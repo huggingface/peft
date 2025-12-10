@@ -546,7 +546,8 @@ class LoraLayer(BaseTunerLayer):
         elif direction == "random":
             indices = torch.randperm(2 * r)[:r]
             lora_A_weight = Vh[indices, :]  # Shape: (r, in_features)
-            lora_B_weight = U[:, indices] @ torch.diag(S[indices])  # Shape: (out_features, r)
+            S_B = S[indices]
+            lora_B_weight = U[:, indices] @ torch.diag(S_B)  # Shape: (out_features, r)
 
         scaling_factor = self.scaling[adapter_name]
         out_features = weight.shape[0]

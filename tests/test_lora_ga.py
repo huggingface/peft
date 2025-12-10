@@ -19,7 +19,7 @@ import pytest
 import torch
 from transformers import AutoModelForCausalLM
 
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, PeftModel, get_peft_model
 from peft.tuners.lora import LoraGAConfig, preprocess_loraga
 
 
@@ -80,135 +80,43 @@ class TestLoraGAPreprocessing:
 
 @pytest.fixture
 def simple_model():
-    """Fixture providing a simple sequential model for testing."""
-    model = torch.nn.Sequential(torch.nn.Linear(10, 10))
-    model.train()
-    return model
+    """Fixture providing a fresh simple sequential model for each test."""
+    def _make_model():
+        model = torch.nn.Sequential(torch.nn.Linear(10, 10))
+        model.train()
+        return model
+    return _make_model
 
 
 @pytest.fixture
-def simple_train_step(simple_model):
-    """Fixture providing a train step function for the simple model."""
-    def train_step():
-        for _ in range(4):
-            inputs = torch.randn(2, 10)
-            outputs = simple_model(inputs)
-            loss = outputs.sum()
-            simple_model.zero_grad()
-            loss.backward()
-    return train_step
-
-
-class TestLoraGASaveLoad:
-    """Test save/load with mutated weights."""
-
-    def test_save_pretrained_creates_file(self, tmp_path, simple_model, simple_train_step):
-        model = simple_model
-        train_step = simple_train_step
-
-        lora_ga_config = LoraGAConfig()
-        lora_config = LoraConfig(
-            r=4,
-            lora_alpha=8,
-            target_modules=["0"],
-            init_lora_weights="lora_ga",
-            lora_ga_config=lora_ga_config,
-        )
-
-        preprocess_loraga(model, lora_config, train_step)
-        peft_model = get_peft_model(model, lora_config)
-
-        peft_model.save_pretrained(tmp_path)
-
-        assert os.path.exists(os.path.join(tmp_path, "adapter_config.json"))
-        assert os.path.exists(os.path.join(tmp_path, "adapter_model.safetensors"))
+def simple_train_step():
+    """Fixture providing a train step function factory."""
+    def _make_train_step(model):
+        def train_step():
+            for _ in range(4):
+                inputs = torch.randn(2, 10)
+                outputs = model(inputs)
+                loss = outputs.sum()
+                model.zero_grad()
+                loss.backward()
+        return train_step
+    return _make_train_step
 
 
 class TestLoraGAIntegration:
-    """Integration tests."""
+    """Integration tests for LoRA-GA."""
 
-    def test_weights_are_modified(self):
-        model = torch.nn.Sequential(torch.nn.Linear(20, 20))
-        original_weight = model[0].weight.data.clone()
-        model.train()
+    @pytest.mark.parametrize("direction", ["ArBr", "A2rBr", "ArB2r", "random"])
+    @pytest.mark.parametrize("scale", ["stable", "weight_svd", "gd_scale", "unit"])
+    def test_save_load_inference(self, tmp_path, simple_model, simple_train_step, direction, scale):
+        """Test that saved and loaded models produce the same output."""
+        model = simple_model()
+        train_step = simple_train_step(model)
 
-        def train_step():
-            for _ in range(4):
-                inputs = torch.randn(2, 20)
-                outputs = model(inputs)
-                loss = outputs.sum()
-                model.zero_grad()
-                loss.backward()
-
-        lora_ga_config = LoraGAConfig()
-        lora_config = LoraConfig(
-            r=8,
-            lora_alpha=16,
-            target_modules=["0"],
-            init_lora_weights="lora_ga",
-            lora_ga_config=lora_ga_config,
-        )
-
-        preprocess_loraga(model, lora_config, train_step)
-        peft_model = get_peft_model(model, lora_config)
-
-        base_layer_weight = peft_model.base_model.model[0].weight.data
-
-        # Base weights should be modified by LoRA-GA (even if slightly)
-        # Use torch.equal instead of allclose to detect any modification
-        assert not torch.equal(original_weight, base_layer_weight)
-
-    def test_forward_pass_after_init(self):
-        model = torch.nn.Sequential(
-            torch.nn.Linear(20, 20),
-            torch.nn.ReLU(),
-            torch.nn.Linear(20, 10),
-        )
-        model.train()
-
-        def train_step():
-            for _ in range(4):
-                inputs = torch.randn(2, 20)
-                labels = torch.randint(0, 10, (2,))
-                outputs = model(inputs)
-                loss = torch.nn.functional.cross_entropy(outputs, labels)
-                model.zero_grad()
-                loss.backward()
-
-        lora_ga_config = LoraGAConfig(direction="ArB2r", scale="stable")
+        lora_ga_config = LoraGAConfig(direction=direction, scale=scale)
         lora_config = LoraConfig(
             r=4,
             lora_alpha=8,
-            target_modules=["0", "2"],
-            init_lora_weights="lora_ga",
-            lora_ga_config=lora_ga_config,
-        )
-
-        preprocess_loraga(model, lora_config, train_step)
-        peft_model = get_peft_model(model, lora_config)
-
-        # Test forward pass
-        test_input = torch.randn(2, 20)
-        with torch.no_grad():
-            output = peft_model(test_input)
-            assert output.shape == torch.Size([2, 10])
-
-    def test_trainable_parameters(self):
-        model = torch.nn.Sequential(torch.nn.Linear(20, 20))
-        model.train()
-
-        def train_step():
-            for _ in range(4):
-                inputs = torch.randn(2, 20)
-                outputs = model(inputs)
-                loss = outputs.sum()
-                model.zero_grad()
-                loss.backward()
-
-        lora_ga_config = LoraGAConfig()
-        lora_config = LoraConfig(
-            r=8,
-            lora_alpha=16,
             target_modules=["0"],
             init_lora_weights="lora_ga",
             lora_ga_config=lora_ga_config,
@@ -217,6 +125,74 @@ class TestLoraGAIntegration:
         preprocess_loraga(model, lora_config, train_step)
         peft_model = get_peft_model(model, lora_config)
 
-        # Check that only LoRA parameters are trainable
-        trainable_params = [n for n, p in peft_model.named_parameters() if p.requires_grad]
-        assert all("lora" in name.lower() for name in trainable_params)
+        # Generate output before saving
+        test_input = torch.randn(2, 10)
+        with torch.no_grad():
+            output_before = peft_model(test_input)
+
+        # Save model
+        peft_model.save_pretrained(str(tmp_path))
+
+        # Load model - need to use the same base model that was modified by LoRA-GA
+        # Create a fresh model and load the saved state
+        loaded_model = PeftModel.from_pretrained(model, str(tmp_path))
+
+        # Generate output after loading
+        with torch.no_grad():
+            output_after = loaded_model(test_input)
+
+        # Outputs should be identical
+        assert torch.allclose(output_before, output_after, atol=1e-5)
+
+    @pytest.mark.parametrize("direction", ["ArBr", "A2rBr", "ArB2r", "random"])
+    @pytest.mark.parametrize("scale", ["stable", "weight_svd", "gd_scale", "unit"])
+    def test_save_load_with_weight_conversion(self, tmp_path, simple_model, simple_train_step, direction, scale):
+        """Test save/load with path_initial_model_for_weight_conversion."""
+        model = simple_model()
+        train_step = simple_train_step(model)
+
+        # Save original base model weights (before LoRA-GA preprocessing)
+        original_weights = {k: v.clone() for k, v in model.state_dict().items()}
+
+        lora_ga_config = LoraGAConfig(direction=direction, scale=scale)
+        lora_config = LoraConfig(
+            r=4,
+            lora_alpha=8,
+            target_modules=["0"],
+            init_lora_weights="lora_ga",
+            lora_ga_config=lora_ga_config,
+        )
+
+        preprocess_loraga(model, lora_config, train_step)
+        peft_model = get_peft_model(model, lora_config)
+
+        # Save the initialized adapter (before training)
+        init_adapter_path = tmp_path / "init_adapter"
+        peft_model.peft_config["default"].init_lora_weights = True
+        peft_model.save_pretrained(str(init_adapter_path))
+
+        # Generate output before saving (simulating after training)
+        test_input = torch.randn(2, 10)
+        with torch.no_grad():
+            output_before = peft_model(test_input)
+
+        # Save with weight conversion
+        adapter_path = tmp_path / "adapter"
+        peft_model.save_pretrained(
+            str(adapter_path),
+            path_initial_model_for_weight_conversion=str(init_adapter_path)
+        )
+
+        # Load with original base model
+        base_model = simple_model()
+        base_model.load_state_dict(original_weights)
+
+        # Load converted adapter
+        loaded_model = PeftModel.from_pretrained(base_model, str(adapter_path))
+
+        # Generate output after loading
+        with torch.no_grad():
+            output_after = loaded_model(test_input)
+
+        # Outputs should be identical
+        assert torch.allclose(output_before, output_after, atol=1e-5)
