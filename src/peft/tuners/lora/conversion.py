@@ -51,6 +51,7 @@ def _convert_module_to_lora(
 ) -> tuple[torch.Tensor, torch.Tensor, int]:
     """Convert a single BaseTunerLayer's adapter weight to a LoRA weight, return A, B, and the effective rank."""
     delta_weight = module.get_delta_weight(adapter_name)
+    # Note: Explore different algorithms (truncated, randomized, ...) to see if they are more efficient
     U, S, V = torch.linalg.svd(delta_weight, full_matrices=False)
     if isinstance(rank, int):
         effective_rank = rank
@@ -74,7 +75,11 @@ def _convert_module_to_lora(
 
 
 def convert_to_lora(
-    model: torch.nn.Module, rank: int | float, adapter_name: str = "default", progressbar: bool = False
+    model: torch.nn.Module,
+    rank: int | float,
+    adapter_name: str = "default",
+    progressbar: bool = False,
+    compile_kwargs=None,
 ) -> tuple[LoraConfig, dict[str, torch.Tensor]]:
     """
     Convert a non-LoRA model with PEFT layers to a LoRA checkpoint.
@@ -118,6 +123,9 @@ def convert_to_lora(
         progressbar (`bool`):
             whether to show a progressbar indicating the progress of the conversion (it can take a few minutes for big
             models).
+        compile_kwargs (`dict`, *optional*):
+            If provided, the compile the function to convert individual modules to LoRA with the given kwargs being
+            passed to `torch.compile`. This can potentially speed up the conversion on large models.
 
     Returns:
         lora_config (`LoraConfig`)
@@ -210,6 +218,11 @@ def convert_to_lora(
             **config_kwargs,
         )
 
+    if compile_kwargs:
+        convert_module_to_lora = torch.compile(_convert_module_to_lora, **compile_kwargs)
+    else:
+        convert_module_to_lora = _convert_module_to_lora
+
     ##############
     # CONVERSION #
     ##############
@@ -228,7 +241,7 @@ def convert_to_lora(
                 "conversion. Please open an issue: https://github.com/huggingface/peft/issues"
             )
 
-        lora_A, lora_B, effective_rank = _convert_module_to_lora(module, rank=rank, adapter_name=adapter_name)
+        lora_A, lora_B, effective_rank = convert_module_to_lora(module, rank=rank, adapter_name=adapter_name)
         if effective_rank == 0:
             # This shouldn't really happen, as we ensure that the rank is greater than 0 (int) or, for tresholds
             # (float), at least one SV is included. But better be safe than sorry, as, in principle, it is fine to
@@ -284,6 +297,7 @@ def save_as_lora(
     rank: int | float,
     adapter_name: str = "default",
     progressbar: bool = False,
+    compile_kwargs=None,
 ) -> None:
     """
     Convert a non-LoRA model with PEFT layers to a LoRA, then save the checkpoint file and PEFT config.
@@ -336,6 +350,9 @@ def save_as_lora(
         progressbar (`bool`):
             whether to show a progressbar indicating the progress of the conversion (it can take a few minutes for big
             models).
+        compile_kwargs (`dict`, *optional*):
+            If provided, the compile the function to convert individual modules to LoRA with the given kwargs being
+            passed to `torch.compile`. This can potentially speed up the conversion on large models.
 
     Raises
         TypeError:
@@ -347,6 +364,8 @@ def save_as_lora(
     if not path.exists():
         os.makedirs(path)
 
-    lora_config, state_dict = convert_to_lora(model, rank=rank, adapter_name=adapter_name, progressbar=progressbar)
+    lora_config, state_dict = convert_to_lora(
+        model, rank=rank, adapter_name=adapter_name, progressbar=progressbar, compile_kwargs=compile_kwargs
+    )
     save_file(state_dict, path / SAFETENSORS_WEIGHTS_NAME)
     lora_config.save_pretrained(str(path))
