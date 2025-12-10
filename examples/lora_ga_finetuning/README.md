@@ -105,8 +105,6 @@ This is useful when:
 - You're sharing the adapter and want users to apply it to the unmodified base model
 - You need the base model weights in their original state for other purposes
 
-**Note**: This follows the same pattern as PiSSA, CorDA, and OLoRA, which also modify base weights during initialization.
-
 ## Run the finetuning script
 
 Simply run:
