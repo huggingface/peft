@@ -200,3 +200,49 @@ class TestLoraGAIntegration:
 
         # Outputs should be identical
         assert torch.allclose(output_before, output_after, atol=1e-5)
+
+    def test_cached_gradients(self, tmp_path, simple_model, simple_train_step):
+        """Test that cached gradients produce the same results as fresh gradients."""
+        torch.manual_seed(42)
+
+        # First run: compute gradients and save to cache
+        model1 = simple_model()
+        train_step1 = simple_train_step(model1)
+
+        lora_ga_config = LoraGAConfig(direction="ArB2r", scale="stable")
+        lora_config = LoraConfig(
+            r=4,
+            lora_alpha=8,
+            target_modules=["0"],
+            init_lora_weights="lora_ga",
+            lora_ga_config=lora_ga_config,
+        )
+
+        cache_file = tmp_path / "gradient_cache.pt"
+        preprocess_loraga(model1, lora_config, train_step1, cache_file=str(cache_file))
+        peft_model1 = get_peft_model(model1, lora_config)
+
+        # Check that cache file was created
+        assert cache_file.exists()
+        assert cache_file.stat().st_size > 0
+
+        # Generate output from first model
+        test_input = torch.randn(2, 10)
+        with torch.no_grad():
+            output1 = peft_model1(test_input)
+
+        # Second run: load gradients from cache
+        torch.manual_seed(42)  # Reset seed to get same initial weights
+        model2 = simple_model()
+        train_step2 = simple_train_step(model2)
+
+        # Use same config and cache file - should load from cache without running train_step
+        preprocess_loraga(model2, lora_config, train_step2, cache_file=str(cache_file))
+        peft_model2 = get_peft_model(model2, lora_config)
+
+        # Generate output from second model
+        with torch.no_grad():
+            output2 = peft_model2(test_input)
+
+        # Outputs should be identical since both used the same cached gradients
+        assert torch.allclose(output1, output2, atol=1e-5)
