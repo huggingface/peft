@@ -77,6 +77,43 @@ class TestLoraGAPreprocessing:
         with pytest.raises(ValueError, match="If you want to use LoRA-GA"):
             preprocess_loraga(model, lora_config, train_step)
 
+    def test_init_without_lora_ga_config_raises(self):
+        model = self.get_dummy_model()
+        model.train()
+
+        def train_step():
+            for _ in range(4):
+                inputs = torch.randn(2, 10)
+                labels = torch.randint(0, 5, (2,))
+                model.zero_grad()
+                outputs = model(inputs)
+                loss = torch.nn.functional.cross_entropy(outputs, labels)
+                loss.backward()
+
+        # Properly preprocess with lora_ga_config
+        lora_ga_config = LoraGAConfig(direction="ArB2r", scale="stable")
+        lora_config = LoraConfig(
+            r=4,
+            lora_alpha=8,
+            target_modules=["0", "2"],
+            init_lora_weights="lora_ga",
+            lora_ga_config=lora_ga_config,
+        )
+        preprocess_loraga(model, lora_config, train_step)
+
+        # Now try to create a config without lora_ga_config but with init_lora_weights="lora_ga"
+        bad_config = LoraConfig(
+            r=4,
+            lora_alpha=8,
+            target_modules=["0", "2"],
+            init_lora_weights="lora_ga",
+            lora_ga_config=None,  # Missing lora_ga_config!
+        )
+
+        # This should raise an error during get_peft_model
+        with pytest.raises(ValueError, match="lora_ga_config must be provided"):
+            get_peft_model(model, bad_config)
+
 
 @pytest.fixture
 def simple_model():

@@ -496,9 +496,10 @@ class LoraLayer(BaseTunerLayer):
 
         # Check for lora_ga_config
         if lora_ga_config is None:
-            # Fall back to gaussian initialization
-            self.reset_lora_parameters(adapter_name, init_lora_weights=True)
-            return
+            raise ValueError(
+                "lora_ga_config must be provided when init_lora_weights='lora_ga'. "
+                "Please pass lora_ga_config=LoraGAConfig(...) to LoraConfig."
+            )
         direction = lora_ga_config.direction
         scale = lora_ga_config.scale
         stable_gamma = lora_ga_config.stable_gamma
