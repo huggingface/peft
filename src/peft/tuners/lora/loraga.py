@@ -29,7 +29,7 @@ from peft.tuners.lora.model import LoraModel
 from peft.utils.other import get_pattern_key
 
 
-def target_modules(model: nn.Module, config: LoraConfig):
+def get_target_modules(model: nn.Module, config: LoraConfig):
     """
     Iterate over LoRA-GA target name and modules of a model. A module is a target if its name is in
     `config.target_modules` and is `nn.Linear` or `Conv1D`.
@@ -83,7 +83,7 @@ def preprocess_loraga(
         )
 
     # Check for quantized models - LoRA-GA requires full-precision gradients
-    for name, module in target_modules(model, lora_config):
+    for name, module in get_target_modules(model, lora_config):
         if hasattr(module, 'quant_state'):
             raise ValueError(
                 f"LoRA-GA does not support quantized models. Found quantized module: '{name}'. "
@@ -93,7 +93,7 @@ def preprocess_loraga(
     # If cache exists, load from cache
     if cache_file is not None and os.path.exists(cache_file) and os.path.getsize(cache_file) > 0:
         cache = torch.load(cache_file, map_location=get_model_device(model))
-        for name, module in target_modules(model, lora_config):
+        for name, module in get_target_modules(model, lora_config):
             module._peft_loraga_grad = cache[f"{name}._peft_loraga_grad"]
     else:
         # Estimate gradients by running train_step
@@ -102,7 +102,7 @@ def preprocess_loraga(
         # Save cache to disk if specified
         if cache_file is not None:
             cache: dict[str, Any] = {}
-            for name, module in target_modules(model, lora_config):
+            for name, module in get_target_modules(model, lora_config):
                 cache[f"{name}._peft_loraga_grad"] = module._peft_loraga_grad
 
             os.makedirs(os.path.dirname(cache_file), exist_ok=True)
@@ -125,7 +125,7 @@ def estimate_gradients(
     model.train()
 
     # Get target modules list once for efficiency
-    target_module_list = list(target_modules(model, lora_config))
+    target_module_list = list(get_target_modules(model, lora_config))
 
     # Initialize gradient storage for each target module
     for name, module in target_module_list:
