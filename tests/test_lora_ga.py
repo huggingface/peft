@@ -110,6 +110,8 @@ class TestLoraGAIntegration:
     @pytest.mark.parametrize("scale", ["stable", "weight_svd", "gd_scale", "unit"])
     def test_save_load_inference(self, tmp_path, simple_model, simple_train_step, direction, scale):
         """Test that saved and loaded models produce the same output."""
+        torch.manual_seed(42)
+
         model = simple_model()
         train_step = simple_train_step(model)
 
@@ -148,6 +150,8 @@ class TestLoraGAIntegration:
     @pytest.mark.parametrize("scale", ["stable", "weight_svd", "gd_scale", "unit"])
     def test_save_load_with_weight_conversion(self, tmp_path, simple_model, simple_train_step, direction, scale):
         """Test save/load with path_initial_model_for_weight_conversion."""
+        torch.manual_seed(42)
+
         model = simple_model()
         train_step = simple_train_step(model)
 
