@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import os
-import tempfile
 import unittest
 
 import pytest
@@ -96,7 +95,7 @@ class TestLoraGASaveLoad:
 
         return model, train_step
 
-    def test_save_pretrained_creates_file(self):
+    def test_save_pretrained_creates_file(self, tmp_path):
         model, train_step = self.get_model_and_train_step()
 
         lora_ga_config = LoraGAConfig()
@@ -111,11 +110,10 @@ class TestLoraGASaveLoad:
         preprocess_loraga(model, lora_config, train_step)
         peft_model = get_peft_model(model, lora_config)
 
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            peft_model.save_pretrained(tmp_dir)
+        peft_model.save_pretrained(tmp_path)
 
-            assert os.path.exists(os.path.join(tmp_dir, "adapter_config.json"))
-            assert os.path.exists(os.path.join(tmp_dir, "adapter_model.safetensors"))
+        assert os.path.exists(os.path.join(tmp_path, "adapter_config.json"))
+        assert os.path.exists(os.path.join(tmp_path, "adapter_model.safetensors"))
 
 
 class TestLoraGAIntegration:
