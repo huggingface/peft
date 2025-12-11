@@ -218,7 +218,7 @@ def convert_to_lora(
             **config_kwargs,
         )
 
-    if compile_kwargs:
+    if compile_kwargs is not None:
         convert_module_to_lora = torch.compile(_convert_module_to_lora, **compile_kwargs)
     else:
         convert_module_to_lora = _convert_module_to_lora
