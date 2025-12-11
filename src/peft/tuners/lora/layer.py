@@ -1054,6 +1054,9 @@ class Embedding(nn.Module, LoraLayer):
 
         if init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
+        elif init_lora_weights == "lora_ga":
+            # Embedding layers don't support LoRA-GA, fall back to standard initialization
+            self.reset_lora_parameters(adapter_name, True)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
 
@@ -1379,6 +1382,9 @@ class _ConvNd(nn.Module, LoraLayer):
 
         if init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
+        elif init_lora_weights == "lora_ga":
+            # Conv layers don't support LoRA-GA, fall back to standard initialization
+            self.reset_lora_parameters(adapter_name, True)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
 

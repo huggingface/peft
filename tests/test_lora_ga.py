@@ -363,3 +363,89 @@ class TestLoraGAIntegration:
         # Should raise ValueError mentioning quantization
         with pytest.raises(ValueError, match="quantized"):
             preprocess_loraga(model, lora_config, train_step)
+
+    def test_unsupported_layer_types_no_error(self):
+        """Test that unsupported layer types don't cause errors."""
+
+        class MixedModel(torch.nn.Module):
+            """Model with both supported and unsupported layer types."""
+
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)  # Supported
+                self.conv2d = torch.nn.Conv2d(3, 16, 3)  # Unsupported
+                self.embedding = torch.nn.Embedding(100, 10)  # Unsupported
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = MixedModel()
+        model.train()
+
+        def train_step():
+            for _ in range(4):
+                inputs = torch.randn(2, 10)
+                outputs = model(inputs)
+                loss = outputs.sum()
+                model.zero_grad()
+                loss.backward()
+
+        lora_ga_config = LoraGAConfig(direction="ArB2r", scale="stable")
+        lora_config = LoraConfig(
+            r=4,
+            lora_alpha=8,
+            target_modules=["linear", "conv2d", "embedding"],  # Mix of supported and unsupported
+            init_lora_weights="lora_ga",
+            lora_ga_config=lora_ga_config,
+        )
+
+        # Should not raise error - unsupported layers are silently skipped
+        preprocess_loraga(model, lora_config, train_step)
+
+        # Verify that linear layer has LoRA-GA gradient attached during preprocessing
+        assert hasattr(model.linear, "_peft_loraga_grad")
+        # Unsupported layers won't have gradients attached
+        assert not hasattr(model.conv2d, "_peft_loraga_grad")
+        assert not hasattr(model.embedding, "_peft_loraga_grad")
+
+        # Now create PEFT model - should work without errors
+        peft_model = get_peft_model(model, lora_config)
+
+        # Verify model still works
+        test_input = torch.randn(2, 10)
+        with torch.no_grad():
+            output = peft_model(test_input)
+        assert output.shape == (2, 10)
+
+    def test_no_supported_layers_raises_error(self):
+        """Test that having no supported layers raises clear error."""
+
+        class UnsupportedModel(torch.nn.Module):
+            """Model with only unsupported layer types."""
+
+            def __init__(self):
+                super().__init__()
+                self.conv2d = torch.nn.Conv2d(3, 16, 3)
+                self.embedding = torch.nn.Embedding(100, 10)
+
+            def forward(self, x):
+                return x
+
+        model = UnsupportedModel()
+        model.train()
+
+        def train_step():
+            model.zero_grad()
+
+        lora_ga_config = LoraGAConfig(direction="ArB2r", scale="stable")
+        lora_config = LoraConfig(
+            r=4,
+            lora_alpha=8,
+            target_modules=["conv2d", "embedding"],  # Only unsupported layers
+            init_lora_weights="lora_ga",
+            lora_ga_config=lora_ga_config,
+        )
+
+        # Should raise ValueError about no supported layers
+        with pytest.raises(ValueError, match="No supported layers found"):
+            preprocess_loraga(model, lora_config, train_step)

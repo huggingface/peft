@@ -123,6 +123,14 @@ def estimate_gradients(
     # Get target modules list once for efficiency
     target_module_list = list(get_target_modules(model, lora_config))
 
+    # Check if any supported layers were found
+    if not target_module_list:
+        raise ValueError(
+            "No supported layers found for LoRA-GA initialization. "
+            "LoRA-GA only supports nn.Linear and Conv1D layers. "
+            "Please ensure your model contains at least one of these layer types in target_modules."
+        )
+
     # Initialize gradient storage for each target module
     for name, module in target_module_list:
         module._peft_loraga_grad = torch.zeros_like(module.weight.data, dtype=module.weight.dtype)
