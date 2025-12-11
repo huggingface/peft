@@ -517,3 +517,39 @@ class TestLoraConversion:
         for key, weight_no_comp in state_dict_no_comp.items():
             weight_comp = state_dict_comp[key]
             assert torch.allclose(weight_comp, weight_no_comp)
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_convert_float16_dtype(self, dtype):
+        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+
+        torch.manual_seed(0)
+        base_model = self.get_base_model().to(dtype)
+        with torch.inference_mode():
+            output_base = base_model(inputs, output_hidden_states=True)
+
+        # load a LoKr model with 16 bit precision
+        lokr_model = get_peft_model(base_model, LoKrConfig(init_weights=False), autocast_adapter_dtype=False)
+
+        with torch.inference_mode():
+            output_lokr = lokr_model(inputs, output_hidden_states=True)
+
+        # sanity check
+        atol, rtol = 1e-4, 1e-4
+        assert not torch.allclose(output_base.logits, output_lokr.logits, atol=atol, rtol=rtol)
+
+        lora_config, state_dict = convert_to_lora(lokr_model, rank=8)
+        for weight in state_dict.values():
+            assert weight.dtype == dtype
+
+        base_model = self.get_base_model().to(dtype)
+        lora_model = get_peft_model(base_model, lora_config, autocast_adapter_dtype=False).eval()
+
+        # load the converted LoRA weights
+        load_result = set_peft_model_state_dict(lora_model, state_dict)
+        assert not load_result.unexpected_keys
+
+        with torch.inference_mode():
+            output_converted = lora_model(inputs, output_hidden_states=True)
+
+        mse_converted = self.get_mse(output_converted, output_lokr)
+        assert 0.0 < mse_converted < 0.1

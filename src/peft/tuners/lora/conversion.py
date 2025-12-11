@@ -52,6 +52,9 @@ def _convert_module_to_lora(
     """Convert a single BaseTunerLayer's adapter weight to a LoRA weight, return A, B, and the effective rank."""
     delta_weight = module.get_delta_weight(adapter_name)
     # Note: Explore different algorithms (truncated, randomized, ...) to see if they are more efficient
+
+    orig_dtype = delta_weight.dtype
+    delta_weight = delta_weight.float()  # SVD not implemented for half-precision types
     U, S, V = torch.linalg.svd(delta_weight, full_matrices=False)
     if isinstance(rank, int):
         effective_rank = rank
@@ -67,6 +70,7 @@ def _convert_module_to_lora(
 
     lora_B = U[:, :effective_rank] * S[:effective_rank]
     lora_A = V[:effective_rank]
+    lora_A, lora_B = lora_A.to(orig_dtype), lora_B.to(orig_dtype)
 
     if isinstance(module.get_base_layer(), Conv1D):
         # Conv1D => original weight is transposed compared to Linear
