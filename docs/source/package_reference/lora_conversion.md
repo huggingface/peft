@@ -67,24 +67,22 @@ It is also possible to convert a LoRA adapter into another LoRA adapter. Why wou
 
 ## Metrics
 
-Of course, converting one PEFT adapter into another adapter is a lossy process. The new adapter will most likely not perform as well as the initial adapter. Therefore, it is highly advised to **evaluate the converted LoRA adapter**. This way, you can make sure that the converted adapter performs well enough for your use case. The general rule applies that the higher the rank of the LoRA adaper, the better it will approximate your initial adapter.
+Of course, converting one PEFT adapter into another adapter is a lossy process. The new adapter will most likely not perform as well as the initial adapter. Therefore, it is highly advised to **evaluate the converted LoRA adapter**. This way, you can make sure that the converted adapter performs well enough for your use case. The general rule applies that the higher the rank of the LoRA adaper, the better it will approximate your initial adapter. This means that the converted LoRA adapter may require more parameters than the original adapter to achieve a similar performanace.
 
-This will most likely mean that the converted LoRA adapter will have more parameters than the original adapter. To give an example, here are some numbers that were derived on the [PEFT MetaMathQA benchmark](https://github.com/huggingface/peft/tree/main/method_comparison/MetaMathQA). For this, a [LoKr](https://huggingface.co/docs/peft/package_reference/lokr) model was trained and then converted into a LoRA model. The initial LoKr adapter had rank 32, resulting in 279,552 trainable parameters, and a test accuracy of 37.5%. The checkpoint was converted into LoRA with different values for the `rank`. The resulting outcome is:
+To give an example, here are some numbers that were derived on the [PEFT MetaMathQA benchmark](https://github.com/huggingface/peft/tree/main/method_comparison/MetaMathQA). For this, a [LoHa](https://huggingface.co/docs/peft/package_reference/loha) was used to fine-tune `meta-llama/Llama-3.2-3B` on MetaMathQA and evaluated on GSM8K. The initial LoKr adapter had rank 32, resulting in 18,350,080 trainable parameters, and a test accuracy of 41.85%. Evaluation required 12.25 GB of memory. The checkpoint was converted into LoRA with different values for the `rank`. The resulting outcome is:
 
-| rank | num trainable params (M) | test accuracy (%) |
-|------|--------------------------|-------------------|
-| 32   | 9                        | 6.9               |
-| 64   | 18                       | 18.3              |
-| 128  | 37                       | 20.5              |
-| 256  | 73                       | 35.0              |
-| 0.3  | 20                       | 15.9              |
-| 0.4  | 32                       | 22.2              |
-| 0.5  | 47                       | 27.7              |
-| 0.6  | 67                       | 32.5              |
-| 0.7  | 95                       | 35.9              |
-| 0.8  | 135                      | 36.7              |
+| rank | trainable parameters | test accuracy (%) | memory reserved (max, GB) |
+|------+----------------------+-------------------+---------------------------|
+|    8 |              2293760 |             37.60 |                     13.80 |
+|   16 |              4587520 |             38.89 |                     13.54 |
+|   32 |              9175040 |             40.11 |                     13.80 |
+|   64 |             18350080 |             39.20 |                     13.57 |
+|  0.4 |              2428928 |             37.60 |                     13.80 |
+|  0.5 |              4761600 |             40.18 |                     13.80 |
+|  0.6 |              8857600 |             39.42 |                     13.80 |
+|  0.7 |             16230400 |             39.04 |                     13.54 |
 
-As you can see, we can attain almost the same test accuracy as what we got with the original LoKr adapter, but only with relatively high ranks. The total number of parameters of the LoRA adapter is thus much higher than of the original LoKr adapter. Choosing the right rank is a tradeoff between model performance and model efficiency.
+As you can see, we can attain a test accuracy that comes close to the original LoHa adapter if the rank is sufficiently high. Choosing the right rank is a tradeoff between model performance and model efficiency. To reproduce this experiment, follow the script at https://github.com/huggingface/peft/tree/main/scripts/evaluate-lora-conversion.py.
 
 Note that the number of trainable parameters cannot be translated one to one into memory usage. Some PEFT methods require more, some less memory, even with the same number of trainable parameters. Therefore, even if after conversion, the LoRA adapter has more parameters than the original one, it could still be more memory efficient when serving.
 
