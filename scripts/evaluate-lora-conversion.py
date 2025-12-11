@@ -46,19 +46,23 @@ import time
 
 import torch
 from transformers import AutoModelForCausalLM
+
 from peft import PeftModel, convert_to_lora, get_peft_model, set_peft_model_state_dict
+
 
 root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 spec = importlib.util.spec_from_file_location("data", os.path.join(root, "method_comparison", "MetaMathQA", "data.py"))
 mm_data = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mm_data)
-sys.modules['data'] = mm_data
+sys.modules["data"] = mm_data
 
-spec = importlib.util.spec_from_file_location("utils", os.path.join(root, "method_comparison", "MetaMathQA", "utils.py"))
+spec = importlib.util.spec_from_file_location(
+    "utils", os.path.join(root, "method_comparison", "MetaMathQA", "utils.py")
+)
 mm_utils = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mm_utils)
-sys.modules['utils'] = mm_utils
+sys.modules["utils"] = mm_utils
 
 spec = importlib.util.spec_from_file_location("run", os.path.join(root, "method_comparison", "MetaMathQA", "run.py"))
 mm_run = importlib.util.module_from_spec(spec)
@@ -80,7 +84,7 @@ def evaluate_model(model, tokenizer, ds_test):
     accuracy_peft = mm_utils.get_accuracy(predictions=predictions, responses=responses)
     cuda_mem_reserved_max = torch.cuda.memory_reserved(0)
     print(f"Evaluation Accuracy: {100 * accuracy_peft:.2f}%")
-    print(f"Max CUDA Memory Reserved: {cuda_mem_reserved_max / (1024 ** 3):.2f} GB")
+    print(f"Max CUDA Memory Reserved: {cuda_mem_reserved_max / (1024**3):.2f} GB")
     print(f"Evaluation Time: {toc - tic:.0f} seconds".format(toc - tic))
 
 
@@ -88,7 +92,7 @@ def main(path_peft_model: str, rank: int | float | None) -> None:
     model_id = "meta-llama/Llama-3.2-3B"
     tokenizer = mm_utils.get_tokenizer(model_id=model_id, max_seq_length=768)
     _, _, ds_test = mm_data.get_train_valid_test_datasets(
-        tokenizer=tokenizer, query_template= "Question: {query} Think step by step.\nAnswer:", print_fn=print
+        tokenizer=tokenizer, query_template="Question: {query} Think step by step.\nAnswer:", print_fn=print
     )
 
     model = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.bfloat16).to(0)
@@ -112,7 +116,9 @@ def main(path_peft_model: str, rank: int | float | None) -> None:
     model.print_trainable_parameters()
 
     load_result = set_peft_model_state_dict(model, lora_state_dict)
-    assert not load_result.unexpected_keys, f"Unexpected keys when loading LoRA state dict: {load_result.unexpected_keys}"
+    assert not load_result.unexpected_keys, (
+        f"Unexpected keys when loading LoRA state dict: {load_result.unexpected_keys}"
+    )
 
     model.eval()
     evaluate_model(model, tokenizer, ds_test)
