@@ -273,3 +273,93 @@ class TestLoraGAIntegration:
 
         # Outputs should be identical since both used the same cached gradients
         assert torch.allclose(output1, output2, atol=1e-5)
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_lower_precision_dtype(self, tmp_path, dtype):
+        """Test LoRA-GA works with lower precision dtypes (fp16/bf16)."""
+        torch.manual_seed(42)
+
+        # Create model in lower precision
+        model = torch.nn.Sequential(torch.nn.Linear(10, 10))
+        model = model.to(dtype=dtype)
+        model.train()
+
+        def train_step():
+            for _ in range(4):
+                inputs = torch.randn(2, 10, dtype=dtype)
+                outputs = model(inputs)
+                loss = outputs.sum()
+                model.zero_grad()
+                loss.backward()
+
+        lora_ga_config = LoraGAConfig(direction="ArB2r", scale="stable")
+        lora_config = LoraConfig(
+            r=4,
+            lora_alpha=8,
+            target_modules=["0"],
+            init_lora_weights="lora_ga",
+            lora_ga_config=lora_ga_config,
+        )
+
+        # Preprocess and create PEFT model with autocast_adapter_dtype=False
+        # to ensure LoRA adapters are also in lower precision
+        preprocess_loraga(model, lora_config, train_step)
+        peft_model = get_peft_model(model, lora_config, autocast_adapter_dtype=False)
+
+        # Verify adapter dtype matches model dtype
+        for name, module in peft_model.named_modules():
+            if hasattr(module, "lora_A"):
+                assert module.lora_A["default"].weight.dtype == dtype
+                assert module.lora_B["default"].weight.dtype == dtype
+
+        # Generate output before saving
+        test_input = torch.randn(2, 10, dtype=dtype)
+        with torch.no_grad():
+            output_before = peft_model(test_input)
+
+        # Save and load model
+        peft_model.save_pretrained(str(tmp_path))
+        loaded_model = PeftModel.from_pretrained(model, str(tmp_path))
+
+        # Generate output after loading
+        with torch.no_grad():
+            output_after = loaded_model(test_input)
+
+        # Outputs should be close - use looser tolerance for lower precision
+        assert torch.allclose(output_before, output_after, atol=1e-2)
+
+    def test_quantized_model_rejection(self):
+        """Test that quantized models are properly rejected with clear error."""
+
+        class MockQuantizedLinear(torch.nn.Linear):
+            """Mock quantized layer that simulates bitsandbytes quantized layers."""
+
+            def __init__(self, in_features, out_features):
+                super().__init__(in_features, out_features)
+                # Simulate quantized layer by adding quant_state attribute
+                self.quant_state = "mock_quantized"
+
+        # Create model with quantized layer
+        model = torch.nn.Sequential(MockQuantizedLinear(10, 10))
+        model.train()
+
+        def train_step():
+            for _ in range(4):
+                inputs = torch.randn(2, 10)
+                outputs = model(inputs)
+                loss = outputs.sum()
+                model.zero_grad()
+                loss.backward()
+
+        lora_ga_config = LoraGAConfig(direction="ArB2r", scale="stable")
+        lora_config = LoraConfig(
+            r=4,
+            lora_alpha=8,
+            target_modules=["0"],
+            init_lora_weights="lora_ga",
+            lora_ga_config=lora_ga_config,
+        )
+
+        # Should raise ValueError mentioning quantization
+        with pytest.raises(ValueError, match="quantized"):
+            preprocess_loraga(model, lora_config, train_step)
