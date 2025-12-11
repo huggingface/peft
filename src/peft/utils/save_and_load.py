@@ -17,6 +17,7 @@ import os
 import platform
 import re
 import warnings
+from collections import namedtuple
 from typing import Optional
 
 import huggingface_hub
@@ -408,7 +409,7 @@ def set_peft_model_state_dict(
     adapter_name="default",
     ignore_mismatched_sizes: bool = False,
     low_cpu_mem_usage: bool = False,
-) -> None:
+) -> namedtuple:
     """
     Set the state dict of the PEFT model.
 
@@ -430,6 +431,10 @@ def set_peft_model_state_dict(
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             This argument must be `True` if the `model` was loaded with adapter weights on the meta device, e.g. after
             calling `inject_adapter_in_model` with `low_cpu_mem_usage=True`. Otherwise, leave it as `False`.
+
+    Returns:
+        load_result (`_IncompatibleKeys`)
+            A named tuple with `missing_keys` and `unexpected_keys` fields.
 
     """
     config = model.peft_config[adapter_name]
