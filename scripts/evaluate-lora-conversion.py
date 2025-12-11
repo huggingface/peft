@@ -69,7 +69,12 @@ mm_run = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mm_run)
 
 
+def noop(*args, **kwargs):
+    pass
+
+
 def evaluate_model(model, tokenizer, ds_test):
+    torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
     tic = time.perf_counter()
     predictions, responses = mm_run.evaluate(
@@ -92,7 +97,7 @@ def main(path_peft_model: str, rank: int | float | None) -> None:
     model_id = "meta-llama/Llama-3.2-3B"
     tokenizer = mm_utils.get_tokenizer(model_id=model_id, max_seq_length=768)
     _, _, ds_test = mm_data.get_train_valid_test_datasets(
-        tokenizer=tokenizer, query_template="Question: {query} Think step by step.\nAnswer:", print_fn=print
+        tokenizer=tokenizer, query_template="Question: {query} Think step by step.\nAnswer:", print_fn=noop
     )
 
     model = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.bfloat16).to(0)
@@ -111,7 +116,10 @@ def main(path_peft_model: str, rank: int | float | None) -> None:
     toc = time.perf_counter()
     print(f"Conversion completed in {toc - tic:.0f} seconds.".format(toc - tic))
 
-    model = model.unload()
+    del model
+    torch.cuda.empty_cache()
+    model = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.bfloat16).to(0)
+
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
@@ -120,6 +128,7 @@ def main(path_peft_model: str, rank: int | float | None) -> None:
         f"Unexpected keys when loading LoRA state dict: {load_result.unexpected_keys}"
     )
 
+    del lora_state_dict
     model.eval()
     evaluate_model(model, tokenizer, ds_test)
 
