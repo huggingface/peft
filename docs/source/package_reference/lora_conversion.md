@@ -71,16 +71,16 @@ Of course, converting one PEFT adapter into another adapter is a lossy process. 
 
 To give an example, here are some numbers that were derived on the [PEFT MetaMathQA benchmark](https://github.com/huggingface/peft/tree/main/method_comparison/MetaMathQA). For this, a [LoHa](https://huggingface.co/docs/peft/package_reference/loha) was used to fine-tune `meta-llama/Llama-3.2-3B` on MetaMathQA and evaluated on GSM8K. The initial LoKr adapter had rank 32, resulting in 18,350,080 trainable parameters, and a test accuracy of 41.85%. Evaluation required 12.25 GB of memory. The checkpoint was converted into LoRA with different values for the `rank`. The resulting outcome is:
 
-| rank | trainable parameters | test accuracy (%) | memory reserved (max, GB) |
-|------|----------------------|-------------------|---------------------------|
-| 8    | 2293760              | 37.60             | 13.80                     |
-| 16   | 4587520              | 38.89             | 13.54                     |
-| 32   | 9175040              | 40.11             | 13.80                     |
-| 64   | 18350080             | 39.20             | 13.57                     |
-| 0.4  | 2428928              | 37.60             | 13.80                     |
-| 0.5  | 4761600              | 40.18             | 13.80                     |
-| 0.6  | 8857600              | 39.42             | 13.80                     |
-| 0.7  | 16230400             | 39.04             | 13.54                     |
+| rank | trainable parameters | test accuracy (%) | accuracy change | memory reserved (max, GB) | memory increase |
+|------|----------------------|-------------------|-----------------|---------------------------|-----------------|
+| 8    | 2293760              | 37.60             | -4.26           | 13.80                     | 1.55            |
+| 16   | 4587520              | 38.89             | -2.96           | 13.54                     | 1.29            |
+| 32   | 9175040              | 40.11             | -1.74           | 13.80                     | 1.55            |
+| 64   | 18350080             | 39.20             | -2.65           | 13.57                     | 1.32            |
+| 0.4  | 2428928              | 37.60             | -4.26           | 13.80                     | 1.55            |
+| 0.5  | 4761600              | 40.18             | -1.67           | 13.80                     | 1.55            |
+| 0.6  | 8857600              | 39.42             | -2.43           | 13.80                     | 1.55            |
+| 0.7  | 16230400             | 39.04             | -2.81           | 13.54                     | 1.29            |
 
 As you can see, we can attain a test accuracy that comes close to the original LoHa adapter if the rank is sufficiently high. Choosing the right rank is a tradeoff between model performance and model efficiency. To reproduce this experiment, follow the script at https://github.com/huggingface/peft/tree/main/scripts/evaluate-lora-conversion.py.
 
