@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import copy
+import platform
 import re
 
 import pytest
@@ -503,6 +504,7 @@ class TestLoraConversion:
         with pytest.raises(ValueError, match=msg):
             convert_to_lora(c3a_model, rank=8)
 
+    @pytest.mark.skipif(platform.system() != "Linux", reason="Running test involving torch.compile only on Linux.")
     def test_with_torch_compile(self, lokr_model):
         # ensure that we can call lora conversion with compilation
         lora_config_no_comp, state_dict_no_comp = convert_to_lora(lokr_model, rank=8)
