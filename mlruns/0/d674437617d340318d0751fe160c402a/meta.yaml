@@ -1,0 +1,14 @@
+artifact_uri: file:///z_data/yinbo/peft/mlruns/0/d674437617d340318d0751fe160c402a/artifacts
+end_time: 1765465538948
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: d674437617d340318d0751fe160c402a
+run_name: capable-auk-759
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1765465526768
+status: 3
+tags: []
+user_id: root
