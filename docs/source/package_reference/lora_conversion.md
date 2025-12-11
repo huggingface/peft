@@ -105,7 +105,7 @@ Similar to the experiment above, we can also evaluate LoRA to LoRA conversion (i
 | 0.9  | 10022912             | 51.55             | -1.37           | 12.38                     | -0.20           |
 | 0.95 | 12976128             | 52.62             | -0.30           | 12.39                     | -0.19           |
 
-So for instance for rank 0.95, we can close the accuracy gap to just 0.3 percentage points while reducing the number of parameters by 30%.
+So for instance for rank 0.95, we can close the accuracy gap to just 0.3 percentage points while reducing the number of parameters by 30%. Also note that these compressed LoRAs can be better than directly training them on the lower rank -- e.g. for rank 32, training directly results in a test accuracy of 48.22%, while conversion from rank 64 results in 51.48%.
 
 ## Caveats
 
