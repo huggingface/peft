@@ -155,7 +155,7 @@ class LoraModel(BaseTuner):
     prefix: str = "lora_"
     tuner_layer_cls = LoraLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING
-    
+
     def _check_new_adapter_config(self, config: LoraConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
@@ -165,11 +165,7 @@ class LoraModel(BaseTuner):
         """
         # TODO: there should be a check if any of the existing adapters actually has bias != "none", or else the check
         # does not fully correspond to the error message.
-        if (len(self.peft_config) > 1) and (config.bias != "none"):
-            raise ValueError(
-                f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
-                "set bias to 'none' for all adapters."
-            )
+        super()._check_new_adapter_config(config)
 
         # Check KaSA adapter compatibility (only when adding additional adapters)
         if len(self.peft_config) > 1:
