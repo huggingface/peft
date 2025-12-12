@@ -188,7 +188,7 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     elif hasattr(module, "codebooks") and module.__class__.__name__ == "QuantizedLinear":
         # AQLM QuantLinear
         in_features, out_features = module.in_features, module.out_features
-    elif hasattr(module, "w_bit") and module.__class__.__name__ == "WQLinear_GEMM":
+    elif hasattr(module, "bits") and module.__class__.__name__ == "AwqGEMMQuantLinear":
         # Awq layers
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "EetqLinear":
