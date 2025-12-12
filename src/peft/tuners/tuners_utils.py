@@ -196,6 +196,14 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     elif hasattr(module, "input_size") and hasattr(module, "output_size"):
         # Megatron ColumnParallelLinear,RowParallelLinear
         in_features, out_features = module.input_size, module.output_size
+    elif module.__class__.__name__ == "Linear" or module.__class__.__name__ == "LayerNormLinear":
+        # TransformerEngine
+        in_features, out_features = module.in_features, module.out_features
+    elif module.__class__.__name__ == "LayerNormMLP":
+        # TransformerEngine
+        ln_weight = module.layer_norm_weight
+        ln_size = ln_weight.shape[0]
+        in_features, out_features = ln_size, ln_size
     elif hasattr(module, "codebooks") and module.__class__.__name__ == "QuantizedLinear":
         # AQLM QuantLinear
         in_features, out_features = module.in_features, module.out_features
