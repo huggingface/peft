@@ -126,8 +126,10 @@ class LoraLayer(BaseTunerLayer):
         in_features, out_features = _get_in_out_features(base_layer)
         self.in_features = in_features
         self.out_features = out_features
-        
-    def resolve_lora_variant(self, *, use_dora: bool, use_kasa: bool, use_bdlora=None, **kwargs) -> Optional[LoraVariant]:
+
+    def resolve_lora_variant(
+        self, *, use_dora: bool, use_kasa: bool, use_bdlora=None, **kwargs
+    ) -> Optional[LoraVariant]:
         """Return a matching LoRA variant for this layer type.
 
         Given the init arguments of this layer, return the correct LoRA variant, if any. E.g., if `use_dora=True`, this
