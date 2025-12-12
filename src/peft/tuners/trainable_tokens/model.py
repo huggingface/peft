@@ -71,17 +71,31 @@ class TrainableTokensModel(BaseTuner):
                 if matched_keys:
                     parent, target, target_name = _get_submodules(model, name)
 
-                    peft_config = self.peft_config[adapter_name].to_dict()
-                    peft_config["tied_adapter"] = self.model.get_input_embeddings()
+                    # If the module is already a TrainableTokensLayer, we need to replace it with a tied version
+                    # instead of just updating it. This handles the case where the user explicitly targeted
+                    # both the embedding and tied layers in target_modules.
+                    if isinstance(target, TrainableTokensLayer):
+                        # Replace the existing layer with a new one that's tied to the embedding
+                        peft_config = self.peft_config[adapter_name].to_dict()
+                        peft_config["tied_adapter"] = self.model.get_input_embeddings()
 
-                    self._create_and_replace_dict(
-                        peft_config,
-                        adapter_name,
-                        target,
-                        target_name,
-                        parent,
-                        matched_keys[0],
-                    )
+                        new_module = self._create_new_module(
+                            peft_config, adapter_name, target.base_layer, **peft_config
+                        )
+                        self._replace_module(parent, target_name, new_module, target.base_layer)
+                    else:
+                        # Module hasn't been wrapped yet, create and replace normally
+                        peft_config = self.peft_config[adapter_name].to_dict()
+                        peft_config["tied_adapter"] = self.model.get_input_embeddings()
+
+                        self._create_and_replace_dict(
+                            peft_config,
+                            adapter_name,
+                            target,
+                            target_name,
+                            parent,
+                            matched_keys[0],
+                        )
 
     def _get_tied_target_modules(self, *args, **kwargs):
         # Normally this method would return the layers that target tied layers.
