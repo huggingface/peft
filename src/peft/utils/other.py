@@ -1483,13 +1483,14 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
 
             # Also get the input embedding layer name as it's the source of tied weights
             embedding_module = model.get_input_embeddings()
-            # Get just the last part of the name for matching with target_layers
-            embedding_name = next(n.split(".")[-1] for n, m in model.named_modules() if m is embedding_module)
+            # Get the full embedding name (not just the last part) to support nested structures
+            embedding_name = next(n for n, m in model.named_modules() if m is embedding_module)
 
             # Find which target layers are in the tied weights (including the embedding source)
             for target_layer_name in target_layers:
-                # Check if this is the embedding layer (check both exact match and endswith for nested structures)
-                if target_layer_name == embedding_name or target_layer_name.endswith(embedding_name):
+                # Check if this is the embedding layer (use endswith to allow flexible matching)
+                # This allows users to specify just "embed_tokens" OR "m1.encoder.embed_tokens" for precision
+                if embedding_name.endswith(target_layer_name):
                     tied_layer_keys.append(target_layer_name)
                     continue
                 # Check if this target layer matches any tied module (considering nested structures)

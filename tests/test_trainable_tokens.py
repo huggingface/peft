@@ -1199,3 +1199,116 @@ class TestTrainableTokens:
         assert lm_head_adapter is not None
         # They should NOT share delta parameters (model doesn't have tied weights)
         assert embed_adapter.trainable_tokens_delta is not lm_head_adapter.trainable_tokens_delta
+
+    def test_mega_model_multiple_embed_tokens_specific_targeting(self):
+        """Test that users can specify full paths to disambiguate multiple embed_tokens layers.
+
+        This tests the scenario described by the maintainer where a composite model has multiple sub-models, each with
+        their own embed_tokens, and users need to target them independently with different token indices.
+        """
+        from transformers import BartConfig, BartModel
+
+        # Create a composite model with two BART sub-models, similar to the MegaModel example
+        class MegaModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                config1 = BartConfig(
+                    vocab_size=100,
+                    d_model=32,
+                    encoder_layers=1,
+                    decoder_layers=1,
+                    encoder_attention_heads=2,
+                    decoder_attention_heads=2,
+                    encoder_ffn_dim=64,
+                    decoder_ffn_dim=64,
+                )
+                self.m1 = BartModel(config1)
+
+                config2 = BartConfig(
+                    vocab_size=100,
+                    d_model=32,
+                    encoder_layers=1,
+                    decoder_layers=1,
+                    encoder_attention_heads=2,
+                    decoder_attention_heads=2,
+                    encoder_ffn_dim=64,
+                    decoder_ffn_dim=64,
+                )
+                config2.tie_word_embeddings = False  # m2 doesn't tie weights
+                self.m2 = BartModel(config2)
+
+                # Add a config attribute for PEFT
+                self.config = config1
+
+            def get_input_embeddings(self):
+                return self.m1.encoder.embed_tokens
+
+        model = MegaModel()
+
+        # User specifies different token indices for each sub-model's embed_tokens
+        # This should NOT raise an error because they are distinct layers
+        # The key point: with our fix, using full paths allows disambiguation
+        peft_config = LoraConfig(
+            target_modules="all-linear",
+            trainable_token_indices={
+                "m1.encoder.embed_tokens": [1, 2, 3],
+                "m2.encoder.embed_tokens": [4, 5, 6],
+            },
+            ensure_weight_tying=False,  # No tying since MegaModel doesn't expose tied weights
+        )
+
+        # This should work without errors - the key is that it doesn't raise ValueError
+        # about conflicting indices like it would have before the fix
+        peft_model = get_peft_model(model, peft_config)
+
+        # Verify that both layers got their adapters with correct indices
+        m1_adapter = peft_model.m1.encoder.embed_tokens.token_adapter
+        m2_adapter = peft_model.m2.encoder.embed_tokens.token_adapter
+
+        assert m1_adapter is not None
+        assert m2_adapter is not None
+
+        # They should have different token indices as specified
+        assert m1_adapter.token_indices["default"] == [1, 2, 3]
+        assert m2_adapter.token_indices["default"] == [4, 5, 6]
+
+        # They should NOT share the same delta parameters (they're independent layers)
+        assert m1_adapter.trainable_tokens_delta is not m2_adapter.trainable_tokens_delta
+
+    def test_mega_model_short_name_matching(self):
+        """Test that short names like 'embed_tokens' still work but match the input embedding."""
+        from transformers import BartConfig, BartModel
+
+        class MegaModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                config = BartConfig(
+                    vocab_size=100,
+                    d_model=32,
+                    encoder_layers=1,
+                    decoder_layers=1,
+                    encoder_attention_heads=2,
+                    decoder_attention_heads=2,
+                    encoder_ffn_dim=64,
+                    decoder_ffn_dim=64,
+                )
+                self.m1 = BartModel(config)
+                self.config = config
+
+            def get_input_embeddings(self):
+                return self.m1.encoder.embed_tokens
+
+        model = MegaModel()
+
+        # User specifies just "embed_tokens" - should match m1.encoder.embed_tokens via endswith
+        peft_config = LoraConfig(
+            target_modules="all-linear",
+            trainable_token_indices={"embed_tokens": [1, 2, 3]},
+            ensure_weight_tying=True,
+        )
+
+        peft_model = get_peft_model(model, peft_config)
+
+        # Should work and apply to the input embeddings
+        assert hasattr(peft_model.m1.encoder.embed_tokens, "token_adapter")
+        assert peft_model.m1.encoder.embed_tokens.token_adapter.token_indices["default"] == [1, 2, 3]
