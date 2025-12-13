@@ -1265,9 +1265,11 @@ def _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config
     if (config_cls == LoraConfig) and config_kwargs.get("target_parameters"):
         pytest.skip("LoRA with multiple adapters with target_parameters is not supported")
 
+
 def _skip_test_disable_adapters(config_cls, config_kwargs):
     if (config_cls == LoraConfig) and config_kwargs.get("use_kasa"):
         pytest.skip("KaSA modifies base weights, so adapter disable test is skipped")
+
 
 class MLP(nn.Module):
     def __init__(self, bias=True):

@@ -764,8 +764,9 @@ class LoraConfig(PeftConfig):
                 "singular value decomposition (SVD) with knowledge-aware singular values to dynamically "
                 "activate parametric knowledge according to its relevance to downstream tasks."
             )
-        }
+        },
     )
+
     def to_dict(self):
         """
         Returns the configuration for your adapter model as a dictionary. Removes runtime configurations.
