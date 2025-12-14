@@ -22,7 +22,8 @@ from functools import partial
 import datasets
 import numpy as np
 from datasets import Dataset, load_dataset
-
+from torch.utils.data import DataLoader
+from transformers import default_data_collator
 
 # with a token limit of 768 for query + response, we have to exclude all texts with length > 1304; this leaves 93.8% of
 # the dataset
@@ -115,3 +116,26 @@ def get_wiki_small(num_samples: int = 100) -> list[str]:
     dataset_head = ds.take(num_samples)
     rows = [row["text"] for row in dataset_head]
     return rows
+
+def make_dataloader(
+    ds: Dataset,
+    *,
+    batch_size: int,
+    shuffle: bool = False,
+    num_workers: int = 0,
+):
+    """
+    Create a PyTorch DataLoader from a Hugging Face Dataset.
+
+    This is intended for benchmarking and evaluation loops.
+    """
+    ds = ds.with_format("torch")
+
+    return DataLoader(
+        ds,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=num_workers,
+        collate_fn=default_data_collator,
+        pin_memory=True,
+    )
