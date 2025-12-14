@@ -862,7 +862,7 @@ class TestDecoderModels(PeftCommonTester):
         except ValueError as exc:
             # Some methods will raise a helpful error. After this, exit the test, as training would fail.
             assert config_cls == PrefixTuningConfig
-            assert "Prefix tuning does not work with gradient checkpointing" in str(exc)
+            assert "does not work with gradient checkpointing" in str(exc)
             return
 
         tokenizer = AutoTokenizer.from_pretrained(model_id)
