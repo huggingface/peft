@@ -3,6 +3,8 @@
 Cartridges are a prompt-learning method that stores a *compressed long-context representation* as a parameterized
 KV-cache prefix. The core idea comes from the paper [Cartridges: Lightweight and general-purpose long context representations via self-study](https://huggingface.co/papers/2506.06266).
 
+For a high-level overview and motivation, see the blog post [Cartridges: Storing long contexts in tiny caches with self-study](https://hazyresearch.stanford.edu/blog/2025-06-08-cartridges).
+
 In PEFT, Cartridges are implemented as a first-class PEFT adapter type: `PeftType.CARTRIDGE`.
 
 ## How Cartridges differ from Prefix Tuning
