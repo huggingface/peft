@@ -33,6 +33,7 @@ from peft import (
     BOFTConfig,
     BoneConfig,
     C3AConfig,
+    CartridgeConfig,
     CPTConfig,
     DeloraConfig,
     FourierFTConfig,
@@ -825,6 +826,14 @@ class TestDecoderModels(PeftCommonTester):
                 },
             ),
             (
+                CartridgeConfig,
+                {
+                    "num_virtual_tokens": 10,
+                    "num_frozen_tokens": 1,
+                    "task_type": "CAUSAL_LM",
+                },
+            ),
+            (
                 PromptEncoderConfig,
                 {
                     "num_virtual_tokens": 10,
@@ -861,7 +870,7 @@ class TestDecoderModels(PeftCommonTester):
             model = get_peft_model(base_model, peft_config)
         except ValueError as exc:
             # Some methods will raise a helpful error. After this, exit the test, as training would fail.
-            assert config_cls == PrefixTuningConfig
+            assert config_cls in (PrefixTuningConfig, CartridgeConfig)
             assert "does not work with gradient checkpointing" in str(exc)
             return
 
