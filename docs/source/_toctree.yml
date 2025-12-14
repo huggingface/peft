@@ -59,6 +59,8 @@
     title: Adapters
   - local: conceptual_guides/prompting
     title: Soft prompts
+  - local: conceptual_guides/cartridges
+    title: Cartridges
   - local: conceptual_guides/ia3
     title: IA3
   - local: conceptual_guides/oft

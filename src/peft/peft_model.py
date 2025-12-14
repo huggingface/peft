@@ -661,10 +661,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             prompt_encoder = model_cls(config, self.word_embeddings)
         elif config.peft_type == PeftType.P_TUNING:
             prompt_encoder = model_cls(config)
-        elif config.peft_type == PeftType.PREFIX_TUNING:
+        elif config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
             # prefix tuning now uses Cache but that won't work with gradient checkpointing
             if any(getattr(module, "gradient_checkpointing", False) for module in self.get_base_model().modules()):
-                raise ValueError("Prefix tuning does not work with gradient checkpointing.")
+                raise ValueError(f"{config.peft_type.value} does not work with gradient checkpointing.")
             prompt_encoder = model_cls(config)
         else:
             raise ValueError("Not supported")
@@ -707,7 +707,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self.prompt_tokens[adapter_name].unsqueeze(0).expand(1, -1).to(prompt_encoder.embedding.weight.device)
         )
         peft_type = self.peft_config[adapter_name].peft_type
-        if self.peft_config[adapter_name].peft_type == PeftType.PREFIX_TUNING:
+        if self.peft_config[adapter_name].peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
             prompt_tokens = prompt_tokens[:, : self.peft_config[adapter_name].num_virtual_tokens]
 
         if self.peft_config[adapter_name].peft_type == PeftType.MULTITASK_PROMPT_TUNING:
@@ -732,7 +732,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             .expand(batch_size, -1)
             .to(prompt_encoder.embedding.weight.device)
         )
-        if peft_config.peft_type == PeftType.PREFIX_TUNING:
+        if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
             prompt_tokens = prompt_tokens[:, : peft_config.num_virtual_tokens]
             if peft_config.inference_mode:
                 past_key_values = prompt_encoder.embedding.weight.repeat(batch_size, 1, 1)
@@ -1748,7 +1748,7 @@ class PeftModelForSequenceClassification(PeftModel):
             }
         )
 
-        if peft_config.peft_type == PeftType.PREFIX_TUNING:
+        if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
             return self._prefix_tuning_forward(input_ids=input_ids, **kwargs)
         else:
             if kwargs.get("token_type_ids", None) is not None:
@@ -1953,7 +1953,7 @@ class PeftModelForCausalLM(PeftModel):
             }
         )
 
-        if peft_config.peft_type == PeftType.PREFIX_TUNING:
+        if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
             # overwrite past_kv in kwargs
             # some archs require max_cache_len to re-initialize the cache
             if input_ids is not None:
@@ -2153,7 +2153,7 @@ class PeftModelForCausalLM(PeftModel):
                 isinstance(cache, transformers.Cache) and not cache.get_seq_length()
             )
 
-            if requires_prompt_injection and peft_config.peft_type == PeftType.PREFIX_TUNING:
+            if requires_prompt_injection and peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
                 # some archs require max_cache_len to re-initialize the cache, but DynamicCache has no max len
                 if isinstance(cache, transformers.Cache) and not isinstance(cache, transformers.DynamicCache):
                     max_cache_len = cache.max_cache_len
@@ -2172,10 +2172,13 @@ class PeftModelForCausalLM(PeftModel):
                 model_kwargs["input_ids"] = None
 
         # if we're in the prefill stage
-        if is_prefill and (peft_config.peft_type == PeftType.PREFIX_TUNING):
+        if is_prefill and (peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE)):
             # for prefix tuning, the past_key_values have been prefilled
             model_kwargs["cache_position"] += peft_config.num_virtual_tokens
-        elif peft_config.peft_type != PeftType.PREFIX_TUNING:  # prefix tuning needs cache_position
+        elif peft_config.peft_type not in (
+            PeftType.PREFIX_TUNING,
+            PeftType.CARTRIDGE,
+        ):  # prefix-style needs cache_position
             # For transformers>=4.38.0 - for some architectures such as Llama, `cache_position` is passed in the forward
             # pass to keep track of the position ids of the cache. We have to pop that from `model_kwargs` as
             # `cache_position` is properly created by the model, using the passed `inputs_embeds`:
@@ -2296,7 +2299,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
             }
         )
 
-        if peft_config.peft_type == PeftType.PREFIX_TUNING:
+        if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
             # overwrite past_kv in kwargs
             kwargs["past_key_values"] = self.get_prompt(batch_size)
             return self.base_model(
@@ -2386,7 +2389,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
                     )
                     kwargs["token_type_ids"] = None
 
-                if peft_config.peft_type == PeftType.PREFIX_TUNING:
+                if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
                     outputs = self.base_model.generate(**kwargs)
                 elif peft_config.peft_type in [
                     PeftType.PROMPT_TUNING,
@@ -2437,7 +2440,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
         model_kwargs = self.base_model_prepare_inputs_for_generation(*args, **kwargs)
         if peft_config.peft_type == PeftType.POLY:
             model_kwargs["task_ids"] = task_ids
-        elif peft_config.peft_type == PeftType.PREFIX_TUNING:
+        elif peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
             past_key_values = model_kwargs.get("past_key_values", None)
             cache_position = model_kwargs.get("cache_position", [None])
             # check prefill stage
@@ -2605,7 +2608,7 @@ class PeftModelForTokenClassification(PeftModel):
             }
         )
 
-        if peft_config.peft_type == PeftType.PREFIX_TUNING:
+        if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
             return self._prefix_tuning_forward(input_ids=input_ids, **kwargs)
         else:
             if kwargs.get("token_type_ids", None) is not None:
@@ -2832,7 +2835,7 @@ class PeftModelForQuestionAnswering(PeftModel):
             }
         )
 
-        if peft_config.peft_type == PeftType.PREFIX_TUNING:
+        if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
             return self._prefix_tuning_forward(input_ids=input_ids, **kwargs)
         else:
             if kwargs.get("token_type_ids", None) is not None:
@@ -3014,7 +3017,7 @@ class PeftModelForFeatureExtraction(PeftModel):
             }
         )
 
-        if peft_config.peft_type == PeftType.PREFIX_TUNING:
+        if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
             # overwrite past_kv in kwargs
             kwargs["past_key_values"] = self.get_prompt(batch_size)
             return self.base_model(input_ids=input_ids, **kwargs)

@@ -24,6 +24,12 @@ from .auto import (
     AutoPeftModelForSequenceClassification,
     AutoPeftModelForTokenClassification,
 )
+from .cartridge_utils import (
+    compose_cartridge_adapters,
+    initialize_cartridge_from_past_key_values,
+    initialize_cartridge_from_text,
+    prompt_embeddings_from_past_key_values,
+)
 from .config import PeftConfig, PromptLearningConfig
 from .mapping import (
     PEFT_TYPE_TO_CONFIG_MAPPING,
@@ -58,6 +64,8 @@ from .tuners import (
     BoneModel,
     C3AConfig,
     C3AModel,
+    CartridgeConfig,
+    CartridgeEncoder,
     CPTConfig,
     CPTEmbedding,
     DeloraConfig,
@@ -162,6 +170,8 @@ __all__ = [
     "C3AModel",
     "CPTConfig",
     "CPTEmbedding",
+    "CartridgeConfig",
+    "CartridgeEncoder",
     "DeloraConfig",
     "DeloraModel",
     "EvaConfig",
@@ -233,6 +243,7 @@ __all__ = [
     "XLoraModel",
     "bloom_model_postprocess_past_key_value",
     "cast_mixed_precision_params",
+    "compose_cartridge_adapters",
     "create_arrow_model",
     "get_eva_state_dict",
     "get_layer_status",
@@ -240,10 +251,13 @@ __all__ = [
     "get_peft_config",
     "get_peft_model",
     "get_peft_model_state_dict",
+    "initialize_cartridge_from_past_key_values",
+    "initialize_cartridge_from_text",
     "initialize_lora_eva_weights",
     "inject_adapter_in_model",
     "load_peft_weights",
     "prepare_model_for_kbit_training",
+    "prompt_embeddings_from_past_key_values",
     "replace_lora_weights_loftq",
     "set_peft_model_state_dict",
     "shift_tokens_right",
