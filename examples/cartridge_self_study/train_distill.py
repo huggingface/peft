@@ -63,6 +63,11 @@ class DistillationTrainer(Trainer):
         student_attention_mask = inputs["student_attention_mask"].to(model.device)
         ctx_len = inputs["ctx_len"].to(model.device)
 
+        # Ensure teacher is on the same device as the student tensors.
+        teacher_device = next(self.teacher_model.parameters()).device
+        if teacher_device != teacher_input_ids.device:
+            self.teacher_model.to(teacher_input_ids.device)
+
         with torch.no_grad():
             teacher_out = self.teacher_model(
                 input_ids=teacher_input_ids,
@@ -102,8 +107,8 @@ class DistillationTrainer(Trainer):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--teacher_model", type=str, required=True)
-    parser.add_argument("--student_model", type=str, required=True)
+    parser.add_argument("--teacher_model", type=str, default="Qwen/Qwen2.5-0.5B-Instruct")
+    parser.add_argument("--student_model", type=str, default="Qwen/Qwen2.5-0.5B-Instruct")
     parser.add_argument("--distill_jsonl", type=str, required=True)
     parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--num_virtual_tokens", type=int, default=256)
@@ -112,11 +117,22 @@ def main():
     parser.add_argument("--per_device_train_batch_size", type=int, default=1)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--max_steps", type=int, default=1000)
+    parser.add_argument("--device", type=str, default="mps", choices=["cpu", "mps", "cuda"])
     args = parser.parse_args()
 
+    if args.device == "mps" and not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
+        raise ValueError("Requested device 'mps' but MPS is not available.")
+    if args.device == "cuda" and not torch.cuda.is_available():
+        raise ValueError("Requested device 'cuda' but CUDA is not available.")
+
+    device = torch.device(args.device)
+    torch_dtype = torch.float16 if args.device in {"cuda", "mps"} else None
+
     tokenizer = AutoTokenizer.from_pretrained(args.student_model)
-    teacher = AutoModelForCausalLM.from_pretrained(args.teacher_model)
-    student_base = AutoModelForCausalLM.from_pretrained(args.student_model)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    teacher = AutoModelForCausalLM.from_pretrained(args.teacher_model, torch_dtype=torch_dtype).to(device)
+    student_base = AutoModelForCausalLM.from_pretrained(args.student_model, torch_dtype=torch_dtype)
 
     peft_cfg = CartridgeConfig(
         task_type="CAUSAL_LM",
@@ -136,6 +152,9 @@ def main():
         logging_steps=10,
         save_steps=100,
         report_to=[],
+        remove_unused_columns=False,
+        use_cpu=args.device == "cpu",
+        dataloader_pin_memory=False,
     )
 
     trainer = DistillationTrainer(

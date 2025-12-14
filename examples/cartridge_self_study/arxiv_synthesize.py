@@ -1,0 +1,58 @@
+import argparse
+from pathlib import Path
+
+from synthesize import synthesize_self_study_jsonl
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-0.5B-Instruct")
+    parser.add_argument(
+        "--corpus_path",
+        type=str,
+        default=str(Path(__file__).resolve().parent / "data/cartridges.tex"),
+    )
+    parser.add_argument("--out_jsonl", type=str, default="distill.jsonl")
+    parser.add_argument("--num_samples", type=int, default=256)
+    parser.add_argument("--seed_prompts", type=str, default="structuring,summarization,question,use_case,creative")
+    parser.add_argument("--min_tokens_per_chunk", type=int, default=512)
+    parser.add_argument("--max_tokens_per_chunk", type=int, default=1024)
+    parser.add_argument("--max_new_tokens", type=int, default=256)
+    parser.add_argument("--temperature", type=float, default=0.7)
+    parser.add_argument("--top_p", type=float, default=0.95)
+    parser.add_argument("--max_corpus_tokens", type=int, default=2048)
+    args = parser.parse_args()
+
+    corpus_text = Path(args.corpus_path).read_text(encoding="utf-8")
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    model = AutoModelForCausalLM.from_pretrained(args.model)
+
+    if args.max_corpus_tokens is not None:
+        ids = tokenizer(
+            corpus_text,
+            add_special_tokens=False,
+            truncation=True,
+            max_length=args.max_corpus_tokens,
+        )["input_ids"]
+        corpus_text = tokenizer.decode(ids, skip_special_tokens=True)
+
+    synthesize_self_study_jsonl(
+        output_path=Path(args.out_jsonl),
+        model=model,
+        tokenizer=tokenizer,
+        corpus_text=corpus_text,
+        num_samples=args.num_samples,
+        seed_prompt_types=[s.strip() for s in args.seed_prompts.split(",") if s.strip()],
+        min_tokens_per_chunk=args.min_tokens_per_chunk,
+        max_tokens_per_chunk=args.max_tokens_per_chunk,
+        max_new_tokens=args.max_new_tokens,
+        temperature=args.temperature,
+        top_p=args.top_p,
+    )
+
+
+if __name__ == "__main__":
+    main()
