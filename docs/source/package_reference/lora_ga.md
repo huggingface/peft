@@ -39,10 +39,6 @@ The abstract from the paper is:
 
 [[autodoc]] tuners.lora.config.LoraGAConfig
 
-## LoraGAModel
-
-[[autodoc]] tuners.lora.model.LoraGAModel
-
 ## Utilities
 
 [[autodoc]] utils.lora_ga_utils.estimate_gradient
