@@ -38,12 +38,15 @@ class AdaLoraLayer(LoraLayer):
     # All names of other parameters that may contain adapter-related parameters
     other_param_names = ("r", "lora_alpha", "scaling", "lora_dropout", "ranknum")
 
-    def __init__(self, base_layer: nn.Module) -> None:
+    def __init__(self, base_layer: nn.Module, use_dora_adaptive: bool = False) -> None:
         super().__init__(base_layer)
         self.lora_E = nn.ParameterDict({})
         self.lora_A = nn.ParameterDict({})
         self.lora_B = nn.ParameterDict({})
         self.ranknum = nn.ParameterDict({})
+        self.use_dora_adaptive = use_dora_adaptive
+        if self.use_dora_adaptive:
+            self.lora_magnitude = nn.ParameterDict({})
 
     def update_layer(
         self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, inference_mode: bool = False, **kwargs
@@ -77,6 +80,24 @@ class AdaLoraLayer(LoraLayer):
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
+        if self.use_dora_adaptive:
+            # 1. Get Base Weight
+            base_layer = self.get_base_layer()
+
+            # We only support standard Linear layers for safety
+            if isinstance(base_layer, nn.Linear):
+                weight = base_layer.weight
+
+                # 2. Calculate Real Norms (dim=1 is row-wise for Linear)
+                # We use float32 for the calculation to avoid overflow/underflow
+                with torch.no_grad():
+                    actual_norm = weight.norm(p=2, dim=1, keepdim=True).to(torch.float32).detach()
+
+                # 3. Save to ParameterDict
+                # We cast back to the weight's dtype (e.g., float16) for storage
+                self.lora_magnitude[adapter_name] = nn.Parameter(
+                    actual_norm.to(weight.device).to(weight.dtype)
+                )
 
     def reset_lora_parameters(self, adapter_name):
         if adapter_name in self.lora_A.keys():
@@ -96,7 +117,6 @@ class SVDLinear(nn.Module, AdaLoraLayer):
         lora_dropout: float = 0.0,
         fan_in_fan_out: bool = False,
         init_lora_weights: bool = True,
-        use_dora_adaptive=True, # New flag to enable DoRA adaptive mechanism
         **kwargs,
     ) -> None:
         super().__init__()
@@ -107,23 +127,6 @@ class SVDLinear(nn.Module, AdaLoraLayer):
         self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.use_dora_adaptive = use_dora_adaptive
-
-    # Initialize Magnitude Vector if flag is on
-        if self.use_dora_adaptive:
-            # 1. Access the weight directly from the base_layer
-            # ('base_layer' is the first argument passed to __init__)
-            weight = base_layer.weight
-
-            # 2. Calculate the REAL norm of the pre-trained weights
-            # Linear weights are [out_features, in_features], so we norm across dim=1.
-            # .detach() is CRITICAL: stops gradients from flowing back to the frozen base model.
-            actual_norm = weight.norm(p=2, dim=1, keepdim=True).detach()
-
-            # 3. Create the parameter
-            # .to(weight.device) ensures it's on the GPU if the model is loaded there.
-            # .to(weight.dtype) ensures it matches the precision (e.g., float16 vs float32).
-            self.magnitude = nn.Parameter(actual_norm.to(weight.device).to(weight.dtype))
 
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -183,77 +186,92 @@ class SVDLinear(nn.Module, AdaLoraLayer):
         )
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-        # --- YOUR NEW ADADORA LOGIC ---
-        if self.use_dora_adaptive:
-            # 1. Identify the Active Adapter
-            # (Standard training usually has just one active adapter, e.g., 'default')
-            # We must extract the specific tensors for the current adapter from the ModuleDict
-            adapter_name = self.active_adapters[0]
+        # 1. Standard Checks
+        if self.disable_adapters:
+            if self.merged:
+                self.unmerge()
+            return self.get_base_layer()(x, *args, **kwargs)
 
-            # Safety check: if this adapter isn't configured, fall back to base
+        # 2. AdaDoRA Logic (Corrected "Split-Path" Implementation)
+        if self.use_dora_adaptive and not self.merged:
+            adapter_name = self.active_adapters[0]
             if adapter_name not in self.lora_A:
                 return self.get_base_layer()(x, *args, **kwargs)
 
-            # 2. Get Base Weight & Bias
+            # --- PREPARE DATA ---
             base_layer = self.get_base_layer()
             base_weight = base_layer.weight
-            # We need the bias separately because F.linear expects it
+            # Bias is handled separately at the very end
             bias = base_layer.bias if hasattr(base_layer, 'bias') else None
 
-            # 3. Retrieve AdaLoRA Components
-            # lora_A: [r, in] | lora_B: [out, r] | lora_E: [r, 1]
             lora_A = self.lora_A[adapter_name]
             lora_B = self.lora_B[adapter_name]
             lora_E = self.lora_E[adapter_name]
-
-            # Get Scaling Factors
+            dropout = self.lora_dropout[adapter_name]
             scaling = self.scaling[adapter_name]
-            ranknum = self.ranknum[adapter_name] + 1e-5 # Avoid division by zero
+            ranknum = self.ranknum[adapter_name] + 1e-5
 
-            # 4. Calculate Adapter Delta (Delta W = B @ (E * A))
-            # We broadcast E across A (scaling the singular values), then multiply by B.
-            # CRITICAL: We must apply the AdaLoRA scaling (scaling / ranknum).
-            adapter_weight = (lora_B @ (lora_E * lora_A)) * (scaling / ranknum)
+            # --- PATH A: Base Model (No Dropout, Standard Precision) ---
+            # We compute x @ W.T separately to preserve pre-trained knowledge
+            base_out = torch.nn.functional.linear(x, base_weight, bias=None)
 
-            # 5. DoRA: Direction + Magnitude
-            # Combine Base + Delta.
-            # We use .to() to ensure data types match (e.g. if base is float16)
-            W_total = base_weight + adapter_weight.to(base_weight.dtype)
+            # --- PATH B: Adapter (Apply Dropout & Cast Dtype) ---
+            # FIX 1: Cast input to match adapter dtype (crucial for mixed precision)
+            x_cast = self._cast_input_dtype(x, lora_A.dtype)
 
-            # Normalize (Row-wise for Linear layers: dim=1)
-            norm = W_total.norm(p=2, dim=1, keepdim=True)
-            W_norm = W_total / (norm + 1e-6)
+            # FIX 2: Explicit Materialization of Delta W
+            # Formula: Delta = B @ (E * A) * scaling
+            # Shape: [out, r] @ [r, in] -> [out, in]
+            delta_weight = (lora_B @ (lora_E * lora_A)) * (scaling / ranknum)
 
-            # Apply Learnable Magnitude
-            W_final = W_norm * self.magnitude
+            # Compute Adapter Output: dropout(x) @ Delta.T
+            # We cast delta_weight to x_cast's dtype to ensure compatibility
+            delta_out = torch.nn.functional.linear(dropout(x_cast), delta_weight.to(x_cast.dtype), bias=None) # type: ignore
 
-            # 6. Compute Output
-            # We cast x to match W_final's dtype to prevent mix-precision errors
-            return torch.nn.functional.linear(x.to(W_final.dtype), W_final, bias=bias)
+            # --- COMBINE (Pre-Scale) ---
+            # z = Base + Delta
+            z = base_out + delta_out.to(base_out.dtype)
 
-        # --- ORIGINAL ADALORA LOGIC  ---
-        else:
-            if self.disable_adapters:
-                if self.merged:
-                    self.unmerge()
-                result = self.base_layer(x, *args, **kwargs)
-            elif self.merged:
-                result = self.base_layer(x, *args, **kwargs)
+            # --- DORA SCALING ---
+            # 1. Calculate Norm of (W + Delta) in Float32 for stability
+            W_total_f = base_weight.float() + delta_weight.float()
+            norm = W_total_f.norm(p=2, dim=1, keepdim=True).clamp_min(1e-6) # [out, 1]
+
+            # 2. Get Learned Magnitude
+            if adapter_name in self.lora_magnitude:
+                mag = self.lora_magnitude[adapter_name]
             else:
-                result = self.base_layer(x, *args, **kwargs)
-                for active_adapter in self.active_adapters:
-                    if active_adapter not in self.lora_A.keys():
-                        continue
-                    lora_A = self.lora_A[active_adapter]
-                    lora_B = self.lora_B[active_adapter]
-                    lora_E = self.lora_E[active_adapter]
-                    dropout = self.lora_dropout[active_adapter]
-                    scaling = self.scaling[active_adapter]
-                    ranknum = self.ranknum[active_adapter] + 1e-5
+                mag = norm.detach().to(z.dtype) # Fallback
 
-                    x = self._cast_input_dtype(x, lora_A.dtype)
-                    # Original logic (implicit matmul x @ A.T @ B.T)
-                    result += (dropout(x) @ (lora_A * lora_E).T @ lora_B.T) * scaling / ranknum
+            # 3. Calculate Scale Factor: (m / ||W+Delta||)
+            # Reshape scale to [1, out] to broadcast over batch
+            scale = (mag.float() / norm).to(z.dtype).view(1, -1)
+
+            # 4. Apply Scale
+            z = z * scale
+
+            # --- FINALIZE ---
+            # Add bias last (Unscaled, as per standard Linear layer)
+            if bias is not None:
+                z = z + bias.view(1, -1)
+
+            return z
+
+        # 3. original AdaLoRA Logic
+        else:
+            result = self.base_layer(x, *args, **kwargs)
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.lora_A.keys():
+                    continue
+                lora_A = self.lora_A[active_adapter]
+                lora_B = self.lora_B[active_adapter]
+                lora_E = self.lora_E[active_adapter]
+                dropout = self.lora_dropout[active_adapter]
+                scaling = self.scaling[active_adapter]
+                ranknum = self.ranknum[active_adapter] + 1e-5
+
+                x = self._cast_input_dtype(x, lora_A.dtype)
+                result += (dropout(x) @ (lora_A * lora_E).T @ lora_B.T) * scaling / ranknum
 
             return result
 
