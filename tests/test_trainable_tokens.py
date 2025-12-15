@@ -1240,40 +1240,56 @@ class TestTrainableTokens:
                 # Add a config attribute for PEFT
                 self.config = config1
 
+                # Expose the tied weights from sub-models so PEFT can see them
+                # This defines which layers are tied within each sub-model
+                self._tied_weights_keys = [
+                    "m1.encoder.embed_tokens.weight",
+                    "m1.decoder.embed_tokens.weight",
+                    # m2 has no tied weights since tie_word_embeddings=False
+                ]
+
             def get_input_embeddings(self):
                 return self.m1.encoder.embed_tokens
 
         model = MegaModel()
 
         # User specifies different token indices for each sub-model's embed_tokens
-        # This should NOT raise an error because they are distinct layers
-        # The key point: with our fix, using full paths allows disambiguation
+        # This should NOT raise an error because they are distinct sub-models
+        # With ensure_weight_tying=True, m1's internal tying should still work
         peft_config = LoraConfig(
             target_modules="all-linear",
             trainable_token_indices={
                 "m1.encoder.embed_tokens": [1, 2, 3],
                 "m2.encoder.embed_tokens": [4, 5, 6],
             },
-            ensure_weight_tying=False,  # No tying since MegaModel doesn't expose tied weights
+            ensure_weight_tying=True,  # Verify that weight tying works correctly
         )
 
         # This should work without errors - the key is that it doesn't raise ValueError
-        # about conflicting indices like it would have before the fix
+        # about conflicting indices because m1 and m2 are independent
         peft_model = get_peft_model(model, peft_config)
 
         # Verify that both layers got their adapters with correct indices
-        m1_adapter = peft_model.m1.encoder.embed_tokens.token_adapter
+        m1_encoder_adapter = peft_model.m1.encoder.embed_tokens.token_adapter
         m2_adapter = peft_model.m2.encoder.embed_tokens.token_adapter
 
-        assert m1_adapter is not None
+        assert m1_encoder_adapter is not None
         assert m2_adapter is not None
 
         # They should have different token indices as specified
-        assert m1_adapter.token_indices["default"] == [1, 2, 3]
+        assert m1_encoder_adapter.token_indices["default"] == [1, 2, 3]
         assert m2_adapter.token_indices["default"] == [4, 5, 6]
 
-        # They should NOT share the same delta parameters (they're independent layers)
-        assert m1_adapter.trainable_tokens_delta is not m2_adapter.trainable_tokens_delta
+        # They should NOT share the same delta parameters (they're independent sub-models)
+        assert m1_encoder_adapter.trainable_tokens_delta is not m2_adapter.trainable_tokens_delta
+
+        # m1's decoder should be tied to m1's encoder (internal weight tying within m1)
+        m1_decoder_adapter = peft_model.m1.decoder.embed_tokens.token_adapter
+        assert m1_decoder_adapter is not None
+        assert m1_encoder_adapter.trainable_tokens_delta is m1_decoder_adapter.trainable_tokens_delta
+
+        # m2's decoder should NOT have an adapter since it's not tied and we didn't target it
+        assert not hasattr(peft_model.m2.decoder.embed_tokens, "token_adapter")
 
     def test_mega_model_short_name_matching(self):
         """Test that short names like 'embed_tokens' still work but match the input embedding."""
