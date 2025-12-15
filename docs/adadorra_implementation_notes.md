@@ -227,9 +227,70 @@ W_merged = (m / ||W + ΔW||) * (W + ΔW)
 
 **Fix**: Disabled unmerge for AdaDoRA with clear error message.
 
+#### Issue 5: Merged State Check in else Branch
+
+**Problem**: The else branch (standard AdaLoRA path) didn't check `self.merged`, causing adapter contribution to be added twice when merged.
+
+**Impact**: Wrong outputs after merge when falling through to else branch.
+
+**Fix**: Added early return when merged:
+```python
+if self.merged:
+    return self.base_layer(x, *args, **kwargs)
+```
+
+#### Issue 6: Use `torch.no_grad()` for Norm Computation
+
+**Problem**: Original code used `.detach()` on the result. Per DoRA paper, the entire norm computation should be outside the gradient graph.
+
+**Fix**: Wrap norm computation in `torch.no_grad()`:
+```python
+with torch.no_grad():
+    delta_weight = (lora_B @ (lora_E * lora_A)) * (scaling / ranknum)
+    W_total_f = base_weight.float() + delta_weight.float()
+    norm = W_total_f.norm(p=2, dim=1, keepdim=True).clamp_min(1e-6)
+```
+
+#### Issue 7: `nn.Linear` Type Guard in forward()
+
+**Problem**: Magnitude initialization only works for `nn.Linear`, but forward() didn't enforce this.
+
+**Fix**: Added type guard:
+```python
+if not isinstance(self.get_base_layer(), nn.Linear):
+    raise NotImplementedError("AdaDoRA currently supports nn.Linear layers only.")
+```
+
+#### Issue 8: merge() Missing Guards
+
+**Problem**: `merge()` didn't have the same guards as `forward()` (`fan_in_fan_out`, `nn.Linear` type check).
+
+**Fix**: Added matching guards to merge():
+```python
+if self.fan_in_fan_out:
+    raise NotImplementedError("AdaDoRA merge does not support fan_in_fan_out=True")
+if not isinstance(self.get_base_layer(), nn.Linear):
+    raise NotImplementedError("AdaDoRA merge supports nn.Linear layers only.")
+```
+
+#### Issue 9: Confusing Error on disable_adapters After Merge
+
+**Problem**: Setting `disable_adapters=True` after AdaDoRA merge calls `unmerge()`, which raises a confusing error.
+
+**Fix**: Added explicit check with clear error message:
+```python
+if self.disable_adapters:
+    if self.merged and self.use_dora_adaptive:
+        raise RuntimeError(
+            "Cannot disable adapters after AdaDoRA merge. The merge operation is "
+            "irreversible; original weights cannot be restored."
+        )
+```
+
 ### Commits
 
 ```
+c730e8d fix: add missing guards to merge() and improve error messages
 920db0f fix: address AdaDoRA implementation issues
 41d6a5e fix: AdaDoRA implementation issues
 2922c80 FEAT Add DoRA adaptive mechanism to AdaLoraLayer and SVDLinear classes
@@ -298,6 +359,7 @@ outputs = model(**inputs)
 | No `fan_in_fan_out=True` | Conv1D-style weight layout not implemented |
 | Single adapter only | No principled multi-adapter magnitude composition |
 | No unmerge | Non-linear transformation not reversible |
+| No `disable_adapters` after merge | Cannot restore original weights |
 | `nn.Linear` only | Magnitude init requires standard linear layer |
 
 ### Performance Characteristics
