@@ -124,6 +124,7 @@ class AdaLoraModel(LoraModel):
             "init_lora_weights": lora_config.init_lora_weights,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
+            "use_dora_adaptive": getattr(lora_config, "use_dora_adaptive", False),
         }
         if (kwargs["loaded_in_8bit"] or kwargs["loaded_in_4bit"]) and not is_bnb_available():
             raise ImportError(

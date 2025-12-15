@@ -54,6 +54,7 @@ class AdaLoraConfig(LoraConfig):
         orth_reg_weight (`float`): The coefficient of orthogonal regularization.
         total_step (`int`): The total training steps that should be specified before training.
         rank_pattern (`list`): The allocated rank for each weight matrix by RankAllocator.
+        use_dora_adaptive (`bool`): Whether to use DoRA-style adaptive magnitude scaling in AdaLoRA layers.
     """
 
     target_r: int = field(default=8, metadata={"help": "Target Lora matrix dimension."})
@@ -66,6 +67,7 @@ class AdaLoraConfig(LoraConfig):
     orth_reg_weight: float = field(default=0.5, metadata={"help": "The orthogonal regularization coefficient."})
     total_step: Optional[int] = field(default=None, metadata={"help": "The total training steps."})
     rank_pattern: Optional[dict] = field(default=None, metadata={"help": "The saved rank pattern."})
+    use_dora_adaptive: bool = field(default=False, metadata={"help": "Whether to use DoRA-style adaptive magnitude scaling."})
 
     def __post_init__(self):
         super().__post_init__()
