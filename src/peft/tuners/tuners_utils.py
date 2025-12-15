@@ -1204,12 +1204,12 @@ class BaseTuner(nn.Module, ABC):
     def _get_module_names_tied_with_embedding(self) -> list[str]:
         return _get_module_names_tied_with_embedding(self)
 
-    def _add_modules_to_tie(self, peft_config, tied_weight_keys):
+    def _add_modules_to_save_to_tie(self, peft_config, tied_weight_keys):
         """
         This method adds modules to tie to `peft_config` so that those modules can be tied downstream. By default this
         method raises a warning, and each tuner class extending `BaseTuner` can choose to implement this.
 
-        Check `peft.tuners.lora.LoraModel._add_modules_to_tie` for an example.
+        Check `peft.tuners.lora.LoraModel._add_modules_to_save_to_tie` for an example.
         """
         warnings.warn(warn_msg_weight_tying)
 
@@ -1244,7 +1244,7 @@ class BaseTuner(nn.Module, ABC):
         if getattr(peft_config, "ensure_weight_tying", False):
             if tied_weight_keys:
                 if is_embedding_to_save:
-                    self._add_modules_to_tie(peft_config, tied_weight_keys)
+                    self._add_modules_to_save_to_tie(peft_config, tied_weight_keys)
                 elif is_embedding_in_target:
                     self._add_targets_to_tie(peft_config, tied_weight_keys)
                 else:
@@ -1946,7 +1946,7 @@ def find_parameter_name_by_tensor(model: nn.Module, reference_tensor: torch.Tens
     Returns:
         str: Name of the layer
     """
-    for n, m in model.named_parameters():
+    for n, m in model.named_modules():
         if m is reference_tensor:
             return n
 

@@ -329,8 +329,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
                     )
 
-                # Before exporting the parameters we need to make sure
-                # all the tensors are contigious. Tensors can become non contigiuous
+                # Before exporting the parameters we need to make sure all the tensors are contigious as saving
+                # non-contiguous parameters is not supported. Tensors can become non contigiuous
                 # if they are a transpose view of another tensor. This can happen
                 # during adapter tying or parameter sharing.
                 for k, v in output_state_dict.items():
