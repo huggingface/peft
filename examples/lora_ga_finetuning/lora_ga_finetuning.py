@@ -46,6 +46,13 @@ def parse_args():
     parser.add_argument("--lora_alpha", type=int, default=16, help="LoRA alpha")
     parser.add_argument("--lora_dropout", type=float, default=0.1, help="LoRA dropout")
     parser.add_argument(
+        "--target_modules",
+        type=str,
+        nargs="+",
+        default=["c_attn"],
+        help="Target modules for LoRA (e.g., c_attn for GPT-2)",
+    )
+    parser.add_argument(
         "--direction",
         type=str,
         default="ArB2r",
@@ -135,7 +142,7 @@ def main():
         r=args.r,
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
-        target_modules=["c_attn"],  # For GPT-2; adjust based on your model
+        target_modules=args.target_modules,
         bias="none",
         task_type="CAUSAL_LM",
         init_lora_weights="lora_ga",
