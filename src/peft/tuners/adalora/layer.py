@@ -148,8 +148,16 @@ class SVDLinear(nn.Module, AdaLoraLayer):
             # no adapter to merge
             return
 
-        # AdaDoRA constraints
+        # AdaDoRA constraints (same guards as forward)
         if self.use_dora_adaptive:
+            if self.fan_in_fan_out:
+                raise NotImplementedError(
+                    "AdaDoRA merge does not support fan_in_fan_out=True (Conv1D-style) layers."
+                )
+            if not isinstance(self.get_base_layer(), nn.Linear):
+                raise NotImplementedError(
+                    "AdaDoRA merge supports nn.Linear layers only."
+                )
             if len(adapter_names) != 1:
                 raise NotImplementedError(
                     "AdaDoRA merge supports exactly one adapter at a time."
@@ -235,6 +243,13 @@ class SVDLinear(nn.Module, AdaLoraLayer):
         # 1. Standard Checks
         if self.disable_adapters:
             if self.merged:
+                if self.use_dora_adaptive:
+                    # AdaDoRA merge is irreversible - unmerge() would fail with confusing error
+                    raise RuntimeError(
+                        "Cannot disable adapters after AdaDoRA merge. The merge operation is "
+                        "irreversible; original weights cannot be restored. Create a new model "
+                        "from the base weights instead."
+                    )
                 self.unmerge()
             return self.get_base_layer()(x, *args, **kwargs)
 
