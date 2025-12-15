@@ -151,29 +151,63 @@ class SVDLinear(nn.Module, AdaLoraLayer):
         for active_adapter in adapter_names:
             base_layer = self.get_base_layer()
             if active_adapter in self.lora_A.keys():
-                if safe_merge:
-                    # Note that safe_merge will be slower than the normal merge
-                    # because of the copy operation.
-                    orig_weights = base_layer.weight.data.clone()
-                    orig_weights += self.get_delta_weight(active_adapter)
+                delta_weight = self.get_delta_weight(active_adapter)
 
-                    if not torch.isfinite(orig_weights).all():
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
+                if self.use_dora_adaptive:
+                    # AdaDoRA merge: W_merged = (m / ||W + ΔW||) * (W + ΔW)
+                    W_total = base_layer.weight.data + delta_weight
+                    norm = W_total.float().norm(p=2, dim=1, keepdim=True).clamp_min(1e-6)
 
-                    base_layer.weight.data = orig_weights
+                    if active_adapter in self.lora_magnitude:
+                        mag = self.lora_magnitude[active_adapter]
+                    else:
+                        mag = norm.to(W_total.dtype)
+
+                    # scale factor: m / ||W + ΔW||
+                    scale = (mag.float() / norm).to(W_total.dtype)
+                    merged_weight = W_total * scale
+
+                    if safe_merge:
+                        if not torch.isfinite(merged_weight).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                            )
+                    base_layer.weight.data = merged_weight
                 else:
-                    base_layer.weight.data += self.get_delta_weight(active_adapter)
+                    # standard AdaLoRA merge: W_merged = W + ΔW
+                    if safe_merge:
+                        orig_weights = base_layer.weight.data.clone()
+                        orig_weights += delta_weight
+
+                        if not torch.isfinite(orig_weights).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                            )
+
+                        base_layer.weight.data = orig_weights
+                    else:
+                        base_layer.weight.data += delta_weight
+
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
         """
         This method unmerges all merged adapter layers from the base weights.
+
+        Note: For AdaDoRA (use_dora_adaptive=True), unmerge is not supported because
+        the merge operation applies a non-linear magnitude scaling transformation.
         """
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
+
+        if self.use_dora_adaptive:
+            raise NotImplementedError(
+                "Unmerge is not supported for AdaDoRA because merge applies a non-linear "
+                "magnitude scaling transformation: W_merged = (m / ||W + ΔW||) * (W + ΔW). "
+                "The original weights cannot be recovered without storing them separately."
+            )
+
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_A.keys():
@@ -193,8 +227,20 @@ class SVDLinear(nn.Module, AdaLoraLayer):
                 self.unmerge()
             return self.get_base_layer()(x, *args, **kwargs)
 
-        # 2. AdaDoRA Logic (Corrected "Split-Path" Implementation)
+        # 2. AdaDoRA Logic (Split-Path with Low-Rank Forward)
         if self.use_dora_adaptive and not self.merged:
+            # --- GUARDS ---
+            if self.fan_in_fan_out:
+                raise NotImplementedError(
+                    "AdaDoRA does not support fan_in_fan_out=True (Conv1D-style) layers. "
+                    "Use standard AdaLoRA instead."
+                )
+            if len(self.active_adapters) > 1:
+                raise NotImplementedError(
+                    "AdaDoRA supports only one active adapter at a time. "
+                    "Use standard AdaLoRA for multi-adapter scenarios."
+                )
+
             # --- PREPARE DATA ---
             base_layer = self.get_base_layer()
             base_weight = base_layer.weight
@@ -205,14 +251,9 @@ class SVDLinear(nn.Module, AdaLoraLayer):
             # we compute x @ W.T separately to preserve pre-trained knowledge
             z = torch.nn.functional.linear(x, base_weight, bias=None)
 
-            # --- PATH B: Accumulate all adapters ---
-            # accumulate delta weights and outputs from all active adapters
-            total_delta_weight = None
-
-            for adapter_name in self.active_adapters:
-                if adapter_name not in self.lora_A:
-                    continue
-
+            # --- PATH B: Adapter (Low-Rank Forward) ---
+            adapter_name = self.active_adapters[0]
+            if adapter_name in self.lora_A:
                 lora_A = self.lora_A[adapter_name]
                 lora_B = self.lora_B[adapter_name]
                 lora_E = self.lora_E[adapter_name]
@@ -223,34 +264,26 @@ class SVDLinear(nn.Module, AdaLoraLayer):
                 # cast input to match adapter dtype (crucial for mixed precision)
                 x_cast = self._cast_input_dtype(x, lora_A.dtype)
 
-                # explicit materialization of Delta W
-                # formula: Delta = B @ (E * A) * scaling
-                # shape: [out, r] @ [r, in] -> [out, in]
-                delta_weight = (lora_B @ (lora_E * lora_A)) * (scaling / ranknum)
-
-                # compute adapter output: dropout(x) @ Delta.T
-                delta_out = torch.nn.functional.linear(dropout(x_cast), delta_weight.to(x_cast.dtype), bias=None)
+                # LOW-RANK forward path (efficient): two small matmuls instead of one dense
+                # x @ (A * E).T @ B.T instead of x @ (B @ (E * A)).T
+                tmp = dropout(x_cast) @ (lora_A * lora_E).T  # [batch, seq, r]
+                delta_out = (tmp @ lora_B.T) * (scaling / ranknum)  # [batch, seq, out]
 
                 # accumulate adapter output
                 z = z + delta_out.to(z.dtype)
 
-                # accumulate delta weight for DoRA scaling
-                if total_delta_weight is None:
-                    total_delta_weight = delta_weight.float()
-                else:
-                    total_delta_weight = total_delta_weight + delta_weight.float()
+                # --- DORA SCALING ---
+                # materialize delta_weight ONLY for norm computation (not for forward)
+                delta_weight = (lora_B @ (lora_E * lora_A)) * (scaling / ranknum)
 
-            # --- DORA SCALING ---
-            if total_delta_weight is not None:
                 # 1. calculate norm of (W + Delta) in Float32 for stability
                 # detach norm from gradient graph per DoRA paper Section 4.3
-                W_total_f = base_weight.float() + total_delta_weight
+                W_total_f = base_weight.float() + delta_weight.float()
                 norm = W_total_f.norm(p=2, dim=1, keepdim=True).clamp_min(1e-6).detach()  # [out, 1]
 
-                # 2. get learned magnitude (use first adapter's magnitude as primary)
-                primary_adapter = self.active_adapters[0]
-                if primary_adapter in self.lora_magnitude:
-                    mag = self.lora_magnitude[primary_adapter]
+                # 2. get learned magnitude
+                if adapter_name in self.lora_magnitude:
+                    mag = self.lora_magnitude[adapter_name]
                 else:
                     mag = norm.detach().to(z.dtype)  # fallback
 
