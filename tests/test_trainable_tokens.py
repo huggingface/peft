@@ -1328,3 +1328,71 @@ class TestTrainableTokens:
         # Should work and apply to the input embeddings
         assert hasattr(peft_model.m1.encoder.embed_tokens, "token_adapter")
         assert peft_model.m1.encoder.embed_tokens.token_adapter.token_indices["default"] == [1, 2, 3]
+
+    def test_targeting_both_embedding_and_tied_layer_explicitly(self, model_weight_tied):
+        """Test the fix for when user explicitly targets both embedding and tied layers.
+
+        When target_modules includes both "embed_tokens" and "lm_head", both get wrapped first, then inject_adapter
+        tries to apply tying.
+        """
+        peft_config = TrainableTokensConfig(
+            target_modules=["model.decoder.embed_tokens", "lm_head"],  # Explicitly target both
+            token_indices=[1, 2, 3],
+        )
+        peft_model = get_peft_model(model_weight_tied, peft_config)
+
+        # Both should have been wrapped as TrainableTokensLayer
+        embed_layer = peft_model.model.model.decoder.embed_tokens
+        lm_head_layer = peft_model.model.lm_head
+
+        assert isinstance(embed_layer, TrainableTokensLayer)
+        assert isinstance(lm_head_layer, TrainableTokensLayer)
+
+        # They should share the same delta parameters (tied)
+        assert embed_layer.trainable_tokens_delta["default"] is lm_head_layer.trainable_tokens_delta["default"]
+
+        # Both should have the same token indices
+        assert embed_layer.token_indices["default"] == [1, 2, 3]
+        assert lm_head_layer.token_indices["default"] == [1, 2, 3]
+
+    def test_multiple_trainable_token_adapters_same_model(self, model_weight_tied):
+        """Test adding multiple trainable token adapters to the same model and layers.
+
+        This verifies that the fix handles the multi-adapter case correctly, where adding a second adapter to
+        already-wrapped tied layers works properly.
+        """
+        # Add first adapter with both embed_tokens and lm_head targeted
+        peft_config1 = TrainableTokensConfig(
+            target_modules=["model.decoder.embed_tokens", "lm_head"],
+            token_indices=[1, 2, 3],
+        )
+        peft_model = get_peft_model(model_weight_tied, peft_config1)
+
+        # Add second adapter to the same layers
+        peft_config2 = TrainableTokensConfig(
+            target_modules=["model.decoder.embed_tokens", "lm_head"],
+            token_indices=[4, 5, 6],
+        )
+        peft_model.add_adapter("adapter2", peft_config2)
+
+        # Get the wrapped layers
+        embed_layer = peft_model.model.model.decoder.embed_tokens
+        lm_head_layer = peft_model.model.lm_head
+
+        # Check first adapter
+        assert "default" in embed_layer.token_indices
+        assert "default" in lm_head_layer.token_indices
+        assert embed_layer.token_indices["default"] == [1, 2, 3]
+        assert lm_head_layer.token_indices["default"] == [1, 2, 3]
+
+        # First adapter should maintain tying
+        assert embed_layer.trainable_tokens_delta["default"] is lm_head_layer.trainable_tokens_delta["default"]
+
+        # Check second adapter
+        assert "adapter2" in embed_layer.token_indices
+        assert "adapter2" in lm_head_layer.token_indices
+        assert embed_layer.token_indices["adapter2"] == [4, 5, 6]
+        assert lm_head_layer.token_indices["adapter2"] == [4, 5, 6]
+
+        # Second adapter should also maintain tying
+        assert embed_layer.trainable_tokens_delta["adapter2"] is lm_head_layer.trainable_tokens_delta["adapter2"]
