@@ -148,6 +148,17 @@ class SVDLinear(nn.Module, AdaLoraLayer):
             # no adapter to merge
             return
 
+        # AdaDoRA constraints
+        if self.use_dora_adaptive:
+            if len(adapter_names) != 1:
+                raise NotImplementedError(
+                    "AdaDoRA merge supports exactly one adapter at a time."
+                )
+            if self.merged:
+                raise RuntimeError(
+                    "Already merged; unmerge is not supported for AdaDoRA."
+                )
+
         for active_adapter in adapter_names:
             base_layer = self.get_base_layer()
             if active_adapter in self.lora_A.keys():
@@ -235,6 +246,10 @@ class SVDLinear(nn.Module, AdaLoraLayer):
                     "AdaDoRA does not support fan_in_fan_out=True (Conv1D-style) layers. "
                     "Use standard AdaLoRA instead."
                 )
+            if not isinstance(self.get_base_layer(), nn.Linear):
+                raise NotImplementedError(
+                    "AdaDoRA currently supports nn.Linear layers only."
+                )
             if len(self.active_adapters) > 1:
                 raise NotImplementedError(
                     "AdaDoRA supports only one active adapter at a time. "
@@ -273,13 +288,12 @@ class SVDLinear(nn.Module, AdaLoraLayer):
                 z = z + delta_out.to(z.dtype)
 
                 # --- DORA SCALING ---
-                # materialize delta_weight ONLY for norm computation (not for forward)
-                delta_weight = (lora_B @ (lora_E * lora_A)) * (scaling / ranknum)
-
-                # 1. calculate norm of (W + Delta) in Float32 for stability
-                # detach norm from gradient graph per DoRA paper Section 4.3
-                W_total_f = base_weight.float() + delta_weight.float()
-                norm = W_total_f.norm(p=2, dim=1, keepdim=True).clamp_min(1e-6).detach()  # [out, 1]
+                # compute norm under no_grad per DoRA paper Section 4.3:
+                # "treat ||V + ΔV||_c as a constant, thereby detaching it from the gradient graph"
+                with torch.no_grad():
+                    delta_weight = (lora_B @ (lora_E * lora_A)) * (scaling / ranknum)
+                    W_total_f = base_weight.float() + delta_weight.float()
+                    norm = W_total_f.norm(p=2, dim=1, keepdim=True).clamp_min(1e-6)  # [out, 1]
 
                 # 2. get learned magnitude
                 if adapter_name in self.lora_magnitude:
@@ -301,8 +315,13 @@ class SVDLinear(nn.Module, AdaLoraLayer):
 
             return z
 
-        # 3. original AdaLoRA Logic
+        # 3. original AdaLoRA Logic (or AdaDoRA when merged)
         else:
+            # if merged, adapter weights are already in base layer - just forward
+            if self.merged:
+                return self.base_layer(x, *args, **kwargs)
+
+            # not merged - add adapter contribution
             result = self.base_layer(x, *args, **kwargs)
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_A.keys():
