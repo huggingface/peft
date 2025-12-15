@@ -78,6 +78,16 @@ def preprocess_loraga(
             "init_lora_weights='lora_ga' and lora_ga_config=LoraGAConfig(...)."
         )
 
+    # Populate target_modules from defaults if empty
+    # This logic mirrors BaseTuner._prepare_adapter_config which runs after get_peft_model.
+    # Since preprocess_loraga is called before get_peft_model, we need to handle this ourselves.
+    if lora_config.target_modules is None:
+        model_config = LoraModel.get_model_config(model)
+        target_modules = LoraModel.target_module_mapping.get(model_config["model_type"])
+        if target_modules is None:
+            raise ValueError("Please specify `target_modules` in `peft_config`")
+        lora_config.target_modules = set(target_modules)
+
     # Check for quantized models - LoRA-GA requires full-precision gradients
     for name, module in get_target_modules(model, lora_config):
         if hasattr(module, "quant_state"):
