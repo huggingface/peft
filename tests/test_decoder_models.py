@@ -18,6 +18,7 @@ from unittest.mock import Mock, call, patch
 
 import pytest
 import torch
+from accelerate.test_utils.testing import get_backend
 from safetensors.torch import load_file as safe_load_file
 from transformers import (
     AutoModelForCausalLM,
@@ -367,10 +368,6 @@ def _skip_osf_disable_adapter_test(config_cls):
 
 class TestDecoderModels(PeftCommonTester):
     transformers_class = AutoModelForCausalLM
-
-    def skipTest(self, reason=""):
-        # for backwards compatibility with unittest style test classes
-        pytest.skip(reason)
 
     def prepare_inputs_for_testing(self):
         input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
@@ -776,6 +773,10 @@ class TestDecoderModels(PeftCommonTester):
 
     def test_prefix_tuning_mistral(self):
         # See issue 869, 1962
+        _, device_count, _ = get_backend()
+        if device_count > 1:
+            pytest.skip("PEFT Mistral training with DP does not work, skipping")
+
         model_id = "hf-internal-testing/tiny-random-MistralForCausalLM"
         base_model = AutoModelForCausalLM.from_pretrained(model_id)
         peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM")
