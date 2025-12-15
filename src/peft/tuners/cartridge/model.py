@@ -35,7 +35,7 @@ class CartridgeEncoder(torch.nn.Module):
 
         num_virtual_tokens = config.num_virtual_tokens
         hidden = config.num_layers * 2 * config.token_dim
-        num_frozen_tokens = int(getattr(config, "num_frozen_tokens", 0) or 0)
+        num_frozen_tokens = int(config.num_frozen_tokens)
         if num_frozen_tokens < 0 or num_frozen_tokens > num_virtual_tokens:
             raise ValueError(
                 f"`num_frozen_tokens` must be in [0, num_virtual_tokens], got {num_frozen_tokens} for "

@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import tempfile
 import warnings
 
+import pytest
 import torch
-from transformers import GPT2Config, GPT2LMHeadModel
+from transformers import AutoModelForCausalLM
 
 from peft import (
     CartridgeConfig,
@@ -25,55 +25,68 @@ from peft import (
     compose_cartridge_adapters,
     get_peft_model,
     initialize_cartridge_from_past_key_values,
+    initialize_prefix_tuning_from_past_key_values,
     load_peft_weights,
     prompt_embeddings_from_past_key_values,
 )
+from peft.tuners import PrefixTuningConfig
+
+from .testing_utils import hub_online_once
 
 
-def _make_tiny_gpt2():
-    cfg = GPT2Config(n_layer=2, n_head=2, n_embd=16, vocab_size=101)
-    return GPT2LMHeadModel(cfg)
+TINY_CAUSAL_LM = "peft-internal-testing/tiny-random-OPTForCausalLM"
 
 
-def test_cartridge_forward_and_save_load():
-    base = _make_tiny_gpt2()
-    peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=2, task_type="CAUSAL_LM")
+def _load_tiny_causal_lm(model_id: str = TINY_CAUSAL_LM):
+    with hub_online_once(model_id):
+        return AutoModelForCausalLM.from_pretrained(model_id)
+
+
+@pytest.mark.parametrize("num_frozen_tokens", [0, 2])
+def test_cartridge_forward_and_save_load(tmp_path, num_frozen_tokens):
+    base = _load_tiny_causal_lm()
+    peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=num_frozen_tokens, task_type="CAUSAL_LM")
     model = get_peft_model(base, peft_config)
 
     assert model.active_peft_config.peft_type.value == "CARTRIDGE"
-    assert model.prompt_encoder[model.active_adapter].frozen_embedding.requires_grad is False
+    if num_frozen_tokens:
+        assert model.prompt_encoder[model.active_adapter].frozen_embedding is not None
+        assert model.prompt_encoder[model.active_adapter].frozen_embedding.requires_grad is False
+    else:
+        assert model.prompt_encoder[model.active_adapter].frozen_embedding is None
     assert model.prompt_encoder[model.active_adapter].trainable_embedding.requires_grad is True
 
     input_ids = torch.randint(0, base.config.vocab_size, (1, 8))
     out = model(input_ids=input_ids)
     assert out.logits.shape[:2] == (1, 8)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        model.prompt_encoder[model.active_adapter].trainable_embedding.data.fill_(3.0)
-        if model.prompt_encoder[model.active_adapter].frozen_embedding is not None:
-            model.prompt_encoder[model.active_adapter].frozen_embedding.data.fill_(7.0)
+    model.prompt_encoder[model.active_adapter].trainable_embedding.data.fill_(3.0)
+    if num_frozen_tokens:
+        model.prompt_encoder[model.active_adapter].frozen_embedding.data.fill_(7.0)
 
-        model.save_pretrained(tmp)
-        base2 = _make_tiny_gpt2()
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            loaded = PeftModel.from_pretrained(base2, tmp)
-            assert not any("Found missing adapter keys" in str(warning.message) for warning in w)
-        out2 = loaded(input_ids=input_ids)
-        assert out2.logits.shape == out.logits.shape
+    model.save_pretrained(tmp_path)
+    base2 = _load_tiny_causal_lm()
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        loaded = PeftModel.from_pretrained(base2, tmp_path)
+        assert not any("Found missing adapter keys" in str(warning.message) for warning in w)
+    out2 = loaded(input_ids=input_ids)
+    assert out2.logits.shape == out.logits.shape
+    assert torch.allclose(
+        loaded.prompt_encoder[loaded.active_adapter].trainable_embedding,
+        torch.full_like(loaded.prompt_encoder[loaded.active_adapter].trainable_embedding, 3.0),
+    )
+    if num_frozen_tokens:
         assert torch.allclose(
-            loaded.prompt_encoder[loaded.active_adapter].trainable_embedding,
-            torch.full_like(loaded.prompt_encoder[loaded.active_adapter].trainable_embedding, 3.0),
+            loaded.prompt_encoder[loaded.active_adapter].frozen_embedding,
+            torch.full_like(loaded.prompt_encoder[loaded.active_adapter].frozen_embedding, 7.0),
         )
-        if loaded.prompt_encoder[loaded.active_adapter].frozen_embedding is not None:
-            assert torch.allclose(
-                loaded.prompt_encoder[loaded.active_adapter].frozen_embedding,
-                torch.full_like(loaded.prompt_encoder[loaded.active_adapter].frozen_embedding, 7.0),
-            )
+    else:
+        assert loaded.prompt_encoder[loaded.active_adapter].frozen_embedding is None
 
 
-def test_cartridge_init_from_past_key_values_and_compose():
-    base = _make_tiny_gpt2()
+def test_cartridge_init_from_past_key_values_and_compose(tmp_path):
+    base = _load_tiny_causal_lm()
     peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=1, task_type="CAUSAL_LM")
     model = get_peft_model(base, peft_config)
 
@@ -85,33 +98,33 @@ def test_cartridge_init_from_past_key_values_and_compose():
         model, past_key_values=outputs.past_key_values, num_virtual_tokens=4
     )
     assert prompt_embeddings.shape[0] == 4
-    assert torch.allclose(model.prompt_encoder[model.active_adapter].weight.cpu(), prompt_embeddings.cpu())
+    assert model.prompt_encoder[model.active_adapter].weight.device == prompt_embeddings.device
+    assert torch.allclose(model.prompt_encoder[model.active_adapter].weight, prompt_embeddings)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        a1 = f"{tmp}/a1"
-        a2 = f"{tmp}/a2"
-        out_dir = f"{tmp}/composed"
-        model.save_pretrained(a1)
+    a1 = tmp_path / "a1"
+    a2 = tmp_path / "a2"
+    out_dir = tmp_path / "composed"
+    model.save_pretrained(a1)
 
-        base2 = _make_tiny_gpt2()
-        model2 = get_peft_model(base2, peft_config)
-        with model2.disable_adapter():
-            outputs2 = model2(input_ids=input_ids, use_cache=True)
-        _ = initialize_cartridge_from_past_key_values(
-            model2, past_key_values=outputs2.past_key_values, num_virtual_tokens=4
-        )
-        model2.save_pretrained(a2)
+    base2 = _load_tiny_causal_lm()
+    model2 = get_peft_model(base2, peft_config)
+    with model2.disable_adapter():
+        outputs2 = model2(input_ids=input_ids, use_cache=True)
+    _ = initialize_cartridge_from_past_key_values(
+        model2, past_key_values=outputs2.past_key_values, num_virtual_tokens=4
+    )
+    model2.save_pretrained(a2)
 
-        compose_cartridge_adapters([a1, a2], output_path=out_dir)
-        cfg = PeftConfig.from_pretrained(out_dir)
-        assert cfg.peft_type.value == "CARTRIDGE"
-        assert cfg.num_virtual_tokens == 8
-        w = load_peft_weights(out_dir, device="cpu")
-        assert w["prompt_embeddings"].shape[0] == 8
+    compose_cartridge_adapters([a1, a2], output_path=out_dir)
+    cfg = PeftConfig.from_pretrained(out_dir)
+    assert cfg.peft_type.value == "CARTRIDGE"
+    assert cfg.num_virtual_tokens == 8
+    w = load_peft_weights(out_dir, device="cpu")
+    assert w["prompt_embeddings"].shape[0] == 8
 
 
 def test_cartridge_prompt_embeddings_from_past_key_values_matches_init():
-    base = _make_tiny_gpt2()
+    base = _load_tiny_causal_lm()
     peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=0, task_type="CAUSAL_LM")
     model = get_peft_model(base, peft_config)
 
@@ -125,20 +138,30 @@ def test_cartridge_prompt_embeddings_from_past_key_values_matches_init():
     pe2 = initialize_cartridge_from_past_key_values(
         model, past_key_values=outputs.past_key_values, num_virtual_tokens=4
     )
-    assert torch.allclose(pe.cpu(), pe2.cpu())
+    assert pe.device == pe2.device
+    assert torch.allclose(pe, pe2)
 
 
-def test_cartridge_inference_mode_disables_grads_and_forward_works():
-    base = _make_tiny_gpt2()
+@pytest.mark.parametrize("num_frozen_tokens", [0, 2])
+def test_cartridge_inference_mode_disables_grads_and_forward_works(num_frozen_tokens):
+    base = _load_tiny_causal_lm()
     peft_config = CartridgeConfig(
-        num_virtual_tokens=4, num_frozen_tokens=2, task_type="CAUSAL_LM", inference_mode=True
+        num_virtual_tokens=4,
+        num_frozen_tokens=num_frozen_tokens,
+        task_type="CAUSAL_LM",
+        inference_mode=True,
     )
     model = get_peft_model(base, peft_config)
 
     enc = model.prompt_encoder[model.active_adapter]
+    # In `inference_mode=True`, PEFT should mark adapter parameters as non-trainable (no gradients) so users can
+    # safely run forward/generation without accidentally updating or tracking grads for the CARTRIDGE parameters.
     assert enc.trainable_embedding.requires_grad is False
-    if enc.frozen_embedding is not None:
+    if num_frozen_tokens:
+        assert enc.frozen_embedding is not None
         assert enc.frozen_embedding.requires_grad is False
+    else:
+        assert enc.frozen_embedding is None
 
     input_ids = torch.randint(0, base.config.vocab_size, (1, 6))
     out = model(input_ids=input_ids)
@@ -146,13 +169,28 @@ def test_cartridge_inference_mode_disables_grads_and_forward_works():
 
 
 def test_cartridge_gradient_checkpointing_raises():
-    base = _make_tiny_gpt2()
+    base = _load_tiny_causal_lm()
     base.gradient_checkpointing_enable()
     peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=0, task_type="CAUSAL_LM")
 
-    try:
+    with pytest.raises(ValueError, match="does not work with gradient checkpointing"):
         _ = get_peft_model(base, peft_config)
-    except ValueError as exc:
-        assert "does not work with gradient checkpointing" in str(exc)
-    else:
-        raise AssertionError("Expected CARTRIDGE to raise with gradient checkpointing enabled.")
+
+
+def test_prefix_tuning_can_be_initialized_from_past_key_values_when_no_projection():
+    base = _load_tiny_causal_lm()
+    peft_config = PrefixTuningConfig(num_virtual_tokens=4, task_type="CAUSAL_LM")
+    model = get_peft_model(base, peft_config)
+
+    input_ids = torch.randint(0, base.config.vocab_size, (1, 10))
+    with model.disable_adapter():
+        outputs = model(input_ids=input_ids, use_cache=True)
+
+    pe = prompt_embeddings_from_past_key_values(outputs.past_key_values, num_virtual_tokens=4)
+    pe2 = initialize_prefix_tuning_from_past_key_values(
+        model, past_key_values=outputs.past_key_values, num_virtual_tokens=4
+    )
+    assert pe.device == pe2.device
+    assert torch.allclose(pe, pe2)
+    assert model.prompt_encoder[model.active_adapter].embedding.weight.device == pe.device
+    assert torch.allclose(model.prompt_encoder[model.active_adapter].embedding.weight, pe)

@@ -24,12 +24,6 @@ from .auto import (
     AutoPeftModelForSequenceClassification,
     AutoPeftModelForTokenClassification,
 )
-from .cartridge_utils import (
-    compose_cartridge_adapters,
-    initialize_cartridge_from_past_key_values,
-    initialize_cartridge_from_text,
-    prompt_embeddings_from_past_key_values,
-)
 from .config import PeftConfig, PromptLearningConfig
 from .mapping import (
     PEFT_TYPE_TO_CONFIG_MAPPING,
@@ -126,6 +120,16 @@ from .tuners import (
     create_arrow_model,
     get_eva_state_dict,
     initialize_lora_eva_weights,
+)
+from .tuners.cartridge.utils import (
+    compose_cartridge_adapters,
+    initialize_cartridge_from_past_key_values,
+    initialize_cartridge_from_text,
+    prompt_embeddings_from_past_key_values,
+)
+from .tuners.prefix_tuning.utils import (
+    initialize_prefix_tuning_from_past_key_values,
+    initialize_prefix_tuning_from_text,
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
@@ -254,6 +258,8 @@ __all__ = [
     "initialize_cartridge_from_past_key_values",
     "initialize_cartridge_from_text",
     "initialize_lora_eva_weights",
+    "initialize_prefix_tuning_from_past_key_values",
+    "initialize_prefix_tuning_from_text",
     "inject_adapter_in_model",
     "load_peft_weights",
     "prepare_model_for_kbit_training",

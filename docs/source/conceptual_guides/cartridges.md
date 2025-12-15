@@ -19,7 +19,7 @@ Key differences:
 - **Initialization**
   - Prefix Tuning is commonly randomly initialized.
   - Cartridges are designed to be initialized from **real prefill KV** (e.g. the first `p` tokens of a corpus/system
-    prompt), optionally freezing the first few “sink” tokens for stability (`num_frozen_tokens`).
+    prompt), freezing the first token as an attention sink for stability (`num_frozen_tokens=1` is the default).
 - **Composition**
   - The paper shows Cartridges can be composed by concatenating independently trained KV prefixes.
   - In PEFT, composition is exposed as an adapter-level utility (see below).
@@ -31,7 +31,7 @@ Create a CARTRIDGE adapter and initialize it from a cached prefix (or from text)
 ```py
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import CartridgeConfig, get_peft_model
-from peft.cartridge_utils import initialize_cartridge_from_text
+from peft import initialize_cartridge_from_text
 
 base = AutoModelForCausalLM.from_pretrained("gpt2")
 tok = AutoTokenizer.from_pretrained("gpt2")
@@ -39,7 +39,7 @@ tok = AutoTokenizer.from_pretrained("gpt2")
 peft_cfg = CartridgeConfig(
     task_type="CAUSAL_LM",
     num_virtual_tokens=256,     # cartridge length (p)
-    num_frozen_tokens=1,        # optional "sink" tokens
+    num_frozen_tokens=1,        # attention-sink token (recommended; default is 1)
 )
 
 model = get_peft_model(base, peft_cfg)
@@ -70,7 +70,7 @@ SELF‑STUDY‑style distillation (data synthesis + `transformers.Trainer`) is p
 To compose multiple independently trained cartridges (concatenate their KV prefixes) into a single adapter:
 
 ```py
-from peft.cartridge_utils import compose_cartridge_adapters
+from peft import compose_cartridge_adapters
 
 compose_cartridge_adapters(
     ["adapter_corpus_a", "adapter_corpus_b"],

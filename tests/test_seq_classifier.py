@@ -20,6 +20,7 @@ from peft import (
     BOFTConfig,
     BoneConfig,
     C3AConfig,
+    CartridgeConfig,
     DeloraConfig,
     FourierFTConfig,
     GraloraConfig,
@@ -156,6 +157,13 @@ ALL_CONFIGS = [
     ),
     (
         PrefixTuningConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "num_virtual_tokens": 10,
+        },
+    ),
+    (
+        CartridgeConfig,
         {
             "task_type": "SEQ_CLS",
             "num_virtual_tokens": 10,
