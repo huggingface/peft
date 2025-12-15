@@ -146,10 +146,15 @@ def estimate_gradients(
         module._peft_loraga_grad = torch.zeros_like(module.weight.data, dtype=module.weight.dtype)
         module._peft_loraga_grad_count = 0
 
-    # Enable gradients ONLY for target module weights (memory efficient)
+    # Memory-efficient gradient computation: disable gradients for all parameters first,
+    # then enable only for target module weights
     original_requires_grad = {}
+    for name, param in model.named_parameters():
+        original_requires_grad[name] = param.requires_grad
+        param.requires_grad = False
+
+    # Enable gradients ONLY for target module weights
     for name, module in target_module_list:
-        original_requires_grad[name] = module.weight.requires_grad
         module.weight.requires_grad = True
 
     # Enable gradient computation
@@ -157,9 +162,10 @@ def estimate_gradients(
         # Run train_step to accumulate gradients
         train_step()
 
-    # Restore original requires_grad state for target modules
-    for name, module in target_module_list:
-        module.weight.requires_grad = original_requires_grad[name]
+    # Restore original requires_grad state for all parameters
+    for name, param in model.named_parameters():
+        if name in original_requires_grad:
+            param.requires_grad = original_requires_grad[name]
 
     # Accumulate gradients from each target module's weight.grad
     for name, module in target_module_list:
