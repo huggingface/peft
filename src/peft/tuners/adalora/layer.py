@@ -38,7 +38,7 @@ class AdaLoraLayer(LoraLayer):
     # All names of other parameters that may contain adapter-related parameters
     other_param_names = ("r", "lora_alpha", "scaling", "lora_dropout", "ranknum")
 
-    def __init__(self, base_layer: nn.Module, use_dora_adaptive: bool = False) -> None:
+    def __init__(self, base_layer: nn.Module, use_dora_adaptive: bool = True) -> None:
         super().__init__(base_layer)
         self.lora_E = nn.ParameterDict({})
         self.lora_A = nn.ParameterDict({})
@@ -117,10 +117,11 @@ class SVDLinear(nn.Module, AdaLoraLayer):
         lora_dropout: float = 0.0,
         fan_in_fan_out: bool = False,
         init_lora_weights: bool = True,
+        use_dora_adaptive: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
-        AdaLoraLayer.__init__(self, base_layer)
+        AdaLoraLayer.__init__(self, base_layer, use_dora_adaptive=use_dora_adaptive)
         # Freezing the pre-trained weight matrix
         self.get_base_layer().weight.requires_grad = False
 
@@ -194,64 +195,74 @@ class SVDLinear(nn.Module, AdaLoraLayer):
 
         # 2. AdaDoRA Logic (Corrected "Split-Path" Implementation)
         if self.use_dora_adaptive and not self.merged:
-            adapter_name = self.active_adapters[0]
-            if adapter_name not in self.lora_A:
-                return self.get_base_layer()(x, *args, **kwargs)
-
             # --- PREPARE DATA ---
             base_layer = self.get_base_layer()
             base_weight = base_layer.weight
-            # Bias is handled separately at the very end
+            # bias is handled separately at the very end
             bias = base_layer.bias if hasattr(base_layer, 'bias') else None
 
-            lora_A = self.lora_A[adapter_name]
-            lora_B = self.lora_B[adapter_name]
-            lora_E = self.lora_E[adapter_name]
-            dropout = self.lora_dropout[adapter_name]
-            scaling = self.scaling[adapter_name]
-            ranknum = self.ranknum[adapter_name] + 1e-5
-
             # --- PATH A: Base Model (No Dropout, Standard Precision) ---
-            # We compute x @ W.T separately to preserve pre-trained knowledge
-            base_out = torch.nn.functional.linear(x, base_weight, bias=None)
+            # we compute x @ W.T separately to preserve pre-trained knowledge
+            z = torch.nn.functional.linear(x, base_weight, bias=None)
 
-            # --- PATH B: Adapter (Apply Dropout & Cast Dtype) ---
-            # FIX 1: Cast input to match adapter dtype (crucial for mixed precision)
-            x_cast = self._cast_input_dtype(x, lora_A.dtype)
+            # --- PATH B: Accumulate all adapters ---
+            # accumulate delta weights and outputs from all active adapters
+            total_delta_weight = None
 
-            # FIX 2: Explicit Materialization of Delta W
-            # Formula: Delta = B @ (E * A) * scaling
-            # Shape: [out, r] @ [r, in] -> [out, in]
-            delta_weight = (lora_B @ (lora_E * lora_A)) * (scaling / ranknum)
+            for adapter_name in self.active_adapters:
+                if adapter_name not in self.lora_A:
+                    continue
 
-            # Compute Adapter Output: dropout(x) @ Delta.T
-            # We cast delta_weight to x_cast's dtype to ensure compatibility
-            delta_out = torch.nn.functional.linear(dropout(x_cast), delta_weight.to(x_cast.dtype), bias=None) # type: ignore
+                lora_A = self.lora_A[adapter_name]
+                lora_B = self.lora_B[adapter_name]
+                lora_E = self.lora_E[adapter_name]
+                dropout = self.lora_dropout[adapter_name]
+                scaling = self.scaling[adapter_name]
+                ranknum = self.ranknum[adapter_name] + 1e-5
 
-            # --- COMBINE (Pre-Scale) ---
-            # z = Base + Delta
-            z = base_out + delta_out.to(base_out.dtype)
+                # cast input to match adapter dtype (crucial for mixed precision)
+                x_cast = self._cast_input_dtype(x, lora_A.dtype)
+
+                # explicit materialization of Delta W
+                # formula: Delta = B @ (E * A) * scaling
+                # shape: [out, r] @ [r, in] -> [out, in]
+                delta_weight = (lora_B @ (lora_E * lora_A)) * (scaling / ranknum)
+
+                # compute adapter output: dropout(x) @ Delta.T
+                delta_out = torch.nn.functional.linear(dropout(x_cast), delta_weight.to(x_cast.dtype), bias=None)
+
+                # accumulate adapter output
+                z = z + delta_out.to(z.dtype)
+
+                # accumulate delta weight for DoRA scaling
+                if total_delta_weight is None:
+                    total_delta_weight = delta_weight.float()
+                else:
+                    total_delta_weight = total_delta_weight + delta_weight.float()
 
             # --- DORA SCALING ---
-            # 1. Calculate Norm of (W + Delta) in Float32 for stability
-            W_total_f = base_weight.float() + delta_weight.float()
-            norm = W_total_f.norm(p=2, dim=1, keepdim=True).clamp_min(1e-6) # [out, 1]
+            if total_delta_weight is not None:
+                # 1. calculate norm of (W + Delta) in Float32 for stability
+                # detach norm from gradient graph per DoRA paper Section 4.3
+                W_total_f = base_weight.float() + total_delta_weight
+                norm = W_total_f.norm(p=2, dim=1, keepdim=True).clamp_min(1e-6).detach()  # [out, 1]
 
-            # 2. Get Learned Magnitude
-            if adapter_name in self.lora_magnitude:
-                mag = self.lora_magnitude[adapter_name]
-            else:
-                mag = norm.detach().to(z.dtype) # Fallback
+                # 2. get learned magnitude (use first adapter's magnitude as primary)
+                primary_adapter = self.active_adapters[0]
+                if primary_adapter in self.lora_magnitude:
+                    mag = self.lora_magnitude[primary_adapter]
+                else:
+                    mag = norm.detach().to(z.dtype)  # fallback
 
-            # 3. Calculate Scale Factor: (m / ||W+Delta||)
-            # Reshape scale to [1, out] to broadcast over batch
-            scale = (mag.float() / norm).to(z.dtype).view(1, -1)
+                # 3. calculate scale factor: (m / ||W+Delta||)
+                # reshape scale to [1, out] to broadcast over batch
+                scale = (mag.float() / norm).to(z.dtype).view(1, -1)
 
-            # 4. Apply Scale
-            z = z * scale
+                # 4. apply scale
+                z = z * scale
 
             # --- FINALIZE ---
-            # Add bias last (Unscaled, as per standard Linear layer)
+            # add bias last (unscaled, as per standard Linear layer)
             if bias is not None:
                 z = z + bias.view(1, -1)
 
@@ -275,9 +286,9 @@ class SVDLinear(nn.Module, AdaLoraLayer):
 
             return result
 
-        def __repr__(self) -> str:
-            rep = super().__repr__()
-            return "adalora." + rep
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "adalora." + rep
 
 
 class RankAllocator:
