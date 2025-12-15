@@ -20,7 +20,6 @@ from peft import (
     BOFTConfig,
     BoneConfig,
     C3AConfig,
-    CartridgeConfig,
     DeloraConfig,
     FourierFTConfig,
     GraloraConfig,
@@ -156,13 +155,6 @@ ALL_CONFIGS = [
     ),
     (
         PrefixTuningConfig,
-        {
-            "task_type": "FEATURE_EXTRACTION",
-            "num_virtual_tokens": 10,
-        },
-    ),
-    (
-        CartridgeConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
             "num_virtual_tokens": 10,
