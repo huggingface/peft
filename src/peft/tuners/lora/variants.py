@@ -51,7 +51,7 @@ class ArrowLinearVariant(LoraVariant):
             The adapter_name is "arrow_router" by default, set in create_arrow_model() in ./arrow.py
         """
         # Checking for arrow necessary config
-        arrow_config = kwargs.get("arrow_config")
+        arrow_config = config.arrow_config
         if arrow_config is None:
             raise ValueError("ArrowLinearVariant.init() did not receive an arrow_config")
 
