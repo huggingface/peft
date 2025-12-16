@@ -397,7 +397,8 @@ class TestInjectAdapterFromStateDict:
     @pytest.mark.skipf(platform.system() != "Linux", reason="Run torch.compile tests only on Linux")
     @pytest.mark.parametrize("compile_initial_model", [False, True])
     def test_inject_from_state_dict_compiled_model(self, compile_initial_model):
-        # TODO
+        # If we directly inject the adapter into the model from a `state_dict`, if the model is compiled, the
+        # keys would not match because they contain the `'_orig_mod.'` prefix from the compilation. See #2957.
         model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
         config = LoraConfig()
 
