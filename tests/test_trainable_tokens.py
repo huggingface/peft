@@ -1242,11 +1242,11 @@ class TestTrainableTokens:
 
                 # Expose the tied weights from sub-models so PEFT can see them
                 # This defines which layers are tied within each sub-model
-                self._tied_weights_keys = [
-                    "m1.encoder.embed_tokens.weight",
-                    "m1.decoder.embed_tokens.weight",
-                    # m2 has no tied weights since tie_word_embeddings=False
-                ]
+                # The mapping exists regardless of tie_word_embeddings setting
+                self._tied_weights_keys = {
+                    "m1.decoder.embed_tokens.weight": "m1.encoder.embed_tokens.weight",
+                    "m2.decoder.embed_tokens.weight": "m2.encoder.embed_tokens.weight",
+                }
 
             def get_input_embeddings(self):
                 return self.m1.encoder.embed_tokens
