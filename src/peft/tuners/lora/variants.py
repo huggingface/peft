@@ -25,14 +25,14 @@ from peft.tuners.lora.config import BdLoraConfig
 from peft.utils.other import transpose
 
 from .arrow import ArrowLoraLinearLayer
-from .config import PeftConfig
+from .config import LoraConfig, PeftConfig
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
 from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
 
 
 class ArrowLinearVariant(LoraVariant):
     @staticmethod
-    def init(module: Linear, adapter_name: str, **kwargs):
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs):
         """
         Initialise the ArrowLoraLinearLayer() inside lora_arrow. lora_arrow is nn.ModuleDict(), serving as a container
         for ArrowLoraLinearLayer(). A layer of the base model with LoRA adapter loaded on it will be like:
@@ -429,28 +429,28 @@ class _DoraConvNdVariant(LoraVariant):
 
 class DoraConv1dVariant(_DoraConvNdVariant):
     @staticmethod
-    def init(module: Conv1d, adapter_name: str, **kwargs: Any) -> None:
+    def init(module: Conv1d, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
         dora_layer = DoraConv1dLayer(fan_in_fan_out=False)
         _DoraConvNdVariant.init_convd_variant(module, adapter_name, dora_layer=dora_layer)
 
 
 class DoraConv2dVariant(_DoraConvNdVariant):
     @staticmethod
-    def init(module: Conv2d, adapter_name: str, **kwargs: Any) -> None:
+    def init(module: Conv2d, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
         dora_layer = DoraConv2dLayer(fan_in_fan_out=False)
         _DoraConvNdVariant.init_convd_variant(module, adapter_name, dora_layer=dora_layer)
 
 
 class DoraConv3dVariant(_DoraConvNdVariant):
     @staticmethod
-    def init(module: Conv3d, adapter_name: str, **kwargs: Any) -> None:
+    def init(module: Conv3d, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
         dora_layer = DoraConv3dLayer(fan_in_fan_out=False)
         _DoraConvNdVariant.init_convd_variant(module, adapter_name, dora_layer=dora_layer)
 
 
 class QALoraLinearVariant(LoraVariant):
     @staticmethod
-    def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
         """
         Initializes QALoRA specific parameters for a given adapter.
 
@@ -552,7 +552,7 @@ class QALoraLinearVariant(LoraVariant):
 
 class ALoraLinearVariant(LoraVariant):
     @staticmethod
-    def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
         pass
 
     @staticmethod
@@ -821,8 +821,8 @@ class BlockDiagonalLinear(nn.Module):
 
 class BdLoraLinearVariant(LoraVariant):
     @staticmethod
-    def init(module: Linear, adapter_name: str, **kwargs) -> None:
-        use_bdlora = kwargs.get("use_bdlora")
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs) -> None:
+        use_bdlora = config.use_bdlora
         target_name = kwargs.get("target_name", "")
 
         # Handle case where use_bdlora is a dict (from saved config) instead of BdLoraConfig object
