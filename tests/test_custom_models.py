@@ -61,6 +61,7 @@ from peft import (
     get_peft_model,
 )
 from peft.tuners import lora
+from peft.tuners.lora.config import BdLoraConfig
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
@@ -901,6 +902,36 @@ TEST_CASES = [
         DeloraConfig,
         {"target_modules": ["lin0"], "module_dropout": 0.1},
     ),
+    ###########
+    # BD-LoRA #
+    ###########
+    (
+        "BD-LoRA A only",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0", "lin1"],
+            "use_bdlora": BdLoraConfig(target_modules_bd_a=["lin0"], nblocks=2, match_strict=False),
+        },
+    ),
+    (
+        "BD-LoRA B only",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0", "lin1"],
+            "use_bdlora": BdLoraConfig(target_modules_bd_b=["lin1"], nblocks=2, match_strict=False),
+        },
+    ),
+    (
+        "BD-LoRA both A and B",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0", "lin1"],
+            "use_bdlora": BdLoraConfig(target_modules_bd_a=["lin0"], target_modules_bd_b=["lin1"], nblocks=2),
+        },
+    ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 
@@ -1199,32 +1230,8 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin1"], "init_weights": False},
     ),
+    # BD-LoRA different encounters issues as the adapter weights have different shapes then
 ]
-
-PREFIXES = {
-    IA3Config: "ia3_",
-    LoraConfig: "lora_",
-    LoHaConfig: "hada_",
-    LoKrConfig: "lokr_",
-    OFTConfig: "oft_",
-    BOFTConfig: "boft_",
-    LNTuningConfig: "ln_tuning_",
-    VeraConfig: "vera_lambda_",
-    RandLoraConfig: "randlora_",
-    FourierFTConfig: "fourierft_",
-    GraloraConfig: "gralora_",
-    C3AConfig: "c3a_",
-    HRAConfig: "hra_",
-    ShiraConfig: "shira_",
-    VBLoRAConfig: "vblora_",
-    BoneConfig: "bone_",
-    RoadConfig: "road_",
-    MissConfig: "miss_",
-    DeloraConfig: "delora_",
-    TrainableTokensConfig: "trainable_tokens_",
-    WaveFTConfig: "waveft_",
-    OSFConfig: "osf_",
-}
 
 
 def _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs):
@@ -2078,10 +2085,9 @@ class TestPeftCustomModel(PeftCommonTester):
         params_after = dict(model.named_parameters())
         assert params_before.keys() == params_after.keys()
 
-        prefix = PREFIXES[config_cls]
         for name, param_before in params_before.items():
             param_after = params_after[name]
-            if (prefix in name) or ("modules_to_save" in name) or ("token_adapter.trainable_tokens" in name):
+            if (model.prefix in name) or ("modules_to_save" in name) or ("token_adapter.trainable_tokens" in name):
                 # target_modules, modules_to_save and modules of `NewTokensWrapper` _are_ updated
                 assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
             else:
