@@ -77,7 +77,7 @@ from peft import (
     replace_lora_weights_loftq,
     set_peft_model_state_dict,
 )
-from peft.import_utils import is_diffusers_available, is_gptqmodel_available, is_xpu_available
+from peft.import_utils import is_diffusers_available, is_xpu_available
 from peft.tuners import boft
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
@@ -104,6 +104,7 @@ from .testing_utils import (
     require_torchao,
     torch_device,
 )
+
 
 device, _, _ = get_backend()
 if device == "cpu":
