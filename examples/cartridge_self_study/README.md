@@ -1,7 +1,7 @@
 # CARTRIDGE self-study distillation (example)
 
 This folder shows an **example** workflow for training a `CARTRIDGE` adapter via a SELF‑STUDY‑style
-context-distillation objective (see the Cartridges paper).
+context-distillation objective (see the [Cartridges paper](https://huggingface.co/papers/2506.06266)).
 
 PEFT intentionally keeps this training logic out of the core library; treat this as a starting point you can adapt.
 
