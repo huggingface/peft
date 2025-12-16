@@ -769,7 +769,9 @@ class BaseTuner(nn.Module, ABC):
         module_names: set[str] = set()
         if state_dict is not None:
             prefix = PEFT_TYPE_TO_PREFIX_MAPPING[peft_config.peft_type]
-            module_names = {k.rsplit("." + prefix, 1)[0] for k in state_dict}
+            # Find the module name from the state_dict. Also defensively remove '_orig_mod.', which might be inserted if
+            # the model was torch.compiled beforehand
+            module_names = {k.rsplit("." + prefix, 1)[0].replace("_orig_mod.", "") for k in state_dict}
 
         for key, module in named_modules:
             if not key:
@@ -802,6 +804,8 @@ class BaseTuner(nn.Module, ABC):
                             peft_config, adapter_name, target, target_name, parent, current_key=key
                         )
             else:
+                # defensively remove _orig_mod prefix in case the model is compiled
+                key = key.removeprefix("_orig_mod.")
                 # use the state_dict to match modules instead
                 if key not in module_names:
                     unmatched_modules.append(key)
