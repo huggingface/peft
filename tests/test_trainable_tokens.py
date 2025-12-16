@@ -1330,10 +1330,10 @@ class TestTrainableTokens:
         assert peft_model.m1.encoder.embed_tokens.token_adapter.token_indices["default"] == [1, 2, 3]
 
     def test_targeting_both_embedding_and_tied_layer_explicitly(self, model_weight_tied):
-        """Test the fix for when user explicitly targets both embedding and tied layers.
+        """Test that explicitly targeting both embedding and tied layers works correctly.
 
-        When target_modules includes both "embed_tokens" and "lm_head", both get wrapped first, then inject_adapter
-        tries to apply tying.
+        When target_modules includes both "embed_tokens" and "lm_head" (which are tied in the model),
+        both layers get wrapped and weight tying is properly applied between them.
         """
         peft_config = TrainableTokensConfig(
             target_modules=["model.decoder.embed_tokens", "lm_head"],  # Explicitly target both
@@ -1356,10 +1356,10 @@ class TestTrainableTokens:
         assert lm_head_layer.token_indices["default"] == [1, 2, 3]
 
     def test_multiple_trainable_token_adapters_same_model(self, model_weight_tied):
-        """Test adding multiple trainable token adapters to the same model and layers.
+        """Test adding multiple trainable token adapters to the same model with tied layers.
 
-        This verifies that the fix handles the multi-adapter case correctly, where adding a second adapter to
-        already-wrapped tied layers works properly.
+        This verifies that adding multiple adapters to the same tied layers (embed_tokens and lm_head)
+        works correctly, with each adapter maintaining its own token indices while preserving weight tying.
         """
         # Add first adapter with both embed_tokens and lm_head targeted
         peft_config1 = TrainableTokensConfig(
