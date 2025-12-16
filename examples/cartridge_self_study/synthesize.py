@@ -118,11 +118,21 @@ def synthesize_self_study_jsonl(
             "pad_token_id": getattr(tokenizer, "pad_token_id", None) or getattr(tokenizer, "eos_token_id", None),
         }
 
+        # Generate only with teacher (which has context) - this is the "ground truth" generation.
+        # The student will be trained to match this generation without seeing the context.
         teacher_out = model.generate(teacher_prompt, attention_mask=torch.ones_like(teacher_prompt), **gen_kwargs)
-        student_out = model.generate(student_prompt, attention_mask=torch.ones_like(student_prompt), **gen_kwargs)
 
+        # Extract just the generated tokens (excluding the prompt)
+        teacher_prompt_len = int(teacher_prompt.shape[1])
+        generated_tokens = teacher_out[0, teacher_prompt_len:].tolist()
+
+        # Build teacher sequence: full prompt + generated tokens
         teacher_gen = teacher_out[0].tolist()
-        student_gen = student_out[0].tolist()
+
+        # Build student sequence: student prompt + same generated tokens
+        # This ensures teacher and student have aligned generation portions
+        student_gen = student_prompt[0].tolist() + generated_tokens
+
         teacher_ctx_len = int(teacher_prompt.shape[1])
         student_ctx_len = int(student_prompt.shape[1])
 
