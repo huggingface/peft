@@ -198,7 +198,7 @@ def compose_cartridge_adapters(
 
     num_virtual_tokens = composed.shape[0]
     # Preserve the "frozen prefix tokens" count of the first adapter only (matches a single attention-sink prefix).
-    num_frozen_tokens = int(getattr(base, "num_frozen_tokens", 0) or 0)
+    num_frozen_tokens = base.num_frozen_tokens
     out_cfg = replace(base, num_virtual_tokens=num_virtual_tokens, num_frozen_tokens=num_frozen_tokens)
 
     output_path = Path(output_path)
