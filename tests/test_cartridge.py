@@ -25,7 +25,7 @@ from peft import (
     compose_cartridge_adapters,
     get_peft_model,
     initialize_cartridge_from_past_key_values,
-    initialize_prefix_tuning_from_past_key_values,
+    initialize_kv_prefix_from_past_key_values,
     load_peft_weights,
     prompt_embeddings_from_past_key_values,
 )
@@ -187,7 +187,7 @@ def test_prefix_tuning_can_be_initialized_from_past_key_values_when_no_projectio
         outputs = model(input_ids=input_ids, use_cache=True)
 
     pe = prompt_embeddings_from_past_key_values(outputs.past_key_values, num_virtual_tokens=4)
-    pe2 = initialize_prefix_tuning_from_past_key_values(
+    pe2 = initialize_kv_prefix_from_past_key_values(
         model, past_key_values=outputs.past_key_values, num_virtual_tokens=4
     )
     assert pe.device == pe2.device

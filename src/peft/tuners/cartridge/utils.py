@@ -20,9 +20,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 import torch
+from safetensors.torch import save_file
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
+from peft.utils.constants import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME
 from peft.utils.save_and_load import load_peft_weights
 
 
@@ -91,7 +93,7 @@ def prompt_embeddings_from_past_key_values(
 
 
 @torch.no_grad()
-def initialize_cartridge_from_past_key_values(
+def initialize_kv_prefix_from_past_key_values(
     model,
     *,
     adapter_name: Optional[str] = None,
@@ -99,15 +101,21 @@ def initialize_cartridge_from_past_key_values(
     num_virtual_tokens: Optional[int] = None,
 ) -> torch.Tensor:
     """
-    Initialize a CARTRIDGE adapter's parameters from an existing cached prefix (`past_key_values`).
+    Initialize a KV-prefix prompt-learning adapter from an existing cached prefix (`past_key_values`).
 
     Returns the prompt embeddings tensor that was loaded into the adapter.
     """
     if adapter_name is None:
         adapter_name = model.active_adapter
     config = model.peft_config[adapter_name]
-    if config.peft_type != PeftType.CARTRIDGE:
-        raise ValueError(f"Adapter '{adapter_name}' is not a CARTRIDGE adapter (got {config.peft_type}).")
+    if config.peft_type not in (PeftType.CARTRIDGE, PeftType.PREFIX_TUNING):
+        raise ValueError(
+            f"Adapter '{adapter_name}' must be a CARTRIDGE or PREFIX_TUNING adapter (got {config.peft_type})."
+        )
+    if getattr(config, "prefix_projection", False):
+        raise ValueError(
+            "Initialization from KV cache is not supported for prefix tuning with `prefix_projection=True`."
+        )
     if num_virtual_tokens is None:
         num_virtual_tokens = config.num_virtual_tokens
 
@@ -117,7 +125,7 @@ def initialize_cartridge_from_past_key_values(
 
 
 @torch.no_grad()
-def initialize_cartridge_from_text(
+def initialize_kv_prefix_from_text(
     model,
     tokenizer,
     *,
@@ -128,13 +136,19 @@ def initialize_cartridge_from_text(
     max_length: Optional[int] = None,
 ) -> torch.Tensor:
     """
-    Convenience initializer: prefill the base model on `text` and use the resulting cache prefix as the cartridge init.
+    Convenience initializer: prefill the base model on `text` and load the resulting cache prefix into the adapter.
     """
     if adapter_name is None:
         adapter_name = model.active_adapter
     config = model.peft_config[adapter_name]
-    if config.peft_type != PeftType.CARTRIDGE:
-        raise ValueError(f"Adapter '{adapter_name}' is not a CARTRIDGE adapter (got {config.peft_type}).")
+    if config.peft_type not in (PeftType.CARTRIDGE, PeftType.PREFIX_TUNING):
+        raise ValueError(
+            f"Adapter '{adapter_name}' must be a CARTRIDGE or PREFIX_TUNING adapter (got {config.peft_type})."
+        )
+    if getattr(config, "prefix_projection", False):
+        raise ValueError(
+            "Initialization from KV cache is not supported for prefix tuning with `prefix_projection=True`."
+        )
     if num_virtual_tokens is None:
         num_virtual_tokens = config.num_virtual_tokens
 
@@ -157,11 +171,59 @@ def initialize_cartridge_from_text(
     attention_mask = torch.ones_like(input_ids)
     with model.disable_adapter():
         outputs = model(input_ids=input_ids, attention_mask=attention_mask, use_cache=True)
-    return initialize_cartridge_from_past_key_values(
+    return initialize_kv_prefix_from_past_key_values(
         model,
         adapter_name=adapter_name,
         past_key_values=outputs.past_key_values,
         num_virtual_tokens=num_virtual_tokens,
+    )
+
+
+@torch.no_grad()
+def initialize_cartridge_from_past_key_values(
+    model,
+    *,
+    adapter_name: Optional[str] = None,
+    past_key_values: Any,
+    num_virtual_tokens: Optional[int] = None,
+) -> torch.Tensor:
+    """
+    Backwards-compatible alias for initializing a KV-prefix adapter from `past_key_values`.
+
+    Despite the name, this works for both CARTRIDGE and PREFIX_TUNING adapters, as both are served as KV prefixes.
+    """
+    return initialize_kv_prefix_from_past_key_values(
+        model,
+        adapter_name=adapter_name,
+        past_key_values=past_key_values,
+        num_virtual_tokens=num_virtual_tokens,
+    )
+
+
+@torch.no_grad()
+def initialize_cartridge_from_text(
+    model,
+    tokenizer,
+    *,
+    text: str,
+    adapter_name: Optional[str] = None,
+    num_virtual_tokens: Optional[int] = None,
+    use_chat_template: bool = True,
+    max_length: Optional[int] = None,
+) -> torch.Tensor:
+    """
+    Backwards-compatible alias for initializing a KV-prefix adapter from a text prefill.
+
+    Despite the name, this works for both CARTRIDGE and PREFIX_TUNING adapters, as both are served as KV prefixes.
+    """
+    return initialize_kv_prefix_from_text(
+        model,
+        tokenizer,
+        text=text,
+        adapter_name=adapter_name,
+        num_virtual_tokens=num_virtual_tokens,
+        use_chat_template=use_chat_template,
+        max_length=max_length,
     )
 
 
@@ -205,11 +267,7 @@ def compose_cartridge_adapters(
     output_path.mkdir(parents=True, exist_ok=True)
     out_cfg.save_pretrained(str(output_path))
 
-    from peft.utils.constants import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME
-
     if safe_serialization:
-        from safetensors.torch import save_file
-
         save_file({"prompt_embeddings": composed}, str(output_path / SAFETENSORS_WEIGHTS_NAME))
     else:
         torch.save({"prompt_embeddings": composed}, str(output_path / WEIGHTS_NAME))

@@ -47,6 +47,26 @@ def _apply_chat_template(tokenizer, messages: list[dict], *, add_generation_prom
         return torch.tensor(ids, dtype=torch.long).unsqueeze(0)
 
 
+def _to_ids_and_mask(prompt) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Normalize chat-template outputs across Transformers versions.
+
+    `tokenizer.apply_chat_template(..., tokenize=True, return_tensors="pt")` has returned either:
+    - a plain `torch.Tensor` of `input_ids`, or
+    - a `BatchEncoding` containing `input_ids` (+ optionally `attention_mask`).
+    """
+    if isinstance(prompt, torch.Tensor):
+        input_ids = prompt
+        attention_mask = torch.ones_like(input_ids)
+        return input_ids, attention_mask
+
+    input_ids = prompt["input_ids"]
+    attention_mask = prompt.get("attention_mask", None)
+    if attention_mask is None:
+        attention_mask = torch.ones_like(input_ids)
+    return input_ids, attention_mask
+
+
 @torch.no_grad()
 def synthesize_self_study_jsonl(
     *,
@@ -107,23 +127,28 @@ def synthesize_self_study_jsonl(
             teacher_prompt = torch.tensor(ctx_ids + x_ids, dtype=torch.long).unsqueeze(0)
             student_prompt = torch.tensor(x_ids, dtype=torch.long).unsqueeze(0)
 
-        teacher_prompt = teacher_prompt.to(device)
-        student_prompt = student_prompt.to(device)
+        teacher_input_ids, teacher_attention_mask = _to_ids_and_mask(teacher_prompt)
+        student_input_ids, _ = _to_ids_and_mask(student_prompt)
+        teacher_input_ids = teacher_input_ids.to(device)
+        teacher_attention_mask = teacher_attention_mask.to(device)
+        student_input_ids = student_input_ids.to(device)
 
+        do_sample = temperature > 0
         gen_kwargs = {
             "max_new_tokens": max_new_tokens,
-            "do_sample": temperature > 0,
-            "temperature": max(temperature, 1e-5),
-            "top_p": top_p,
+            "do_sample": do_sample,
             "pad_token_id": getattr(tokenizer, "pad_token_id", None) or getattr(tokenizer, "eos_token_id", None),
         }
+        if do_sample:
+            gen_kwargs["temperature"] = max(temperature, 1e-5)
+            gen_kwargs["top_p"] = top_p
 
         # Generate only with teacher (which has context) - this is the "ground truth" generation.
         # The student will be trained to match this generation without seeing the context.
-        teacher_out = model.generate(teacher_prompt, attention_mask=torch.ones_like(teacher_prompt), **gen_kwargs)
+        teacher_out = model.generate(teacher_input_ids, attention_mask=teacher_attention_mask, **gen_kwargs)
 
         # Extract just the generated tokens (excluding the prompt)
-        teacher_prompt_len = int(teacher_prompt.shape[1])
+        teacher_prompt_len = int(teacher_input_ids.shape[1])
         generated_tokens = teacher_out[0, teacher_prompt_len:].tolist()
 
         # Build teacher sequence: full prompt + generated tokens
@@ -131,10 +156,10 @@ def synthesize_self_study_jsonl(
 
         # Build student sequence: student prompt + same generated tokens
         # This ensures teacher and student have aligned generation portions
-        student_gen = student_prompt[0].tolist() + generated_tokens
+        student_gen = student_input_ids[0].tolist() + generated_tokens
 
-        teacher_ctx_len = int(teacher_prompt.shape[1])
-        student_ctx_len = int(student_prompt.shape[1])
+        teacher_ctx_len = int(teacher_input_ids.shape[1])
+        student_ctx_len = int(student_input_ids.shape[1])
 
         record = {
             "teacher_input_ids": teacher_gen,

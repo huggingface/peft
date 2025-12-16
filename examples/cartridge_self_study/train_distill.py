@@ -83,25 +83,38 @@ class DistillationTrainer(Trainer):
         )
         student_logits = student_out.logits
 
-        batch_losses = []
-        for b in range(student_input_ids.shape[0]):
-            x_len = int(student_attention_mask[b].sum().item())
-            if x_len <= 1:
-                continue
+        # Vectorized distillation loss (avoids Python `.item()` in per-example indexing).
+        # Align teacher logits to student positions via the per-example `ctx_len` offset.
+        student_logits = student_logits[:, :-1, :]  # [B, Ls-1, V]
+        seq_len = student_logits.shape[1]
+        pos = torch.arange(seq_len, device=student_logits.device)[None, :]  # [1, Ls-1]
 
-            student_slice = student_logits[b, : x_len - 1, :]
-            t_start = int(ctx_len[b].item())
-            teacher_slice = teacher_logits[b, t_start : t_start + (x_len - 1), :]
-            if teacher_slice.shape[0] != student_slice.shape[0]:
-                raise ValueError("Mismatched teacher/student sequence alignment for distillation loss.")
+        student_len = student_attention_mask.sum(dim=1).to(torch.long)  # [B]
+        valid = pos < (student_len - 1).clamp(min=0)[:, None]  # [B, Ls-1]
 
-            topk_vals, topk_ids = torch.topk(teacher_slice, k=min(self.top_k, teacher_slice.shape[-1]), dim=-1)
-            teacher_logprobs = F.log_softmax(teacher_slice, dim=-1).gather(-1, topk_ids)
-            student_logprobs = F.log_softmax(student_slice, dim=-1).gather(-1, topk_ids)
-            loss_by_pos = -(teacher_logprobs.exp() * student_logprobs).sum(dim=-1)
-            batch_losses.append(loss_by_pos.mean())
+        teacher_pos = ctx_len[:, None] + pos  # [B, Ls-1]
+        in_bounds = teacher_pos < teacher_logits.shape[1]
+        valid = valid & in_bounds
 
-        loss = torch.stack(batch_losses).mean() if batch_losses else student_logits.new_zeros(())
+        teacher_pos = teacher_pos.clamp(min=0, max=teacher_logits.shape[1] - 1)
+        teacher_slice = teacher_logits.gather(
+            dim=1, index=teacher_pos[:, :, None].expand(-1, -1, teacher_logits.shape[-1])
+        )  # [B, Ls-1, V]
+
+        k = min(self.top_k, teacher_slice.shape[-1])
+        topk_ids = torch.topk(teacher_slice, k=k, dim=-1).indices  # [B, Ls-1, K]
+        teacher_logprobs = F.log_softmax(teacher_slice, dim=-1).gather(-1, topk_ids)
+        student_logprobs = F.log_softmax(student_logits, dim=-1).gather(-1, topk_ids)
+
+        loss_by_pos = -(teacher_logprobs.exp() * student_logprobs).sum(dim=-1)  # [B, Ls-1]
+        loss_by_pos = loss_by_pos.masked_fill(~valid, 0.0)
+
+        denom = valid.sum(dim=1).clamp(min=1)
+        per_example = loss_by_pos.sum(dim=1) / denom
+        if valid.any():
+            loss = per_example[valid.any(dim=1)].mean()
+        else:
+            loss = student_logits.new_zeros(())
         return (loss, student_out) if return_outputs else loss
 
 

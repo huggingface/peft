@@ -59,8 +59,6 @@
     title: Adapters
   - local: conceptual_guides/prompting
     title: Soft prompts
-  - local: conceptual_guides/cartridges
-    title: Cartridges
   - local: conceptual_guides/ia3
     title: IA3
   - local: conceptual_guides/oft
@@ -110,6 +108,8 @@
       title: P-tuning
     - local: package_reference/prefix_tuning
       title: Prefix tuning
+    - local: package_reference/cartridges
+      title: Cartridges
     - local: package_reference/prompt_tuning
       title: Prompt tuning
     - local: package_reference/layernorm_tuning

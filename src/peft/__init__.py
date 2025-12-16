@@ -125,11 +125,9 @@ from .tuners.cartridge.utils import (
     compose_cartridge_adapters,
     initialize_cartridge_from_past_key_values,
     initialize_cartridge_from_text,
+    initialize_kv_prefix_from_past_key_values,
+    initialize_kv_prefix_from_text,
     prompt_embeddings_from_past_key_values,
-)
-from .tuners.prefix_tuning.utils import (
-    initialize_prefix_tuning_from_past_key_values,
-    initialize_prefix_tuning_from_text,
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
@@ -257,9 +255,9 @@ __all__ = [
     "get_peft_model_state_dict",
     "initialize_cartridge_from_past_key_values",
     "initialize_cartridge_from_text",
+    "initialize_kv_prefix_from_past_key_values",
+    "initialize_kv_prefix_from_text",
     "initialize_lora_eva_weights",
-    "initialize_prefix_tuning_from_past_key_values",
-    "initialize_prefix_tuning_from_text",
     "inject_adapter_in_model",
     "load_peft_weights",
     "prepare_model_for_kbit_training",
