@@ -58,6 +58,10 @@ from ..utils import _get_submodules
 from ._buffer_dict import BufferDict
 
 
+_torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
+_torch_supports_distributed = _torch_supports_dtensor and torch.distributed.is_available()
+
+
 @contextmanager
 def onload_layer(layer):
     r"""
@@ -157,8 +161,7 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     this function returns a valid result does not imply that the layer type is supported.
     """
     if isinstance(module, nn.Linear):
-        torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
-        if torch_supports_dtensor and isinstance(module.weight, torch.distributed.tensor.DTensor):
+        if _torch_supports_distributed and isinstance(module.weight, torch.distributed.tensor.DTensor):
             # If Tensor Parallel is used, the weight is sharded, so we need to get the local shape
             out_features, in_features = module.weight.to_local().shape
         else:
