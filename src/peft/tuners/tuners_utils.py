@@ -771,7 +771,7 @@ class BaseTuner(nn.Module, ABC):
             prefix = PEFT_TYPE_TO_PREFIX_MAPPING[peft_config.peft_type]
             # Find the module name from the state_dict. Also defensively remove '_orig_mod.', which might be inserted if
             # the model was torch.compiled beforehand
-            module_names = {k.rsplit("." + prefix, 1)[0].replace("_orig_mod.", "") for k in state_dict}
+            module_names = {k.rsplit("." + prefix, 1)[0].removeprefix("_orig_mod.") for k in state_dict}
 
         for key, module in named_modules:
             if not key:
