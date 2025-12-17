@@ -1200,14 +1200,14 @@ class TestTrainableTokens:
         # They should NOT share delta parameters (model doesn't have tied weights)
         assert embed_adapter.trainable_tokens_delta is not lm_head_adapter.trainable_tokens_delta
 
-    def test_mega_model_multiple_embed_tokens_specific_targeting(self):
+    def test_composite_model_multiple_embed_tokens_specific_targeting(self):
         """Test that users can specify full paths to disambiguate multiple embed_tokens layers.
 
         This tests the scenario where a composite model has multiple sub-models, each with their own
         embed_tokens, and users need to target them independently with different token indices.
         """
-        # Create a composite model with two BART sub-models, similar to the MegaModel example
-        class MegaModel(torch.nn.Module):
+        # Create a composite model with two BART sub-models
+        class CompositeModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 config1 = BartConfig(
@@ -1249,7 +1249,7 @@ class TestTrainableTokens:
             def get_input_embeddings(self):
                 return self.m1.encoder.embed_tokens
 
-        model = MegaModel()
+        model = CompositeModel()
 
         # User specifies different token indices for each sub-model's embed_tokens
         # This should NOT raise an error because they are distinct sub-models
@@ -1289,9 +1289,9 @@ class TestTrainableTokens:
         # m2's decoder should NOT have an adapter since it's not tied and we didn't target it
         assert not hasattr(peft_model.m2.decoder.embed_tokens, "token_adapter")
 
-    def test_mega_model_short_name_matching(self):
+    def test_composite_model_short_name_matching(self):
         """Test that short names like 'embed_tokens' still work but match the input embedding."""
-        class MegaModel(torch.nn.Module):
+        class CompositeModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 config = BartConfig(
@@ -1310,7 +1310,7 @@ class TestTrainableTokens:
             def get_input_embeddings(self):
                 return self.m1.encoder.embed_tokens
 
-        model = MegaModel()
+        model = CompositeModel()
 
         # User specifies just "embed_tokens" - should match m1.encoder.embed_tokens via endswith
         peft_config = LoraConfig(
