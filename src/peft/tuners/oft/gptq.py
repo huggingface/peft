@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 import torch
 
+from peft.import_utils import is_gptqmodel_available
 from peft.tuners.oft.layer import OFTLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 
@@ -98,10 +99,11 @@ def dispatch_gptq(
     else:
         target_base_layer = target
 
-    from gptqmodel.nn_modules.qlinear import BaseQuantLinear
+    if is_gptqmodel_available():
+        from gptqmodel.nn_modules.qlinear import BaseQuantLinear
 
-    if isinstance(target_base_layer, BaseQuantLinear):
-        new_module = GPTQOFTLinear(target, adapter_name, **kwargs)
-        target.qweight = target_base_layer.qweight
+        if isinstance(target_base_layer, BaseQuantLinear):
+            new_module = GPTQOFTLinear(target, adapter_name, **kwargs)
+            target.qweight = target_base_layer.qweight
 
     return new_module

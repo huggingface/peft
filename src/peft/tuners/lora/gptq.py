@@ -135,8 +135,6 @@ def dispatch_gptq(
     else:
         target_base_layer = target
 
-    cfg = kwargs.get("gptq_quantization_config", None)
-
     if is_gptqmodel_available():
         from gptqmodel.nn_modules.qlinear import BaseQuantLinear
 
