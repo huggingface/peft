@@ -157,22 +157,38 @@ def estimate_gradients(
     for name, module in target_module_list:
         module.weight.requires_grad = True
 
-    # Enable gradient computation
+    # Register forward hooks to count gradient computations
+    # Each forward pass corresponds to one gradient computation
+    hooks = []
+
+    def create_forward_hook(module):
+        def forward_hook(m, input, output):
+            module._peft_loraga_grad_count += 1
+
+        return forward_hook
+
+    for name, module in target_module_list:
+        hook = module.register_forward_hook(create_forward_hook(module))
+        hooks.append(hook)
+
+    # Enable gradient computation and run train_step
     with torch.enable_grad():
-        # Run train_step to accumulate gradients
         train_step()
+
+        # Accumulate gradients after all backward passes complete
+        for name, module in target_module_list:
+            if module.weight.grad is not None:
+                # Convert to same dtype as stored gradient
+                module._peft_loraga_grad += module.weight.grad.detach().to(module._peft_loraga_grad.dtype)
+
+    # Remove hooks
+    for hook in hooks:
+        hook.remove()
 
     # Restore original requires_grad state for all parameters
     for name, param in model.named_parameters():
         if name in original_requires_grad:
             param.requires_grad = original_requires_grad[name]
-
-    # Accumulate gradients from each target module's weight.grad
-    for name, module in target_module_list:
-        if module.weight.grad is not None:
-            # Convert to same dtype as stored gradient
-            module._peft_loraga_grad += module.weight.grad.detach().to(module._peft_loraga_grad.dtype)
-            module._peft_loraga_grad_count += 1
 
     # Average gradients and clean up temporary fields
     for name, module in target_module_list:
