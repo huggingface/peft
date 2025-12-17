@@ -1203,8 +1203,8 @@ class TestTrainableTokens:
     def test_mega_model_multiple_embed_tokens_specific_targeting(self):
         """Test that users can specify full paths to disambiguate multiple embed_tokens layers.
 
-        This tests the scenario described by the maintainer where a composite model has multiple sub-models, each with
-        their own embed_tokens, and users need to target them independently with different token indices.
+        This tests the scenario where a composite model has multiple sub-models, each with their own
+        embed_tokens, and users need to target them independently with different token indices.
         """
         from transformers import BartConfig, BartModel
 
