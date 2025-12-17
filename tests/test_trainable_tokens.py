@@ -20,7 +20,7 @@ from unittest.mock import patch
 import pytest
 import torch
 from safetensors.torch import load_file as safe_load_file
-from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer, BartConfig, BartModel
 
 from peft import AutoPeftModel, LoraConfig, PeftModel, TrainableTokensConfig, get_peft_model
 from peft.tuners.trainable_tokens.layer import TrainableTokensLayer
@@ -1206,8 +1206,6 @@ class TestTrainableTokens:
         This tests the scenario where a composite model has multiple sub-models, each with their own
         embed_tokens, and users need to target them independently with different token indices.
         """
-        from transformers import BartConfig, BartModel
-
         # Create a composite model with two BART sub-models, similar to the MegaModel example
         class MegaModel(torch.nn.Module):
             def __init__(self):
@@ -1293,8 +1291,6 @@ class TestTrainableTokens:
 
     def test_mega_model_short_name_matching(self):
         """Test that short names like 'embed_tokens' still work but match the input embedding."""
-        from transformers import BartConfig, BartModel
-
         class MegaModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
