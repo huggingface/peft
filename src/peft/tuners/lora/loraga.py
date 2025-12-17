@@ -199,3 +199,112 @@ def estimate_gradients(
     # Restore original training state
     if not was_training:
         model.eval()
+
+
+def prepare_model_for_quantized_loraga_training(
+    model_name_or_path: str,
+    lora_config: LoraConfig,
+    train_step: Callable[[], None],
+    quantization_config,
+    cache_file: str,
+    torch_dtype=None,
+    **model_kwargs,
+):
+    """
+    Helper function to prepare a quantized model for LoRA-GA training.
+
+    Since LoRA-GA requires full-precision gradients during preprocessing, this function
+    handles the two-stage workflow for BitsAndBytes quantized models:
+    1. Loads model in full precision
+    2. Estimates gradients and caches them
+    3. Clears the full-precision model from memory
+    4. Loads model with quantization
+    5. Returns quantized model ready for get_peft_model()
+
+    Args:
+        model_name_or_path (`str`):
+            The model identifier from HuggingFace Hub or a local path.
+        lora_config (`LoraConfig`):
+            LoRA configuration with lora_ga_config set.
+        train_step (`Callable[[], None]`):
+            Callback to run gradient estimation. Should perform forward and backward passes.
+        quantization_config:
+            BitsAndBytesConfig for quantization (e.g., load_in_4bit=True).
+        cache_file (`str`):
+            Path where gradients will be cached. The cached gradients will be automatically
+            loaded when get_peft_model() is called on the quantized model.
+        torch_dtype (optional):
+            Data type for full-precision model (e.g., torch.bfloat16). If None, uses default.
+        **model_kwargs:
+            Additional arguments passed to AutoModel.from_pretrained().
+
+    Returns:
+        The quantized model ready for get_peft_model().
+
+    Example:
+        ```python
+        from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+        from peft import LoraConfig, get_peft_model
+        from peft.tuners.lora import LoraGAConfig, prepare_model_for_quantized_loraga_training
+        import torch
+
+        # Configuration
+        quantization_config = BitsAndBytesConfig(load_in_4bit=True)
+        lora_ga_config = LoraGAConfig(direction="ArB2r", scale="stable")
+        lora_config = LoraConfig(
+            r=8,
+            target_modules=["q_proj", "v_proj"],
+            init_lora_weights="lora_ga",
+            lora_ga_config=lora_ga_config,
+        )
+
+        # Define gradient estimation function
+        def train_step():
+            # Your gradient estimation logic here
+            inputs = torch.randint(0, 50257, (2, 10))
+            outputs = model(inputs, labels=inputs)
+            outputs.loss.backward()
+
+        # Prepare quantized model for LoRA-GA
+        model = prepare_model_for_quantized_loraga_training(
+            model_name_or_path="gpt2",
+            lora_config=lora_config,
+            train_step=train_step,
+            quantization_config=quantization_config,
+            cache_file="loraga_gradients.pt",
+            torch_dtype=torch.bfloat16,
+        )
+
+        # Apply LoRA-GA (gradients loaded from cache automatically)
+        model = get_peft_model(model, lora_config)
+        ```
+    """
+    from transformers import AutoModelForCausalLM
+
+    if torch_dtype is None:
+        torch_dtype = torch.bfloat16
+
+    # Stage 1: Load full-precision model for gradient estimation
+    print(f"Loading full-precision model from {model_name_or_path} for gradient estimation...")
+    model_fp = AutoModelForCausalLM.from_pretrained(
+        model_name_or_path, torch_dtype=torch_dtype, **model_kwargs
+    )
+
+    print(f"Estimating gradients (this may take a few minutes)...")
+    preprocess_loraga(model_fp, lora_config, train_step, cache_file=cache_file)
+    print(f"✓ Gradients estimated and cached to {cache_file}")
+
+    # Clear full-precision model from memory
+    del model_fp
+    torch.cuda.empty_cache()
+
+    # Stage 2: Load quantized model
+    print(f"Loading quantized model from {model_name_or_path}...")
+    model_quantized = AutoModelForCausalLM.from_pretrained(
+        model_name_or_path, quantization_config=quantization_config, **model_kwargs
+    )
+
+    print(f"✓ Quantized model ready for get_peft_model()")
+    print(f"  Cached gradients will be automatically loaded during LoRA-GA initialization")
+
+    return model_quantized

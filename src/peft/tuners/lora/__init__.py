@@ -20,7 +20,7 @@ from .config import ArrowConfig, BdLoraConfig, EvaConfig, LoftQConfig, LoraConfi
 from .eva import get_eva_state_dict, initialize_lora_eva_weights
 from .gptq import GPTQLoraLinear
 from .layer import Conv2d, Conv3d, Embedding, Linear, LoraLayer, ParamWrapper
-from .loraga import preprocess_loraga
+from .loraga import prepare_model_for_quantized_loraga_training, preprocess_loraga
 from .model import LoraModel
 
 
@@ -43,6 +43,7 @@ __all__ = [
     "create_arrow_model",
     "get_eva_state_dict",
     "initialize_lora_eva_weights",
+    "prepare_model_for_quantized_loraga_training",
     "preprocess_loraga",
 ]
 
