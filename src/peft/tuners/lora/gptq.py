@@ -18,6 +18,7 @@ import torch
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 
+from ...import_utils import is_gptqmodel_available
 from .layer import LoraVariant
 
 
@@ -136,10 +137,11 @@ def dispatch_gptq(
 
     cfg = kwargs.get("gptq_quantization_config", None)
 
-    from gptqmodel.nn_modules.qlinear import BaseQuantLinear
+    if is_gptqmodel_available():
+        from gptqmodel.nn_modules.qlinear import BaseQuantLinear
 
-    if isinstance(target_base_layer, BaseQuantLinear):
-        new_module = GPTQLoraLinear(target, adapter_name, **kwargs)
-        target.qweight = target_base_layer.qweight
+        if isinstance(target_base_layer, BaseQuantLinear):
+            new_module = GPTQLoraLinear(target, adapter_name, **kwargs)
+            target.qweight = target_base_layer.qweight
 
     return new_module
