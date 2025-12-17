@@ -138,29 +138,12 @@ class TestLoraGAIntegration:
         # Outputs should be identical
         assert torch.allclose(output_before, output_after, atol=1e-5)
 
-    @pytest.mark.parametrize(
-        "direction,scale",
-        [
-            # Test all direction/scale combinations except weight_svd+random
-            # which has non-deterministic behavior in weight conversion
-            ("ArBr", "stable"),
-            ("ArBr", "weight_svd"),
-            ("ArBr", "gd_scale"),
-            ("ArBr", "unit"),
-            ("A2rBr", "stable"),
-            ("A2rBr", "weight_svd"),
-            ("A2rBr", "gd_scale"),
-            ("A2rBr", "unit"),
-            ("ArB2r", "stable"),
-            ("ArB2r", "weight_svd"),
-            ("ArB2r", "gd_scale"),
-            ("ArB2r", "unit"),
-            ("random", "stable"),
-            ("random", "gd_scale"),
-            ("random", "unit"),
-        ],
-    )
+    @pytest.mark.parametrize("scale", ["stable", "weight_svd", "gd_scale", "unit"])
+    @pytest.mark.parametrize("direction", ["ArBr", "A2rBr", "ArB2r", "random"])
     def test_save_load_with_weight_conversion(self, tmp_path, simple_model, simple_train_step, direction, scale):
+        # Skip the random+weight_svd combination as it produces non-deterministic results
+        if direction == "random" and scale == "weight_svd":
+            pytest.skip("Skipping random+weight_svd combination due to non-deterministic behavior")
         """Test save/load with path_initial_model_for_weight_conversion."""
         torch.manual_seed(42)
         # Save RNG state for reproducing exact initialization later
