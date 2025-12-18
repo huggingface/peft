@@ -14,6 +14,10 @@ Here we present a potential solution. PEFT offers two functions, [`save_as_lora`
 
 ## Example
 
+The LoRA rank for the converted adapter can either be set to a fixed rank by passing an int > 0 to the `rank` argument, or a dynamic rank, which adapts to each layer, by passing a float between 0 and 1 to the `rank` argument. Dynamic ranks can potentially be more efficient (same performance with fewer parameters).
+
+### Fixed LoRA rank
+
 The usage of [`save_as_lora`] is relatively straightforward:
 
 ```python
@@ -55,11 +59,22 @@ lora_model = get_peft_model(base_model, lora_config)
 set_peft_model_state_dict(lora_model, state_dict)
 ```
 
-### Adaptive LoRA rank
+### Dynamic LoRA rank
 
 In the examples above, we used a fixed LoRA rank for conversion. However, it is conceivable that some layers don't require a high rank to be accurately converted, while other layers require a higher rank. To accomodate this, PEFT offers the option to pass a float between 0 and 1 as the `rank` argument. Let's say you pass `rank=0.5`. This means that for each layer, the rank for the LoRA adapter is chosen such that the LoRA adapter explains 50% of the variance in weight introduced by original adapter. In more technical terms, under the hood we perform a [Singular Value Decomposition](https://en.wikipedia.org/wiki/Singular_value_decomposition) on the weight contribution of the adapter and then take the top singular values that, when normalized, sum up to the passed value.
 
-Using this type of adaptive LoRA rank can be useful if the contribution of the different layers varies a lot. The disadvantage is that it could mean that some layers will have a very high LoRA rank, which can lead to memory spikes. Please test what works best for your use case.
+```python
+# set a dynamic rank by passing a float
+threshold = 0.7
+# save as a LoRA checkpoint
+save_as_lora(output_path, model, rank=threshold)
+# get the lora config and state dict directly:
+lora_config, lora_state_dict = convert_to_lora(model, rank=threshold)
+# inspect the different ranks per layer:
+print(lora_config.rank_pattern)
+```
+
+Using this type of dynamic LoRA rank can be useful if the contribution of the different layers varies a lot. The disadvantage is that it could mean that some layers will have a very high LoRA rank, which can lead to memory spikes. Please test what works best for your use case.
 
 ### LoRA to LoRA conversion
 
