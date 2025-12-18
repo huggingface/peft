@@ -756,6 +756,17 @@ class LoraConfig(PeftConfig):
         },
     )
 
+    use_kasa: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Enable <a href='https://arxiv.org/abs/2412.06071'>'Knowledge-Aware Singular-Value Adaptation of Large Language Models' (KaSA)</a>. This technique leverages "
+                "singular value decomposition (SVD) with knowledge-aware singular values to dynamically "
+                "activate parametric knowledge according to its relevance to downstream tasks."
+            )
+        },
+    )
+
     def to_dict(self):
         """
         Returns the configuration for your adapter model as a dictionary. Removes runtime configurations.
