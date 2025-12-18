@@ -596,13 +596,12 @@ class Linear(nn.Module, LoraLayer):
         config: LoraConfig,
         r: int = 0,
         lora_alpha: int = 1,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
 
         self._active_adapter = adapter_name
         self.update_layer(
@@ -817,7 +816,6 @@ class Embedding(nn.Module, LoraLayer):
         config: LoraConfig,
         r: int = 0,
         lora_alpha: int = 1,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         init_lora_weights: Union[bool, str] = True,
         **kwargs,
     ) -> None:
@@ -827,7 +825,7 @@ class Embedding(nn.Module, LoraLayer):
 
         super().__init__()
         LoraLayer.__init__(self, base_layer)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
 
         self._active_adapter = adapter_name
         self.update_layer(
@@ -1863,7 +1861,6 @@ class ParamWrapper(nn.Module, LoraLayer):
         config: LoraConfig,
         r: int = 0,
         lora_alpha: int = 1,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
         **kwargs,
     ) -> None:
@@ -1885,7 +1882,7 @@ class ParamWrapper(nn.Module, LoraLayer):
             # It's not possible to factor out x from lora_B(lora_A(dropout(x))), so dropout can't be correctly
             # implemented
             raise ValueError(f"lora.{self.__class__.__name__} does not work with lora_dropout != 0.")
-        if fan_in_fan_out:
+        if config.fan_in_fan_out:
             raise ValueError(f"lora.{self.__class__.__name__} does not work with fan_in_fan_out.")
         if config.lora_bias:
             raise ValueError(f"lora.{self.__class__.__name__} does not work with lora_bias=True.")
@@ -1894,7 +1891,7 @@ class ParamWrapper(nn.Module, LoraLayer):
         if is_target_conv_1d_layer:
             raise ValueError(f"lora.{self.__class__.__name__} does not work with is_target_conv_1d_layer=True.")
 
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
         self._active_adapter = adapter_name
         self.update_layer(
             adapter_name,
@@ -2191,10 +2188,8 @@ def dispatch_default(
     if parameter_name is not None:
         new_module = ParamWrapper(target, adapter_name, parameter_name=parameter_name, config=config, **kwargs)
     elif isinstance(target_base_layer, torch.nn.Embedding):
-        embedding_kwargs = kwargs.copy()
-        embedding_kwargs.pop("fan_in_fan_out", None)
-        embedding_kwargs.update(config.loftq_config)
-        new_module = Embedding(target, adapter_name, config=config, **embedding_kwargs)
+        kwargs.update(config.loftq_config)
+        new_module = Embedding(target, adapter_name, config=config, **kwargs)
     elif isinstance(target_base_layer, torch.nn.Conv2d):
         kwargs.update(config.loftq_config)
         new_module = Conv2d(target, adapter_name, config=config, **kwargs)
@@ -2208,20 +2203,20 @@ def dispatch_default(
         kwargs.update(config.loftq_config)
         new_module = MultiheadAttention(target, adapter_name, config=config, **kwargs)
     elif isinstance(target_base_layer, torch.nn.Linear):
-        if kwargs["fan_in_fan_out"]:
+        if config.fan_in_fan_out:
             warnings.warn(
                 "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                 "Setting fan_in_fan_out to False."
             )
-            kwargs["fan_in_fan_out"] = config.fan_in_fan_out = False
+            config.fan_in_fan_out = False
         kwargs.update(config.loftq_config)
         new_module = Linear(target, adapter_name, config=config, **kwargs)
     elif isinstance(target_base_layer, Conv1D):
-        if not kwargs["fan_in_fan_out"]:
+        if not config.fan_in_fan_out:
             warnings.warn(
                 "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
             )
-            kwargs["fan_in_fan_out"] = config.fan_in_fan_out = True
+            config.fan_in_fan_out = True
         kwargs.update(config.loftq_config)
         new_module = Linear(target, adapter_name, is_target_conv_1d_layer=True, config=config, **kwargs)
 

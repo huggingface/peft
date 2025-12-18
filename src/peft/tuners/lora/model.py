@@ -204,7 +204,6 @@ class LoraModel(BaseTuner):
         kwargs = {
             "r": r,
             "lora_alpha": alpha,
-            "fan_in_fan_out": lora_config.fan_in_fan_out,
             "target_name": current_key,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
