@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import importlib
 import warnings
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
@@ -797,8 +798,6 @@ class LoraConfig(PeftConfig):
 
         # handle init_lora_weights and loftq_config
         if self.init_lora_weights == "loftq":
-            import importlib
-
             if not importlib.util.find_spec("scipy"):
                 raise ImportError("The required package 'scipy' is not installed. Please install it to continue.")
             if not self.loftq_config:

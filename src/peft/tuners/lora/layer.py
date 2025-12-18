@@ -32,6 +32,7 @@ from peft.utils.integrations import (
     get_bnb_param_type,
     skip_init_on_device,
 )
+from peft.utils.loftq_utils import loftq_init
 from peft.utils.other import transpose
 from peft.utils.warning import PeftWarning
 
@@ -209,7 +210,7 @@ class LoraLayer(BaseTunerLayer):
                 self.olora_init(adapter_name)
         elif init_lora_weights == "loftq":
             with gather_params_ctx(self.get_base_layer().weight):
-                self.loftq_init(adapter_name)
+                self.loftq_init(adapter_name, config)
         elif init_lora_weights == "eva":
             nn.init.zeros_(self.lora_B[adapter_name].weight)
         elif init_lora_weights == "orthogonal":
@@ -415,14 +416,12 @@ class LoraLayer(BaseTunerLayer):
         # Remove redundant fields
         del linear.eigens
 
-    def loftq_init(self, adapter_name):
-        from peft.utils.loftq_utils import loftq_init
-
+    def loftq_init(self, adapter_name, config: LoraConfig):
         weight = self.get_base_layer().weight
         kwargs = {
-            "num_bits": self.kwargs.get("loftq_bits", 4),
+            "num_bits": config.loftq_config["loftq_bits"],
             "reduced_rank": self.r[adapter_name],
-            "num_iter": self.kwargs.get("loftq_iter", 1),
+            "num_iter": config.loftq_config["loftq_iter"],
         }
 
         qweight, lora_A, lora_B = loftq_init(weight, **kwargs)
@@ -2188,19 +2187,14 @@ def dispatch_default(
     if parameter_name is not None:
         new_module = ParamWrapper(target, adapter_name, parameter_name=parameter_name, config=config, **kwargs)
     elif isinstance(target_base_layer, torch.nn.Embedding):
-        kwargs.update(config.loftq_config)
         new_module = Embedding(target, adapter_name, config=config, **kwargs)
     elif isinstance(target_base_layer, torch.nn.Conv2d):
-        kwargs.update(config.loftq_config)
         new_module = Conv2d(target, adapter_name, config=config, **kwargs)
     elif isinstance(target_base_layer, torch.nn.Conv3d):
-        kwargs.update(config.loftq_config)
         new_module = Conv3d(target, adapter_name, config=config, **kwargs)
     elif isinstance(target_base_layer, nn.Conv1d):
-        kwargs.update(config.loftq_config)
         new_module = Conv1d(target, adapter_name, config=config, **kwargs)
     elif isinstance(target_base_layer, torch.nn.MultiheadAttention):
-        kwargs.update(config.loftq_config)
         new_module = MultiheadAttention(target, adapter_name, config=config, **kwargs)
     elif isinstance(target_base_layer, torch.nn.Linear):
         if config.fan_in_fan_out:
@@ -2209,7 +2203,6 @@ def dispatch_default(
                 "Setting fan_in_fan_out to False."
             )
             config.fan_in_fan_out = False
-        kwargs.update(config.loftq_config)
         new_module = Linear(target, adapter_name, config=config, **kwargs)
     elif isinstance(target_base_layer, Conv1D):
         if not config.fan_in_fan_out:
@@ -2217,7 +2210,6 @@ def dispatch_default(
                 "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
             )
             config.fan_in_fan_out = True
-        kwargs.update(config.loftq_config)
         new_module = Linear(target, adapter_name, is_target_conv_1d_layer=True, config=config, **kwargs)
 
     return new_module
