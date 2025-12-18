@@ -29,6 +29,7 @@ from .loha import LoHaConfig, LoHaModel
 from .lokr import LoKrConfig, LoKrModel
 from .lora import (
     ArrowConfig,
+    BdLoraConfig,
     EvaConfig,
     LoftQConfig,
     LoraConfig,
@@ -65,6 +66,7 @@ __all__ = [
     "ArrowConfig",
     "BOFTConfig",
     "BOFTModel",
+    "BdLoraConfig",
     "BoneConfig",
     "BoneModel",
     "C3AConfig",
