@@ -108,6 +108,8 @@ class LoHaModel(LycorisTuner):
         kwargs = config.to_dict()
         kwargs["r"] = config.rank_pattern.get(r_key, config.r)
         kwargs["alpha"] = config.alpha_pattern.get(alpha_key, config.alpha)
+        # Pass r2 if specified in config (r is always passed, r2 defaults to r if not specified)
+        kwargs["r2"] = getattr(config, "r2", None)
 
         if isinstance(target, LoHaLayer):
             target.update_layer(adapter_name, **kwargs)
