@@ -27,9 +27,9 @@ class LilyConfig(PeftConfig):
 
     Args:
         r (`int`): Lily's rank
-        num_A (`int`): Lily's number of experts (ne) for hps
-        num_B (`int`): Lily's number of experts (ne) for hps
-        target_modules (`Union[List[str],str]`): The names of the modules to apply Lora to.
+        num_A (`int`): Lily's number of As
+        num_B (`int`): Lily's number of experts (ne) of Bs
+        target_modules (`Union[List[str],str]`): The names of the modules to apply Lily to.
         lily_scaling (`float`): The scaling factor for lily.
         lily_dropout (`float`): The dropout probability for Lily layers.
         modules_to_save (`List[str]`):List of modules apart from Lily layers to be set as trainable
@@ -41,12 +41,6 @@ class LilyConfig(PeftConfig):
     lily_scaling: int = field(default=1.0, metadata={"help": "scaling factor for lily"})
     num_A: int = field(default=4, metadata={"help": "Lily's number of adapter A"})
     num_B: int = field(default=4, metadata={"help": "Lily's number of adapter B"})
-    decouple_A: bool = field(
-        default=False,
-        metadata={
-            "help": "Whether to decouple the adapter A from the layer. Default to False."
-        },
-    )
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={

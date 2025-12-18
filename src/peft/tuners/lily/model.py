@@ -280,7 +280,7 @@ class LilyModel(BaseTuner):
 
         return counter
         
-    def inject_adapter(self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
+    def inject_adapter(self, model: nn.Module, adapter_name: str, low_cpu_mem_usage: bool = False) -> None:
         """
         Override BaseTuner to allow custom deployment of adapters for Lily.
         """
