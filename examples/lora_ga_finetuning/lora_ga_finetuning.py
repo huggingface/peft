@@ -17,12 +17,14 @@ import os
 
 import torch
 from datasets import load_dataset
+from torch.utils.data import DataLoader
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     DataCollatorForLanguageModeling,
     Trainer,
     TrainingArguments,
+    default_data_collator,
 )
 
 from peft import LoraConfig, get_peft_model
@@ -163,9 +165,6 @@ def main():
     train_dataset = tokenized_datasets["train"]
 
     # Create a simple DataLoader for gradient estimation
-    from torch.utils.data import DataLoader
-    from transformers import default_data_collator
-
     grad_dataloader = DataLoader(
         train_dataset,
         batch_size=args.grad_estimate_batch_size,
