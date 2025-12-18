@@ -247,9 +247,9 @@ def convert_to_lora(
 
         lora_A, lora_B, effective_rank = convert_module_to_lora(module, rank=rank, adapter_name=adapter_name)
         if effective_rank == 0:
-            # This shouldn't really happen, as we ensure that the rank is greater than 0 (int) or, for tresholds
+            # This shouldn't really happen, as we ensure that the rank is greater than 0 (int) or, for thresholds
             # (float), at least one SV is included. But better be safe than sorry, as, in principle, it is fine to
-            # exclude some layers.
+            # exclude some layers. Also makes this more future proof.
             lora_config.exclude_modules.add(name.removeprefix(peft_prefix))
             continue
 
@@ -272,7 +272,7 @@ def convert_to_lora(
         # no layer was converted, which should not happen
         raise ValueError(
             "Did not convert a single layer, this means that something went wrong. Please open an issue: "
-            "Please open an issue: https://github.com/huggingface/peft/issues"
+            "https://github.com/huggingface/peft/issues"
         )
 
     ##################
