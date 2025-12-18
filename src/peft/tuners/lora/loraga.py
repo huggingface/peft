@@ -141,7 +141,7 @@ def estimate_gradients(
             "Please ensure your model contains at least one of these layer types in target_modules."
         )
 
-    # Initialize gradient storage for each target module
+    # Initialize gradient storage and count for each target module
     for name, module in target_module_list:
         module._peft_loraga_grad = torch.zeros_like(module.weight.data, dtype=module.weight.dtype)
         module._peft_loraga_grad_count = 0
@@ -157,29 +157,23 @@ def estimate_gradients(
     for name, module in target_module_list:
         module.weight.requires_grad = True
 
-    # Register forward hooks to count gradient computations
-    # Each forward pass corresponds to one gradient computation
+    # Register backward hooks to count gradient computations and accumulate gradients
     hooks = []
 
-    def create_forward_hook(module):
-        def forward_hook(m, input, output):
-            module._peft_loraga_grad_count += 1
-
-        return forward_hook
+    def backward_hook(module, grad_input, grad_output):
+        module._peft_loraga_grad_count += 1
+        # Accumulate gradient after each backward pass
+        # This handles cases where train_step calls zero_grad() between iterations
+        if module.weight.grad is not None:
+            module._peft_loraga_grad += module.weight.grad.detach().to(module._peft_loraga_grad.dtype)
 
     for name, module in target_module_list:
-        hook = module.register_forward_hook(create_forward_hook(module))
+        hook = module.register_full_backward_hook(backward_hook)
         hooks.append(hook)
 
     # Enable gradient computation and run train_step
     with torch.enable_grad():
         train_step()
-
-        # Accumulate gradients after all backward passes complete
-        for name, module in target_module_list:
-            if module.weight.grad is not None:
-                # Convert to same dtype as stored gradient
-                module._peft_loraga_grad += module.weight.grad.detach().to(module._peft_loraga_grad.dtype)
 
     # Remove hooks
     for hook in hooks:
@@ -193,7 +187,8 @@ def estimate_gradients(
     # Average gradients and clean up temporary fields
     for name, module in target_module_list:
         if module._peft_loraga_grad_count > 0:
-            module._peft_loraga_grad /= module._peft_loraga_grad_count
+            module._peft_loraga_grad = module._peft_loraga_grad / module._peft_loraga_grad_count
+        module.weight.grad = None
         del module._peft_loraga_grad_count
 
     # Restore original training state
