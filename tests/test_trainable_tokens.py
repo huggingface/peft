@@ -1206,6 +1206,7 @@ class TestTrainableTokens:
         This tests the scenario where a composite model has multiple sub-models, each with their own
         embed_tokens, and users need to target them independently with different token indices.
         """
+
         # Create a composite model with two BART sub-models
         class CompositeModel(torch.nn.Module):
             def __init__(self):
@@ -1291,6 +1292,7 @@ class TestTrainableTokens:
 
     def test_composite_model_short_name_matching(self):
         """Test that short names like 'embed_tokens' still work but match the input embedding."""
+
         class CompositeModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
