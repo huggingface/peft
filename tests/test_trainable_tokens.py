@@ -1203,8 +1203,8 @@ class TestTrainableTokens:
     def test_composite_model_multiple_embed_tokens_specific_targeting(self):
         """Test that users can specify full paths to disambiguate multiple embed_tokens layers.
 
-        This tests the scenario where a composite model has multiple sub-models, each with their own
-        embed_tokens, and users need to target them independently with different token indices.
+        This tests the scenario where a composite model has multiple sub-models, each with their own embed_tokens, and
+        users need to target them independently with different token indices.
         """
 
         # Create a composite model with two BART sub-models
@@ -1330,8 +1330,8 @@ class TestTrainableTokens:
     def test_targeting_both_embedding_and_tied_layer_explicitly(self, model_weight_tied):
         """Test that explicitly targeting both embedding and tied layers works correctly.
 
-        When target_modules includes both "embed_tokens" and "lm_head" (which are tied in the model),
-        both layers get wrapped and weight tying is properly applied between them.
+        When target_modules includes both "embed_tokens" and "lm_head" (which are tied in the model), both layers get
+        wrapped and weight tying is properly applied between them.
         """
         peft_config = TrainableTokensConfig(
             target_modules=["model.decoder.embed_tokens", "lm_head"],  # Explicitly target both
@@ -1356,8 +1356,8 @@ class TestTrainableTokens:
     def test_multiple_trainable_token_adapters_same_model(self, model_weight_tied):
         """Test adding multiple trainable token adapters to the same model with tied layers.
 
-        This verifies that adding multiple adapters to the same tied layers (embed_tokens and lm_head)
-        works correctly, with each adapter maintaining its own token indices while preserving weight tying.
+        This verifies that adding multiple adapters to the same tied layers (embed_tokens and lm_head) works correctly,
+        with each adapter maintaining its own token indices while preserving weight tying.
         """
         # Add first adapter with both embed_tokens and lm_head targeted
         peft_config1 = TrainableTokensConfig(
