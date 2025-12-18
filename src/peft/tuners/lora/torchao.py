@@ -32,7 +32,7 @@ class TorchaoLoraLinear(Linear):
     def __init__(self, *args, get_apply_tensor_subclass, **kwargs):
         # this is not strictly necessary, as kwargs are stored either way, but we want to error early if
         # get_apply_tensor_subclass is missing.
-        if kwargs.get("lora_bias", False):
+        if kwargs["config"].lora_bias:
             raise ValueError(f"{self.__class__.__name__} does not support lora_bias yet, set it to False")
 
         super().__init__(*args, **kwargs)
@@ -131,7 +131,7 @@ class TorchaoLoraLinear(Linear):
 def dispatch_torchao(
     target: torch.nn.Module,
     adapter_name: str,
-    lora_config: LoraConfig,
+    config: LoraConfig,
     **kwargs: Any,
 ) -> Optional[torch.nn.Module]:
     new_module = None
@@ -151,6 +151,6 @@ def dispatch_torchao(
     from torchao.quantization import LinearActivationQuantizedTensor
 
     if isinstance(target_base_layer.weight, (AffineQuantizedTensor, LinearActivationQuantizedTensor)):
-        new_module = TorchaoLoraLinear(target, adapter_name, **kwargs)
+        new_module = TorchaoLoraLinear(target, adapter_name, config=config, **kwargs)
 
     return new_module

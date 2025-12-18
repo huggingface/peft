@@ -19,6 +19,8 @@ from peft.import_utils import is_eetq_available
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 
+from .config import LoraConfig
+
 
 if is_eetq_available():
     from eetq import EetqLinear
@@ -28,16 +30,12 @@ if is_eetq_available():
             self,
             base_layer,
             adapter_name,
+            config: LoraConfig,
             r: int = 0,
             lora_alpha: int = 1,
-            lora_dropout: float = 0.0,
-            init_lora_weights: bool = True,
-            use_rslora: bool = False,
-            use_dora: bool = False,
-            lora_bias: bool = False,
             **kwargs,
         ):
-            if use_dora:
+            if config.use_dora:
                 raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
 
             super().__init__()
@@ -52,11 +50,7 @@ if is_eetq_available():
                 adapter_name,
                 r,
                 lora_alpha=lora_alpha,
-                lora_dropout=lora_dropout,
-                init_lora_weights=init_lora_weights,
-                use_rslora=use_rslora,
-                use_dora=use_dora,
-                lora_bias=lora_bias,
+                config=config,
             )
 
         def forward(self, x: torch.Tensor):
@@ -99,6 +93,7 @@ if is_eetq_available():
 def dispatch_eetq(
     target: torch.nn.Module,
     adapter_name: str,
+    config: LoraConfig,
     **kwargs: Any,
 ) -> Optional[torch.nn.Module]:
     new_module = None
@@ -109,7 +104,7 @@ def dispatch_eetq(
         target_base_layer = target
 
     if is_eetq_available() and isinstance(target_base_layer, EetqLinear):
-        new_module = EetqLoraLinear(target, adapter_name, **kwargs)
+        new_module = EetqLoraLinear(target, adapter_name, config=config, **kwargs)
         target.weight = target_base_layer.weight
 
         if hasattr(target, "bias"):

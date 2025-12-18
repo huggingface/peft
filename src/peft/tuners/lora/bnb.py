@@ -24,7 +24,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.integrations import dequantize_bnb_weight
 from peft.utils.other import transpose
 
-from .config import ArrowConfig
+from .config import LoraConfig
 from .layer import LoraLayer, LoraVariant
 
 
@@ -38,15 +38,9 @@ if is_bnb_available():
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
+            config: LoraConfig,
             r: int = 0,
             lora_alpha: int = 1,
-            lora_dropout: float = 0.0,
-            init_lora_weights: bool = True,
-            use_rslora: bool = False,
-            use_alora: bool = False,
-            use_dora: bool = False,
-            arrow_config: ArrowConfig = None,
-            lora_bias: bool = False,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -58,24 +52,17 @@ if is_bnb_available():
                 adapter_name,
                 r,
                 lora_alpha=lora_alpha,
-                lora_dropout=lora_dropout,
-                init_lora_weights=init_lora_weights,
-                use_rslora=use_rslora,
-                use_dora=use_dora,
-                use_alora=use_alora,
-                lora_bias=lora_bias,
-                arrow_config=arrow_config,
+                config=config,
             )
 
-        def resolve_lora_variant(
-            self, *, arrow_config: ArrowConfig, use_dora: bool, use_alora: bool, **kwargs
-        ) -> Optional[LoraVariant]:
-            if arrow_config is not None:
+        def resolve_lora_variant(self, *, config, **kwargs) -> Optional[LoraVariant]:
+            if config.arrow_config is not None:
                 from .variants import ArrowLinearVariant
 
                 return ArrowLinearVariant()
 
-            if not use_dora and not use_alora:
+            use_alora = config.alora_invocation_tokens is not None
+            if not config.use_dora and not use_alora:
                 return None
 
             from .variants import ALoraLinearVariant, DoraLinearVariant
@@ -296,7 +283,7 @@ if is_bnb_available():
             rep = super().__repr__()
             return "lora." + rep
 
-    def dispatch_bnb_8bit(target: torch.nn.Module, adapter_name: str, **kwargs):
+    def dispatch_bnb_8bit(target: torch.nn.Module, adapter_name: str, config: LoraConfig, **kwargs):
         new_module = None
 
         if isinstance(target, BaseTunerLayer):
@@ -314,7 +301,7 @@ if is_bnb_available():
                     "index": target.index,
                 }
             )
-            new_module = Linear8bitLt(target, adapter_name, **eightbit_kwargs)
+            new_module = Linear8bitLt(target, adapter_name, config=config, **eightbit_kwargs)
 
         return new_module
 
@@ -327,14 +314,9 @@ if is_bnb_4bit_available():
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
+            config: LoraConfig,
             r: int = 0,
             lora_alpha: int = 1,
-            lora_dropout: float = 0.0,
-            init_lora_weights: bool = True,
-            use_rslora: bool = False,
-            use_dora: bool = False,
-            arrow_config: ArrowConfig = None,
-            lora_bias: bool = False,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -346,23 +328,17 @@ if is_bnb_4bit_available():
                 adapter_name,
                 r,
                 lora_alpha=lora_alpha,
-                lora_dropout=lora_dropout,
-                init_lora_weights=init_lora_weights,
-                use_rslora=use_rslora,
-                use_dora=use_dora,
-                lora_bias=lora_bias,
-                arrow_config=arrow_config,
+                config=config,
             )
 
-        def resolve_lora_variant(
-            self, *, arrow_config: ArrowConfig, use_dora: bool, use_alora: bool, **kwargs
-        ) -> Optional[LoraVariant]:
-            if arrow_config is not None:
+        def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
+            if config.arrow_config is not None:
                 from .variants import ArrowLinearVariant
 
                 return ArrowLinearVariant()
 
-            if not use_dora and not use_alora:
+            use_alora = config.alora_invocation_tokens is not None
+            if not config.use_dora and not use_alora:
                 return None
 
             from .variants import ALoraLinearVariant, DoraLinearVariant
@@ -588,7 +564,7 @@ if is_bnb_4bit_available():
             rep = super().__repr__()
             return "lora." + rep
 
-    def dispatch_bnb_4bit(target: torch.nn.Module, adapter_name: str, **kwargs):
+    def dispatch_bnb_4bit(target: torch.nn.Module, adapter_name: str, config: LoraConfig, **kwargs):
         new_module = None
 
         if isinstance(target, BaseTunerLayer):
@@ -606,6 +582,6 @@ if is_bnb_4bit_available():
                     "quant_type": target_base_layer.weight.quant_type,
                 }
             )
-            new_module = Linear4bit(target, adapter_name, **fourbit_kwargs)
+            new_module = Linear4bit(target, adapter_name, config=config, **fourbit_kwargs)
 
         return new_module
