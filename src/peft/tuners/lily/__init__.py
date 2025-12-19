@@ -15,7 +15,7 @@
 from peft.utils import register_peft_method
 
 from .config import LilyConfig
-from .layer import Conv2d, Linear, LilyLayer
+from .layer import Linear, LilyLayer
 from .model import LilyModel
 
 
