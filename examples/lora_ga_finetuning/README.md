@@ -31,7 +31,6 @@ def train_step():
     for _ in range(64):  # 64 iterations
         batch = next(data_iter)
 
-        model.zero_grad()
         outputs = model(**batch)
         loss = outputs.loss
         loss.backward()
@@ -205,6 +204,73 @@ LoRA-GA follows the same pattern as PiSSA, OLoRA, and CorDA:
 4. **Training**: Train normally using Hugging Face Trainer or your own training loop
 5. **Saving**: Use standard `save_pretrained()` to save the trained adapter
 
+## Using LoRA-GA with Quantized Models
+
+LoRA-GA requires full-precision gradients during preprocessing. For quantized models (e.g., BitsAndBytes 4-bit/8-bit), use a two-stage workflow:
+
+### Step 1: Estimate gradients with full-precision model
+
+```python
+import torch
+from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+from peft import LoraConfig, get_peft_model
+from peft.tuners.lora import LoraGAConfig, preprocess_loraga
+
+# Load model in full precision for gradient estimation
+model = AutoModelForCausalLM.from_pretrained(
+    "meta-llama/Llama-2-7b-hf",
+    torch_dtype=torch.bfloat16,
+    device_map="auto"
+)
+
+# Configure LoRA-GA
+lora_config = LoraConfig(
+    r=8,
+    target_modules=["q_proj", "v_proj"],
+    init_lora_weights="lora_ga",
+    lora_ga_config=LoraGAConfig(direction="ArB2r", scale="stable"),
+)
+
+# Define your train_step (same as before)
+def train_step():
+    for _ in range(64):
+        # Your training logic here
+        outputs = model(**batch)
+        loss = outputs.loss
+        loss.backward()
+
+# Estimate and cache gradients
+preprocess_loraga(model, lora_config, train_step, cache_file="loraga_gradients.pt")
+
+# Clean up full-precision model
+del model
+torch.cuda.empty_cache()
+```
+
+### Step 2: Load quantized model and apply LoRA-GA
+
+```python
+# Load model with quantization
+quantization_config = BitsAndBytesConfig(load_in_4bit=True)
+model = AutoModelForCausalLM.from_pretrained(
+    "meta-llama/Llama-2-7b-hf",
+    quantization_config=quantization_config,
+    device_map="auto"
+)
+
+# Apply LoRA-GA - gradients will be loaded from cache automatically
+peft_model = get_peft_model(model, lora_config)
+
+# Train normally
+trainer.train()
+```
+
+**Key points:**
+- Gradient estimation must use a non-quantized model (full precision or bfloat16/float16)
+- Cache gradients with `cache_file` parameter to avoid re-computation
+- Cached gradients are automatically loaded when applying LoRA to the quantized model
+- This workflow allows memory-efficient training with quantized models while benefiting from LoRA-GA's faster convergence
+
 ## Tips
 
 - **Gradient Estimation**: 64-128 iterations is typically sufficient. More iterations provide more accurate estimation but increase initialization time.
@@ -214,6 +280,8 @@ LoRA-GA follows the same pattern as PiSSA, OLoRA, and CorDA:
 - **Direction and Scale**: The default `direction="ArB2r"` and `scale="stable"` work well in most cases.
 
 - **User-Defined Callback**: The `train_step` callback gives you full control over the gradient estimation process. You can customize batching, loss functions, and more.
+
+- **Gradient Accumulation**: Do NOT call `model.zero_grad()` or `optimizer.zero_grad()` inside your `train_step` callback. LoRA-GA relies on PyTorch's natural gradient accumulation across iterations.
 
 ## Citation
 
