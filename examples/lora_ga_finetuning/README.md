@@ -147,7 +147,7 @@ python lora_ga_finetuning.py \
     --grad_estimate_batch_size 2 \
     --num_epochs 3 \
     --batch_size 8 \
-    --learning_rate 3e-4
+    --learning_rate 3e-5
 ```
 
 ## Configuration Options
