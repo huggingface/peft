@@ -143,7 +143,6 @@ def estimate_gradients(
 
     # Initialize gradient storage and count for each target module
     for name, module in target_module_list:
-        module._peft_loraga_grad = torch.zeros_like(module.weight.data, dtype=module.weight.dtype)
         module._peft_loraga_grad_count = 0
 
     # Memory-efficient gradient computation: disable gradients for all parameters first,
@@ -157,15 +156,11 @@ def estimate_gradients(
     for name, module in target_module_list:
         module.weight.requires_grad = True
 
-    # Register backward hooks to count gradient computations and accumulate gradients
+    # Register backward hooks to count gradient computations
     hooks = []
 
     def backward_hook(module, grad_input, grad_output):
         module._peft_loraga_grad_count += 1
-        # Accumulate gradient after each backward pass
-        # This handles cases where train_step calls zero_grad() between iterations
-        if module.weight.grad is not None:
-            module._peft_loraga_grad += module.weight.grad.detach().to(module._peft_loraga_grad.dtype)
 
     for name, module in target_module_list:
         hook = module.register_full_backward_hook(backward_hook)
@@ -187,7 +182,7 @@ def estimate_gradients(
     # Average gradients and clean up temporary fields
     for name, module in target_module_list:
         if module._peft_loraga_grad_count > 0:
-            module._peft_loraga_grad = module._peft_loraga_grad / module._peft_loraga_grad_count
+            module._peft_loraga_grad = module.weight.grad.detach() / module._peft_loraga_grad_count
         module.weight.grad = None
         del module._peft_loraga_grad_count
 

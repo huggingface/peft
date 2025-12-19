@@ -92,7 +92,6 @@ def simple_train_step(simple_model):
             inputs = torch.randn(2, 10)
             outputs = simple_model(inputs)
             loss = outputs.sum()
-            simple_model.zero_grad()
             loss.backward()
 
     return train_step

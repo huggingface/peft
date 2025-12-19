@@ -188,7 +188,6 @@ def main():
             batch = {k: v.to(device) for k, v in batch.items()}
 
             # Forward pass
-            model.zero_grad()
             outputs = model(**batch)
             loss = outputs.loss
 
