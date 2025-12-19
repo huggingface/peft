@@ -227,7 +227,7 @@ class Linear(nn.Module, LilyLayer):
             router = self.lily_router[active_adapter]
             B = einops.rearrange(lily_B.weight, "(e i) o -> e i o", e=self.num_B)
             dropout = self.lily_dropout
-            scaling = self.lily_scaling
+            scaling = self.lily_scaling[active_adapter]
             x = x.to(lily_A.weight.dtype)
             hidden = lily_A(x)
             router_logits = router(hidden) # [B, N, num_of_experts]
