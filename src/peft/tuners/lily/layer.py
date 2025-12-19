@@ -224,12 +224,13 @@ class Linear(nn.Module, LilyLayer):
 
             lily_A = self.lily_A[active_adapter]
             lily_B = self.lily_B[active_adapter]
+            router = self.lily_router[active_adapter]
             B = einops.rearrange(lily_B.weight, "(e i) o -> e i o", e=self.num_B)
             dropout = self.lily_dropout
             scaling = self.lily_scaling
             x = x.to(lily_A.weight.dtype)
-            hidden = self.lily_A(x)
-            router_logits = self.lily_router(hidden) # [B, N, num_of_experts]
+            hidden = lily_A(x)
+            router_logits = router(hidden) # [B, N, num_of_experts]
             router_probability = F.softmax(router_logits, dim=-1) # [B, N, num_of_experts]
             expert_probabilities = router_probability.mean(dim=(0, 1)) 
             combined_B = torch.einsum("e,eio->io", expert_probabilities, B)
