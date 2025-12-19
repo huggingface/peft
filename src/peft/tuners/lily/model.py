@@ -280,7 +280,10 @@ class LilyModel(BaseTuner):
 
         return counter
         
-    def inject_adapter(self, model: nn.Module, adapter_name: str, low_cpu_mem_usage: bool = False) -> None:
+    def inject_adapter(self, model: nn.Module, adapter_name: str,
+        autocast_adapter_dtype: bool = True,
+        low_cpu_mem_usage: bool = False,
+        state_dict: Optional[dict[str, torch.Tensor]] = None) -> None:
         """
         Override BaseTuner to allow custom deployment of adapters for Lily.
         """
