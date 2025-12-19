@@ -213,8 +213,6 @@ class Linear(nn.Module, LilyLayer):
         return output_tensor
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-        self._check_forward_args(x, *args, **kwargs)
-
         result = self.base_layer(x, *args, **kwargs)
         torch_result_dtype = result.dtype
 
