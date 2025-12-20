@@ -1239,6 +1239,12 @@ class TestTrainableTokens:
                 # Add a config attribute for PEFT
                 self.config = config1
 
+                # Override sub-models' _tied_weights_keys to avoid conflicts
+                # BartModel uses list format, but we need dict format at the composite level
+                # Setting to None prevents PEFT from trying to use them
+                self.m1._tied_weights_keys = None
+                self.m2._tied_weights_keys = None
+
                 # Expose the tied weights from sub-models so PEFT can see them
                 # This defines which layers are tied within each sub-model
                 # The mapping exists regardless of tie_word_embeddings setting
