@@ -606,6 +606,11 @@ class TestDecoderModels(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_prefix_tuning_half_prec_conversion(self, model_id, config_cls, config_kwargs):
+        self._test_prefix_tuning_half_prec_conversion(model_id, config_cls, config_kwargs.copy())
+
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_training_decoders(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_training(model_id, config_cls, config_kwargs.copy())

@@ -1004,6 +1004,22 @@ class PeftCommonTester:
             # check if `generate` works
             _ = model.generate(input_ids=input_ids, attention_mask=attention_mask)
 
+    def _test_prefix_tuning_half_prec_conversion(self, model_id, config_cls, config_kwargs):
+        if config_cls not in (PrefixTuningConfig,):
+            pytest.skip(f"Test not applicable for {config_cls}")
+
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            model = get_peft_model(model, config)
+            model = model.half()
+
+            assert model.base_model_torch_dtype == torch.float16
+
     def _test_training(self, model_id, config_cls, config_kwargs):
         if (config_cls == AdaLoraConfig) and ("roberta" in model_id.lower()):
             # TODO: no gradients on the "dense" layer, other layers work, not sure why

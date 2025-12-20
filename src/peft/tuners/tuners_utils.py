@@ -58,10 +58,6 @@ from ..utils import _get_submodules
 from ._buffer_dict import BufferDict
 
 
-_torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
-_torch_supports_distributed = _torch_supports_dtensor and torch.distributed.is_available()
-
-
 @contextmanager
 def onload_layer(layer):
     r"""
@@ -161,7 +157,8 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     this function returns a valid result does not imply that the layer type is supported.
     """
     if isinstance(module, nn.Linear):
-        if _torch_supports_distributed and isinstance(module.weight, torch.distributed.tensor.DTensor):
+        torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
+        if torch_supports_dtensor and isinstance(module.weight, torch.distributed.tensor.DTensor):
             # If Tensor Parallel is used, the weight is sharded, so we need to get the local shape
             out_features, in_features = module.weight.to_local().shape
         else:
@@ -772,9 +769,7 @@ class BaseTuner(nn.Module, ABC):
         module_names: set[str] = set()
         if state_dict is not None:
             prefix = PEFT_TYPE_TO_PREFIX_MAPPING[peft_config.peft_type]
-            # Find the module name from the state_dict. Also defensively remove '_orig_mod.', which might be inserted if
-            # the model was torch.compiled beforehand
-            module_names = {k.rsplit("." + prefix, 1)[0].removeprefix("_orig_mod.") for k in state_dict}
+            module_names = {k.rsplit("." + prefix, 1)[0] for k in state_dict}
 
         for key, module in named_modules:
             if not key:
@@ -807,8 +802,6 @@ class BaseTuner(nn.Module, ABC):
                             peft_config, adapter_name, target, target_name, parent, current_key=key
                         )
             else:
-                # defensively remove _orig_mod prefix in case the model is compiled
-                key = key.removeprefix("_orig_mod.")
                 # use the state_dict to match modules instead
                 if key not in module_names:
                     unmatched_modules.append(key)
@@ -1479,44 +1472,24 @@ class BaseTunerLayer(ABC):
                 if key in adapter_names_set:
                     layer.requires_grad_(requires_grad)
 
-    def _get_base_layer_device_and_dtype(self, base_layer):
-        """
-        Helper function to determine the device and dtype of the base layer. If not possible to determine, return None.
-        """
-        device, dtype = None, None
-
-        # check weight and qweight (for GPTQ)
-        for weight_name in ("weight", "qweight"):
-            weight = getattr(base_layer, weight_name, None)
-            if weight is not None:
-                device = weight.device
-                dtype = weight.dtype
-                break
-
-        if hasattr(base_layer, "compute_dtype"):  # bnb Linear4bitLt
-            dtype = base_layer.compute_dtype
-
-        return device, dtype
-
     def _move_adapter_to_device_of_base_layer(self, adapter_name: str, device: Optional[torch.device] = None) -> None:
         """
-        Move the adapter of the given name to the device, and possibly dtype, of the base layer.
+        Move the adapter of the given name to the device of the base layer.
         """
-        base_layer = self.get_base_layer()
-        if isinstance(base_layer, nn.MultiheadAttention):
-            base_layer = base_layer.out_proj
-        base_layer_device, base_layer_dtype = self._get_base_layer_device_and_dtype(base_layer)
-
-        target_device = device if device is not None else base_layer_device
-        if target_device is None:
-            # could not determine device
-            return
-
-        target_dtype = None
-        if base_layer_dtype is not None:
-            # don't cast to int dtype
-            if base_layer_dtype.is_floating_point or base_layer_dtype.is_complex:
-                target_dtype = base_layer_dtype
+        if device is None:
+            base_layer = self.get_base_layer()
+            if isinstance(base_layer, nn.MultiheadAttention):
+                base_layer = base_layer.out_proj
+            # check weight and qweight (for GPTQ)
+            for weight_name in ("weight", "qweight"):
+                weight = getattr(base_layer, weight_name, None)
+                if weight is not None:
+                    device = weight.device
+                    dtype = weight.dtype
+                    break
+            else:
+                # no break encountered: could not determine the device
+                return
 
         meta = torch.device("meta")
 
@@ -1532,10 +1505,11 @@ class BaseTunerLayer(ABC):
             if any(p.device == meta for p in adapter_layer.parameters()):
                 continue
 
-            if target_dtype is not None:
-                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(target_device, dtype=target_dtype)
+            # TODO: weight is not necessarily defined here, leading to a NameError, fix that
+            if weight.dtype.is_floating_point or weight.dtype.is_complex:
+                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device, dtype=dtype)
             else:
-                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(target_device)
+                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device)
 
     @overload
     def _cast_input_dtype(self, x: None, dtype: torch.dtype) -> None: ...

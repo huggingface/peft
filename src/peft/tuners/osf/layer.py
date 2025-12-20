@@ -254,12 +254,7 @@ class Linear(nn.Module, OSFLayer):
             active_adapter = self.active_adapters[0] if self.active_adapters else None
             if active_adapter and active_adapter in self.osf_svd_params:
                 weight = self._reconstruct_weight(active_adapter)
-                orig_dtype = x.dtype  # assume that the intended dtype is that of the input
-                x = self._cast_input_dtype(x, weight.dtype)
-                if bias is not None:
-                    bias = bias.to(weight.dtype)
                 result = F.linear(x, weight, bias)
-                result = result.to(orig_dtype)
             else:
                 result = self.base_layer(x, *args, **kwargs)
 

@@ -118,6 +118,42 @@ class OSFModel(BaseTuner):
             if "osf_svd_params" not in n:
                 p.requires_grad = False
 
+    def _cast_adapter_dtype(self, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
+        """
+        Ensure all OSF adapter components have consistent dtype with the base model.
+
+        Instead of forcing float32, we match the base model's actual dtype for consistency.
+        """
+        if not autocast_adapter_dtype:
+            return
+
+        for module in self.model.modules():
+            if not hasattr(module, "osf_svd_params"):
+                continue
+
+            # Get target dtype from base layer weight
+            base_layer = getattr(module, "base_layer", None)
+            if base_layer is None or not hasattr(base_layer, "weight"):
+                continue
+
+            target_dtype = base_layer.weight.dtype
+
+            # Cast trainable low-rank parameters to match base model dtype
+            if adapter_name in module.osf_svd_params:
+                svd_params = module.osf_svd_params[adapter_name]
+                for param_name, param in svd_params.items():
+                    if param.dtype != target_dtype:
+                        param.data = param.data.to(target_dtype)
+
+            # Cast frozen high-rank buffers to match base model dtype
+            for buffer_dict_name in OSFLayer.other_param_names:
+                if hasattr(module, buffer_dict_name):
+                    buffer_dict = getattr(module, buffer_dict_name)
+                    if adapter_name in buffer_dict:
+                        buffer = buffer_dict[adapter_name]
+                        if buffer.dtype != target_dtype:
+                            buffer_dict[adapter_name] = buffer.to(target_dtype)
+
     # Use BaseTuner's merge and merge_and_unload implementations.
     # Explicitly disallow unmerging at the model level for OSF.
     def unmerge_adapter(self, *args, **kwargs):

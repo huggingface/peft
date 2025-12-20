@@ -343,6 +343,11 @@ class TestEncoderDecoderModels(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_prefix_tuning_half_prec_conversion(self, model_id, config_cls, config_kwargs):
+        self._test_prefix_tuning_half_prec_conversion(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_training_encoder_decoders(self, model_id, config_cls, config_kwargs):
         self._test_training(model_id, config_cls, config_kwargs)
 

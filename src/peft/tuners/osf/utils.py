@@ -101,7 +101,7 @@ def project_gradient_to_orthogonal_space(svd_dict: dict[str, Any]) -> None:
         # Use addmm_ for efficient in-place operation
         # Compute local contribution to (U_high^T @ dU); all-reduce to get global projection
         proj_coeff = torch.mm(local_U_high.transpose(0, 1), local_dU)
-        if dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1:
+        if dist.is_initialized() and dist.get_world_size() > 1:
             dist.all_reduce(proj_coeff, op=dist.ReduceOp.SUM)
         # Apply projection using only local rows of U_high
         local_dU.addmm_(local_U_high, proj_coeff, alpha=-1.0)
@@ -120,7 +120,7 @@ def project_gradient_to_orthogonal_space(svd_dict: dict[str, Any]) -> None:
         # Compute Gram matrix G = V_high^T @ V_high for global projection across row-sharded V_high
         # Assumes column dimension is consistent across ranks (row sharding over singular vectors)
         G_local = torch.mm(local_V_high.transpose(0, 1), local_V_high)
-        if dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1:
+        if dist.is_initialized() and dist.get_world_size() > 1:
             dist.all_reduce(G_local, op=dist.ReduceOp.SUM)
 
         # Apply projection: dV = dV - dV @ G (use local shard of dV)
