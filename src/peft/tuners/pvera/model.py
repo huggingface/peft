@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -33,36 +33,6 @@ from .._buffer_dict import BufferDict
 from ..tuners_utils import _maybe_include_all_linear_layers
 from .config import PVeRAConfig
 from .layer import Linear, PVeRALayer
-
-
-def _kaiming_init(
-    tensor_or_shape: Union[torch.Tensor, tuple[int, ...]],
-    generator: torch.Generator,
-) -> torch.Tensor:
-    """
-    Kaiming Uniform Initialisation adapted to accept a `torch.Generator` object for PRNG.
-
-    Args:
-        tensor_or_shape (`Union[torch.Tensor, tuple[int, ...]]`):
-            Tensor to initialise, or shape of new tensor to create and then initialise.
-        generator: (`torch.Generator`):
-            Generator object that manages the state of the PRNG algorithm in use.
-
-    Returns:
-        `torch.Tensor`: The initialised tensor.
-    """
-    if isinstance(tensor_or_shape, tuple):
-        tensor = torch.empty(tensor_or_shape)
-    else:
-        tensor = tensor_or_shape
-    fan = _calculate_correct_fan(tensor, "fan_in")
-    gain = math.sqrt(2)
-    std = gain / math.sqrt(fan)
-    bound = math.sqrt(3.0) * std
-
-    with torch.no_grad():
-        return tensor.uniform_(-bound, bound, generator=generator)
-
 
 class PVeRAModel(BaseTuner):
     """
@@ -144,8 +114,8 @@ class PVeRAModel(BaseTuner):
 
         # deterministic init of pvera_A and pvera_B if we know the key
         generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
-        pvera_A = _kaiming_init((config.r * 2, linear_in_dim), generator=generator)
-        pvera_B = _kaiming_init((linear_out_dim, config.r), generator=generator)
+        pvera_A = torch.nn.init.kaiming_uniform_(torch.empty(config.r * 2, linear_in_dim), generator=generator)
+        pvera_B = torch.nn.init.kaiming_uniform_(torch.empty(linear_out_dim, config.r), generator=generator)
 
         self.pvera_A[adapter_name] = pvera_A
         self.pvera_B[adapter_name] = pvera_B
@@ -173,7 +143,7 @@ class PVeRAModel(BaseTuner):
                     f"previous config had {existing_config.projection_prng_key}."
                 )
 
-        save_project_unique_values = sorted({config.save_projection for config in self.peft_config.values()})
+        save_project_unique_values = {config.save_projection for config in self.peft_config.values()}
         if len(save_project_unique_values) > 1:
             raise ValueError(
                 "PVeRA projection weights must be saved for all adapters or none, but got multiple different values: "

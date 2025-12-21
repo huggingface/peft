@@ -1,4 +1,4 @@
-<!--Copyright 2024 The HuggingFace Team. All rights reserved.
+<!--Copyright 2025 The HuggingFace Team. All rights reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
 the License. You may obtain a copy of the License at
@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # PVeRA: Probabilistic Vector-Based Random Matrix Adaptation
 
-[PVeRA](https://www.arxiv.org/abs/2512.07703) is a parameter-efficient fine-tuning technique that is base on VeRA, in the family of the LoRA-based adapters. It keeps the very low parameter budget of VeRA, but increases the performance by learning a distribution of latent adaptations. This also enables models adapted with PVeRA to generate Monte Carlo confidence interval estimates, by sampling from the learned distribution at inference.
+[PVeRA](https://huggingface.co/papers/2512.07703) is a parameter-efficient fine-tuning technique that is base on VeRA, in the family of the LoRA-based adapters. It keeps the very low parameter budget of VeRA, but increases the performance by learning a distribution of latent adaptations. This also enables models adapted with PVeRA to generate Monte Carlo confidence interval estimates, by sampling from the learned distribution at inference.
 
 When saving the adapter parameters, it's possible to eschew storing the low rank matrices by setting `save_projection=False` on the `PVeRAConfig`. In that case, these matrices will be restored based on the fixed random seed from the `projection_prng_key` argument. This cuts down on the size of the checkpoint, but we cannot guarantee reproducibility on all devices and for all future versions of PyTorch. If you want to ensure reproducibility, set `save_projection=True` (which is the default).
 
