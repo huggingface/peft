@@ -247,6 +247,11 @@ class Linear(nn.Linear, PVeRALayer):
         sliced_B = pvera_B[: self.out_features, :].to(lambda_d.device)
         lambda_b = lambda_b.unsqueeze(-1)
         lambda_d = lambda_d.unsqueeze(-1)
+
+        # In PVeRA, the first half of the lambda_d and sliced_A vector corresponds to the mean (mu) and the second half to the log-variance (logvar). When merging, we can only do mean sampling, and therefore only need the first half
+        lambda_d = lambda_d[: lambda_d.size(0) // 2, :]
+        sliced_A = sliced_A[: sliced_A.size(0) // 2, :]
+
         output_tensor = transpose((lambda_b * sliced_B) @ (lambda_d * sliced_A), self.fan_in_fan_out)
 
         if cast_to_fp32:

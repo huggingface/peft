@@ -14,13 +14,10 @@
 
 from __future__ import annotations
 
-import math
 import warnings
-from typing import Union
 
 import torch
 import torch.nn as nn
-from torch.nn.init import _calculate_correct_fan
 from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
@@ -33,6 +30,7 @@ from .._buffer_dict import BufferDict
 from ..tuners_utils import _maybe_include_all_linear_layers
 from .config import PVeRAConfig
 from .layer import Linear, PVeRALayer
+
 
 class PVeRAModel(BaseTuner):
     """

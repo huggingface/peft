@@ -50,6 +50,7 @@ from peft import (
     OSFConfig,
     PeftModel,
     PeftWarning,
+    PVeRAConfig,
     RandLoraConfig,
     RoadConfig,
     ShiraConfig,
@@ -624,7 +625,26 @@ TEST_CASES = [
         VeraConfig,
         {"target_modules": ["conv1d"]},
     ),
-    #############
+    #########
+    # PVERA #
+    #########
+    ("Vanilla MLP 1 PVeRA", "MLP", PVeRAConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 PVeRA", "MLP", PVeRAConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 PVeRA", "MLP", PVeRAConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 PVeRA", "MLP", PVeRAConfig, {"target_modules": ["lin0", "lin1"]}),
+    (
+        "Vanilla MLP 5 PVeRA",
+        "MLP",
+        PVeRAConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"]},
+    ),
+    (
+        "Embedding + transformers Conv1D 1 PVeRA",
+        "EmbConv1D",
+        PVeRAConfig,
+        {"target_modules": ["conv1d"]},
+    ),
+    ############
     # FourierFT #
     #############
     # FourierFT is not initialized as an identity transform by default, hence set init_weights=True
@@ -1078,6 +1098,14 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         "VeRA Same",
         "vera",
         VeraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    # Note: PVeRA may present the same problem mentioned above for VeRA.
+    (
+        "PVeRA Same",
+        "pvera",
+        PVeRAConfig,
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin0"], "init_weights": False},
     ),
@@ -2113,6 +2141,8 @@ class TestPeftCustomModel(PeftCommonTester):
             lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high
         elif issubclass(config_cls, (VBLoRAConfig, RandLoraConfig, OSFConfig)):
             lr = 0.01  # otherwise we get nan
+        elif issubclass(config_cls, PVeRAConfig):  # needs very small lr to not get nan
+            lr = 1e-6
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -2177,6 +2207,8 @@ class TestPeftCustomModel(PeftCommonTester):
         if isinstance(config, TrainableTokensConfig):
             # TrainableTokens is only changing a small subset, so we need a higher lr to see the difference
             lr = 2.0
+        if isinstance(config, PVeRAConfig):
+            lr = 1e-4  # needs smaller lr to not get nan
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -3725,7 +3757,7 @@ class TestMultipleActiveAdapters:
         config_1 = config_cls(**config_kwargs_1)
         config_2 = config_cls(**config_kwargs_2)
 
-        peft_model = get_peft_model(model, config_1, adapter_name="adapter_1")
+        peft_model = get_peft_model(model, config_1, adapter_name="adapter_1").eval()
         peft_model.add_adapter("adapter_2", config_2)
 
         # set ["adapter_1", "adapter_2"]
@@ -5160,6 +5192,148 @@ class TestRequiresGrad:
             "base_model.model.lin1.vera_lambda_d.adapter1",
             "base_model.model.lin2.vera_lambda_b.adapter1",
             "base_model.model.lin2.vera_lambda_d.adapter1",
+        )
+
+    def test_requires_grad_pvera_different_targets(self):
+        # Test two different PVeRA adapters that target different modules. Most notably, ensure that pvera_A and pvera_B
+        # don't require grads.
+
+        # requires a model with at least 2 layers with the same shapes
+        class MLP2(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.relu = nn.ReLU()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+                self.lin1 = nn.Linear(20, 20, bias=bias)  # lin1 and lin2 have same shape
+                self.lin2 = nn.Linear(20, 20, bias=bias)
+                self.lin3 = nn.Linear(20, 2, bias=bias)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = X.float()
+                X = self.lin0(X)
+                X = self.relu(X)
+                X = self.lin1(X)
+                X = self.relu(X)
+                X = self.lin2(X)
+                X = self.relu(X)
+                X = self.lin3(X)
+                X = self.sm(X)
+                return X
+
+        config0 = PVeRAConfig(target_modules=["lin1"])
+        peft_model = get_peft_model(MLP2(), config0)
+
+        config1 = PVeRAConfig(target_modules=["lin2"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.pvera_lambda_b.default",
+            "base_model.model.lin1.pvera_lambda_d.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.pvera_lambda_b.default",
+            "base_model.model.lin1.pvera_lambda_d.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin2.pvera_lambda_b.adapter1",
+            "base_model.model.lin2.pvera_lambda_d.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin2.pvera_lambda_b.adapter1",
+            "base_model.model.lin2.pvera_lambda_d.adapter1",
+        )
+
+    def test_requires_grad_pvera_same_targets(self):
+        # Test two different PVeRA adapters that target the same module. Most notably, ensure that pvera_A and pvera_B
+        # don't require grads.
+
+        # requires a model with at least 2 layers with the same shapes
+        class MLP2(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.relu = nn.ReLU()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+                self.lin1 = nn.Linear(20, 20, bias=bias)  # lin1 and lin2 have same shape
+                self.lin2 = nn.Linear(20, 20, bias=bias)
+                self.lin3 = nn.Linear(20, 2, bias=bias)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = X.float()
+                X = self.lin0(X)
+                X = self.relu(X)
+                X = self.lin1(X)
+                X = self.relu(X)
+                X = self.lin2(X)
+                X = self.relu(X)
+                X = self.lin3(X)
+                X = self.sm(X)
+                return X
+
+        config0 = PVeRAConfig(target_modules=["lin1", "lin2"])
+        peft_model = get_peft_model(MLP2(), config0)
+
+        config1 = PVeRAConfig(target_modules=["lin1", "lin2"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.pvera_lambda_b.default",
+            "base_model.model.lin1.pvera_lambda_d.default",
+            "base_model.model.lin2.pvera_lambda_b.default",
+            "base_model.model.lin2.pvera_lambda_d.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.pvera_lambda_b.default",
+            "base_model.model.lin1.pvera_lambda_d.default",
+            "base_model.model.lin2.pvera_lambda_b.default",
+            "base_model.model.lin2.pvera_lambda_d.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.pvera_lambda_b.adapter1",
+            "base_model.model.lin1.pvera_lambda_d.adapter1",
+            "base_model.model.lin2.pvera_lambda_b.adapter1",
+            "base_model.model.lin2.pvera_lambda_d.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.pvera_lambda_b.adapter1",
+            "base_model.model.lin1.pvera_lambda_d.adapter1",
+            "base_model.model.lin2.pvera_lambda_b.adapter1",
+            "base_model.model.lin2.pvera_lambda_d.adapter1",
         )
 
     def test_requires_grad_randlora_different_targets(self):
