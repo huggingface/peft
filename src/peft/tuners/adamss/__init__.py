@@ -29,4 +29,10 @@ __all__ = [
 ]
 
 # Register AdaMSS as a PEFT method
-register_peft_method(name="adamss", config_cls=AdaMSSConfig, model_cls=AdaMSSModel, is_mixed_compatible=False)
+register_peft_method(
+    name="adamss",
+    config_cls=AdaMSSConfig,
+    model_cls=AdaMSSModel,
+    prefix="adamss_",
+    is_mixed_compatible=False
+)
