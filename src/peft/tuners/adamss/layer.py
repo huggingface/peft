@@ -248,6 +248,12 @@ class AdaMSSLayer(BaseTunerLayer):
         self.adamss_resW[adapter_name] = f"adamss_resW_{adapter_name}"
         self.adamss_newB[adapter_name] = f"adamss_newB_{adapter_name}"
 
+        # Calculate effective rank per subspace (r/K)
+        # Following paper: each subspace uses R_k = R/K columns from SVD decomposition
+        rank_per_subspace = r // num_subspaces
+        
+        print(f"      [INFO] Using rank_per_subspace = {rank_per_subspace} (r={r} / K={num_subspaces})")
+
         # Initialize trainable subspace parameters
         for i in range(self.KK[adapter_name]):
             indx_i = TrainSubsp_indx[0][i]
@@ -257,8 +263,9 @@ class AdaMSSLayer(BaseTunerLayer):
             actual_rank = min(len(seg_indices), subspace_rank)
 
             # Initialize A matrix with orthogonal initialization
+            # Use only rank_per_subspace columns (not all r columns)
             Q, _, _ = torch.svd_lowrank(
-                (newA[0, 0, seg_indices, :]).T,
+                (newA[0, 0, seg_indices, :rank_per_subspace]).T,  # ← Changed: only use r/K columns
                 q=actual_rank,
                 niter=2,
                 M=None
@@ -376,20 +383,35 @@ class Linear(nn.Module, AdaMSSLayer):
         x1 = F.linear(newx, resW)
 
         # Compute AdaMSS path
-        x2 = F.linear(newx, newB)
+        x2 = F.linear(newx, newB)  # Shape: (..., r)
 
-        # Stack A and B matrices using flat keys
-        stacked_A = torch.cat(
-            [self.adamss_A[f"{adapter_name}_A_{i}"] for i in range(self.KK[adapter_name])],
-            dim=0
-        )
-        stacked_B = torch.block_diag(
-            *[self.adamss_B[f"{adapter_name}_B_{i}"] for i in range(self.KK[adapter_name])]
-        )
-
-        # Apply A and B transformations
-        x5 = F.linear(x2, stacked_A)
-        x6 = F.linear(x5, stacked_B)
+        # Calculate rank per subspace from newB shape
+        # newB has shape (r, in_features+1), so r is the first dimension
+        r = newB.shape[0]
+        rank_per_subspace = r // self.KK[adapter_name]  # e.g., 100 // 10 = 10
+        
+        # Split x2 into subspace chunks: each subspace gets r/K columns
+        # x2 has shape (..., r), split into K chunks of size r/K each
+        x2_chunks = []
+        for i in range(self.KK[adapter_name]):
+            start_idx = i * rank_per_subspace
+            end_idx = start_idx + rank_per_subspace
+            x2_chunks.append(x2[..., start_idx:end_idx])  # Each chunk: (..., r/K)
+        
+        # Apply A and B transformations per subspace
+        x6_chunks = []
+        for i in range(self.KK[adapter_name]):
+            # Get A and B for this subspace
+            A_i = self.adamss_A[f"{adapter_name}_A_{i}"]  # Shape: (ri, r/K)
+            B_i = self.adamss_B[f"{adapter_name}_B_{i}"]  # Shape: (num_cols_i, ri)
+            
+            # Apply transformations: x2_chunk @ A^T @ B^T
+            x5_i = F.linear(x2_chunks[i], A_i)  # (..., r/K) @ (ri, r/K)^T -> (..., ri)
+            x6_i = F.linear(x5_i, B_i)  # (..., ri) @ (num_cols_i, ri)^T -> (..., num_cols_i)
+            x6_chunks.append(x6_i)
+        
+        # Concatenate results from all subspaces
+        x6 = torch.cat(x6_chunks, dim=-1)
 
         # Scatter to correct positions
         # Handle both 2D (batch, features) and 3D (batch, seq, features) inputs
