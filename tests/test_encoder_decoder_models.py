@@ -110,7 +110,7 @@ ALL_CONFIGS = [
             "task_type": "SEQ_2_SEQ_LM",
         },
     ),
-(
+    (
         HiraConfig,
         {
             "target_modules": None,

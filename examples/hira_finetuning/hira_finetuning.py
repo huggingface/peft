@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import os
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import transformers
@@ -37,7 +37,7 @@ def train(
     device_map: str = "auto",
     hira_r: int = 32,
     hira_dropout: float = 0.0,
-    hira_target_modules: Optional[List[str]] = None,
+    hira_target_modules: Optional[list[str]] = None,
     dtype: str = "float16",
     seed: Optional[int] = None,
     init_weights: bool = True,
@@ -146,9 +146,9 @@ def train(
 def generate_prompt(example):
     return f"""Below is an instruction that describes a task. Write a response that appropriately completes the request.
             ### Instruction:
-            {example['instruction']}
+            {example["instruction"]}
             ### Response:
-            {example['output']}"""
+            {example["output"]}"""
 
 
 if __name__ == "__main__":

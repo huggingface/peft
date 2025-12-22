@@ -43,5 +43,3 @@ def __getattr__(name):
         from .bnb import Linear4bit
 
         return Linear4bit
-
-
