@@ -38,15 +38,15 @@ peft_model.print_trainable_parameters()
 # trainable params: 4,718,592 || all params: 129,957,888 || trainable%: 3.6309
 ```
 
-## HiRAConfig
+## HiraConfig
 
-[[autodoc]] tuners.hira.config.HiRAConfig
+[[autodoc]] tuners.hira.config.HiraConfig
 
 ## Core Layers
 
-### HiRALayer
+### HiraLayer
 
-[[autodoc]] tuners.hira.layer.HiRALayer
+[[autodoc]] tuners.hira.layer.HiraLayer
 
 ### Linear Adapter
 
