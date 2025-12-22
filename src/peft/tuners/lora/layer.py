@@ -568,14 +568,19 @@ class LoraLayer(BaseTunerLayer):
             lora_A_weight = lora_A_weight / scaling_factor
             lora_B_weight = lora_B_weight / scaling_factor
 
+        # Convert to target dtype first to ensure weight offset matches adapter precision
+        lora_A_weight = lora_A_weight.to(dtype)
+        lora_B_weight = lora_B_weight.to(dtype)
+
         # Assign LoRA weights
         # lora_A should be (r, in_features), lora_B should be (out_features, r)
-        self.lora_A[adapter_name].weight.data = lora_A_weight.contiguous().to(dtype)
-        self.lora_B[adapter_name].weight.data = lora_B_weight.contiguous().to(dtype)
+        self.lora_A[adapter_name].weight.data = lora_A_weight.contiguous()
+        self.lora_B[adapter_name].weight.data = lora_B_weight.contiguous()
 
         # Modify base weights: W_new = W_old - scaling * (B @ A)
+        # Important: compute offset in fp32 using dtype-converted weights to match forward pass precision
         weight_data = transpose(weight.data.to(torch.float32), self.fan_in_fan_out)
-        weight_offset = scaling_factor * (lora_B_weight @ lora_A_weight)
+        weight_offset = scaling_factor * (lora_B_weight.float() @ lora_A_weight.float())
         weight_data = weight_data - weight_offset
         weight_data = transpose(weight_data.to(dtype), self.fan_in_fan_out)
         self.get_base_layer().weight.data = weight_data
