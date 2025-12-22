@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import copy
+import platform
 import re
 
 import pytest
@@ -388,6 +389,40 @@ class TestInjectAdapterFromStateDict:
 
             # besides the warning, the rest of the injection should work
             sd_after = get_peft_model_state_dict(model)
+            assert len(sd_before) > 0
+            assert sd_before.keys() == sd_after.keys()
+            for key in sd_before.keys():
+                assert sd_before[key].shape == sd_after[key].shape
+
+    @pytest.mark.skipf(platform.system() != "Linux", reason="Run torch.compile tests only on Linux")
+    @pytest.mark.parametrize("compile_initial_model", [False, True])
+    def test_inject_from_state_dict_compiled_model(self, compile_initial_model):
+        # If we directly inject the adapter into the model from a `state_dict`, if the model is compiled, the
+        # keys would not match because they contain the `'_orig_mod.'` prefix from the compilation. See #2957.
+        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        config = LoraConfig()
+
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            if compile_initial_model:
+                # we want to test both cases: the initial model already being compiled and not
+                model = torch.compile(model)
+            model.add_adapter(config)
+            sd_before = get_peft_model_state_dict(model)
+            del model
+
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model = torch.compile(model)
+            model = inject_adapter_in_model(config, model, state_dict=sd_before)
+            sd_after = get_peft_model_state_dict(model)
+
+            if not compile_initial_model:
+                # if initial model was not compiled, remove the _orig_mod. prefix for loaded model for the comparison to
+                # work
+                sd_after = {k.removeprefix("_orig_mod."): v for k, v in sd_after.items()}
+
+            # We exepct the same keys and the same shapes of the weights. Don't check the values: injection is only
+            # about creating the PEFT adapter, not about loading the actual weights
             assert len(sd_before) > 0
             assert sd_before.keys() == sd_after.keys()
             for key in sd_before.keys():

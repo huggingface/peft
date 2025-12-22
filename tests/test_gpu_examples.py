@@ -5585,3 +5585,211 @@ class TestArrowQuantized:
 
         assert out is not None
         assert out.shape[0] == 1  # batch size 1
+
+
+@require_non_cpu
+@require_bitsandbytes
+class TestDtypeAutocastBnb:
+    """Ensure that the dtype of the PEFT weights have the expected value, even when using quantized base models.
+
+    The autocast argument should be honored.
+
+    """
+
+    model_id = "trl-internal-testing/tiny-Qwen2ForCausalLM-2.5"
+    # no need to check each possible peft type, a selection should be enough
+    peft_types_to_test = ["lora", "vera", "lora-target-param"]
+
+    def check_dtype(self, quant_config, autocast_adapter_dtype, base_dtype, expected_dtype, peft_type, tmp_path=None):
+        """helper function that creates the PEFT model and checks that the dtype of the PEFT adapter is as expected.
+
+        Checks:
+        - get_peft_model
+        - add_adapter
+        - PeftModel.from_pretrained
+        - load_adapter
+        """
+        if peft_type == "lora":
+            peft_config = LoraConfig()
+        elif peft_type == "vera":
+            peft_config = VeraConfig()
+        elif peft_type == "lora-target-param":
+            peft_config = LoraConfig(target_modules=[], target_parameters=["q_proj.weight", "v_proj.weight"])
+        else:
+            raise ValueError("Argument must be one of 'lora' or 'vera'")
+
+        with hub_online_once(self.model_id):
+            model = AutoModelForCausalLM.from_pretrained(
+                self.model_id,
+                quantization_config=quant_config,
+                dtype=base_dtype,
+                device_map="auto",
+            )
+            model = get_peft_model(model, peft_config, autocast_adapter_dtype=autocast_adapter_dtype)
+            if peft_type != "lora-target-param":
+                # target_parameters does not allow multiple adapters on the same parameter
+                model.add_adapter("other", peft_config, autocast_adapter_dtype=autocast_adapter_dtype)
+            peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
+            assert all(p.dtype == expected_dtype for p in peft_params)
+
+            model.save_pretrained(tmp_path)
+            del model
+
+            model = AutoModelForCausalLM.from_pretrained(
+                self.model_id,
+                quantization_config=quant_config,
+                dtype=base_dtype,
+                device_map="auto",
+            )
+            model = PeftModel.from_pretrained(model, tmp_path, autocast_adapter_dtype=autocast_adapter_dtype)
+            if peft_type != "lora-target-param":
+                # target_parameters does not allow multiple adapters on the same parameter
+                model.load_adapter(
+                    tmp_path / "other", adapter_name="other", autocast_adapter_dtype=autocast_adapter_dtype
+                )
+            peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
+            assert all(p.dtype == expected_dtype for p in peft_params)
+
+    @pytest.mark.parametrize("peft_type", peft_types_to_test)
+    @pytest.mark.parametrize("base_dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_lora_no_quantization_dtype_no_autocast(self, base_dtype, peft_type, tmp_path):
+        # sanity check that without bnb, everything works as expected
+        quant_config = None
+        self.check_dtype(
+            quant_config,
+            autocast_adapter_dtype=False,
+            base_dtype=base_dtype,
+            expected_dtype=base_dtype,
+            peft_type=peft_type,
+            tmp_path=tmp_path,
+        )
+
+    @pytest.mark.parametrize("peft_type", peft_types_to_test)
+    @pytest.mark.parametrize("base_dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_lora_no_quantization_dtype_autocast(self, base_dtype, peft_type, tmp_path):
+        # sanity check that without bnb, everything works as expected
+        quant_config = None
+        self.check_dtype(
+            quant_config,
+            autocast_adapter_dtype=True,
+            base_dtype=base_dtype,
+            expected_dtype=torch.float32,
+            peft_type=peft_type,
+            tmp_path=tmp_path,
+        )
+
+    @pytest.mark.parametrize("peft_type", peft_types_to_test)
+    @pytest.mark.parametrize("base_dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_lora_4bit_bnb_dtype_no_autocast(self, base_dtype, peft_type, tmp_path):
+        # Ensure that the compute dtype of the 4bit weights is honored, see #2889
+        quant_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=base_dtype,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+        )
+        self.check_dtype(
+            quant_config,
+            autocast_adapter_dtype=False,
+            base_dtype=base_dtype,
+            expected_dtype=base_dtype,
+            peft_type=peft_type,
+            tmp_path=tmp_path,
+        )
+
+    @pytest.mark.parametrize("peft_type", peft_types_to_test)
+    @pytest.mark.parametrize("base_dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_lora_4bit_bnb_dtype_autocast(self, base_dtype, peft_type, tmp_path):
+        # With autocast, the adapter weights should always be in float32
+        quant_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=base_dtype,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+        )
+        self.check_dtype(
+            quant_config,
+            autocast_adapter_dtype=True,
+            base_dtype=base_dtype,
+            expected_dtype=torch.float32,
+            peft_type=peft_type,
+            tmp_path=tmp_path,
+        )
+
+    @pytest.mark.parametrize("peft_type", peft_types_to_test)
+    def test_lora_4bit_bnb_dtype_no_autocast_compute_dtype_diverges(self, peft_type, tmp_path):
+        # In this test, the compute dtype of the bnb weights and the dtype of the base model diverge. In this case the
+        # bnb dtype should 'win'.
+        quant_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+        )
+        self.check_dtype(
+            quant_config,
+            autocast_adapter_dtype=False,
+            base_dtype=torch.float16,
+            expected_dtype=torch.bfloat16,
+            peft_type=peft_type,
+            tmp_path=tmp_path,
+        )
+
+    @pytest.mark.parametrize("peft_type", peft_types_to_test)
+    @pytest.mark.parametrize("base_dtype", [torch.float16, torch.bfloat16])
+    @pytest.mark.xfail(reason="Currently, dtype casting with 8bit bnb does not work", strict=True)
+    def test_lora_8bit_bnb_dtype_no_autocast(self, base_dtype, peft_type, tmp_path):
+        # With 8bit bnb, the base layer carries no information about the intended dtype, thus we cannot cast to the same dtype
+        quant_config = BitsAndBytesConfig(load_in_8bit=True)
+        self.check_dtype(
+            quant_config,
+            autocast_adapter_dtype=False,
+            base_dtype=base_dtype,
+            expected_dtype=base_dtype,
+            peft_type=peft_type,
+            tmp_path=tmp_path,
+        )
+
+    @pytest.mark.parametrize("peft_type", peft_types_to_test)
+    def test_lora_8bit_bnb_dtype_no_autocast_float32(self, peft_type, tmp_path):
+        # for 8bit bnb with float32, everything works as expected
+        # TODO: once dtype != float32 works, merge this test with the one above
+        quant_config = BitsAndBytesConfig(load_in_8bit=True)
+        base_dtype = torch.float32
+        self.check_dtype(
+            quant_config,
+            autocast_adapter_dtype=False,
+            base_dtype=base_dtype,
+            expected_dtype=base_dtype,
+            peft_type=peft_type,
+            tmp_path=tmp_path,
+        )
+
+    @pytest.mark.parametrize("peft_type", peft_types_to_test)
+    @pytest.mark.parametrize("base_dtype", [torch.float16, torch.bfloat16])
+    def test_lora_8bit_bnb_dtype_autocast(self, base_dtype, peft_type, tmp_path):
+        # With 8bit bnb, the base layer carries no information about the intended dtype, thus we cannot cast to the same dtype
+        quant_config = BitsAndBytesConfig(load_in_8bit=True)
+        self.check_dtype(
+            quant_config,
+            autocast_adapter_dtype=True,
+            base_dtype=base_dtype,
+            expected_dtype=torch.float32,
+            peft_type=peft_type,
+            tmp_path=tmp_path,
+        )
+
+    @pytest.mark.parametrize("peft_type", peft_types_to_test)
+    def test_lora_8bit_bnb_dtype_autocast_float32(self, peft_type, tmp_path):
+        # for 8bit bnb with float32, everything works as expected
+        # TODO: once dtype != float32 works, merge this test with the one above
+        base_dtype = torch.float32
+        quant_config = BitsAndBytesConfig(load_in_8bit=True)
+        self.check_dtype(
+            quant_config,
+            autocast_adapter_dtype=True,
+            base_dtype=base_dtype,
+            expected_dtype=torch.float32,
+            peft_type=peft_type,
+            tmp_path=tmp_path,
+        )

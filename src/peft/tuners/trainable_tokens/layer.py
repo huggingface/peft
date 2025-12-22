@@ -90,7 +90,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         device = torch.device("cuda", torch.cuda.current_device())
 
         with gather_params_ctx([weight], modifier_rank=None):
-            if dist.get_rank() == src_rank:
+            if dist.is_available() and dist.is_initialized() and dist.get_rank() == src_rank:
                 token_weights = weight[rows].clone()
             else:
                 # build an empty tensor with correct shape/type/device
