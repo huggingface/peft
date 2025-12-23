@@ -49,6 +49,7 @@ class PeftType(str, enum.Enum):
     - OSF
     - DELORA
     - GRALORA
+    - ADAMSS
     """
 
     PROMPT_TUNING = "PROMPT_TUNING"
@@ -78,6 +79,7 @@ class PeftType(str, enum.Enum):
     TRAINABLE_TOKENS = "TRAINABLE_TOKENS"
     SHIRA = "SHIRA"
     C3A = "C3A"
+    ADAMSS = "ADAMSS"
     WAVEFT = "WAVEFT"
     OSF = "OSF"
     DELORA = "DELORA"
