@@ -135,10 +135,10 @@ class DistillationTrainer(Trainer):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--teacher_model", type=str, default="Qwen/Qwen2.5-0.5B-Instruct")
-    parser.add_argument("--student_model", type=str, default="Qwen/Qwen2.5-0.5B-Instruct")
+    parser.add_argument("--model", type=str, required=True, help="Model to use for both teacher and student")
     parser.add_argument("--distill_jsonl", type=str, required=True)
     parser.add_argument("--output_dir", type=str, required=True)
+    parser.add_argument("--document", type=str, required=True, help="Path to text file for KV cache initialization")
     parser.add_argument("--num_virtual_tokens", type=int, default=256)
     parser.add_argument("--num_frozen_tokens", type=int, default=1)
     parser.add_argument("--top_k", type=int, default=20)
@@ -146,7 +146,6 @@ def main():
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--max_steps", type=int, default=1000)
     parser.add_argument("--device", type=str, default="cuda", choices=["cpu", "mps", "cuda"])
-    parser.add_argument("--document", type=str, required=True, help="Path to text file for KV cache initialization")
     parser.add_argument(
         "--max_init_length", type=int, default=2048, help="Max tokens for text initialization (truncate long docs)"
     )
@@ -160,11 +159,12 @@ def main():
     model_dtype = torch.float16 if args.device in {"cuda", "mps"} else None
     device_map = args.device if args.device != "cpu" else None
 
-    tokenizer = AutoTokenizer.from_pretrained(args.student_model)
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    teacher = AutoModelForCausalLM.from_pretrained(args.teacher_model, dtype=model_dtype, device_map=device_map)
-    student_base = AutoModelForCausalLM.from_pretrained(args.student_model, dtype=model_dtype, device_map=device_map)
+
+    teacher = AutoModelForCausalLM.from_pretrained(args.model, dtype=model_dtype, device_map=device_map)
+    student_base = AutoModelForCausalLM.from_pretrained(args.model, dtype=model_dtype, device_map=device_map)
 
     peft_cfg = CartridgeConfig(
         task_type="CAUSAL_LM",

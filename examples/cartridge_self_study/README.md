@@ -20,15 +20,11 @@ pip install -r requirements.txt
 
 ## How it works
 
-1. **Synthesize**: Generate QA pairs where the teacher model has access to the full document context
-2. **Train**: The student model (with cartridge) learns to match teacher outputs without seeing the document
+1. **Synthesize**: Generate QA pairs where the model has access to the full document context
+2. **Train**: The student (with cartridge) learns to match teacher outputs; both use the same base model but:
+   - Teacher sees: document + question
+   - Student sees: question only + cartridge KV cache
 3. **Inference**: The trained cartridge provides compressed document knowledge as a KV cache prefix
-
-### Text initialization (required for RoPE models)
-
-For models using Rotary Position Embeddings (RoPE) like Qwen and Llama, the cartridge must be initialized
-from text. This runs the document through the model to get KV states with proper position encodings baked in.
-Training then refines these embeddings via distillation.
 
 ## Run
 
@@ -46,8 +42,7 @@ python synthesize.py \
 
 ```bash
 python train_distill.py \
-  --teacher_model Qwen/Qwen3-4B \
-  --student_model Qwen/Qwen3-4B \
+  --model Qwen/Qwen3-4B \
   --document /path/to/document.txt \
   --distill_jsonl distill.jsonl \
   --output_dir cartridge_adapter \
@@ -83,8 +78,7 @@ python arxiv_synthesize.py \
 
 # Train cartridge
 python arxiv_train.py \
-  --teacher_model Qwen/Qwen3-4B \
-  --student_model Qwen/Qwen3-4B \
+  --model Qwen/Qwen3-4B \
   --document /path/to/cartridges.tex \
   --distill_jsonl distill.jsonl \
   --output_dir cartridge_adapter \

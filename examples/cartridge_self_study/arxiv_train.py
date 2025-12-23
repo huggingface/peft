@@ -25,8 +25,8 @@ from peft.tuners.cartridge.utils import initialize_cartridge_from_text
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--teacher_model", type=str, default="Qwen/Qwen2.5-0.5B-Instruct")
-    parser.add_argument("--student_model", type=str, default="Qwen/Qwen2.5-0.5B-Instruct")
+    parser.add_argument("--model", type=str, required=True, help="Model to use for both teacher and student")
+    parser.add_argument("--document", type=str, required=True, help="Path to text file for KV cache initialization")
     parser.add_argument("--distill_jsonl", type=str, default="distill.jsonl")
     parser.add_argument("--output_dir", type=str, default="cartridge_adapter")
     parser.add_argument("--num_virtual_tokens", type=int, default=256)
@@ -36,15 +36,10 @@ def main():
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--max_steps", type=int, default=1000)
     parser.add_argument("--device", type=str, default="cuda", choices=["cpu", "mps", "cuda"])
-    parser.add_argument("--document", type=str, required=True, help="Path to text file for KV cache initialization")
     parser.add_argument(
         "--max_init_length", type=int, default=2048, help="Max tokens for text initialization (truncate long docs)"
     )
     args = parser.parse_args()
-
-    tokenizer = AutoTokenizer.from_pretrained(args.student_model)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
 
     if args.device == "mps" and not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
         raise ValueError("Requested device 'mps' but MPS is not available.")
@@ -54,8 +49,12 @@ def main():
     model_dtype = torch.float16 if args.device in {"cuda", "mps"} else None
     device_map = args.device if args.device != "cpu" else None
 
-    teacher = AutoModelForCausalLM.from_pretrained(args.teacher_model, dtype=model_dtype, device_map=device_map)
-    student_base = AutoModelForCausalLM.from_pretrained(args.student_model, dtype=model_dtype, device_map=device_map)
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    teacher = AutoModelForCausalLM.from_pretrained(args.model, dtype=model_dtype, device_map=device_map)
+    student_base = AutoModelForCausalLM.from_pretrained(args.model, dtype=model_dtype, device_map=device_map)
     student = get_peft_model(
         student_base,
         CartridgeConfig(
