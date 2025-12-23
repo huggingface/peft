@@ -13,9 +13,9 @@ pip install -r requirements.txt
 
 ## Files
 
-- `synthesize.py`: generates synthetic single-turn conversations about a corpus into a JSONL file using vLLM.
-- `train_distill.py`: trains a `CARTRIDGE` adapter to match a frozen teacher on that JSONL.
-- `arxiv_synthesize.py`: like `synthesize.py`, but defaults to the Cartridges paper LaTeX and uses seed prompts.
+- `synthesize.py`: generates synthetic QA pairs about a corpus using vLLM with prefix caching.
+- `train_distill.py`: trains a `CARTRIDGE` adapter via self-study distillation.
+- `arxiv_synthesize.py`: like `synthesize.py`, with defaults for the Cartridges paper LaTeX.
 - `arxiv_train.py`: like `train_distill.py`, with arxiv-specific defaults.
 
 ## How it works
@@ -35,8 +35,11 @@ python synthesize.py \
   --model Qwen/Qwen3-4B \
   --corpus_path /path/to/document.txt \
   --out_jsonl distill.jsonl \
-  --num_samples 1024
+  --num_samples 1024 \
+  --use_vllm
 ```
+
+With `--use_vllm`, the document is cached and reused across all samples via automatic prefix caching.
 
 ### 2. Train cartridge
 
@@ -74,7 +77,9 @@ Convenience wrappers for training on the Cartridges paper LaTeX:
 # Synthesize QA pairs (uses vLLM with prefix caching)
 python arxiv_synthesize.py \
   --model Qwen/Qwen3-4B \
-  --num_samples 1024
+  --corpus_path /path/to/cartridges.tex \
+  --num_samples 1024 \
+  --use_vllm
 
 # Train cartridge
 python arxiv_train.py \

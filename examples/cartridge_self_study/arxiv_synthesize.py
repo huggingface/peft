@@ -30,8 +30,6 @@ def main():
     parser.add_argument("--out_jsonl", type=str, default="distill.jsonl")
     parser.add_argument("--num_samples", type=int, default=256)
     parser.add_argument("--seed_prompts", type=str, default="structuring,summarization,question,use_cases,creative")
-    parser.add_argument("--min_tokens_per_chunk", type=int, default=512)
-    parser.add_argument("--max_tokens_per_chunk", type=int, default=1024)
     parser.add_argument("--max_new_tokens", type=int, default=256)
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--top_p", type=float, default=0.95)
@@ -84,8 +82,6 @@ def main():
         corpus_text=corpus_text,
         num_samples=args.num_samples,
         seed_prompt_types=[s.strip() for s in args.seed_prompts.split(",") if s.strip()],
-        min_tokens_per_chunk=args.min_tokens_per_chunk,
-        max_tokens_per_chunk=args.max_tokens_per_chunk,
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
         top_p=args.top_p,

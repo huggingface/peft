@@ -14,32 +14,38 @@
 
 import argparse
 import json
-import math
 import random
 from pathlib import Path
 
 from transformers import AutoTokenizer
 
 
-DEFAULT_SEED_PROMPTS = {
-    "structuring": "Please outline the key sections and how the information is structured.",
-    "summarization": "Please summarize the most important points concisely.",
-    "question": "Ask a question about the document above that requires careful reading, then answer it.",
-    "use_cases": "List a few realistic use cases and provide one concrete example.",
-    "creative": "Write something creative that still uses the document facts (e.g., a short story or a poem).",
+SEED_PROMPTS = {
+    "structuring": (
+        "Generate a single instruction asking an LLM to structure information from the document above. "
+        "Be specific about what section or topic to structure. "
+        "Output only the instruction, nothing else."
+    ),
+    "summarization": (
+        "Generate a single instruction asking an LLM to summarize part of the document above. "
+        "Be explicit about which section to summarize. "
+        "Output only the instruction, nothing else."
+    ),
+    "question": (
+        "Generate a question that tests knowledge of the document above. "
+        "Include specific details (names, dates, numbers) so the question is unambiguous. "
+        "Output only the question, nothing else."
+    ),
+    "use_cases": (
+        "Think of a practical real-world task someone could accomplish using knowledge from the document. "
+        "Generate a single question or instruction reflecting that use case. "
+        "Output only the question/instruction, nothing else."
+    ),
+    "creative": (
+        "Generate a creative question inspired by the document above. "
+        "Output only the question, nothing else."
+    ),
 }
-
-
-def _chunk_token_ids(token_ids: list[int], *, min_tokens: int, max_tokens: int) -> list[list[int]]:
-    if min_tokens <= 0 or max_tokens <= 0 or min_tokens > max_tokens:
-        raise ValueError("Invalid chunk size bounds.")
-    if len(token_ids) == 0:
-        return []
-
-    chunk_size = max_tokens
-    num_chunks = math.ceil(len(token_ids) / chunk_size)
-    chunks = [token_ids[i * chunk_size : (i + 1) * chunk_size] for i in range(num_chunks)]
-    return [c for c in chunks if len(c) >= min_tokens]
 
 
 def synthesize_self_study_jsonl(
@@ -50,8 +56,6 @@ def synthesize_self_study_jsonl(
     corpus_text: str,
     num_samples: int,
     seed_prompt_types: list[str],
-    min_tokens_per_chunk: int,
-    max_tokens_per_chunk: int,
     max_new_tokens: int,
     temperature: float,
     top_p: float,
@@ -59,6 +63,9 @@ def synthesize_self_study_jsonl(
 ):
     """
     Synthesize self-study data for cartridge training.
+
+    Uses the full corpus as context for all samples, varying only the seed prompt.
+    With vLLM's prefix caching, the document KV cache is computed once and reused.
 
     If use_vllm=True, `model` should be a vllm.LLM instance.
     Otherwise, `model` should be a HuggingFace model.
@@ -68,32 +75,21 @@ def synthesize_self_study_jsonl(
         output_path.unlink()
 
     for t in seed_prompt_types:
-        if t not in DEFAULT_SEED_PROMPTS:
-            raise ValueError(f"Unknown seed prompt type '{t}', expected one of: {sorted(DEFAULT_SEED_PROMPTS)}")
+        if t not in SEED_PROMPTS:
+            raise ValueError(f"Unknown seed prompt type '{t}', expected one of: {sorted(SEED_PROMPTS)}")
 
-    corpus_token_ids = tokenizer(
-        corpus_text,
-        return_tensors=None,
-        add_special_tokens=False,
-        truncation=False,
-    )["input_ids"]
-    chunks = _chunk_token_ids(corpus_token_ids, min_tokens=min_tokens_per_chunk, max_tokens=max_tokens_per_chunk)
-    if not chunks:
-        raise ValueError("Corpus too small after chunking; try lowering `min_tokens_per_chunk`.")
-
-    # Pre-generate all (chunk_idx, prompt_idx) pairs
-    sample_pairs = [
-        (random.randint(0, len(chunks) - 1), random.randint(0, len(seed_prompt_types) - 1)) for _ in range(num_samples)
-    ]
+    # Pre-generate prompt indices (cycling through seed prompt types)
+    prompt_indices = [i % len(seed_prompt_types) for i in range(num_samples)]
+    random.shuffle(prompt_indices)
 
     if use_vllm:
         _synthesize_vllm(
             output_path=output_path,
             model=model,
             tokenizer=tokenizer,
-            chunks=chunks,
+            corpus_text=corpus_text,
             seed_prompt_types=seed_prompt_types,
-            sample_pairs=sample_pairs,
+            prompt_indices=prompt_indices,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             top_p=top_p,
@@ -103,9 +99,9 @@ def synthesize_self_study_jsonl(
             output_path=output_path,
             model=model,
             tokenizer=tokenizer,
-            chunks=chunks,
+            corpus_text=corpus_text,
             seed_prompt_types=seed_prompt_types,
-            sample_pairs=sample_pairs,
+            prompt_indices=prompt_indices,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             top_p=top_p,
@@ -117,76 +113,83 @@ def _synthesize_vllm(
     output_path: Path,
     model,
     tokenizer,
-    chunks: list[list[int]],
+    corpus_text: str,
     seed_prompt_types: list[str],
-    sample_pairs: list[tuple[int, int]],
+    prompt_indices: list[int],
     max_new_tokens: int,
     temperature: float,
     top_p: float,
 ):
-    """Synthesize using vLLM with prefix caching for efficient batch generation."""
+    """Synthesize using vLLM with prefix caching (two-stage like original cartridges).
+
+    Stage 1: Generate questions using meta-prompts (all share document prefix)
+    Stage 2: Generate answers to those questions (all share document prefix)
+    """
     from vllm import SamplingParams
 
-    # Build all teacher prompts (with document context in system message)
-    teacher_conversations = []
-    student_input_ids_list = []
+    # Stage 1: Generate questions
+    question_conversations = []
+    for prompt_idx in prompt_indices:
+        meta_prompt = SEED_PROMPTS[seed_prompt_types[prompt_idx]]
+        question_conversations.append([
+            {"role": "system", "content": corpus_text},
+            {"role": "user", "content": meta_prompt},
+        ])
 
-    for chunk_idx, prompt_idx in sample_pairs:
-        chunk_text = tokenizer.decode(chunks[chunk_idx], skip_special_tokens=True)
-        seed_prompt = DEFAULT_SEED_PROMPTS[seed_prompt_types[prompt_idx]]
-
-        # Teacher conversation has document in system message
-        teacher_conv = [
-            {"role": "system", "content": chunk_text},
-            {"role": "user", "content": seed_prompt},
-        ]
-        teacher_conversations.append(teacher_conv)
-
-        # Student prompt (no document context)
-        student_ids = tokenizer.apply_chat_template(
-            [{"role": "user", "content": seed_prompt}],
-            tokenize=True,
-            add_generation_prompt=True,
-        )
-        student_input_ids_list.append(student_ids)
-
-    # Configure sampling
-    sampling_params = SamplingParams(
-        max_tokens=max_new_tokens,
+    question_params = SamplingParams(
+        max_tokens=256,
         temperature=temperature if temperature > 0 else 0.0,
         top_p=top_p if temperature > 0 else 1.0,
     )
 
-    # Batch generate with vLLM (prefix caching happens automatically for shared prefixes)
-    outputs = model.chat(
-        messages=teacher_conversations,
-        sampling_params=sampling_params,
+    print("Stage 1: Generating questions...")
+    question_outputs = model.chat(
+        messages=question_conversations,
+        sampling_params=question_params,
+        use_tqdm=True,
+    )
+    questions = [out.outputs[0].text.strip() for out in question_outputs]
+
+    # Stage 2: Generate answers
+    answer_conversations = []
+    for question in questions:
+        answer_conversations.append([
+            {"role": "system", "content": corpus_text},
+            {"role": "user", "content": question},
+        ])
+
+    answer_params = SamplingParams(
+        max_tokens=max_new_tokens,
+        temperature=0.0,
+        top_p=1.0,
+    )
+
+    print("Stage 2: Generating answers...")
+    answer_outputs = model.chat(
+        messages=answer_conversations,
+        sampling_params=answer_params,
         use_tqdm=True,
     )
 
-    # Process outputs and write to file
-    for i, output in enumerate(outputs):
-        # Get the generated token ids
-        generated_ids = list(output.outputs[0].token_ids)
+    # Build training records
+    for i, (question, answer_out) in enumerate(zip(questions, answer_outputs)):
+        answer_ids = list(answer_out.outputs[0].token_ids)
 
-        # Teacher: prompt + generated
         teacher_prompt_ids = tokenizer.apply_chat_template(
-            teacher_conversations[i],
+            [{"role": "system", "content": corpus_text}, {"role": "user", "content": question}],
             tokenize=True,
             add_generation_prompt=True,
         )
-        teacher_gen = teacher_prompt_ids + generated_ids
-
-        # Student: prompt + same generated tokens
-        student_gen = student_input_ids_list[i] + generated_ids
-
-        teacher_ctx_len = len(teacher_prompt_ids)
-        student_ctx_len = len(student_input_ids_list[i])
+        student_prompt_ids = tokenizer.apply_chat_template(
+            [{"role": "user", "content": question}],
+            tokenize=True,
+            add_generation_prompt=True,
+        )
 
         record = {
-            "teacher_input_ids": teacher_gen,
-            "student_input_ids": student_gen,
-            "ctx_len": teacher_ctx_len - student_ctx_len,
+            "teacher_input_ids": teacher_prompt_ids + answer_ids,
+            "student_input_ids": student_prompt_ids + answer_ids,
+            "ctx_len": len(teacher_prompt_ids) - len(student_prompt_ids),
         }
         with output_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
@@ -197,63 +200,75 @@ def _synthesize_hf(
     output_path: Path,
     model,
     tokenizer,
-    chunks: list[list[int]],
+    corpus_text: str,
     seed_prompt_types: list[str],
-    sample_pairs: list[tuple[int, int]],
+    prompt_indices: list[int],
     max_new_tokens: int,
     temperature: float,
     top_p: float,
 ):
-    """Synthesize using HuggingFace transformers (slower, one sample at a time)."""
+    """Synthesize using HuggingFace transformers (two-stage, one sample at a time)."""
     import torch
+    from tqdm import tqdm
 
     device = getattr(model, "device", torch.device("cpu"))
     model.eval()
 
-    for chunk_idx, prompt_idx in sample_pairs:
-        chunk_text = tokenizer.decode(chunks[chunk_idx], skip_special_tokens=True)
-        seed_prompt = DEFAULT_SEED_PROMPTS[seed_prompt_types[prompt_idx]]
+    for prompt_idx in tqdm(prompt_indices, desc="Generating samples"):
+        meta_prompt = SEED_PROMPTS[seed_prompt_types[prompt_idx]]
 
-        teacher_input_ids = tokenizer.apply_chat_template(
-            [{"role": "system", "content": chunk_text}, {"role": "user", "content": seed_prompt}],
+        # Stage 1: Generate question
+        question_input = tokenizer.apply_chat_template(
+            [{"role": "system", "content": corpus_text}, {"role": "user", "content": meta_prompt}],
             tokenize=True,
             add_generation_prompt=True,
             return_tensors="pt",
         ).to(device)
 
-        student_input_ids = tokenizer.apply_chat_template(
-            [{"role": "user", "content": seed_prompt}],
-            tokenize=True,
-            add_generation_prompt=True,
-            return_tensors="pt",
-        ).to(device)
-
-        do_sample = temperature > 0
         gen_kwargs = {
-            "max_new_tokens": max_new_tokens,
-            "do_sample": do_sample,
-            "pad_token_id": getattr(tokenizer, "pad_token_id", None) or getattr(tokenizer, "eos_token_id", None),
+            "max_new_tokens": 256,
+            "do_sample": temperature > 0,
+            "pad_token_id": tokenizer.pad_token_id or tokenizer.eos_token_id,
         }
-        if do_sample:
+        if temperature > 0:
             gen_kwargs["temperature"] = max(temperature, 1e-5)
             gen_kwargs["top_p"] = top_p
 
         with torch.no_grad():
-            teacher_out = model.generate(teacher_input_ids, **gen_kwargs)
+            question_out = model.generate(question_input, **gen_kwargs)
 
-        teacher_prompt_len = int(teacher_input_ids.shape[1])
-        generated_tokens = teacher_out[0, teacher_prompt_len:].tolist()
+        question_tokens = question_out[0, question_input.shape[1]:].tolist()
+        question = tokenizer.decode(question_tokens, skip_special_tokens=True).strip()
 
-        teacher_gen = teacher_out[0].tolist()
-        student_gen = student_input_ids[0].tolist() + generated_tokens
+        # Stage 2: Generate answer
+        teacher_input = tokenizer.apply_chat_template(
+            [{"role": "system", "content": corpus_text}, {"role": "user", "content": question}],
+            tokenize=True,
+            add_generation_prompt=True,
+            return_tensors="pt",
+        ).to(device)
 
-        teacher_ctx_len = int(teacher_input_ids.shape[1])
-        student_ctx_len = int(student_input_ids.shape[1])
+        student_input = tokenizer.apply_chat_template(
+            [{"role": "user", "content": question}],
+            tokenize=True,
+            add_generation_prompt=True,
+            return_tensors="pt",
+        ).to(device)
+
+        with torch.no_grad():
+            answer_out = model.generate(
+                teacher_input,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+            )
+
+        answer_tokens = answer_out[0, teacher_input.shape[1]:].tolist()
 
         record = {
-            "teacher_input_ids": teacher_gen,
-            "student_input_ids": student_gen,
-            "ctx_len": teacher_ctx_len - student_ctx_len,
+            "teacher_input_ids": answer_out[0].tolist(),
+            "student_input_ids": student_input[0].tolist() + answer_tokens,
+            "ctx_len": int(teacher_input.shape[1]) - int(student_input.shape[1]),
         }
         with output_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
@@ -266,8 +281,6 @@ def main():
     parser.add_argument("--out_jsonl", type=str, required=True)
     parser.add_argument("--num_samples", type=int, default=1024)
     parser.add_argument("--seed_prompts", type=str, default="structuring,summarization,question,use_cases,creative")
-    parser.add_argument("--min_tokens_per_chunk", type=int, default=512)
-    parser.add_argument("--max_tokens_per_chunk", type=int, default=1024)
     parser.add_argument("--max_new_tokens", type=int, default=256)
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--top_p", type=float, default=0.95)
@@ -275,7 +288,7 @@ def main():
         "--max_corpus_tokens",
         type=int,
         default=None,
-        help="Optional cap on the number of tokens used from the corpus for chunking (useful for small-context models).",
+        help="Optional cap on the number of tokens used from the corpus.",
     )
     parser.add_argument(
         "--use_vllm",
@@ -325,8 +338,6 @@ def main():
         corpus_text=corpus_text,
         num_samples=args.num_samples,
         seed_prompt_types=[s.strip() for s in args.seed_prompts.split(",") if s.strip()],
-        min_tokens_per_chunk=args.min_tokens_per_chunk,
-        max_tokens_per_chunk=args.max_tokens_per_chunk,
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
         top_p=args.top_p,
