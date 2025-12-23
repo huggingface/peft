@@ -53,10 +53,9 @@ def main():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    teacher = AutoModelForCausalLM.from_pretrained(args.model, dtype=model_dtype, device_map=device_map)
-    student_base = AutoModelForCausalLM.from_pretrained(args.model, dtype=model_dtype, device_map=device_map)
-    student = get_peft_model(
-        student_base,
+    base_model = AutoModelForCausalLM.from_pretrained(args.model, dtype=model_dtype, device_map=device_map)
+    model = get_peft_model(
+        base_model,
         CartridgeConfig(
             task_type="CAUSAL_LM",
             num_virtual_tokens=args.num_virtual_tokens,
@@ -64,15 +63,13 @@ def main():
         ),
     )
 
-    # Initialize cartridge from text (like original cartridges implementation)
-    # This runs text through the model to get post-RoPE KV states
     print(f"Initializing cartridge from document: {args.document}", flush=True)
     document_text = Path(args.document).read_text()
     initialize_cartridge_from_text(
-        student,
+        model,
         tokenizer,
         text=document_text,
-        use_chat_template=False,  # Use raw text like original cartridges
+        use_chat_template=False,
         max_length=args.max_init_length,
     )
     print(f"Cartridge initialized with {args.num_virtual_tokens} tokens from text", flush=True)
@@ -94,15 +91,14 @@ def main():
     )
 
     trainer = DistillationTrainer(
-        model=student,
-        teacher_model=teacher,
+        model=model,
         top_k=args.top_k,
         args=train_args,
         train_dataset=ds,
         data_collator=collator,
     )
     trainer.train()
-    student.save_pretrained(args.output_dir)
+    model.save_pretrained(args.output_dir)
 
 
 if __name__ == "__main__":

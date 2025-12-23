@@ -65,9 +65,8 @@ class DistillationCollator:
 
 
 class DistillationTrainer(Trainer):
-    def __init__(self, *args, teacher_model, top_k: int = 20, teacher_temperature: float = 1.0, **kwargs):
+    def __init__(self, *args, top_k: int = 20, teacher_temperature: float = 1.0, **kwargs):
         super().__init__(*args, **kwargs)
-        self.teacher_model = teacher_model.eval()
         self.top_k = int(top_k)
         self.teacher_temperature = float(teacher_temperature)
 
@@ -78,17 +77,13 @@ class DistillationTrainer(Trainer):
         student_attention_mask = inputs["student_attention_mask"].to(model.device)
         ctx_len = inputs["ctx_len"].to(model.device)
 
-        # Ensure teacher is on the same device as the student tensors.
-        teacher_device = next(self.teacher_model.parameters()).device
-        if teacher_device != teacher_input_ids.device:
-            self.teacher_model.to(teacher_input_ids.device)
-
         with torch.no_grad():
-            teacher_out = self.teacher_model(
-                input_ids=teacher_input_ids,
-                attention_mask=teacher_attention_mask,
-                use_cache=False,
-            )
+            with model.disable_adapter():
+                teacher_out = model(
+                    input_ids=teacher_input_ids,
+                    attention_mask=teacher_attention_mask,
+                    use_cache=False,
+                )
             teacher_logits = teacher_out.logits / max(self.teacher_temperature, 1e-5)
 
         student_out = model(
@@ -163,22 +158,20 @@ def main():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    teacher = AutoModelForCausalLM.from_pretrained(args.model, dtype=model_dtype, device_map=device_map)
-    student_base = AutoModelForCausalLM.from_pretrained(args.model, dtype=model_dtype, device_map=device_map)
-
-    peft_cfg = CartridgeConfig(
-        task_type="CAUSAL_LM",
-        num_virtual_tokens=args.num_virtual_tokens,
-        num_frozen_tokens=args.num_frozen_tokens,
+    base_model = AutoModelForCausalLM.from_pretrained(args.model, dtype=model_dtype, device_map=device_map)
+    model = get_peft_model(
+        base_model,
+        CartridgeConfig(
+            task_type="CAUSAL_LM",
+            num_virtual_tokens=args.num_virtual_tokens,
+            num_frozen_tokens=args.num_frozen_tokens,
+        ),
     )
-    student = get_peft_model(student_base, peft_cfg)
 
-    # Initialize cartridge from text (required for RoPE-based models)
-    # This runs text through the model to get post-RoPE KV states
     print(f"Initializing cartridge from document: {args.document}", flush=True)
     document_text = Path(args.document).read_text()
     initialize_cartridge_from_text(
-        student,
+        model,
         tokenizer,
         text=document_text,
         use_chat_template=False,
@@ -203,15 +196,14 @@ def main():
     )
 
     trainer = DistillationTrainer(
-        model=student,
-        teacher_model=teacher,
+        model=model,
         top_k=args.top_k,
         args=train_args,
         train_dataset=ds,
         data_collator=collator,
     )
     trainer.train()
-    student.save_pretrained(args.output_dir)
+    model.save_pretrained(args.output_dir)
 
 
 if __name__ == "__main__":

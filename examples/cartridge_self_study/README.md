@@ -21,9 +21,9 @@ pip install -r requirements.txt
 ## How it works
 
 1. **Synthesize**: Generate QA pairs where the model has access to the full document context
-2. **Train**: The student (with cartridge) learns to match teacher outputs; both use the same base model but:
-   - Teacher sees: document + question
-   - Student sees: question only + cartridge KV cache
+2. **Train**: Distill knowledge from teacher to student using a single model in memory:
+   - Teacher (adapter disabled): document + question → logits
+   - Student (adapter enabled): question + cartridge KV cache → logits
 3. **Inference**: The trained cartridge provides compressed document knowledge as a KV cache prefix
 
 ## Run
