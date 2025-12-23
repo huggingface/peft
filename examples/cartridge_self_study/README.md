@@ -5,36 +5,88 @@ context-distillation objective (see the [Cartridges paper](https://huggingface.c
 
 PEFT intentionally keeps this training logic out of the core library; treat this as a starting point you can adapt.
 
+## Installation
+
+```bash
+pip install -r requirements.txt
+```
+
 ## Files
 
-- `synthesize.py`: generates synthetic single-turn conversations about a corpus into a JSONL file.
+- `synthesize.py`: generates synthetic single-turn conversations about a corpus into a JSONL file using vLLM.
 - `train_distill.py`: trains a `CARTRIDGE` adapter to match a frozen teacher on that JSONL.
-- `arxiv_synthesize.py`: like `synthesize.py`, but defaults the corpus to `examples/cartridge_self_study/data/cartridges.tex` and uses the Cartridges seed-prompt set.
-- `arxiv_train.py`: like `train_distill.py`, but defaults to training from `distill.jsonl` and writing the adapter to `cartridge_adapter/`.
+- `arxiv_synthesize.py`: like `synthesize.py`, but defaults to the Cartridges paper LaTeX and uses seed prompts.
+- `arxiv_train.py`: like `train_distill.py`, with arxiv-specific defaults.
+
+## How it works
+
+1. **Synthesize**: Generate QA pairs where the teacher model has access to the full document context
+2. **Train**: The student model (with cartridge) learns to match teacher outputs without seeing the document
+3. **Inference**: The trained cartridge provides compressed document knowledge as a KV cache prefix
+
+### Text initialization (required for RoPE models)
+
+For models using Rotary Position Embeddings (RoPE) like Qwen and Llama, the cartridge must be initialized
+from text. This runs the document through the model to get KV states with proper position encodings baked in.
+Training then refines these embeddings via distillation.
 
 ## Run
 
+### 1. Synthesize training data
+
 ```bash
-python examples/cartridge_self_study/synthesize.py \
-  --model Qwen/Qwen2.5-0.5B-Instruct \
-  --corpus_path path/to/corpus.txt \
+python synthesize.py \
+  --model Qwen/Qwen3-4B \
+  --corpus_path /path/to/document.txt \
   --out_jsonl distill.jsonl \
   --num_samples 1024
+```
 
-python examples/cartridge_self_study/train_distill.py \
-  --teacher_model Qwen/Qwen2.5-0.5B-Instruct \
-  --student_model Qwen/Qwen2.5-0.5B-Instruct \
+### 2. Train cartridge
+
+```bash
+python train_distill.py \
+  --teacher_model Qwen/Qwen3-4B \
+  --student_model Qwen/Qwen3-4B \
+  --document /path/to/document.txt \
   --distill_jsonl distill.jsonl \
   --output_dir cartridge_adapter \
   --num_virtual_tokens 256 \
-  --num_frozen_tokens 1
+  --num_frozen_tokens 1 \
+  --max_steps 500
 ```
 
-## arXiv wrappers
+### 3. Load and use cartridge
 
-These wrappers are convenience entrypoints for running the same pipeline on the included LaTeX corpus:
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import PeftModel
+
+model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-4B")
+model = PeftModel.from_pretrained(model, "cartridge_adapter")
+
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-4B")
+inputs = tokenizer("What is the document about?", return_tensors="pt")
+outputs = model.generate(**inputs, max_new_tokens=100)
+print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+```
+
+## arXiv example
+
+Convenience wrappers for training on the Cartridges paper LaTeX:
 
 ```bash
-python examples/cartridge_self_study/arxiv_synthesize.py
-python examples/cartridge_self_study/arxiv_train.py --max_steps 2
+# Synthesize QA pairs (uses vLLM with prefix caching)
+python arxiv_synthesize.py \
+  --model Qwen/Qwen3-4B \
+  --num_samples 1024
+
+# Train cartridge
+python arxiv_train.py \
+  --teacher_model Qwen/Qwen3-4B \
+  --student_model Qwen/Qwen3-4B \
+  --document /path/to/cartridges.tex \
+  --distill_jsonl distill.jsonl \
+  --output_dir cartridge_adapter \
+  --max_steps 500
 ```

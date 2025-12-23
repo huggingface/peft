@@ -22,6 +22,7 @@ from torch.utils.data import Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 
 from peft import CartridgeConfig, get_peft_model
+from peft.tuners.cartridge.utils import initialize_cartridge_from_text
 
 
 class DistillJsonlDataset(Dataset):
@@ -145,6 +146,10 @@ def main():
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--max_steps", type=int, default=1000)
     parser.add_argument("--device", type=str, default="cuda", choices=["cpu", "mps", "cuda"])
+    parser.add_argument("--document", type=str, required=True, help="Path to text file for KV cache initialization")
+    parser.add_argument(
+        "--max_init_length", type=int, default=2048, help="Max tokens for text initialization (truncate long docs)"
+    )
     args = parser.parse_args()
 
     if args.device == "mps" and not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
@@ -167,6 +172,20 @@ def main():
         num_frozen_tokens=args.num_frozen_tokens,
     )
     student = get_peft_model(student_base, peft_cfg)
+    student = student.to(device)  # Move to GPU before initialization!
+
+    # Initialize cartridge from text (required for RoPE-based models)
+    # This runs text through the model to get post-RoPE KV states
+    print(f"Initializing cartridge from document: {args.document}", flush=True)
+    document_text = Path(args.document).read_text()
+    initialize_cartridge_from_text(
+        student,
+        tokenizer,
+        text=document_text,
+        use_chat_template=False,
+        max_length=args.max_init_length,
+    )
+    print(f"Cartridge initialized with {args.num_virtual_tokens} tokens from text", flush=True)
 
     ds = DistillJsonlDataset(args.distill_jsonl)
     collator = DistillationCollator(tokenizer)

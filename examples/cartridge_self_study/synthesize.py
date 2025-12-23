@@ -15,10 +15,10 @@
 import argparse
 import json
 import math
+import random
 from pathlib import Path
 
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoTokenizer
 
 
 DEFAULT_SEED_PROMPTS = {
@@ -26,7 +26,6 @@ DEFAULT_SEED_PROMPTS = {
     "summarization": "Please summarize the most important points concisely.",
     "question": "Ask a question about the document above that requires careful reading, then answer it.",
     "use_cases": "List a few realistic use cases and provide one concrete example.",
-    "use_case": "List a few realistic use cases and provide one concrete example.",
     "creative": "Write something creative that still uses the document facts (e.g., a short story or a poem).",
 }
 
@@ -43,45 +42,6 @@ def _chunk_token_ids(token_ids: list[int], *, min_tokens: int, max_tokens: int) 
     return [c for c in chunks if len(c) >= min_tokens]
 
 
-def _apply_chat_template(tokenizer, messages: list[dict], *, add_generation_prompt: bool):
-    if not hasattr(tokenizer, "apply_chat_template"):
-        return None
-    try:
-        return tokenizer.apply_chat_template(
-            messages,
-            tokenize=True,
-            add_generation_prompt=add_generation_prompt,
-            return_tensors="pt",
-        )
-    except ValueError:
-        # Many non-chat tokenizers expose `apply_chat_template` but do not have a template set.
-        return None
-    except TypeError:
-        ids = tokenizer.apply_chat_template(messages, add_generation_prompt=add_generation_prompt)
-        return torch.tensor(ids, dtype=torch.long).unsqueeze(0)
-
-
-def _to_ids_and_mask(prompt) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Normalize chat-template outputs across Transformers versions.
-
-    `tokenizer.apply_chat_template(..., tokenize=True, return_tensors="pt")` has returned either:
-    - a plain `torch.Tensor` of `input_ids`, or
-    - a `BatchEncoding` containing `input_ids` (+ optionally `attention_mask`).
-    """
-    if isinstance(prompt, torch.Tensor):
-        input_ids = prompt
-        attention_mask = torch.ones_like(input_ids)
-        return input_ids, attention_mask
-
-    input_ids = prompt["input_ids"]
-    attention_mask = prompt.get("attention_mask", None)
-    if attention_mask is None:
-        attention_mask = torch.ones_like(input_ids)
-    return input_ids, attention_mask
-
-
-@torch.no_grad()
 def synthesize_self_study_jsonl(
     *,
     output_path: Path,
@@ -95,7 +55,14 @@ def synthesize_self_study_jsonl(
     max_new_tokens: int,
     temperature: float,
     top_p: float,
+    use_vllm: bool = False,
 ):
+    """
+    Synthesize self-study data for cartridge training.
+
+    If use_vllm=True, `model` should be a vllm.LLM instance.
+    Otherwise, `model` should be a HuggingFace model.
+    """
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if output_path.exists():
         output_path.unlink()
@@ -114,38 +81,152 @@ def synthesize_self_study_jsonl(
     if not chunks:
         raise ValueError("Corpus too small after chunking; try lowering `min_tokens_per_chunk`.")
 
-    device = getattr(model, "device", torch.device("cpu"))
-    model.eval()
+    # Pre-generate all (chunk_idx, prompt_idx) pairs
+    sample_pairs = [
+        (random.randint(0, len(chunks) - 1), random.randint(0, len(seed_prompt_types) - 1)) for _ in range(num_samples)
+    ]
 
-    rng = torch.Generator(device="cpu")
-    for _ in range(num_samples):
-        chunk_idx = int(torch.randint(low=0, high=len(chunks), size=(1,), generator=rng).item())
-        prompt_idx = int(torch.randint(low=0, high=len(seed_prompt_types), size=(1,), generator=rng).item())
+    if use_vllm:
+        _synthesize_vllm(
+            output_path=output_path,
+            model=model,
+            tokenizer=tokenizer,
+            chunks=chunks,
+            seed_prompt_types=seed_prompt_types,
+            sample_pairs=sample_pairs,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+        )
+    else:
+        _synthesize_hf(
+            output_path=output_path,
+            model=model,
+            tokenizer=tokenizer,
+            chunks=chunks,
+            seed_prompt_types=seed_prompt_types,
+            sample_pairs=sample_pairs,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+        )
 
+
+def _synthesize_vllm(
+    *,
+    output_path: Path,
+    model,
+    tokenizer,
+    chunks: list[list[int]],
+    seed_prompt_types: list[str],
+    sample_pairs: list[tuple[int, int]],
+    max_new_tokens: int,
+    temperature: float,
+    top_p: float,
+):
+    """Synthesize using vLLM with prefix caching for efficient batch generation."""
+    from vllm import SamplingParams
+
+    # Build all teacher prompts (with document context in system message)
+    teacher_conversations = []
+    student_input_ids_list = []
+
+    for chunk_idx, prompt_idx in sample_pairs:
         chunk_text = tokenizer.decode(chunks[chunk_idx], skip_special_tokens=True)
         seed_prompt = DEFAULT_SEED_PROMPTS[seed_prompt_types[prompt_idx]]
 
-        teacher_prompt = _apply_chat_template(
-            tokenizer,
-            [{"role": "system", "content": chunk_text}, {"role": "user", "content": seed_prompt}],
-            add_generation_prompt=True,
-        )
-        student_prompt = _apply_chat_template(
-            tokenizer,
-            [{"role": "user", "content": seed_prompt}],
-            add_generation_prompt=True,
-        )
-        if teacher_prompt is None or student_prompt is None:
-            ctx_ids = tokenizer(chunk_text, add_special_tokens=False)["input_ids"]
-            x_ids = tokenizer(seed_prompt, add_special_tokens=False)["input_ids"]
-            teacher_prompt = torch.tensor(ctx_ids + x_ids, dtype=torch.long).unsqueeze(0)
-            student_prompt = torch.tensor(x_ids, dtype=torch.long).unsqueeze(0)
+        # Teacher conversation has document in system message
+        teacher_conv = [
+            {"role": "system", "content": chunk_text},
+            {"role": "user", "content": seed_prompt},
+        ]
+        teacher_conversations.append(teacher_conv)
 
-        teacher_input_ids, teacher_attention_mask = _to_ids_and_mask(teacher_prompt)
-        student_input_ids, _ = _to_ids_and_mask(student_prompt)
-        teacher_input_ids = teacher_input_ids.to(device)
-        teacher_attention_mask = teacher_attention_mask.to(device)
-        student_input_ids = student_input_ids.to(device)
+        # Student prompt (no document context)
+        student_ids = tokenizer.apply_chat_template(
+            [{"role": "user", "content": seed_prompt}],
+            tokenize=True,
+            add_generation_prompt=True,
+        )
+        student_input_ids_list.append(student_ids)
+
+    # Configure sampling
+    sampling_params = SamplingParams(
+        max_tokens=max_new_tokens,
+        temperature=temperature if temperature > 0 else 0.0,
+        top_p=top_p if temperature > 0 else 1.0,
+    )
+
+    # Batch generate with vLLM (prefix caching happens automatically for shared prefixes)
+    outputs = model.chat(
+        messages=teacher_conversations,
+        sampling_params=sampling_params,
+        use_tqdm=True,
+    )
+
+    # Process outputs and write to file
+    for i, output in enumerate(outputs):
+        # Get the generated token ids
+        generated_ids = list(output.outputs[0].token_ids)
+
+        # Teacher: prompt + generated
+        teacher_prompt_ids = tokenizer.apply_chat_template(
+            teacher_conversations[i],
+            tokenize=True,
+            add_generation_prompt=True,
+        )
+        teacher_gen = teacher_prompt_ids + generated_ids
+
+        # Student: prompt + same generated tokens
+        student_gen = student_input_ids_list[i] + generated_ids
+
+        teacher_ctx_len = len(teacher_prompt_ids)
+        student_ctx_len = len(student_input_ids_list[i])
+
+        record = {
+            "teacher_input_ids": teacher_gen,
+            "student_input_ids": student_gen,
+            "ctx_len": teacher_ctx_len - student_ctx_len,
+        }
+        with output_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+
+
+def _synthesize_hf(
+    *,
+    output_path: Path,
+    model,
+    tokenizer,
+    chunks: list[list[int]],
+    seed_prompt_types: list[str],
+    sample_pairs: list[tuple[int, int]],
+    max_new_tokens: int,
+    temperature: float,
+    top_p: float,
+):
+    """Synthesize using HuggingFace transformers (slower, one sample at a time)."""
+    import torch
+
+    device = getattr(model, "device", torch.device("cpu"))
+    model.eval()
+
+    for chunk_idx, prompt_idx in sample_pairs:
+        chunk_text = tokenizer.decode(chunks[chunk_idx], skip_special_tokens=True)
+        seed_prompt = DEFAULT_SEED_PROMPTS[seed_prompt_types[prompt_idx]]
+
+        teacher_input_ids = tokenizer.apply_chat_template(
+            [{"role": "system", "content": chunk_text}, {"role": "user", "content": seed_prompt}],
+            tokenize=True,
+            add_generation_prompt=True,
+            return_tensors="pt",
+        ).to(device)
+
+        student_input_ids = tokenizer.apply_chat_template(
+            [{"role": "user", "content": seed_prompt}],
+            tokenize=True,
+            add_generation_prompt=True,
+            return_tensors="pt",
+        ).to(device)
 
         do_sample = temperature > 0
         gen_kwargs = {
@@ -157,19 +238,13 @@ def synthesize_self_study_jsonl(
             gen_kwargs["temperature"] = max(temperature, 1e-5)
             gen_kwargs["top_p"] = top_p
 
-        # Generate only with teacher (which has context) - this is the "ground truth" generation.
-        # The student will be trained to match this generation without seeing the context.
-        teacher_out = model.generate(teacher_input_ids, attention_mask=teacher_attention_mask, **gen_kwargs)
+        with torch.no_grad():
+            teacher_out = model.generate(teacher_input_ids, **gen_kwargs)
 
-        # Extract just the generated tokens (excluding the prompt)
         teacher_prompt_len = int(teacher_input_ids.shape[1])
         generated_tokens = teacher_out[0, teacher_prompt_len:].tolist()
 
-        # Build teacher sequence: full prompt + generated tokens
         teacher_gen = teacher_out[0].tolist()
-
-        # Build student sequence: student prompt + same generated tokens
-        # This ensures teacher and student have aligned generation portions
         student_gen = student_input_ids[0].tolist() + generated_tokens
 
         teacher_ctx_len = int(teacher_input_ids.shape[1])
@@ -202,13 +277,23 @@ def main():
         default=None,
         help="Optional cap on the number of tokens used from the corpus for chunking (useful for small-context models).",
     )
+    parser.add_argument(
+        "--use_vllm",
+        action="store_true",
+        help="Use vLLM for faster generation with automatic prefix caching.",
+    )
+    parser.add_argument(
+        "--tensor_parallel_size",
+        type=int,
+        default=1,
+        help="Tensor parallel size for vLLM (number of GPUs).",
+    )
     args = parser.parse_args()
 
     corpus_text = Path(args.corpus_path).read_text(encoding="utf-8")
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLM.from_pretrained(args.model)
 
     if args.max_corpus_tokens is not None:
         ids = tokenizer(
@@ -218,6 +303,20 @@ def main():
             max_length=args.max_corpus_tokens,
         )["input_ids"]
         corpus_text = tokenizer.decode(ids, skip_special_tokens=True)
+
+    if args.use_vllm:
+        from vllm import LLM
+
+        model = LLM(
+            model=args.model,
+            tensor_parallel_size=args.tensor_parallel_size,
+            enable_prefix_caching=True,
+        )
+    else:
+        import torch
+        from transformers import AutoModelForCausalLM
+
+        model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch.bfloat16, device_map="auto")
 
     synthesize_self_study_jsonl(
         output_path=Path(args.out_jsonl),
@@ -231,6 +330,7 @@ def main():
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
         top_p=args.top_p,
+        use_vllm=args.use_vllm,
     )
 
 
