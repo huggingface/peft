@@ -42,10 +42,12 @@ SEED_PROMPTS = {
         "Output only the question/instruction, nothing else."
     ),
     "creative": (
-        "Generate a creative question inspired by the document above. "
-        "Output only the question, nothing else."
+        "Generate a creative question inspired by the document above. Output only the question, nothing else."
     ),
 }
+
+# Chat template kwargs to disable thinking mode for models like Qwen3
+CHAT_TEMPLATE_KWARGS = {"enable_thinking": False}
 
 
 def synthesize_self_study_jsonl(
@@ -128,13 +130,13 @@ def _synthesize_vllm(
     from vllm import SamplingParams
 
     # Stage 1: Generate questions
-    question_conversations = []
-    for prompt_idx in prompt_indices:
-        meta_prompt = SEED_PROMPTS[seed_prompt_types[prompt_idx]]
-        question_conversations.append([
+    question_messages = [
+        [
             {"role": "system", "content": corpus_text},
-            {"role": "user", "content": meta_prompt},
-        ])
+            {"role": "user", "content": SEED_PROMPTS[seed_prompt_types[prompt_idx]]},
+        ]
+        for prompt_idx in prompt_indices
+    ]
 
     question_params = SamplingParams(
         max_tokens=256,
@@ -144,19 +146,21 @@ def _synthesize_vllm(
 
     print("Stage 1: Generating questions...")
     question_outputs = model.chat(
-        messages=question_conversations,
-        sampling_params=question_params,
+        question_messages,
+        question_params,
         use_tqdm=True,
+        chat_template_kwargs=CHAT_TEMPLATE_KWARGS,
     )
     questions = [out.outputs[0].text.strip() for out in question_outputs]
 
     # Stage 2: Generate answers
-    answer_conversations = []
-    for question in questions:
-        answer_conversations.append([
+    answer_messages = [
+        [
             {"role": "system", "content": corpus_text},
             {"role": "user", "content": question},
-        ])
+        ]
+        for question in questions
+    ]
 
     answer_params = SamplingParams(
         max_tokens=max_new_tokens,
@@ -166,24 +170,28 @@ def _synthesize_vllm(
 
     print("Stage 2: Generating answers...")
     answer_outputs = model.chat(
-        messages=answer_conversations,
-        sampling_params=answer_params,
+        answer_messages,
+        answer_params,
         use_tqdm=True,
+        chat_template_kwargs=CHAT_TEMPLATE_KWARGS,
     )
 
     # Build training records
     for i, (question, answer_out) in enumerate(zip(questions, answer_outputs)):
+        # Get the answer token IDs directly from vLLM output (avoids decode/re-encode mismatch)
         answer_ids = list(answer_out.outputs[0].token_ids)
 
         teacher_prompt_ids = tokenizer.apply_chat_template(
             [{"role": "system", "content": corpus_text}, {"role": "user", "content": question}],
             tokenize=True,
             add_generation_prompt=True,
+            **CHAT_TEMPLATE_KWARGS,
         )
         student_prompt_ids = tokenizer.apply_chat_template(
             [{"role": "user", "content": question}],
             tokenize=True,
             add_generation_prompt=True,
+            **CHAT_TEMPLATE_KWARGS,
         )
 
         record = {
@@ -223,6 +231,7 @@ def _synthesize_hf(
             tokenize=True,
             add_generation_prompt=True,
             return_tensors="pt",
+            **CHAT_TEMPLATE_KWARGS,
         ).to(device)
 
         gen_kwargs = {
@@ -237,7 +246,7 @@ def _synthesize_hf(
         with torch.no_grad():
             question_out = model.generate(question_input, **gen_kwargs)
 
-        question_tokens = question_out[0, question_input.shape[1]:].tolist()
+        question_tokens = question_out[0, question_input.shape[1] :].tolist()
         question = tokenizer.decode(question_tokens, skip_special_tokens=True).strip()
 
         # Stage 2: Generate answer
@@ -246,6 +255,7 @@ def _synthesize_hf(
             tokenize=True,
             add_generation_prompt=True,
             return_tensors="pt",
+            **CHAT_TEMPLATE_KWARGS,
         ).to(device)
 
         student_input = tokenizer.apply_chat_template(
@@ -253,6 +263,7 @@ def _synthesize_hf(
             tokenize=True,
             add_generation_prompt=True,
             return_tensors="pt",
+            **CHAT_TEMPLATE_KWARGS,
         ).to(device)
 
         with torch.no_grad():
@@ -263,7 +274,7 @@ def _synthesize_hf(
                 pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
             )
 
-        answer_tokens = answer_out[0, teacher_input.shape[1]:].tolist()
+        answer_tokens = answer_out[0, teacher_input.shape[1] :].tolist()
 
         record = {
             "teacher_input_ids": answer_out[0].tolist(),
