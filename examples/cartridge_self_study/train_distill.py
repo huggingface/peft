@@ -157,14 +157,14 @@ def main():
     if args.device == "cuda" and not torch.cuda.is_available():
         raise ValueError("Requested device 'cuda' but CUDA is not available.")
 
-    device = torch.device(args.device)
-    torch_dtype = torch.float16 if args.device in {"cuda", "mps"} else None
+    model_dtype = torch.float16 if args.device in {"cuda", "mps"} else None
+    device_map = args.device if args.device != "cpu" else None
 
     tokenizer = AutoTokenizer.from_pretrained(args.student_model)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    teacher = AutoModelForCausalLM.from_pretrained(args.teacher_model, torch_dtype=torch_dtype).to(device)
-    student_base = AutoModelForCausalLM.from_pretrained(args.student_model, torch_dtype=torch_dtype)
+    teacher = AutoModelForCausalLM.from_pretrained(args.teacher_model, dtype=model_dtype, device_map=device_map)
+    student_base = AutoModelForCausalLM.from_pretrained(args.student_model, dtype=model_dtype, device_map=device_map)
 
     peft_cfg = CartridgeConfig(
         task_type="CAUSAL_LM",
@@ -172,7 +172,6 @@ def main():
         num_frozen_tokens=args.num_frozen_tokens,
     )
     student = get_peft_model(student_base, peft_cfg)
-    student = student.to(device)  # Move to GPU before initialization!
 
     # Initialize cartridge from text (required for RoPE-based models)
     # This runs text through the model to get post-RoPE KV states

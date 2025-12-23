@@ -316,7 +316,7 @@ def main():
         import torch
         from transformers import AutoModelForCausalLM
 
-        model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch.bfloat16, device_map="auto")
+        model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.bfloat16, device_map="auto")
 
     synthesize_self_study_jsonl(
         output_path=Path(args.out_jsonl),
