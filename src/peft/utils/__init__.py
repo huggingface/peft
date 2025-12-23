@@ -12,7 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .integrations import is_transformers_ge_v5, map_cache_to_layer_device_map
+from .integrations import map_cache_to_layer_device_map
+from .intruder_dimensions import (
+    IntruderDetectionResult,
+    compute_reconstruction_error,
+    detect_intruder_dimensions,
+    mitigate_intruder_dimensions,
+    project_delta_to_lora,
+)
 from .loftq_utils import replace_lora_weights_loftq
 from .other import (
     CONFIG_NAME,
@@ -99,6 +106,7 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING",
     "WEIGHTS_NAME",
     "AuxiliaryTrainingWrapper",
+    "IntruderDetectionResult",
     "ModulesToSaveWrapper",
     "PeftType",
     "PeftWarning",
@@ -114,6 +122,8 @@ __all__ = [
     "_set_trainable",
     "bloom_model_postprocess_past_key_value",
     "cast_mixed_precision_params",
+    "compute_reconstruction_error",
+    "detect_intruder_dimensions",
     "get_auto_gptq_quant_linear",
     "get_gptqmodel_quant_linear",
     "get_peft_model_state_dict",
@@ -123,7 +133,9 @@ __all__ = [
     "is_transformers_ge_v5",
     "load_peft_weights",
     "map_cache_to_layer_device_map",
+    "mitigate_intruder_dimensions",
     "prepare_model_for_kbit_training",
+    "project_delta_to_lora",
     "register_peft_method",
     "replace_lora_weights_loftq",
     "set_additional_trainable_modules",
