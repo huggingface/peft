@@ -124,6 +124,28 @@ class AdaMSSConfig(PeftConfig):
     beta1: float = field(default=0.85, metadata={"help": "EMA coefficient for importance"})
     beta2: float = field(default=0.85, metadata={"help": "EMA coefficient for uncertainty"})
     tt: float = field(default=0.01, metadata={"help": "Temperature for importance scoring"})
+    # Dynamic rank selection parameters
+    use_dynamic_rank: bool = field(
+        default=True,
+        metadata={
+            "help": (
+                "Whether to use dynamic rank selection based on singular value threshold. "
+                "If True (default, matches adamss_pkg), adaptively determines rank per subspace using SVD threshold. "
+                "If False, uses fixed subspace_rank for all subspaces."
+            )
+        },
+    )
+    svd_threshold: float = field(
+        default=0.1,
+        metadata={
+            "help": (
+                "Singular value threshold ratio for dynamic rank selection. "
+                "Only used when use_dynamic_rank=True. "
+                "Rank is determined by counting singular values > threshold * largest_singular_value. "
+                "Default is 0.1 (10% of largest singular value)."
+            )
+        },
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.ADAMSS

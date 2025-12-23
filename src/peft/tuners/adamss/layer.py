@@ -192,6 +192,10 @@ class AdaMSSLayer(BaseTunerLayer):
         if adapter_name in self.adamss_A:
             # Adapter already exists, skip
             return
+        
+        # Extract dynamic rank configuration from kwargs
+        use_dynamic_rank = kwargs.get('use_dynamic_rank', False)
+        svd_threshold = kwargs.get('svd_threshold', 0.1)
 
         # Import here to avoid circular dependency
         from .utils import slicePCA, clustering_Z, seg_locations, get_trainable_subspaces_all
@@ -259,24 +263,70 @@ class AdaMSSLayer(BaseTunerLayer):
             indx_i = TrainSubsp_indx[0][i]
             seg_indices = seg_results[0][indx_i]
 
-            # Calculate actual rank for this subspace
-            actual_rank = min(len(seg_indices), subspace_rank)
+            # Extract subspace data: use ALL r columns from SVD (not just r/K)
+            # This matches adamss_pkg where A matrices have shape (rank_i, r)
+            subspace_data = newA[0, 0, seg_indices, :r]
+            # subspace_data shape: (len(seg_indices), r)
+            
+            # Determine actual rank based on configuration
+            if use_dynamic_rank:
+                # Dynamic rank selection using SVD threshold
+                # Compute Gram matrix Z = subspace_data @ subspace_data.T
+                Z_row = subspace_data @ subspace_data.T  # (len(seg_indices), len(seg_indices))
+                
+                # Compute SVD to get row space decomposition
+                U_row, S_row, V_row = torch.svd_lowrank(Z_row, q=min(Z_row.shape), niter=2)
+                
+                # Also compute column space Gram matrix for A initialization
+                Z_col = subspace_data.T @ subspace_data  # (r, r)
+                U_col, S_col, V_col = torch.svd_lowrank(Z_col, q=min(Z_col.shape), niter=2)
+                
+                # Dynamically determine actual rank using configurable threshold
+                # Following adamss_pkg: num_ii_jj = min((S > threshold * S[0]).sum().item(), args.adamss_ri)
+                threshold_mask = S_row > svd_threshold * S_row[0]
+                actual_rank = min(threshold_mask.sum().item(), subspace_rank, len(S_col))
+                
+                # Handle edge case: ensure at least rank 1
+                if actual_rank == 0:
+                    actual_rank = 1
+                
+                print(f"      [INFO] Subspace {i}: dynamic rank = {actual_rank} (threshold {svd_threshold} from {len(S_row)} row singular values)")
+                
+                # Initialize A matrix from column space SVD
+                A_init = U_col[:, :actual_rank].T.contiguous()
+                
+                # Initialize B matrix from row space SVD with singular value weighting
+                B_init = V_row[:, :actual_rank] @ torch.diag(S_row[:actual_rank])
+            else:
+                # Fixed rank: use subspace_rank directly (don't let seg_indices size constrain it)
+                actual_rank = subspace_rank
+                
+                print(f"      [INFO] Subspace {i}: fixed rank = {actual_rank} (seg_indices={len(seg_indices)}, rank_per_subspace={rank_per_subspace})")
+                
+                # Use orthogonal initialization for A matrix
+                # A matrix: (actual_rank, r) - using FULL r, not r/K
+                # QR gives orthogonal columns, so we generate (r, r) 
+                # and take the first actual_rank rows
+                if actual_rank <= r:
+                    # Generate orthogonal matrix and take first actual_rank rows
+                    Q, _ = torch.linalg.qr(torch.randn(r, r, dtype=dtype, device=device))
+                    A_init = Q[:actual_rank, :].contiguous()
+                else:
+                    # actual_rank > r: use random initialization
+                    A_init = torch.randn(actual_rank, r, dtype=dtype, device=device)
+                
+                # B matrix: (len(seg_indices), actual_rank) - subspace size
+                B_init = torch.zeros(len(seg_indices), actual_rank, dtype=dtype, device=device)
+            
+            # Register A and B parameters
+            # A maps from r (full SVD rank) dimensions to actual_rank dimensions
+            # Shape: (actual_rank, r) - matches adamss_pkg structure
+            self.adamss_A[f"{adapter_name}_A_{i}"] = nn.Parameter(A_init.to(dtype))
 
-            # Initialize A matrix with orthogonal initialization
-            # Use only rank_per_subspace columns (not all r columns)
-            Q, _, _ = torch.svd_lowrank(
-                (newA[0, 0, seg_indices, :rank_per_subspace]).T,  # ← Changed: only use r/K columns
-                q=actual_rank,
-                niter=2,
-                M=None
-            )
-            # Use flat key format: adapter_name_A_i (no dots allowed in parameter names)
-            # Call .contiguous() to ensure memory is contiguous for safetensors saving
-            self.adamss_A[f"{adapter_name}_A_{i}"] = nn.Parameter(Q.T.contiguous().to(dtype))
-
-            # Initialize B matrix with zeros
-            B_shape = (len(seg_indices), actual_rank)
-            self.adamss_B[f"{adapter_name}_B_{i}"] = nn.Parameter(torch.zeros(B_shape, dtype=dtype).contiguous())
+            # B maps from actual_rank dimensions back to len(seg_indices) dimensions
+            # PyTorch Linear expects weight shape: (out_features, in_features)
+            # So B should be: (len(seg_indices), actual_rank)
+            self.adamss_B[f"{adapter_name}_B_{i}"] = nn.Parameter(B_init.to(dtype))
 
         # Explicitly enable gradients for A and B parameters
         for i in range(self.KK[adapter_name]):
@@ -385,29 +435,23 @@ class Linear(nn.Module, AdaMSSLayer):
         # Compute AdaMSS path
         x2 = F.linear(newx, newB)  # Shape: (..., r)
 
-        # Calculate rank per subspace from newB shape
+        # Get r from newB shape
         # newB has shape (r, in_features+1), so r is the first dimension
         r = newB.shape[0]
-        rank_per_subspace = r // self.KK[adapter_name]  # e.g., 100 // 10 = 10
         
-        # Split x2 into subspace chunks: each subspace gets r/K columns
-        # x2 has shape (..., r), split into K chunks of size r/K each
-        x2_chunks = []
-        for i in range(self.KK[adapter_name]):
-            start_idx = i * rank_per_subspace
-            end_idx = start_idx + rank_per_subspace
-            x2_chunks.append(x2[..., start_idx:end_idx])  # Each chunk: (..., r/K)
+        # No splitting needed! Each A matrix takes the full x2 of dimension r
+        # This matches adamss_pkg where A matrices have shape (rank_i, r)
         
         # Apply A and B transformations per subspace
         x6_chunks = []
         for i in range(self.KK[adapter_name]):
             # Get A and B for this subspace
-            A_i = self.adamss_A[f"{adapter_name}_A_{i}"]  # Shape: (ri, r/K)
-            B_i = self.adamss_B[f"{adapter_name}_B_{i}"]  # Shape: (num_cols_i, ri)
+            A_i = self.adamss_A[f"{adapter_name}_A_{i}"]  # Shape: (ri, r) - takes FULL r
+            B_i = self.adamss_B[f"{adapter_name}_B_{i}"]  # Shape: (len(seg_indices_i), ri)
             
-            # Apply transformations: x2_chunk @ A^T @ B^T
-            x5_i = F.linear(x2_chunks[i], A_i)  # (..., r/K) @ (ri, r/K)^T -> (..., ri)
-            x6_i = F.linear(x5_i, B_i)  # (..., ri) @ (num_cols_i, ri)^T -> (..., num_cols_i)
+            # Apply transformations: x2 @ A^T @ B^T
+            x5_i = F.linear(x2, A_i)  # (..., r) @ (ri, r)^T -> (..., ri)
+            x6_i = F.linear(x5_i, B_i)  # (..., ri) @ (len(seg_indices_i), ri)^T -> (..., len(seg_indices_i))
             x6_chunks.append(x6_i)
         
         # Concatenate results from all subspaces

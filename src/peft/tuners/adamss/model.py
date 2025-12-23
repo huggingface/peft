@@ -141,6 +141,8 @@ class AdaMSSModel(BaseTuner):
                 subspace_rank=adamss_config.subspace_rank,
                 init_weights=adamss_config.init_weights,
                 use_asa=adamss_config.use_asa,
+                use_dynamic_rank=adamss_config.use_dynamic_rank,
+                svd_threshold=adamss_config.svd_threshold,
                 **kwargs,
             )
         else:
