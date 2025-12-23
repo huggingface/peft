@@ -222,6 +222,19 @@ def get_peft_model_state_dict(
                     to_return[f"{name}.shira_indices.{k}"] = (
                         v.to(torch.float32) if platform.system() == "Windows" else v
                     )
+    elif config.peft_type == PeftType.UNILORA:
+        theta_d_key = f"base_model.unilora_theta_d.{adapter_name}"
+        if theta_d_key not in state_dict:
+            raise KeyError(f"Expected UniLora parameter '{theta_d_key}' in the model state dict.")
+        to_return = {theta_d_key: state_dict[theta_d_key]}
+        if config.save_indices:
+            to_return.update(
+                {
+                    k: v
+                    for k, v in state_dict.items()
+                    if (("unilora_indices" in k or "unilora_scales" in k) and f".{adapter_name}" in k)
+                }
+            )
 
     elif config.peft_type == PeftType.VERA:
         vera_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
