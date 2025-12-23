@@ -127,6 +127,8 @@
         title: SHiRA
       - local: package_reference/tinylora
         title: TinyLoRA
+      - local: package_reference/unilora
+        title: UniLoRA
       - local: package_reference/vblora
         title: VB-LoRA
       - local: package_reference/vera
@@ -238,6 +240,8 @@
       title: SHiRA
     - local: package_reference/tinylora
       title: TinyLoRA
+    - local: package_reference/unilora
+      title: UniLoRA
     - local: package_reference/trainable_tokens
       title: Trainable Tokens
     - local: package_reference/vblora

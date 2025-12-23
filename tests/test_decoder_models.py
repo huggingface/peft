@@ -58,6 +58,7 @@ from peft import (
     ShiraConfig,
     TaskType,
     TinyLoraConfig,
+    UniLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -325,6 +326,14 @@ ALL_CONFIGS = [
             "d_initial": 0.1,
             "save_projection": True,
             "bias": "none",
+        },
+    ),
+    (
+        UniLoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "theta_d_length": 257,
         },
     ),
     (
