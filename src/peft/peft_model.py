@@ -1942,8 +1942,12 @@ class PeftModelForCausalLM(PeftModel):
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
 
         if kwargs.get("position_ids", None) is not None:
-            warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
-            kwargs["position_ids"] = None
+            if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
+                # Offset position_ids by num_virtual_tokens to account for the KV cache prefix
+                kwargs["position_ids"] = kwargs["position_ids"] + peft_config.num_virtual_tokens
+            else:
+                warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
+                kwargs["position_ids"] = None
         if kwargs.get("token_type_ids", None) is not None:
             warnings.warn("Token type ids are not supported for parameter efficient tuning. Ignoring token type ids")
             kwargs["token_type_ids"] = None
@@ -2118,7 +2122,7 @@ class PeftModelForCausalLM(PeftModel):
                     total_seq_len = prefix_attention_mask.shape[1] + attention_mask.shape[2]
                     attention_mask_2d = torch.ones((bs, total_seq_len), dtype=attention_mask.dtype)
 
-                    if is_prefill and (peft_config.peft_type != PeftType.PREFIX_TUNING):
+                    if is_prefill and (peft_config.peft_type not in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE)):
                         # if in prefill stage, for prompt learning methods that are not prefix tuning, new tokens
                         # (embeddings) are inserted, thus set cache_position to correspond to these tokens
                         cache_position_ = torch.arange(total_seq_len, device=model_kwargs["input_ids"].device)

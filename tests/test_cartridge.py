@@ -17,6 +17,7 @@ import warnings
 import pytest
 import torch
 from transformers import AutoModelForCausalLM
+from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from peft import (
     CartridgeConfig,
@@ -40,6 +41,74 @@ TINY_CAUSAL_LM = "peft-internal-testing/tiny-random-OPTForCausalLM"
 def _load_tiny_causal_lm(model_id: str = TINY_CAUSAL_LM):
     with hub_online_once(model_id):
         return AutoModelForCausalLM.from_pretrained(model_id)
+
+
+def test_cartridge_offsets_position_ids_in_forward(monkeypatch):
+    base = _load_tiny_causal_lm()
+    peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=1, task_type="CAUSAL_LM")
+    model = get_peft_model(base, peft_config)
+
+    captured = {}
+
+    def fake_forward(*args, **kwargs):
+        captured["position_ids"] = kwargs.get("position_ids")
+        input_ids = kwargs.get("input_ids")
+        if input_ids is None and args:
+            input_ids = args[0]
+        batch, seq_len = input_ids.shape
+        logits = torch.zeros((batch, seq_len, base.config.vocab_size), device=input_ids.device)
+        return CausalLMOutputWithPast(logits=logits)
+
+    monkeypatch.setattr(model.base_model, "forward", fake_forward)
+
+    input_ids = torch.randint(0, base.config.vocab_size, (1, 3))
+    position_ids = torch.arange(input_ids.shape[1]).unsqueeze(0)
+    _ = model(input_ids=input_ids, position_ids=position_ids)
+
+    assert captured["position_ids"] is not None
+    assert torch.equal(captured["position_ids"], position_ids + peft_config.num_virtual_tokens)
+
+
+def test_cartridge_prefill_4d_mask_uses_cache_position(monkeypatch):
+    base = _load_tiny_causal_lm()
+    peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=1, task_type="CAUSAL_LM")
+    model = get_peft_model(base, peft_config)
+
+    captured = {}
+
+    def fake_create_attention_mask(
+        model,
+        *,
+        model_input,
+        attention_mask,
+        past_key_values,
+        cache_position,
+        batch_size,
+        sequence_length,
+        position_ids,
+    ):
+        captured["cache_position"] = cache_position
+        return attention_mask
+
+    monkeypatch.setattr("peft.peft_model.create_attention_mask", fake_create_attention_mask)
+
+    input_ids = torch.randint(0, base.config.vocab_size, (1, 2))
+    attention_mask_4d = torch.ones((1, 1, input_ids.shape[1], input_ids.shape[1]))
+    cache_position = torch.arange(input_ids.shape[1])
+
+    def fake_prepare_inputs_for_generation(*args, **kwargs):
+        return {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask_4d,
+            "cache_position": cache_position,
+            "past_key_values": None,
+        }
+
+    model.base_model_prepare_inputs_for_generation = fake_prepare_inputs_for_generation
+    _ = model.prepare_inputs_for_generation(input_ids)
+
+    assert captured["cache_position"] is not None
+    assert torch.equal(captured["cache_position"], cache_position)
 
 
 @pytest.mark.parametrize("num_frozen_tokens", [0, 2])
