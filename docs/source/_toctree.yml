@@ -108,6 +108,8 @@
       title: P-tuning
     - local: package_reference/prefix_tuning
       title: Prefix tuning
+    - local: package_reference/cartridges
+      title: Cartridges
     - local: package_reference/prompt_tuning
       title: Prompt tuning
     - local: package_reference/layernorm_tuning

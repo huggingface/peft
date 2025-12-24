@@ -565,9 +565,12 @@ def set_peft_model_state_dict(
         load_result = model.load_state_dict(peft_model_state_dict, strict=False)
 
     if config.is_prompt_learning:
-        model.prompt_encoder[adapter_name].embedding.load_state_dict(
-            {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
-        )
+        if config.peft_type == PeftType.CARTRIDGE:
+            model.prompt_encoder[adapter_name].load_prompt_embeddings(peft_model_state_dict["prompt_embeddings"])
+        else:
+            model.prompt_encoder[adapter_name].embedding.load_state_dict(
+                {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
+            )
 
     if config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
         model.prompt_encoder[adapter_name].load_state_dict(peft_model_state_dict, strict=False)
