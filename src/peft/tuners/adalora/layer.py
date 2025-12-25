@@ -17,11 +17,11 @@ from typing import Any, Optional
 
 import packaging
 import torch
-import torch.nn.functional as F
 import transformers
 from torch import nn
 
 from peft.tuners.lora import LoraLayer
+from peft.tuners.lora.layer import LoraVariant
 from peft.tuners.tuners_utils import check_adapters_to_merge
 from peft.utils import transpose
 
@@ -32,14 +32,6 @@ else:
     from transformers.deepspeed import deepspeed_config
 
 
-class DoRAMagnitude(nn.Module):
-    """Simple module wrapper for DoRA magnitude vector."""
-
-    def __init__(self, magnitude: torch.Tensor):
-        super().__init__()
-        self.weight = nn.Parameter(magnitude)
-
-
 class AdaLoraLayer(LoraLayer):
     # list all names of layers that may contain adapter weights
     # note: ranknum doesn't need to be included as it is not an nn.Module
@@ -47,21 +39,17 @@ class AdaLoraLayer(LoraLayer):
     # all names of other parameters that may contain adapter-related parameters
     other_param_names = ("r", "lora_alpha", "scaling", "lora_dropout", "ranknum")
 
-    def __init__(self, base_layer: nn.Module, use_dora: bool = False) -> None:
+    def __init__(self, base_layer: nn.Module) -> None:
         super().__init__(base_layer)
-        self.use_dora = use_dora
         self.lora_E = nn.ParameterDict({})
         self.lora_A = nn.ParameterDict({})
         self.lora_B = nn.ParameterDict({})
         self.ranknum = nn.ParameterDict({})
+        self.lora_variant: dict[str, LoraVariant] = {}
 
     def update_layer(
         self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, inference_mode: bool = False, **kwargs
     ):
-        # handle use_dora from kwargs (passed during update)
-        use_dora = kwargs.get("use_dora", self.use_dora)
-        self.use_dora = use_dora
-
         if r < 0:
             # note: r == 0 is allowed for AdaLora, see #1539
             raise ValueError(f"`r` should be a positive integer or 0, but the value passed is {r}")
@@ -92,16 +80,6 @@ class AdaLoraLayer(LoraLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
-        # DoRA magnitude initialization (identity init: magnitude = ||base_weight||)
-        if self.use_dora:
-            base_layer = self.get_base_layer()
-            if isinstance(base_layer, nn.Linear):
-                weight = base_layer.weight
-                # calculate norm in fp32, detach to avoid backprop to frozen weights
-                with torch.no_grad():
-                    norm = weight.float().norm(p=2, dim=1, keepdim=False)
-                self.lora_magnitude_vector[adapter_name] = DoRAMagnitude(norm.to(weight.dtype))
-
     def reset_lora_parameters(self, adapter_name):
         if adapter_name in self.lora_A.keys():
             nn.init.zeros_(self.lora_E[adapter_name])
@@ -124,13 +102,38 @@ class SVDLinear(nn.Module, AdaLoraLayer):
         **kwargs,
     ) -> None:
         super().__init__()
-        AdaLoraLayer.__init__(self, base_layer, use_dora=use_dora)
+        AdaLoraLayer.__init__(self, base_layer)
         # freezing the pre-trained weight matrix
         self.get_base_layer().weight.requires_grad = False
 
         self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_dora=use_dora)
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_dora=use_dora, **kwargs)
+
+    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+        """Return AdaDoRA variant if use_dora is True."""
+        if not use_dora:
+            return None
+
+        from .variants import AdaDoraLinearVariant
+
+        return AdaDoraLinearVariant()
+
+    def update_layer(
+        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights,
+        inference_mode: bool = False, use_dora: bool = False, **kwargs
+    ):
+        # call parent update_layer to set up base AdaLoRA parameters
+        AdaLoraLayer.update_layer(
+            self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights,
+            inference_mode=inference_mode, **kwargs
+        )
+
+        # initialize variant if needed (e.g., DoRA)
+        lora_variant = self.resolve_lora_variant(use_dora=use_dora, **kwargs)
+        if lora_variant is not None:
+            self.lora_variant[adapter_name] = lora_variant
+            lora_variant.init(self, adapter_name, **kwargs)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -155,39 +158,32 @@ class SVDLinear(nn.Module, AdaLoraLayer):
                 continue
 
             base_layer = self.get_base_layer()
-            delta_weight = self.get_delta_weight(active_adapter)
 
-            if self.use_dora and active_adapter in self.lora_magnitude_vector:
-                # DoRA merge: W' = m * (W + dW) / ||W + dW||
-                orig_weight = base_layer.weight.data
-
-                with torch.no_grad():
-                    new_weight = orig_weight + delta_weight
-                    weight_norm = new_weight.float().norm(p=2, dim=1, keepdim=True).clamp_min(1e-6)
-                    magnitude = self.lora_magnitude_vector[active_adapter].weight.float()
-                    scaled_weight = (magnitude.view(-1, 1) / weight_norm) * new_weight.float()
-
-                if safe_merge:
-                    if not torch.isfinite(scaled_weight).all():
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
-
-                base_layer.weight.data = scaled_weight.to(orig_weight.dtype)
-            else:
-                # standard AdaLoRA merge
-                if safe_merge:
-                    orig_weights = base_layer.weight.data.clone()
-                    orig_weights += delta_weight
-
-                    if not torch.isfinite(orig_weights).all():
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
-
-                    base_layer.weight.data = orig_weights
+            if safe_merge:
+                orig_weight = base_layer.weight.data.clone()
+                if active_adapter in self.lora_variant:
+                    # use variant pattern for DoRA merge
+                    new_weight = self.lora_variant[active_adapter].merge_safe(
+                        self, active_adapter, orig_weight
+                    )
                 else:
-                    base_layer.weight.data += delta_weight
+                    # standard AdaLoRA merge
+                    new_weight = orig_weight + self.get_delta_weight(active_adapter)
+
+                if not torch.isfinite(new_weight).all():
+                    raise ValueError(
+                        f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                    )
+                base_layer.weight.data = new_weight
+            else:
+                if active_adapter in self.lora_variant:
+                    # use variant pattern for DoRA merge
+                    self.lora_variant[active_adapter].merge_unsafe(
+                        self, active_adapter, base_layer.weight
+                    )
+                else:
+                    # standard AdaLoRA merge
+                    base_layer.weight.data += self.get_delta_weight(active_adapter)
 
             self.merged_adapters.append(active_adapter)
 
@@ -204,13 +200,16 @@ class SVDLinear(nn.Module, AdaLoraLayer):
             if active_adapter not in self.lora_A.keys():
                 continue
 
-            if self.use_dora and active_adapter in self.lora_magnitude_vector:
-                raise NotImplementedError(
-                    "Unmerging DoRA adapters in AdaLoRA is not supported. "
-                    "Use safe_merge=True and save the merged model."
+            weight = self.get_base_layer().weight
+            if active_adapter in self.lora_variant:
+                # use variant pattern for DoRA unmerge
+                unmerged = self.lora_variant[active_adapter].unmerge(
+                    self, active_adapter, weight
                 )
+                weight.data = unmerged
             else:
-                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
+                # standard AdaLoRA unmerge
+                weight.data -= self.get_delta_weight(active_adapter)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         return (
@@ -218,29 +217,6 @@ class SVDLinear(nn.Module, AdaLoraLayer):
             * self.scaling[adapter]
             / (self.ranknum[adapter] + 1e-5)
         )
-
-    def update_dora_magnitude(self, adapter_name: str) -> None:
-        """Re-compute DoRA magnitude after rank pruning."""
-        if not self.use_dora or adapter_name not in self.lora_magnitude_vector:
-            return
-
-        with torch.no_grad():
-            base_layer = self.get_base_layer()
-            lora_A = self.lora_A[adapter_name]
-            lora_B = self.lora_B[adapter_name]
-            lora_E = self.lora_E[adapter_name]
-            scaling = self.scaling[adapter_name]
-            ranknum = self.ranknum[adapter_name] + 1e-5
-
-            # compute delta weight with current (possibly pruned) E values
-            delta_W = (lora_B @ (lora_A * lora_E)) * (scaling / ranknum)
-            W_total = base_layer.weight.float() + delta_W.float()
-            new_norm = W_total.norm(p=2, dim=1).clamp_min(1e-6)
-
-            # update magnitude to new norm (preserves training direction)
-            self.lora_magnitude_vector[adapter_name].weight.data = new_norm.to(
-                self.lora_magnitude_vector[adapter_name].weight.dtype
-            )
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         # standard guards
@@ -267,36 +243,14 @@ class SVDLinear(nn.Module, AdaLoraLayer):
 
             x_cast = self._cast_input_dtype(x, lora_A.dtype)
 
-            if self.use_dora and active_adapter in self.lora_magnitude_vector:
-                # DoRA path
-                base_layer = self.get_base_layer()
-
-                # A. base output (without adapter, without bias)
-                base_out = F.linear(x_cast, base_layer.weight, bias=None)
-
-                # B. adapter delta: x @ (A*E).T @ B.T * scaling / ranknum
-                delta_out = (dropout(x_cast) @ (lora_A * lora_E).T @ lora_B.T) * (scaling / ranknum)
-
-                # C. combined (before DoRA scaling)
-                z = base_out + delta_out.to(base_out.dtype)
-
-                # D. compute weight norm (float32, detached per paper)
-                with torch.no_grad():
-                    A_f = (lora_E * lora_A).float()
-                    B_f = lora_B.float()
-                    scale_f = float(scaling / ranknum)
-                    delta_W = (B_f @ A_f) * scale_f
-                    W_total = base_layer.weight.float() + delta_W
-                    weight_norm = W_total.norm(p=2, dim=1, keepdim=True).clamp_min(1e-6)
-
-                # E. apply magnitude scaling
-                magnitude = self.lora_magnitude_vector[active_adapter].weight
-                mag_norm_scale = (magnitude.float() / weight_norm.squeeze()).to(z.dtype)
-                result = z * mag_norm_scale.view(1, -1)
-
-                # F. add bias (unscaled)
-                if base_layer.bias is not None:
-                    result = result + base_layer.bias
+            if active_adapter in self.lora_variant:
+                # use variant pattern (e.g., DoRA)
+                result = self.lora_variant[active_adapter].forward(
+                    self,
+                    active_adapter=active_adapter,
+                    x=x_cast,
+                    result=result,
+                )
             else:
                 # standard AdaLoRA path
                 result = result + (dropout(x_cast) @ (lora_A * lora_E).T @ lora_B.T) * scaling / ranknum

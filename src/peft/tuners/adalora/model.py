@@ -302,10 +302,26 @@ class AdaLoraModel(LoraModel):
         return state_dict
 
     def _update_dora_magnitudes(self):
-        """Update DoRA magnitude vectors after rank changes."""
+        """Update DoRA magnitude vectors after rank changes.
+
+        Uses the variant layer's update_magnitude_after_pruning method
+        to re-compute magnitudes after AdaLoRA rank pruning.
+        """
+        adapter_name = self.trainable_adapter_name
         for module in self.model.modules():
-            if isinstance(module, SVDLinear) and hasattr(module, "update_dora_magnitude"):
-                module.update_dora_magnitude(self.trainable_adapter_name)
+            if isinstance(module, SVDLinear):
+                if adapter_name in module.lora_variant:
+                    # get the AdaDoraLinearLayer from lora_magnitude_vector
+                    dora_layer = module.lora_magnitude_vector.get(adapter_name)
+                    if dora_layer is not None and hasattr(dora_layer, "update_magnitude_after_pruning"):
+                        dora_layer.update_magnitude_after_pruning(
+                            module.get_base_layer(),
+                            module.lora_A[adapter_name],
+                            module.lora_B[adapter_name],
+                            module.lora_E[adapter_name],
+                            module.scaling[adapter_name],
+                            module.ranknum[adapter_name].item(),
+                        )
 
     def update_and_allocate(self, global_step):
         """
