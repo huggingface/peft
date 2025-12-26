@@ -164,28 +164,28 @@ class AdaDoraLinearLayer(DoraLinearLayer):
         self, base_layer, lora_A, lora_B, lora_E, scaling, ranknum
     ) -> None:
         """
-        Re-compute magnitude after AdaLoRA rank pruning.
+        Hook called after AdaLoRA rank pruning.
 
-        Called by AdaLoraModel after RankAllocator masks singular values.
-        This ensures the magnitude vector stays synchronized with the
-        current effective rank.
+        In DoRA, the magnitude vector should evolve via gradients and diverge
+        from the weight norm ||W + ΔW||. This divergence is what distinguishes
+        DoRA from standard LoRA - the ratio m/||W+ΔW|| controls output scaling.
+
+        Previously, this method reset magnitude = ||W + ΔW||, which made the
+        ratio equal to 1 and effectively disabled DoRA (identical to AdaLoRA).
+
+        Now we let the magnitude remain at its learned value and allow gradients
+        to naturally adjust it after pruning changes the effective rank.
 
         Args:
-            base_layer: The base nn.Linear layer
-            lora_A: A matrix parameter
-            lora_B: B matrix parameter
-            lora_E: E matrix parameter (with pruned values set to 0)
-            scaling: LoRA scaling factor
-            ranknum: Current rank number
+            base_layer: The base nn.Linear layer (unused)
+            lora_A: A matrix parameter (unused)
+            lora_B: B matrix parameter (unused)
+            lora_E: E matrix parameter (unused)
+            scaling: LoRA scaling factor (unused)
+            ranknum: Current rank number (unused)
         """
-        with torch.no_grad():
-            weight = dequantize_module_weight(base_layer)
-            new_norm = self.get_weight_norm(
-                weight.float(),
-                lora_A.float(), lora_B.float(), lora_E.float(),
-                scaling, ranknum
-            ).clamp_min(1e-6)
-            self.weight.data = new_norm.to(self.weight.dtype)
+        # don't reset magnitude - let gradients handle adaptation
+        pass
 
     def __repr__(self) -> str:
         rep = super().__repr__()

@@ -312,7 +312,7 @@ class AdaLoraModel(LoraModel):
             if isinstance(module, SVDLinear):
                 if adapter_name in module.lora_variant:
                     # get the AdaDoraLinearLayer from lora_magnitude_vector
-                    dora_layer = module.lora_magnitude_vector.get(adapter_name)
+                    dora_layer = module.lora_magnitude_vector[adapter_name] if adapter_name in module.lora_magnitude_vector else None
                     if dora_layer is not None and hasattr(dora_layer, "update_magnitude_after_pruning"):
                         dora_layer.update_magnitude_after_pruning(
                             module.get_base_layer(),
