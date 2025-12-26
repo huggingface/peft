@@ -122,6 +122,7 @@ class AdaLoraModel(LoraModel):
             "lora_dropout": lora_config.lora_dropout,
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "init_lora_weights": lora_config.init_lora_weights,
+            "use_dora": lora_config.use_dora,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -150,6 +151,7 @@ class AdaLoraModel(LoraModel):
                 lora_config.lora_alpha,
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
+                use_dora=lora_config.use_dora,
             )
 
     @staticmethod
@@ -299,6 +301,28 @@ class AdaLoraModel(LoraModel):
                     )
         return state_dict
 
+    def _update_dora_magnitudes(self):
+        """Update DoRA magnitude vectors after rank changes.
+
+        Uses the variant layer's update_magnitude_after_pruning method
+        to re-compute magnitudes after AdaLoRA rank pruning.
+        """
+        adapter_name = self.trainable_adapter_name
+        for module in self.model.modules():
+            if isinstance(module, SVDLinear):
+                if adapter_name in module.lora_variant:
+                    # get the AdaDoraLinearLayer from lora_magnitude_vector
+                    dora_layer = module.lora_magnitude_vector[adapter_name] if adapter_name in module.lora_magnitude_vector else None
+                    if dora_layer is not None and hasattr(dora_layer, "update_magnitude_after_pruning"):
+                        dora_layer.update_magnitude_after_pruning(
+                            module.get_base_layer(),
+                            module.lora_A[adapter_name],
+                            module.lora_B[adapter_name],
+                            module.lora_E[adapter_name],
+                            module.scaling[adapter_name],
+                            module.ranknum[adapter_name].item(),
+                        )
+
     def update_and_allocate(self, global_step):
         """
         This method updates Adalora budget and mask.
@@ -321,23 +345,32 @@ class AdaLoraModel(LoraModel):
         ```
         """
         lora_config = self.peft_config[self.trainable_adapter_name]
-        # Update the importance score and allocate the budget
+        # update the importance score and allocate the budget
         if global_step < lora_config.total_step - lora_config.tfinal:
             _, rank_pattern = self.rankallocator.update_and_allocate(self.model, global_step)
             if rank_pattern:
                 lora_config.rank_pattern = rank_pattern
-        # Finalize the budget allocation
+                # update DoRA magnitudes after pruning
+                if lora_config.use_dora:
+                    self._update_dora_magnitudes()
+        # finalize the budget allocation
         elif global_step == lora_config.total_step - lora_config.tfinal:
             _, rank_pattern = self.rankallocator.update_and_allocate(self.model, global_step, force_mask=True)
             # for some reason, this freezes the trainable parameters and nothing gets updates
             # self.resize_modules_by_rank_pattern(rank_pattern, self.trainable_adapter_name)
             lora_config.rank_pattern = rank_pattern
+            # update DoRA magnitudes after final pruning
+            if lora_config.use_dora:
+                self._update_dora_magnitudes()
             self.rankallocator.reset_ipt()
-        # Currently using inefficient way to mask the unimportant weights using the rank pattern
+        # currently using inefficient way to mask the unimportant weights using the rank pattern
         #  due to problem mentioned above
         elif global_step > lora_config.total_step - lora_config.tfinal:
             self.rankallocator.mask_using_rank_pattern(self.model, lora_config.rank_pattern)
-        # Pass the function and do forward propagation
+            # update DoRA magnitudes after masking
+            if lora_config.use_dora:
+                self._update_dora_magnitudes()
+        # pass the function and do forward propagation
         else:
             return None
 
