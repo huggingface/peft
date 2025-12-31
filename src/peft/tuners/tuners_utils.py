@@ -626,6 +626,8 @@ class BaseTuner(nn.Module, ABC):
         """
         Check if adapters are applied to both embedding and output layers.
 
+        This checks both target_modules (LoRA layers) and modules_to_save.
+
         Returns:
             True if both embed_tokens-like and lm_head-like modules have adapters
         """
@@ -635,12 +637,22 @@ class BaseTuner(nn.Module, ABC):
         embed_names = {"embed_tokens", "wte", "word_embeddings"}
         lm_head_names = {"lm_head", "embed_out"}
 
+        # Check targeted_module_names (LoRA target_modules)
         for module_name in self.targeted_module_names:
             last_part = module_name.split(".")[-1]
             if last_part in embed_names:
                 has_embed = True
             elif last_part in lm_head_names:
                 has_lm_head = True
+
+        # Check modules_to_save from peft_config
+        for adapter_name, peft_config in self.peft_config.items():
+            modules_to_save = getattr(peft_config, "modules_to_save", None) or []
+            for module_name in modules_to_save:
+                if module_name in embed_names:
+                    has_embed = True
+                elif module_name in lm_head_names:
+                    has_lm_head = True
 
         return has_embed and has_lm_head
 
@@ -695,13 +707,15 @@ class BaseTuner(nn.Module, ABC):
             config = getattr(self.model, "config", None)
             if config is not None and getattr(config, "tie_word_embeddings", False):
                 if self._has_adapters_on_both_embeddings():
-                    if self._untie_embedding_weights():
-                        self._update_tie_word_embeddings_config(value=False)
-                        warnings.warn(
-                            "Detected adapters on both embed_tokens and lm_head with "
-                            "tie_word_embeddings=True. Automatically untied the weights and "
-                            "set config.tie_word_embeddings=False to preserve merged weights."
-                        )
+                    # Try to untie if still tied (may already be untied by ModulesToSaveWrapper)
+                    self._untie_embedding_weights()
+                    # Always update config since adapters on both layers means they will diverge
+                    self._update_tie_word_embeddings_config(value=False)
+                    warnings.warn(
+                        "Detected adapters on both embed_tokens and lm_head with "
+                        "tie_word_embeddings=True. Automatically set config.tie_word_embeddings=False "
+                        "to preserve merged weights on model reload."
+                    )
 
         key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
