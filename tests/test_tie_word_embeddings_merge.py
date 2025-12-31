@@ -18,23 +18,27 @@ Resolves: https://github.com/huggingface/peft/issues/2777
 """
 
 import gc
-import unittest
 
+import pytest
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import LoraConfig, get_peft_model
 
 
-class TestTieWordEmbeddingsMerge(unittest.TestCase):
+MODEL_ID = "HuggingFaceTB/SmolLM-135M"
+
+
+@pytest.fixture(autouse=True)
+def cleanup():
+    yield
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+class TestTieWordEmbeddingsMerge:
     """Test that merge_and_unload correctly handles tie_word_embeddings."""
-
-    model_id = "HuggingFaceTB/SmolLM-135M"
-
-    def tearDown(self):
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
     def test_merge_unties_embeddings_when_both_targeted(self):
         """
@@ -44,16 +48,16 @@ class TestTieWordEmbeddingsMerge(unittest.TestCase):
         Resolves: https://github.com/huggingface/peft/issues/2777
         """
         model = AutoModelForCausalLM.from_pretrained(
-            self.model_id,
+            MODEL_ID,
             torch_dtype=torch.float32,
         )
 
         # Skip if model doesn't have tied embeddings
         if not getattr(model.config, "tie_word_embeddings", False):
-            self.skipTest("Model does not have tie_word_embeddings=True")
+            pytest.skip("Model does not have tie_word_embeddings=True")
 
         # Verify initial state
-        self.assertTrue(model.config.tie_word_embeddings)
+        assert model.config.tie_word_embeddings
 
         # Configure LoRA to target both embed_tokens and lm_head via modules_to_save
         lora_config = LoraConfig(
@@ -69,18 +73,15 @@ class TestTieWordEmbeddingsMerge(unittest.TestCase):
         merged_model = peft_model.merge_and_unload()
 
         # After merge: tie_word_embeddings should be False
-        self.assertFalse(
-            merged_model.config.tie_word_embeddings,
-            "config.tie_word_embeddings should be False after merging with both embeddings targeted",
+        assert not merged_model.config.tie_word_embeddings, (
+            "config.tie_word_embeddings should be False after merging with both embeddings targeted"
         )
 
         # Verify weights are actually untied (different memory addresses)
         embed_weight = merged_model.model.embed_tokens.weight
         lm_head_weight = merged_model.lm_head.weight
-        self.assertNotEqual(
-            embed_weight.data_ptr(),
-            lm_head_weight.data_ptr(),
-            "embed_tokens and lm_head weights should be untied (different memory)",
+        assert embed_weight.data_ptr() != lm_head_weight.data_ptr(), (
+            "embed_tokens and lm_head weights should be untied (different memory)"
         )
 
     def test_merge_preserves_tie_when_embeddings_not_targeted(self):
@@ -89,12 +90,12 @@ class TestTieWordEmbeddingsMerge(unittest.TestCase):
         tie_word_embeddings is preserved if embed_tokens/lm_head are not targeted.
         """
         model = AutoModelForCausalLM.from_pretrained(
-            self.model_id,
+            MODEL_ID,
             torch_dtype=torch.float32,
         )
 
         if not getattr(model.config, "tie_word_embeddings", False):
-            self.skipTest("Model does not have tie_word_embeddings=True")
+            pytest.skip("Model does not have tie_word_embeddings=True")
 
         original_tie = model.config.tie_word_embeddings
 
@@ -109,10 +110,8 @@ class TestTieWordEmbeddingsMerge(unittest.TestCase):
         merged_model = peft_model.merge_and_unload()
 
         # tie_word_embeddings should be unchanged
-        self.assertEqual(
-            merged_model.config.tie_word_embeddings,
-            original_tie,
-            "tie_word_embeddings should be unchanged when embeddings are not targeted",
+        assert merged_model.config.tie_word_embeddings == original_tie, (
+            "tie_word_embeddings should be unchanged when embeddings are not targeted"
         )
 
     def test_merged_model_produces_valid_output(self):
@@ -120,14 +119,14 @@ class TestTieWordEmbeddingsMerge(unittest.TestCase):
         Test that merged model produces coherent output (not garbage).
         This is a sanity check to ensure the merge doesn't break inference.
         """
-        tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
         model = AutoModelForCausalLM.from_pretrained(
-            self.model_id,
+            MODEL_ID,
             torch_dtype=torch.float32,
         )
 
         if not getattr(model.config, "tie_word_embeddings", False):
-            self.skipTest("Model does not have tie_word_embeddings=True")
+            pytest.skip("Model does not have tie_word_embeddings=True")
 
         lora_config = LoraConfig(
             r=8,
@@ -154,11 +153,4 @@ class TestTieWordEmbeddingsMerge(unittest.TestCase):
         decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
         # Check that output is not garbage (contains some readable characters)
-        self.assertTrue(
-            any(c.isalpha() for c in decoded),
-            f"Generated output appears to be garbage: {decoded}",
-        )
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert any(c.isalpha() for c in decoded), f"Generated output appears to be garbage: {decoded}"
