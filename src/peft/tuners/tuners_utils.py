@@ -541,6 +541,109 @@ class BaseTuner(nn.Module, ABC):
         """
         cast_adapter_dtype(self.model, adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
 
+    def _untie_embedding_weights(self) -> bool:
+        """
+        Untie word embeddings if they are tied and both have adapters.
+
+        When LoRA is applied to both embed_tokens and lm_head on a model with
+        tie_word_embeddings=True, the merged weights will be different. This method
+        unties the weights by cloning lm_head's weight tensor.
+
+        Returns:
+            True if untying was performed, False otherwise
+        """
+        config = getattr(self.model, "config", None)
+        if config is None:
+            return False
+
+        if not getattr(config, "tie_word_embeddings", False):
+            return False
+
+        # Find embed_tokens and lm_head
+        embed_module = None
+        lm_head_module = None
+
+        for name, module in self.model.named_modules():
+            module_name = name.split(".")[-1]
+            if module_name in EMBEDDING_LAYER_NAMES:
+                if module_name in {"embed_tokens", "wte", "word_embeddings"}:
+                    embed_module = module
+                elif module_name in {"lm_head", "embed_out"}:
+                    lm_head_module = module
+
+        if embed_module is None or lm_head_module is None:
+            return False
+
+        # Get actual weight tensors (handle wrapped layers)
+        def get_weight(m):
+            if hasattr(m, "base_layer"):
+                return m.base_layer.weight
+            return getattr(m, "weight", None)
+
+        embed_weight = get_weight(embed_module)
+        lm_head_weight = get_weight(lm_head_module)
+
+        if embed_weight is None or lm_head_weight is None:
+            return False
+
+        # Check if weights are actually tied (same memory location)
+        if embed_weight.data_ptr() != lm_head_weight.data_ptr():
+            return False
+
+        # Untie by creating a copy for lm_head
+        if hasattr(lm_head_module, "base_layer"):
+            lm_head_module.base_layer.weight = nn.Parameter(lm_head_weight.clone())
+        else:
+            lm_head_module.weight = nn.Parameter(lm_head_weight.clone())
+
+        return True
+
+    def _update_tie_word_embeddings_config(self, value: bool) -> None:
+        """
+        Update tie_word_embeddings in all relevant config locations.
+
+        Args:
+            value: The value to set for tie_word_embeddings
+        """
+        config = getattr(self.model, "config", None)
+        if config is None:
+            return
+
+        if hasattr(config, "tie_word_embeddings"):
+            config.tie_word_embeddings = value
+
+        # Handle nested configs (e.g., text_config for multimodal models)
+        if hasattr(config, "text_config") and hasattr(config.text_config, "tie_word_embeddings"):
+            config.text_config.tie_word_embeddings = value
+
+        # Handle language_model config (e.g., Gemma3ForConditionalGeneration)
+        if hasattr(self.model, "language_model") and hasattr(self.model.language_model, "config"):
+            lm_config = self.model.language_model.config
+            if hasattr(lm_config, "tie_word_embeddings"):
+                lm_config.tie_word_embeddings = value
+
+    def _has_adapters_on_both_embeddings(self) -> bool:
+        """
+        Check if adapters are applied to both embedding and output layers.
+
+        Returns:
+            True if both embed_tokens-like and lm_head-like modules have adapters
+        """
+        has_embed = False
+        has_lm_head = False
+
+        embed_names = {"embed_tokens", "wte", "word_embeddings"}
+        lm_head_names = {"lm_head", "embed_out"}
+
+        for module_name in self.targeted_module_names:
+            last_part = module_name.split(".")[-1]
+            if last_part in embed_names:
+                has_embed = True
+            elif last_part in lm_head_names:
+                has_lm_head = True
+
+        return has_embed and has_lm_head
+
     def _check_merge_allowed(self):
         """Helper method to check whether the adapter can be merged.
 
@@ -586,6 +689,19 @@ class BaseTuner(nn.Module, ABC):
     ) -> None:
         if merge:
             self._check_merge_allowed()
+
+            # Auto-handle tie_word_embeddings when both embed_tokens and lm_head have adapters
+            # See: https://github.com/huggingface/peft/issues/2777
+            config = getattr(self.model, "config", None)
+            if config is not None and getattr(config, "tie_word_embeddings", False):
+                if self._has_adapters_on_both_embeddings():
+                    if self._untie_embedding_weights():
+                        self._update_tie_word_embeddings_config(value=False)
+                        warnings.warn(
+                            "Detected adapters on both embed_tokens and lm_head with "
+                            "tie_word_embeddings=True. Automatically untied the weights and "
+                            "set config.tie_word_embeddings=False to preserve merged weights."
+                        )
 
         key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
