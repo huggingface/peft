@@ -50,6 +50,7 @@ from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
 from .randlora import RandLoraConfig, RandLoraModel
 from .road import RoadConfig, RoadModel
 from .shira import ShiraConfig, ShiraModel
+from .ewora import EworaConfig, EworaModel
 from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
 from .vblora import VBLoRAConfig, VBLoRAModel
 from .vera import VeraConfig, VeraModel
@@ -119,6 +120,8 @@ __all__ = [
     "RoadModel",
     "ShiraConfig",
     "ShiraModel",
+    "EworaConfig",
+    "EworaModel",
     "TrainableTokensConfig",
     "TrainableTokensModel",
     "VBLoRAConfig",

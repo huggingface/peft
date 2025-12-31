@@ -43,6 +43,7 @@ class PeftType(str, enum.Enum):
     - MISS
     - RANDLORA
     - SHIRA
+    - EWORA
     - C3A
     - ROAD
     - WAVEFT
@@ -77,6 +78,7 @@ class PeftType(str, enum.Enum):
     ROAD = "ROAD"
     TRAINABLE_TOKENS = "TRAINABLE_TOKENS"
     SHIRA = "SHIRA"
+    EWORA = "EWORA"
     C3A = "C3A"
     WAVEFT = "WAVEFT"
     OSF = "OSF"
