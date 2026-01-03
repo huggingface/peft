@@ -123,15 +123,23 @@ class AdaMSSConfig(PeftConfig):
     mask_interval: int = field(default=100, metadata={"help": "Steps between ASA updates"})
     beta1: float = field(default=0.85, metadata={"help": "EMA coefficient for importance"})
     beta2: float = field(default=0.85, metadata={"help": "EMA coefficient for uncertainty"})
-    tt: float = field(default=0.01, metadata={"help": "Temperature for importance scoring"})
+    tt: float = field(
+        default=3.0,
+        metadata={
+            "help": (
+                "Schedule exponent controlling decay from total_kk to target_kk during ASA warmup. "
+                "Aligned with adamss_pkg where curr_kk = target_kk + (total_kk - target_kk) * (mul_coeff ** tt)."
+            )
+        },
+    )
     # Dynamic rank selection parameters
     use_dynamic_rank: bool = field(
-        default=True,
+        default=False,
         metadata={
             "help": (
                 "Whether to use dynamic rank selection based on singular value threshold. "
-                "If True (default, matches adamss_pkg), adaptively determines rank per subspace using SVD threshold. "
-                "If False, uses fixed subspace_rank for all subspaces."
+                "If True, adaptively determines rank per subspace using SVD threshold. "
+                "If False (default, matches adamss_pkg), uses fixed subspace_rank for all subspaces."
             )
         },
     )

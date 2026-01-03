@@ -74,10 +74,13 @@ class AdaMSSModel(BaseTuner):
     tuner_layer_cls = (AdaMSSLayer,)
 
     def __init__(self, model, config, adapter_name) -> None:
+        # Initialize ASA tracking before BaseTuner injects adapters so attribute exists.
+        self._asa_total_kk = {}
         super().__init__(model, config, adapter_name)
         # Track the trainable adapter name (following AdaLora pattern)
         if not config[adapter_name].inference_mode:
             self.trainable_adapter_name = adapter_name
+        # Cache total subspace counts per adapter to keep ASA schedule deterministic
 
     @staticmethod
     def _check_target_module_exists(adamss_config, key):
@@ -113,9 +116,21 @@ class AdaMSSModel(BaseTuner):
         else:
             # Create new AdaMSS layer
             new_module = self._create_new_module(adamss_config, adapter_name, target, **optional_kwargs)
+            self._record_total_kk(adapter_name, adamss_config, new_module)
             if adapter_name not in self.active_adapters:
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
+
+    def _record_total_kk(self, adapter_name: str, adamss_config: AdaMSSConfig, module: nn.Module) -> None:
+        """Track total subspaces per adapter so the ASA schedule matches adamss_pkg."""
+        if not hasattr(module, "KK"):
+            return
+        total_kk = module.KK.get(adapter_name, 0)
+        if total_kk is None or total_kk <= 0:
+            return
+        prev_total = self._asa_total_kk.get(adapter_name, 0)
+        self._asa_total_kk[adapter_name] = prev_total + total_kk
+        adamss_config.total_kk = self._asa_total_kk[adapter_name]
 
     def _create_new_module(
         self,
@@ -276,31 +291,50 @@ class AdaMSSModel(BaseTuner):
         
         from .layer import AdaMSSLayer
         
-        # Update importance for all AdaMSS layers
+        within_warmup = adamss_config.init_warmup <= global_step <= adamss_config.final_warmup
+        should_mask = within_warmup and (global_step % adamss_config.mask_interval == 0)
+
+        if not should_mask:
+            return
+
+        asa_layers = []
         for module in self.model.modules():
-            if isinstance(module, AdaMSSLayer):
-                for adapter_name in module.exp_avg_ipt.keys():
-                    module.update_importance(adapter_name, adamss_config.beta1, adamss_config.beta2)
-        
-        # Apply masking at intervals
-        if global_step % adamss_config.mask_interval == 0:
-            curr_kk = self._schedule_threshold(global_step, adamss_config)
-            if curr_kk is not None:
-                self._mask_to_target(curr_kk)
+            if isinstance(module, AdaMSSLayer) and module.exp_avg_ipt:
+                asa_layers.append(module)
+
+        if not asa_layers:
+            return
+
+        for module in asa_layers:
+            for adapter_name in module.exp_avg_ipt.keys():
+                module.reset_importance(adapter_name)
+                module.update_importance(adapter_name, adamss_config.beta1, adamss_config.beta2)
+
+        curr_kk = self._schedule_threshold(global_step, adamss_config)
+        if curr_kk is not None:
+            self._mask_to_target(curr_kk)
     
     def _schedule_threshold(self, step: int, config) -> Optional[int]:
-        """Calculate current target KK based on warmup schedule."""
-        if step < config.init_warmup:
-            return None  # Don't mask during initial warmup
-        elif step <= config.final_warmup:
-            # Gradual decrease with cubic decay
-            progress = (step - config.init_warmup) / (config.final_warmup - config.init_warmup)
-            decay_ratio = progress ** 3
-            # Get total_kk from first layer
+        """Calculate current target KK based on warmup schedule (aligned with adamss_pkg)."""
+        total_kk = getattr(config, "total_kk", None)
+        if not total_kk:
             total_kk = self._get_total_kk()
-            curr_kk = int(total_kk - (total_kk - config.target_kk) * decay_ratio)
+
+        if not total_kk:
+            return None
+
+        if step < config.init_warmup:
+            # Initial warmup: use all subspaces; no masking
+            return None
+        elif step <= config.final_warmup:
+            # Gradual decrease following adamss_pkg schedule
+            mul_coeff = 1.0 - (step - config.init_warmup) / (config.final_warmup - config.init_warmup)
+            # Clamp for numerical stability
+            mul_coeff = max(0.0, min(1.0, mul_coeff))
+            curr_kk = int(config.target_kk + (total_kk - config.target_kk) * (mul_coeff ** getattr(config, 'tt', 3.0)))
             return curr_kk
         else:
+            # After final warmup: fix target_kk
             return config.target_kk
     
     def _get_total_kk(self) -> int:

@@ -51,120 +51,117 @@ class AdaMSSLayer(BaseTunerLayer):
         self.exp_avg_unc = {}  # Exponential moving average of uncertainty
         self._disable_adapters = False
         self.merged_adapters = []
+        # self._asa_update_enabled = False # Flag removed as hooks are removed
         
         # Mark base layer parameters as not trainable
         for param in self.base_layer.parameters():
             param.requires_grad = False
     
+    def set_asa_update_enabled(self, enabled: bool) -> None:
+        """Deprecated: No longer needed as hooks are removed."""
+        pass
+
+    def reset_importance(self, adapter_name: str) -> None:
+        """Clear stored importance stats for an adapter (aligns with adamss_pkg)."""
+        if adapter_name in self.exp_avg_ipt:
+            self.exp_avg_ipt[adapter_name] = {}
+        if adapter_name in self.exp_avg_unc:
+            self.exp_avg_unc[adapter_name] = {}
+
+    def _create_importance_hook(self, adapter_name, key, beta1=0.85, beta2=0.85):
+        """
+        Deprecated: Hooks are no longer used.
+        """
+        return None
+
     def update_importance(self, adapter_name: str, beta1: float = 0.85, beta2: float = 0.85) -> None:
         """
-        Update importance scores for ASA.
-        Called during training to track parameter importance.
+        Update importance scores using current gradients (called explicitly by ASACallback).
+        Matches adamss_pkg behavior of using accumulated gradients.
         """
         if adapter_name not in self.exp_avg_ipt:
-            return  # ASA not enabled for this adapter
-        
-        num_subspaces = self.KK[adapter_name]
-        
-        # Collect gradients and parameters (including frozen ones with zero grad)
-        all_grads = []
-        all_params = []
-        
-        for i in range(num_subspaces):
+            return
+
+        exp_avg_ipt = self.exp_avg_ipt[adapter_name]
+        exp_avg_unc = self.exp_avg_unc[adapter_name]
+
+        # Iterate over all parameters for this adapter
+        for i in range(self.KK[adapter_name]):
             key_A = f"{adapter_name}_A_{i}"
             key_B = f"{adapter_name}_B_{i}"
             
-            if key_A in self.adamss_A and key_B in self.adamss_B:
-                param_A = self.adamss_A[key_A]
-                param_B = self.adamss_B[key_B]
-                
-                # Always collect params, use zero grad if frozen
-                all_params.append(param_A.view(-1))
-                if param_A.grad is not None:
-                    all_grads.append(param_A.grad.view(-1))
-                else:
-                    all_grads.append(torch.zeros_like(param_A.view(-1)))
-                
-                all_params.append(param_B.view(-1))
-                if param_B.grad is not None:
-                    all_grads.append(param_B.grad.view(-1))
-                else:
-                    all_grads.append(torch.zeros_like(param_B.view(-1)))
-        
-        if not all_grads:
-            return
-        
-        # Concatenate all gradients and parameters
-        grads = torch.cat(all_grads)
-        params = torch.cat(all_params)
-        
-        # Calculate sensitivity: |grad * param|
-        ipt = (grads * params).abs()
-        
-        # Update exponential moving averages
-        exp_avg_ipt = self.exp_avg_ipt[adapter_name]
-        exp_avg_unc = self.exp_avg_unc[adapter_name]
-        
-        # Ensure tensors are on the same device
-        if exp_avg_ipt.device != ipt.device:
-            exp_avg_ipt = exp_avg_ipt.to(ipt.device)
-            exp_avg_unc = exp_avg_unc.to(ipt.device)
-        
-        # Update importance with EMA
-        exp_avg_ipt.mul_(beta1).add_(ipt, alpha=1 - beta1)
-        
-        # Update uncertainty (variance) with EMA
-        diff = (ipt - exp_avg_ipt).abs()
-        exp_avg_unc.mul_(beta2).add_(diff, alpha=1 - beta2)
-        
-        # Store back (now on correct device)
-        self.exp_avg_ipt[adapter_name] = exp_avg_ipt
-        self.exp_avg_unc[adapter_name] = exp_avg_unc
+            for key, param_dict in [(key_A, self.adamss_A), (key_B, self.adamss_B)]:
+                if key in param_dict:
+                    param = param_dict[key]
+                    if param.grad is not None:
+                        if key not in exp_avg_ipt:
+                            exp_avg_ipt[key] = torch.zeros_like(param)
+                            exp_avg_unc[key] = torch.zeros_like(param)
+                        
+                        # Calculate importance: |w * g|
+                        ipt = (param * param.grad).abs()
+                        
+                        # Update EMA
+                        exp_avg_ipt[key].mul_(beta1).add_(ipt, alpha=1 - beta1)
+                        
+                        # Update Uncertainty
+                        diff = (ipt - exp_avg_ipt[key]).abs()
+                        exp_avg_unc[key].mul_(beta2).add_(diff, alpha=1 - beta2)
     
     def mask_to_target(self, adapter_name: str, target_kk: int) -> None:
         """
         Mask (freeze) less important subspaces to reach target_kk active subspaces.
         """
+        print(f"[DEBUG][mask_to_target] 开始处理 adapter: {adapter_name}, target_kk={target_kk}")
         if adapter_name not in self.exp_avg_ipt:
+            print(f"[DEBUG][mask_to_target] adapter {adapter_name} 不在 exp_avg_ipt 中，跳过")
             return  # ASA not enabled
         
         num_subspaces = self.KK[adapter_name]
         if target_kk >= num_subspaces:
-            # No masking needed
             return
-        
-        # Calculate combined importance score: ipt * unc
+
         exp_avg_ipt = self.exp_avg_ipt[adapter_name]
         exp_avg_unc = self.exp_avg_unc[adapter_name]
-        ipt_score = exp_avg_ipt * exp_avg_unc
-        
-        # Calculate per-subspace importance
+
+        print(f"[DEBUG][mask_to_target] exp_avg_ipt keys: {list(exp_avg_ipt.keys())}")
+        print(f"[DEBUG][mask_to_target] exp_avg_unc keys: {list(exp_avg_unc.keys())}")
+
         subspace_scores = []
-        offset = 0
-        
         for i in range(num_subspaces):
             key_A = f"{adapter_name}_A_{i}"
             key_B = f"{adapter_name}_B_{i}"
-            
-            if key_A in self.adamss_A and key_B in self.adamss_B:
-                param_A = self.adamss_A[key_A]
-                param_B = self.adamss_B[key_B]
-                
-                size_A = param_A.numel()
-                size_B = param_B.numel()
-                total_size = size_A + size_B
-                
-                # Average importance for this subspace
-                subspace_score = ipt_score[offset:offset + total_size].mean()
-                subspace_scores.append((i, subspace_score.item()))
-                offset += total_size
-        
-        # Sort by importance (descending)
-        subspace_scores.sort(key=lambda x: x[1], reverse=True)
-        
-        # Keep top target_kk subspaces, freeze the rest
-        active_indices = set(idx for idx, _ in subspace_scores[:target_kk])
-        
+
+            if key_A not in exp_avg_ipt or key_B not in exp_avg_ipt:
+                continue
+
+            score_A = (exp_avg_ipt[key_A] * exp_avg_unc[key_A]).mean()
+            score_B = (exp_avg_ipt[key_B] * exp_avg_unc[key_B]).mean()
+            subspace_scores.append((i, score_A + score_B))
+
+        # Debug: Print subspace scores for verification
+        print(f"[DEBUG][mask_to_target] Subspace scores for {adapter_name}:")
+        for idx, score in subspace_scores:
+            print(f"  Subspace {idx}: Score={score}")
+
+        if len(subspace_scores) <= target_kk and target_kk > 0:
+            return
+
+        if target_kk <= 0:
+            active_indices = set()
+        else:
+            scores_tensor = torch.stack([s for _, s in subspace_scores])
+            kth = torch.kthvalue(-scores_tensor, target_kk).values.item()
+            threshold = -kth
+            active_indices = {idx for idx, score in subspace_scores if score > threshold}
+
+            if len(active_indices) < target_kk:
+                subspace_scores.sort(key=lambda x: x[1], reverse=True)
+                active_indices = {idx for idx, _ in subspace_scores[:target_kk]}
+
+        # Debug: Print active indices after thresholding
+        print(f"[DEBUG][mask_to_target] Active indices for {adapter_name}: {sorted(active_indices)}")
+
         for i in range(num_subspaces):
             key_A = f"{adapter_name}_A_{i}"
             key_B = f"{adapter_name}_B_{i}"
@@ -173,6 +170,25 @@ class AdaMSSLayer(BaseTunerLayer):
                 should_train = i in active_indices
                 self.adamss_A[key_A].requires_grad = should_train
                 self.adamss_B[key_B].requires_grad = should_train
+                if not should_train:
+                    self.adamss_A[key_A].grad = None
+                    self.adamss_B[key_B].grad = None
+
+        # Debug print: 输出所有 adamss 参数的 requires_grad 状态和统计
+        print(f"[DEBUG][mask_to_target] {adapter_name} 参数 requires_grad 状态:")
+        trainable_count = 0
+        total_count = 0
+        for key, param in self.adamss_A.items():
+            print(f"  {key}: requires_grad={param.requires_grad}")
+            total_count += param.numel()
+            if param.requires_grad:
+                trainable_count += param.numel()
+        for key, param in self.adamss_B.items():
+            print(f"  {key}: requires_grad={param.requires_grad}")
+            total_count += param.numel()
+            if param.requires_grad:
+                trainable_count += param.numel()
+        print(f"[DEBUG][mask_to_target] 当前trainable参数: {trainable_count} / {total_count} ({100*trainable_count/total_count:.2f}%)")
 
     def update_layer(
         self,
@@ -215,8 +231,39 @@ class AdaMSSLayer(BaseTunerLayer):
         # Reshape to 4D tensor for slicePCA: (1, 1, out_features, in_features)
         weight_tensor = weight_with_bias.unsqueeze(0).unsqueeze(0).to(torch.float32).to(device)
 
-        # Perform SVD decomposition
-        VVT, UU = slicePCA(weight_tensor, r, device, torch.float32)
+        # Perform SVD decomposition with diagnostics in case of failure
+        try:
+            res = slicePCA(weight_tensor, r, device, torch.float32)
+        except Exception as e:
+            raise RuntimeError(f"slicePCA raised an exception for layer {adapter_name} (shape={tuple(weight_tensor.shape)}, dtype={weight_tensor.dtype}, device={device}): {e}") from e
+        if res is None:
+            # Try fallback to native adamss implementation
+            try:
+                from adamss_pkg.lrr import slicePCA as ad_slicePCA
+                res2 = ad_slicePCA(weight_tensor, r, device, torch.float32)
+                if res2 is not None:
+                    VVT, UU = res2
+                    # write a small debug note
+                    try:
+                        with open('/tmp/peft_adamss_fallback.log', 'a') as f:
+                            f.write(f"Fallback to adamss_pkg.lrr.slicePCA for layer {adapter_name}\n")
+                    except Exception:
+                        pass
+                else:
+                    raise RuntimeError("adamss_pkg.lrr.slicePCA also returned None")
+            except Exception as e:
+                # collect lightweight diagnostics to help debugging
+                try:
+                    has_nan = bool(torch.isnan(weight_tensor).any().item())
+                    mn = float(weight_tensor.min().item())
+                    mx = float(weight_tensor.max().item())
+                except Exception:
+                    has_nan = 'unknown'
+                    mn = 'unknown'
+                    mx = 'unknown'
+                raise RuntimeError(f"slicePCA returned None for layer {adapter_name} and fallback failed: shape={tuple(weight_tensor.shape)}, dtype={weight_tensor.dtype}, device={device}, has_nan={has_nan}, min={mn}, max={mx}; fallback_error={e}") from e
+        else:
+            VVT, UU = res
 
         # Store projection matrices
         newA = UU  # (1, 1, out_features, r)
@@ -269,18 +316,18 @@ class AdaMSSLayer(BaseTunerLayer):
             # subspace_data shape: (len(seg_indices), r)
             
             # Determine actual rank based on configuration
+            # Compute Gram matrix Z = subspace_data @ subspace_data.T
+            Z_row = subspace_data @ subspace_data.T  # (len(seg_indices), len(seg_indices))
+            
+            # Compute SVD to get row space decomposition
+            U_row, S_row, V_row = torch.svd_lowrank(Z_row, q=min(Z_row.shape), niter=2)
+            
+            # Also compute column space Gram matrix for A initialization
+            Z_col = subspace_data.T @ subspace_data  # (r, r)
+            U_col, S_col, V_col = torch.svd_lowrank(Z_col, q=min(Z_col.shape), niter=2)
+
             if use_dynamic_rank:
                 # Dynamic rank selection using SVD threshold
-                # Compute Gram matrix Z = subspace_data @ subspace_data.T
-                Z_row = subspace_data @ subspace_data.T  # (len(seg_indices), len(seg_indices))
-                
-                # Compute SVD to get row space decomposition
-                U_row, S_row, V_row = torch.svd_lowrank(Z_row, q=min(Z_row.shape), niter=2)
-                
-                # Also compute column space Gram matrix for A initialization
-                Z_col = subspace_data.T @ subspace_data  # (r, r)
-                U_col, S_col, V_col = torch.svd_lowrank(Z_col, q=min(Z_col.shape), niter=2)
-                
                 # Dynamically determine actual rank using configurable threshold
                 # Following adamss_pkg: num_ii_jj = min((S > threshold * S[0]).sum().item(), args.adamss_ri)
                 threshold_mask = S_row > svd_threshold * S_row[0]
@@ -291,32 +338,32 @@ class AdaMSSLayer(BaseTunerLayer):
                     actual_rank = 1
                 
                 print(f"      [INFO] Subspace {i}: dynamic rank = {actual_rank} (threshold {svd_threshold} from {len(S_row)} row singular values)")
-                
-                # Initialize A matrix from column space SVD
-                A_init = U_col[:, :actual_rank].T.contiguous()
-                
-                # Initialize B matrix from row space SVD with singular value weighting
-                B_init = V_row[:, :actual_rank] @ torch.diag(S_row[:actual_rank])
             else:
-                # Fixed rank: use subspace_rank directly (don't let seg_indices size constrain it)
-                actual_rank = subspace_rank
+                # Fixed rank: use subspace_rank directly (but constrained by available dimensions)
+                # adamss_pkg uses: num_ii_jj = min(len(seg_result[indx]), args.adamss_ri)
+                # actual_rank = min(len(seg_indices), subspace_rank)
                 
-                print(f"      [INFO] Subspace {i}: fixed rank = {actual_rank} (seg_indices={len(seg_indices)}, rank_per_subspace={rank_per_subspace})")
+                # print(f"      [INFO] Subspace {i}: fixed rank = {actual_rank} (seg_indices={len(seg_indices)}, rank_per_subspace={rank_per_subspace})")
+
+
+                ##
+                # Fixed rank: match adamss_pkg behavior exactly
+                # adamss_pkg uses: num_ii_jj = min(len(seg_result[indx]), args.adamss_ri)
+                actual_rank = min(len(seg_indices), subspace_rank)
                 
-                # Use orthogonal initialization for A matrix
-                # A matrix: (actual_rank, r) - using FULL r, not r/K
-                # QR gives orthogonal columns, so we generate (r, r) 
-                # and take the first actual_rank rows
-                if actual_rank <= r:
-                    # Generate orthogonal matrix and take first actual_rank rows
-                    Q, _ = torch.linalg.qr(torch.randn(r, r, dtype=dtype, device=device))
-                    A_init = Q[:actual_rank, :].contiguous()
-                else:
-                    # actual_rank > r: use random initialization
-                    A_init = torch.randn(actual_rank, r, dtype=dtype, device=device)
+                # Ensure at least rank 1
+                if actual_rank == 0:
+                    actual_rank = 1
                 
-                # B matrix: (len(seg_indices), actual_rank) - subspace size
-                B_init = torch.zeros(len(seg_indices), actual_rank, dtype=dtype, device=device)
+                # print(f"      [INFO] Subspace {i}: fixed-rank = {actual_rank} (seg_indices={len(seg_indices)})")
+            
+            # Initialize A matrix from column space SVD (matches adamss_pkg)
+            # A maps from r (full SVD rank) dimensions to actual_rank dimensions
+            A_init = U_col[:, :actual_rank].T.contiguous()
+            
+            # Initialize B matrix to zeros (matches adamss_pkg)
+            # B maps from actual_rank dimensions back to len(seg_indices) dimensions
+            B_init = torch.zeros(len(seg_indices), actual_rank, dtype=dtype, device=device)
             
             # Register A and B parameters
             # A maps from r (full SVD rank) dimensions to actual_rank dimensions
@@ -335,12 +382,11 @@ class AdaMSSLayer(BaseTunerLayer):
 
         # Initialize ASA tracking if enabled
         if use_asa:
-            total_params = sum(
-                self.adamss_A[f"{adapter_name}_A_{i}"].numel() + self.adamss_B[f"{adapter_name}_B_{i}"].numel()
-                for i in range(self.KK[adapter_name])
-            )
-            self.exp_avg_ipt[adapter_name] = torch.zeros(total_params, device=device, dtype=dtype)
-            self.exp_avg_unc[adapter_name] = torch.zeros(total_params, device=device, dtype=dtype)
+            self.exp_avg_ipt[adapter_name] = {}
+            self.exp_avg_unc[adapter_name] = {}
+            
+            # Hooks are not used; importance is updated explicitly via update_importance
+            # to match adamss_pkg behavior (using accumulated gradients).
 
         # Compute newindex for forward pass
         self.newindex[adapter_name] = np.concatenate(
