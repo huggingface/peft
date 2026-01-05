@@ -60,21 +60,6 @@ peft_model.print_trainable_parameters()
 
 [[autodoc]] tuners.hira.layer.Conv1d [[autodoc]] tuners.hira.layer.Conv2d [[autodoc]] tuners.hira.layer.ConvNd
 
-## BitsAndBytes Integration
-
-* **8-bit Quantized**: [[autodoc]] tuners.hira.bnb.Linear8bitLt
-* **4-bit Quantized**: [[autodoc]] tuners.hira.bnb.Linear4bit
-* **Dispatch Utilities**:
-
-  * [[autodoc]] tuners.hira.bnb.dispatch_bnb_8bit
-  * [[autodoc]] tuners.hira.bnb.dispatch_bnb_4bit
-
-## Dispatch Handler
-
-Default layer replacement for HiRA adapters:
-
-[[autodoc]] tuners.hira.dispatch.dispatch_default
-
 
 ## Citation:
 If you found HiRA is useful, please cite HiRA as:
