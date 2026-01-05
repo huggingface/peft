@@ -77,10 +77,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         model ([`~transformers.PreTrainedModel`]): The base transformer model used for Peft.
         peft_config ([`PeftConfig`]): The configuration of the Peft model.
         adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
-        autocast_adapter_dtype (`bool`, *optional*):
+        autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
             Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
             using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
-            select PEFT tuners.
+            select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the corresponding layer.
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             Create empty adapter weights on meta device. Useful to speed up the loading loading process.
 
@@ -432,8 +432,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 The configuration object to use instead of an automatically loaded configuration. This configuration
                 object is mutually exclusive with `model_id` and `kwargs`. This is useful when configuration is already
                 loaded before calling `from_pretrained`.
-            autocast_adapter_dtype (`bool`, *optional*):
-                Whether to autocast the adapter dtype. Defaults to `True`. Only relevant for specific adapter types.
+            autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
+                Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter
+                weights using float16 and bfloat16 to float32, as this is typically required for stable training, and
+                only affect select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the
+                corresponding layer.
             ephemeral_gpu_offload (`bool`, *optional*):
                 Whether to use ephemeral GPU offloading for partially loaded modules. Defaults to `False`. This is
                 useful when parts of the model and/or components (such as adapters) are kept in CPU memory until they
@@ -451,6 +454,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 `"default"`) is not inserted yet. Only pass this argument if you know what you're doing.
             kwargs: (`optional`):
                 Additional keyword arguments passed along to the specific PEFT configuration class.
+
         """
         from .auto import MODEL_TYPE_TO_PEFT_MODEL_MAPPING
         from .tuners import XLoraConfig, XLoraModel
@@ -1002,7 +1006,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         return self.base_model if self.active_peft_config.is_prompt_learning else self.base_model.model
 
-    def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
+    def add_adapter(
+        self,
+        adapter_name: str,
+        peft_config: PeftConfig,
+        low_cpu_mem_usage: bool = False,
+        autocast_adapter_dtype: bool = True,
+    ) -> None:
         """
         Add an adapter to the model based on the passed configuration.
 
@@ -1021,7 +1031,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
                 Create empty adapter weights on meta device. Useful to speed up the process when loading saved
                 adapters. Don't use this option when creating a new PEFT adapter for training.
-
+            autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
+                Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter
+                weights using float16 and bfloat16 to float32, as this is typically required for stable training, and
+                only affect select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the
+                corresponding layer.
         """
         prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(peft_config.peft_type)
         if prefix and adapter_name in prefix:
@@ -1069,6 +1083,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if adapter_name in self.peft_config:
                 del self.peft_config[adapter_name]
             raise
+
+        if hasattr(self.base_model, "_cast_adapter_dtype"):
+            self.base_model._cast_adapter_dtype(
+                adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype
+            )
 
     def delete_adapter(self, adapter_name: str) -> None:
         """
@@ -1333,7 +1352,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
                 Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter
                 weights using float16 and bfloat16 to float32, as this is typically required for stable training, and
-                only affect select PEFT tuners.
+                only affect select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the
+                corresponding layer.
             ephemeral_gpu_offload (`bool`, *optional*, defaults to `False`):
                 Whether to use ephemeral GPU offloading for partially loaded modules. Defaults to `False`.
             low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
@@ -1366,7 +1386,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             )
             self._check_new_adapter_config(peft_config, is_trainable=is_trainable)
             peft_config.inference_mode = not is_trainable
-            self.add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
+            self.add_adapter(
+                adapter_name,
+                peft_config,
+                low_cpu_mem_usage=low_cpu_mem_usage,
+                autocast_adapter_dtype=autocast_adapter_dtype,
+            )
 
         adapters_weights = load_peft_weights(
             model_id, device=torch_device, key_mapping=key_mapping, **hf_hub_download_kwargs
@@ -1611,10 +1636,10 @@ class PeftModelForSequenceClassification(PeftModel):
         model ([`~transformers.PreTrainedModel`]): Base transformer model.
         peft_config ([`PeftConfig`]): Peft config.
         adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
-        autocast_adapter_dtype (`bool`, *optional*):
+        autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
             Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
             using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
-            select PEFT tuners.
+            select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the corresponding layer.
 
     **Attributes**:
         - **config** ([`~transformers.PretrainedConfig`]) -- The configuration object of the base model.
@@ -1678,7 +1703,13 @@ class PeftModelForSequenceClassification(PeftModel):
             inference_mode=peft_config.inference_mode,
         )
 
-    def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
+    def add_adapter(
+        self,
+        adapter_name: str,
+        peft_config: PeftConfig,
+        low_cpu_mem_usage: bool = False,
+        autocast_adapter_dtype: bool = True,
+    ) -> None:
         """
         Add an adapter to the model based on the passed configuration.
 
@@ -1697,7 +1728,11 @@ class PeftModelForSequenceClassification(PeftModel):
             low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
                 Create empty adapter weights on meta device. Useful to speed up the process when loading saved
                 adapters. Don't use this option when creating a new PEFT adapter for training.
-
+            autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
+                Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter
+                weights using float16 and bfloat16 to float32, as this is typically required for stable training, and
+                only affect select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the
+                corresponding layer.
         """
         # ensure that additional adapters also add the classifier layer to modules_to_save
         if hasattr(peft_config, "modules_to_save"):
@@ -1855,10 +1890,10 @@ class PeftModelForCausalLM(PeftModel):
         model ([`~transformers.PreTrainedModel`]): Base transformer model.
         peft_config ([`PeftConfig`]): Peft config.
         adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
-        autocast_adapter_dtype (`bool`, *optional*):
+        autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
             Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
             using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
-            select PEFT tuners.
+            select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the corresponding layer.
 
     Example:
 
@@ -2202,10 +2237,10 @@ class PeftModelForSeq2SeqLM(PeftModel):
         model ([`~transformers.PreTrainedModel`]): Base transformer model.
         peft_config ([`PeftConfig`]): Peft config.
         adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
-        autocast_adapter_dtype (`bool`, *optional*):
+        autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
             Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
             using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
-            select PEFT tuners.
+            select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the corresponding layer.
 
     Example:
 
@@ -2472,10 +2507,10 @@ class PeftModelForTokenClassification(PeftModel):
         model ([`~transformers.PreTrainedModel`]): Base transformer model.
         peft_config ([`PeftConfig`]): Peft config.
         adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
-        autocast_adapter_dtype (`bool`, *optional*):
+        autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
             Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
             using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
-            select PEFT tuners.
+            select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the corresponding layer.
 
     **Attributes**:
         - **config** ([`~transformers.PretrainedConfig`]) -- The configuration object of the base model.
@@ -2534,7 +2569,13 @@ class PeftModelForTokenClassification(PeftModel):
             inference_mode=peft_config.inference_mode,
         )
 
-    def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
+    def add_adapter(
+        self,
+        adapter_name: str,
+        peft_config: PeftConfig,
+        low_cpu_mem_usage: bool = False,
+        autocast_adapter_dtype: bool = True,
+    ) -> None:
         """
         Add an adapter to the model based on the passed configuration.
 
@@ -2553,6 +2594,11 @@ class PeftModelForTokenClassification(PeftModel):
             low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
                 Create empty adapter weights on meta device. Useful to speed up the process when loading saved
                 adapters. Don't use this option when creating a new PEFT adapter for training.
+            autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
+                Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter
+                weights using float16 and bfloat16 to float32, as this is typically required for stable training, and
+                only affect select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the
+                corresponding layer.
 
         """
         # ensure that additional adapters also add the classifier layer to modules_to_save
@@ -2695,10 +2741,10 @@ class PeftModelForQuestionAnswering(PeftModel):
         model ([`~transformers.PreTrainedModel`]): Base transformer model.
         peft_config ([`PeftConfig`]): Peft config.
         adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
-        autocast_adapter_dtype (`bool`, *optional*):
+        autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
             Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
             using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
-            select PEFT tuners.
+            select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the corresponding layer.
 
     **Attributes**:
         - **config** ([`~transformers.PretrainedConfig`]) -- The configuration object of the base model.
@@ -2755,7 +2801,13 @@ class PeftModelForQuestionAnswering(PeftModel):
             inference_mode=peft_config.inference_mode,
         )
 
-    def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
+    def add_adapter(
+        self,
+        adapter_name: str,
+        peft_config: PeftConfig,
+        low_cpu_mem_usage: bool = False,
+        autocast_adapter_dtype: bool = True,
+    ) -> None:
         """
         Add an adapter to the model based on the passed configuration.
 
@@ -2774,6 +2826,11 @@ class PeftModelForQuestionAnswering(PeftModel):
             low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
                 Create empty adapter weights on meta device. Useful to speed up the process when loading saved
                 adapters. Don't use this option when creating a new PEFT adapter for training.
+            autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
+                Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter
+                weights using float16 and bfloat16 to float32, as this is typically required for stable training, and
+                only affect select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the
+                corresponding layer.
 
         """
         # ensure that additional adapters also add the classifier layer to modules_to_save
@@ -2939,10 +2996,10 @@ class PeftModelForFeatureExtraction(PeftModel):
         model ([`~transformers.PreTrainedModel`]): Base transformer model.
         peft_config ([`PeftConfig`]): Peft config.
         adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
-        autocast_adapter_dtype (`bool`, *optional*):
+        autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
             Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
             using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
-            select PEFT tuners.
+            select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the corresponding layer.
 
     **Attributes**:
         - **config** ([`~transformers.PretrainedConfig`]) -- The configuration object of the base model.
