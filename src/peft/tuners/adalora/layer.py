@@ -55,7 +55,15 @@ class AdaLoraLayer(LoraLayer):
         self.lora_variant: dict[str, LoraVariant] = {}
 
     def update_layer(
-        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, inference_mode: bool = False, **kwargs
+        self,
+        adapter_name,
+        r,
+        lora_alpha,
+        lora_dropout,
+        init_lora_weights,
+        inference_mode: bool = False,
+        use_dora: bool = False,
+        **kwargs,
     ):
         if r < 0:
             # note: r == 0 is allowed for AdaLora, see #1539
@@ -85,7 +93,19 @@ class AdaLoraLayer(LoraLayer):
             self.reset_lora_parameters(adapter_name)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
+
+        # initialize variant if needed (e.g., DoRA) - must happen after device move
+        if use_dora:
+            lora_variant = self.resolve_lora_variant(use_dora=use_dora, **kwargs)
+            if lora_variant is not None:
+                self.lora_variant[adapter_name] = lora_variant
+                lora_variant.init(self, adapter_name, **kwargs)
+
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
+
+    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+        """Return AdaDoRA variant if use_dora is True. Override in subclasses."""
+        return None
 
     def reset_lora_parameters(self, adapter_name):
         if adapter_name in self.lora_A.keys():
@@ -125,28 +145,6 @@ class SVDLinear(nn.Module, AdaLoraLayer):
         from .variants import AdaDoraLinearVariant
 
         return AdaDoraLinearVariant()
-
-    def update_layer(
-        self,
-        adapter_name,
-        r,
-        lora_alpha,
-        lora_dropout,
-        init_lora_weights,
-        inference_mode: bool = False,
-        use_dora: bool = False,
-        **kwargs,
-    ):
-        # call parent update_layer to set up base AdaLoRA parameters
-        AdaLoraLayer.update_layer(
-            self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, inference_mode=inference_mode, **kwargs
-        )
-
-        # initialize variant if needed (e.g., DoRA)
-        lora_variant = self.resolve_lora_variant(use_dora=use_dora, **kwargs)
-        if lora_variant is not None:
-            self.lora_variant[adapter_name] = lora_variant
-            lora_variant.init(self, adapter_name, **kwargs)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
