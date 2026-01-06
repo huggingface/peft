@@ -179,54 +179,6 @@ def initialize_kv_prefix_from_text(
     )
 
 
-@torch.no_grad()
-def initialize_cartridge_from_past_key_values(
-    model,
-    *,
-    adapter_name: Optional[str] = None,
-    past_key_values: Any,
-    num_virtual_tokens: Optional[int] = None,
-) -> torch.Tensor:
-    """
-    Backwards-compatible alias for initializing a KV-prefix adapter from `past_key_values`.
-
-    Despite the name, this works for both CARTRIDGE and PREFIX_TUNING adapters, as both are served as KV prefixes.
-    """
-    return initialize_kv_prefix_from_past_key_values(
-        model,
-        adapter_name=adapter_name,
-        past_key_values=past_key_values,
-        num_virtual_tokens=num_virtual_tokens,
-    )
-
-
-@torch.no_grad()
-def initialize_cartridge_from_text(
-    model,
-    tokenizer,
-    *,
-    text: str,
-    adapter_name: Optional[str] = None,
-    num_virtual_tokens: Optional[int] = None,
-    use_chat_template: bool = True,
-    max_length: Optional[int] = None,
-) -> torch.Tensor:
-    """
-    Backwards-compatible alias for initializing a KV-prefix adapter from a text prefill.
-
-    Despite the name, this works for both CARTRIDGE and PREFIX_TUNING adapters, as both are served as KV prefixes.
-    """
-    return initialize_kv_prefix_from_text(
-        model,
-        tokenizer,
-        text=text,
-        adapter_name=adapter_name,
-        num_virtual_tokens=num_virtual_tokens,
-        use_chat_template=use_chat_template,
-        max_length=max_length,
-    )
-
-
 def compose_cartridge_adapters(
     adapter_paths: Sequence[str | Path],
     *,

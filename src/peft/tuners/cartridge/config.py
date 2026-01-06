@@ -37,8 +37,8 @@ class CartridgeConfig(PromptLearningConfig):
           model* and copy the first `num_virtual_tokens` cached KV tokens into the adapter. PEFT provides utilities for
           this (importable from `peft` or from `peft.tuners.cartridge.utils`):
 
-          - `initialize_cartridge_from_text(model, tokenizer, text=...)`
-          - `initialize_cartridge_from_past_key_values(model, past_key_values=...)`
+          - `initialize_kv_prefix_from_text(model, tokenizer, text=...)`
+          - `initialize_kv_prefix_from_past_key_values(model, past_key_values=...)`
 
           If you already have a flattened KV-prefix tensor, you can load it directly via the prompt encoder’s
           `load_prompt_embeddings(...)` method.

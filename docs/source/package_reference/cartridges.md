@@ -64,9 +64,9 @@ If you need to create and initialize a cartridge before training, see the initia
 The paper discusses a few practical initialization strategies:
 
 - Random KV (default): create a `CartridgeConfig` and start training. This initializes the KV prefix randomly.
-- KV from the first tokens of a prompt/corpus: use `initialize_cartridge_from_text(model, tokenizer, text=...)`. This
+- KV from the first tokens of a prompt/corpus: use `initialize_kv_prefix_from_text(model, tokenizer, text=...)`. This
   runs a prefill on `text` and copies the resulting KV cache for the first `num_virtual_tokens` into the adapter.
-- KV from an existing cache: use `initialize_cartridge_from_past_key_values(model, past_key_values=...)` if you already
+- KV from an existing cache: use `initialize_kv_prefix_from_past_key_values(model, past_key_values=...)` if you already
   have a `past_key_values` object from a base-model prefill.
 
 ## Training

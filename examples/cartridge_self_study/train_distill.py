@@ -22,7 +22,7 @@ from torch.utils.data import Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 
 from peft import CartridgeConfig, get_peft_model
-from peft.tuners.cartridge.utils import initialize_cartridge_from_text
+from peft.tuners.cartridge.utils import initialize_kv_prefix_from_text
 
 
 class DistillJsonlDataset(Dataset):
@@ -170,7 +170,7 @@ def main():
 
     print(f"Initializing cartridge from document: {args.document}", flush=True)
     document_text = Path(args.document).read_text()
-    initialize_cartridge_from_text(
+    initialize_kv_prefix_from_text(
         model,
         tokenizer,
         text=document_text,

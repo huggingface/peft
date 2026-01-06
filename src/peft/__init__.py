@@ -123,8 +123,6 @@ from .tuners import (
 )
 from .tuners.cartridge.utils import (
     compose_cartridge_adapters,
-    initialize_cartridge_from_past_key_values,
-    initialize_cartridge_from_text,
     initialize_kv_prefix_from_past_key_values,
     initialize_kv_prefix_from_text,
     prompt_embeddings_from_past_key_values,
@@ -253,8 +251,6 @@ __all__ = [
     "get_peft_config",
     "get_peft_model",
     "get_peft_model_state_dict",
-    "initialize_cartridge_from_past_key_values",
-    "initialize_cartridge_from_text",
     "initialize_kv_prefix_from_past_key_values",
     "initialize_kv_prefix_from_text",
     "initialize_lora_eva_weights",

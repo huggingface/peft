@@ -20,7 +20,7 @@ from train_distill import DistillationCollator, DistillationTrainer, DistillJson
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
 
 from peft import CartridgeConfig, get_peft_model
-from peft.tuners.cartridge.utils import initialize_cartridge_from_text
+from peft.tuners.cartridge.utils import initialize_kv_prefix_from_text
 
 
 def main():
@@ -65,7 +65,7 @@ def main():
 
     print(f"Initializing cartridge from document: {args.document}", flush=True)
     document_text = Path(args.document).read_text()
-    initialize_cartridge_from_text(
+    initialize_kv_prefix_from_text(
         model,
         tokenizer,
         text=document_text,

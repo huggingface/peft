@@ -25,7 +25,6 @@ from peft import (
     PeftModel,
     compose_cartridge_adapters,
     get_peft_model,
-    initialize_cartridge_from_past_key_values,
     initialize_kv_prefix_from_past_key_values,
     load_peft_weights,
     prompt_embeddings_from_past_key_values,
@@ -163,7 +162,7 @@ def test_cartridge_init_from_past_key_values_and_compose(tmp_path):
     input_ids = torch.randint(0, base.config.vocab_size, (1, 12))
     with model.disable_adapter():
         outputs = model(input_ids=input_ids, use_cache=True)
-    prompt_embeddings = initialize_cartridge_from_past_key_values(
+    prompt_embeddings = initialize_kv_prefix_from_past_key_values(
         model, past_key_values=outputs.past_key_values, num_virtual_tokens=4
     )
     assert prompt_embeddings.shape[0] == 4
@@ -179,7 +178,7 @@ def test_cartridge_init_from_past_key_values_and_compose(tmp_path):
     model2 = get_peft_model(base2, peft_config)
     with model2.disable_adapter():
         outputs2 = model2(input_ids=input_ids, use_cache=True)
-    _ = initialize_cartridge_from_past_key_values(
+    _ = initialize_kv_prefix_from_past_key_values(
         model2, past_key_values=outputs2.past_key_values, num_virtual_tokens=4
     )
     model2.save_pretrained(a2)
@@ -204,7 +203,7 @@ def test_cartridge_prompt_embeddings_from_past_key_values_matches_init():
     pe = prompt_embeddings_from_past_key_values(outputs.past_key_values, num_virtual_tokens=4)
     assert pe.shape[0] == 4
 
-    pe2 = initialize_cartridge_from_past_key_values(
+    pe2 = initialize_kv_prefix_from_past_key_values(
         model, past_key_values=outputs.past_key_values, num_virtual_tokens=4
     )
     assert pe.device == pe2.device
