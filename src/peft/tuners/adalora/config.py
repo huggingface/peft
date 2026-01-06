@@ -71,8 +71,6 @@ class AdaLoraConfig(LoraConfig):
         super().__post_init__()
         self.peft_type = PeftType.ADALORA
 
-        # DoRA is now supported in AdaLoRA (AdaDoRA)
-
         if self.loftq_config:
             raise ValueError(f"{self.peft_type} does not support LOFTQ.")
 

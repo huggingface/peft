@@ -43,9 +43,7 @@ class AdaDoraLinearLayer(DoraLinearLayer):
     4. update_magnitude_after_pruning handles AdaLoRA's rank pruning
     """
 
-    def get_weight_norm(
-        self, weight, lora_A, lora_B, lora_E, scaling, ranknum
-    ) -> torch.Tensor:
+    def get_weight_norm(self, weight, lora_A, lora_B, lora_E, scaling, ranknum) -> torch.Tensor:
         """
         Compute L2 norm of (W + ΔW) for AdaLoRA's SVD decomposition.
 
@@ -68,9 +66,7 @@ class AdaDoraLinearLayer(DoraLinearLayer):
         weight_norm = torch.linalg.norm(weight, dim=1).to(weight.dtype)
         return weight_norm
 
-    def update_layer(
-        self, *, base_layer, lora_A, lora_B, lora_E, scaling, ranknum, place_on_cpu=False
-    ) -> None:
+    def update_layer(self, *, base_layer, lora_A, lora_B, lora_E, scaling, ranknum, place_on_cpu=False) -> None:
         """
         Initialize magnitude vector for AdaLoRA.
 
@@ -95,11 +91,7 @@ class AdaDoraLinearLayer(DoraLinearLayer):
 
         with gather_params_ctx(base_layer.parameters()):
             weight = dequantize_module_weight(base_layer)
-            weight_norm = self.get_weight_norm(
-                weight.to(lora_A.device),
-                lora_A, lora_B, lora_E,
-                scaling, ranknum
-            )
+            weight_norm = self.get_weight_norm(weight.to(lora_A.device), lora_A, lora_B, lora_E, scaling, ranknum)
 
         if dtype_is_fp16:
             weight_norm = weight_norm.half()
@@ -109,9 +101,7 @@ class AdaDoraLinearLayer(DoraLinearLayer):
 
         self.weight = nn.Parameter(weight_norm, requires_grad=True)
 
-    def forward(
-        self, x, *, lora_A, lora_B, lora_E, scaling, ranknum, base_layer, base_result=None
-    ):
+    def forward(self, x, *, lora_A, lora_B, lora_E, scaling, ranknum, base_layer, base_result=None):
         """
         DoRA forward pass for AdaLoRA.
 
@@ -137,10 +127,7 @@ class AdaDoraLinearLayer(DoraLinearLayer):
         # weight norm is detached per DoRA paper section 4.3:
         # "[...] we suggest treating ||V + ΔV||_c as a constant, thereby
         # detaching it from the gradient graph."
-        weight_norm = self.get_weight_norm(
-            weight, lora_A.detach(), lora_B.detach(), lora_E.detach(),
-            scaling, ranknum
-        )
+        weight_norm = self.get_weight_norm(weight, lora_A.detach(), lora_B.detach(), lora_E.detach(), scaling, ranknum)
         weight_norm = weight_norm.detach()
         mag_norm_scale = (magnitude / weight_norm).view(1, -1)
 
@@ -160,9 +147,7 @@ class AdaDoraLinearLayer(DoraLinearLayer):
 
         return result_dora
 
-    def update_magnitude_after_pruning(
-        self, base_layer, lora_A, lora_B, lora_E, scaling, ranknum
-    ) -> None:
+    def update_magnitude_after_pruning(self, base_layer, lora_A, lora_B, lora_E, scaling, ranknum) -> None:
         """
         Hook called after AdaLoRA rank pruning.
 

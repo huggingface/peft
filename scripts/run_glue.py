@@ -12,9 +12,8 @@ from typing import Optional
 import datasets
 import evaluate
 import numpy as np
-from datasets import load_dataset
-
 import transformers
+from datasets import load_dataset
 from transformers import (
     AutoConfig,
     AutoModelForSequenceClassification,
@@ -29,7 +28,8 @@ from transformers import (
     set_seed,
 )
 
-from peft import AdaLoraConfig, get_peft_model, PeftType
+from peft import AdaLoraConfig, PeftType, get_peft_model
+
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +77,7 @@ class ModelArguments:
 @dataclass
 class AdaLoraArguments:
     """Arguments for AdaLoRA configuration."""
+
     peft_type: str = field(default="ADALORA", metadata={"help": "PEFT type: ADALORA or LORA"})
     use_dora: bool = field(default=False, metadata={"help": "Enable DoRA (Weight-Decomposed Low-Rank Adaptation)"})
     target_r: int = field(default=8, metadata={"help": "Target rank after pruning"})
@@ -127,7 +128,9 @@ def main():
     transformers.utils.logging.set_verbosity(log_level)
 
     logger.info(f"Training/evaluation parameters {training_args}")
-    logger.info(f"AdaLoRA parameters: use_dora={adalora_args.use_dora}, target_r={adalora_args.target_r}, init_r={adalora_args.init_r}")
+    logger.info(
+        f"AdaLoRA parameters: use_dora={adalora_args.use_dora}, target_r={adalora_args.target_r}, init_r={adalora_args.init_r}"
+    )
 
     set_seed(training_args.seed)
 
@@ -201,8 +204,7 @@ def main():
 
     def preprocess_function(examples):
         args = (
-            (examples[sentence1_key],) if sentence2_key is None
-            else (examples[sentence1_key], examples[sentence2_key])
+            (examples[sentence1_key],) if sentence2_key is None else (examples[sentence1_key], examples[sentence2_key])
         )
         return tokenizer(*args, padding=padding, max_length=max_seq_length, truncation=True)
 

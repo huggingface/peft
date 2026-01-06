@@ -35,7 +35,14 @@ else:
 class AdaLoraLayer(LoraLayer):
     # list all names of layers that may contain adapter weights
     # note: ranknum doesn't need to be included as it is not an nn.Module
-    adapter_layer_names = ("lora_A", "lora_B", "lora_E", "lora_embedding_A", "lora_embedding_B", "lora_magnitude_vector")
+    adapter_layer_names = (
+        "lora_A",
+        "lora_B",
+        "lora_E",
+        "lora_embedding_A",
+        "lora_embedding_B",
+        "lora_magnitude_vector",
+    )
     # all names of other parameters that may contain adapter-related parameters
     other_param_names = ("r", "lora_alpha", "scaling", "lora_dropout", "ranknum")
 
@@ -120,13 +127,19 @@ class SVDLinear(nn.Module, AdaLoraLayer):
         return AdaDoraLinearVariant()
 
     def update_layer(
-        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights,
-        inference_mode: bool = False, use_dora: bool = False, **kwargs
+        self,
+        adapter_name,
+        r,
+        lora_alpha,
+        lora_dropout,
+        init_lora_weights,
+        inference_mode: bool = False,
+        use_dora: bool = False,
+        **kwargs,
     ):
         # call parent update_layer to set up base AdaLoRA parameters
         AdaLoraLayer.update_layer(
-            self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights,
-            inference_mode=inference_mode, **kwargs
+            self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, inference_mode=inference_mode, **kwargs
         )
 
         # initialize variant if needed (e.g., DoRA)
@@ -163,9 +176,7 @@ class SVDLinear(nn.Module, AdaLoraLayer):
                 orig_weight = base_layer.weight.data.clone()
                 if active_adapter in self.lora_variant:
                     # use variant pattern for DoRA merge
-                    new_weight = self.lora_variant[active_adapter].merge_safe(
-                        self, active_adapter, orig_weight
-                    )
+                    new_weight = self.lora_variant[active_adapter].merge_safe(self, active_adapter, orig_weight)
                 else:
                     # standard AdaLoRA merge
                     new_weight = orig_weight + self.get_delta_weight(active_adapter)
@@ -178,9 +189,7 @@ class SVDLinear(nn.Module, AdaLoraLayer):
             else:
                 if active_adapter in self.lora_variant:
                     # use variant pattern for DoRA merge
-                    self.lora_variant[active_adapter].merge_unsafe(
-                        self, active_adapter, base_layer.weight
-                    )
+                    self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer.weight)
                 else:
                     # standard AdaLoRA merge
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
@@ -203,9 +212,7 @@ class SVDLinear(nn.Module, AdaLoraLayer):
             weight = self.get_base_layer().weight
             if active_adapter in self.lora_variant:
                 # use variant pattern for DoRA unmerge
-                unmerged = self.lora_variant[active_adapter].unmerge(
-                    self, active_adapter, weight
-                )
+                unmerged = self.lora_variant[active_adapter].unmerge(self, active_adapter, weight)
                 weight.data = unmerged
             else:
                 # standard AdaLoRA unmerge
