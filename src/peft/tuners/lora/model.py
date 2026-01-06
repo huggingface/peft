@@ -378,6 +378,16 @@ class LoraModel(BaseTuner):
         hook_handles = []
 
         if alora_offsets is not None:
+            # TODO: remove once transformers 4.52 is no longer supported. Note that 4.52.0 is yanked, so 4.52.1
+            # is the first 4.52 release.
+            transformers_lt_4_52 = packaging.version.parse(transformers.__version__) < packaging.version.parse(
+                "4.52.1"
+            )
+            if transformers_lt_4_52:
+                raise ValueError("Using aLoRA requires transformers >= 4.52.1.")
+
+            from transformers.modeling_layers import GradientCheckpointingLayer
+
             for n, layer in self.named_modules():
                 # gradient checkpointing layer are executed concurrently to the 'normal' forward call
                 # (in the backward step the gradient checkpointing layer's forward will be executed again).
@@ -387,21 +397,7 @@ class LoraModel(BaseTuner):
                 #
                 # Note that this will lead to double application of whatever the callbacks do in normal forward.
                 # Make sure that whatever change is done, can be applied more than once without harm (idempotency).
-
-                if layer.gradient_checkpointing:
-                    # TODO: remove once transformers 4.52 is no longer supported. Note that 4.52.0 is yanked, so 4.52.1
-                    # is the first 4.52 release.
-                    transformers_lt_4_52 = packaging.version.parse(transformers.__version__) < packaging.version.parse(
-                        "4.52.1"
-                    )
-                    if transformers_lt_4_52:
-                        raise ValueError(
-                            "To use aLoRA with gradient checkpointing, please install transformers >= 4.52.1."
-                        )
-
-                    from transformers.modeling_layers import GradientCheckpointingLayer
-
-                if layer.gradient_checkpointing and isinstance(layer, GradientCheckpointingLayer):
+                if isinstance(layer, GradientCheckpointingLayer) and layer.gradient_checkpointing:
 
                     def forward_pre_hook(name, module, inputs, **kwargs):
                         for submodule in module.modules():
