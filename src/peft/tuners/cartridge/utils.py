@@ -35,8 +35,13 @@ def _to_legacy_past_key_values(past_key_values: Any):
     to_legacy = getattr(past_key_values, "to_legacy_cache", None)
     if callable(to_legacy):
         return to_legacy()
+    if hasattr(past_key_values, "__iter__"):
+        legacy = list(past_key_values)
+        if legacy and isinstance(legacy[0], (tuple, list)) and len(legacy[0]) >= 2:
+            return [(layer[0], layer[1]) for layer in legacy]
     raise TypeError(
-        "Unsupported `past_key_values` type. Expected a legacy tuple/list or an object with `to_legacy_cache()`."
+        "Unsupported `past_key_values` type. Expected a legacy tuple/list, an object with `to_legacy_cache()`, or an "
+        "iterable of (key, value) tuples."
     )
 
 
