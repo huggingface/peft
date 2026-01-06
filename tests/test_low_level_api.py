@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import copy
+import platform
 import re
 
 import pytest
@@ -126,9 +127,9 @@ class TestInjectAdapterFromStateDict:
         "model_cls_and_id",
         [
             (AutoModelForCausalLM, "trl-internal-testing/tiny-random-LlamaForCausalLM"),
-            (AutoModel, "hf-internal-testing/tiny-random-BertModel"),
-            (AutoModelForSeq2SeqLM, "hf-internal-testing/tiny-random-BartForConditionalGeneration"),
-            (AutoModelForSequenceClassification, "hf-internal-testing/tiny-random-RobertaForSequenceClassification"),
+            (AutoModel, "peft-internal-testing/tiny-random-BertModel"),
+            (AutoModelForSeq2SeqLM, "peft-internal-testing/tiny-random-BartForConditionalGeneration"),
+            (AutoModelForSequenceClassification, "peft-internal-testing/tiny-random-RobertaForSequenceClassification"),
         ],
         ids=["Llama", "Bert", "Bart", "Roberta"],
     )
@@ -171,7 +172,7 @@ class TestInjectAdapterFromStateDict:
                 assert sd_before[key].shape == sd_after[key].shape
 
     def test_inject_from_state_dict_transformers(self):
-        model_id = "facebook/opt-125m"
+        model_id = "peft-internal-testing/opt-125m"
         config = LoraConfig()
 
         with hub_online_once(model_id):
@@ -193,7 +194,7 @@ class TestInjectAdapterFromStateDict:
 
     def test_inject_from_state_dict_transformers_irregular_targets(self):
         # ensure that this works even if an "irregular" pattern is used, i.e. only targeting some modules on some layers
-        model_id = "facebook/opt-125m"
+        model_id = "peft-internal-testing/opt-125m"
         config = LoraConfig(
             target_modules=r".*\.[0-5]\.self_attn\.v_proj|.*\.[4-7]\.self_attn\.k_proj",
         )
@@ -220,7 +221,7 @@ class TestInjectAdapterFromStateDict:
         # the state_dict, we cannot tell if the user intends to use target_modules or target_parameters. Currently, we
         # just assume the former, thus applying normal lora.Linear etc. layers instead of lora.ParamWrapper. When we
         # detect that the user tries to do this, we raise an error.
-        model_id = "facebook/opt-125m"
+        model_id = "peft-internal-testing/opt-125m"
         config = LoraConfig(target_modules=[], target_parameters=["q_proj.weight", "v_proj.weight"])
 
         with hub_online_once(model_id):
@@ -242,7 +243,7 @@ class TestInjectAdapterFromStateDict:
         # the state_dict, we cannot tell if the user intends to use target_modules or target_parameters. Currently, we
         # just assume the former, thus applying normal lora.Linear etc. layers instead of lora.ParamWrapper. When we
         # don't detect that the user tries to do this, there is nothing that can be done.
-        model_id = "facebook/opt-125m"
+        model_id = "peft-internal-testing/opt-125m"
         config = LoraConfig(target_modules=[], target_parameters=["q_proj.weight", "v_proj.weight"])
 
         with hub_online_once(model_id):
@@ -311,7 +312,7 @@ class TestInjectAdapterFromStateDict:
                 assert sd_unet_before[key].shape == sd_unet_after[key].shape
 
     def test_inject_from_state_dict_low_cpu_mem_usage(self):
-        model_id = "facebook/opt-125m"
+        model_id = "peft-internal-testing/opt-125m"
         config = LoraConfig()
 
         with hub_online_once(model_id):
@@ -328,7 +329,7 @@ class TestInjectAdapterFromStateDict:
 
     def test_inject_from_state_dict_missing_keys_warning(self):
         # check that if the PEFT config specifies **more** taget modules than the state_dict, we get a warning for that
-        model_id = "facebook/opt-125m"
+        model_id = "peft-internal-testing/opt-125m"
         config = LoraConfig()
 
         with hub_online_once(model_id):
@@ -362,7 +363,7 @@ class TestInjectAdapterFromStateDict:
 
     def test_inject_from_state_dict_extra_keys_warning(self):
         # check that if the PEFT config specifies **fewer** taget modules than the state_dict, we get a warning for that
-        model_id = "facebook/opt-125m"
+        model_id = "peft-internal-testing/opt-125m"
         config = LoraConfig()
 
         with hub_online_once(model_id):
@@ -393,13 +394,47 @@ class TestInjectAdapterFromStateDict:
             for key in sd_before.keys():
                 assert sd_before[key].shape == sd_after[key].shape
 
+    @pytest.mark.skipf(platform.system() != "Linux", reason="Run torch.compile tests only on Linux")
+    @pytest.mark.parametrize("compile_initial_model", [False, True])
+    def test_inject_from_state_dict_compiled_model(self, compile_initial_model):
+        # If we directly inject the adapter into the model from a `state_dict`, if the model is compiled, the
+        # keys would not match because they contain the `'_orig_mod.'` prefix from the compilation. See #2957.
+        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        config = LoraConfig()
+
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            if compile_initial_model:
+                # we want to test both cases: the initial model already being compiled and not
+                model = torch.compile(model)
+            model.add_adapter(config)
+            sd_before = get_peft_model_state_dict(model)
+            del model
+
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model = torch.compile(model)
+            model = inject_adapter_in_model(config, model, state_dict=sd_before)
+            sd_after = get_peft_model_state_dict(model)
+
+            if not compile_initial_model:
+                # if initial model was not compiled, remove the _orig_mod. prefix for loaded model for the comparison to
+                # work
+                sd_after = {k.removeprefix("_orig_mod."): v for k, v in sd_after.items()}
+
+            # We exepct the same keys and the same shapes of the weights. Don't check the values: injection is only
+            # about creating the PEFT adapter, not about loading the actual weights
+            assert len(sd_before) > 0
+            assert sd_before.keys() == sd_after.keys()
+            for key in sd_before.keys():
+                assert sd_before[key].shape == sd_after[key].shape
+
 
 class TestPeftStateDict:
     # Test some edge cases around getting and setting the PEFT state_dict. There are potential sources of errors there
     # because the adapter_name is removed from/added to the state_dict keys.
     def test_get_peft_model_state_dict_removes_adapter_name(self):
         # ensure that the adapter name, "default", is removed from the state_dict
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
 
@@ -411,7 +446,7 @@ class TestPeftStateDict:
 
     def test_get_peft_model_state_dict_removes_non_defaul_adapter_name(self):
         # ensure that the adapter name is removed from the state_dict, even if it's not "default"
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
 
@@ -423,7 +458,7 @@ class TestPeftStateDict:
     def test_get_peft_model_state_dict_removes_adapter_name_when_same_as_module_name(self):
         # here the adapter is named "v_proj", which is the same name as some modules targeted with lora in the model,
         # which is nefarious
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
 

@@ -43,11 +43,12 @@ from .testing_common import PeftCommonTester
 from .testing_utils import set_init_weights_false
 
 
+# Note: models from peft-internal-testing are just the safetensors versions of hf-internal-testing
 PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST = [
-    "hf-internal-testing/tiny-random-BertModel",
-    "hf-internal-testing/tiny-random-RobertaModel",
-    "hf-internal-testing/tiny-random-DebertaModel",
-    "hf-internal-testing/tiny-random-DebertaV2Model",
+    "peft-internal-testing/tiny-random-BertModel",
+    "peft-internal-testing/tiny-random-RobertaModel",
+    "peft-internal-testing/tiny-random-DebertaModel",
+    "peft-internal-testing/tiny-random-DebertaV2Model",
 ]
 
 # TODO Missing from this list are LoKr, LoHa, LN Tuning, add them
@@ -265,10 +266,6 @@ class TestPeftFeatureExtractionModel(PeftCommonTester):
     """
 
     transformers_class = AutoModel
-
-    def skipTest(self, reason=""):
-        # for backwards compatibility with unittest style test classes
-        pytest.skip(reason)
 
     def prepare_inputs_for_testing(self):
         input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)

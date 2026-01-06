@@ -457,10 +457,10 @@ class BOFTLayer(BaseTunerLayer):
         skew_mat = 0.5 * (data - data.transpose(1, 2))
         id_mat = torch.eye(r, device=data.device).unsqueeze(0).expand(b, r, c)
 
-        # Perform the Cayley parametrization
+        # Perform the Cayley parametrization, must be in float32
         Q = torch.linalg.solve(id_mat + skew_mat, id_mat - skew_mat, left=False)
 
-        return Q
+        return Q.to(data.dtype)
 
 
 class Linear(nn.Module, BOFTLayer):
@@ -586,7 +586,7 @@ class Linear(nn.Module, BOFTLayer):
             block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
             block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
 
-        boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+        boft_P = self.boft_P.to(block_diagonal_butterfly.device, block_diagonal_butterfly.dtype)
         butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
         butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
         butterfly_oft_mat = butterfly_oft_mat_batch[0]
@@ -919,7 +919,7 @@ class Conv2d(nn.Module, BOFTLayer):
             block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
             block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
 
-        boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+        boft_P = self.boft_P.to(block_diagonal_butterfly.device, block_diagonal_butterfly.dtype)
         butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
         butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
         butterfly_oft_mat = butterfly_oft_mat_batch[0]

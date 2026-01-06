@@ -66,6 +66,19 @@ def _alora_offsets_pre_forward_hook(target, args, kwargs, alora_offsets):
     return args, kwargs
 
 
+def _get_encoder(model: nn.Module) -> nn.Module | None:
+    """Check if the model has an encoder and if it has, returns it; otherwise returns None"""
+    if not hasattr(model, "get_encoder"):
+        return None
+
+    encoder = model.get_encoder()
+    # https://github.com/huggingface/transformers/pull/42156
+    # new logic in transformers v5: all PretrainedModels return a model here, but it is self if there is no encoder
+    if encoder is model:
+        return None
+    return encoder
+
+
 class LoraModel(BaseTuner):
     """
     Creates Low Rank Adapter (LoRA) model from a pretrained transformers model.
@@ -202,6 +215,8 @@ class LoraModel(BaseTuner):
             "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
             "lora_bias": lora_config.lora_bias,
             "arrow_config": lora_config.arrow_config,
+            "use_bdlora": lora_config.use_bdlora,
+            "target_name": current_key,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
             "parameter_name": parameter_name,
@@ -237,7 +252,9 @@ class LoraModel(BaseTuner):
                 use_dora=lora_config.use_dora,
                 lora_bias=lora_config.lora_bias,
                 arrow_config=lora_config.arrow_config,
+                use_bdlora=lora_config.use_bdlora,
                 inference_mode=lora_config.inference_mode,
+                target_name=current_key,
             )
         else:
             if isinstance(target, ParamWrapper) and (parameter_name == target.parameter_name):
@@ -438,10 +455,11 @@ class LoraModel(BaseTuner):
                     handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                     hook_handles.append(handle)
 
-            if uses_beam_search and hasattr(self.model, "get_encoder"):
+            encoder = _get_encoder(self.model)
+            if uses_beam_search and (encoder is not None):
                 # For encoder-decoder models, even when applying beam search, the encoder part of the model should not use
                 # the extended adapter_names. This is because the encoder still uses the original, non-extended samples.
-                for module in self.model.get_encoder().modules():
+                for module in encoder.modules():
                     if isinstance(module, LoraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
                         # Add another hook to overwrite the kwargs with the original adapter names -- this is easier than
                         # trying to exclude the encoder.
@@ -767,7 +785,8 @@ class LoraModel(BaseTuner):
         majority_sign_method,
     ):
         # account weights for LoRA A and B layers.
-        valid_weights = []
+        valid_weights_A = []
+        valid_weights_B = []
         lora_A_deltas = []
         lora_B_deltas = []
         for adapter, weight in zip(adapters, weights):
@@ -782,23 +801,27 @@ class LoraModel(BaseTuner):
             # Support negative weights: take absolute value for sqrt, then apply sign
             weight_with_scaling = weight * target.scaling[adapter]
             sign = 1 if weight_with_scaling >= 0 else -1
-            valid_weights.append(sign * math.sqrt(abs(weight_with_scaling)))
+            # apply sign only on one side of the weights, otherwise negative signs negate
+            valid_weights_A.append(math.sqrt(abs(weight_with_scaling)) * sign)
+            valid_weights_B.append(math.sqrt(abs(weight_with_scaling)))
             lora_A_deltas.append(current_adapter_lora_A.data)
             lora_B_deltas.append(current_adapter_lora_B.data)
-        valid_weights = torch.tensor(valid_weights).to(lora_A_deltas[0].device)
+        valid_weights_A = torch.tensor(valid_weights_A).to(lora_A_deltas[0].device)
+        valid_weights_B = torch.tensor(valid_weights_B).to(lora_B_deltas[0].device)
+        valid_weights = [valid_weights_A, valid_weights_B]
         lora_deltas = [lora_A_deltas, lora_B_deltas]
         dtype = lora_A_deltas[0].dtype
         for i, task_tensors in enumerate(lora_deltas):
             if combination_type == "linear":
-                lora_deltas[i] = task_arithmetic(task_tensors, valid_weights)
+                lora_deltas[i] = task_arithmetic(task_tensors, valid_weights[i])
             elif combination_type == "ties":
-                lora_deltas[i] = ties(task_tensors, valid_weights, density, majority_sign_method)
+                lora_deltas[i] = ties(task_tensors, valid_weights[i], density, majority_sign_method)
             elif combination_type == "dare_linear":
-                lora_deltas[i] = dare_linear(task_tensors, valid_weights, density)
+                lora_deltas[i] = dare_linear(task_tensors, valid_weights[i], density)
             elif combination_type == "dare_ties":
-                lora_deltas[i] = dare_ties(task_tensors, valid_weights, density, majority_sign_method)
+                lora_deltas[i] = dare_ties(task_tensors, valid_weights[i], density, majority_sign_method)
             elif combination_type == "magnitude_prune":
-                lora_deltas[i] = magnitude_prune(task_tensors, valid_weights, density)
+                lora_deltas[i] = magnitude_prune(task_tensors, valid_weights[i], density)
             else:
                 raise ValueError("Invalid combination type")
         lora_deltas = [delta.to(dtype) for delta in lora_deltas]

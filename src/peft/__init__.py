@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.18.0"
+__version__ = "0.18.1.dev0"
 
 from .auto import (
     MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
@@ -51,6 +51,7 @@ from .tuners import (
     AdaptionPromptConfig,
     AdaptionPromptModel,
     ArrowConfig,
+    BdLoraConfig,
     BOFTConfig,
     BOFTModel,
     BoneConfig,
@@ -154,6 +155,7 @@ __all__ = [
     "AutoPeftModelForTokenClassification",
     "BOFTConfig",
     "BOFTModel",
+    "BdLoraConfig",
     "BoneConfig",
     "BoneModel",
     "C3AConfig",

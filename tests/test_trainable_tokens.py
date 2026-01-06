@@ -579,7 +579,7 @@ class TestTrainableTokens:
 
     @pytest.fixture()
     def model_id_weight_tied(self):
-        return "facebook/opt-125m"
+        return "peft-internal-testing/opt-125m"
 
     @pytest.fixture()
     def model_weight_tied(self, request, model_id_weight_tied):
@@ -757,7 +757,7 @@ class TestTrainableTokens:
         ],
     )
     def test_weight_tying_applied_when_model_is_tied_encoder_decoder(self, peft_config):
-        model_id = "hf-internal-testing/tiny-random-t5"
+        model_id = "peft-internal-testing/tiny-random-t5"
         base_model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
 
         peft_model = get_peft_model(base_model, peft_config)

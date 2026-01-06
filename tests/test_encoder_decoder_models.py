@@ -47,9 +47,10 @@ from .testing_common import PeftCommonTester
 from .testing_utils import set_init_weights_false
 
 
+# Note: models from peft-internal-testing are just the safetensors versions of hf-internal-testing
 PEFT_ENCODER_DECODER_MODELS_TO_TEST = [
-    "ybelkada/tiny-random-T5ForConditionalGeneration-calibrated",
-    "hf-internal-testing/tiny-random-BartForConditionalGeneration",
+    "peft-internal-testing/tiny-random-T5ForConditionalGeneration-calibrated",
+    "peft-internal-testing/tiny-random-BartForConditionalGeneration",
 ]
 
 # TODO Missing from this list are LoKr, LoHa, LN Tuning, add them
@@ -250,10 +251,6 @@ def _skip_osf_disable_adapter_test(config_cls):
 class TestEncoderDecoderModels(PeftCommonTester):
     transformers_class = AutoModelForSeq2SeqLM
 
-    def skipTest(self, reason=""):
-        # for backwards compatibility with unittest style test classes
-        pytest.skip(reason)
-
     def prepare_inputs_for_testing(self):
         input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
         decoder_input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
@@ -346,11 +343,6 @@ class TestEncoderDecoderModels(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
-    def test_prefix_tuning_half_prec_conversion(self, model_id, config_cls, config_kwargs):
-        self._test_prefix_tuning_half_prec_conversion(model_id, config_cls, config_kwargs)
-
-    @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
-    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_training_encoder_decoders(self, model_id, config_cls, config_kwargs):
         self._test_training(model_id, config_cls, config_kwargs)
 
@@ -418,7 +410,7 @@ class TestEncoderDecoderModels(PeftCommonTester):
 
     def test_active_adapters_prompt_learning(self):
         model = AutoModelForSeq2SeqLM.from_pretrained(
-            "hf-internal-testing/tiny-random-BartForConditionalGeneration"
+            "peft-internal-testing/tiny-random-BartForConditionalGeneration"
         ).to(self.torch_device)
         # any prompt learning method would work here
         config = PromptEncoderConfig(task_type=TaskType.SEQ_2_SEQ_LM, num_virtual_tokens=10)
@@ -426,7 +418,7 @@ class TestEncoderDecoderModels(PeftCommonTester):
         assert model.active_adapters == ["default"]
 
     def test_save_shared_tensors(self):
-        model_id = "hf-internal-testing/tiny-random-RobertaModel"
+        model_id = "peft-internal-testing/tiny-random-RobertaModel"
         peft_config = LoraConfig(
             task_type=TaskType.TOKEN_CLS,
             inference_mode=False,

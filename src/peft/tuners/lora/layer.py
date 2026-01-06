@@ -127,7 +127,7 @@ class LoraLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+    def resolve_lora_variant(self, *, use_dora: bool, use_bdlora=None, **kwargs) -> Optional[LoraVariant]:
         """Return a matching LoRA variant for this layer type.
 
         Given the init arguments of this layer, return the correct LoRA variant, if any. E.g., if `use_dora=True`, this
@@ -156,11 +156,14 @@ class LoraLayer(BaseTunerLayer):
         arrow_config: ArrowConfig = None,
         qalora_group_size: int = 32,
         inference_mode: bool = False,
+        use_bdlora=None,
         **kwargs,
     ):
         # collect the kwargs
+        target_name = kwargs.get("target_name", "")  # preserve target_name before overwriting kwargs
         kwargs = locals().copy()
         del kwargs["self"]
+        kwargs["target_name"] = target_name  # restore target_name
 
         # This code works for linear layers, override for other layer types
         if r <= 0:
@@ -179,6 +182,7 @@ class LoraLayer(BaseTunerLayer):
             use_qalora=use_qalora,
             qalora_group_size=qalora_group_size,
             arrow_config=arrow_config,
+            use_bdlora=use_bdlora,
         )
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
@@ -612,6 +616,7 @@ class Linear(nn.Module, LoraLayer):
         use_dora: bool = False,
         use_alora: bool = False,
         arrow_config: ArrowConfig = None,
+        use_bdlora=None,
         lora_bias: bool = False,
         **kwargs,
     ) -> None:
@@ -631,16 +636,23 @@ class Linear(nn.Module, LoraLayer):
             use_alora=use_alora,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
+            use_bdlora=use_bdlora,
+            **kwargs,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def resolve_lora_variant(
-        self, *, arrow_config: ArrowConfig, use_dora: bool, use_alora: bool, **kwargs
+        self, *, arrow_config: ArrowConfig, use_dora: bool, use_alora: bool, use_bdlora=None, **kwargs
     ) -> Optional[LoraVariant]:
         if arrow_config is not None:
             from .variants import ArrowLinearVariant
 
             return ArrowLinearVariant()
+
+        if use_bdlora is not None:
+            from .variants import BdLoraLinearVariant
+
+            return BdLoraLinearVariant()
 
         if not use_dora and not use_alora:
             return None
@@ -1881,8 +1893,7 @@ class _LoraParameterProxy(nn.Module):
         self.delta_weight = delta_weight
 
     def forward(self, W):
-        with nn.utils.parametrize.cached():
-            return W + self.delta_weight
+        return W + self.delta_weight
 
 
 # copied from:
@@ -2113,7 +2124,8 @@ class ParamWrapper(nn.Module, LoraLayer):
         # set requires_grad, as it defaults to False
         base_layer.parametrizations[self.parameter_name].original.requires_grad_(requires_grad_before)
         try:
-            yield
+            with nn.utils.parametrize.cached():
+                yield
         finally:
             self._remove_parametrizations()
 

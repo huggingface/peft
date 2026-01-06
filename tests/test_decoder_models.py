@@ -18,6 +18,7 @@ from unittest.mock import Mock, call, patch
 
 import pytest
 import torch
+from accelerate.test_utils.testing import get_backend
 from safetensors.torch import load_file as safe_load_file
 from transformers import (
     AutoModelForCausalLM,
@@ -60,13 +61,11 @@ from .testing_common import PeftCommonTester
 from .testing_utils import device_count, hub_online_once, load_dataset_english_quotes, set_init_weights_false
 
 
+# Note: some models from peft-internal-testing are just the safetensors versions of hf-internal-testing
 PEFT_DECODER_MODELS_TO_TEST = [
-    "hf-internal-testing/tiny-random-OPTForCausalLM",
-    "hf-internal-testing/tiny-random-GPT2LMHeadModel",
-    "hf-internal-testing/tiny-random-BloomForCausalLM",
-    "hf-internal-testing/tiny-random-gpt_neo",
-    "hf-internal-testing/tiny-random-GPTJForCausalLM",
-    "hf-internal-testing/tiny-random-GPTBigCodeForCausalLM",
+    "peft-internal-testing/tiny-random-OPTForCausalLM",
+    "peft-internal-testing/tiny-random-GPT2LMHeadModel",
+    "peft-internal-testing/tiny-random-GPTJForCausalLM",
     "trl-internal-testing/tiny-random-LlamaForCausalLM",
     "peft-internal-testing/tiny-dummy-qwen2",
     "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
@@ -74,7 +73,7 @@ PEFT_DECODER_MODELS_TO_TEST = [
 
 SMALL_GRID_MODELS = [
     "hf-internal-testing/tiny-random-gpt2",
-    "hf-internal-testing/tiny-random-OPTForCausalLM",
+    "peft-internal-testing/tiny-random-OPTForCausalLM",
     "hf-internal-testing/tiny-random-MistralForCausalLM",
     "peft-internal-testing/tiny-dummy-qwen2",
     "trl-internal-testing/tiny-random-LlamaForCausalLM",
@@ -370,10 +369,6 @@ def _skip_osf_disable_adapter_test(config_cls):
 class TestDecoderModels(PeftCommonTester):
     transformers_class = AutoModelForCausalLM
 
-    def skipTest(self, reason=""):
-        # for backwards compatibility with unittest style test classes
-        pytest.skip(reason)
-
     def prepare_inputs_for_testing(self):
         input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
         attention_mask = torch.tensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
@@ -418,7 +413,7 @@ class TestDecoderModels(PeftCommonTester):
             mock(*args, **kwargs)
             return orig_from_pretrained(config.tokenizer_name_or_path)
 
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         config = PromptTuningConfig(
             base_model_name_or_path=model_id,
             tokenizer_name_or_path=model_id,
@@ -446,7 +441,7 @@ class TestDecoderModels(PeftCommonTester):
         # be loaded in inference mode. Therefore, the only way for the exploit to work would be if the user manually
         # loads the model, as is shown below.
 
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         with hub_online_once(model_id):
             # crafting the malicious checkpoint:
             model = AutoModelForCausalLM.from_pretrained(model_id)
@@ -507,7 +502,7 @@ class TestDecoderModels(PeftCommonTester):
     def test_prompt_tuning_config_invalid_args(self):
         # Raise an error when tokenizer_kwargs is used with prompt_tuning_init!='TEXT', because this argument has no
         # function in that case
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         with pytest.raises(ValueError, match="tokenizer_kwargs only valid when using prompt_tuning_init='TEXT'."):
             PromptTuningConfig(
                 base_model_name_or_path=model_id,
@@ -611,11 +606,6 @@ class TestDecoderModels(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
-    def test_prefix_tuning_half_prec_conversion(self, model_id, config_cls, config_kwargs):
-        self._test_prefix_tuning_half_prec_conversion(model_id, config_cls, config_kwargs.copy())
-
-    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
-    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_training_decoders(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_training(model_id, config_cls, config_kwargs.copy())
@@ -694,7 +684,7 @@ class TestDecoderModels(PeftCommonTester):
 
     def test_generate_adalora_no_dropout(self):
         # test for issue #730
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         config_kwargs = {
             "target_modules": None,
             "task_type": "CAUSAL_LM",
@@ -778,6 +768,10 @@ class TestDecoderModels(PeftCommonTester):
 
     def test_prefix_tuning_mistral(self):
         # See issue 869, 1962
+        _, device_count, _ = get_backend()
+        if device_count > 1:
+            pytest.skip("PEFT Mistral training with DP does not work, skipping")
+
         model_id = "hf-internal-testing/tiny-random-MistralForCausalLM"
         base_model = AutoModelForCausalLM.from_pretrained(model_id)
         peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM")
