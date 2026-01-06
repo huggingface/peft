@@ -15,9 +15,8 @@
 """
 AdaDoRA variant: DoRA variant for AdaLoRA's SVD-based adaptation.
 
-This module follows the standard LoraVariant pattern used in PEFT,
-providing static methods for initialization, forward pass, and merging
-operations specific to AdaLoRA's 3-factor decomposition.
+This module follows the standard LoraVariant pattern used in PEFT, providing static methods for initialization, forward
+pass, and merging operations specific to AdaLoRA's 3-factor decomposition.
 """
 
 from typing import Any
@@ -34,9 +33,8 @@ class AdaDoraLinearVariant(LoraVariant):
     """
     DoRA variant for AdaLoRA's SVD-based adaptation.
 
-    Follows the standard LoraVariant pattern while accounting for
-    AdaLoRA's 3-factor decomposition (A, E, B matrices) instead of
-    standard LoRA's 2-factor decomposition (A, B).
+    Follows the standard LoraVariant pattern while accounting for AdaLoRA's 3-factor decomposition (A, E, B matrices)
+    instead of standard LoRA's 2-factor decomposition (A, B).
 
     The variant pattern provides:
     - init: Creates AdaDoraLinearLayer and stores in lora_magnitude_vector
@@ -50,8 +48,8 @@ class AdaDoraLinearVariant(LoraVariant):
         """
         Initialize AdaDoRA layer and store in lora_magnitude_vector.
 
-        Creates an AdaDoraLinearLayer with the magnitude vector initialized
-        based on ||W + ΔW|| where ΔW uses AdaLoRA's SVD decomposition.
+        Creates an AdaDoraLinearLayer with the magnitude vector initialized based on ||W + ΔW|| where ΔW uses AdaLoRA's
+        SVD decomposition.
 
         Args:
             module: The SVDLinear module
@@ -135,11 +133,10 @@ class AdaDoraLinearVariant(LoraVariant):
         """
         Safe merge for AdaDoRA.
 
-        Merges adapter weights into base weights with DoRA magnitude scaling.
-        Returns a new tensor (does not modify orig_weight in-place).
+        Merges adapter weights into base weights with DoRA magnitude scaling. Returns a new tensor (does not modify
+        orig_weight in-place).
 
-        The merged weight is computed as:
-        W' = (m / ||W + ΔW||) * (W + ΔW)
+        The merged weight is computed as: W' = (m / ||W + ΔW||) * (W + ΔW)
 
         Args:
             module: The SVDLinear module
@@ -177,8 +174,7 @@ class AdaDoraLinearVariant(LoraVariant):
         """
         Unsafe merge for AdaDoRA.
 
-        Merges adapter weights into base weights with DoRA magnitude scaling.
-        Modifies orig_weight in-place.
+        Merges adapter weights into base weights with DoRA magnitude scaling. Modifies orig_weight in-place.
 
         Args:
             module: The SVDLinear module
@@ -212,11 +208,9 @@ class AdaDoraLinearVariant(LoraVariant):
         """
         Unmerge for AdaDoRA.
 
-        Reverses the merge operation by removing the DoRA-scaled adapter
-        contribution from the merged weights.
+        Reverses the merge operation by removing the DoRA-scaled adapter contribution from the merged weights.
 
-        The unmerged weight is computed as:
-        W = W' / (m / ||W + ΔW||) - ΔW
+        The unmerged weight is computed as: W = W' / (m / ||W + ΔW||) - ΔW
 
         Args:
             module: The SVDLinear module

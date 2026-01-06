@@ -15,8 +15,8 @@
 """
 AdaDoRA layer: DoRA adapted for AdaLoRA's SVD decomposition.
 
-This module extends DoraLinearLayer to handle AdaLoRA's 3-factor decomposition
-(A, E, B matrices) instead of standard LoRA's 2-factor decomposition (A, B).
+This module extends DoraLinearLayer to handle AdaLoRA's 3-factor decomposition (A, E, B matrices) instead of standard
+LoRA's 2-factor decomposition (A, B).
 """
 
 import torch
@@ -32,45 +32,39 @@ class AdaDoraLinearLayer(DoraLinearLayer):
     """
     DoRA layer adapted for AdaLoRA's SVD decomposition.
 
-    Unlike standard LoRA where ΔW = B @ A, AdaLoRA uses ΔW = B @ (A * E) / ranknum.
-    This class overrides the weight norm computation to account for the E matrix
-    (singular values) in the decomposition.
+    Unlike standard LoRA where ΔW = B @ A, AdaLoRA uses ΔW = B @ (A * E) / ranknum. This class overrides the weight
+    norm computation to account for the E matrix (singular values) in the decomposition.
 
     The key differences from DoraLinearLayer:
-    1. get_weight_norm accepts lora_E and ranknum parameters
+    1. get_weight_norm accepts pre-computed lora_weight
     2. update_layer initializes magnitude with SVD-aware weight norm
     3. forward computes output using SVD decomposition
     """
 
-    def get_weight_norm(self, weight, lora_A, lora_B, lora_E, scaling, ranknum) -> torch.Tensor:
+    def get_weight_norm(self, weight, lora_weight) -> torch.Tensor:
         """
-        Compute L2 norm of (W + ΔW) for AdaLoRA's SVD decomposition.
+        Compute L2 norm of (W + ΔW).
 
         Args:
             weight: Base layer weight (out_features x in_features)
-            lora_A: A matrix (r x in_features) - right singular vectors
-            lora_B: B matrix (out_features x r) - left singular vectors
-            lora_E: E matrix (r x 1) - singular values
-            scaling: LoRA scaling factor (lora_alpha)
-            ranknum: Current rank number for normalization
+            lora_weight: Pre-computed LoRA delta weight (out_features x in_features)
 
         Returns:
             Weight norm tensor of shape (out_features,)
         """
-        # compute lora weight: B @ (A * E) * scaling / ranknum
-        lora_weight = (lora_B @ (lora_A * lora_E)) * (scaling / (ranknum + 1e-5))
-
-        # add to base weight and compute L2 norm per row
         weight = weight + lora_weight
         weight_norm = torch.linalg.norm(weight, dim=1).to(weight.dtype)
         return weight_norm
+
+    def _compute_lora_weight(self, lora_A, lora_B, lora_E, scaling, ranknum) -> torch.Tensor:
+        """Compute AdaLoRA delta weight: B @ (A * E) * scaling / ranknum."""
+        return (lora_B @ (lora_A * lora_E)) * (scaling / (ranknum + 1e-5))
 
     def update_layer(self, *, base_layer, lora_A, lora_B, lora_E, scaling, ranknum, place_on_cpu=False) -> None:
         """
         Initialize magnitude vector for AdaLoRA.
 
-        Overrides parent to accept lora_E and ranknum parameters for
-        SVD-aware magnitude initialization.
+        Overrides parent to accept lora_E and ranknum parameters for SVD-aware magnitude initialization.
 
         Args:
             base_layer: The base nn.Linear layer
@@ -90,7 +84,8 @@ class AdaDoraLinearLayer(DoraLinearLayer):
 
         with gather_params_ctx(base_layer.parameters()):
             weight = dequantize_module_weight(base_layer)
-            weight_norm = self.get_weight_norm(weight.to(lora_A.device), lora_A, lora_B, lora_E, scaling, ranknum)
+            lora_weight = self._compute_lora_weight(lora_A, lora_B, lora_E, scaling, ranknum)
+            weight_norm = self.get_weight_norm(weight.to(lora_A.device), lora_weight)
 
         if dtype_is_fp16:
             weight_norm = weight_norm.half()
@@ -104,8 +99,8 @@ class AdaDoraLinearLayer(DoraLinearLayer):
         """
         DoRA forward pass for AdaLoRA.
 
-        Computes the DoRA output using AdaLoRA's SVD decomposition:
-        output = (m / ||W + ΔW|| - 1) * base_result + (m / ||W + ΔW||) * lora_result
+        Computes the DoRA output using AdaLoRA's SVD decomposition: output = (m / ||W + ΔW|| - 1) * base_result + (m /
+        ||W + ΔW||) * lora_result
 
         Args:
             x: Input tensor
@@ -126,7 +121,8 @@ class AdaDoraLinearLayer(DoraLinearLayer):
         # weight norm is detached per DoRA paper section 4.3:
         # "[...] we suggest treating ||V + ΔV||_c as a constant, thereby
         # detaching it from the gradient graph."
-        weight_norm = self.get_weight_norm(weight, lora_A.detach(), lora_B.detach(), lora_E.detach(), scaling, ranknum)
+        lora_weight = self._compute_lora_weight(lora_A.detach(), lora_B.detach(), lora_E.detach(), scaling, ranknum)
+        weight_norm = self.get_weight_norm(weight, lora_weight)
         weight_norm = weight_norm.detach()
         mag_norm_scale = (magnitude / weight_norm).view(1, -1)
 

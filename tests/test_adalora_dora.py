@@ -15,8 +15,8 @@
 """
 Tests for AdaDoRA (AdaLoRA + DoRA) integration.
 
-Tests the variant pattern implementation that reuses existing DoRA code
-while adapting it for AdaLoRA's SVD decomposition.
+Tests the variant pattern implementation that reuses existing DoRA code while adapting it for AdaLoRA's SVD
+decomposition.
 """
 
 import torch
