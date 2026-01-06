@@ -48,6 +48,7 @@ SEED_PROMPTS = {
 
 # Chat template kwargs to disable thinking mode for models like Qwen3
 CHAT_TEMPLATE_KWARGS = {"enable_thinking": False}
+MAX_NEW_TOKENS_FOR_QUESTIONS = 256
 
 
 def synthesize_self_study_jsonl(
@@ -141,7 +142,7 @@ def _synthesize_vllm(
     ]
 
     question_params = SamplingParams(
-        max_tokens=256,
+        max_tokens=MAX_NEW_TOKENS_FOR_QUESTIONS,
         temperature=temperature if temperature > 0 else 0.0,
         top_p=top_p if temperature > 0 else 1.0,
     )
@@ -237,7 +238,7 @@ def _synthesize_hf(
         ).to(device)
 
         gen_kwargs = {
-            "max_new_tokens": 256,
+            "max_new_tokens": MAX_NEW_TOKENS_FOR_QUESTIONS,
             "do_sample": temperature > 0,
             "pad_token_id": tokenizer.pad_token_id or tokenizer.eos_token_id,
         }
