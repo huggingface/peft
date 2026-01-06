@@ -40,7 +40,6 @@ class AdaDoraLinearLayer(DoraLinearLayer):
     1. get_weight_norm accepts lora_E and ranknum parameters
     2. update_layer initializes magnitude with SVD-aware weight norm
     3. forward computes output using SVD decomposition
-    4. update_magnitude_after_pruning handles AdaLoRA's rank pruning
     """
 
     def get_weight_norm(self, weight, lora_A, lora_B, lora_E, scaling, ranknum) -> torch.Tensor:
@@ -146,31 +145,6 @@ class AdaDoraLinearLayer(DoraLinearLayer):
         result_dora = (mag_norm_scale - 1) * base_result + mag_norm_scale * lora_result
 
         return result_dora
-
-    def update_magnitude_after_pruning(self, base_layer, lora_A, lora_B, lora_E, scaling, ranknum) -> None:
-        """
-        Hook called after AdaLoRA rank pruning.
-
-        In DoRA, the magnitude vector should evolve via gradients and diverge
-        from the weight norm ||W + ΔW||. This divergence is what distinguishes
-        DoRA from standard LoRA - the ratio m/||W+ΔW|| controls output scaling.
-
-        Previously, this method reset magnitude = ||W + ΔW||, which made the
-        ratio equal to 1 and effectively disabled DoRA (identical to AdaLoRA).
-
-        Now we let the magnitude remain at its learned value and allow gradients
-        to naturally adjust it after pruning changes the effective rank.
-
-        Args:
-            base_layer: The base nn.Linear layer (unused)
-            lora_A: A matrix parameter (unused)
-            lora_B: B matrix parameter (unused)
-            lora_E: E matrix parameter (unused)
-            scaling: LoRA scaling factor (unused)
-            ranknum: Current rank number (unused)
-        """
-        # don't reset magnitude - let gradients handle adaptation
-        pass
 
     def __repr__(self) -> str:
         rep = super().__repr__()
