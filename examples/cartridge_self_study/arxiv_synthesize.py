@@ -39,6 +39,7 @@ def main():
         action="store_true",
         help="Use vLLM for faster generation with automatic prefix caching.",
     )
+    parser.add_argument("--seed", type=int, default=0, help="Seed for deterministic prompt-type shuffling.")
     parser.add_argument(
         "--tensor_parallel_size",
         type=int,
@@ -86,6 +87,7 @@ def main():
         temperature=args.temperature,
         top_p=args.top_p,
         use_vllm=args.use_vllm,
+        seed=args.seed,
     )
 
 

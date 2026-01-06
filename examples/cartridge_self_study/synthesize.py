@@ -62,6 +62,7 @@ def synthesize_self_study_jsonl(
     temperature: float,
     top_p: float,
     use_vllm: bool = False,
+    seed: int = 0,
 ):
     """
     Synthesize self-study data for cartridge training.
@@ -80,9 +81,10 @@ def synthesize_self_study_jsonl(
         if t not in SEED_PROMPTS:
             raise ValueError(f"Unknown seed prompt type '{t}', expected one of: {sorted(SEED_PROMPTS)}")
 
-    # Pre-generate prompt indices (cycling through seed prompt types)
+    # Pre-generate prompt indices (cycling through seed prompt types).
     prompt_indices = [i % len(seed_prompt_types) for i in range(num_samples)]
-    random.shuffle(prompt_indices)
+    rng = random.Random(seed)
+    rng.shuffle(prompt_indices)
 
     if use_vllm:
         _synthesize_vllm(
@@ -306,6 +308,7 @@ def main():
         action="store_true",
         help="Use vLLM for faster generation with automatic prefix caching.",
     )
+    parser.add_argument("--seed", type=int, default=0, help="Seed for deterministic prompt-type shuffling.")
     parser.add_argument(
         "--tensor_parallel_size",
         type=int,
@@ -353,6 +356,7 @@ def main():
         temperature=args.temperature,
         top_p=args.top_p,
         use_vllm=args.use_vllm,
+        seed=args.seed,
     )
 
 
