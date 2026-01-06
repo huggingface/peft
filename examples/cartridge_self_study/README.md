@@ -54,6 +54,9 @@ python train_distill.py \
   --max_steps 500
 ```
 
+If you want to follow the arXiv paper example locally, you can use the LaTeX source included in this repo at
+`examples/cartridge_self_study/data/cartridges.tex`.
+
 ### 3. Load and use cartridge
 
 ```python
@@ -74,17 +77,18 @@ print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 Convenience wrappers for training on the Cartridges paper LaTeX:
 
 ```bash
+# From the repo root:
 # Synthesize QA pairs (uses vLLM with prefix caching)
-python arxiv_synthesize.py \
+python examples/cartridge_self_study/arxiv_synthesize.py \
   --model Qwen/Qwen3-4B \
-  --corpus_path /path/to/cartridges.tex \
+  --corpus_path examples/cartridge_self_study/data/cartridges.tex \
   --num_samples 1024 \
   --use_vllm
 
 # Train cartridge
-python arxiv_train.py \
+python examples/cartridge_self_study/arxiv_train.py \
   --model Qwen/Qwen3-4B \
-  --document /path/to/cartridges.tex \
+  --document examples/cartridge_self_study/data/cartridges.tex \
   --distill_jsonl distill.jsonl \
   --output_dir cartridge_adapter \
   --max_steps 500
