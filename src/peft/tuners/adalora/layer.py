@@ -331,10 +331,7 @@ class RankAllocator:
     def update_ipt(self, model):
         # Update the sensitivity and uncertainty for every weight
         for n, p in model.named_parameters():
-            if "lora_" in n and self.adapter_name in n:
-                # skip DoRA magnitude vectors - they're not part of SVD rank allocation
-                if "lora_magnitude_vector" in n:
-                    continue
+            if ("lora_" in n) and (self.adapter_name in n) and ("lora_magnitude_vector" not in n):
                 if n not in self.ipt:
                     self.ipt[n] = torch.zeros_like(p)
                     self.exp_avg_ipt[n] = torch.zeros_like(p)
