@@ -7,12 +7,12 @@ This example demonstrates how to use **AdaDoRA** - a combination of AdaLoRA's ad
 ```bash
 python run_glue.py \
     --model_name_or_path roberta-base \
-    --task_name sst2 \
-    --peft_type ADALORA \
-    --use_dora \
-    --per_device_train_batch_size 16 \
-    --learning_rate 1e-4 \
-    --num_train_epochs 3 \
+    --task_name sst2 \ 
+    --peft_type ADALORA \ 
+    --use_dora \ 
+    --per_device_train_batch_size 16 \ 
+    --learning_rate 1e-4 \ 
+    --num_train_epochs 3 \ 
     --output_dir ./output
 ```
 
@@ -22,7 +22,6 @@ python run_glue.py \
 |-----------|-------------|
 | `--peft_type ADALORA` | Use AdaLoRA as the base PEFT method |
 | `--use_dora` | Enable DoRA's magnitude-direction decomposition |
-| `--dora_init` | Use DoRA-style initialization (B=0, E=1) instead of AdaLoRA-style |
 | `--init_r` | Initial rank for each layer (default: 12) |
 | `--target_r` | Target rank after pruning (default: 8) |
 
