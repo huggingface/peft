@@ -37,8 +37,15 @@ tok = AutoTokenizer.from_pretrained("gpt2")
 peft_cfg = PrefixTuningConfig(task_type="CAUSAL_LM", num_virtual_tokens=20, prefix_projection=False)
 model = get_peft_model(base, peft_cfg)
 
-initialize_kv_prefix_from_text(model, tok, text="...some long context...")
+initialize_kv_prefix_from_text(
+    model,
+    tok,
+    text="...a long context with at least num_virtual_tokens tokens...",
+    use_chat_template=False,
+)
 ```
+
+Make sure the text is long enough to produce at least `num_virtual_tokens` tokens, otherwise initialization will fail.
 
 The abstract from the paper is:
 

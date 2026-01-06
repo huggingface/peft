@@ -152,6 +152,10 @@ def initialize_kv_prefix_from_text(
     if num_virtual_tokens is None:
         num_virtual_tokens = config.num_virtual_tokens
 
+    def _tokenize_plain():
+        toks = tokenizer(text, return_tensors="pt", truncation=max_length is not None, max_length=max_length)
+        return toks["input_ids"]
+
     if use_chat_template and hasattr(tokenizer, "apply_chat_template"):
         try:
             input_ids = tokenizer.apply_chat_template(
@@ -160,12 +164,14 @@ def initialize_kv_prefix_from_text(
                 add_generation_prompt=False,
                 return_tensors="pt",
             )
-        except TypeError:
-            # Some tokenizers don't support the full signature above.
-            input_ids = torch.tensor(tokenizer.apply_chat_template([{"role": "system", "content": text}]))[None, :]
+        except (TypeError, ValueError):
+            # Some tokenizers don't support the full signature or do not define a chat template.
+            input_ids = _tokenize_plain()
+        else:
+            if max_length is not None and input_ids.shape[1] > max_length:
+                input_ids = input_ids[:, :max_length]
     else:
-        toks = tokenizer(text, return_tensors="pt", truncation=max_length is not None, max_length=max_length)
-        input_ids = toks["input_ids"]
+        input_ids = _tokenize_plain()
 
     input_ids = input_ids.to(model.device)
     attention_mask = torch.ones_like(input_ids)
