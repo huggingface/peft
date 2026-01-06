@@ -36,31 +36,28 @@ default).
 
 ## Usage (inference)
 
-Create a CARTRIDGE adapter and initialize it from text:
+Load a trained CARTRIDGE adapter and run generation:
 
 ```py
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from peft import CartridgeConfig, get_peft_model, initialize_cartridge_from_text
+from peft import PeftModel
 
 model_id = "Qwen/Qwen2.5-0.5B-Instruct"
+adapter_path = "path/to/cartridge_adapter"
+
 base = AutoModelForCausalLM.from_pretrained(model_id)
+model = PeftModel.from_pretrained(base, adapter_path)
+
 tok = AutoTokenizer.from_pretrained(model_id)
 if tok.pad_token is None:
     tok.pad_token = tok.eos_token
 
-peft_cfg = CartridgeConfig(
-    task_type="CAUSAL_LM",
-    num_virtual_tokens=256,  # cartridge length (p)
-    num_frozen_tokens=1,  # attention-sink token (recommended; default is 1)
-)
-
-model = get_peft_model(base, peft_cfg)
-initialize_cartridge_from_text(model, tok, text="...your corpus text...")
-
 out = model.generate(**tok("Question about the corpus:", return_tensors="pt"), max_new_tokens=64)
 print(tok.decode(out[0], skip_special_tokens=True))
 ```
+
+If you need to create and initialize a cartridge before training, see the initialization options below.
 
 ## Initialization options
 
