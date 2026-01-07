@@ -75,8 +75,8 @@ The Cartridges paper proposes a SELF-STUDY distillation objective (a frozen base
 CARTRIDGE adapter is trained so the student matches the teacher’s next-token distribution over the target segment).
 PEFT keeps training logic out of the core library; see
 `https://github.com/huggingface/peft/tree/main/examples/cartridge_self_study` for a reference workflow.
-The example scripts also work when you use the same checkpoint as both teacher and student (the teacher is the frozen
-base model without the adapter), so you don’t need a separate “teacher model” beyond a base model forward pass.
+The example scripts use the frozen base model as the teacher and the adapted model as the student, so both share the
+same underlying checkpoint.
 
 ## Composition
 
