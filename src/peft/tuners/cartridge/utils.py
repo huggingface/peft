@@ -167,6 +167,7 @@ def initialize_kv_prefix_from_text(
                 [{"role": "system", "content": text}],
                 tokenize=True,
                 add_generation_prompt=False,
+                return_dict=False,
                 return_tensors="pt",
             )
         except (TypeError, ValueError):
