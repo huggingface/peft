@@ -27,6 +27,7 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
+from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from peft import (
     AdaLoraConfig,
@@ -771,6 +772,34 @@ class TestDecoderModels(PeftCommonTester):
             x = torch.tensor([[1, 2, 3]])
             # does not raise
             model(x)
+
+    def test_prefix_tuning_offsets_position_ids_in_forward(self, monkeypatch):
+        # Regression: RoPE models need position_ids offset for prefix tuning.
+        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        with hub_online_once(model_id):
+            base = AutoModelForCausalLM.from_pretrained(model_id)
+        peft_config = PrefixTuningConfig(num_virtual_tokens=4, task_type="CAUSAL_LM", prefix_projection=False)
+        model = get_peft_model(base, peft_config)
+
+        captured = {}
+
+        def fake_forward(*args, **kwargs):
+            captured["position_ids"] = kwargs.get("position_ids")
+            input_ids = kwargs.get("input_ids")
+            if input_ids is None and args:
+                input_ids = args[0]
+            batch, seq_len = input_ids.shape
+            logits = torch.zeros((batch, seq_len, base.config.vocab_size), device=input_ids.device)
+            return CausalLMOutputWithPast(logits=logits)
+
+        monkeypatch.setattr(model.base_model, "forward", fake_forward)
+
+        input_ids = torch.randint(0, base.config.vocab_size, (1, 3))
+        position_ids = torch.arange(input_ids.shape[1]).unsqueeze(0)
+        _ = model(input_ids=input_ids, position_ids=position_ids)
+
+        assert captured["position_ids"] is not None
+        assert torch.equal(captured["position_ids"], position_ids + peft_config.num_virtual_tokens)
 
     def test_prefix_tuning_mistral(self):
         # See issue 869, 1962
