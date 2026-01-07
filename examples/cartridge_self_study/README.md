@@ -55,7 +55,13 @@ python train_distill.py \
 ```
 
 If you want to follow the arXiv paper example locally, you can use the LaTeX source included in this repo at
-`examples/cartridge_self_study/data/cartridges.tex`.
+`examples/cartridge_self_study/data/cartridges.tex` (download it first):
+
+```bash
+mkdir -p examples/cartridge_self_study/data
+curl -L -o examples/cartridge_self_study/data/cartridges.tex \
+  https://raw.githubusercontent.com/HazyResearch/cartridges/refs/heads/main/examples/arxiv/cartridges.tex
+```
 
 ### 3. Load and use cartridge
 

@@ -298,7 +298,7 @@ def main():
     parser.add_argument("--out_jsonl", type=str, required=True)
     parser.add_argument("--num_samples", type=int, default=1024)
     parser.add_argument("--seed_prompts", type=str, default="structuring,summarization,question,use_cases,creative")
-    parser.add_argument("--max_new_tokens", type=int, default=256)
+    parser.add_argument("--max_new_tokens", type=int, default=512)
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--top_p", type=float, default=0.95)
     parser.add_argument(
