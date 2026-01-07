@@ -117,6 +117,8 @@ from .tuners import (
     WaveFTModel,
     XLoraConfig,
     XLoraModel,
+    UniLoRAConfig,
+    UniLoRAModel,
     create_arrow_model,
     get_eva_state_dict,
     initialize_lora_eva_weights,

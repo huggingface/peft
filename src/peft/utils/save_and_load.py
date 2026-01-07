@@ -182,6 +182,10 @@ def get_peft_model_state_dict(
                     to_return[f"{name}.shira_indices.{k}"] = (
                         v.to(torch.float32) if platform.system() == "Windows" else v
                     )
+    elif config.peft_type == PeftType.UNILORA:
+        to_return = {}
+        to_return["base_model.unilora_theta_d." + adapter_name] = state_dict["base_model.unilora_theta_d." + adapter_name]
+      
 
     elif config.peft_type == PeftType.VERA:
         vera_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
@@ -197,7 +201,13 @@ def get_peft_model_state_dict(
             to_return["base_model.vera_A." + adapter_name] = state_dict["base_model.vera_A." + adapter_name]
             to_return["base_model.vera_B." + adapter_name] = state_dict["base_model.vera_B." + adapter_name]
     elif config.peft_type == PeftType.XLORA:
-        to_return = {k: state_dict[k] for k in state_dict if "internal_xlora_classifier" in k}
+        to_return = {k: state_dict[k] for k in state_dict if "internal_xlora_classifier" in k}     
+    elif config.peft_type == PeftType.UNILORA:
+        to_return = {}
+        to_return = {k: state_dict[k] for k in state_dict if "unilora_scales" in k or "unilora_indices" in k}
+        to_return["base_model.unilora_theta_d." + adapter_name] = state_dict[
+            "base_model.unilora_theta_d." + adapter_name
+        ]
     elif config.peft_type == PeftType.VBLORA:
         to_return = {}
         # choose the most efficient dtype for indices
