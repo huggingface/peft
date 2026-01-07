@@ -234,6 +234,7 @@ def _synthesize_hf(
             tokenize=True,
             add_generation_prompt=True,
             return_tensors="pt",
+            return_dict=False,
             **CHAT_TEMPLATE_KWARGS,
         ).to(device)
 
@@ -258,6 +259,7 @@ def _synthesize_hf(
             tokenize=True,
             add_generation_prompt=True,
             return_tensors="pt",
+            return_dict=False,
             **CHAT_TEMPLATE_KWARGS,
         ).to(device)
 
@@ -266,6 +268,7 @@ def _synthesize_hf(
             tokenize=True,
             add_generation_prompt=True,
             return_tensors="pt",
+            return_dict=False,
             **CHAT_TEMPLATE_KWARGS,
         ).to(device)
 
