@@ -37,13 +37,19 @@ from .testing_utils import hub_online_once
 TINY_CAUSAL_LM = "peft-internal-testing/tiny-random-OPTForCausalLM"
 
 
-def _load_tiny_causal_lm(model_id: str = TINY_CAUSAL_LM):
+@pytest.fixture
+def model_id():
+    return TINY_CAUSAL_LM
+
+
+@pytest.fixture
+def base_model(model_id):
     with hub_online_once(model_id):
         return AutoModelForCausalLM.from_pretrained(model_id)
 
 
-def test_cartridge_offsets_position_ids_in_forward(monkeypatch):
-    base = _load_tiny_causal_lm()
+def test_cartridge_offsets_position_ids_in_forward(monkeypatch, base_model):
+    base = base_model
     peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=1, task_type="CAUSAL_LM")
     model = get_peft_model(base, peft_config)
 
@@ -68,8 +74,8 @@ def test_cartridge_offsets_position_ids_in_forward(monkeypatch):
     assert torch.equal(captured["position_ids"], position_ids + peft_config.num_virtual_tokens)
 
 
-def test_cartridge_prefill_4d_mask_uses_cache_position(monkeypatch):
-    base = _load_tiny_causal_lm()
+def test_cartridge_prefill_4d_mask_uses_cache_position(monkeypatch, base_model):
+    base = base_model
     peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=1, task_type="CAUSAL_LM")
     model = get_peft_model(base, peft_config)
 
@@ -111,8 +117,8 @@ def test_cartridge_prefill_4d_mask_uses_cache_position(monkeypatch):
 
 
 @pytest.mark.parametrize("num_frozen_tokens", [0, 2])
-def test_cartridge_forward_and_save_load(tmp_path, num_frozen_tokens):
-    base = _load_tiny_causal_lm()
+def test_cartridge_forward_and_save_load(tmp_path, num_frozen_tokens, base_model, model_id):
+    base = base_model
     peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=num_frozen_tokens, task_type="CAUSAL_LM")
     model = get_peft_model(base, peft_config)
 
@@ -133,7 +139,8 @@ def test_cartridge_forward_and_save_load(tmp_path, num_frozen_tokens):
         model.prompt_encoder[model.active_adapter].frozen_embedding.data.fill_(7.0)
 
     model.save_pretrained(tmp_path)
-    base2 = _load_tiny_causal_lm()
+    with hub_online_once(model_id):
+        base2 = AutoModelForCausalLM.from_pretrained(model_id)
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         loaded = PeftModel.from_pretrained(base2, tmp_path)
@@ -153,8 +160,8 @@ def test_cartridge_forward_and_save_load(tmp_path, num_frozen_tokens):
         assert loaded.prompt_encoder[loaded.active_adapter].frozen_embedding is None
 
 
-def test_cartridge_init_from_past_key_values_and_compose(tmp_path):
-    base = _load_tiny_causal_lm()
+def test_cartridge_init_from_past_key_values_and_compose(tmp_path, base_model, model_id):
+    base = base_model
     peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=1, task_type="CAUSAL_LM")
     model = get_peft_model(base, peft_config)
 
@@ -174,7 +181,8 @@ def test_cartridge_init_from_past_key_values_and_compose(tmp_path):
     out_dir = tmp_path / "composed"
     model.save_pretrained(a1)
 
-    base2 = _load_tiny_causal_lm()
+    with hub_online_once(model_id):
+        base2 = AutoModelForCausalLM.from_pretrained(model_id)
     model2 = get_peft_model(base2, peft_config)
     with model2.disable_adapter():
         outputs2 = model2(input_ids=input_ids, use_cache=True)
@@ -191,8 +199,8 @@ def test_cartridge_init_from_past_key_values_and_compose(tmp_path):
     assert w["prompt_embeddings"].shape[0] == 8
 
 
-def test_cartridge_prompt_embeddings_from_past_key_values_matches_init():
-    base = _load_tiny_causal_lm()
+def test_cartridge_prompt_embeddings_from_past_key_values_matches_init(base_model):
+    base = base_model
     peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=0, task_type="CAUSAL_LM")
     model = get_peft_model(base, peft_config)
 
@@ -211,8 +219,8 @@ def test_cartridge_prompt_embeddings_from_past_key_values_matches_init():
 
 
 @pytest.mark.parametrize("num_frozen_tokens", [0, 2])
-def test_cartridge_inference_mode_disables_grads_and_forward_works(num_frozen_tokens):
-    base = _load_tiny_causal_lm()
+def test_cartridge_inference_mode_disables_grads_and_forward_works(num_frozen_tokens, base_model):
+    base = base_model
     peft_config = CartridgeConfig(
         num_virtual_tokens=4,
         num_frozen_tokens=num_frozen_tokens,
@@ -236,8 +244,8 @@ def test_cartridge_inference_mode_disables_grads_and_forward_works(num_frozen_to
     assert out.logits.shape[:2] == (1, 6)
 
 
-def test_cartridge_gradient_checkpointing_raises():
-    base = _load_tiny_causal_lm()
+def test_cartridge_gradient_checkpointing_raises(base_model):
+    base = base_model
     base.gradient_checkpointing_enable()
     peft_config = CartridgeConfig(num_virtual_tokens=4, num_frozen_tokens=0, task_type="CAUSAL_LM")
 
@@ -245,8 +253,8 @@ def test_cartridge_gradient_checkpointing_raises():
         _ = get_peft_model(base, peft_config)
 
 
-def test_prefix_tuning_can_be_initialized_from_past_key_values_when_no_projection():
-    base = _load_tiny_causal_lm()
+def test_prefix_tuning_can_be_initialized_from_past_key_values_when_no_projection(base_model):
+    base = base_model
     peft_config = PrefixTuningConfig(num_virtual_tokens=4, task_type="CAUSAL_LM")
     model = get_peft_model(base, peft_config)
 
