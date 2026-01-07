@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2020 The HuggingFace Inc. team. All rights reserved.
+# Copyright 2025 The HuggingFace Inc. team. All rights reserved.
 # Modified for AdaLoRA/DoRA (AdaDoRA) support.
 """Finetuning models for sequence classification on GLUE with AdaLoRA/DoRA."""
 
