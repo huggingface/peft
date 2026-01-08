@@ -17,6 +17,7 @@ from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
 from .boft import BOFTConfig, BOFTModel
 from .bone import BoneConfig, BoneModel
 from .c3a import C3AConfig, C3AModel
+from .cartridge import CartridgeConfig, CartridgeEncoder
 from .cpt import CPTConfig, CPTEmbedding
 from .delora import DeloraConfig, DeloraModel
 from .fourierft import FourierFTConfig, FourierFTModel
@@ -74,6 +75,8 @@ __all__ = [
     "C3AModel",
     "CPTConfig",
     "CPTEmbedding",
+    "CartridgeConfig",
+    "CartridgeEncoder",
     "DeloraConfig",
     "DeloraModel",
     "EvaConfig",
