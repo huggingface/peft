@@ -60,8 +60,6 @@ class GPTQOFTLinear(torch.nn.Module, OFTLayer):
 
     def forward(self, x: torch.Tensor):
         # note: logic differs from default Linear because merging is not supported
-        result = self.quant_linear_module(x)
-
         if self.disable_adapters:
             return self.quant_linear_module(x)
 
@@ -70,17 +68,16 @@ class GPTQOFTLinear(torch.nn.Module, OFTLayer):
                 continue
 
             oft_R = self.oft_R[active_adapter]
-
             requires_conversion = not torch.is_autocast_enabled()
             if requires_conversion:
                 expected_dtype = x.dtype
                 x = self._cast_input_dtype(x, oft_R.weight.dtype)
 
             x = oft_R(x)
+            if requires_conversion:
+                x = x.to(expected_dtype)
 
         result = self.quant_linear_module(x)
-        if requires_conversion:
-            result = result.to(expected_dtype)
         return result
 
     def __repr__(self) -> str:
