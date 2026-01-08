@@ -858,6 +858,7 @@ class Embedding(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_kasa: bool = False,
         arrow_config: ArrowConfig = None,
         lora_bias: bool = False,
         **kwargs,
@@ -879,6 +880,7 @@ class Embedding(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_kasa=use_kasa,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
         )
@@ -1200,6 +1202,7 @@ class _ConvNd(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_kasa=use_kasa,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
         )
