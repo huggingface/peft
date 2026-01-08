@@ -123,6 +123,7 @@ jobs:
           pip install setuptools
           # cpu version of pytorch
           pip install -e .[test]
+          pip install transformers==5.0.0rc2
       - name: Test with pytest
         shell: bash
         env:
