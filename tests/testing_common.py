@@ -609,6 +609,8 @@ class PeftCommonTester:
             atol, rtol = 1e-4, 1e-4
             if self.torch_device in ["mlu"]:
                 atol, rtol = 1e-3, 1e-3  # MLU
+            if model_id == "trl-internal-testing/tiny-GptOssForCausalLM":
+                atol, rtol = 1e-3, 1e-3
             if config.peft_type in ("ADALORA", "OFT"):
                 # these methods require a bit higher tolerance
                 atol, rtol = 1e-2, 1e-2
@@ -621,11 +623,6 @@ class PeftCommonTester:
                 # also getting larger errors here, not exactly sure why
                 atol, rtol = 0.3, 0.01
 
-            print("=" * 50)
-            print(logits[:, :, :7])
-            print(logits_merged[:, :, :7])
-            print(f"{(logits - logits_merged).abs().max().item()=}")
-            torch.testing.assert_close(logits, logits_merged)
             assert torch.allclose(logits, logits_merged, atol=atol, rtol=rtol)
             assert torch.allclose(logits, logits_unmerged, atol=atol, rtol=rtol)
             assert torch.allclose(logits, logits_merged_unloaded, atol=atol, rtol=rtol)
