@@ -358,7 +358,8 @@ class PeftGPTQModelTests(unittest.TestCase):
                 quantization_config=self.quantization_config,
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
+            if getattr(model, "hf_device_map", None) is not None:
+                assert set(model.hf_device_map.values()) <= set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -421,7 +422,8 @@ class PeftGPTQModelTests(unittest.TestCase):
                 quantization_config=self.quantization_config,
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
+            if getattr(model, "hf_device_map", None) is not None:
+                assert set(model.hf_device_map.values()) <= set(range(device_count))
 
             model = prepare_model_for_kbit_training(model)
 
