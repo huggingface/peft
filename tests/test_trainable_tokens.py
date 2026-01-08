@@ -24,7 +24,7 @@ from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokeni
 
 from peft import AutoPeftModel, LoraConfig, PeftModel, TrainableTokensConfig, get_peft_model
 from peft.tuners.trainable_tokens.layer import TrainableTokensLayer
-from peft.utils import TrainableTokensWrapper, get_peft_model_state_dict
+from peft.utils import TrainableTokensWrapper, get_peft_model_state_dict, is_transformers_ge_v5
 
 from .testing_utils import hub_online_once
 
@@ -1200,6 +1200,7 @@ class TestTrainableTokens:
         # They should NOT share delta parameters (model doesn't have tied weights)
         assert embed_adapter.trainable_tokens_delta is not lm_head_adapter.trainable_tokens_delta
 
+    @pytest.mark.skipif(not is_transformers_ge_v5, reason="Test requires transformers v5+ dict format for _tied_weights_keys")
     def test_composite_model_multiple_embed_tokens_specific_targeting(self):
         """Test that users can specify full paths to disambiguate multiple embed_tokens layers.
 
@@ -1239,13 +1240,7 @@ class TestTrainableTokens:
                 # Add a config attribute for PEFT
                 self.config = config1
 
-                # Avoid mixing list-format (transformers <v5) and dict-format _tied_weights_keys.
-                # Set sub-models to None when they use list format, then use dict at composite level.
-                if isinstance(self.m1._tied_weights_keys, list):
-                    self.m1._tied_weights_keys = None
-                    self.m2._tied_weights_keys = None
-
-                # Dict format correctly represents independent tied weights within each sub-model
+                # Use dict format to correctly represent independent tied weights within each sub-model
                 self._tied_weights_keys = {
                     "m1.decoder.embed_tokens.weight": "m1.encoder.embed_tokens.weight",
                     "m2.decoder.embed_tokens.weight": "m2.encoder.embed_tokens.weight",
