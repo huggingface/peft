@@ -620,6 +620,12 @@ class PeftCommonTester:
             if model_id == "trl-internal-testing/tiny-Llama4ForCausalLM":
                 # also getting larger errors here, not exactly sure why
                 atol, rtol = 0.3, 0.01
+
+            print("=" * 50)
+            print(logits[:, :, :7])
+            print(logits_merged[:, :, :7])
+            print(f"{(logits - logits_merged).abs().max().item()=}")
+            torch.testing.assert_close(logits, logits_merged)
             assert torch.allclose(logits, logits_merged, atol=atol, rtol=rtol)
             assert torch.allclose(logits, logits_unmerged, atol=atol, rtol=rtol)
             assert torch.allclose(logits, logits_merged_unloaded, atol=atol, rtol=rtol)
