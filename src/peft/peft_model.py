@@ -1618,6 +1618,21 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         card.text = "\n".join(lines)
         card.save(filename)
 
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        """
+        Whether it is possible for the adapter of this model to be converted to LoRA.
+
+        Normally, this works if the PEFT method is additive, i.e. W' = W_base + delta_weight.
+        """
+        peft_config = self.active_peft_config
+        if peft_config.is_prompt_learning:
+            return False
+
+        if not hasattr(self.base_model, "supports_lora_conversion"):
+            return False
+
+        return self.base_model.supports_lora_conversion()
+
 
 class PeftModelForSequenceClassification(PeftModel):
     """

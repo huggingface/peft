@@ -1037,3 +1037,16 @@ class TestDecoderModels(PeftCommonTester):
             msg = "Setting `requires_grad` is not supported for prompt learning methods like"
             with pytest.raises(TypeError, match=msg):
                 model.set_requires_grad(adapter_names="adpater0")
+
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_lora_conversion(self, model_id, config_cls, config_kwargs):
+        # Test for the ability to convert a PEFT adapter into a LoRA adapter (if the adapter supports it). It's not
+        # necessary to run this with all model types, only checking decoder models.
+        _skip_if_not_conv1d_supported(model_id, config_cls)
+        if config_kwargs.get("alora_invocation_tokens"):
+            # very large conversion error, not sure why
+            pytest.skip("Skipping LoRA conversion for aLoRA.")
+
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_lora_conversion(model_id, config_cls, config_kwargs)

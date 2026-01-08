@@ -117,9 +117,11 @@ from .tuners import (
     WaveFTModel,
     XLoraConfig,
     XLoraModel,
+    convert_to_lora,
     create_arrow_model,
     get_eva_state_dict,
     initialize_lora_eva_weights,
+    save_as_lora,
 )
 from .tuners.cartridge.utils import (
     compose_cartridge_adapters,
@@ -244,6 +246,7 @@ __all__ = [
     "bloom_model_postprocess_past_key_value",
     "cast_mixed_precision_params",
     "compose_cartridge_adapters",
+    "convert_to_lora",
     "create_arrow_model",
     "get_eva_state_dict",
     "get_layer_status",
@@ -259,6 +262,7 @@ __all__ = [
     "prepare_model_for_kbit_training",
     "prompt_embeddings_from_past_key_values",
     "replace_lora_weights_loftq",
+    "save_as_lora",
     "set_peft_model_state_dict",
     "shift_tokens_right",
 ]
