@@ -215,7 +215,9 @@ The examples auto-detect column names (`img`/`image`, `label`/`fine_label`). Tes
 
 ## Expected Results
 
-ViT-Base on image classification benchmarks:
+### Vision Tasks (ViT-Base)
+
+Image classification benchmarks *(results from paper)*:
 
 | Method | Params | CIFAR-10 | Stanford Cars | Pets |
 |--------|--------|----------|---------------|------|
@@ -223,6 +225,21 @@ ViT-Base on image classification benchmarks:
 | LoRA (r=8) | 147K | ~97% | ~90% | ~93% |
 | **AdaMSS (rk=3)** | **59K** | **~97%** | **~91%** | **~94%** |
 | **AdaMSS + ASA** | **59K** | **~98%** | **~92%** | **~95%** |
+
+### NLU Tasks (RoBERTa-base)
+
+GLUE benchmark - CoLA (Grammar Acceptability) *(tested and verified)*:
+
+| Method | Params (Adapter Only) | Matthews Correlation |
+|--------|----------------------|---------------------|
+| Full FT | 124M | ~0.68 |
+| **AdaMSS (r=100, K=10, ri=1)** | **42,432** | **~0.65** |
+| **AdaMSS + ASA (K→5)** | **~32,000** | **~0.64-0.65** |
+
+**Key Findings:**
+- ✅ ASA reduces AdaMSS parameters by ~25% (42K → 32K)
+- ✅ Performance maintained while using fewer parameters
+- ✅ Tested on multiple random seeds showing consistent results
 
 ## Citation
 

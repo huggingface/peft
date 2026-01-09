@@ -58,6 +58,7 @@ class ASACallback(TrainerCallback):
         beta2 (float): EMA coefficient for uncertainty averaging (default: 0.85).
         tt (float): Schedule exponent for gradual transition (default: 3.0).
         total_steps (Optional[int]): Total training steps. If None, computed from training args.
+        verbose (bool): Enable verbose debug output (default: False).
     
     Example:
         ```python
@@ -102,6 +103,7 @@ class ASACallback(TrainerCallback):
         beta2: float = 0.85,
         tt: float = 3.0,
         total_steps: Optional[int] = None,
+        verbose: bool = False,
     ):
         super().__init__()
         self.target_kk = target_kk
@@ -112,6 +114,7 @@ class ASACallback(TrainerCallback):
         self.beta2 = beta2
         self.total_steps = total_steps
         self.tt = tt
+        self.verbose = verbose
         
         # Sanity checks
         assert 0 < beta1 < 1, f"beta1 must be in (0, 1), got {beta1}"
@@ -121,7 +124,7 @@ class ASACallback(TrainerCallback):
         self.current_step = 0
         self._collected_total_kk = False
         self.total_kk = None
-        self.trainer = None  # 保存trainer实例
+        self.trainer = None  # Store trainer instance
     
     def _schedule_threshold(self, step: int) -> tuple[int, bool]:
         """
@@ -181,13 +184,16 @@ class ASACallback(TrainerCallback):
         """Apply masking to all AdaMSS layers."""
         from .layer import AdaMSSLayer
         
-        print(f"[DEBUG][_mask_model_to_target] 开始遍历模型，target_kk={target_kk}")
+        if self.verbose:
+            print(f"[DEBUG][_mask_model_to_target] Starting model traversal, target_kk={target_kk}")
         for name, module in model.named_modules():
             if isinstance(module, AdaMSSLayer):
-                print(f"[DEBUG][_mask_model_to_target] 找到 AdaMSSLayer: {name}")
+                if self.verbose:
+                    print(f"[DEBUG][_mask_model_to_target] Found AdaMSSLayer: {name}")
                 for adapter_name in module.exp_avg_ipt.keys():
-                    print(f"[DEBUG][_mask_model_to_target] 调用 mask_to_target for adapter: {adapter_name}")
-                    module.mask_to_target(adapter_name, target_kk)
+                    if self.verbose:
+                        print(f"[DEBUG][_mask_model_to_target] Calling mask_to_target for adapter: {adapter_name}")
+                    module.mask_to_target(adapter_name, target_kk, verbose=self.verbose)
     
     def _reset_model_importance(self, model):
         """Reset importance stats for all AdaMSS layers."""
@@ -222,22 +228,23 @@ class ASACallback(TrainerCallback):
             # 3. Calculate threshold and apply mask
             curr_kk, should_mask = self._schedule_threshold(current_step)
             
-            print(f"[DEBUG][ASA] step={current_step}, init_warmup={self.init_warmup}, final_warmup={self.final_warmup}, mask_interval={self.mask_interval}")
-            print(f"[DEBUG][ASA] masking条件: True")
-            print(f"[DEBUG][ASA] 调用_schedule_threshold: curr_kk={curr_kk}, should_mask={should_mask}")
+            if self.verbose:
+                print(f"[DEBUG][ASA] step={current_step}, init_warmup={self.init_warmup}, final_warmup={self.final_warmup}, mask_interval={self.mask_interval}")
+                print(f"[DEBUG][ASA] Masking condition: True")
+                print(f"[DEBUG][ASA] Called _schedule_threshold: curr_kk={curr_kk}, should_mask={should_mask}")
             
             if should_mask:
                 self._mask_model_to_target(model, curr_kk)
 
-                # 关键：重建 optimizer 以同步 requires_grad 变化
+                # Critical: Rebuild optimizer to sync requires_grad changes
                 if self.trainer is not None:
                     self.trainer.create_optimizer_and_scheduler(self.trainer.num_training_steps)
-                    # Debug print: 检查 optimizer param group 中参数的 requires_grad 状态
-                    # print("[DEBUG][ASA] Optimizer param groups after masking:")
-                    # for i, group in enumerate(self.trainer.optimizer.param_groups):
-                    #     print(f"  Param group {i}:")
-                    #     for p in group['params']:
-                    #         print(f"    shape={tuple(p.shape)}, requires_grad={p.requires_grad}")
+                    if self.verbose:
+                        print("[DEBUG][ASA] Optimizer param groups after masking:")
+                        for i, group in enumerate(self.trainer.optimizer.param_groups):
+                            print(f"  Param group {i}:")
+                            for p in group['params']:
+                                print(f"    shape={tuple(p.shape)}, requires_grad={p.requires_grad}")
 
                 # Print current active AdaMSS trainable parameter count for alignment checks
                 active_adamss = sum(
@@ -288,7 +295,7 @@ class ASACallback(TrainerCallback):
     
     def on_train_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         """Called at the beginning of training."""
-        # 保存 trainer 实例
+        # Store trainer instance
         self.trainer = kwargs.get('trainer', None)
         print("="*80)
         print("ASA (Adaptive Subspace Allocation) Enabled")

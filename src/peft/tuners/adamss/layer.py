@@ -108,13 +108,15 @@ class AdaMSSLayer(BaseTunerLayer):
                         diff = (ipt - exp_avg_ipt[key]).abs()
                         exp_avg_unc[key].mul_(beta2).add_(diff, alpha=1 - beta2)
     
-    def mask_to_target(self, adapter_name: str, target_kk: int) -> None:
+    def mask_to_target(self, adapter_name: str, target_kk: int, verbose: bool = False) -> None:
         """
         Mask (freeze) less important subspaces to reach target_kk active subspaces.
         """
-        print(f"[DEBUG][mask_to_target] 开始处理 adapter: {adapter_name}, target_kk={target_kk}")
+        if verbose:
+            print(f"[DEBUG][mask_to_target] Starting processing for adapter: {adapter_name}, target_kk={target_kk}")
         if adapter_name not in self.exp_avg_ipt:
-            print(f"[DEBUG][mask_to_target] adapter {adapter_name} 不在 exp_avg_ipt 中，跳过")
+            if verbose:
+                print(f"[DEBUG][mask_to_target] Adapter {adapter_name} not in exp_avg_ipt, skipping")
             return  # ASA not enabled
         
         num_subspaces = self.KK[adapter_name]
@@ -124,8 +126,9 @@ class AdaMSSLayer(BaseTunerLayer):
         exp_avg_ipt = self.exp_avg_ipt[adapter_name]
         exp_avg_unc = self.exp_avg_unc[adapter_name]
 
-        print(f"[DEBUG][mask_to_target] exp_avg_ipt keys: {list(exp_avg_ipt.keys())}")
-        print(f"[DEBUG][mask_to_target] exp_avg_unc keys: {list(exp_avg_unc.keys())}")
+        if verbose:
+            print(f"[DEBUG][mask_to_target] exp_avg_ipt keys: {list(exp_avg_ipt.keys())}")
+            print(f"[DEBUG][mask_to_target] exp_avg_unc keys: {list(exp_avg_unc.keys())}")
 
         subspace_scores = []
         for i in range(num_subspaces):
@@ -140,9 +143,10 @@ class AdaMSSLayer(BaseTunerLayer):
             subspace_scores.append((i, score_A + score_B))
 
         # Debug: Print subspace scores for verification
-        print(f"[DEBUG][mask_to_target] Subspace scores for {adapter_name}:")
-        for idx, score in subspace_scores:
-            print(f"  Subspace {idx}: Score={score}")
+        if verbose:
+            print(f"[DEBUG][mask_to_target] Subspace scores for {adapter_name}:")
+            for idx, score in subspace_scores:
+                print(f"  Subspace {idx}: Score={score}")
 
         if len(subspace_scores) <= target_kk and target_kk > 0:
             return
@@ -160,7 +164,8 @@ class AdaMSSLayer(BaseTunerLayer):
                 active_indices = {idx for idx, _ in subspace_scores[:target_kk]}
 
         # Debug: Print active indices after thresholding
-        print(f"[DEBUG][mask_to_target] Active indices for {adapter_name}: {sorted(active_indices)}")
+        if verbose:
+            print(f"[DEBUG][mask_to_target] Active indices for {adapter_name}: {sorted(active_indices)}")
 
         for i in range(num_subspaces):
             key_A = f"{adapter_name}_A_{i}"
@@ -174,21 +179,22 @@ class AdaMSSLayer(BaseTunerLayer):
                     self.adamss_A[key_A].grad = None
                     self.adamss_B[key_B].grad = None
 
-        # Debug print: 输出所有 adamss 参数的 requires_grad 状态和统计
-        print(f"[DEBUG][mask_to_target] {adapter_name} 参数 requires_grad 状态:")
-        trainable_count = 0
-        total_count = 0
-        for key, param in self.adamss_A.items():
-            print(f"  {key}: requires_grad={param.requires_grad}")
-            total_count += param.numel()
-            if param.requires_grad:
-                trainable_count += param.numel()
-        for key, param in self.adamss_B.items():
-            print(f"  {key}: requires_grad={param.requires_grad}")
-            total_count += param.numel()
-            if param.requires_grad:
-                trainable_count += param.numel()
-        print(f"[DEBUG][mask_to_target] 当前trainable参数: {trainable_count} / {total_count} ({100*trainable_count/total_count:.2f}%)")
+        # Debug print: Output requires_grad status and statistics for all adamss parameters
+        if verbose:
+            print(f"[DEBUG][mask_to_target] {adapter_name} parameter requires_grad status:")
+            trainable_count = 0
+            total_count = 0
+            for key, param in self.adamss_A.items():
+                print(f"  {key}: requires_grad={param.requires_grad}")
+                total_count += param.numel()
+                if param.requires_grad:
+                    trainable_count += param.numel()
+            for key, param in self.adamss_B.items():
+                print(f"  {key}: requires_grad={param.requires_grad}")
+                total_count += param.numel()
+                if param.requires_grad:
+                    trainable_count += param.numel()
+            print(f"[DEBUG][mask_to_target] Current trainable parameters: {trainable_count} / {total_count} ({100*trainable_count/total_count:.2f}%)")
 
     def update_layer(
         self,

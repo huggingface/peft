@@ -337,6 +337,7 @@ def main():
             beta1=adamss_args.asa_beta1,
             beta2=adamss_args.asa_beta2,
             tt=adamss_args.asa_tt,
+            verbose=False,  # Set to True to enable debug output
         )
         callbacks.append(asa_callback)
     
