@@ -301,9 +301,12 @@ class AdaMSSLayer(BaseTunerLayer):
 
         # Calculate effective rank per subspace (r/K)
         # Following paper: each subspace uses R_k = R/K columns from SVD decomposition
-        rank_per_subspace = r // num_subspaces
+        # rank_per_subspace = r // num_subspaces
         
-        print(f"      [INFO] Using rank_per_subspace = {rank_per_subspace} (r={r} / K={num_subspaces})")
+        # Override with user specified subspace_rank if provided (default 1)
+        rank_per_subspace = subspace_rank
+        # print(f"      [INFO] Using rank_per_subspace = {rank_per_subspace} (r={r} / K={num_subspaces})")
+        print(f"      [INFO] Using rank_per_subspace = {rank_per_subspace} (user specified)")
 
         # Initialize trainable subspace parameters
         for i in range(self.KK[adapter_name]):
@@ -316,22 +319,18 @@ class AdaMSSLayer(BaseTunerLayer):
             # subspace_data shape: (len(seg_indices), r)
             
             # Determine actual rank based on configuration
-            # Compute Gram matrix Z = subspace_data @ subspace_data.T
-            Z_row = subspace_data @ subspace_data.T  # (len(seg_indices), len(seg_indices))
-            
-            # Compute SVD to get row space decomposition
-            U_row, S_row, V_row = torch.svd_lowrank(Z_row, q=min(Z_row.shape), niter=2)
-            
-            # Also compute column space Gram matrix for A initialization
-            Z_col = subspace_data.T @ subspace_data  # (r, r)
-            U_col, S_col, V_col = torch.svd_lowrank(Z_col, q=min(Z_col.shape), niter=2)
-
             if use_dynamic_rank:
+                # Compute Gram matrix Z = subspace_data @ subspace_data.T
+                Z_row = subspace_data @ subspace_data.T  # (len(seg_indices), len(seg_indices))
+                
+                # Compute SVD to get row space decomposition
+                U_row, S_row, V_row = torch.svd_lowrank(Z_row, q=min(Z_row.shape), niter=2)
+                
                 # Dynamic rank selection using SVD threshold
                 # Dynamically determine actual rank using configurable threshold
                 # Following adamss_pkg: num_ii_jj = min((S > threshold * S[0]).sum().item(), args.adamss_ri)
                 threshold_mask = S_row > svd_threshold * S_row[0]
-                actual_rank = min(threshold_mask.sum().item(), subspace_rank, len(S_col))
+                actual_rank = min(threshold_mask.sum().item(), subspace_rank, len(S_row))
                 
                 # Handle edge case: ensure at least rank 1
                 if actual_rank == 0:
@@ -339,14 +338,6 @@ class AdaMSSLayer(BaseTunerLayer):
                 
                 print(f"      [INFO] Subspace {i}: dynamic rank = {actual_rank} (threshold {svd_threshold} from {len(S_row)} row singular values)")
             else:
-                # Fixed rank: use subspace_rank directly (but constrained by available dimensions)
-                # adamss_pkg uses: num_ii_jj = min(len(seg_result[indx]), args.adamss_ri)
-                # actual_rank = min(len(seg_indices), subspace_rank)
-                
-                # print(f"      [INFO] Subspace {i}: fixed rank = {actual_rank} (seg_indices={len(seg_indices)}, rank_per_subspace={rank_per_subspace})")
-
-
-                ##
                 # Fixed rank: match adamss_pkg behavior exactly
                 # adamss_pkg uses: num_ii_jj = min(len(seg_result[indx]), args.adamss_ri)
                 actual_rank = min(len(seg_indices), subspace_rank)
@@ -357,9 +348,24 @@ class AdaMSSLayer(BaseTunerLayer):
                 
                 # print(f"      [INFO] Subspace {i}: fixed-rank = {actual_rank} (seg_indices={len(seg_indices)})")
             
-            # Initialize A matrix from column space SVD (matches adamss_pkg)
-            # A maps from r (full SVD rank) dimensions to actual_rank dimensions
-            A_init = U_col[:, :actual_rank].T.contiguous()
+            # Initialize A using QR decomposition to match adamss_pkg exactly
+            # adamss_pkg: Q, R = torch.linalg.qr((newA[seg_result[indx],:]).T @ A[i], mode='reduced')
+            # where A[i] is U from SVD of subspace Gram matrix
+            
+            # First, compute Gram matrix for this subspace
+            Z_subspace = subspace_data @ subspace_data.T  # (len(seg_indices), len(seg_indices))
+            
+            # SVD of Gram matrix to get A_intermediate
+            U_gram, S_gram, _ = torch.svd_lowrank(Z_subspace, q=min(Z_subspace.shape[0], actual_rank), niter=2)
+            A_intermediate = U_gram[:, :actual_rank]  # (len(seg_indices), actual_rank)
+            
+            # Now apply QR decomposition: (newA[seg_indices, :r]).T @ A_intermediate
+            # newA[0, 0, seg_indices, :r] is subspace_data with shape (len(seg_indices), r)
+            matrix_for_qr = subspace_data.T @ A_intermediate  # (r, actual_rank)
+            Q, R = torch.linalg.qr(matrix_for_qr, mode='reduced')
+            
+            # A_init is Q.T to match adamss_pkg
+            A_init = Q.T.contiguous()  # (actual_rank, r)
             
             # Initialize B matrix to zeros (matches adamss_pkg)
             # B maps from actual_rank dimensions back to len(seg_indices) dimensions
@@ -505,7 +511,8 @@ class Linear(nn.Module, AdaMSSLayer):
 
         # Scatter to correct positions
         # Handle both 2D (batch, features) and 3D (batch, seq, features) inputs
-        x7 = torch.zeros_like(x6)
+        # CRITICAL FIX: x7 should match x1's shape (full output_features), not x6's shape
+        x7 = torch.zeros_like(x1)
         if x6.dim() == 2:
             # 2D input: (batch, features)
             x7[:, self.newindex[adapter_name]] = x6

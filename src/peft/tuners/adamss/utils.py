@@ -129,7 +129,7 @@ def seg_locations(WW_shape0, index, debug=False):
             arr = np.where(index[ii] == i)[0]
             location.append(arr)
         # Canonicalize ordering: sort clusters by their minimum index (empty arrays go last)
-        location.sort(key=lambda arr: (int(arr.min()) if arr.size > 0 else 10 ** 9))
+        # location.sort(key=lambda arr: (int(arr.min()) if arr.size > 0 else 10 ** 9))
         locations.append(location)
 
     # Optional debug dump

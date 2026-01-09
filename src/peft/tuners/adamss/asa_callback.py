@@ -17,6 +17,15 @@ ASA (Adaptive Subspace Allocation) Callback for AdaMSS.
 
 This callback implements dynamic subspace selection during training based on
 gradient-based importance scoring.
+
+Note:
+    This callback provides the same functionality as manually calling
+    `model.base_model.update_and_allocate(global_step)` in a custom training loop.
+    When using this callback with Trainer, DO NOT call update_and_allocate() manually
+    as it would result in duplicate ASA updates.
+    
+    Use this callback if you're using HuggingFace Trainer, or call update_and_allocate()
+    manually if you have a custom training loop.
 """
 
 from typing import Optional
@@ -31,6 +40,15 @@ class ASACallback(TrainerCallback):
     This callback periodically updates importance scores and masks less important
     subspaces during training to achieve adaptive parameter selection.
     
+    Important:
+        This callback implements the same functionality as `AdaMSSModel.update_and_allocate()`.
+        When using this callback with HuggingFace Trainer, DO NOT manually call
+        `model.base_model.update_and_allocate(global_step)` as it would result in
+        duplicate ASA updates.
+        
+        - Use ASACallback: for HuggingFace Trainer
+        - Use update_and_allocate(): for custom training loops
+    
     Args:
         target_kk (int): Target number of active subspaces.
         init_warmup (int): Initial warmup steps before starting masking.
@@ -38,7 +56,40 @@ class ASACallback(TrainerCallback):
         mask_interval (int): Steps between ASA updates.
         beta1 (float): EMA coefficient for importance averaging (default: 0.85).
         beta2 (float): EMA coefficient for uncertainty averaging (default: 0.85).
+        tt (float): Schedule exponent for gradual transition (default: 3.0).
         total_steps (Optional[int]): Total training steps. If None, computed from training args.
+    
+    Example:
+        ```python
+        from peft import AdaMSSConfig, get_peft_model, ASACallback
+        from transformers import Trainer
+        
+        # Configure AdaMSS with ASA
+        config = AdaMSSConfig(
+            r=100,
+            num_subspaces=10,
+            subspace_rank=3,
+            use_asa=True,
+            target_kk=5,
+        )
+        model = get_peft_model(model, config)
+        
+        # Create ASA callback
+        asa_callback = ASACallback(
+            target_kk=5,
+            init_warmup=50,
+            final_warmup=1000,
+            mask_interval=100,
+        )
+        
+        # Use with Trainer
+        trainer = Trainer(
+            model=model,
+            callbacks=[asa_callback],
+            ...
+        )
+        trainer.train()
+        ```
     """
     
     def __init__(

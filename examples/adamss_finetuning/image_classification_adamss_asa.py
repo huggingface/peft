@@ -49,6 +49,35 @@ from torchvision.transforms import (
 from peft import AdaMSSConfig, get_peft_model, ASACallback
 
 
+# Hyperparameters from Table 18 in the paper
+HYPERPARAMS = {
+    "vit-large-patch16-224-in21k": {
+        "pets": {"lr": 0.001, "head_lr": 0.0005, "wd": 0.0005},
+        "cars": {"lr": 0.01, "head_lr": 0.005, "wd": 0.1},
+        "cifar10": {"lr": 0.01, "head_lr": 0.05, "wd": 0.1},
+        "cifar100": {"lr": 0.01, "head_lr": 0.05, "wd": 0.05},
+        "eurosat": {"lr": 0.01, "head_lr": 0.0005, "wd": 0.01},
+        "fgvc": {"lr": 0.01, "head_lr": 0.0005, "wd": 0.0005},
+        "resisc": {"lr": 0.01, "head_lr": 0.0005, "wd": 0.1},
+    },
+    "vit-base-patch16-224-in21k": {
+        "pets": {"lr": 0.005, "head_lr": 0.005, "wd": 0.0005},
+        "cars": {"lr": 0.01, "head_lr": 0.005, "wd": 0.0},
+        "cifar10": {"lr": 0.01, "head_lr": 0.005, "wd": 0.05},
+        "cifar100": {"lr": 0.01, "head_lr": 0.005, "wd": 0.05},
+        "eurosat": {"lr": 0.01, "head_lr": 0.0005, "wd": 0.05},
+        "fgvc": {"lr": 0.01, "head_lr": 0.005, "wd": 0.0005},
+        "resisc": {"lr": 0.01, "head_lr": 0.005, "wd": 0.0005},
+    },
+}
+
+# Model-specific K values (number of subspaces)
+MODEL_K_VALUES = {
+    "vit-large-patch16-224-in21k": 16,
+    "vit-base-patch16-224-in21k": 10,
+}
+
+
 # Global preprocessing functions (to avoid closure issues with set_transform)
 def _preprocess_images(examples, img_col, transforms):
     """Apply image transformations."""
@@ -99,7 +128,19 @@ class AdaMSSArguments:
     )
     asa_mask_interval: int = field(
         default=100,
-        metadata={"help": "ASA interval between subspace selection updates."}
+        metadata={"help": "steps between ASA updates."}
+    )
+    asa_beta1: float = field(
+        default=0.85,
+        metadata={"help": "EMA coefficient for importance."}
+    )
+    asa_beta2: float = field(
+        default=0.85,
+        metadata={"help": "EMA coefficient for uncertainty."}
+    )
+    asa_tt: float = field(
+        default=3.0,
+        metadata={"help": "ASA schedule exponent."}
     )
 
 
@@ -155,6 +196,41 @@ def main():
     # Parse arguments
     parser = HfArgumentParser((ModelArguments, DataArguments, AdaMSSArguments, TrainingArguments))
     model_args, data_args, adamss_args, training_args = parser.parse_args_into_dataclasses()
+    
+    # Auto-detect model type and set K value
+    model_name = model_args.model_name_or_path
+    model_type = None
+    for key in MODEL_K_VALUES.keys():
+        if key in model_name:
+            model_type = key
+            break
+    
+    if model_type is None:
+        # Default to base model
+        model_type = "vit-base-patch16-224-in21k"
+        print(f"⚠️  Model type not recognized, defaulting to {model_type}")
+    
+    # Override K value based on model type
+    adamss_args.adamss_k = MODEL_K_VALUES[model_type]
+    
+    # Get hyperparameters from Table 18
+    if model_type in HYPERPARAMS and data_args.dataset_name in HYPERPARAMS[model_type]:
+        hp = HYPERPARAMS[model_type][data_args.dataset_name]
+        print(f"📋 Using Table 18 hyperparameters for {model_type} + {data_args.dataset_name}")
+        print(f"   lr={hp['lr']}, head_lr={hp['head_lr']}, wd={hp['wd']}")
+    else:
+        hp = {"lr": 0.01, "head_lr": 0.005, "wd": 0.0005}
+        print(f"⚠️  No Table 18 hyperparameters found, using defaults: {hp}")
+    
+    print("\n" + "="*80)
+    print(f"AdaMSS {'with ASA' if adamss_args.use_asa else 'without ASA'} - {data_args.dataset_name.upper()}")
+    print("="*80)
+    print(f"Model: {model_type}")
+    print(f"AdaMSS: r={adamss_args.adamss_r}, K={adamss_args.adamss_k}, ri={adamss_args.adamss_ri}")
+    if adamss_args.use_asa:
+        print(f"ASA: Target {adamss_args.target_kk}/{adamss_args.adamss_k} subspaces")
+        print(f"     Warmup steps {adamss_args.asa_init_warmup} → {adamss_args.asa_final_warmup}")
+    print("="*80 + "\n")
     
     # Load dataset
     print(f"📦 Loading {data_args.dataset_name} dataset...")
@@ -234,11 +310,7 @@ def main():
     )
     
     # Configure AdaMSS
-    print("\n⚙️  Configuring AdaMSS...")
-    print(f"   r={adamss_args.adamss_r}, K={adamss_args.adamss_k}, ri={adamss_args.adamss_ri}")
-    if adamss_args.use_asa:
-        print(f"   ASA enabled: target {adamss_args.target_kk}/{adamss_args.adamss_k} active subspaces")
-    
+    print("\n⚙️  Applying AdaMSS...")
     config = AdaMSSConfig(
         r=adamss_args.adamss_r,
         num_subspaces=adamss_args.adamss_k,
@@ -262,6 +334,9 @@ def main():
             init_warmup=adamss_args.asa_init_warmup,
             final_warmup=adamss_args.asa_final_warmup,
             mask_interval=adamss_args.asa_mask_interval,
+            beta1=adamss_args.asa_beta1,
+            beta2=adamss_args.asa_beta2,
+            tt=adamss_args.asa_tt,
         )
         callbacks.append(asa_callback)
     
@@ -276,9 +351,34 @@ def main():
         predictions = preds.argmax(axis=1)
         return metric.compute(predictions=predictions, references=eval_pred.label_ids)
     
+    # Apply hyperparameters from Table 18
+    training_args.learning_rate = hp['lr']
+    training_args.weight_decay = hp['wd']
+    training_args.warmup_ratio = 0.06
+    training_args.evaluation_strategy = "epoch"
+    training_args.save_strategy = "epoch"
+    training_args.load_best_model_at_end = True
+    training_args.metric_for_best_model = "accuracy"
+    training_args.greater_is_better = True
+    
     # Override remove_unused_columns for set_transform compatibility
     # When using set_transform (lazy loading), original columns must be kept
     training_args.remove_unused_columns = False
+    
+    # Create custom optimizer with different LR for head
+    from torch.optim import AdamW
+    
+    optimizer_grouped_parameters = [
+        {
+            "params": [p for n, p in model.named_parameters() if "classifier" in n and p.requires_grad],
+            "lr": hp['head_lr'],
+        },
+        {
+            "params": [p for n, p in model.named_parameters() if "classifier" not in n and p.requires_grad],
+            "lr": hp['lr'],
+        },
+    ]
+    optimizer = AdamW(optimizer_grouped_parameters, weight_decay=hp['wd'])
     
     # Create trainer
     trainer = Trainer(
@@ -288,8 +388,17 @@ def main():
         eval_dataset=val_ds,
         data_collator=collate_fn,
         compute_metrics=compute_metrics,
+        optimizers=(optimizer, None),
         callbacks=callbacks,
     )
+    
+    # GPU memory monitoring
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+        print(f"\n[GPU Memory - Before Training]")
+        print(f"Allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
+        print(f"Reserved: {torch.cuda.memory_reserved() / 1024**3:.2f} GB")
     
     # Train
     print("\n" + "="*80)
@@ -297,6 +406,17 @@ def main():
     print("="*80 + "\n")
     
     train_result = trainer.train()
+    
+    # GPU memory stats
+    if torch.cuda.is_available():
+        print(f"\n[GPU Memory - Peak During Training]")
+        print(f"Peak Allocated: {torch.cuda.max_memory_allocated() / 1024**3:.2f} GB")
+        print(f"Peak Reserved: {torch.cuda.max_memory_reserved() / 1024**3:.2f} GB")
+    
+    # Print best metric
+    if trainer.state.best_metric is not None:
+        print(f"\n[Best Model Info]")
+        print(f"Best accuracy: {trainer.state.best_metric:.4f}")
     
     # Evaluate on test set
     print("\n" + "="*80)
