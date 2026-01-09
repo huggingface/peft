@@ -18,6 +18,7 @@ from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
 from .boft import BOFTConfig, BOFTModel
 from .bone import BoneConfig, BoneModel
 from .c3a import C3AConfig, C3AModel
+from .cartridge import CartridgeConfig, CartridgeEncoder
 from .cpt import CPTConfig, CPTEmbedding
 from .delora import DeloraConfig, DeloraModel
 from .fourierft import FourierFTConfig, FourierFTModel
@@ -35,9 +36,11 @@ from .lora import (
     LoraConfig,
     LoraModel,
     LoraRuntimeConfig,
+    convert_to_lora,
     create_arrow_model,
     get_eva_state_dict,
     initialize_lora_eva_weights,
+    save_as_lora,
 )
 from .miss import MissConfig, MissModel
 from .mixed import MixedModel
@@ -76,6 +79,8 @@ __all__ = [
     "C3AModel",
     "CPTConfig",
     "CPTEmbedding",
+    "CartridgeConfig",
+    "CartridgeEncoder",
     "DeloraConfig",
     "DeloraModel",
     "EvaConfig",
@@ -133,7 +138,9 @@ __all__ = [
     "WaveFTModel",
     "XLoraConfig",
     "XLoraModel",
+    "convert_to_lora",
     "create_arrow_model",
     "get_eva_state_dict",
     "initialize_lora_eva_weights",
+    "save_as_lora",
 ]
