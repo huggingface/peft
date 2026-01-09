@@ -46,6 +46,7 @@ from peft import (
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
+    PVeRAConfig,
     RoadConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -792,6 +793,8 @@ class PeftCommonTester:
             conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
             if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
                 atol, rtol = 1e-3, 1e-3
+            elif issubclass(config_cls, PVeRAConfig):
+                atol, rtol = 1e-5, 1e-5
 
             # check that the logits are the same after unloading
             assert torch.allclose(logits_peft, logits_unloaded, atol=atol, rtol=rtol)
@@ -1101,7 +1104,7 @@ class PeftCommonTester:
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
             model = get_peft_model(model, config)
-            model = model.to(self.torch_device)
+            model = model.to(self.torch_device).eval()
 
             inputs = self.prepare_inputs_for_testing()
 
@@ -1126,8 +1129,8 @@ class PeftCommonTester:
                 model.save_pretrained(tmp_dirname)
 
                 model_from_pretrained = self.transformers_class.from_pretrained(model_id)
-                model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname).to(
-                    self.torch_device
+                model_from_pretrained = (
+                    PeftModel.from_pretrained(model_from_pretrained, tmp_dirname).to(self.torch_device).eval()
                 )
 
                 logits_from_pretrained = model_from_pretrained(**inputs)[0][0]
