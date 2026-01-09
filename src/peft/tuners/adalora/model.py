@@ -122,6 +122,7 @@ class AdaLoraModel(LoraModel):
             "lora_dropout": lora_config.lora_dropout,
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "init_lora_weights": lora_config.init_lora_weights,
+            "use_dora": lora_config.use_dora,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -150,6 +151,7 @@ class AdaLoraModel(LoraModel):
                 lora_config.lora_alpha,
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
+                use_dora=lora_config.use_dora,
             )
 
     @staticmethod
@@ -321,23 +323,23 @@ class AdaLoraModel(LoraModel):
         ```
         """
         lora_config = self.peft_config[self.trainable_adapter_name]
-        # Update the importance score and allocate the budget
+        # update the importance score and allocate the budget
         if global_step < lora_config.total_step - lora_config.tfinal:
             _, rank_pattern = self.rankallocator.update_and_allocate(self.model, global_step)
             if rank_pattern:
                 lora_config.rank_pattern = rank_pattern
-        # Finalize the budget allocation
+        # finalize the budget allocation
         elif global_step == lora_config.total_step - lora_config.tfinal:
             _, rank_pattern = self.rankallocator.update_and_allocate(self.model, global_step, force_mask=True)
             # for some reason, this freezes the trainable parameters and nothing gets updates
             # self.resize_modules_by_rank_pattern(rank_pattern, self.trainable_adapter_name)
             lora_config.rank_pattern = rank_pattern
             self.rankallocator.reset_ipt()
-        # Currently using inefficient way to mask the unimportant weights using the rank pattern
+        # currently using inefficient way to mask the unimportant weights using the rank pattern
         #  due to problem mentioned above
         elif global_step > lora_config.total_step - lora_config.tfinal:
             self.rankallocator.mask_using_rank_pattern(self.model, lora_config.rank_pattern)
-        # Pass the function and do forward propagation
+        # pass the function and do forward propagation
         else:
             return None
 
