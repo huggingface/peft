@@ -205,18 +205,6 @@ class LoraModel(BaseTuner):
         kwargs = {
             "r": r,
             "lora_alpha": alpha,
-            "lora_dropout": lora_config.lora_dropout,
-            "fan_in_fan_out": lora_config.fan_in_fan_out,
-            "init_lora_weights": lora_config.init_lora_weights,
-            "use_rslora": lora_config.use_rslora,
-            "use_dora": lora_config.use_dora,
-            "use_alora": lora_config.alora_invocation_tokens is not None,
-            "use_qalora": lora_config.use_qalora,
-            "qalora_group_size": lora_config.qalora_group_size,
-            "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
-            "lora_bias": lora_config.lora_bias,
-            "arrow_config": lora_config.arrow_config,
-            "use_bdlora": lora_config.use_bdlora,
             "target_name": current_key,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
@@ -247,15 +235,8 @@ class LoraModel(BaseTuner):
                 adapter_name,
                 r,
                 lora_alpha=alpha,
-                lora_dropout=lora_config.lora_dropout,
-                init_lora_weights=lora_config.init_lora_weights,
-                use_rslora=lora_config.use_rslora,
-                use_dora=lora_config.use_dora,
-                lora_bias=lora_config.lora_bias,
-                arrow_config=lora_config.arrow_config,
-                use_bdlora=lora_config.use_bdlora,
-                inference_mode=lora_config.inference_mode,
                 target_name=current_key,
+                config=lora_config,
             )
         else:
             if isinstance(target, ParamWrapper) and (parameter_name == target.parameter_name):
@@ -307,7 +288,7 @@ class LoraModel(BaseTuner):
         if lora_config._custom_modules:
             # Experimental custom LoRA module support. Allows users to pass a custom mapping for unsupported layer
             # types by impelementing their own LoRA layers.
-            def dynamic_dispatch_func(target, adapter_name, lora_config, **kwargs):
+            def dynamic_dispatch_func(target, adapter_name, config, **kwargs):
                 new_module = None
 
                 if isinstance(target, BaseTunerLayer):
@@ -315,9 +296,9 @@ class LoraModel(BaseTuner):
                 else:
                     target_base_layer = target
 
-                for key, custom_cls in lora_config._custom_modules.items():
+                for key, custom_cls in config._custom_modules.items():
                     if isinstance(target_base_layer, key):
-                        new_module = custom_cls(target, adapter_name, **kwargs)
+                        new_module = custom_cls(target, adapter_name, config=config, **kwargs)
                         break
 
                 return new_module
@@ -351,7 +332,7 @@ class LoraModel(BaseTuner):
 
         new_module = None
         for dispatcher in dispatchers:
-            new_module = dispatcher(target, adapter_name, lora_config=lora_config, **kwargs)
+            new_module = dispatcher(target, adapter_name, config=lora_config, **kwargs)
             if new_module is not None:  # first match wins
                 break
 

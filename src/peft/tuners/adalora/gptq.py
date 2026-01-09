@@ -13,6 +13,7 @@
 # limitations under the License.
 import torch
 
+from .config import AdaLoraConfig
 from .layer import AdaLoraLayer
 
 
@@ -21,10 +22,8 @@ class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
         self,
         base_layer,
         adapter_name,
+        config: AdaLoraConfig,
         r: int = 0,
-        lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
-        init_lora_weights: bool = True,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -34,7 +33,7 @@ class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
         # for backwards compatibility
         self.quant_linear_module = base_layer
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+        self.update_layer(adapter_name, r, config=config)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         result = self.quant_linear_module(x)
