@@ -41,6 +41,7 @@ from .lora import (
     initialize_lora_eva_weights,
     save_as_lora,
 )
+from .loretta import LORETTaConfig
 from .miss import MissConfig, MissModel
 from .mixed import MixedModel
 from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTuningConfig, MultitaskPromptTuningInit
@@ -98,6 +99,7 @@ __all__ = [
     "LoraConfig",
     "LoraModel",
     "LoraRuntimeConfig",
+    "LORETTaConfig",
     "MissConfig",
     "MissModel",
     "MixedModel",
