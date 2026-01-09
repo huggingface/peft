@@ -165,6 +165,8 @@ TEST_CASES = [
         LoraConfig,
         {"target_modules": ["lin0"], "target_parameters": ["lin1.weight"]},
     ),
+    ("Vanilla MLP 7 LoRA with KaSA", "MLP", LoraConfig, {"target_modules": ["lin0"], "use_kasa": True}),
+    ("Vanilla MLP 8 LoRA with KaSA", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"], "use_kasa": True}),
     #######
     # IA³ #
     #######
@@ -1239,6 +1241,11 @@ def _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config
         pytest.skip("LoRA with multiple adapters with target_parameters is not supported")
 
 
+def _skip_test_disable_adapters(config_cls, config_kwargs):
+    if (config_cls == LoraConfig) and config_kwargs.get("use_kasa"):
+        pytest.skip("KaSA modifies base weights, so adapter disable test is skipped")
+
+
 class MLP(nn.Module):
     def __init__(self, bias=True):
         super().__init__()
@@ -2209,6 +2216,7 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_disable_adapters(self, test_name, model_id, config_cls, config_kwargs):
         # Test that it's possible to disable the adapter, in which case the model output should be identical to that of
         # the base model.
+        _skip_test_disable_adapters(config_cls, config_kwargs)
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device).eval()
         outputs_base = model(**X)

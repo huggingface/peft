@@ -127,7 +127,9 @@ class LoraLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-    def resolve_lora_variant(self, *, use_dora: bool, use_bdlora=None, **kwargs) -> Optional[LoraVariant]:
+    def resolve_lora_variant(
+        self, *, use_dora: bool, use_kasa: bool, use_bdlora=None, **kwargs
+    ) -> Optional[LoraVariant]:
         """Return a matching LoRA variant for this layer type.
 
         Given the init arguments of this layer, return the correct LoRA variant, if any. E.g., if `use_dora=True`, this
@@ -150,6 +152,7 @@ class LoraLayer(BaseTunerLayer):
         init_lora_weights,
         use_rslora,
         use_dora: bool = False,
+        use_kasa: bool = False,
         use_alora: bool = False,
         use_qalora: bool = False,
         lora_bias: bool = False,
@@ -178,12 +181,14 @@ class LoraLayer(BaseTunerLayer):
 
         lora_variant = self.resolve_lora_variant(
             use_dora=use_dora,
+            use_kasa=use_kasa,
             use_alora=use_alora,
             use_qalora=use_qalora,
             qalora_group_size=qalora_group_size,
             arrow_config=arrow_config,
             use_bdlora=use_bdlora,
         )
+
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -614,6 +619,7 @@ class Linear(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_kasa: bool = False,
         use_alora: bool = False,
         arrow_config: ArrowConfig = None,
         use_bdlora=None,
@@ -633,6 +639,7 @@ class Linear(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_kasa=use_kasa,
             use_alora=use_alora,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
@@ -642,7 +649,7 @@ class Linear(nn.Module, LoraLayer):
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def resolve_lora_variant(
-        self, *, arrow_config: ArrowConfig, use_dora: bool, use_alora: bool, use_bdlora=None, **kwargs
+        self, *, arrow_config: ArrowConfig, use_dora: bool, use_alora: bool, use_kasa: bool, use_bdlora=None, **kwargs
     ) -> Optional[LoraVariant]:
         if arrow_config is not None:
             from .variants import ArrowLinearVariant
@@ -654,13 +661,15 @@ class Linear(nn.Module, LoraLayer):
 
             return BdLoraLinearVariant()
 
-        if not use_dora and not use_alora:
+        if not use_dora and not use_alora and not use_kasa:
             return None
 
-        from .variants import ALoraLinearVariant, DoraLinearVariant
+        from .variants import ALoraLinearVariant, DoraLinearVariant, KasaLinearVariant
 
         if use_alora:
             return ALoraLinearVariant()
+        elif use_kasa:
+            return KasaLinearVariant()
         else:
             return DoraLinearVariant()
 
@@ -852,6 +861,7 @@ class Embedding(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_kasa: bool = False,
         arrow_config: ArrowConfig = None,
         lora_bias: bool = False,
         **kwargs,
@@ -873,11 +883,12 @@ class Embedding(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_kasa=use_kasa,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
         )
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+    def resolve_lora_variant(self, *, use_dora: bool, use_kasa: bool, **kwargs) -> Optional[LoraVariant]:
         if not use_dora:
             return None
 
@@ -894,6 +905,7 @@ class Embedding(nn.Module, LoraLayer):
         init_lora_weights,
         use_rslora,
         use_dora,
+        use_kasa,
         lora_bias,
         arrow_config: ArrowConfig = None,
         inference_mode: bool = False,
@@ -906,7 +918,8 @@ class Embedding(nn.Module, LoraLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        lora_variant = self.resolve_lora_variant(use_dora=use_dora, arrow_config=arrow_config)
+        lora_variant = self.resolve_lora_variant(use_dora=use_dora, use_kasa=use_kasa, arrow_config=arrow_config)
+
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -1162,6 +1175,7 @@ class _ConvNd(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_kasa: bool = False,
         arrow_config: ArrowConfig = None,
         lora_bias: bool = False,
         **kwargs,
@@ -1191,6 +1205,7 @@ class _ConvNd(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_kasa=use_kasa,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
         )
@@ -1204,6 +1219,7 @@ class _ConvNd(nn.Module, LoraLayer):
         init_lora_weights,
         use_rslora,
         use_dora,
+        use_kasa,
         lora_bias,
         arrow_config: ArrowConfig = None,
         inference_mode: bool = False,
@@ -1223,7 +1239,7 @@ class _ConvNd(nn.Module, LoraLayer):
                 PeftWarning,
             )
 
-        lora_variant = self.resolve_lora_variant(use_dora=use_dora, arrow_config=arrow_config)
+        lora_variant = self.resolve_lora_variant(use_dora=use_dora, arrow_config=arrow_config, use_kasa=use_kasa)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -1467,7 +1483,7 @@ class Conv2d(_ConvNd):
             raise ValueError(f"Conv2d layer kernel must have 4 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv2d
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+    def resolve_lora_variant(self, *, use_dora: bool, use_kasa: bool, **kwargs) -> Optional[LoraVariant]:
         if not use_dora:
             return None
 
@@ -1484,7 +1500,7 @@ class Conv1d(_ConvNd):
             raise ValueError(f"Conv1d layer kernel must have 3 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv1d
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+    def resolve_lora_variant(self, *, use_dora: bool, use_kasa: bool, **kwargs) -> Optional[LoraVariant]:
         if not use_dora:
             return None
 
@@ -1501,7 +1517,7 @@ class Conv3d(_ConvNd):
             raise ValueError(f"Conv3d layer kernel must have 5 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv3d
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
+    def resolve_lora_variant(self, *, use_dora: bool, use_kasa: bool, **kwargs) -> Optional[LoraVariant]:
         if not use_dora:
             return None
 
@@ -1984,6 +2000,7 @@ class ParamWrapper(nn.Module, LoraLayer):
         init_lora_weights,
         use_rslora,
         use_dora: bool = False,
+        use_kasa: bool = False,
         use_qalora: bool = False,
         lora_bias: bool = False,
         qalora_group_size: int = 32,
@@ -2000,7 +2017,7 @@ class ParamWrapper(nn.Module, LoraLayer):
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
         lora_variant = self.resolve_lora_variant(
-            use_dora=use_dora, use_qalora=use_qalora, qalora_group_size=qalora_group_size
+            use_dora=use_dora, use_qalora=use_qalora, qalora_group_size=qalora_group_size, use_kasa=use_kasa
         )
         if lora_variant is not None:
             raise ValueError(f"lora.{self.__class__.__name__} does not work with LoRA variants like DoRA.")
