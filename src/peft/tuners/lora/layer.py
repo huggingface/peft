@@ -831,9 +831,6 @@ class Linear(nn.Module, LoraLayer):
 
         return result
 
-    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
-        return True
-
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "lora." + rep

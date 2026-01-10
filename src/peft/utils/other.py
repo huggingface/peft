@@ -1117,7 +1117,7 @@ def _prepare_prompt_learning_config(peft_config, model_config):
         peft_config.num_attention_heads = num_attention_heads
 
     # For grouped-query attention, see #1901.
-    if (peft_config.peft_type in {"PREFIX_TUNING", "CARTRIDGE"}) and ("num_key_value_heads" in model_config):
+    if (peft_config.peft_type == "PREFIX_TUNING") and ("num_key_value_heads" in model_config):
         num_key_value_heads = model_config["num_key_value_heads"]
         if model_config.get("head_dim", None) is not None:
             head_dim = model_config["head_dim"]
@@ -1165,13 +1165,13 @@ def fsdp_auto_wrap_policy(model):
         from accelerate.utils.dataclasses import get_module_class_from_name
     from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy, transformer_auto_wrap_policy
 
-    from ..tuners import CartridgeEncoder, PrefixEncoder, PromptEmbedding, PromptEncoder
+    from ..tuners import PrefixEncoder, PromptEmbedding, PromptEncoder
 
     default_transformer_cls_names_to_wrap = ",".join(_get_no_split_modules(model))
     transformer_cls_names_to_wrap = os.environ.get(
         "FSDP_TRANSFORMER_CLS_TO_WRAP", default_transformer_cls_names_to_wrap
     ).split(",")
-    transformer_cls_to_wrap = {CartridgeEncoder, PrefixEncoder, PromptEncoder, PromptEmbedding}
+    transformer_cls_to_wrap = {PrefixEncoder, PromptEncoder, PromptEmbedding}
     for layer_class in transformer_cls_names_to_wrap:
         if len(layer_class) == 0:
             continue

@@ -8,63 +8,66 @@ The method optionally supports **ASA** (Adaptive Subspace Allocation) for dynami
 
 See the [paper](https://neurips.cc/virtual/2025/poster/119606) for more details.
 
-## Quick start
 
-```python
-import torch
-from peft import AdaMSSConfig, get_peft_model, ASACallback
-from transformers import AutoModelForImageClassification, Trainer, TrainingArguments
-from datasets import load_dataset
+## Installation & Quick Test
 
-# Load model and dataset
-model = AutoModelForImageClassification.from_pretrained(
-    "google/vit-base-patch16-224-in21k",
-    num_labels=10,
-    ignore_mismatched_sizes=True
-)
-dataset = load_dataset("cifar10")
-
-# Configure AdaMSS
-config = AdaMSSConfig(
-    r=100,                          # SVD rank
-    num_subspaces=10,               # Number of subspaces (K)
-    subspace_rank=3,                # Rank per subspace (ri)
-    target_modules=["query", "value"],
-    use_asa=True,                   # Enable adaptive subspace allocation
-    target_kk=5,                    # Target active subspaces
-    modules_to_save=["classifier"], # Train classifier head
-)
-
-peft_model = get_peft_model(model, config)
-
-# Setup ASA callback
-asa_callback = ASACallback(
-    target_kk=5,
-    init_warmup=50,
-    final_warmup=1000,
-    mask_interval=100,
-)
-
-# Train
-training_args = TrainingArguments(
-    output_dir="./output",
-    num_train_epochs=10,
-    per_device_train_batch_size=16,
-    learning_rate=0.01,
-    remove_unused_columns=False,  # Important: keep original columns for set_transform
-)
-
-trainer = Trainer(
-    model=peft_model,
-    args=training_args,
-    train_dataset=dataset["train"],
-    callbacks=[asa_callback],
-)
-trainer.train()
-peft_model.save_pretrained("adamss-vit-cifar10")
+Install from local source:
+```bash
+cd peft-main && pip install -e .
+pip install transformers datasets torch torchvision evaluate accelerate
 ```
 
-## Use the training example script
+Verify installation:
+```bash
+python -c "from peft import AdaMSSConfig, ASACallback; print('AdaMSS ready')"
+```
+
+## Detailed Code Explanation
+
+**Core AdaMSS Configuration:**
+```python
+from peft import AdaMSSConfig, get_peft_model, ASACallback
+
+# Configure AdaMSS with ASA
+config = AdaMSSConfig(
+    r=100,                          # SVD rank (full decomposition rank)
+    num_subspaces=10,               # Number of subspaces (K) - initial capacity
+    subspace_rank=3,                # Rank per subspace (ri) - use 1 for NLU, 3 for Vision
+    target_modules=["query", "value"],  # Target attention layers
+    use_asa=True,                   # Enable Adaptive Subspace Allocation
+    target_kk=5,                    # Target active subspaces (ASA reduces K→5)
+    modules_to_save=["classifier"], # Modules to train without decomposition
+)
+peft_model = get_peft_model(model, config)
+```
+
+**ASA Callback Setup:**
+```python
+asa_callback = ASACallback(
+    target_kk=5,            # Gradually mask to 5 active subspaces
+    init_warmup=50,         # Start ASA after 50 steps (Vision) or 5 epochs (NLU)
+    final_warmup=1000,      # Complete masking by step 1000 (Vision) or epoch 95 (NLU)
+    mask_interval=100,      # Update mask every 100 steps (Vision) or 10 epochs (NLU)
+    verbose=True,           # Print ASA progress
+)
+
+# Integrate with Trainer
+trainer = Trainer(
+    model=peft_model,
+    callbacks=[asa_callback],  # Add ASA callback
+    # ... other arguments
+)
+```
+
+**Key Points:**
+- **Parameterization**: Total params = `r × (d_in + d_out)`, split into K subspaces of rank `ri` each
+- **ASA Mechanism**: Dynamically selects `target_kk` most important subspaces from initial `num_subspaces`
+- **Warmup Schedule**: ASA gradually increases masking strength from `init_warmup` to `final_warmup`
+- **Vision vs NLU**: Use `subspace_rank=3` for vision, `subspace_rank=1` for NLU tasks
+
+## Use the training example scripts
+
+### Vision Tasks (Image Classification)
 
 Run the provided script with your configuration:
 ```bash
@@ -79,101 +82,32 @@ python examples/adamss_finetuning/image_classification_adamss_asa.py \
     --output_dir ./output
 ```
 
-For CIFAR-100:
+### NLU Tasks (GLUE Benchmark)
+
+Run GLUE tasks (e.g., CoLA) with ASA:
 ```bash
-python examples/adamss_finetuning/image_classification_adamss_asa.py \
-    --model_name_or_path google/vit-base-patch16-224-in21k \
-    --dataset_name cifar100 \
+python examples/adamss_finetuning/glue_adamss_asa_example.py \
+    --dataset_name cola \
     --adamss_r 100 \
     --adamss_k 10 \
-    --adamss_ri 3 \
+    --adamss_ri 1 \
     --use_asa \
     --target_kk 5 \
-    --output_dir ./output
+    --num_epochs 100 \
+    --batch_size 32 \
+    --output_dir ./output_cola_asa
 ```
 
-## Full example
-
+Without ASA (fixed K=10):
 ```bash
-python image_classification_adamss_asa.py \
-    --model_name_or_path google/vit-base-patch16-224-in21k \
-    --dataset_name cifar10 \
+python examples/adamss_finetuning/glue_adamss_asa_example.py \
+    --dataset_name cola \
     --adamss_r 100 \
     --adamss_k 10 \
-    --adamss_ri 3 \
-    --use_asa \
-    --target_kk 5 \
-    --asa_init_warmup 50 \
-    --asa_final_warmup 1000 \
-    --asa_mask_interval 100 \
-    --num_train_epochs 10 \
-    --per_device_train_batch_size 16 \
-    --per_device_eval_batch_size 16 \
-    --learning_rate 0.01 \
-    --weight_decay 0.0005 \
-    --eval_strategy epoch \
-    --save_strategy epoch \
-    --logging_steps 100 \
-    --output_dir ./adamss_cifar10
-```
-
-## Installation & Quick Test
-
-Install from local source:
-```bash
-cd peft-main && pip install -e .
-pip install transformers datasets torch torchvision evaluate accelerate
-```
-
-Verify installation:
-```bash
-python -c "from peft import AdaMSSConfig, ASACallback; print('✅ AdaMSS ready')"
-```
-
-Quick test (< 2 minutes):
-```bash
-python test_adamss_quick.py  # Should output: ✅ Test PASSED
-```
-
-## Python API Details
-
-```python
-from peft import AdaMSSConfig, get_peft_model, ASACallback
-from transformers import AutoModelForImageClassification, Trainer
-
-# Load base model
-model = AutoModelForImageClassification.from_pretrained("google/vit-base-patch16-224-in21k")
-
-# Configure AdaMSS
-config = AdaMSSConfig(
-    r=100,              # SVD rank
-    num_subspaces=10,   # Number of subspaces (K)
-    subspace_rank=3,    # Rank per subspace (ri)
-    target_modules=["query", "value"],  # Apply to attention modules
-    use_asa=True,       # Enable adaptive subspace allocation
-    target_kk=5,        # Target active subspaces
-)
-
-# Apply PEFT
-model = get_peft_model(model, config)
-
-# Setup ASA callback (if use_asa=True)
-asa_callback = ASACallback(
-    target_kk=5,
-    init_warmup=50,
-    final_warmup=1000,
-    mask_interval=100,
-)
-
-# Train with Trainer
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    callbacks=[asa_callback],  # Add ASA callback
-)
-
-trainer.train()
+    --adamss_ri 1 \
+    --num_epochs 100 \
+    --batch_size 32 \
+    --output_dir ./output_cola_no_asa
 ```
 
 ### AdaMSSConfig Parameters
@@ -199,60 +133,51 @@ trainer.train()
 | `beta1` | float | 0.85 | EMA decay for importance tracking |
 | `beta2` | float | 0.85 | EMA decay for uncertainty tracking |
 
-## Important Notes
 
-**⚠️ Using `set_transform` with Trainer**
+## Experimental Results
 
-When using `dataset.set_transform()` for lazy data loading, you must disable automatic column removal:
-```python
-training_args.remove_unused_columns = False
-```
-Without this, the Trainer will remove original columns (like `img`) that `set_transform` needs at runtime, causing `KeyError`.
+### NLU Tasks (GLUE Benchmark)
 
-**📊 Supported Datasets**
+Results with AdaMSS + ASA (100 epochs, seed=0):
 
-The examples auto-detect column names (`img`/`image`, `label`/`fine_label`). Tested on: `cifar10`, `cifar100`.
+| Task | Model | AdaMSS Params | Metric | Score |
+|------|-------|---------------|--------|-------|
+| CoLA | RoBERTa-base | 27.0K (ASA K→5) | Matthews | **0.6466** |
+| CoLA | RoBERTa-large | 64.8K (ASA K→5) | Matthews | **0.7093** |
+| MRPC | RoBERTa-base | 27.2K (ASA K→5) | Accuracy | **0.8824** |
+| MRPC | RoBERTa-large | 66.7K (ASA K→5) | Accuracy | **0.9044** |
 
-## Expected Results
+**Notes:**
+- Configuration: r=100, K=10→5 (ASA), ri=1
+- AdaMSS active params with ASA (5 out of 10 subspaces selected)
+- Full AdaMSS capacity: 97K (large) / 42K (base)
+- Training: 100 epochs, batch_size=32, warmup_ratio=0.06
 
-### Vision Tasks (ViT-Base)
+### Vision Tasks (Image Classification)
 
-Image classification benchmarks *(results from paper)*:
+Results with AdaMSS on Stanford Cars (10 epochs, seed=0):
 
-| Method | Params | CIFAR-10 | Stanford Cars | Pets |
-|--------|--------|----------|---------------|------|
-| Full FT | 86M | ~98% | ~92% | ~95% |
-| LoRA (r=8) | 147K | ~97% | ~90% | ~93% |
-| **AdaMSS (rk=3)** | **59K** | **~97%** | **~91%** | **~94%** |
-| **AdaMSS + ASA** | **59K** | **~98%** | **~92%** | **~95%** |
+| Model | Method | AdaMSS Params | Test Accuracy |
+|-------|--------|---------------|---------------|
+| ViT-Base | AdaMSS (no ASA) | 121K (K=10) | **82.15%** |
+| ViT-Base | AdaMSS + ASA | 75.0K (K→5) | **80.45%** |
 
-### NLU Tasks (RoBERTa-base)
+**Notes:**
+- Configuration: r=100, K=10, ri=3, 10 epochs, batch_size=32
+- ASA dynamically selects 5 out of 10 subspaces (75K active from 121K total)
 
-GLUE benchmark - CoLA (Grammar Acceptability) *(tested and verified)*:
 
-| Method | Params (Adapter Only) | Matthews Correlation |
-|--------|----------------------|---------------------|
-| Full FT | 124M | ~0.68 |
-| **AdaMSS (r=100, K=10, ri=1)** | **42,432** | **~0.65** |
-| **AdaMSS + ASA (K→5)** | **~32,000** | **~0.64-0.65** |
-
-**Key Findings:**
-- ✅ ASA reduces AdaMSS parameters by ~25% (42K → 32K)
-- ✅ Performance maintained while using fewer parameters
-- ✅ Tested on multiple random seeds showing consistent results
 
 ## Citation
 
 If you use AdaMSS in your research, please cite:
 
 ```bibtex
-@inproceedings{
-zheng2025adamss,
-    title={Ada{MSS}: Adaptive Multi-Subspace Approach for Parameter-Efficient Fine-Tuning},
-    author={Jingjing Zheng and Wanglong Lu and Yiming Dong and Chaojie Ji and Yankai Cao and Zhouchen Lin},
-    booktitle={The Thirty-ninth Annual Conference on Neural Information Processing Systems},
-    year={2025},
-    url={https://openreview.net/forum?id=8ZdWmpYxT0}
+@inproceedings{zheng2025adamss,
+  title={AdaMSS: Adaptive Multi-Subspace Approach for Parameter-Efficient Fine-Tuning},
+  author={Zheng, Jingjing and Lu, Wanglong and Dong, Yiming and Ji, Chaojie and Cao, Yankai and Lin, Zhouchen},
+  booktitle={The Thirty-ninth Annual Conference on Neural Information Processing Systems},
+  year={2025},
 }
 ```
 

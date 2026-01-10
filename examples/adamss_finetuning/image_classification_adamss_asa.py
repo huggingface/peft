@@ -76,6 +76,38 @@ MODEL_K_VALUES = {
     "vit-large-patch16-224-in21k": 16,
     "vit-base-patch16-224-in21k": 10,
 }
+# Dataset configurations (matching exec_adamss_peft.py)
+DATASET_CONFIGS = {
+    "cars": {
+        "train": "Multimodal-Fatima/StanfordCars_train",
+        "test": "Multimodal-Fatima/StanfordCars_test",
+        "img_col": "image",
+        "label_col": "label",
+    },
+    "cifar10": {
+        "train": "Multimodal-Fatima/CIFAR10_train",
+        "test": "Multimodal-Fatima/CIFAR10_test",
+        "img_col": "image",
+        "label_col": "label",
+    },
+    "cifar100": {
+        "train": "cifar100",
+        "test": "cifar100",
+        "img_col": "img",
+        "label_col": "fine_label",
+    },
+    "eurosat": {
+        "dataset": "timm/eurosat-rgb",
+        "img_col": "image",
+        "label_col": "label",
+    },
+    "pets": {
+        "train": "timm/oxford-iiit-pet",
+        "test": "timm/oxford-iiit-pet",
+        "img_col": "image",
+        "label_col": "label",
+    },
+}
 
 
 # Global preprocessing functions (to avoid closure issues with set_transform)
@@ -95,81 +127,44 @@ def _collate_batch(examples, label_col):
 
 
 @dataclass
-class AdaMSSArguments:
-    """Arguments for AdaMSS configuration."""
+class ImageClassificationArguments:
+    """Arguments for image classification with AdaMSS and ASA."""
     
-    adamss_r: int = field(
-        default=100,
-        metadata={"help": "SVD decomposition rank (R in paper)."}
-    )
-    adamss_k: int = field(
-        default=10,
-        metadata={"help": "Number of subspaces (K in paper)."}
-    )
-    adamss_ri: int = field(
-        default=3,
-        metadata={"help": "Subspace rank (rk in paper), typically 1-3."}
-    )
-    use_asa: bool = field(
-        default=False,
-        metadata={"help": "Enable Adaptive Subspace Allocation."}
-    )
-    target_kk: int = field(
-        default=5,
-        metadata={"help": "Target number of active subspaces when ASA is enabled."}
-    )
-    asa_init_warmup: int = field(
-        default=50,
-        metadata={"help": "ASA warmup steps before starting masking."}
-    )
-    asa_final_warmup: int = field(
-        default=1000,
-        metadata={"help": "ASA steps to reach target active subspaces."}
-    )
-    asa_mask_interval: int = field(
-        default=100,
-        metadata={"help": "steps between ASA updates."}
-    )
-    asa_beta1: float = field(
-        default=0.85,
-        metadata={"help": "EMA coefficient for importance."}
-    )
-    asa_beta2: float = field(
-        default=0.85,
-        metadata={"help": "EMA coefficient for uncertainty."}
-    )
-    asa_tt: float = field(
-        default=3.0,
-        metadata={"help": "ASA schedule exponent."}
-    )
-
-
-@dataclass
-class ModelArguments:
-    """Arguments for model configuration."""
-    
+    # Model configuration
     model_name_or_path: str = field(
         default="google/vit-base-patch16-224-in21k",
-        metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models."}
+        metadata={"help": "Model identifier: vit-base or vit-large"}
     )
-    cache_dir: Optional[str] = field(
-        default=None,
-        metadata={"help": "Where to store pretrained models from huggingface.co."}
-    )
-
-
-@dataclass
-class DataArguments:
-    """Arguments for dataset configuration."""
-    
     dataset_name: str = field(
         default="cifar10",
-        metadata={"help": "Name of dataset to use (cifar10, cifar100, etc.)."}
+        metadata={"help": "Dataset: cifar10, cifar100, pets, cars, eurosat, fgvc, resisc"}
     )
-    max_train_samples: Optional[int] = field(
-        default=None,
-        metadata={"help": "Maximum number of training samples (for debugging)."}
-    )
+    
+    # AdaMSS Configuration
+    adamss_r: int = field(default=100, metadata={"help": "SVD rank"})
+    adamss_k: int = field(default=10, metadata={"help": "Number of subspaces (K), auto-set based on model"})
+    adamss_ri: int = field(default=3, metadata={"help": "Subspace rank (rk), use 3 for vision"})
+    
+    # ASA Configuration
+    use_asa: bool = field(default=False, metadata={"help": "Enable Adaptive Subspace Allocation"})
+    target_kk: int = field(default=5, metadata={"help": "Target active subspaces for ASA"})
+    asa_init_warmup: int = field(default=50, metadata={"help": "ASA init warmup in STEPS"})
+    asa_final_warmup: int = field(default=1000, metadata={"help": "ASA final warmup in STEPS"})
+    asa_mask_interval: int = field(default=100, metadata={"help": "ASA mask interval in STEPS"})
+    asa_beta1: float = field(default=0.85, metadata={"help": "EMA coefficient for importance"})
+    asa_beta2: float = field(default=0.85, metadata={"help": "EMA coefficient for uncertainty"})
+    asa_tt: float = field(default=3.0, metadata={"help": "ASA schedule exponent"})
+    
+    # Training Configuration
+    num_epochs: int = field(default=10, metadata={"help": "Number of training epochs"})
+    batch_size: int = field(default=32, metadata={"help": "Batch size per device"})
+    warmup_ratio: float = field(default=0.0, metadata={"help": "Warmup ratio"})
+    max_train_samples: Optional[int] = field(default=None, metadata={"help": "Max training samples (for debug)"})
+    
+    # Other
+    seed: int = field(default=0, metadata={"help": "Random seed"})
+    output_dir: str = field(default="./output", metadata={"help": "Output directory"})
+    cache_dir: Optional[str] = field(default=None, metadata={"help": "Cache directory"})
 
 
 def prepare_transforms(image_processor):
@@ -194,11 +189,14 @@ def prepare_transforms(image_processor):
 
 def main():
     # Parse arguments
-    parser = HfArgumentParser((ModelArguments, DataArguments, AdaMSSArguments, TrainingArguments))
-    model_args, data_args, adamss_args, training_args = parser.parse_args_into_dataclasses()
+    parser = HfArgumentParser(ImageClassificationArguments)
+    args = parser.parse_args_into_dataclasses()[0]
+    
+    # Set seed
+    torch.manual_seed(args.seed)
     
     # Auto-detect model type and set K value
-    model_name = model_args.model_name_or_path
+    model_name = args.model_name_or_path
     model_type = None
     for key in MODEL_K_VALUES.keys():
         if key in model_name:
@@ -208,72 +206,76 @@ def main():
     if model_type is None:
         # Default to base model
         model_type = "vit-base-patch16-224-in21k"
-        print(f"⚠️  Model type not recognized, defaulting to {model_type}")
+        print(f"Warning: Model type not recognized, defaulting to {model_type}")
     
     # Override K value based on model type
-    adamss_args.adamss_k = MODEL_K_VALUES[model_type]
+    args.adamss_k = MODEL_K_VALUES[model_type]
     
     # Get hyperparameters from Table 18
-    if model_type in HYPERPARAMS and data_args.dataset_name in HYPERPARAMS[model_type]:
-        hp = HYPERPARAMS[model_type][data_args.dataset_name]
-        print(f"📋 Using Table 18 hyperparameters for {model_type} + {data_args.dataset_name}")
+    if model_type in HYPERPARAMS and args.dataset_name in HYPERPARAMS[model_type]:
+        hp = HYPERPARAMS[model_type][args.dataset_name]
+        print(f"Using Table 18 hyperparameters for {model_type} + {args.dataset_name}")
         print(f"   lr={hp['lr']}, head_lr={hp['head_lr']}, wd={hp['wd']}")
     else:
         hp = {"lr": 0.01, "head_lr": 0.005, "wd": 0.0005}
-        print(f"⚠️  No Table 18 hyperparameters found, using defaults: {hp}")
+        print(f"Warning: No Table 18 hyperparameters found, using defaults: {hp}")
     
     print("\n" + "="*80)
-    print(f"AdaMSS {'with ASA' if adamss_args.use_asa else 'without ASA'} - {data_args.dataset_name.upper()}")
+    print(f"AdaMSS {'with ASA' if args.use_asa else 'without ASA'} - {args.dataset_name.upper()}")
     print("="*80)
     print(f"Model: {model_type}")
-    print(f"AdaMSS: r={adamss_args.adamss_r}, K={adamss_args.adamss_k}, ri={adamss_args.adamss_ri}")
-    if adamss_args.use_asa:
-        print(f"ASA: Target {adamss_args.target_kk}/{adamss_args.adamss_k} subspaces")
-        print(f"     Warmup steps {adamss_args.asa_init_warmup} → {adamss_args.asa_final_warmup}")
+    print(f"AdaMSS: r={args.adamss_r}, K={args.adamss_k}, ri={args.adamss_ri}")
+    if args.use_asa:
+        print(f"ASA: Target {args.target_kk}/{args.adamss_k} subspaces")
+        print(f"     Warmup steps {args.asa_init_warmup} → {args.asa_final_warmup}")
+    print(f"Training: {args.num_epochs} epochs, batch_size={args.batch_size}, seed={args.seed}")
     print("="*80 + "\n")
     
+    # Get dataset configuration
+    if args.dataset_name not in DATASET_CONFIGS:
+        raise ValueError(f"Unsupported dataset: {args.dataset_name}. Supported: {list(DATASET_CONFIGS.keys())}")
+    
+    config = DATASET_CONFIGS[args.dataset_name]
+    img_name = config["img_col"]
+    label_name = config["label_col"]
+    
     # Load dataset
-    print(f"📦 Loading {data_args.dataset_name} dataset...")
-    dataset = load_dataset(data_args.dataset_name)
-    
-    # Auto-detect column names for flexibility
-    column_names = dataset["train"].column_names
-    
-    # Find image column (usually 'img' or 'image')
-    if "img" in column_names:
-        img_name = "img"
-    elif "image" in column_names:
-        img_name = "image"
+    print(f"Loading {args.dataset_name} dataset...")
+    if "dataset" in config:
+        # Single dataset with train/val/test splits (e.g., eurosat)
+        dataset = load_dataset(config["dataset"], cache_dir=args.cache_dir)
+        train_val = dataset["train"].train_test_split(test_size=0.1, seed=args.seed)
+        train_ds = train_val["train"]
+        val_ds = train_val["test"]
+        # Try 'test' split, fall back to 'val' if not available
+        if "test" in dataset:
+            test_ds = dataset["test"]
+        elif "val" in dataset:
+            test_ds = dataset["val"]
+        else:
+            print(f"Warning: No test/val split found, using validation set as test")
+            test_ds = val_ds
     else:
-        raise ValueError(f"Could not find image column in {column_names}")
+        # Separate train and test datasets (e.g., cars, cifar10)
+        train_val_ds = load_dataset(config["train"], split="train", cache_dir=args.cache_dir)
+        test_ds = load_dataset(config["test"], split="test", cache_dir=args.cache_dir)
+        
+        # Split train into train and validation
+        train_val = train_val_ds.train_test_split(test_size=0.1, seed=args.seed)
+        train_ds = train_val["train"]
+        val_ds = train_val["test"]
     
-    # Find label column (usually 'label', 'labels', or 'fine_label')
-    if "label" in column_names:
-        label_name = "label"
-    elif "labels" in column_names:
-        label_name = "labels"
-    elif "fine_label" in column_names:
-        label_name = "fine_label"
-    else:
-        raise ValueError(f"Could not find label column in {column_names}")
-    
-    print(f"ℹ️  Detected columns - Image: '{img_name}', Label: '{label_name}'")
-    
-    # Split into train/val/test
-    train_val = dataset["train"].train_test_split(test_size=0.1, seed=42)
-    train_ds = train_val["train"]
-    val_ds = train_val["test"]
-    test_ds = dataset["test"]
+    print(f"Detected columns - Image: '{img_name}', Label: '{label_name}'")
     
     # Limit train samples if specified (for quick testing)
-    if data_args.max_train_samples:
-        train_ds = train_ds.select(range(min(data_args.max_train_samples, len(train_ds))))
+    if args.max_train_samples:
+        train_ds = train_ds.select(range(min(args.max_train_samples, len(train_ds))))
         # Also limit validation for faster testing
         val_ds = val_ds.select(range(min(5000, len(val_ds))))
     
     labels = train_ds.features[label_name].names
     num_classes = len(labels)
-    print(f"✅ Dataset loaded: {len(train_ds)} train, {len(val_ds)} val, {len(test_ds)} test")
+    print(f"Dataset loaded: {len(train_ds)} train, {len(val_ds)} val, {len(test_ds)} test")
     print(f"   Number of classes: {num_classes}")
     
     # Create label mappings
@@ -281,10 +283,10 @@ def main():
     id2label = {i: label for i, label in enumerate(labels)}
     
     # Load image processor
-    print("\n📥 Loading image processor...")
+    print("\nLoading image processor...")
     image_processor = AutoImageProcessor.from_pretrained(
-        model_args.model_name_or_path,
-        cache_dir=model_args.cache_dir,
+        args.model_name_or_path,
+        cache_dir=args.cache_dir,
     )
     
     # Prepare transforms
@@ -299,25 +301,25 @@ def main():
     collate_fn = partial(_collate_batch, label_col=label_name)
     
     # Load base model
-    print("\n🤖 Loading base model...")
+    print("\nLoading base model...")
     model = AutoModelForImageClassification.from_pretrained(
-        model_args.model_name_or_path,
+        args.model_name_or_path,
         num_labels=num_classes,
         label2id=label2id,
         id2label=id2label,
         ignore_mismatched_sizes=True,
-        cache_dir=model_args.cache_dir,
+        cache_dir=args.cache_dir,
     )
     
     # Configure AdaMSS
-    print("\n⚙️  Applying AdaMSS...")
+    print("\nApplying AdaMSS...")
     config = AdaMSSConfig(
-        r=adamss_args.adamss_r,
-        num_subspaces=adamss_args.adamss_k,
-        subspace_rank=adamss_args.adamss_ri,
+        r=args.adamss_r,
+        num_subspaces=args.adamss_k,
+        subspace_rank=args.adamss_ri,
         target_modules=["query", "value"],
-        use_asa=adamss_args.use_asa,
-        target_kk=adamss_args.target_kk if adamss_args.use_asa else None,
+        use_asa=args.use_asa,
+        target_kk=args.target_kk if args.use_asa else None,
         modules_to_save=["classifier"],
     )
     
@@ -325,19 +327,28 @@ def main():
     model = get_peft_model(model, config)
     model.print_trainable_parameters()
     
+    # Print detailed parameter breakdown (same logic as exec_adamss_peft.py)
+    print("\n[Detailed Parameter Breakdown]")
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    head_params = sum(p.numel() for n, p in model.named_parameters() if 'classifier' in n and p.requires_grad)
+    adamss_params = trainable_params - head_params
+    print(f"Classifier Head Params: {head_params:,}")
+    print(f"AdaMSS Adapter Params:  {adamss_params:,}")
+    print(f"Total Trainable Params: {trainable_params:,}")
+    
     # Setup ASA callback if enabled
     callbacks = []
-    if adamss_args.use_asa:
-        print("\n🔥 Setting up ASA callback...")
+    if args.use_asa:
+        print("\nSetting up ASA callback...")
         asa_callback = ASACallback(
-            target_kk=adamss_args.target_kk,
-            init_warmup=adamss_args.asa_init_warmup,
-            final_warmup=adamss_args.asa_final_warmup,
-            mask_interval=adamss_args.asa_mask_interval,
-            beta1=adamss_args.asa_beta1,
-            beta2=adamss_args.asa_beta2,
-            tt=adamss_args.asa_tt,
-            verbose=False,  # Set to True to enable debug output
+            target_kk=args.target_kk,
+            init_warmup=args.asa_init_warmup,
+            final_warmup=args.asa_final_warmup,
+            mask_interval=args.asa_mask_interval,
+            beta1=args.asa_beta1,
+            beta2=args.asa_beta2,
+            tt=args.asa_tt,
+            verbose=True,  # Enable verbose output for ASA monitoring
         )
         callbacks.append(asa_callback)
     
@@ -352,19 +363,26 @@ def main():
         predictions = preds.argmax(axis=1)
         return metric.compute(predictions=predictions, references=eval_pred.label_ids)
     
-    # Apply hyperparameters from Table 18
-    training_args.learning_rate = hp['lr']
-    training_args.weight_decay = hp['wd']
-    training_args.warmup_ratio = 0.06
-    training_args.evaluation_strategy = "epoch"
-    training_args.save_strategy = "epoch"
-    training_args.load_best_model_at_end = True
-    training_args.metric_for_best_model = "accuracy"
-    training_args.greater_is_better = True
-    
-    # Override remove_unused_columns for set_transform compatibility
-    # When using set_transform (lazy loading), original columns must be kept
-    training_args.remove_unused_columns = False
+    # Create TrainingArguments manually (not parsed to avoid conflicts)
+    training_args = TrainingArguments(
+        output_dir=args.output_dir,
+        num_train_epochs=args.num_epochs,
+        per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=args.batch_size,
+        learning_rate=hp['lr'],
+        weight_decay=hp['wd'],
+        warmup_ratio=args.warmup_ratio,
+        eval_strategy="epoch",
+        save_strategy="epoch",
+        load_best_model_at_end=True,
+        metric_for_best_model="accuracy",
+        greater_is_better=True,
+        logging_steps=100,
+        logging_strategy="steps",
+        seed=args.seed,
+        report_to="none",
+        remove_unused_columns=False,  # Required for set_transform compatibility
+    )
     
     # Create custom optimizer with different LR for head
     from torch.optim import AdamW
@@ -425,11 +443,11 @@ def main():
     print("="*80 + "\n")
     
     test_metrics = trainer.evaluate(test_ds, metric_key_prefix="test")
-    print(f"\n🎯 Test Accuracy: {test_metrics['test_accuracy']:.4f}")
+    print(f"\nTest Accuracy: {test_metrics['test_accuracy']:.4f}")
     
     # Save model
     trainer.save_model()
-    print(f"\n✅ Model saved to {training_args.output_dir}")
+    print(f"\nModel saved to {training_args.output_dir}")
 
 
 if __name__ == "__main__":

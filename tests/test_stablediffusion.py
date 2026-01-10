@@ -17,8 +17,7 @@ from dataclasses import asdict, replace
 
 import numpy as np
 import pytest
-import torch
-from diffusers import AutoModel, StableDiffusionPipeline
+from diffusers import StableDiffusionPipeline
 
 from peft import (
     BOFTConfig,
@@ -27,7 +26,6 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     OFTConfig,
-    convert_to_lora,
     get_peft_model,
     get_peft_model_state_dict,
     inject_adapter_in_model,
@@ -36,7 +34,7 @@ from peft import (
 from peft.tuners.tuners_utils import BaseTunerLayer
 
 from .testing_common import PeftCommonTester
-from .testing_utils import hub_online_once, set_init_weights_false, temp_seed
+from .testing_utils import set_init_weights_false, temp_seed
 
 
 PEFT_DIFFUSERS_SD_MODELS_TO_TEST = ["hf-internal-testing/tiny-sd-pipe"]
@@ -387,76 +385,3 @@ class TestStableDiffusionModel(PeftCommonTester):
         assert "meta" in {p.device.type for p in pipe.unet.parameters()}
         set_peft_model_state_dict(pipe.unet, unet_state_dict, low_cpu_mem_usage=True)
         assert "meta" not in {p.device.type for p in pipe.unet.parameters()}
-
-    def test_lora_conversion(self):
-        # For now, testing a model with only linear layers, as other types are not supported yet
-        torch.manual_seed(0)
-        model_id = "hf-internal-testing/tiny-flux2"
-
-        # from Flux2TransformerTests in Diffusers
-        height = 4
-        width = 4
-        batch_size = 1
-        num_latent_channels = 4
-        sequence_length = 48
-        embedding_dim = 16
-
-        hidden_states = torch.randn((batch_size, height * width, num_latent_channels))
-        encoder_hidden_states = torch.randn((batch_size, sequence_length, embedding_dim))
-
-        t_coords = torch.arange(1)
-        h_coords = torch.arange(height)
-        w_coords = torch.arange(width)
-        l_coords = torch.arange(1)
-        image_ids = torch.cartesian_prod(t_coords, h_coords, w_coords, l_coords)  # [height * width, 4]
-        image_ids = image_ids.unsqueeze(0).expand(batch_size, -1, -1)
-
-        text_t_coords = torch.arange(1)
-        text_h_coords = torch.arange(1)
-        text_w_coords = torch.arange(1)
-        text_l_coords = torch.arange(sequence_length)
-        text_ids = torch.cartesian_prod(text_t_coords, text_h_coords, text_w_coords, text_l_coords)
-        text_ids = text_ids.unsqueeze(0).expand(batch_size, -1, -1)
-
-        timestep = torch.tensor([1.0]).expand(batch_size)
-        guidance = torch.tensor([1.0]).expand(batch_size)
-
-        inputs = {
-            "hidden_states": hidden_states,
-            "encoder_hidden_states": encoder_hidden_states,
-            "timestep": timestep,
-            "img_ids": image_ids,
-            "txt_ids": text_ids,
-            "guidance": guidance,
-        }
-
-        with hub_online_once(model_id):
-            model = AutoModel.from_pretrained(model_id, subfolder="transformer")
-            with torch.inference_mode():
-                output_base = model(**inputs)
-
-            loha_config = LoHaConfig(target_modules=["to_q", "to_v"], init_weights=False, alpha=100)
-            model_loha = get_peft_model(copy.deepcopy(model), loha_config)
-            with torch.inference_mode():
-                output_loha = model_loha(**inputs)
-
-            # sanity check: loha changes outputs
-            atol, rtol = 1e-4, 1e-4
-            assert not torch.allclose(output_base.sample, output_loha.sample, atol=atol, rtol=rtol)
-
-            lora_config, state_dict = convert_to_lora(model_loha, rank=4)
-            model_lora = get_peft_model(model, lora_config).eval()
-            with torch.inference_mode():
-                output_lora = model_lora(**inputs)
-            load_result = set_peft_model_state_dict(model_lora, state_dict)
-            assert not load_result.unexpected_keys
-
-            with torch.inference_mode():
-                output_converted = model_lora(**inputs)
-
-            # calculate MSE
-            mse_lora = torch.nn.functional.mse_loss(output_loha.sample, output_lora.sample)
-            mse_converted = torch.nn.functional.mse_loss(output_loha.sample, output_converted.sample)
-
-            # converted model should be significantly closer to the LoHa model than the base model
-            assert mse_lora / mse_converted > 2

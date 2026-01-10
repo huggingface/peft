@@ -14,12 +14,13 @@ Example usage:
     # CoLA with RoBERTa-base and manual ASA
     python glue_adamss_asa_manual_example.py \
         --dataset_name cola \
-        --model_name_or_path roberta-base \
         --use_asa \
         --target_kk 5 \
-        --output_dir ./output/cola_asa_manual \
-        --num_train_epochs 100 \
-        --per_device_train_batch_size 32
+        --num_epochs 100 \
+        --batch_size 32 \
+        --warmup_ratio 0.06 \
+        --seed 0 \
+        --output_dir ./output/cola_asa_manual
 
 Requirements:
     pip install peft transformers datasets torch evaluate scikit-learn
@@ -54,7 +55,7 @@ class CustomTrainerWithManualASA(Trainer):
     zero_grad() to compute importance scores from gradients.
     """
     
-    def training_step(self, model, inputs):
+    def training_step(self, model, inputs, num_items_in_batch=None):
         """
         Override training_step to add manual ASA update.
         
@@ -91,6 +92,7 @@ class CustomTrainerWithManualASA(Trainer):
 class AdaMSSArguments:
     """Arguments for AdaMSS configuration."""
     
+    # Basic AdaMSS parameters
     adamss_r: int = field(
         default=100,
         metadata={"help": "SVD decomposition rank (R in paper)."}
@@ -103,6 +105,30 @@ class AdaMSSArguments:
         default=1,
         metadata={"help": "Subspace rank (rk in paper), typically 1 for NLU."}
     )
+    
+    # Training configuration
+    num_epochs: int = field(
+        default=100,
+        metadata={"help": "Number of training epochs."}
+    )
+    batch_size: int = field(
+        default=32,
+        metadata={"help": "Batch size per device."}
+    )
+    warmup_ratio: float = field(
+        default=0.06,
+        metadata={"help": "Warmup ratio."}
+    )
+    seed: int = field(
+        default=0,
+        metadata={"help": "Random seed."}
+    )
+    output_dir: str = field(
+        default="./output",
+        metadata={"help": "Output directory."}
+    )
+    
+    # ASA parameters
     use_asa: bool = field(
         default=False,
         metadata={"help": "Enable Adaptive Subspace Allocation (manual mode)."}
@@ -142,6 +168,7 @@ class DataArguments:
     """Arguments for dataset configuration."""
     
     dataset_name: str = field(
+        default="cola",
         metadata={"help": "GLUE task name (cola, mrpc, qnli, rte, stsb, sst2)."}
     )
     max_length: int = field(
@@ -184,14 +211,14 @@ TASK_METRICS = {
 
 def main():
     # Parse arguments
-    parser = HfArgumentParser((DataArguments, AdaMSSArguments, TrainingArguments))
-    data_args, adamss_args, training_args = parser.parse_args_into_dataclasses()
+    parser = HfArgumentParser((DataArguments, AdaMSSArguments))
+    data_args, adamss_args = parser.parse_args_into_dataclasses()
     
     # Set seed
-    set_seed(training_args.seed)
+    set_seed(adamss_args.seed)
     
     # Extract model name from output_dir or use default
-    if "roberta-large" in str(training_args.output_dir).lower() or "roberta-large" in str(getattr(training_args, 'model_name_or_path', '')).lower():
+    if "roberta-large" in str(adamss_args.output_dir).lower():
         model_name = "roberta-large"
     else:
         model_name = "roberta-base"
@@ -210,13 +237,15 @@ def main():
         hp = {"lr": 0.001, "head_lr": 0.005, "wd": 0.005}
         print(f"Using default hyperparameters: {hp}")
     
+    print(f"Training: {adamss_args.num_epochs} epochs, batch_size={adamss_args.batch_size}, seed={adamss_args.seed}")
+    
     if adamss_args.use_asa:
-        print(f"🔧 Manual ASA Mode: Target {adamss_args.target_kk}/{adamss_args.adamss_k} subspaces")
+        print(f"Manual ASA Mode: Target {adamss_args.target_kk}/{adamss_args.adamss_k} subspaces")
         print(f"     Warmup epochs {adamss_args.asa_init_warmup} → {adamss_args.asa_final_warmup}")
         print(f"     Using update_and_allocate() instead of ASACallback")
     
     # Load dataset
-    print(f"\n📦 Loading {data_args.dataset_name} dataset...")
+    print(f"\nLoading {data_args.dataset_name} dataset...")
     dataset = load_dataset("glue", data_args.dataset_name)
     
     # Get task info
@@ -227,10 +256,10 @@ def main():
     else:
         num_labels = 1
     
-    print(f"✅ Dataset loaded - Task type: {'regression' if is_regression else 'classification'}")
+    print(f"Dataset loaded - Task type: {'regression' if is_regression else 'classification'}")
     
     # Load tokenizer and model
-    print(f"\n🤖 Loading {model_name}...")
+    print(f"\nLoading {model_name}...")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForSequenceClassification.from_pretrained(
         model_name,
@@ -249,13 +278,17 @@ def main():
         else:  # cola, sst2, etc.
             texts = (examples["sentence"],)
         
-        return tokenizer(*texts, truncation=True, max_length=data_args.max_length, padding="max_length")
+        result = tokenizer(*texts, truncation=True, max_length=data_args.max_length, padding="max_length")
+        result["labels"] = examples["label"]
+        return result
     
-    print("🔄 Tokenizing dataset...")
+    print("Tokenizing dataset...")
+    # Remove all columns except label
+    columns_to_remove = [col for col in dataset["train"].column_names if col != "label"]
     tokenized_datasets = dataset.map(
         preprocess_function,
         batched=True,
-        remove_columns=dataset["train"].column_names,
+        remove_columns=columns_to_remove,
     )
     
     train_ds = tokenized_datasets["train"]
@@ -263,25 +296,50 @@ def main():
     test_key = "test" if "test" in tokenized_datasets else "validation"
     test_ds = tokenized_datasets[test_key]
     
+    # Create TrainingArguments manually (not parsed to avoid conflicts)
+    training_args = TrainingArguments(
+        output_dir=adamss_args.output_dir,
+        num_train_epochs=adamss_args.num_epochs,
+        per_device_train_batch_size=adamss_args.batch_size,
+        per_device_eval_batch_size=adamss_args.batch_size,
+        learning_rate=hp['lr'],
+        weight_decay=hp['wd'],
+        warmup_ratio=adamss_args.warmup_ratio,
+        eval_strategy="epoch",
+        save_strategy="epoch",
+        load_best_model_at_end=True,
+        metric_for_best_model=TASK_METRICS.get(data_args.dataset_name, "accuracy"),
+        greater_is_better=True,
+        logging_steps=100,
+        logging_strategy="steps",
+        seed=adamss_args.seed,
+        report_to="none",
+    )
+    
     # Configure AdaMSS with ASA parameters stored in config
-    print("\n⚙️  Applying AdaMSS...")
+    print("\nApplying AdaMSS...")
     
     # Convert epoch-based parameters to step-based for config
-    steps_per_epoch = len(train_ds) // training_args.per_device_train_batch_size
-    if len(train_ds) % training_args.per_device_train_batch_size != 0:
+    steps_per_epoch = len(train_ds) // adamss_args.batch_size
+    if len(train_ds) % adamss_args.batch_size != 0:
         steps_per_epoch += 1
+    total_steps = adamss_args.num_epochs * steps_per_epoch
+    
+    print(f"\n[Training Configuration]")
+    print(f"Dataset size: {len(train_ds)}")
+    print(f"Batch size: {adamss_args.batch_size}")
+    print(f"Steps per epoch: {steps_per_epoch}")
+    print(f"Total steps: {adamss_args.num_epochs} epochs × {steps_per_epoch} steps = {total_steps} steps")
     
     asa_init_warmup_steps = adamss_args.asa_init_warmup * steps_per_epoch
     asa_final_warmup_steps = adamss_args.asa_final_warmup * steps_per_epoch
     asa_mask_interval_steps = adamss_args.asa_mask_interval * steps_per_epoch
     
     if adamss_args.use_asa:
-        print(f"Dataset size: {len(train_ds)}, Batch size: {training_args.per_device_train_batch_size}")
-        print(f"Steps per epoch: {steps_per_epoch}")
-        print(f"ASA warmup (epochs → steps):")
-        print(f"  init: {adamss_args.asa_init_warmup} epochs → {asa_init_warmup_steps} steps")
-        print(f"  final: {adamss_args.asa_final_warmup} epochs → {asa_final_warmup_steps} steps")
-        print(f"  interval: {adamss_args.asa_mask_interval} epochs → {asa_mask_interval_steps} steps")
+        print(f"\n[ASA Configuration (Epoch → Step Conversion)]")
+        print(f"  init warmup: {adamss_args.asa_init_warmup} epochs → {asa_init_warmup_steps} steps")
+        print(f"  final warmup: {adamss_args.asa_final_warmup} epochs → {asa_final_warmup_steps} steps")
+        print(f"  mask interval: {adamss_args.asa_mask_interval} epochs → {asa_mask_interval_steps} steps")
     
     config = AdaMSSConfig(
         r=adamss_args.adamss_r,
@@ -303,6 +361,16 @@ def main():
     model = get_peft_model(model, config)
     model.print_trainable_parameters()
     
+    # Print detailed parameter breakdown (same logic as exec_adamss_peft_glue.py)
+    print("\n[Detailed Parameter Breakdown]")
+    head_params = [p for n, p in model.named_parameters() if ("classifier" in n or "score" in n) and p.requires_grad]
+    other_params = [p for n, p in model.named_parameters() if ("classifier" not in n and "score" not in n) and p.requires_grad]
+    head_count = sum(p.numel() for p in head_params)
+    adapter_count = sum(p.numel() for p in other_params)
+    print(f"Classifier Head Params: {head_count:,}")
+    print(f"AdaMSS Adapter Params:  {adapter_count:,}")
+    print(f"Total Trainable Params: {head_count + adapter_count:,}")
+    
     # GPU memory monitoring
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -319,16 +387,6 @@ def main():
         preds = np.squeeze(preds) if is_regression else np.argmax(preds, axis=1)
         result = metric.compute(predictions=preds, references=p.label_ids)
         return result
-    
-    # Update training arguments with hyperparameters
-    training_args.learning_rate = hp['lr']
-    training_args.weight_decay = hp['wd']
-    training_args.warmup_ratio = 0.06
-    training_args.evaluation_strategy = "epoch"
-    training_args.save_strategy = "epoch"
-    training_args.load_best_model_at_end = True
-    training_args.metric_for_best_model = TASK_METRICS.get(data_args.dataset_name, "accuracy")
-    training_args.greater_is_better = True
     
     # Create custom optimizer with different LR for head
     from torch.optim import AdamW
@@ -360,7 +418,7 @@ def main():
     print("\n" + "="*80)
     print("Starting training...")
     if adamss_args.use_asa:
-        print("⚠️  Manual ASA: update_and_allocate() will be called in training_step")
+        print("Manual ASA: update_and_allocate() will be called in training_step")
     print("="*80 + "\n")
     
     train_result = trainer.train()
@@ -377,17 +435,17 @@ def main():
         print(f"\n[Best Model Info]")
         print(f"Best {metric_name}: {trainer.state.best_metric:.4f}")
     
-    # Evaluate on test set
+    # Evaluate on validation set (use val_ds, not test_ds to avoid label issues)
     print("\n" + "="*80)
-    print("Evaluating on test set...")
+    print("Final evaluation on validation set...")
     print("="*80 + "\n")
     
-    test_metrics = trainer.evaluate(test_ds)
-    print(f"\nTest Results: {test_metrics}")
+    final_metrics = trainer.evaluate(val_ds)
+    print(f"\nFinal Validation Results: {final_metrics}")
     
     # Save model
     trainer.save_model()
-    print(f"\n✅ Model saved to {training_args.output_dir}")
+    print(f"\nModel saved to {training_args.output_dir}")
 
 
 if __name__ == "__main__":
