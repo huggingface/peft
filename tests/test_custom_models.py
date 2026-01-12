@@ -1233,31 +1233,6 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
     # BD-LoRA different encounters issues as the adapter weights have different shapes then
 ]
 
-PREFIXES = {
-    IA3Config: "ia3_",
-    LoraConfig: "lora_",
-    LoHaConfig: "hada_",
-    LoKrConfig: "lokr_",
-    OFTConfig: "oft_",
-    BOFTConfig: "boft_",
-    LNTuningConfig: "ln_tuning_",
-    VeraConfig: "vera_lambda_",
-    RandLoraConfig: "randlora_",
-    FourierFTConfig: "fourierft_",
-    GraloraConfig: "gralora_",
-    C3AConfig: "c3a_",
-    HRAConfig: "hra_",
-    ShiraConfig: "shira_",
-    VBLoRAConfig: "vblora_",
-    BoneConfig: "bone_",
-    RoadConfig: "road_",
-    MissConfig: "miss_",
-    DeloraConfig: "delora_",
-    TrainableTokensConfig: "trainable_tokens_",
-    WaveFTConfig: "waveft_",
-    OSFConfig: "osf_",
-}
-
 
 def _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs):
     if (config_cls == LoraConfig) and config_kwargs.get("target_parameters"):
@@ -2074,6 +2049,71 @@ class TestPeftCustomModel(PeftCommonTester):
         model(**X)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @pytest.mark.parametrize("autocast_adapter_dtype", [True, False])
+    @pytest.mark.parametrize("low_cpu_mem_usage", [False, True])
+    def test_adapter_dtype_autocast(
+        self,
+        test_name,
+        model_id,
+        config_cls,
+        config_kwargs,
+        dtype,
+        autocast_adapter_dtype,
+        low_cpu_mem_usage,
+        tmp_path,
+    ):
+        """checks that the dtype of the PEFT adapter corresponds to the expected dtype.
+
+        Checks:
+        - get_peft_model
+        - add_adapter
+        - PeftModel.from_pretrained
+        - load_adapter
+        - with and without autocasting adapter dtype
+        - with and without low_cpu_mem_usage (which only makes sense for loading adapters)
+        """
+        if autocast_adapter_dtype and (config_cls == LNTuningConfig):
+            # LN Tuning basically copies the base weight and makes it trainable, hence it makes sense to keep the dtype
+            # of the base model weight.
+            pytest.skip("LNTuning is exempted from casting the adapter weights to float32")
+
+        if autocast_adapter_dtype:
+            expected_dtype = torch.float32
+        else:
+            expected_dtype = dtype
+
+        model = self.transformers_class.from_pretrained(model_id, dtype=dtype).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config, autocast_adapter_dtype=autocast_adapter_dtype)
+        if config_kwargs.get("target_parameters", None) is None:
+            # target_parameters does not allow multiple adapters on the same parameter
+            model.add_adapter("other", config, autocast_adapter_dtype=autocast_adapter_dtype)
+        peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
+        assert all(p.dtype == expected_dtype for p in peft_params)
+
+        model.save_pretrained(tmp_path)
+        del model
+
+        model = self.transformers_class.from_pretrained(model_id, dtype=dtype).to(self.torch_device)
+        model = PeftModel.from_pretrained(
+            model, tmp_path, autocast_adapter_dtype=autocast_adapter_dtype, low_cpu_mem_usage=low_cpu_mem_usage
+        )
+        if config_kwargs.get("target_parameters", None) is None:
+            # target_parameters does not allow multiple adapters on the same parameter
+            model.load_adapter(
+                tmp_path / "other",
+                adapter_name="other",
+                autocast_adapter_dtype=autocast_adapter_dtype,
+                low_cpu_mem_usage=low_cpu_mem_usage,
+            )
+        peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
+        assert all(p.dtype == expected_dtype for p in peft_params)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_only_params_are_updated(self, test_name, model_id, config_cls, config_kwargs):
         # An explicit test that when using an adapter on a custom model, only the adapter parameters are updated during
         # training
@@ -2110,10 +2150,9 @@ class TestPeftCustomModel(PeftCommonTester):
         params_after = dict(model.named_parameters())
         assert params_before.keys() == params_after.keys()
 
-        prefix = PREFIXES[config_cls]
         for name, param_before in params_before.items():
             param_after = params_after[name]
-            if (prefix in name) or ("modules_to_save" in name) or ("token_adapter.trainable_tokens" in name):
+            if (model.prefix in name) or ("modules_to_save" in name) or ("token_adapter.trainable_tokens" in name):
                 # target_modules, modules_to_save and modules of `NewTokensWrapper` _are_ updated
                 assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
             else:
