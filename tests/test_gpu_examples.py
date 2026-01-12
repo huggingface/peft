@@ -88,6 +88,7 @@ from peft.utils.other import fsdp_auto_wrap_policy
 from tests.testing_utils import hub_online_once
 
 from .testing_utils import (
+    DEVICE_MAP_MAP,
     device_count,
     load_dataset_english_quotes,
     require_aqlm,
@@ -105,7 +106,6 @@ from .testing_utils import (
     require_torch_multi_gpu,
     require_torchao,
     torch_device,
-    DEVICE_MAP_MAP,
 )
 
 

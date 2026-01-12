@@ -41,11 +41,11 @@ from peft.tuners.lora import GPTQLoraLinear
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 
 from .testing_utils import (
+    DEVICE_MAP_MAP,
     load_dataset_english_quotes,
     require_gptqmodel,
     require_optimum,
     require_torch_multi_accelerator,
-    DEVICE_MAP_MAP,
 )
 
 
