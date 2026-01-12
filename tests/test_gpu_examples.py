@@ -88,6 +88,7 @@ from peft.utils.other import fsdp_auto_wrap_policy
 from tests.testing_utils import hub_online_once
 
 from .testing_utils import (
+    DEVICE_MAP_MAP,
     device_count,
     load_dataset_english_quotes,
     require_aqlm,
@@ -111,93 +112,6 @@ from .testing_utils import (
 device, _, _ = get_backend()
 if device == "cpu":
     pytest.skip(allow_module_level=True, reason="GPU tests require hardware accelerator, got CPU only")
-
-
-# Some tests with multi GPU require specific device maps to ensure that the models are loaded in two devices
-DEVICE_MAP_MAP: dict[str, dict[str, int]] = {
-    "facebook/opt-6.7b": {
-        "model.decoder.embed_tokens": 0,
-        "model.decoder.embed_positions": 0,
-        "model.decoder.final_layer_norm": 0,
-        "model.decoder.layers.0": 0,
-        "model.decoder.layers.1": 0,
-        "model.decoder.layers.2": 0,
-        "model.decoder.layers.3": 0,
-        "model.decoder.layers.4": 0,
-        "model.decoder.layers.5": 0,
-        "model.decoder.layers.6": 0,
-        "model.decoder.layers.7": 0,
-        "model.decoder.layers.8": 0,
-        "model.decoder.layers.9": 0,
-        "model.decoder.layers.10": 0,
-        "model.decoder.layers.11": 0,
-        "model.decoder.layers.12": 0,
-        "model.decoder.layers.13": 0,
-        "model.decoder.layers.14": 0,
-        "model.decoder.layers.15": 0,
-        "model.decoder.layers.16": 1,
-        "model.decoder.layers.17": 1,
-        "model.decoder.layers.18": 1,
-        "model.decoder.layers.19": 1,
-        "model.decoder.layers.20": 1,
-        "model.decoder.layers.21": 1,
-        "model.decoder.layers.22": 1,
-        "model.decoder.layers.23": 1,
-        "model.decoder.layers.24": 1,
-        "model.decoder.layers.25": 1,
-        "model.decoder.layers.26": 1,
-        "model.decoder.layers.27": 1,
-        "model.decoder.layers.28": 1,
-        "model.decoder.layers.29": 1,
-        "model.decoder.layers.30": 1,
-        "model.decoder.layers.31": 1,
-        "lm_head": 0,  # tied with embed_tokens
-    },
-    "peft-internal-testing/opt-125m": {
-        "model.decoder.embed_tokens": 0,
-        "model.decoder.embed_positions": 0,
-        "model.decoder.final_layer_norm": 1,
-        "model.decoder.layers.0": 0,
-        "model.decoder.layers.1": 0,
-        "model.decoder.layers.2": 0,
-        "model.decoder.layers.3": 0,
-        "model.decoder.layers.4": 0,
-        "model.decoder.layers.5": 0,
-        "model.decoder.layers.6": 1,
-        "model.decoder.layers.7": 1,
-        "model.decoder.layers.8": 1,
-        "model.decoder.layers.9": 1,
-        "model.decoder.layers.10": 1,
-        "model.decoder.layers.11": 1,
-        "lm_head": 0,
-    },
-    "marcsun13/opt-350m-gptq-4bit": {
-        "model.decoder.embed_tokens": 0,
-        "model.decoder.embed_positions": 0,
-        "model.decoder.layers.0": 0,
-        "model.decoder.layers.1": 0,
-        "model.decoder.layers.2": 0,
-        "model.decoder.layers.3": 0,
-        "model.decoder.layers.4": 0,
-        "model.decoder.layers.5": 0,
-        "model.decoder.layers.6": 1,
-        "model.decoder.layers.7": 1,
-        "model.decoder.layers.8": 1,
-        "model.decoder.layers.9": 1,
-        "model.decoder.layers.10": 1,
-        "model.decoder.layers.11": 1,
-        "model.decoder.final_layer_norm": 1,
-        "lm_head": 0,  # tied with embed_tokens
-    },
-    "google/flan-t5-base": {
-        "shared": 0,
-        "encoder": 0,
-        "decoder": 1,
-        "final_layer_norm": 1,
-        "decoder.embed_tokens": 0,  # tied with encoder.embed_tokens
-        "lm_head": 0,  # tied with encoder.embed_tokens
-    },
-}
 
 
 # A full testing suite that tests all the necessary features on GPU. The tests should

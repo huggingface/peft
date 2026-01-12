@@ -756,7 +756,7 @@ class LoraConfig(PeftConfig):
                 "Whether to tie weights or not after peft initialization. "
                 "This will ensure that the adapters added to the tied layers "
                 "are also tied. This is only applicable for layers passed via "
-                "`modules_to_save` and `target_modules`."
+                "`modules_to_save`, `target_modules` and `trainable_token_indices`."
             )
         },
     )

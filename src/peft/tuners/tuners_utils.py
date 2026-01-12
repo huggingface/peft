@@ -1280,6 +1280,16 @@ class BaseTuner(nn.Module, ABC):
                 )
                 warnings.warn(msg)
 
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        """
+        Whether it is possible for the adapter of this model to be converted to LoRA.
+
+        Normally, this works if the PEFT method is additive, i.e. W' = W_base + delta_weight.
+        """
+        return all(
+            module.supports_lora_conversion() for module in self.modules() if isinstance(module, BaseTunerLayer)
+        )
+
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
         try:
@@ -1617,6 +1627,14 @@ class BaseTunerLayer(ABC):
         if (not cast_input_dtype_enabled) or (x.dtype == dtype):
             return x
         return x.to(dtype=dtype)
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        """
+        Whether it is possible for this layer type to be converted to LoRA.
+
+        Normally, this works if the PEFT method is additive, i.e. W' = W_base + delta_weight.
+        """
+        return False
 
 
 def _find_minimal_target_modules(
