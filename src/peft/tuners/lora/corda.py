@@ -255,6 +255,10 @@ def collect_eigens_for_layer(
     config: LoraConfig,
 ) -> CordaEigens:
     w = linear.weight.data.float()
+    # Conv1D stores weights as (in_features, out_features), transposed compared to Linear
+    # We need to transpose it to match Linear's (out_features, in_features) layout for SVD
+    if isinstance(linear, Conv1D):
+        w = w.T
     out_dim = w.size(0)
     in_dim = w.size(1)
     min_dim = min(in_dim, out_dim)
