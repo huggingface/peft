@@ -97,7 +97,9 @@ class OFTRotationModule(nn.Module):
         self.use_cayley_neumann = use_cayley_neumann
         self.num_cayley_neumann_terms = num_cayley_neumann_terms
         # Create indices for upper triangle (excluding diagonal)
-        self.rows, self.cols = torch.triu_indices(block_size, block_size, 1)
+        rows, cols = torch.triu_indices(block_size, block_size, 1)
+        self.register_buffer("rows", rows, persistent=False)
+        self.register_buffer("cols", cols, persistent=False)
 
     def _pytorch_skew_symmetric(self, vec, block_size):
         batch_size = vec.shape[0]
@@ -139,9 +141,11 @@ class OFTRotationModule(nn.Module):
                     R.add_(Q_squared, alpha=2.0)
 
                     Q_power = Q_squared
-                    for i in range(3, num_neumann_terms):
+                    for _ in range(3, num_neumann_terms - 1):
                         Q_power = torch.bmm(Q_power, Q_skew)
                         R.add_(Q_power, alpha=2.0)
+                    Q_power = torch.bmm(Q_power, Q_skew)
+                    R.add_(Q_power)
         else:
             id_mat = (
                 torch.eye(Q_skew.shape[-1], device=Q_skew.device)
@@ -412,6 +416,8 @@ class OFTLayer(BaseTunerLayer):
         init_weights,
         use_cayley_neumann,
         num_cayley_neumann_terms,
+        inference_mode: bool = False,
+        **kwargs,
     ):
         """
         Update the linear layer with trainable OFT weights. Override for other layer types.
@@ -479,7 +485,7 @@ class OFTLayer(BaseTunerLayer):
 
         # Move new weights to device
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_oft_parameters(self, adapter_name, init_weights):
         """
@@ -619,9 +625,13 @@ class Linear(nn.Module, OFTLayer):
             if active_adapter in self.oft_R.keys():
                 oft_mat = self.get_delta_weight(active_adapter)
 
+                previous_dtype = oft_mat.dtype
+                if previous_dtype != torch.float32:
+                    oft_mat = oft_mat.to(torch.float32)
+
                 orig_weights = self.get_base_layer().weight.data
                 orig_weights = torch.transpose(orig_weights, 0, 1)
-                orig_weights = torch.mm(oft_mat.t(), orig_weights.to(oft_mat.dtype))
+                orig_weights = torch.mm(torch.linalg.inv(oft_mat).to(previous_dtype), orig_weights.to(previous_dtype))
                 orig_weights = torch.transpose(orig_weights, 0, 1)
 
                 base_layer.weight.data = orig_weights.to(orig_dtype)
@@ -716,6 +726,8 @@ class Conv2d(nn.Module, OFTLayer):
         init_weights,
         use_cayley_neumann,
         num_cayley_neumann_terms,
+        inference_mode: bool = False,
+        **kwargs,
     ):
         """
         Update the conv2d layer with trainable OFT weights.
@@ -777,7 +789,7 @@ class Conv2d(nn.Module, OFTLayer):
 
         # Move new weights to device
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -851,13 +863,17 @@ class Conv2d(nn.Module, OFTLayer):
             if active_adapter in self.oft_R.keys():
                 oft_mat = self.get_delta_weight(active_adapter)
 
+                previous_dtype = oft_mat.dtype
+                if previous_dtype != torch.float32:
+                    oft_mat = oft_mat.to(torch.float32)
+
                 orig_weights = self.get_base_layer().weight.data.clone()
                 orig_weights = orig_weights.view(
                     self.out_features,
                     self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0],
                 )
                 orig_weights = torch.transpose(orig_weights, 0, 1)
-                orig_weights = torch.mm(oft_mat.t(), orig_weights.to(oft_mat.dtype))
+                orig_weights = torch.mm(torch.linalg.inv(oft_mat).to(previous_dtype), orig_weights.to(previous_dtype))
                 orig_weights = torch.transpose(orig_weights, 0, 1)
                 orig_weights = orig_weights.view(
                     self.out_features,

@@ -56,7 +56,7 @@ class C3ALayer(BaseTunerLayer):
         delta_weight = get_circulant_fast(c3a_kernel.to(torch.float32)).to(base_layer_weight_dtype)
         return delta_weight / base_layer_weight.size(-1)
 
-    def update_layer(self, adapter_name, block_size, init_weights):
+    def update_layer(self, adapter_name, block_size, init_weights, inference_mode: bool = False, **kwargs):
         if block_size <= 0:
             raise ValueError(f"`block_size` should be a positive integer value but the value passed is {block_size}")
         if self.in_features % block_size != 0:
@@ -76,14 +76,16 @@ class C3ALayer(BaseTunerLayer):
                 self.out_features // block_size,
                 self.in_features // block_size,
                 block_size,
-                dtype=torch.float32,  # Currently, only fp32 is widely supported for FFT (fp16 is only supported on GPU with shapes of powers of 2, bf16 lacks FFT support)
+                # Currently, only fp32 is widely supported for FFT (fp16 is only supported on GPU with shapes of powers
+                # of 2, bf16 lacks FFT support)
+                dtype=torch.float32,
                 device=weight.device,
             )
         )
 
         self.reset_c3a_parameters(adapter_name, init_weights)
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     @torch.no_grad()
     def reset_c3a_parameters(self, adapter_name, init_weights):
@@ -93,7 +95,7 @@ class C3ALayer(BaseTunerLayer):
         if adapter_name in self.c3a_kernel.keys():
             if init_weights == "gaussian":
                 nn.init.normal_(self.c3a_kernel[adapter_name])
-            elif init_weights in ["xavier_uniform", False]:  # Support test cases where False presents
+            elif init_weights in ["xavier_uniform", False]:
                 fan_in, fan_out = self.in_features, self.out_features
                 std = 1.0 * math.sqrt(2.0 / float(fan_in + fan_out))
                 a = math.sqrt(3.0) * std
@@ -194,6 +196,9 @@ class C3ALinear(nn.Module, C3ALayer):
 
         result = result.to(previous_dtype)
         return result
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        return True
 
     def __repr__(self) -> str:
         rep = super().__repr__()

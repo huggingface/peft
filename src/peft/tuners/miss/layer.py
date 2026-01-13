@@ -11,6 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
+
 import math
 import warnings
 from typing import Any, Optional, Union
@@ -53,7 +55,8 @@ class MissLayer(BaseTunerLayer):
         r: int,
         mini_r: int,
         miss_dropout,
-        init_weights: bool,
+        init_weights: bool | str,
+        inference_mode: bool = False,
         **kwargs,
     ) -> None:
         """Internal function to create miss adapter
@@ -101,7 +104,7 @@ class MissLayer(BaseTunerLayer):
             self.reset_miss_parameters_random(adapter_name)
         # Move new weights to device
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_miss_parameters(self, adapter_name: str, r):
         self.miss_block[adapter_name] = nn.Parameter(torch.zeros(r, self.out_features), requires_grad=True)
@@ -384,6 +387,10 @@ class MissLinear(nn.Module, MissLayer):
 
         result = result.to(previous_dtype)
         return result
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        # only 'bat' can be converted in a straightforward way
+        return self.miss_fn == "bat"
 
     def __repr__(self) -> str:
         rep = super().__repr__()

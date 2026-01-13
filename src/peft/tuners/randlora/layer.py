@@ -99,6 +99,8 @@ class RandLoraLayer(BaseTunerLayer):
         randlora_alpha,
         randlora_dropout,
         init_weights,
+        inference_mode: bool = False,
+        **kwargs,
     ):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -166,7 +168,7 @@ class RandLoraLayer(BaseTunerLayer):
             self.reset_randlora_parameters(adapter_name)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_randlora_parameters(self, adapter_name):
         if adapter_name in self.randlora_lambda.keys():
@@ -342,6 +344,9 @@ class Linear(nn.Linear, RandLoraLayer):
                 result = result + F.linear(F.linear(dropout(x), update_B), update_A) * scaling
         result = result.to(previous_dtype)
         return result
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        return True
 
     def __repr__(self) -> str:
         rep = super().__repr__()

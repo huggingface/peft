@@ -21,6 +21,7 @@ import re
 import warnings
 from collections.abc import Sequence
 from contextlib import nullcontext
+from operator import attrgetter
 from typing import Any, Optional, Union
 
 import accelerate
@@ -42,19 +43,28 @@ from .constants import (
     INCLUDE_LINEAR_LAYERS_SHORTHAND,
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_BONE_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LOKR_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_MISS_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_OFT_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_POLY_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING,
     WEIGHTS_NAME,
     bloom_model_postprocess_past_key_value,
     starcoder_model_postprocess_past_key_value,
@@ -74,19 +84,28 @@ __all__ = [
     "INCLUDE_LINEAR_LAYERS_SHORTHAND",
     "SAFETENSORS_WEIGHTS_NAME",
     "TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_BONE_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LOKR_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_MISS_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_OFT_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_POLY_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
     "TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING",
     "WEIGHTS_NAME",
     "bloom_model_postprocess_past_key_value",
     "starcoder_model_postprocess_past_key_value",
@@ -224,6 +243,13 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
 
     """
 
+    # All names of layers that may contain adapter (trainable) weights
+    adapter_layer_names: tuple[str, ...] = ()
+    # All names of other parameters that may contain adapter-related parameters
+    other_param_names: tuple[str, ...] = ()
+    # List all merged adapters
+    merged_adapters: list[str] = []
+
     def __init__(self, module_to_save, adapter_name, **kwargs):
         """Extra kwargs will be passed to `self.init_modules` and `self.update`."""
         super().__init__()
@@ -239,6 +265,10 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
 
     def init_modules(self, adapter_name, **kwargs):
         """A place to initialize PyTorch modules in `__init__` before the call to `self.update()`."""
+        raise NotImplementedError
+
+    def _get_available_adapters(self) -> set[str]:
+        """Return all adapter names that can be found on this module."""
         raise NotImplementedError
 
     def _error_message_name(self):
@@ -310,7 +340,8 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         # Could not find the attribute the PyTorch way. So let's check if it's an attribute on the
         # original_module or the module further down (e.g., `modules_to_save[active_adapter]`).
         modules = self.__dict__["_modules"]
-        if self.disable_adapters:
+        if self.disable_adapters or (not self.active_adapters):
+            # no PEFT adapter is active, thus refer to original module
             return getattr(self.original_module, name)
         elif self._hasattr_wrapped(name, modules):
             return self._getattr_wrapped(name, modules)
@@ -423,11 +454,24 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         else:
             self._disable_adapters = True
 
-    def set_adapter(self, adapter_names: Union[str, list[str]]):
+    def check_set_adapter(self, adapter_name: str | list[str]) -> str | None:
+        """Helper function to check if the given adapter(s) can be set.
+
+        Return the name of the adapter to be set or None if no adapter should be set.
+        """
+        raise NotImplementedError
+
+    def set_adapter(self, adapter_names: Union[str, list[str]], inference_mode: bool = False) -> None:
         """Set the active adapter
 
+        Note: This only deals with active_adapters, not with requires_grad. If the latter needs changing, handle it via
+        the subclass.
+
         Args:
-            adapter_name (str): The name of the adapter to set as active
+            adapter_names (str or list[str]):
+                The name(s) of the adapter(s) to set as active
+            inference_mode (bool, optional):
+                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
         if isinstance(adapter_names, str):
             self._active_adapter = adapter_names
@@ -442,6 +486,28 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
     def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
         """Delete an adapter from the layer, set a new active adapter if necessary"""
         raise NotImplementedError
+
+    def set_requires_grad(self, adapter_names: str | Sequence[str], requires_grad: bool = True) -> None:
+        """
+        Enable or disable gradients on the given adapter(s).
+
+        Args:
+            adapter_name (`str` or `Sequence[str]`):
+                The name of the adapter(s) whose gradients should be enabled/disabled.
+            requires_grad (`bool`, *optional*)
+                Whether to enable (`True`, default) or disable (`False`).
+        """
+        if isinstance(adapter_names, str):
+            adapter_names_set = {adapter_names}
+        else:
+            adapter_names_set = set(adapter_names)
+
+        for layer_name in self.adapter_layer_names:
+            # use attrgetter, as it resolves `.` in the attribute name
+            module_dict = attrgetter(layer_name)(self)
+            for key, layer in module_dict.items():
+                if key in adapter_names_set:
+                    layer.requires_grad_(requires_grad)
 
     def adapter_state_dict(self, adapter_name):
         """Return the state dict of this module for a given adapter."""
@@ -468,10 +534,13 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
 class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
     """Wraps a module that is supposed to be trained (i.e. `requires_grad_(True)`) and saved after training."""
 
-    def __init__(self, module_to_save, adapter_name):
-        super().__init__(module_to_save, adapter_name)
+    # All names of layers that may contain adapter (trainable) weights
+    adapter_layer_names: tuple[str, ...] = ("modules_to_save",)
 
-    def init_modules(self, adapter_name):
+    def __init__(self, module_to_save, adapter_name, tied_module=None):
+        super().__init__(module_to_save, adapter_name, tied_module=tied_module)
+
+    def init_modules(self, adapter_name, **kwargs):
         # we treat each adapter separately, so we have multiple adapters, same (copied) module for each
         self.modules_to_save = torch.nn.ModuleDict({})
 
@@ -490,12 +559,13 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         return self.original_module(x, *args, **kwargs)
 
     def _hasattr_wrapped(self, name, modules):
+        # this method is only called if there is at least one active adapter
         return self.active_adapters[0] in modules["modules_to_save"]
 
     def _getattr_wrapped(self, name, modules):
         return getattr(modules["modules_to_save"][self.active_adapters[0]], name)
 
-    def update(self, adapter_name, **kwargs):
+    def update(self, adapter_name, tied_module=None, **kwargs):
         super().update(adapter_name)
 
         context_manager = nullcontext()
@@ -510,7 +580,13 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
         if adapter_name not in self.modules_to_save:
             with context_manager:
-                self.modules_to_save[adapter_name] = copy.deepcopy(self.original_module)
+                if tied_module:
+                    new_linear = torch.nn.Linear(*tied_module.weight.shape, bias=False)
+                    new_linear.weight = tied_module.weight
+
+                    self.modules_to_save[adapter_name] = new_linear
+                else:
+                    self.modules_to_save[adapter_name] = copy.deepcopy(self.original_module)
 
         if hasattr(self.modules_to_save[adapter_name], "_hf_hook"):
             old_hook = self.modules_to_save[adapter_name]._hf_hook
@@ -533,26 +609,47 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         super().enable_adapters(enabled)
 
         if enabled:
-            self.original_module.requires_grad_(False)
-            self.modules_to_save[self.active_adapter].requires_grad_(True)
+            for adapter_name in self.active_adapters:
+                self.modules_to_save[adapter_name].requires_grad_(True)
         else:
-            self.original_module.requires_grad_(True)
             self.modules_to_save.requires_grad_(False)
 
-    def set_adapter(self, adapter_names: Union[str, list[str]]):
+    def check_set_adapter(self, adapter_name: str | list[str]) -> str | None:
+        """Helper function to check if the given adapter(s) can be set.
+
+        Return the name of the adapter to be set or None if no adapter should be set.
+        """
+        if isinstance(adapter_name, str):
+            return adapter_name
+
+        # adapter_name is a list of str
+        if len(adapter_name) == 0:
+            raise ValueError("Please specify at least one adapter to set")
+
+        adapter_names_in_module = [n for n in adapter_name if n in self.modules_to_save]
+
+        if len(adapter_names_in_module) > 1:
+            raise ValueError(f"Only one adapter can be set at a time for {self}, got {len(adapter_names_in_module)}")
+
+        adapter_name_to_set: str | None
+        if not adapter_names_in_module:
+            adapter_name_to_set = None
+        else:
+            adapter_name_to_set = adapter_names_in_module[0]
+
+        return adapter_name_to_set
+
+    def set_adapter(self, adapter_names: Union[str, list[str]], inference_mode: bool = False) -> None:
         """Set the active adapter
 
-        Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True). If this is
-        not desired, use the following code.
-
-        ```py
-        >>> for name, param in model_peft.named_parameters():
-        ...     if ...:  # some check on name (ex. if 'lora' in name)
-        ...         param.requires_grad = False
-        ```
+        Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True) unless
+        inference_mode is True.
 
         Args:
-            adapter_names (list[str], str): The name of the adapter to set as active
+            adapter_names (list[str], str):
+                 The name(s) of the adapter(s) to set as active.
+            inference_mode (bool, optional):
+                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
         if isinstance(adapter_names, str):
             adapter_names = [adapter_names]
@@ -560,13 +657,20 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         if len(adapter_names) > 1:
             raise ValueError(f"Attempted to set multiple ({adapter_names}) adapters at once for modules_to_save.")
 
+        for currently_active_adapter_name in self.active_adapters:
+            self.modules_to_save[currently_active_adapter_name].requires_grad_(False)
+
+        if len(adapter_names) == 0:
+            # when calling model.add_adapter, the new adapter is not automatically active
+            self._active_adapter = []
+            return
+
         adapter_name = adapter_names[0]
 
         if adapter_name not in self._adapters:
             raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
 
-        self.modules_to_save[self.active_adapters[0]].requires_grad_(False)
-        self.modules_to_save[adapter_name].requires_grad_(True)
+        self.modules_to_save[adapter_name].requires_grad_(not inference_mode)
         self._active_adapter = adapter_name
 
     def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
@@ -647,6 +751,10 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
         return new_module
 
+    def _get_available_adapters(self) -> set[str]:
+        """Return all adapter names that can be found on this module."""
+        return set(self.modules_to_save.keys())
+
 
 class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
     """Wraps a module (typically an embedding layer) that is supposed to be re-trained selectively (i.e.
@@ -655,6 +763,10 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
     Supports weight-tying to another adapter when passed a `tied_adapter` which is expected to be a
     `TrainableTokensLayer`.
     """
+
+    # All names of layers that may contain adapter (trainable) weights
+    adapter_layer_names: tuple[str, ...] = ("token_adapter.trainable_tokens_delta",)
+    other_param_names: tuple[str, ...] = ("token_adapter.token_indices", "token_adapter.trainable_tokens_original")
 
     def __init__(
         self,
@@ -745,9 +857,35 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
 
         self.token_adapter.enable_adapters(enabled)
 
-    def set_adapter(self, adapter_names: Union[str, list[str]]):
-        super().set_adapter(adapter_names)
-        self.token_adapter.set_adapter(adapter_names)
+    def check_set_adapter(self, adapter_name: str | list[str]) -> str | None:
+        """Helper function to check if the given adapter(s) can be set.
+
+        Return the name of the adapter to be set or None if no adapter should be set.
+        """
+        if isinstance(adapter_name, str):
+            return adapter_name
+
+        # adapter_name is a list of str
+        if len(adapter_name) == 0:
+            raise ValueError("Please specify at least one adapter to set")
+
+        # TODO In theory, multiple active trainable tokens is fine when the indices don't overlap
+        adapter_names_in_module = [n for n in adapter_name if n in self.token_adapter.trainable_tokens_delta]
+
+        if len(adapter_names_in_module) > 1:
+            raise ValueError(f"Only one adapter can be set at a time for {self}, got {len(adapter_names_in_module)}")
+
+        adapter_name_to_set: str | None
+        if not adapter_names_in_module:
+            adapter_name_to_set = None
+        else:
+            adapter_name_to_set = adapter_names_in_module[0]
+
+        return adapter_name_to_set
+
+    def set_adapter(self, adapter_names: Union[str, list[str]], inference_mode: bool = False) -> None:
+        super().set_adapter(adapter_names, inference_mode=inference_mode)
+        self.token_adapter.set_adapter(adapter_names, inference_mode=inference_mode)
 
     def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
         """
@@ -792,6 +930,10 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
             self.token_adapter.merge(safe_merge=safe_merge, adapter_names=adapter_names)
         return self.token_adapter.get_base_layer()
 
+    def _get_available_adapters(self) -> set[str]:
+        """Return all adapter names that can be found on this module."""
+        return set(self.token_adapter.trainable_tokens_delta.keys())
+
 
 def _get_input_embeddings_name(model, default=None):
     if not hasattr(model, "get_input_embeddings"):
@@ -812,6 +954,18 @@ def _get_submodules(model, key):
     return parent, target, target_name
 
 
+def _get_submodules_with_grandparent(model, key):
+    parent = model.get_submodule(".".join(key.split(".")[:-1]))
+    try:
+        grandparent = model.get_submodule(".".join(key.split(".")[:-2]))
+    except AttributeError:
+        # no grand parent
+        grandparent = None
+    target_name = key.split(".")[-1]
+    target = model.get_submodule(key)
+    return parent, grandparent, target, target_name
+
+
 def _freeze_adapter(model, adapter_name):
     for n, p in model.named_parameters():
         if adapter_name in n:
@@ -822,8 +976,10 @@ def _set_trainable(
     model,
     adapter_name,
     module_names,
-    strict_module_check=False,
+    inference_mode: bool,
+    strict_module_check: bool = False,
     wrapper_cls: Optional[AuxiliaryTrainingWrapper] = None,
+    activate_adapter: bool = True,
     **wrapper_kwargs,
 ):
     """Wraps modules that are supposed to be re-trained either normally, i.e. marking them to require gradients and
@@ -838,7 +994,11 @@ def _set_trainable(
 
     If `strict_module_check` is set, this method raises an ValueError, similar to BaseTuner.inject_adapter when none of
     the requested modules in `module_names` is not found in the model.
+
+    The `active_adapter` flag indicates if this new adapter should be activated.
     """
+    from peft.tuners.tuners_utils import BaseTunerLayer
+
     if wrapper_cls is None:
         wrapper_cls = ModulesToSaveWrapper
 
@@ -855,13 +1015,39 @@ def _set_trainable(
     for key in key_list:
         target_module_found = any(key.endswith(target_key) for target_key in module_names)
         if target_module_found:
-            parent, target, target_name = _get_submodules(model, key)
-            if isinstance(target, wrapper_cls):
+            parent, grandparent, target, target_name = _get_submodules_with_grandparent(model, key)
+            if isinstance(grandparent, BaseTunerLayer):
+                # This is an extreme edge case: Let's assume that there is a PEFT config with
+                # modules_to_save=["default"], which is the same name as the adapter name. The PEFT method's adapter
+                # (e.g. LoRA) is applied first. Then, when the modules_to_save matching is performed, the LoRA layer
+                # would be considered a valid target. Assuming that the name is "foo.bar.lora_A.default", it would
+                # match, with "default" being an nn.Linear and the parent, "lora_A", being an nn.ModuleDict. This by
+                # itself is not enough to prove that this is an unintended match. Thererfore, we also need to check the
+                # grandparent, "bar", that would be a lora.LoraLayer. When we see this, we should raise an error.
+                raise ValueError(
+                    f"You are trying to target a module with {wrapper_cls} that is a child of {type(grandparent)}. "
+                    "This is almost certainly not the intended behavior. Please ensure that the adapter name, "
+                    f"'{adapter_name}', does not conflict with any of the targeted modules."
+                )
+
+            # For transformers >=5 we need to check the grandparent to detect already modified tied weights.  The way
+            # the new `get_tied_weights_keys` works is that we resolve the current name of the module tied to the
+            # embeddings. If we replaced the tied weight (i.e. moved it to, say, `lm_head.token_adapter.base_layer`)
+            # we'll get the new name whereas the old way was that we got `lm_head` regardless of whether it was modified
+            # or not. We'll assume that we always have two levels of nesting and therefore do the same check as before
+            # but on the grandparent to accomodate for the new behavior.
+            if isinstance(grandparent, wrapper_cls):
+                grandparent.update(adapter_name, **wrapper_kwargs)
+                grandparent.set_adapter(grandparent.active_adapter, inference_mode=inference_mode)
+            elif isinstance(target, wrapper_cls):
                 target.update(adapter_name, **wrapper_kwargs)
-                target.set_adapter(target.active_adapter)
+                target.set_adapter(target.active_adapter, inference_mode=inference_mode)
             else:
                 new_module = wrapper_cls(target, adapter_name, **wrapper_kwargs)
-                new_module.set_adapter(adapter_name)
+                if activate_adapter:
+                    new_module.set_adapter(adapter_name, inference_mode=inference_mode)
+                else:
+                    new_module.set_adapter([], inference_mode=inference_mode)
                 setattr(parent, target_name, new_module)
                 trainable_modules.append(new_module)
             found_modules.add(target_name)
@@ -875,31 +1061,19 @@ def _set_trainable(
     return trainable_modules
 
 
-def _set_adapter(model, adapter_name):
-    def check_adapter_name(adapter_name):
-        if isinstance(adapter_name, str):
-            return adapter_name
-
-        # adapter_name is a list of str
-        if len(adapter_name) > 1:
-            raise ValueError("Only one adapter can be set at a time for modules_to_save")
-        elif len(adapter_name) == 0:
-            raise ValueError("Please specify at least one adapter to set")
-        adapter_name = adapter_name[0]
-        return adapter_name
-
+def _set_adapter(model, adapter_name: str | list[str], inference_mode: bool = False) -> None:
+    """Call set_adapter on the AuxiliaryTrainingWrapper modules"""
     for module in model.modules():
         if isinstance(module, AuxiliaryTrainingWrapper):
             # only check the adapter_name if we actually encounter a AuxiliaryTrainingWrapper, otherwise we don't care
-            adapter_name = check_adapter_name(adapter_name)
+            adapter_name_to_set = module.check_set_adapter(adapter_name)
 
             # if the adapter is found in this module, set it as the active adapter, else disable the adapters of this
             # module
-            if adapter_name in module._adapters:
-                module.enable_adapters(True)
-                module.set_adapter(adapter_name)
+            if adapter_name_to_set in module._adapters:
+                module.set_adapter(adapter_name_to_set, inference_mode=inference_mode)
             else:
-                module.enable_adapters(False)
+                module.set_adapter([], inference_mode=inference_mode)
 
 
 def _prepare_prompt_learning_config(peft_config, model_config):
@@ -943,9 +1117,13 @@ def _prepare_prompt_learning_config(peft_config, model_config):
         peft_config.num_attention_heads = num_attention_heads
 
     # For grouped-query attention, see #1901.
-    if peft_config.peft_type == "PREFIX_TUNING" and "num_key_value_heads" in model_config:
+    if (peft_config.peft_type in {"PREFIX_TUNING", "CARTRIDGE"}) and ("num_key_value_heads" in model_config):
         num_key_value_heads = model_config["num_key_value_heads"]
-        peft_config.token_dim = peft_config.token_dim // peft_config.num_attention_heads * num_key_value_heads
+        if model_config.get("head_dim", None) is not None:
+            head_dim = model_config["head_dim"]
+        else:
+            head_dim = peft_config.token_dim // peft_config.num_attention_heads
+        peft_config.token_dim = head_dim * num_key_value_heads
         peft_config.num_attention_heads = num_key_value_heads
 
     if getattr(peft_config, "encoder_hidden_size", None) is None:
@@ -987,13 +1165,13 @@ def fsdp_auto_wrap_policy(model):
         from accelerate.utils.dataclasses import get_module_class_from_name
     from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy, transformer_auto_wrap_policy
 
-    from ..tuners import PrefixEncoder, PromptEmbedding, PromptEncoder
+    from ..tuners import CartridgeEncoder, PrefixEncoder, PromptEmbedding, PromptEncoder
 
     default_transformer_cls_names_to_wrap = ",".join(_get_no_split_modules(model))
     transformer_cls_names_to_wrap = os.environ.get(
         "FSDP_TRANSFORMER_CLS_TO_WRAP", default_transformer_cls_names_to_wrap
     ).split(",")
-    transformer_cls_to_wrap = {PrefixEncoder, PromptEncoder, PromptEmbedding}
+    transformer_cls_to_wrap = {CartridgeEncoder, PrefixEncoder, PromptEncoder, PromptEmbedding}
     for layer_class in transformer_cls_names_to_wrap:
         if len(layer_class) == 0:
             continue
@@ -1252,15 +1430,38 @@ def get_pattern_key(pattern_keys: Sequence[str], key_to_match: str) -> str:
     return key_to_match
 
 
-def set_additional_trainable_modules(model, peft_config, model_config, adapter_name):
+def set_additional_trainable_modules(model, peft_config, model_config, adapter_name, activate_adapter: bool = True):
     """Handle the resolution of additional trainable modules (also called AuxiliaryTrainingWrapper)
     by checking the config if such modules are requested and adding them to the model.
 
     Currently trainable tokens and modules to save are considered additional trainable modules.
+
+    If `activate_adapter` is set to `False`, the adapter won't be activated. This is typically the case when
+    `model.add_adapter` or `model.load_adapter` are being called.
     """
     if getattr(peft_config, "modules_to_save", None) is not None:
         # this may add a new ModulesToSaveWrapper
-        _set_trainable(model, adapter_name, module_names=getattr(peft_config, "modules_to_save", None))
+        _set_trainable(
+            model,
+            adapter_name,
+            inference_mode=peft_config.inference_mode,
+            module_names=getattr(peft_config, "modules_to_save", None),
+            activate_adapter=activate_adapter,
+        )
+
+    if getattr(peft_config, "modules_to_tie", None) is not None:
+        # Tie the modules if any tied layer is passed in `modules_to_save`.
+        # This should always be called after
+        # `_set_trainable` is called for `modules_to_save`.
+        tied_module = getattr(model.get_input_embeddings().modules_to_save, adapter_name)
+        _set_trainable(
+            model,
+            adapter_name,
+            inference_mode=peft_config.inference_mode,
+            module_names=getattr(peft_config, "modules_to_tie", None),
+            activate_adapter=activate_adapter,
+            tied_module=tied_module,
+        )
 
     if getattr(peft_config, "trainable_token_indices", None) is not None:
         if isinstance(peft_config.trainable_token_indices, dict):
@@ -1271,41 +1472,105 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
 
         modules_to_save = getattr(peft_config, "modules_to_save", None)
         if modules_to_save is not None:
-            for target_layer in target_layers:
-                if target_layer in modules_to_save:
+            for target_layer_name in target_layers:
+                if target_layer_name in modules_to_save:
                     raise ValueError(
                         "The embedding layer is already marked to be trained fully, either specify "
-                        f'`modules_to_save=[..., "{target_layer}", ...]` or '
-                        f"`trainable_tokens={{'{target_layer}': x}}` but not both."
+                        f'`modules_to_save=[..., "{target_layer_name}", ...]` or '
+                        f"`trainable_tokens={{'{target_layer_name}': x}}` but not both."
                     )
 
-        for target_layer, token_indices in target_layers.items():
+        # Check weight tying configuration first to determine which layers to wrap
+        weights_tied = model_config.get("tie_word_embeddings", False)
+        ensure_weight_tying = getattr(peft_config, "ensure_weight_tying", False)
+
+        # When multiple target layers are specified, check if they correspond to tied weights
+        indices_mismatch = False
+        layers_to_skip = set()
+        tied_layer_keys = []
+
+        if len(target_layers) > 1 and weights_tied:
+            # Get module names that are tied with the embedding
+            tied_module_names = set(_get_module_names_tied_with_embedding(model))
+
+            # Also get the input embedding layer name as it's the source of tied weights
+            embedding_module = model.get_input_embeddings()
+            # Get the full embedding name (not just the last part) to support nested structures
+            embedding_name = next(n for n, m in model.named_modules() if m is embedding_module)
+
+            # Find which target layers are in the tied weights (including the embedding source)
+            for target_layer_name in target_layers:
+                # Check if this is the embedding layer (use endswith to allow flexible matching)
+                # This allows users to specify just "embed_tokens" OR "m1.encoder.embed_tokens" for precision
+                if embedding_name.endswith(target_layer_name):
+                    tied_layer_keys.append(target_layer_name)
+                    continue
+                # Check if this target layer matches any tied module (considering nested structures)
+                for tied_module in tied_module_names:
+                    if tied_module.endswith(target_layer_name) or target_layer_name in tied_module.split("."):
+                        tied_layer_keys.append(target_layer_name)
+                        break
+
+            # If we found multiple tied layers in our targets, check their indices
+            if len(tied_layer_keys) >= 2:
+                # Check if all tied layers have the same indices
+                first_indices = target_layers[tied_layer_keys[0]]
+                indices_mismatch = not all(target_layers[key] == first_indices for key in tied_layer_keys[1:])
+
+                # Raise error immediately if ensure_weight_tying=True and indices mismatch
+                if indices_mismatch and ensure_weight_tying:
+                    tied_layers_info = ", ".join([f"{key}: {target_layers[key]}" for key in tied_layer_keys])
+                    raise ValueError(
+                        f"Cannot ensure weight tying when different token indices are specified for tied layers. "
+                        f"Conflicting layers: {tied_layers_info}. "
+                        f"Please use the same indices for all tied layers or set ensure_weight_tying=False."
+                    )
+
+                # If indices match, skip tied modules (except embedding) as they'll be handled by weight tying logic
+                if not indices_mismatch:
+                    layers_to_skip = set(tied_layer_keys) & tied_module_names
+
+        # Wrap target layers (skip those that will be handled by weight tying logic)
+        for target_layer_name, token_indices in target_layers.items():
+            if target_layer_name in layers_to_skip:
+                continue
+
             _set_trainable(
                 model,
                 adapter_name,
-                module_names=[target_layer],
+                inference_mode=peft_config.inference_mode,
+                module_names=[target_layer_name],
                 strict_module_check=True,
                 wrapper_cls=TrainableTokensWrapper,
                 token_indices=token_indices,
+                activate_adapter=activate_adapter,
             )
 
-        # There might be the possibility that we have output weights that are tied to the input weights.
-        # In that case we will tie any module that wants tied weights to the token adapter to make sure that
-        # any modification is reflected in the tied layers as well.
-        if (
-            model_config.get("tie_word_embeddings", False)
-            # some models may be misconfigured to have weight tying enabled but don't define tied weights keys
-            and model._tied_weights_keys is not None
-            and isinstance(model.get_input_embeddings(), TrainableTokensWrapper)
-        ):
-            # the embedding layer is modified and we want weight tying.
-            module_keys = [".".join(n.split(".")[:-1]) for n in model._tied_weights_keys]
+        # Warn if user expects weight tying but model doesn't have tied weights
+        if not weights_tied and ensure_weight_tying:
+            warnings.warn(
+                "ensure_weight_tying=True but the model does not have tied weights "
+                "(tie_word_embeddings=False). Weight tying will not be applied for trainable_token_indices."
+            )
 
+        # Apply weight tying when appropriate
+        should_apply_tying = (
+            weights_tied
+            and isinstance(model.get_input_embeddings(), TrainableTokensWrapper)
+            and (ensure_weight_tying or not indices_mismatch)
+        )
+
+        if should_apply_tying:
+            # There might be the possibility that we have output weights that are tied to the input weights.
+            # In that case we will tie any module that wants tied weights to the token adapter to make sure that
+            # any modification is reflected in the tied layers as well.
+            tied_weights_module_names = _get_module_names_tied_with_embedding(model)
             token_adapter = model.get_input_embeddings().token_adapter
             _set_trainable(
                 model,
                 adapter_name,
-                module_names=module_keys,
+                inference_mode=peft_config.inference_mode,
+                module_names=tied_weights_module_names,
                 strict_module_check=True,
                 wrapper_cls=TrainableTokensWrapper,
                 token_indices=token_adapter.token_indices[adapter_name],
@@ -1364,3 +1629,83 @@ def create_attention_mask(
             position_ids=position_ids,
         )
     return attention_mask
+
+
+def _get_module_names_tied_with_embedding(model) -> list[str]:
+    """
+    Get the list of the fully qualified names of the modules that are tied to the input embeddings. In case of a
+    source-target-mapping `_tied_weights_keys`, it will attempt to identify the input embedding weights from the
+    mapping and return the list of tied modules accordingly. This gives a unified interface to both transformers v4
+    tied weights and v5 mapped tied weights.
+
+    For example: For models which have `embed_tokens` and `lm_head` as the tied keys, this function will return
+    [`lm_head`]. The PEFT model is assumed to be transparent: returned names will be relative to the base model, so
+    even though `model.base_model.lm_head` is tied, the returned name is `lm_head` since such attributes are forwarded
+    to the base model anyway. Non-transformer models have to provide a `_tied_weights_keys` attribute for this function
+    to work.
+
+    Note that this function will not check if weight tying is disabled by the model's config. There can be the case
+    that the weight tying definition is present but the tying is disabled via `model_config.tie_word_embeddings=False`.
+    You have to check that yourself.
+    """
+    tied_weights: list[str] = []
+
+    if hasattr(model, "get_base_model"):
+        # unpack PeftModel
+        model = model.get_base_model()
+
+    if hasattr(model, "tuner_layer_cls"):
+        # unpack BaseTuner
+        model = model.model
+
+    if not hasattr(model, "_tied_weights_keys"):
+        return []
+
+    base_layer_pattern = re.compile(r"[^.]+\.base_layer\.")
+
+    if isinstance(model._tied_weights_keys, dict):
+        if not hasattr(model, "get_input_embeddings"):
+            raise ValueError(
+                "The supplied model implements `_tied_weights_keys` as a dict but doesn't implement "
+                "'get_input_embeddings' so we can't determine which weights are tied to embeddings."
+            )
+
+        # collect all _tied_weights_keys, as sub-modules may have additional entries
+        tied_weights_keys: dict[str, str] = {}
+        for module_name, module in model.named_modules():
+            module_tied_weights_keys = getattr(module, "_tied_weights_keys", None)
+            if module_tied_weights_keys and not module_name:
+                tied_weights_keys.update(module_tied_weights_keys)
+            elif module_tied_weights_keys:
+                tied_weights_keys.update(
+                    {f"{module_name}.{k}": f"{module_name}.{v}" for k, v in module_tied_weights_keys.items()}
+                )
+
+        # technically it would be sufficient to just return candidates since that contains all the keys of
+        # all models that are tied (not just equal!) to the input embeddings. the only reason why we aren't
+        # doing that is because we need to filter out the original embedding name since we promise to just
+        # return the keys of the tying targets.
+        input_embedding_params = set(model.get_input_embeddings().parameters())
+        candidates = [n for n, p in model.named_parameters(remove_duplicate=False) if p in input_embedding_params]
+
+        # Consider the case that sources and targets are already wrapped by a PEFT method. In that case we won't
+        # find them by their old names. Therefore, we need to create a map of the new names to the old names so
+        # that we can translate back and forth.
+        peft_reverse_mapping = {base_layer_pattern.sub("", name): name for name in candidates}
+
+        # AuxiliaryTrainingWrapper don't have an adapter suffix but still have a base_layer attribute,
+        # add those as a potential translation.
+        peft_reverse_mapping.update(**{name.replace("base_layer.", ""): name for name in candidates})
+
+        tied_weights.extend(
+            peft_reverse_mapping.get(k, k)
+            for k, v in tied_weights_keys.items()
+            if peft_reverse_mapping.get(v, v) in candidates
+        )
+
+    elif model._tied_weights_keys is not None:
+        # TODO remove this when transformers <v5 is no longer supported
+        tied_weights.extend(model._tied_weights_keys)
+
+    # get module names from parameter names
+    return sorted({name.rpartition(".")[0] for name in tied_weights})

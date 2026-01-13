@@ -53,6 +53,8 @@ class CPTEmbedding(torch.nn.Module):
             word_embedding_weights = word_embedding_weights.to(torch.float32)
             self.embedding.weight = torch.nn.Parameter(word_embedding_weights)
 
+        self.embedding.requires_grad_(False)
+
         # Initialize delta embedding with zero weights
         self.delta_embedding = torch.nn.Embedding(num_virtual_tokens, config.token_dim)
         self.delta_embedding.weight.data = torch.zeros_like(self.delta_embedding.weight).to(torch.float32)

@@ -388,7 +388,7 @@ class TestAdaptionPrompt:
 
         """Test that AdaptionPrompt works when Llama using a half-precision model."""
         input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
-        original = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16)
+        original = self.transformers_class.from_pretrained(model_id, dtype=torch.bfloat16)
         adapted = get_peft_model(
             original, AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
         )

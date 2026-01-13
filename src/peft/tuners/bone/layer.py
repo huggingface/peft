@@ -50,6 +50,7 @@ class BoneLayer(BaseTunerLayer):
         adapter_name: str,
         r: int,
         init_weights: bool,
+        inference_mode: bool = False,
         **kwargs,
     ) -> None:
         """Internal function to create bone adapter
@@ -83,7 +84,7 @@ class BoneLayer(BaseTunerLayer):
             self.reset_bone_parameters_random(adapter_name)
         # Move new weights to device
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_bone_parameters(self, adapter_name: str, r):
         self.bone_block[adapter_name] = nn.Parameter(torch.zeros(r, self.out_features), requires_grad=True)

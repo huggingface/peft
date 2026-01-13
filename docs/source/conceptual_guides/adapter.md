@@ -22,11 +22,8 @@ This guide will give you a brief overview of the adapter methods supported by PE
 
 ## Low-Rank Adaptation (LoRA)
 
-<Tip>
-
-LoRA is one of the most popular PEFT methods and a good starting point if you're just getting started with PEFT. It was originally developed for large language models but it is a tremendously popular training method for diffusion models because of its efficiency and effectiveness.
-
-</Tip>
+> [!TIP]
+> LoRA is one of the most popular PEFT methods and a good starting point if you're just getting started with PEFT. It was originally developed for large language models but it is a tremendously popular training method for diffusion models because of its efficiency and effectiveness.
 
 As mentioned briefly earlier, [LoRA](https://hf.co/papers/2106.09685) is a technique that accelerates finetuning large models while consuming less memory.
 
@@ -85,9 +82,11 @@ OFT preserves the hyperspherical energy by learning an orthogonal transformation
 
 ## Orthogonal Butterfly (BOFT)
 
-[BOFT](https://hf.co/papers/2311.06243) is a method that primarily focuses on preserving a pretrained model's generative performance in the finetuned model. It tries to maintain the same cosine similarity (hyperspherical energy) between all pairwise neurons in a layer because this better captures the semantic information among neurons. This means OFT is more capable at preserving the subject and it is better for controllable generation (similar to [ControlNet](https://huggingface.co/docs/diffusers/using-diffusers/controlnet)).
+[BOFT](https://hf.co/papers/2311.06243) is an improved orthogonal finetuning method that focuses on preserving a pretrained model's generative capabilities while being significantly more parameter-efficient than standard OFT. Like OFT, BOFT maintains the same cosine similarity (hyperspherical energy) between all pairwise neurons in a layer by applying an orthogonal transformation to the pretrained weight matrix, ensuring the semantic relationships among neurons are preserved.
 
-OFT preserves the hyperspherical energy by learning an orthogonal transformation for neurons to keep the cosine similarity between them unchanged. In practice, this means taking the matrix product of an orthogonal matrix with the pretrained weight matrix. However, to be parameter-efficient, the orthogonal matrix is represented as a block-diagonal matrix with rank `r` blocks. Whereas LoRA reduces the number of trainable parameters with low-rank structures, OFT reduces the number of trainable parameters with a sparse block-diagonal matrix structure.
+Instead of using a block-diagonal orthogonal matrix, BOFT factorizes the orthogonal transformation into a product of **sparse butterfly matrices** (originally introduced in the [Cooley–Tukey FFT](https://en.wikipedia.org/wiki/Cooley%E2%80%93Tukey_FFT_algorithm)). Unlike OFT's block-diagonal rotations, which only mix inputs within each block, the butterfly structure guarantees that every input can influence every output, producing a **dense connectivity** with just `O(d log d)` parameters. This factorization preserves expressivity while drastically reducing the parameter count compared to OFT (at the expense of computation time).
+
+In practice, BOFT multiplies each pretrained weight matrix by a sequence of butterfly-structured orthogonal factors, enabling efficient and expressive neuron rotations. This makes BOFT well-suited for controllable generation and tasks where maintaining the pretrained model's subject representation is critical, while also scaling to larger models with lower memory and compute overhead.
 
 ## Adaptive Low-Rank Adaptation (AdaLoRA)
 

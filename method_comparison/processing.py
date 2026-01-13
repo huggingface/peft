@@ -51,10 +51,12 @@ def preprocess(rows, task_name: str, print_fn=print):
             "total_time": run_info["total_time"],
             "train_time": train_info["train_time"],
             "file_size": train_info["file_size"],
+            "num_trainable_params": train_info["num_trainable_params"],
             "test_accuracy": train_metrics["test accuracy"],
             "train_loss": train_metrics["train loss"],
             "train_samples": train_metrics["train samples"],
             "train_total_tokens": train_metrics["train total tokens"],
+            "forgetting*": train_metrics.get("forgetting", 123),
             "peft_version": meta_info["package_info"]["peft-version"],
             "peft_branch": run_info["peft_branch"],
             "transformers_version": meta_info["package_info"]["transformers-version"],
@@ -103,6 +105,8 @@ def load_df(path, task_name, print_fn=print):
         "train_loss": float,
         "train_samples": int,
         "train_total_tokens": int,
+        "forgetting*": float,
+        "num_trainable_params": int,
         "peft_version": "string",
         "peft_branch": "string",
         "transformers_version": "string",
@@ -131,14 +135,15 @@ def load_df(path, task_name, print_fn=print):
         "accelerator_memory_max",
         "accelerator_memory_reserved_99th",
         "accelerator_memory_reserved_avg",
+        "num_trainable_params",
         "file_size",
         "created_at",
         "task_name",
+        "forgetting*",
     ]
     other_columns = [col for col in df if col not in important_columns]
     df = df[important_columns + other_columns]
 
-    size_before_drop_dups = len(df)
     columns = ["experiment_name", "model_id", "peft_type", "created_at"]
     # we want to keep only the most recent run for each experiment
     df = df.sort_values("created_at").drop_duplicates(columns, keep="last")

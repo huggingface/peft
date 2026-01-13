@@ -74,6 +74,8 @@ class VeraLayer(BaseTunerLayer):
         vera_dropout,
         init_weights,
         d_initial: float = 0.1,
+        inference_mode: bool = False,
+        **kwargs,
     ):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -129,7 +131,7 @@ class VeraLayer(BaseTunerLayer):
             self.reset_vera_parameters(adapter_name, d_initial=d_initial)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_vera_parameters(self, adapter_name, d_initial: float = 0.1):
         if adapter_name in self.vera_lambda_d.keys():
@@ -283,6 +285,9 @@ class Linear(nn.Linear, VeraLayer):
 
         result = result.to(previous_dtype)
         return result
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        return True
 
     def __repr__(self) -> str:
         rep = super().__repr__()

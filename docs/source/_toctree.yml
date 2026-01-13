@@ -90,6 +90,8 @@
       title: LoKr
     - local: package_reference/lora
       title: LoRA
+    - local: package_reference/osf
+      title: OSF
     - local: package_reference/xlora
       title: X-LoRA
     - local: package_reference/adapter_utils
@@ -106,6 +108,8 @@
       title: P-tuning
     - local: package_reference/prefix_tuning
       title: Prefix tuning
+    - local: package_reference/cartridges
+      title: Cartridges
     - local: package_reference/prompt_tuning
       title: Prompt tuning
     - local: package_reference/layernorm_tuning
@@ -114,6 +118,8 @@
       title: VeRA
     - local: package_reference/fourierft
       title: FourierFT
+    - local: package_reference/gralora
+      title: GraLoRA
     - local: package_reference/vblora
       title: VB-LoRA
     - local: package_reference/hra
@@ -132,6 +138,12 @@
       title: C3A
     - local: package_reference/miss
       title: MiSS
+    - local: package_reference/road
+      title: RoAd
+    - local: package_reference/waveft
+      title: WaveFT
+    - local: package_reference/delora
+      title: DeLoRA
 
     title: Adapters
   - sections:
@@ -141,5 +153,9 @@
       title: Helpers
     - local: package_reference/hotswap
       title: Hotswapping adapters
+    - local: package_reference/functional
+      title: Functions for PEFT integration
+    - local: package_reference/lora_conversion
+      title: Converting non-LoRA adapters to LoRA
     title: Utilities
   title: API reference

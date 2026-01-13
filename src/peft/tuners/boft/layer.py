@@ -261,7 +261,15 @@ class BOFTLayer(BaseTunerLayer):
             warnings.warn("Unscaling operation for BOFT not supported! Keeping scale to 1.")
 
     def update_layer(
-        self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
+        self,
+        adapter_name,
+        boft_block_size,
+        boft_block_num,
+        boft_n_butterfly_factor,
+        boft_dropout,
+        init_weights,
+        inference_mode: bool = False,
+        **kwargs,
     ):
         """
         Update the linear layer with trainable BOFT weights. Override for other layer types.
@@ -360,7 +368,7 @@ class BOFTLayer(BaseTunerLayer):
         self.boft_block_num[adapter_name] = boft_block_num
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_boft_parameters(self, adapter_name, init_weights):
         """
@@ -449,10 +457,10 @@ class BOFTLayer(BaseTunerLayer):
         skew_mat = 0.5 * (data - data.transpose(1, 2))
         id_mat = torch.eye(r, device=data.device).unsqueeze(0).expand(b, r, c)
 
-        # Perform the Cayley parametrization
+        # Perform the Cayley parametrization, must be in float32
         Q = torch.linalg.solve(id_mat + skew_mat, id_mat - skew_mat, left=False)
 
-        return Q
+        return Q.to(data.dtype)
 
 
 class Linear(nn.Module, BOFTLayer):
@@ -578,7 +586,7 @@ class Linear(nn.Module, BOFTLayer):
             block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
             block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
 
-        boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+        boft_P = self.boft_P.to(block_diagonal_butterfly.device, block_diagonal_butterfly.dtype)
         butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
         butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
         butterfly_oft_mat = butterfly_oft_mat_batch[0]
@@ -682,7 +690,15 @@ class Conv2d(nn.Module, BOFTLayer):
         )
 
     def update_layer(
-        self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
+        self,
+        adapter_name,
+        boft_block_size,
+        boft_block_num,
+        boft_n_butterfly_factor,
+        boft_dropout,
+        init_weights,
+        inference_mode: bool = False,
+        **kwargs,
     ):
         """
         Update the conv2d layer with trainable BOFT weights.
@@ -787,7 +803,7 @@ class Conv2d(nn.Module, BOFTLayer):
         self.boft_block_num[adapter_name] = boft_block_num
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -903,7 +919,7 @@ class Conv2d(nn.Module, BOFTLayer):
             block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
             block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
 
-        boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+        boft_P = self.boft_P.to(block_diagonal_butterfly.device, block_diagonal_butterfly.dtype)
         butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
         butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
         butterfly_oft_mat = butterfly_oft_mat_batch[0]

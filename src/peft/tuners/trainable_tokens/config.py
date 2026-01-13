@@ -85,4 +85,5 @@ class TrainableTokensConfig(PeftConfig):
     )
 
     def __post_init__(self):
+        super().__post_init__()
         self.peft_type = PeftType.TRAINABLE_TOKENS

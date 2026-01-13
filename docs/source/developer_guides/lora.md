@@ -119,11 +119,8 @@ initialize_lora_eva_weights(peft_model, dataloader)
 ```
 EVA works out of the box with bitsandbytes. Simply initialize the model with `quantization_config` and call [`initialize_lora_eva_weights`] as usual.
 
-<Tip>
-
-For further instructions on using EVA, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/eva_finetuning).
-
-</Tip>
+> [!TIP]
+> For further instructions on using EVA, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/eva_finetuning).
 
 ### LoftQ
 
@@ -158,11 +155,8 @@ At the moment, `replace_lora_weights_loftq` has these additional limitations:
 - Model files must be stored as a `safetensors` file.
 - Only bitsandbytes 4bit quantization is supported.
 
-<Tip>
-
-Learn more about how PEFT works with quantization in the [Quantization](quantization) guide.
-
-</Tip>
+> [!TIP]
+> Learn more about how PEFT works with quantization in the [Quantization](quantization) guide.
 
 ### Rank-stabilized LoRA
 
@@ -172,6 +166,111 @@ Another way to initialize [`LoraConfig`] is with the [rank-stabilized LoRA (rsLo
 from peft import LoraConfig
 
 config = LoraConfig(use_rslora=True, ...)
+```
+### Activated LoRA (aLoRA)
+
+Activated LoRA (aLoRA) is a low rank adapter architecture for Causal LMs that allows for reusing existing base model KV cache for more efficient inference. This approach is best suited for inference pipelines which rely on the base model for most tasks/generations, but use aLoRA adapter(s) to perform specialized task(s) within the chain. For example, checking or correcting generated outputs of the base model. In these settings, inference times can be sped up by an order of magnitude or more. For more information on aLoRA and many example use cases, see https://huggingface.co/papers/2504.12397.
+
+This technique scans for the last occurence of an invocation sequence (`alora_invocation_tokens`) in each input (this can be as short as 1 token), and activates the adapter weights on tokens starting with the beginning of the invocation sequence (any inputs after the invocation sequence are also adapted, and all generated tokens will use the adapted weights). Weights on prior tokens are left un-adapted -- making the cache for those tokens interchangeable with base model cache due to the causal attention mask in Causal LMs. Usage is very similar to standard LoRA, with the key difference that this invocation sequence must be specified when the adapter is created:
+
+```py
+from peft import LoraConfig
+
+config = LoraConfig(alora_invocation_tokens=alora_invocation_tokens, task_type="CAUSAL_LM", ...)
+```
+
+where `alora_invocation_tokens` is a list of integer token ids. Given a desired invocation string, this can be obtained as
+```
+invocation_string = "placeholder"
+alora_invocation_tokens = tokenizer.encode(invocation_string, add_special_tokens=False).
+```
+where the tokenizer is the tokenizer for the base model. Note that we have `add_special_tokens=False` to avoid adding SOS/EOS tokens in our search string (which will most likely cause failure to find).
+
+**Notes**
+* aLoRA is only supported for `task_type=CAUSAL_LM` tasks due to its focus on cache reuse.
+* Since the weights are adapted on fewer tokens, often (not always) aLoRA requires higher rank (`r`) than LoRA. `r=32` can be a good starting point.
+* aLoRA weights cannot be merged into the base model by definition, since the adapter weights are selectively applied to a subset of tokens. Attempts to merge will throw errors.
+* Beam search is not yet supported.
+* It is generally not recommended to add new tokens to the tokenizer that are not present in the base model, as this can complicate the target use case of both the base model and adapter model operating on overlapping context. That said, there is a possible workaround by first efficiently adding [trainable tokens](https://huggingface.co/docs/peft/en/package_reference/trainable_tokens) to the base model prior to training the adapter.
+
+#### Choice of invocation sequence and SFT design 
+
+Each input must have the `alora_invocation_tokens` sequence present, it is not added automatically. To maximize model performance without compromising cache reuse, it is recommended to have the adapter weights activated early, i.e. at the start of any adapter-specific prompting, but after any long inputs such as prior generations or documents. As with any model,
+formatting should be consistent between train and test.
+
+Consider the following example, where the base model has a chat template,
+and the goal is to train the adapter to generate a desired output. 
+
+* Option 1: If there is no task-specific prompt, i.e. the input is a chat history with the `assistant` prompt, then the chat template's `assistant` prompt (e.g. `<|start_of_role|>assistant<|end_of_role|>`) is a natural choice for the invocation string. See the model's chat template to find the prompt for the model.
+* Option 2: If there is a task-specific prompt for the adapter that describes the task the adapter is learning, and that prompt is put as a `user` turn immediately prior to the generation, then the chat template's `user` prompt (e.g. `<|start_of_role|>user<|end_of_role|>`) is a natural choice for the invocation string.
+
+Once deciding on an invocation string, get the model tokenizer and obtain `alora_invocation_tokens` as 
+```
+alora_invocation_tokens = tokenizer.encode(invocation_string, add_special_tokens=False).
+```
+
+An example inference setup is at [alora finetuning](https://github.com/huggingface/peft/blob/main/examples/alora_finetuning/alora_finetuning.py).
+
+**Note** If using custom strings for the invocation string, make sure that the start and end of the string are special tokens to avoid issues with tokenization at the boundaries. 
+
+To see why, imagine that 'a', 'b', 'c', and 'ab' are tokens in your tokenizer (numbers 1, 2, 3, 4 respectively). Suppose that your alora_invocation_tokens = [2, 3]. Now imagine your input string is "abc". Because "ab" is a token, this will get tokenized as [4,3]. So the alora_invocation_tokens will fail to be found, despite the string "bc" being in it. If the start and end of the invocation string are special tokens, however, this failure case will never happen since special tokens are never tokenized into the same token with other characters.
+
+#### Using (and reusing) cache for generation
+The main purpose of Activated LoRA is to make KV cache interchangeable between the base model and aLoRA adapter models **prior to the invocation sequence** since base and adapted KV values are not compatible. Specifically, keys and values stored during one model generation can be used in subsequent generations to avoid expensive prefill operations for context tokens. When sharing cache between the base model and aLoRA adapters, there are 2 main patterns:
+1. The base model has generated something, and an aLoRA adapter is then called to do a followup generation. Example: the base model answers a question, and an aLoRA trained to detect hallucinations checks the base model response.
+2. An aLoRA adapter has generated something, and the base model or a different aLoRA adapter is called to do a followup generation where there is partial context overlap with the original aLoRA. Example: The user provides a query, and an aLoRA rewrites the query to be more self-contained and improve retrieval in a RAG system. Then, documents are retrieved and loaded into context, an aLoRA checks if these documents are indeed relevant to the question, and then the base model generates an answer.
+
+
+To demonstrate the above behaviors when using caching, we're using [DynamicCache](https://huggingface.co/docs/transformers/en/kv_cache) from `transformers`. Care must be taken to ensure that adapted cache values are not mixed with base cache values. In particular, an extra step is required for sharing the cache when there is partial context overlap (pattern 2).
+
+**Pattern 1: Base model followed by aLoRA** Here, the entire input and generation from the base model is input into the aLoRA adapter, along with the invocation sequence:
+```
+from transformers import DynamicCache
+...
+cache = DynamicCache()
+inputs_base = tokenizer(prompt_base, return_tensors="pt")
+# Generate from base model and save cache
+with model_alora.disable_adapter(): 
+    output = model_alora.generate(inputs_base["input_ids"].to(device),attention_mask=inputs_base["attention_mask"].to(device),past_key_values = cache,return_dict_in_generate=True)
+output_text_base = tokenizer.decode(output.sequences[0])
+cache = output.past_key_values
+
+# Generate with aLoRA adapter from cache
+prompt_alora = output_text + INVOCATION_STRING
+inputs_alora = tokenizer(prompt_alora, return_tensors="pt").to(device)
+output = model_alora.generate(**inputs_alora, past_key_values=cache)
+output_text_alora = tokenizer.decode(output[0])
+
+# Note: cache is now tainted with adapter values and cannot be used in base model from here on!
+```
+
+**Pattern 2: aLoRA generation followed by base model (or another aLoRA) with partial context overlap** Here, we prefill the shared context using the base model, and then generate.
+
+```
+from transformers import DynamicCache
+import copy
+...
+cache = DynamicCache()
+inputs_shared = tokenizer(prompt_shared, return_tensors="pt").to(device)
+
+# Prefill from base model and save cache
+with model_alora.disable_adapter():
+    with torch.no_grad():
+        model_alora(**inputs_shared, past_key_values=cache)
+cache_copy = copy.deepcopy(cache)
+
+# Generate from aLoRA using prefilled cache
+prompt_alora = prompt_shared + INVOCATION_STRING
+inputs_alora = tokenizer(prompt_alora, return_tensors="pt").to(device)
+output = model_alora.generate(**inputs_alora, past_key_values=cache)
+output_text_alora = tokenizer.decode(output[0])
+
+# Generate from base model using saved cache not tainted by aLoRA KV values
+prompt_base = prompt_shared
+inputs_base = tokenizer(prompt_base, return_tensors="pt").to(device)
+with model_alora.disable_adapter(): 
+    output = model_alora.generate(**inputs_base, past_key_values=cache_copy)
+output_text_base = tokenizer.decode(output[0])
 ```
 
 ### Weight-Decomposed Low-Rank Adaptation (DoRA)
@@ -432,10 +531,10 @@ from peft import PeftModel
 base_model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1")
 peft_model_id = "alignment-handbook/zephyr-7b-sft-lora"
 model = PeftModel.from_pretrained(base_model, peft_model_id)
-model.merge_and_unload()
+model = model.merge_and_unload()
 ```
 
-If you need to keep a copy of the weights so you can unmerge the adapter later or delete and load different ones, you should use the [`~LoraModel.merge_adapter`] function instead. Now you have the option to use [`~LoraModel.unmerge_adapter`] to return the base model.
+It is important to assign the returned model to a variable and use it, [`~LoraModel.merge_and_unload`] is not an in-place operation. If you need to keep a copy of the weights so you can unmerge the adapter later or delete and load different ones, you should use the [`~LoraModel.merge_adapter`] function instead. Now you have the option to use [`~LoraModel.unmerge_adapter`] to return the base model.
 
 ```py
 from transformers import AutoModelForCausalLM
@@ -460,7 +559,7 @@ from peft import PeftModel
 import torch
 
 base_model = AutoModelForCausalLM.from_pretrained(
-    "mistralai/Mistral-7B-v0.1", torch_dtype=torch.float16, device_map="auto"
+    "mistralai/Mistral-7B-v0.1", dtype=torch.float16, device_map="auto"
 )
 ```
 
@@ -485,11 +584,8 @@ model.add_weighted_adapter(
 model.set_adapter(weighted_adapter_name)
 ```
 
-<Tip>
-
-There are several supported methods for `combination_type`. Refer to the [documentation](../package_reference/lora#peft.LoraModel.add_weighted_adapter) for more details. Note that "svd" as the `combination_type` is not supported when using `torch.float16` or `torch.bfloat16` as the datatype.
-
-</Tip>
+> [!TIP]
+> There are several supported methods for `combination_type`. Refer to the [documentation](../package_reference/lora#peft.LoraModel.add_weighted_adapter) for more details. Note that "svd" as the `combination_type` is not supported when using `torch.float16` or `torch.bfloat16` as the datatype.
 
 Now, perform inference:
 
@@ -527,11 +623,11 @@ model.load_adapter("alignment-handbook/zephyr-7b-dpo-lora", adapter_name="dpo")
 model.set_adapter("dpo")
 ```
 
-To return the base model, you could use [`~LoraModel.unload`] to unload all of the LoRA modules or [`~LoraModel.delete_adapter`] to delete the adapter entirely.
+To return the base model, you could use [`~LoraModel.unload`] to unload all of the LoRA modules or [`~LoraModel.delete_adapter`] to delete the adapter entirely. [`~LoraModel.unload`] is not an in-place operation, remember to assign the returned model to a variable and use it.
 
 ```py
 # unload adapter
-model.unload()
+model = model.unload()
 
 # delete adapter
 model.delete_adapter("dpo")
@@ -602,3 +698,145 @@ Using this feature has some drawbacks, namely:
   - Increase the batch size.
   - Try to avoid having a large number of different adapters in the same batch, prefer homogeneous batches. This can be achieved by buffering samples with the same adapter and only perform inference with a small handful of different adapters.
   - Take a look at alternative implementations such as [LoRAX](https://github.com/predibase/lorax), [punica](https://github.com/punica-ai/punica), or [S-LoRA](https://github.com/S-LoRA/S-LoRA), which are specialized to work with a large number of different adapters.
+
+## Composing and Reusing LoRA Adapters
+### Arrow
+[Arrow](https://huggingface.co/papers/2405.11157) is a modular routing algorithm designed to combine multiple pre-trained task-specific LoRA adapters to solve a given task. Rather than merging all adapters naively, Arrow introduces a **gradient-free, token-wise mixture-of-experts (MoE) routing mechanism**. At inference time, it first computes a _prototype_ for each LoRA by extracting the top right singular vector from its SVD decomposition. Each token representation is then compared to these prototypes via cosine similarity to obtain routing coefficients. Tokens are assigned to the top-k most relevant LoRA adapters, with the coefficients normalized through softmax, and their outputs linearly combined. This allows effective reuse of existing LoRA modules for new tasks and leads to stronger zero-shot generalization.
+
+In PEFT, Arrow is enabled through ```ArrowConfig``` and ```create_arrow_model```. You can also configure parameters such as ```top_k``` (the number of LoRA adapters combined per token), ```router_temperature``` (the softmax temperature applied to the routing coefficients), and ```rng_seed``` (for reproducibility). 
+
+```py
+from peft import create_arrow_model, ArrowConfig
+from transformers import AutoModelForCausalLM
+
+# Loading the model
+base_model = AutoModelForCausalLM.from_pretrained("microsoft/Phi-3-mini-4k-instruct")
+
+# Creating the Arrow config
+arrow_config = ArrowConfig(
+    top_k=3,
+    router_temperature=1.0,
+    rng_seed=42,
+)
+
+# The LoRA adapters below were trained on a clustered FLAN dataset.
+# Task clustering was performed using the Model-Based Clustering (MBC) method,
+# as described in the Arrow paper.
+# While one could train a separate LoRA for each task and let Arrow route tokens among them,
+# training LoRAs on clusters of tasks instead provides an indirect optimization for
+# transfer across the multi-task dataset.
+task_specific_adapter_paths = [
+        f"TahaBa/phi3-mini-clustered-flan/ts_expert_{i}" for i in range(10)
+    ]
+
+# Creating the Arrow model
+model = create_arrow_model(
+        base_model=base_model,
+        task_specific_adapter_paths=task_specific_adapter_paths,
+        arrow_config=arrow_config,
+    )
+
+# Now the forward path could be called on this model, like a normal PeftModel.
+```
+
+Furthermore, you can add or remove adapters after calling ```create_arrow_model```—for example, to fine-tune a new adapter or discard an unnecessary one. Once the adapters are in place, you can activate the ```"arrow_router"``` for inference to use Arrow. Note that if you add a new LoRA adapter after ```create_arrow_model``` and want to fine-tune it, you must explicitly set the new adapter as active, since ```"arrow_router"``` is activated by default in ```create_arrow_model```.
+
+```py
+from trl import SFTTrainer, SFTConfig
+
+# Adding a new adapter and activating it
+model.add_adapter(adapter_name='new_adapter')
+model.set_adapter('new_adapter')
+
+# Now the model could be trained along the `new_adapter`.
+trainer = SFTTrainer(
+        model=model,
+        args=SFTConfig(...),
+        ...
+    )
+
+# Once the training is done, you can activate `arrow_router` and use it in inference
+model.set_adapter('arrow_router')    # Model is ready to be used at inference time now
+```
+
+### GenKnowSub
+[GenKnowSub](https://aclanthology.org/2025.acl-short.54/) augments Arrow by purifying task-specific LoRA adapters before routing. The key idea is to subtract general knowledge encoded in LoRA space—based on the [forgetting-via-negation principle](https://huggingface.co/papers/2212.04089)—so that task adapters become more isolated and focused on task-relevant signals. Concretely, GenKnowSub estimates a low-dimensional “general” subspace from a set of general (non task-specific) LoRA adapters and removes this component from each task adapter’s LoRA update prior to Arrow’s token-wise routing. This typically improves compositionality and reduces interference when combining many task adapters.
+
+In PEFT, enable GenKnowSub by setting ```use_gks=True``` in ArrowConfig, and providing ```general_adapter_paths``` in ```create_arrow_model```:
+
+```py
+from peft import create_arrow_model, ArrowConfig
+from transformers import AutoModelForCausalLM
+
+# Loading the model
+base_model = AutoModelForCausalLM.from_pretrained("microsoft/Phi-3-mini-4k-instruct")
+
+# Creating the Arrow config
+arrow_config = ArrowConfig(
+    top_k=3,
+    router_temperature=1.0,
+    use_gks=True,
+    rng_seed=42,
+)
+
+# Path to task-specific, trained on flan clustered dataset (as we explained before.)
+task_specific_adapter_paths = [
+        f"TahaBa/phi3-mini-clustered-flan/ts_expert_{i}" for i in range(10)
+    ]
+# These general adapters are trained on English, German, and French Wikipedia dataset,
+# with causal language modelling objective, each pair like: (507 token tsentence, 5 token completion), and the loss computed on the completion
+general_adapter_paths = [
+        "TahaBa/phi3-mini-general-adapters/cluster0_batch16_prop1.0_langen/checkpoint-17",
+        "TahaBa/phi3-mini-general-adapters/cluster0_batch16_prop1.0_langfr/checkpoint-35",
+        "TahaBa/phi3-mini-general-adapters/cluster0_batch16_prop1.0_langger/checkpoint-17"
+    ]
+
+# Creating the Arrow model
+model = create_arrow_model(
+        base_model=base_model,
+        task_specific_adapter_paths=task_specific_adapter_paths,
+        general_adapter_paths=general_adapter_paths,
+        arrow_config=arrow_config,
+    )
+
+# Now the forward path could be called on this model, like a normal PeftModel.
+```
+To encode general knowledge, GenKnowSub subtracts the average of the provided general adapters from each task-specific adapter once, before routing begins. Furthermore, the ability to add or remove adapters after calling ```create_arrow_model``` (as described in the Arrow section) is still supported in this case.
+
+> [!TIP]
+> **Things to keep in mind when using Arrow + GenKnowSub:**
+>
+> - All LoRA adapters (task-specific and general) must share the same ```rank``` and ```target_modules```.
+>
+> - Any inconsistency in these settings will raise an error in ```create_arrow_model```.
+>
+> - Having different scaling factors (```lora_alpha```) across task adapters is supported — Arrow handles them automatically.
+>
+> - Merging the ```"arrow_router"``` is not supported, due to its dynamic routing behavior.
+>
+> - In create_arrow_model, task adapters are loaded as ```task_i``` and general adapters as ```gks_j``` (where ```i``` and ```j``` are indices). The function ensures consistency of ```target_modules```, ```rank```, and whether adapters are applied to ```Linear``` or ```Linear4bit``` layers. It then adds the ```"arrow_router"``` module and activates it. Any customization of this process requires overriding ```create_arrow_model```.
+>
+> - This implementation is compatible with 4-bit quantization (via bitsandbytes):
+>
+>     ```py
+>     from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+>     import torch
+>
+>     # Quantisation config
+>     bnb_config = BitsAndBytesConfig(
+>             load_in_4bit=True,
+>             bnb_4bit_quant_type="nf4",
+>             bnb_4bit_compute_dtype=torch.bfloat16,
+>             bnb_4bit_use_double_quant=False,
+>         )
+>
+>     # Loading the model
+>     base_model = AutoModelForCausalLM.from_pretrained(
+>         "microsoft/Phi-3-mini-4k-instruct",
+>         dtype=torch.bfloat16,
+>         device_map="auto",
+>         quantization_config=bnb_config,
+>     )
+>
+>     # Now call create_arrow_model() as we explained before.
+>     ```

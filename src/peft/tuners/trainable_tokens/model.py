@@ -14,29 +14,18 @@
 
 from __future__ import annotations
 
-import warnings
-from typing import Optional
-
-import torch
 import torch.nn as nn
-from tqdm import tqdm
 
 from peft.config import PeftConfig
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists, onload_layer
-from peft.utils import AuxiliaryTrainingWrapper, _get_input_embeddings_name, _get_submodules
+from peft.tuners.tuners_utils import BaseTuner
+from peft.utils import _get_input_embeddings_name, _get_submodules
 
 from .layer import TrainableTokensLayer
 
 
 class TrainableTokensModel(BaseTuner):
     prefix: str = "trainable_tokens_"
-
-    def __getattr__(self, name: str):
-        """Forward missing attributes to the wrapped module."""
-        try:
-            return super().__getattr__(name)  # defer to nn.Module's logic
-        except AttributeError:
-            return getattr(self.model, name)
+    tuner_layer_cls = TrainableTokensLayer
 
     def _prepare_adapter_config(self, peft_config, model_config):
         # target_modules can be none which prompts us to infer the embedding layer name ourselves.
@@ -69,30 +58,44 @@ class TrainableTokensModel(BaseTuner):
         # not do any changes on its own but solely rely on the weights from the tied adapter. We will search for the
         # tied weights and put tied TrainableTokensLayer adapters on them, all tied to the adapter of the embedding
         # matrix.
+        tied_weights_module_names = self._get_module_names_tied_with_embedding()
+
         if (
-            model_config.get("tie_word_embeddings", False)
-            # some models may be misconfigured to have weight tying enabled but don't define tied weights keys
-            and self.model._tied_weights_keys is not None
+            tied_weights_module_names
+            and model_config.get("tie_word_embeddings", False)
             and isinstance(self.model.get_input_embeddings(), TrainableTokensLayer)
         ):
-            module_keys = [".".join(n.split(".")[:-1]) for n in self.model._tied_weights_keys]
             # disable removing of duplicates since we're essentially only dealing with duplicates (i.e. tied weights)
             for name, module in self.model.named_modules(remove_duplicate=False):
-                matched_keys = [target_key for target_key in module_keys if name.endswith(target_key)]
+                matched_keys = [target_key for target_key in tied_weights_module_names if name.endswith(target_key)]
                 if matched_keys:
                     parent, target, target_name = _get_submodules(model, name)
 
-                    peft_config = self.peft_config[adapter_name].to_dict()
-                    peft_config["tied_adapter"] = self.model.get_input_embeddings()
+                    # If the module is already a TrainableTokensLayer, we need to replace it with a tied version
+                    # instead of just updating it. This handles the case where the user explicitly targeted
+                    # both the embedding and tied layers in target_modules.
+                    if isinstance(target, TrainableTokensLayer):
+                        # Replace the existing layer with a new one that's tied to the embedding
+                        peft_config = self.peft_config[adapter_name].to_dict()
+                        peft_config["tied_adapter"] = self.model.get_input_embeddings()
 
-                    self._create_and_replace_dict(
-                        peft_config,
-                        adapter_name,
-                        target,
-                        target_name,
-                        parent,
-                        matched_keys[0],
-                    )
+                        new_module = self._create_new_module(
+                            peft_config, adapter_name, target.base_layer, **peft_config
+                        )
+                        self._replace_module(parent, target_name, new_module, target.base_layer)
+                    else:
+                        # Module hasn't been wrapped yet, create and replace normally
+                        peft_config = self.peft_config[adapter_name].to_dict()
+                        peft_config["tied_adapter"] = self.model.get_input_embeddings()
+
+                        self._create_and_replace_dict(
+                            peft_config,
+                            adapter_name,
+                            target,
+                            target_name,
+                            parent,
+                            matched_keys[0],
+                        )
 
     def _get_tied_target_modules(self, *args, **kwargs):
         # Normally this method would return the layers that target tied layers.
@@ -137,9 +140,6 @@ class TrainableTokensModel(BaseTuner):
         kwargs = peft_config.to_dict()
         self._create_and_replace_dict(kwargs, adapter_name, target, target_name, parent, current_key)
 
-    def _check_target_module_exists(self, peft_config: PeftConfig, key: str) -> bool:
-        return check_target_module_exists(peft_config, key)
-
     @staticmethod
     def _create_new_module(peft_config, adapter_name, target, **kwargs):
         new_module = TrainableTokensLayer(target, adapter_name, **kwargs)
@@ -151,133 +151,3 @@ class TrainableTokensModel(BaseTuner):
         )
 
         return new_module
-
-    def _replace_module(self, parent, child_name, new_module, child):
-        setattr(parent, child_name, new_module)
-        # It's not necessary to set requires_grad here, as that is handled by
-        # _mark_only_adapters_as_trainable
-
-        # child layer wraps the original module, unpack it
-        if hasattr(child, "base_layer"):
-            child = child.base_layer
-
-        if not hasattr(new_module, "base_layer"):
-            new_module.weight = child.weight
-            if hasattr(child, "bias"):
-                new_module.bias = child.bias
-
-        if getattr(child, "state", None) is not None:
-            if hasattr(new_module, "base_layer"):
-                new_module.base_layer.state = child.state
-            else:
-                new_module.state = child.state
-            new_module.to(child.weight.device)
-
-        meta = torch.device("meta")
-        # dispatch to correct device
-        for name, module in new_module.named_modules():
-            if self.prefix in name:
-                if not any(p.device == meta for p in module.parameters()):
-                    module.to(child.weight.device)
-
-    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
-        for n, p in model.named_parameters():
-            if self.prefix not in n:
-                p.requires_grad = False
-
-    def _set_adapter_layers(self, enabled: bool = True) -> None:
-        for module in self.model.modules():
-            if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
-                module.enable_adapters(enabled)
-
-    def enable_adapter_layers(self) -> None:
-        """Enable all adapters.
-
-        Call this if you have previously disabled all adapters and want to re-enable them.
-        """
-        self._set_adapter_layers(enabled=True)
-
-    def disable_adapter_layers(self) -> None:
-        """Disable all adapters.
-
-        When disabling all adapters, the model output corresponds to the output of the base model.
-        """
-        self._set_adapter_layers(enabled=False)
-
-    def set_adapter(self, adapter_name: str | list[str]) -> None:
-        """Set the active adapter(s).
-
-        Additionally, this function will set the specified adapters to trainable (i.e., requires_grad=True). If this is
-        not desired, use the following code.
-
-        ```py
-        >>> for name, param in model_peft.named_parameters():
-        ...     if ...:  # some check on name (ex. if 'lora' in name)
-        ...         param.requires_grad = False
-        ```
-
-        Args:
-            adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
-        """
-        for module in self.model.modules():
-            if isinstance(module, TrainableTokensLayer):
-                if module.merged:
-                    warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
-                    module.unmerge()
-                module.set_adapter(adapter_name)
-        self.active_adapter = adapter_name
-
-    def unload(self) -> torch.nn.Module:
-        """
-        Gets back the base model by removing all the trainable tokens modules without merging.
-        """
-        return self._unload_and_optionally_merge(merge=False)
-
-    def merge_and_unload(
-        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
-    ) -> torch.nn.Module:
-        r"""
-        This method merges the trained tokens into the targeted embedding layer(s) of the base model. This is needed if
-        someone wants to use the base model as a standalone model.
-
-        Args:
-            progressbar (`bool`):
-                whether to show a progressbar indicating the unload and merge process
-            safe_merge (`bool`):
-                whether to activate the safe merging check to check if there is any potential Nan in the adapter
-                weights
-            adapter_names (`List[str]`, *optional*):
-                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
-                to `None`.
-        """
-        return self._unload_and_optionally_merge(
-            progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
-        )
-
-    def _unload_and_optionally_merge(
-        self,
-        merge=True,
-        progressbar: bool = False,
-        safe_merge: bool = False,
-        adapter_names: Optional[list[str]] = None,
-    ):
-        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
-        desc = "Unloading " + ("and merging " if merge else "") + "model"
-        for key in tqdm(key_list, disable=not progressbar, desc=desc):
-            try:
-                parent, target, target_name = _get_submodules(self.model, key)
-            except AttributeError:
-                continue
-            with onload_layer(target):
-                if hasattr(target, "unload_and_optionally_merge_module"):
-                    # if layers have special unloading method, like MultiheadAttention, use that
-                    unloaded_module = target.unload_and_optionally_merge_module(
-                        merge=merge, safe_merge=safe_merge, adapter_names=adapter_names
-                    )
-                    self._replace_module(parent, target_name, unloaded_module, target)
-                elif hasattr(target, "base_layer"):
-                    if merge:
-                        target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-                    self._replace_module(parent, target_name, target.get_base_layer(), target)
-
-        return self.model

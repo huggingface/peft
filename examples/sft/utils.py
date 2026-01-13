@@ -97,7 +97,9 @@ def create_and_prepare_model(args, data_args, training_args):
     ):
         raise NotImplementedError("Unsloth is not supported in distributed training")
 
-    if args.use_4bit_quantization:
+    if args.use_4bit_quantization and args.use_8bit_quantization:
+        raise ValueError("You configured 4bit and 8bit quantization at the same time, please choose only one of them.")
+    elif args.use_4bit_quantization:
         compute_dtype = getattr(torch, args.bnb_4bit_compute_dtype)
         quant_storage_dtype = getattr(torch, args.bnb_4bit_quant_storage_dtype)
 
@@ -115,8 +117,8 @@ def create_and_prepare_model(args, data_args, training_args):
                 print("=" * 80)
                 print("Your GPU supports bfloat16, you can accelerate training with the argument --bf16")
                 print("=" * 80)
-        elif args.use_8bit_quantization:
-            bnb_config = BitsAndBytesConfig(load_in_8bit=args.use_8bit_quantization)
+    elif args.use_8bit_quantization:
+        bnb_config = BitsAndBytesConfig(load_in_8bit=args.use_8bit_quantization)
 
     if args.use_unsloth:
         if torch.xpu.is_available():
@@ -124,19 +126,17 @@ def create_and_prepare_model(args, data_args, training_args):
         # Load model
         model, _ = FastLanguageModel.from_pretrained(
             model_name=args.model_name_or_path,
-            max_seq_length=training_args.max_seq_length,
+            max_seq_length=training_args.max_length,
             dtype=None,
             load_in_4bit=args.use_4bit_quantization,
         )
     else:
-        torch_dtype = (
-            quant_storage_dtype if quant_storage_dtype and quant_storage_dtype.is_floating_point else torch.float32
-        )
+        dtype = quant_storage_dtype if quant_storage_dtype and quant_storage_dtype.is_floating_point else torch.float32
 
         # Prepare model loading arguments
         model_kwargs = {
             "trust_remote_code": True,
-            "torch_dtype": torch_dtype,
+            "dtype": dtype,
         }
         if args.use_flash_attn:
             if torch.xpu.is_available():
@@ -213,7 +213,7 @@ def create_and_prepare_model(args, data_args, training_args):
             else args.lora_target_modules,
             use_gradient_checkpointing=training_args.gradient_checkpointing,
             random_state=training_args.seed,
-            max_seq_length=training_args.max_seq_length,
+            max_seq_length=training_args.max_length,
         )
 
     return model, peft_config, tokenizer

@@ -217,7 +217,7 @@ class TestMultiTaskPromptTuning:
         input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
         task_ids = torch.tensor([1, 2]).to(self.torch_device)
 
-        original = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.bfloat16)
+        original = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.bfloat16)
         mpt = get_peft_model(original, config)
         mpt = mpt.to(self.torch_device)
         _ = mpt.generate(input_ids=input_ids, task_ids=task_ids)

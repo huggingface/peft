@@ -20,7 +20,9 @@ from peft import (
     BOFTConfig,
     BoneConfig,
     C3AConfig,
+    DeloraConfig,
     FourierFTConfig,
+    GraloraConfig,
     HRAConfig,
     IA3Config,
     LoraConfig,
@@ -30,9 +32,11 @@ from peft import (
     PromptEncoderConfig,
     PromptTuningConfig,
     PromptTuningInit,
+    RoadConfig,
     ShiraConfig,
     VBLoRAConfig,
     VeraConfig,
+    WaveFTConfig,
     get_peft_model,
 )
 from peft.utils.other import ModulesToSaveWrapper
@@ -41,9 +45,10 @@ from .testing_common import PeftCommonTester
 from .testing_utils import hub_online_once
 
 
+# Note: models from peft-internal-testing are just the safetensors versions of hf-internal-testing
 PEFT_SEQ_CLS_MODELS_TO_TEST = [
-    "hf-internal-testing/tiny-random-BertForSequenceClassification",
-    "hf-internal-testing/tiny-random-RobertaForSequenceClassification",
+    "peft-internal-testing/tiny-random-BertForSequenceClassification",
+    "peft-internal-testing/tiny-random-RobertaForSequenceClassification",
     "trl-internal-testing/tiny-LlamaForSequenceClassification-3.2",
 ]
 
@@ -81,10 +86,25 @@ ALL_CONFIGS = [
         },
     ),
     (
+        DeloraConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "r": 2,
+        },
+    ),
+    (
         FourierFTConfig,
         {
             "task_type": "SEQ_CLS",
             "n_frequency": 10,
+            "target_modules": None,
+        },
+    ),
+    (
+        GraloraConfig,
+        {
+            "task_type": "SEQ_CLS",
             "target_modules": None,
         },
     ),
@@ -157,6 +177,14 @@ ALL_CONFIGS = [
         },
     ),
     (
+        RoadConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "variant": "road_1",
+            "group_size": 2,
+        },
+    ),
+    (
         ShiraConfig,
         {
             "r": 1,
@@ -196,6 +224,14 @@ ALL_CONFIGS = [
             "target_modules": None,
         },
     ),
+    (
+        WaveFTConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "n_frequency": 8,
+            "target_modules": None,
+        },
+    ),
 ]
 
 
@@ -206,10 +242,6 @@ class TestSequenceClassificationModels(PeftCommonTester):
     """
 
     transformers_class = AutoModelForSequenceClassification
-
-    def skipTest(self, reason=""):
-        #  for backwards compatibility with unittest style test classes
-        pytest.skip(reason)
 
     def prepare_inputs_for_testing(self):
         input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)

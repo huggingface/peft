@@ -51,7 +51,7 @@ class IA3Layer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-    def update_layer(self, adapter_name, init_ia3_weights):
+    def update_layer(self, adapter_name, init_ia3_weights, inference_mode: bool = False, **kwargs):
         # This code works for linear layers, override for other layer types
         # Actual trainable parameters
         if self.is_feedforward:
@@ -62,7 +62,7 @@ class IA3Layer(BaseTunerLayer):
         if init_ia3_weights:
             self.reset_ia3_parameters(adapter_name)
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_ia3_parameters(self, adapter_name):
         if adapter_name in self.ia3_l.keys():
@@ -202,7 +202,7 @@ class _ConvNd(nn.Module, IA3Layer):
 
         self.update_layer(adapter_name, init_ia3_weights)
 
-    def update_layer(self, adapter_name, init_ia3_weights):
+    def update_layer(self, adapter_name, init_ia3_weights, inference_mode: bool = False, **kwargs):
         # Actual trainable parameters
         num_features = self.in_features if self.is_feedforward else self.out_features
         weights_size = (1, num_features) + (1,) * (self._kernel_dim - 2)
@@ -211,7 +211,7 @@ class _ConvNd(nn.Module, IA3Layer):
         if init_ia3_weights:
             self.reset_ia3_parameters(adapter_name)
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """

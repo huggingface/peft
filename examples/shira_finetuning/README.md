@@ -1,7 +1,7 @@
 # Sparse High Rank Adapters
 
 ## Introduction
-Sparse High Rank Adapters or [SHiRA](https://arxiv.org/abs/2406.13175) is an alternate type of adapter and has been found to have significant advantages over the low rank adapters. Specifically, SHiRA achieves better accuracy than LoRA for a variety of vision and language tasks. It also offers simpler and higher quality multi-adapter fusion by significantly reducing concept loss, a common problem faced by low rank adapters. SHiRA directly finetunes a small number of the base model's parameters to finetune the model on any adaptation task.
+Sparse High Rank Adapters or [SHiRA](https://huggingface.co/papers/2406.13175) is an alternate type of adapter and has been found to have significant advantages over the low rank adapters. Specifically, SHiRA achieves better accuracy than LoRA for a variety of vision and language tasks. It also offers simpler and higher quality multi-adapter fusion by significantly reducing concept loss, a common problem faced by low rank adapters. SHiRA directly finetunes a small number of the base model's parameters to finetune the model on any adaptation task.
 
 ## Quick start
 ```python
@@ -11,14 +11,14 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import SFTConfig, SFTTrainer
 from datasets import load_dataset
 
-model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m", torch_dtype=torch.bfloat16, device_map="auto")
+model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m", dtype=torch.bfloat16, device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
 dataset = load_dataset("imdb", split="train[:1%]")
 shira_config = ShiraConfig(
     r=32,
 )
 peft_model = get_peft_model(model, shira_config)
-training_args = SFTConfig(dataset_text_field="text", max_seq_length=128)
+training_args = SFTConfig(dataset_text_field="text", max_length=128)
 trainer = SFTTrainer(
     model=peft_model,
     train_dataset=dataset,

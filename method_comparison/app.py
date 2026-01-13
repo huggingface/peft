@@ -33,6 +33,8 @@ metric_preferences = {
     "file_size": "lower",
     "test_accuracy": "higher",
     "train_loss": "lower",
+    "num_trainable_params": "lower",
+    "forgetting*": "lower",
 }
 
 
@@ -186,7 +188,7 @@ def format_df(df):
 
 
 def build_app(df):
-    with gr.Blocks(theme=gr.themes.Soft()) as demo:
+    with gr.Blocks() as demo:
         gr.Markdown("# PEFT method comparison")
         gr.Markdown(
             "Find more information [on the PEFT GitHub repo](https://github.com/huggingface/peft/tree/main/method_comparison)"
@@ -229,6 +231,11 @@ def build_app(df):
             )
             apply_filter_button = gr.Button("Apply Filter")
             reset_filter_button = gr.Button("Reset Filter")
+
+        gr.Markdown(
+            "*forgetting: This is the reduction in CE loss on a sample of Wikipedia data and reflects how much the "
+            "model 'forgot' during training. The lower the number, the better."
+        )
 
         gr.Markdown("## Pareto plot")
         gr.Markdown(
@@ -375,4 +382,4 @@ def build_app(df):
 path = os.path.join(os.path.dirname(__file__), "MetaMathQA", "results")
 df = load_df(path, task_name="MetaMathQA")
 demo = build_app(df)
-demo.launch()
+demo.launch(theme=gr.themes.Soft())

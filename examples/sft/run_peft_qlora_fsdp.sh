@@ -6,7 +6,7 @@ accelerate launch --config_file "configs/fsdp_config_qlora.yaml"  train.py \
 --add_special_tokens False \
 --append_concat_token False \
 --splits "train,test" \
---max_seq_len 2048 \
+--max_length 2048 \
 --num_train_epochs 1 \
 --logging_steps 5 \
 --log_level "info" \

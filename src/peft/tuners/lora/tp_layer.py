@@ -110,6 +110,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         init_method=init.xavier_normal_,
         input_is_parallel=True,
         gather_output=False,
+        inference_mode: bool = False,
         **parallel_linear_kwargs,
     ):
         # collect the kwargs
@@ -182,7 +183,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         if adapter_name in self.lora_variant:
             self.lora_variant[adapter_name].init(self, **kwargs)
 
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any):
         self._check_forward_args(x, *args, **kwargs)
