@@ -3911,15 +3911,14 @@ class TestRequiresGrad:
         config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
         peft_model = get_peft_model(MLP(), config)
 
-        # when disabling the adapter, the original module's grad should be enabled and vice versa
+        # when disabling the adapter, modules_to_save should have requires_grad=False
+        # original_module's requires_grad is no longer manipulated by enable_adapters
         peft_model.disable_adapter_layers()
         self.check_requires_grad(
             peft_model,
-            "base_model.model.lin1.original_module.weight",
-            "base_model.model.lin1.original_module.bias",
         )
 
-        # when re-enabling the adapter, the original module's grad should be disabled and vice versa
+        # when re-enabling the adapter, modules_to_save should have requires_grad=True
         peft_model.enable_adapter_layers()
         self.check_requires_grad(
             peft_model,
@@ -3929,12 +3928,11 @@ class TestRequiresGrad:
             "base_model.model.lin0.lora_B.default.weight",
         )
 
-        # when using the disable_adapter context, the original module's grad should be enabled and vice versa
+        # when using the disable_adapter context, modules_to_save should have requires_grad=False
+        # original_module's requires_grad is no longer manipulated by enable_adapters
         with peft_model.disable_adapter():
             self.check_requires_grad(
                 peft_model,
-                "base_model.model.lin1.original_module.weight",
-                "base_model.model.lin1.original_module.bias",
             )
 
         # after context is exited, return to the previous state
