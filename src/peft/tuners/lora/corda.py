@@ -338,14 +338,19 @@ def crop_corda_eigens(model: nn.Module, config: LoraConfig):
             raise ValueError(f"Invalid corda_method found: {module.corda_method}, it should be 'ipm' or 'kpm'.")
 
         # Sanity check
+        # For Conv1D, weight is stored as (in_features, out_features), transposed compared to Linear
+        # But U and V are computed on the transposed weight, so we need to account for this
+        weight_out_dim = module.weight.size(1) if isinstance(module, Conv1D) else module.weight.size(0)
+        weight_in_dim = module.weight.size(0) if isinstance(module, Conv1D) else module.weight.size(1)
+
         if module.eigens.S_WC.size(0) != module.rank:
             raise ValueError(
                 f"rank mismatch: {module.eigens.S_WC.size(0)} vs. {module.rank},"
                 "please file an issue at https://github.com/huggingface/peft/issues."
             )
-        if module.eigens.U_WC.size(0) != module.weight.size(0):
+        if module.eigens.U_WC.size(0) != weight_out_dim:
             raise ValueError(
-                f"U size mismatch: {module.eigens.U_WC.size(0)} vs. {module.weight.size(0)},"
+                f"U size mismatch: {module.eigens.U_WC.size(0)} vs. {weight_out_dim},"
                 "please file an issue at https://github.com/huggingface/peft/issues."
             )
         if module.eigens.U_WC.size(1) != module.rank:
@@ -353,9 +358,9 @@ def crop_corda_eigens(model: nn.Module, config: LoraConfig):
                 f"U size mismatch: {module.eigens.U_WC.size(1)} vs. {module.rank},"
                 "please file an issue at https://github.com/huggingface/peft/issues."
             )
-        if module.eigens.V_WC.size(0) != module.weight.size(1):
+        if module.eigens.V_WC.size(0) != weight_in_dim:
             raise ValueError(
-                f"V size mismatch: {module.eigens.V_WC.size(0)} vs. {module.weight.size(1)},"
+                f"V size mismatch: {module.eigens.V_WC.size(0)} vs. {weight_in_dim},"
                 "please file an issue at https://github.com/huggingface/peft/issues."
             )
         if module.eigens.V_WC.size(1) != module.rank:
