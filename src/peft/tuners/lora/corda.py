@@ -23,6 +23,7 @@ import torch
 import torch.nn as nn
 from attr import dataclass
 from tqdm import tqdm
+from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.lora.config import LoraConfig
 from peft.tuners.lora.model import LoraModel
@@ -39,10 +40,10 @@ class CordaEigens:
 def target_modules(model: nn.Module, config: LoraConfig) -> Iterable[nn.Module]:
     """
     Iterate over CorDA target name and modules of a model. A module is a target if its name is in
-    `config.target_modules` and is `nn.Linear`.
+    `config.target_modules` and is `nn.Linear` or `Conv1D`.
     """
     for name, module in model.named_modules():
-        if LoraModel._check_target_module_exists(config, name) and isinstance(module, nn.Linear):
+        if LoraModel._check_target_module_exists(config, name) and isinstance(module, (nn.Linear, Conv1D)):
             yield name, module
 
 
@@ -250,7 +251,7 @@ def collect_eigens(
 
 @torch.no_grad()
 def collect_eigens_for_layer(
-    linear: nn.Linear,
+    linear: nn.Module,
     config: LoraConfig,
 ) -> CordaEigens:
     w = linear.weight.data.float()
