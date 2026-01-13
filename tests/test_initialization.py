@@ -3303,18 +3303,16 @@ class TestCordaInitialization:
     @pytest.mark.parametrize("corda_method", ("ipm", "kpm"))
     def test_lora_corda_conv1d_gpt2(self, tmp_path, corda_method):
         """Test that CoRDA works with Conv1D layers (GPT-2)."""
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoModelForCausalLM
 
-        model = AutoModelForCausalLM.from_pretrained("gpt2")
-        tokenizer = AutoTokenizer.from_pretrained("gpt2")
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-gpt2").to(self.torch_device)
 
-        # Create sample input
-        text = "Hello world"
-        inputs = tokenizer(text, return_tensors="pt")
+        # Create random input
+        input_ids = torch.randint(0, model.config.vocab_size, (1, 10), device=self.torch_device)
 
         # Get baseline output
         with torch.no_grad():
-            output_base = model(**inputs).logits
+            output_base = model(input_ids).logits
 
         corda_config = CordaConfig(
             cache_file=tmp_path / "corda_cache.pt",
@@ -3331,7 +3329,7 @@ class TestCordaInitialization:
         preprocess_corda(
             model,
             config,
-            run_model=lambda: model(**inputs),
+            run_model=lambda: model(input_ids),
         )
 
         # Create PEFT model
@@ -3339,7 +3337,7 @@ class TestCordaInitialization:
 
         # Check that adapter performs identity transformation initially
         with torch.no_grad():
-            output_peft = peft_model(**inputs).logits
+            output_peft = peft_model(input_ids).logits
         assert torch.allclose(output_base, output_peft, atol=1e-5)
 
 
