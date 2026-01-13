@@ -254,6 +254,9 @@ def disable_input_dtype_casting(model: nn.Module, active: bool = True):
 class DoraCaching:
     """Context manager to enable DoRA caching, which improves speed of DoRA inference at the expense of memory.
 
+    With active caching, the materialized LoRA weight (B @ A) and the weight norm (base weight + LoRA weight) are
+    cached.
+
     Even within the caching context, if the model is in training mode, caching is disabled. When the model switches to
     training mode, the cache will be cleared.
 

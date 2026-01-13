@@ -218,7 +218,6 @@ class _DoraConvNdLayer(DoraLinearLayer):
         # calculate the same but using forward.
         r = lora_A.weight.shape[0]
         lora_weight = torch.mm(lora_B.weight.view([-1, r]), lora_A.weight.view([r, -1]))
-        lora_weight = lora_weight
         return lora_weight
 
     def forward(
