@@ -430,8 +430,7 @@ class LoraLayer(BaseTunerLayer):
         # For Conv1D, lora_B @ lora_A gives (out_dim, in_dim) but weight is (in_dim, out_dim)
         # So we need to transpose before subtraction
         delta = self.scaling[adapter_name] * lora_B @ lora_A
-        if isinstance(linear, Conv1D):
-            delta = delta.T
+        delta = transpose(delta, fan_in_fan_out=isinstance(linear, Conv1D))
         weight = weight.data - delta
         weight = weight.to(dtype)
         self.get_base_layer().weight.data = weight
