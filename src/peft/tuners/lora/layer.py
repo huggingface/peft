@@ -364,8 +364,13 @@ class LoraLayer(BaseTunerLayer):
                 "Subsequently, re-quantize the residual model to help minimize quantization errors."
             )
         weight = weight.to(torch.float32)
-        out_dim = weight.data.size(0)
-        in_dim = weight.data.size(1)
+        # For Conv1D, weight is stored as (in_features, out_features), transposed compared to Linear
+        if isinstance(linear, Conv1D):
+            out_dim = weight.data.size(1)
+            in_dim = weight.data.size(0)
+        else:
+            out_dim = weight.data.size(0)
+            in_dim = weight.data.size(1)
 
         # Calculate WC from covariance matrix
         if not hasattr(linear, "eigens"):
@@ -421,7 +426,12 @@ class LoraLayer(BaseTunerLayer):
         lora_B = U.mul(S.sqrt()).contiguous()
         self.lora_A[adapter_name].weight.data = lora_A
         self.lora_B[adapter_name].weight.data = lora_B
-        weight = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
+
+        # For Conv1D, lora_B @ lora_A gives (out_dim, in_dim) but weight is (in_dim, out_dim)
+        # So we need to transpose before subtraction
+        delta = self.scaling[adapter_name] * lora_B @ lora_A
+        delta = transpose(delta, fan_in_fan_out=self.fan_in_fan_out)
+        weight = weight.data - delta
         weight = weight.to(dtype)
         self.get_base_layer().weight.data = weight
 
