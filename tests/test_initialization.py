@@ -3300,6 +3300,48 @@ class TestCordaInitialization:
                 tmp_path / "corda-model", path_initial_model_for_weight_conversion=tmp_path / "init-model"
             )
 
+    @pytest.mark.parametrize("corda_method", ("ipm", "kpm"))
+    def test_lora_corda_conv1d_gpt2(self, tmp_path, corda_method):
+        """Test that CoRDA works with Conv1D layers (GPT-2)."""
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        tokenizer = AutoTokenizer.from_pretrained("gpt2")
+
+        # Create sample input
+        text = "Hello world"
+        inputs = tokenizer(text, return_tensors="pt")
+
+        # Get baseline output
+        with torch.no_grad():
+            output_base = model(**inputs).logits
+
+        corda_config = CordaConfig(
+            cache_file=tmp_path / "corda_cache.pt",
+            corda_method=corda_method,
+        )
+        config = LoraConfig(
+            init_lora_weights="corda",
+            target_modules=["c_fc"],  # Conv1D layer in GPT-2
+            fan_in_fan_out=True,  # Required for Conv1D
+            corda_config=corda_config,
+        )
+
+        # Preprocess with CoRDA
+        preprocess_corda(
+            model,
+            config,
+            run_model=lambda: model(**inputs),
+        )
+
+        # Create PEFT model
+        peft_model = get_peft_model(model, config)
+
+        # Check that adapter performs identity transformation initially
+        with torch.no_grad():
+            output_peft = peft_model(**inputs).logits
+        assert torch.allclose(output_base, output_peft, atol=1e-5)
+
 
 class TestEvaInitialization:
     """Tests for the EVA (Explained Variance Adaptation) initialization method.
