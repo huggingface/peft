@@ -3324,7 +3324,7 @@ class TestCordaInitialization:
         )
 
         # Preprocess with CoRDA - this is the critical step that used to fail with Conv1D layers
-        # See issue: https://github.com/huggingface/peft/issues/XXXX
+        # See issue: https://github.com/huggingface/peft/issues/2991
         preprocess_corda(
             model,
             config,
