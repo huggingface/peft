@@ -3303,8 +3303,6 @@ class TestCordaInitialization:
     @pytest.mark.parametrize("corda_method", ("ipm", "kpm"))
     def test_lora_corda_conv1d_gpt2(self, tmp_path, corda_method):
         """Test that CoRDA works with Conv1D layers (GPT-2)."""
-        from transformers import AutoModelForCausalLM
-
         model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-gpt2").to(self.torch_device)
 
         # Create random input
@@ -3325,7 +3323,8 @@ class TestCordaInitialization:
             corda_config=corda_config,
         )
 
-        # Preprocess with CoRDA
+        # Preprocess with CoRDA - this is the critical step that used to fail with Conv1D layers
+        # See issue: https://github.com/huggingface/peft/issues/XXXX
         preprocess_corda(
             model,
             config,
@@ -3335,7 +3334,8 @@ class TestCordaInitialization:
         # Create PEFT model
         peft_model = get_peft_model(model, config)
 
-        # Check that adapter performs identity transformation initially
+        # Sanity check: verify adapter performs identity transformation initially
+        # The important test is the preprocessing step above - this just confirms correctness
         with torch.no_grad():
             output_peft = peft_model(input_ids).logits
         assert torch.allclose(output_base, output_peft, atol=1e-5)
