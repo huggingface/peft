@@ -35,7 +35,7 @@ def main():
     parser.add_argument("--per_device_train_batch_size", type=int, default=1)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--max_steps", type=int, default=1000)
-    parser.add_argument("--device", type=str, default="cuda", choices=["cpu", "mps", "cuda"])
+    parser.add_argument("--device", type=str, default="cuda", choices=["cpu", "mps", "cuda", "xpu"])
     parser.add_argument(
         "--max_init_length", type=int, default=2048, help="Max tokens for text initialization (truncate long docs)"
     )
