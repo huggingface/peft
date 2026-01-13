@@ -663,17 +663,12 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         if len(adapter_names) == 0:
             # when calling model.add_adapter, the new adapter is not automatically active
             self._active_adapter = []
-            # enable/disable adapters based on inference_mode
-            self.enable_adapters(not inference_mode)
             return
 
         adapter_name = adapter_names[0]
 
         if adapter_name not in self._adapters:
             raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
-
-        # enable/disable adapters based on inference_mode
-        self.enable_adapters(not inference_mode)
 
         for currently_active_adapter_name in self.active_adapters:
             self.modules_to_save[currently_active_adapter_name].requires_grad_(False)
