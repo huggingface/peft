@@ -154,22 +154,30 @@ class ASACallback(TrainerCallback):
         """Collect total number of subspaces from the model (called once)."""
         if self._collected_total_kk:
             return
-        
-        # Find AdaMSS layers and get total KK
+
+        # Find AdaMSS layers and collect per-layer KK, then sum to global total
         from .layer import AdaMSSLayer
-        
+
+        adapters_info: list[tuple[object, str, int]] = []  # (module, adapter_name, KK)
+        total = 0
         for name, module in model.named_modules():
             if isinstance(module, AdaMSSLayer):
-                # Get KK from first adapter (assumes all adapters have same KK)
-                if module.KK:
-                    adapter_name = list(module.KK.keys())[0]
-                    self.total_kk = module.KK[adapter_name]
-                    self._collected_total_kk = True
-                    print(f"ASA: Detected total_kk = {self.total_kk} subspaces")
-                    break
-        
-        if not self._collected_total_kk:
-            raise RuntimeError("ASA: Could not find AdaMSS layers in model")
+                # module.KK is a dict mapping adapter_name->KK for that module
+                for adapter_name, kk in module.KK.items():
+                    try:
+                        kk_int = int(kk)
+                    except Exception:
+                        kk_int = kk
+                    adapters_info.append((module, adapter_name, kk_int))
+                    total += kk_int
+
+        if total == 0 or not adapters_info:
+            raise RuntimeError("ASA: Could not find AdaMSS layers or KK information in model")
+
+        self._adapters_info = adapters_info
+        self.total_kk = total
+        self._collected_total_kk = True
+        print(f"ASA: Detected total_kk (global) = {self.total_kk} subspaces across {len(adapters_info)} adapters")
     
     def _update_model_importance(self, model):
         """Update importance scores for all AdaMSS layers."""
@@ -181,19 +189,121 @@ class ASACallback(TrainerCallback):
                     module.update_importance(adapter_name, self.beta1, self.beta2)
     
     def _mask_model_to_target(self, model, target_kk: int):
-        """Apply masking to all AdaMSS layers."""
+        """
+        Apply global top-K masking across all layers.
+        
+        This implements the exact behavior of adamss_pkg: collect importance scores
+        from all subspaces across all layers, rank them globally, and select the
+        top target_kk subspaces to keep active.
+        """
         from .layer import AdaMSSLayer
         
         if self.verbose:
-            print(f"[DEBUG][_mask_model_to_target] Starting model traversal, target_kk={target_kk}")
-        for name, module in model.named_modules():
-            if isinstance(module, AdaMSSLayer):
+            print(f"[DEBUG][_mask_model_to_target] Starting global top-{target_kk} masking")
+        
+        # Ensure we have adapters info collected
+        if not getattr(self, "_collected_total_kk", False):
+            self._collect_total_kk(model)
+
+        adapters = getattr(self, "_adapters_info", [])
+        if not adapters:
+            if self.verbose:
+                print("[DEBUG][_mask_model_to_target] No adapters collected, skipping")
+            return
+
+        # Step 1: Collect importance scores for all subspaces across all layers
+        # Format: list of (module, adapter_name, subspace_idx, importance_score)
+        subspace_scores = []
+        
+        for module, adapter_name, kk in adapters:
+            if adapter_name not in module.exp_avg_ipt:
                 if self.verbose:
-                    print(f"[DEBUG][_mask_model_to_target] Found AdaMSSLayer: {name}")
-                for adapter_name in module.exp_avg_ipt.keys():
-                    if self.verbose:
-                        print(f"[DEBUG][_mask_model_to_target] Calling mask_to_target for adapter: {adapter_name}")
-                    module.mask_to_target(adapter_name, target_kk, verbose=self.verbose)
+                    print(f"[DEBUG] Adapter {adapter_name} has no importance tracking, skipping")
+                continue
+            
+            exp_avg_ipt = module.exp_avg_ipt[adapter_name]
+            exp_avg_unc = module.exp_avg_unc[adapter_name]
+            
+            # Calculate score for each subspace in this adapter
+            for i in range(kk):
+                key_A = f"{adapter_name}_A_{i}"
+                key_B = f"{adapter_name}_B_{i}"
+                
+                if key_A not in exp_avg_ipt or key_B not in exp_avg_ipt:
+                    continue
+                
+                # Score = (ipt * unc).mean() for both A and B
+                score_A = (exp_avg_ipt[key_A] * exp_avg_unc[key_A]).mean()
+                score_B = (exp_avg_ipt[key_B] * exp_avg_unc[key_B]).mean()
+                total_score = score_A + score_B
+                
+                subspace_scores.append((module, adapter_name, i, total_score))
+        
+        if not subspace_scores:
+            if self.verbose:
+                print("[DEBUG][_mask_model_to_target] No importance scores available, skipping")
+            return
+        
+        # Step 2: Use kthvalue to find threshold (matches adamss_pkg exactly)
+        # Collect all scores into a tensor
+        all_scores = torch.stack([s[3] for s in subspace_scores])
+        
+        if self.verbose:
+            print(f"[DEBUG][_mask_model_to_target] Collected {len(subspace_scores)} subspaces globally")
+            print(f"[DEBUG][_mask_model_to_target] Top 5 scores: {[float(s) for s in all_scores.topk(min(5, len(all_scores)))[0]]}")
+        
+        # Step 3: Find kth largest value as threshold
+        # If target_kk >= total subspaces, keep all active
+        if target_kk >= len(subspace_scores):
+            mask_threshold = float('-inf')  # Keep all
+            if self.verbose:
+                print(f"[DEBUG][_mask_model_to_target] target_kk >= total subspaces, keeping all active")
+        else:
+            # Use kthvalue: find the target_kk-th largest score
+            # Note: kthvalue returns kth smallest, so we negate the scores
+            mask_threshold = -torch.kthvalue(-all_scores, target_kk)[0].item()
+            if self.verbose:
+                print(f"[DEBUG][_mask_model_to_target] Mask threshold: {mask_threshold}")
+        
+        # Step 4: Apply masking - subspaces with score > threshold are active
+        # This matches adamss_pkg: is_dict[name_mat] > mask_threshold
+        for module, adapter_name, kk in adapters:
+            num_active_in_adapter = 0
+            
+            for i in range(kk):
+                key_A = f"{adapter_name}_A_{i}"
+                key_B = f"{adapter_name}_B_{i}"
+                
+                # Find this subspace's score
+                subspace_score = None
+                for mod, adp, idx, score in subspace_scores:
+                    if id(mod) == id(module) and adp == adapter_name and idx == i:
+                        subspace_score = score
+                        break
+                
+                # Active if score > threshold (strict inequality, like adamss_pkg)
+                # Convert tensor to Python bool for requires_grad
+                if subspace_score is not None:
+                    is_active = (float(subspace_score) > mask_threshold)
+                else:
+                    is_active = False
+                
+                # Set requires_grad for both A and B parameters
+                if key_A in module.adamss_A:
+                    module.adamss_A[key_A].requires_grad = is_active
+                    if not is_active:
+                        module.adamss_A[key_A].grad = None
+                        
+                if key_B in module.adamss_B:
+                    module.adamss_B[key_B].requires_grad = is_active
+                    if not is_active:
+                        module.adamss_B[key_B].grad = None
+                
+                if is_active:
+                    num_active_in_adapter += 1
+            
+            if self.verbose:
+                print(f"[DEBUG][_mask_model_to_target] Adapter {adapter_name}: {num_active_in_adapter}/{kk} subspaces active")
     
     def _reset_model_importance(self, model):
         """Reset importance stats for all AdaMSS layers."""

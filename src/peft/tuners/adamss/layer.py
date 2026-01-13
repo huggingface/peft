@@ -99,14 +99,15 @@ class AdaMSSLayer(BaseTunerLayer):
                             exp_avg_unc[key] = torch.zeros_like(param)
                         
                         # Calculate importance: |w * g|
-                        ipt = (param * param.grad).abs()
+                        ipt = (param * param.grad).abs().detach()
                         
-                        # Update EMA
-                        exp_avg_ipt[key].mul_(beta1).add_(ipt, alpha=1 - beta1)
-                        
-                        # Update Uncertainty
+                        # CRITICAL: Update uncertainty BEFORE updating exp_avg_ipt
+                        # This matches adamss_pkg logic exactly
                         diff = (ipt - exp_avg_ipt[key]).abs()
                         exp_avg_unc[key].mul_(beta2).add_(diff, alpha=1 - beta2)
+                        
+                        # Then update exp_avg_ipt
+                        exp_avg_ipt[key].mul_(beta1).add_(ipt, alpha=1 - beta1)
     
     def mask_to_target(self, adapter_name: str, target_kk: int, verbose: bool = False) -> None:
         """
