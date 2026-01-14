@@ -1,4 +1,4 @@
-# Copyright 2024-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -35,14 +35,19 @@ def slicePCA(tensor, r, device, dtype=torch.float32):
     """
     tensor = tensor.to(device)
     B, C, H, W = tensor.shape
-    UU = torch.zeros(B, C, H, r, dtype=dtype, device=device)
-    VVT = torch.zeros(B, C, r, W, dtype=dtype, device=device)
+    
+    # Clamp r to the minimum dimension to avoid SVD errors
+    # SVD rank cannot exceed min(H, W)
+    effective_r = min(r, H, W)
+    
+    UU = torch.zeros(B, C, H, effective_r, dtype=dtype, device=device)
+    VVT = torch.zeros(B, C, effective_r, W, dtype=dtype, device=device)
     
     for i in range(B):
         for j in range(C):
-            U, _, V = torch.svd_lowrank(tensor[i, j, :, :], q=r, niter=2, M=None)
-            UU[i, j, :, :] = U[:, 0:r]
-            VVT[i, j, :, :] = V[:, 0:r].T
+            U, _, V = torch.svd_lowrank(tensor[i, j, :, :], q=effective_r, niter=2, M=None)
+            UU[i, j, :, :] = U[:, 0:effective_r]
+            VVT[i, j, :, :] = V[:, 0:effective_r].T
 
     # Optional debug dump: save a compact snapshot of UU/VVT and weight row norms
     try:
@@ -85,10 +90,17 @@ def clustering_Z(VT, K, iternum):
         # the reference implementation clusters raw singular vectors.
         vt = VT.cpu().numpy().astype('float32')
 
-        kmeans = KMeans(n_clusters=K, init='random', n_init=1, max_iter=iternum, random_state=123456789)
+        # Auto-clamp K to available samples (output dimensions)
+        # Cannot cluster n samples into more than n clusters
+        effective_K = min(K, vt.shape[0])
+        if effective_K < K:
+            # Silent clamping - this is expected for small layers like lin1 (2 outputs)
+            pass
+        
+        kmeans = KMeans(n_clusters=effective_K, init='random', n_init=1, max_iter=iternum, random_state=123456789)
         idx = kmeans.fit_predict(vt)
         indxx.append(idx)
-        KK.append(K)
+        KK.append(effective_K)
 
         # Optional debug dump: controlled by PEFT_ADAMSS_DEBUG env var
         try:

@@ -1,4 +1,4 @@
-# Copyright 2024-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -31,31 +31,31 @@ from peft.utils import (
     _get_submodules,
 )
 
-from .config import AdaMSSConfig
-from .layer import AdaMSSLayer, Linear
+from .config import AdamssConfig
+from .layer import AdamssLayer, Linear
 
 
-class AdaMSSModel(BaseTuner):
+class AdamssModel(BaseTuner):
     """
-    Creates AdaMSS (Adaptive Multi-Subspaces) model from a pretrained model.
+    Creates Adamss (Adaptive Multi-Subspaces) model from a pretrained model.
 
     The method decomposes weight matrices using SVD and clusters the decomposed space
     into multiple trainable subspaces for parameter-efficient fine-tuning.
 
     Args:
         model (`torch.nn.Module`): The model to be adapted.
-        config (`AdaMSSConfig`): The configuration of the AdaMSS model.
+        config (`AdamssConfig`): The configuration of the Adamss model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
     Returns:
-        `torch.nn.Module`: The AdaMSS model.
+        `torch.nn.Module`: The Adamss model.
 
     Example:
         ```python
         >>> from transformers import AutoModelForImageClassification
-        >>> from peft import AdaMSSConfig, get_peft_model
+        >>> from peft import AdamssConfig, get_peft_model
         
-        >>> config = AdaMSSConfig(
+        >>> config = AdamssConfig(
         ...     r=500,
         ...     num_subspaces=5,
         ...     target_modules=["query", "value"],
@@ -67,18 +67,20 @@ class AdaMSSModel(BaseTuner):
 
     **Attributes**:
         - **model** ([`~torch.nn.Module`]) -- The model to be adapted.
-        - **peft_config** ([`AdaMSSConfig`]): The configuration of the AdaMSS model.
+        - **peft_config** ([`AdamssConfig`]): The configuration of the Adamss model.
     """
 
     prefix: str = "adamss_"
-    tuner_layer_cls = (AdaMSSLayer,)
+    tuner_layer_cls = (AdamssLayer,)
 
-    def __init__(self, model, config, adapter_name) -> None:
+    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False, state_dict: dict = None) -> None:
         # Initialize ASA tracking before BaseTuner injects adapters so attribute exists.
         self._asa_total_kk = {}
-        super().__init__(model, config, adapter_name)
+        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage, state_dict=state_dict)
         # Track the trainable adapter name (following AdaLora pattern)
-        if not config[adapter_name].inference_mode:
+        # Handle both dict config (from PeftModel) and single config (from inject_adapter_in_model)
+        adapter_config = config[adapter_name] if isinstance(config, dict) else config
+        if not adapter_config.inference_mode:
             self.trainable_adapter_name = adapter_name
         # Cache total subspace counts per adapter to keep ASA schedule deterministic
 
@@ -89,7 +91,7 @@ class AdaMSSModel(BaseTuner):
 
     def _create_and_replace(
         self,
-        adamss_config: AdaMSSConfig,
+        adamss_config: AdamssConfig,
         adapter_name: str,
         target: nn.Module,
         target_name: str,
@@ -98,13 +100,13 @@ class AdaMSSModel(BaseTuner):
         **optional_kwargs,
     ):
         """
-        Create and replace target module with AdaMSS-adapted module.
+        Create and replace target module with Adamss-adapted module.
         """
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
-        # Check if already an AdaMSS layer
-        if isinstance(target, AdaMSSLayer):
+        # Check if already an Adamss layer
+        if isinstance(target, AdamssLayer):
             target.update_layer(
                 adapter_name,
                 adamss_config.r,
@@ -112,16 +114,25 @@ class AdaMSSModel(BaseTuner):
                 adamss_config.subspace_rank,
                 adamss_config.init_weights,
                 adamss_config.use_asa,
+                inference_mode=adamss_config.inference_mode,
             )
-        else:
-            # Create new AdaMSS layer
-            new_module = self._create_new_module(adamss_config, adapter_name, target, **optional_kwargs)
-            self._record_total_kk(adapter_name, adamss_config, new_module)
+            # set_adapter is called inside update_layer, but we need to handle
+            # the case where adapter is not in active_adapters
             if adapter_name not in self.active_adapters:
-                new_module.requires_grad_(False)
+                # Ensure the new adapter is frozen if not active
+                target.set_adapter(self.active_adapters, inference_mode=adamss_config.inference_mode)
+        else:
+            # Create new Adamss layer
+            new_module = self._create_new_module(
+                adamss_config, adapter_name, target,
+                inference_mode=adamss_config.inference_mode,
+                **optional_kwargs
+            )
+            self._record_total_kk(adapter_name, adamss_config, new_module)
+            # requires_grad is handled inside _create_new_module via set_adapter
             self._replace_module(parent, target_name, new_module, target)
 
-    def _record_total_kk(self, adapter_name: str, adamss_config: AdaMSSConfig, module: nn.Module) -> None:
+    def _record_total_kk(self, adapter_name: str, adamss_config: AdamssConfig, module: nn.Module) -> None:
         """Track total subspaces per adapter so the ASA schedule matches adamss_pkg."""
         if not hasattr(module, "KK"):
             return
@@ -134,13 +145,13 @@ class AdaMSSModel(BaseTuner):
 
     def _create_new_module(
         self,
-        adamss_config: AdaMSSConfig,
+        adamss_config: AdamssConfig,
         adapter_name: str,
         target: nn.Module,
         **kwargs,
     ) -> nn.Module:
         """
-        Create a new AdaMSS module based on the target module type.
+        Create a new Adamss module based on the target module type.
         """
         if isinstance(target, BaseTunerLayer):
             target_base_layer = target.get_base_layer()
@@ -171,8 +182,12 @@ class AdaMSSModel(BaseTuner):
         """Replace a module with a new module."""
         setattr(parent, child_name, new_module)
         # Ensure base layer weight dtype matches
+        # Skip moving if parameters are on meta device (will be loaded later)
         if hasattr(child, "weight"):
-            new_module.to(child.weight.device)
+            # Check if any parameters are on meta device
+            meta_params = any(p.device.type == "meta" for p in new_module.parameters())
+            if not meta_params:
+                new_module.to(child.weight.device)
 
         # Copy state for modules to save
         if hasattr(new_module, "base_layer"):
@@ -187,7 +202,7 @@ class AdaMSSModel(BaseTuner):
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         """
-        Mark only AdaMSS parameters as trainable.
+        Mark only Adamss parameters as trainable.
         """
         for n, p in model.named_parameters():
             if self.prefix not in n:
@@ -224,27 +239,23 @@ class AdaMSSModel(BaseTuner):
         adapter_names: Optional[list[str]] = None,
     ):
         """
-        Unload and optionally merge AdaMSS adapters.
+        Unload and optionally merge Adamss adapters.
         
-        Note: Merging is not yet fully supported for AdaMSS due to the complex
-        multi-subspace structure.
+        This properly replaces adapter layers with their base layers after merging.
         """
-        if merge:
-            warnings.warn(
-                "Merging AdaMSS adapters is not yet fully supported. "
-                "The adapter will be unloaded but not merged."
-            )
-
-        # Simply unload by returning the base model
-        return self.model
+        # Call parent implementation which handles the layer replacement
+        return super()._unload_and_optionally_merge(
+            merge=merge,
+            progressbar=progressbar,
+            safe_merge=safe_merge,
+            adapter_names=adapter_names,
+        )
 
     def merge_and_unload(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ):
         """
-        Merge AdaMSS weights into base model and unload adapters.
-        
-        Note: Full merging support for AdaMSS is not yet implemented.
+        Merge Adamss weights into base model and unload adapters.
         """
         return self._unload_and_optionally_merge(
             merge=True, progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
@@ -252,7 +263,7 @@ class AdaMSSModel(BaseTuner):
 
     def unload(self):
         """
-        Unload AdaMSS adapters and return base model.
+        Unload Adamss adapters and return base model.
         """
         return self._unload_and_optionally_merge(merge=False)
     
@@ -289,7 +300,7 @@ class AdaMSSModel(BaseTuner):
         if not adamss_config.use_asa:
             return
         
-        from .layer import AdaMSSLayer
+        from .layer import AdamssLayer
         
         within_warmup = adamss_config.init_warmup <= global_step <= adamss_config.final_warmup
         should_mask = within_warmup and (global_step % adamss_config.mask_interval == 0)
@@ -299,7 +310,7 @@ class AdaMSSModel(BaseTuner):
 
         asa_layers = []
         for module in self.model.modules():
-            if isinstance(module, AdaMSSLayer) and module.exp_avg_ipt:
+            if isinstance(module, AdamssLayer) and module.exp_avg_ipt:
                 asa_layers.append(module)
 
         if not asa_layers:
@@ -339,17 +350,17 @@ class AdaMSSModel(BaseTuner):
     
     def _get_total_kk(self) -> int:
         """Get total number of subspaces from model."""
-        from .layer import AdaMSSLayer
+        from .layer import AdamssLayer
         for module in self.model.modules():
-            if isinstance(module, AdaMSSLayer) and module.KK:
+            if isinstance(module, AdamssLayer) and module.KK:
                 return list(module.KK.values())[0]
         return 0
     
     def _mask_to_target(self, target_kk: int) -> None:
-        """Apply masking to all AdaMSS layers."""
-        from .layer import AdaMSSLayer
+        """Apply masking to all Adamss layers."""
+        from .layer import AdamssLayer
         for module in self.model.modules():
-            if isinstance(module, AdaMSSLayer):
+            if isinstance(module, AdamssLayer):
                 for adapter_name in module.exp_avg_ipt.keys():
                     module.mask_to_target(adapter_name, target_kk)
 

@@ -1,4 +1,4 @@
-# Copyright 2024-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,9 +22,9 @@ from peft.utils import PeftType
 
 
 @dataclass
-class AdaMSSConfig(PeftConfig):
+class AdamssConfig(PeftConfig):
     """
-    Configuration class for AdaMSS (Adaptive Multi-Subspaces) method.
+    Configuration class for Adamss (Adaptive Multi-Subspaces) method.
     
     AdaMSS is a parameter-efficient fine-tuning method that decomposes weight matrices
     using SVD and clusters the decomposed space into multiple trainable subspaces.
@@ -69,7 +69,7 @@ class AdaMSSConfig(PeftConfig):
             The layer pattern name for layer index matching if `layers_to_transform` is specified.
     """
 
-    r: int = field(default=500, metadata={"help": "Rank for SVD decomposition (adamss_R)"})
+    r: int = field(default=100, metadata={"help": "Rank for SVD decomposition (adamss_R). Will be automatically clamped to min(r, matrix dimensions)"})
     num_subspaces: int = field(default=5, metadata={"help": "Number of subspaces for clustering (adamss_K)"})
     subspace_rank: int = field(
         default=1, metadata={"help": "Rank for each trainable subspace (adamss_ri)"}
@@ -84,12 +84,13 @@ class AdaMSSConfig(PeftConfig):
             )
         },
     )
-    init_weights: Literal["orthogonal"] = field(
+    init_weights: Optional[Literal["orthogonal"]] = field(
         default="orthogonal",
         metadata={
             "help": (
                 "Initialization method for AdaMSS weights. Currently only 'orthogonal' is supported, "
-                "which uses orthogonal initialization for subspace matrices."
+                "which uses orthogonal initialization for subspace matrices. "
+                "Set to None (or False for backward compatibility) to skip initialization when loading from checkpoint."
             )
         },
     )
@@ -160,6 +161,11 @@ class AdaMSSConfig(PeftConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
+        
+        # Normalize init_weights: convert False to None for backward compatibility
+        if self.init_weights is False:
+            self.init_weights = None
+        
         # Validate initialization method
-        if self.init_weights not in ["orthogonal"]:
-            raise ValueError(f"init_weights must be 'orthogonal', got {self.init_weights}")
+        if self.init_weights not in ["orthogonal", None]:
+            raise ValueError(f"init_weights must be 'orthogonal' or None, got {self.init_weights}")

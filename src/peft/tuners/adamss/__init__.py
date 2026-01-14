@@ -1,4 +1,4 @@
-# Copyright 2024-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,25 +14,25 @@
 
 from peft.utils import register_peft_method
 
-from .config import AdaMSSConfig
-from .layer import AdaMSSLayer, Linear
-from .model import AdaMSSModel
+from .config import AdamssConfig
+from .layer import AdamssLayer, Linear
+from .model import AdamssModel
 from .asa_callback import ASACallback
 
 
 __all__ = [
-    "AdaMSSConfig",
-    "AdaMSSLayer",
-    "AdaMSSModel",
+    "AdamssConfig",
+    "AdamssLayer",
+    "AdamssModel",
     "Linear",
     "ASACallback",
 ]
 
-# Register AdaMSS as a PEFT method
+# Register Adamss as a PEFT method
 register_peft_method(
     name="adamss",
-    config_cls=AdaMSSConfig,
-    model_cls=AdaMSSModel,
+    config_cls=AdamssConfig,
+    model_cls=AdamssModel,
     prefix="adamss_",
     is_mixed_compatible=False
 )

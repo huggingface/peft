@@ -37,7 +37,7 @@ from transformers import (
 )
 from torch.optim import AdamW
 
-from peft import AdaMSSConfig, get_peft_model, ASACallback
+from peft import AdamssConfig, get_peft_model, ASACallback
 
 
 # Table 19: Hyperparameters for GLUE tasks (from paper)
@@ -212,7 +212,7 @@ def main():
     
     # Apply AdaMSS
     print("\nApplying AdaMSS...")
-    config = AdaMSSConfig(
+    config = AdamssConfig(
         r=args.adamss_r,
         num_subspaces=args.adamss_k,
         subspace_rank=args.adamss_ri,

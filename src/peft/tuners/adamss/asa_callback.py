@@ -1,4 +1,4 @@
-# Copyright 2024-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """
-ASA (Adaptive Subspace Allocation) Callback for AdaMSS.
+ASA (Adaptive Subspace Allocation) Callback for Adamss.
 
 This callback implements dynamic subspace selection during training based on
 gradient-based importance scoring.
@@ -41,7 +41,7 @@ class ASACallback(TrainerCallback):
     subspaces during training to achieve adaptive parameter selection.
     
     Important:
-        This callback implements the same functionality as `AdaMSSModel.update_and_allocate()`.
+        This callback implements the same functionality as `AdamssModel.update_and_allocate()`.
         When using this callback with HuggingFace Trainer, DO NOT manually call
         `model.base_model.update_and_allocate(global_step)` as it would result in
         duplicate ASA updates.
@@ -62,11 +62,11 @@ class ASACallback(TrainerCallback):
     
     Example:
         ```python
-        from peft import AdaMSSConfig, get_peft_model, ASACallback
+        from peft import AdamssConfig, get_peft_model, ASACallback
         from transformers import Trainer
         
-        # Configure AdaMSS with ASA
-        config = AdaMSSConfig(
+        # Configure Adamss with ASA
+        config = AdamssConfig(
             r=100,
             num_subspaces=10,
             subspace_rank=3,
@@ -155,13 +155,13 @@ class ASACallback(TrainerCallback):
         if self._collected_total_kk:
             return
 
-        # Find AdaMSS layers and collect per-layer KK, then sum to global total
-        from .layer import AdaMSSLayer
+        # Find Adamss layers and collect per-layer KK, then sum to global total
+        from .layer import AdamssLayer
 
         adapters_info: list[tuple[object, str, int]] = []  # (module, adapter_name, KK)
         total = 0
         for name, module in model.named_modules():
-            if isinstance(module, AdaMSSLayer):
+            if isinstance(module, AdamssLayer):
                 # module.KK is a dict mapping adapter_name->KK for that module
                 for adapter_name, kk in module.KK.items():
                     try:
@@ -172,7 +172,7 @@ class ASACallback(TrainerCallback):
                     total += kk_int
 
         if total == 0 or not adapters_info:
-            raise RuntimeError("ASA: Could not find AdaMSS layers or KK information in model")
+            raise RuntimeError("ASA: Could not find Adamss layers or KK information in model")
 
         self._adapters_info = adapters_info
         self.total_kk = total
@@ -180,11 +180,11 @@ class ASACallback(TrainerCallback):
         print(f"ASA: Detected total_kk (global) = {self.total_kk} subspaces across {len(adapters_info)} adapters")
     
     def _update_model_importance(self, model):
-        """Update importance scores for all AdaMSS layers."""
-        from .layer import AdaMSSLayer
+        """Update importance scores for all Adamss layers."""
+        from .layer import AdamssLayer
         
         for name, module in model.named_modules():
-            if isinstance(module, AdaMSSLayer):
+            if isinstance(module, AdamssLayer):
                 for adapter_name in module.exp_avg_ipt.keys():
                     module.update_importance(adapter_name, self.beta1, self.beta2)
     
@@ -196,7 +196,7 @@ class ASACallback(TrainerCallback):
         from all subspaces across all layers, rank them globally, and select the
         top target_kk subspaces to keep active.
         """
-        from .layer import AdaMSSLayer
+        from .layer import AdamssLayer
         
         if self.verbose:
             print(f"[DEBUG][_mask_model_to_target] Starting global top-{target_kk} masking")
@@ -306,10 +306,10 @@ class ASACallback(TrainerCallback):
                 print(f"[DEBUG][_mask_model_to_target] Adapter {adapter_name}: {num_active_in_adapter}/{kk} subspaces active")
     
     def _reset_model_importance(self, model):
-        """Reset importance stats for all AdaMSS layers."""
-        from .layer import AdaMSSLayer
+        """Reset importance stats for all Adamss layers."""
+        from .layer import AdamssLayer
         for module in model.modules():
-            if isinstance(module, AdaMSSLayer):
+            if isinstance(module, AdamssLayer):
                 for adapter_name in module.exp_avg_ipt.keys():
                     module.reset_importance(adapter_name)
 
