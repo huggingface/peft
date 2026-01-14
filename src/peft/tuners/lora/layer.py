@@ -115,7 +115,7 @@ class LoraLayer(BaseTunerLayer):
         self.use_rslora: dict[str, bool] = {}
         self.lora_bias: dict[str, bool] = {}
         self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA
-        self._caches: dict[str, Any] = {}
+        self._caches: dict[str, Any] = {}  # small ad hoc cache; values are not part of the state_dict
         self.ephemeral_gpu_offload: bool = ephemeral_gpu_offload
         # flag to enable/disable casting of input to weight dtype during forward call
         self.cast_input_dtype_enabled: bool = True
@@ -477,9 +477,11 @@ class LoraLayer(BaseTunerLayer):
         self.lora_B[adapter_name].weight = nn.Parameter(lora_B.contiguous().to(dtype))
 
     def _cache_store(self, key: str, value: Any) -> None:
+        # cache intermediate values, e.g. weight norm of DoRA
         self._caches[key] = value
 
     def _cache_pop(self, key: str) -> Any:
+        # retrieve and remove from ad hoc cache
         value = self._caches.pop(key)
         return value
 
