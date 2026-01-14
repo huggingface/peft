@@ -1117,7 +1117,7 @@ def _prepare_prompt_learning_config(peft_config, model_config):
         peft_config.num_attention_heads = num_attention_heads
 
     # For grouped-query attention, see #1901.
-    if (peft_config.peft_type == "PREFIX_TUNING") and ("num_key_value_heads" in model_config):
+    if (peft_config.peft_type in {"PREFIX_TUNING", "CARTRIDGE"}) and ("num_key_value_heads" in model_config):
         num_key_value_heads = model_config["num_key_value_heads"]
         if model_config.get("head_dim", None) is not None:
             head_dim = model_config["head_dim"]
@@ -1165,13 +1165,13 @@ def fsdp_auto_wrap_policy(model):
         from accelerate.utils.dataclasses import get_module_class_from_name
     from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy, transformer_auto_wrap_policy
 
-    from ..tuners import PrefixEncoder, PromptEmbedding, PromptEncoder
+    from ..tuners import CartridgeEncoder, PrefixEncoder, PromptEmbedding, PromptEncoder
 
     default_transformer_cls_names_to_wrap = ",".join(_get_no_split_modules(model))
     transformer_cls_names_to_wrap = os.environ.get(
         "FSDP_TRANSFORMER_CLS_TO_WRAP", default_transformer_cls_names_to_wrap
     ).split(",")
-    transformer_cls_to_wrap = {PrefixEncoder, PromptEncoder, PromptEmbedding}
+    transformer_cls_to_wrap = {CartridgeEncoder, PrefixEncoder, PromptEncoder, PromptEmbedding}
     for layer_class in transformer_cls_names_to_wrap:
         if len(layer_class) == 0:
             continue
@@ -1440,36 +1440,99 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
 
         modules_to_save = getattr(peft_config, "modules_to_save", None)
         if modules_to_save is not None:
-            for target_layer in target_layers:
-                if target_layer in modules_to_save:
+            for target_layer_name in target_layers:
+                if target_layer_name in modules_to_save:
                     raise ValueError(
                         "The embedding layer is already marked to be trained fully, either specify "
-                        f'`modules_to_save=[..., "{target_layer}", ...]` or '
-                        f"`trainable_tokens={{'{target_layer}': x}}` but not both."
+                        f'`modules_to_save=[..., "{target_layer_name}", ...]` or '
+                        f"`trainable_tokens={{'{target_layer_name}': x}}` but not both."
                     )
 
-        for target_layer, token_indices in target_layers.items():
+        # Check weight tying configuration first to determine which layers to wrap
+        weights_tied = model_config.get("tie_word_embeddings", False)
+        ensure_weight_tying = getattr(peft_config, "ensure_weight_tying", False)
+
+        # When multiple target layers are specified, check if they correspond to tied weights
+        indices_mismatch = False
+        layers_to_skip = set()
+        tied_layer_keys = []
+
+        if len(target_layers) > 1 and weights_tied:
+            # Get module names that are tied with the embedding
+            tied_module_names = set(_get_module_names_tied_with_embedding(model))
+
+            # Also get the input embedding layer name as it's the source of tied weights
+            embedding_module = model.get_input_embeddings()
+            # Get the full embedding name (not just the last part) to support nested structures
+            embedding_name = next(n for n, m in model.named_modules() if m is embedding_module)
+
+            # Find which target layers are in the tied weights (including the embedding source)
+            for target_layer_name in target_layers:
+                # Check if this is the embedding layer (use endswith to allow flexible matching)
+                # This allows users to specify just "embed_tokens" OR "m1.encoder.embed_tokens" for precision
+                if embedding_name.endswith(target_layer_name):
+                    tied_layer_keys.append(target_layer_name)
+                    continue
+                # Check if this target layer matches any tied module (considering nested structures)
+                for tied_module in tied_module_names:
+                    if tied_module.endswith(target_layer_name) or target_layer_name in tied_module.split("."):
+                        tied_layer_keys.append(target_layer_name)
+                        break
+
+            # If we found multiple tied layers in our targets, check their indices
+            if len(tied_layer_keys) >= 2:
+                # Check if all tied layers have the same indices
+                first_indices = target_layers[tied_layer_keys[0]]
+                indices_mismatch = not all(target_layers[key] == first_indices for key in tied_layer_keys[1:])
+
+                # Raise error immediately if ensure_weight_tying=True and indices mismatch
+                if indices_mismatch and ensure_weight_tying:
+                    tied_layers_info = ", ".join([f"{key}: {target_layers[key]}" for key in tied_layer_keys])
+                    raise ValueError(
+                        f"Cannot ensure weight tying when different token indices are specified for tied layers. "
+                        f"Conflicting layers: {tied_layers_info}. "
+                        f"Please use the same indices for all tied layers or set ensure_weight_tying=False."
+                    )
+
+                # If indices match, skip tied modules (except embedding) as they'll be handled by weight tying logic
+                if not indices_mismatch:
+                    layers_to_skip = set(tied_layer_keys) & tied_module_names
+
+        # Wrap target layers (skip those that will be handled by weight tying logic)
+        for target_layer_name, token_indices in target_layers.items():
+            if target_layer_name in layers_to_skip:
+                continue
+
             _set_trainable(
                 model,
                 adapter_name,
                 inference_mode=peft_config.inference_mode,
-                module_names=[target_layer],
+                module_names=[target_layer_name],
                 strict_module_check=True,
                 wrapper_cls=TrainableTokensWrapper,
                 token_indices=token_indices,
                 activate_adapter=activate_adapter,
             )
 
-        tied_weights_module_names = _get_module_names_tied_with_embedding(model)
+        # Warn if user expects weight tying but model doesn't have tied weights
+        if not weights_tied and ensure_weight_tying:
+            warnings.warn(
+                "ensure_weight_tying=True but the model does not have tied weights "
+                "(tie_word_embeddings=False). Weight tying will not be applied for trainable_token_indices."
+            )
 
-        # There might be the possibility that we have output weights that are tied to the input weights.
-        # In that case we will tie any module that wants tied weights to the token adapter to make sure that
-        # any modification is reflected in the tied layers as well.
-        if (
-            tied_weights_module_names
-            and model_config.get("tie_word_embeddings", False)
+        # Apply weight tying when appropriate
+        should_apply_tying = (
+            weights_tied
             and isinstance(model.get_input_embeddings(), TrainableTokensWrapper)
-        ):
+            and (ensure_weight_tying or not indices_mismatch)
+        )
+
+        if should_apply_tying:
+            # There might be the possibility that we have output weights that are tied to the input weights.
+            # In that case we will tie any module that wants tied weights to the token adapter to make sure that
+            # any modification is reflected in the tied layers as well.
+            tied_weights_module_names = _get_module_names_tied_with_embedding(model)
             token_adapter = model.get_input_embeddings().token_adapter
             _set_trainable(
                 model,
