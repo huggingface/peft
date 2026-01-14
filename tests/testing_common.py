@@ -292,17 +292,6 @@ class PeftCommonTester:
                 assert "meta" in {p.device.type for p in model.parameters()}
 
     def _test_save_pretrained(self, model_id, config_cls, config_kwargs, safe_serialization=True):
-        # ensure that the weights are randomly initialized
-        if issubclass(config_cls, LoraConfig):
-            config_kwargs = config_kwargs.copy()
-            config_kwargs["init_lora_weights"] = False
-        if issubclass(config_cls, IA3Config):
-            config_kwargs = config_kwargs.copy()
-            config_kwargs["init_ia3_weights"] = False
-        if hasattr(config_cls, "init_weights"):
-            config_kwargs = config_kwargs.copy()
-            config_kwargs["init_weights"] = False
-
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
             config = config_cls(
@@ -362,16 +351,6 @@ class PeftCommonTester:
         if issubclass(config_cls, AdaLoraConfig):
             # AdaLora does not support adding more than 1 adapter
             pytest.skip(f"Test not applicable for {config_cls}")
-
-        # ensure that the weights are randomly initialized
-        if issubclass(config_cls, LoraConfig):
-            config_kwargs = config_kwargs.copy()
-            config_kwargs["init_lora_weights"] = False
-        elif issubclass(config_cls, IA3Config):
-            config_kwargs = config_kwargs.copy()
-            config_kwargs["init_ia3_weights"] = False
-        elif hasattr(config_cls, "init_weights"):
-            config_kwargs["init_weights"] = False
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
