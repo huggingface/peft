@@ -22,7 +22,7 @@ from accelerate.utils.imports import is_bf16_available
 from safetensors import safe_open
 from torch import nn
 
-from peft import PeftModel, PVeRAConfig, get_peft_model
+from peft import PeftModel, PveraConfig, get_peft_model
 
 
 class MLP(nn.Module):
@@ -58,10 +58,10 @@ class TestPVeRA:
     def mlp_same_prng(self, mlp):
         torch.manual_seed(0)
 
-        config = PVeRAConfig(target_modules=["lin1", "lin2"], init_weights=False)
+        config = PveraConfig(target_modules=["lin1", "lin2"], init_weights=False)
         # creates a default PVeRA adapter
         peft_model = get_peft_model(mlp, config)
-        config2 = PVeRAConfig(target_modules=["lin1", "lin2"], init_weights=False)
+        config2 = PveraConfig(target_modules=["lin1", "lin2"], init_weights=False)
         peft_model.add_adapter("other", config2)
         return peft_model
 
@@ -94,10 +94,10 @@ class TestPVeRA:
     def test_multiple_adapters_different_prng_raises(self):
         # we cannot have multiple adapters with different prng keys
         model = MLP()
-        config = PVeRAConfig(target_modules=["lin1", "lin2"], init_weights=False)
+        config = PveraConfig(target_modules=["lin1", "lin2"], init_weights=False)
         # creates a default PVeRA adapter
         peft_model = get_peft_model(model, config)
-        config2 = PVeRAConfig(target_modules=["lin1", "lin2"], init_weights=False, projection_prng_key=123)
+        config2 = PveraConfig(target_modules=["lin1", "lin2"], init_weights=False, projection_prng_key=123)
 
         msg = (
             r"PVeRA PRNG initialisation key must be the same for all adapters. Got config.projection_prng_key=123 but "
@@ -141,10 +141,10 @@ class TestPVeRA:
     def test_multiple_adapters_save_load_save_projection_false(self, mlp, tmp_path):
         # check saving and loading works with multiple adapters without saved projection weights
         torch.manual_seed(1)
-        config = PVeRAConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=False)
+        config = PveraConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=False)
         # creates a default PVeRA adapter
         peft_model = get_peft_model(mlp, config, adapter_name="first")
-        config2 = PVeRAConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=False)
+        config2 = PveraConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=False)
         peft_model.add_adapter("second", config2)
         peft_model.eval()
 
@@ -204,10 +204,10 @@ class TestPVeRA:
 
     def test_multiple_adapters_save_projection_false_contains_no_pvera_A_pvera_B(self, mlp, tmp_path):
         torch.manual_seed(1)
-        config = PVeRAConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=False)
+        config = PveraConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=False)
         # creates a default PVeRA adapter
         peft_model = get_peft_model(mlp, config, adapter_name="first")
-        config2 = PVeRAConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=False)
+        config2 = PveraConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=False)
         peft_model.add_adapter("second", config2)
 
         save_path = tmp_path / "pvera"
@@ -269,7 +269,7 @@ class TestPVeRA:
         )
 
     def test_pvera_different_shapes(self, mlp):
-        config = PVeRAConfig(target_modules=["lin0", "lin3"], init_weights=False)
+        config = PveraConfig(target_modules=["lin0", "lin3"], init_weights=False)
         mlp_different_shapes = get_peft_model(mlp, config)
 
         pvera_A = mlp_different_shapes.pvera_A["default"]
@@ -295,7 +295,7 @@ class TestPVeRA:
                 pytest.skip("bfloat16 not supported on this system, skipping the test")
 
         model = MLP().to(dtype)
-        config = PVeRAConfig(target_modules=["lin1", "lin2"], init_weights=False)
+        config = PveraConfig(target_modules=["lin1", "lin2"], init_weights=False)
         peft_model = get_peft_model(model, config)
         inputs = torch.randn(5, 10).to(dtype)
         output = peft_model(inputs)  # should not raise

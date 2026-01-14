@@ -28,17 +28,17 @@ from peft.utils import (
 
 from .._buffer_dict import BufferDict
 from ..tuners_utils import _maybe_include_all_linear_layers
-from .config import PVeRAConfig
+from .config import PveraConfig
 from .layer import Linear, PVeRALayer
 
 
-class PVeRAModel(BaseTuner):
+class PveraModel(BaseTuner):
     """
     Creates Probabilistic Vector-based Random Matrix Adaptation (PVeRA) model from a pretrained transformers model.
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
-        config ([`PVeRAConfig`]): The configuration of the PVeRA model.
+        config ([`PveraConfig`]): The configuration of the PVeRA model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             Create empty adapter weights on meta device. Useful to speed up the loading process.
@@ -50,16 +50,16 @@ class PVeRAModel(BaseTuner):
 
         ```py
         >>> from transformers import AutoModel
-        >>> from peft import PVeRAConfig, get_peft_model
+        >>> from peft import PveraConfig, get_peft_model
 
         >>> base_model = AutoModel.from_pretrained("facebook/dinov2-base")
-        >>> config = PVeRAConfig(r=128)
+        >>> config = PveraConfig(r=128)
         >>> model = get_peft_model(base_model, config)
         ```
 
     **Attributes**:
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
-        - **peft_config** ([`PVeRAConfig`]): The configuration of the PVeRA model.
+        - **peft_config** ([`PveraConfig`]): The configuration of the PVeRA model.
     """
 
     prefix: str = "pvera_lambda_"
@@ -103,7 +103,7 @@ class PVeRAModel(BaseTuner):
 
         return largest_shape
 
-    def _init_pvera_A_pvera_B(self, config: PVeRAConfig, adapter_name: str) -> None:
+    def _init_pvera_A_pvera_B(self, config: PveraConfig, adapter_name: str) -> None:
         linear_out_dim, linear_in_dim = self._find_dim(config)
 
         # use of persistent to exclude pvera_A and pvera_B from the state dict if we choose not to save them.
@@ -118,10 +118,10 @@ class PVeRAModel(BaseTuner):
         self.pvera_A[adapter_name] = pvera_A
         self.pvera_B[adapter_name] = pvera_B
 
-    def _pre_injection_hook(self, model: nn.Module, config: PVeRAConfig, adapter_name: str) -> None:
+    def _pre_injection_hook(self, model: nn.Module, config: PveraConfig, adapter_name: str) -> None:
         self._init_pvera_A_pvera_B(config, adapter_name)
 
-    def _check_new_adapter_config(self, config: PVeRAConfig) -> None:
+    def _check_new_adapter_config(self, config: PveraConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
 

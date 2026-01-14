@@ -22,18 +22,21 @@ from peft.utils import PeftType
 
 
 @dataclass
-class PVeRAConfig(PeftConfig):
+class PveraConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a [`PVeRAModel`].
+    This is the configuration class to store the configuration of a [`PveraModel`].
 
     Paper: https://www.arxiv.org/abs/2512.07703.
 
     Args:
         r (`int`, *optional*, defaults to `256`):
-            PVeRA parameter dimension ("rank"). Choose higher values than LoRA ranks here, since PVeRA uses far fewer
-            parameters than LoRA.
+            PVeRA parameter dimension ("rank"). Choose higher values than LoRA ranks here, since PVeRA shares
+            parameters across layers and therefore uses far fewer parameters than LoRA.
         target_modules (`Union[List[str], str]`):
-            The names of the modules to apply PVeRA to. Only linear layers are supported.
+            The names of the modules to apply PVeRA to. Only linear layers are supported. When passing a string, a
+            regex match will be performed. If this is specified as 'all-linear', then all linear/Conv1D modules are
+            chosen. If this is not specified, modules will bechosen according to the model architecture. If the
+            architecture is not known, an error will be raised.
         projection_prng_key (`int`):
             PVeRA PRNG init key. Used for initialising pvera_A and pvera_B for new models or when loading a checkpoint
             that did not include these projections. Defaults to `0`.
@@ -44,8 +47,8 @@ class PVeRAConfig(PeftConfig):
         pvera_dropout (`float`):
             The dropout probability for PVeRA layers.
         d_initial (`float`, *optional*, defaults to `0.1`):
-            Initial init value for `pvera_lambda_d` vector used when initializing the PVeRA parameters. Small values
-            (<=0.1) are recommended (see Table 6c in the paper).
+            Initial value for `pvera_lambda_d` vector used when initializing the PVeRA parameters. Small values (<=0.1)
+            are recommended.
         fan_in_fan_out (`bool`):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
             `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
