@@ -185,6 +185,45 @@ def map_cache_to_layer_device_map(model, cache) -> None:
             cache.value_cache[idx] = cache.value_cache[idx].to(layer_device)
 
 
+def convert_peft_config_for_transformers(peft_config, model, conversions):
+    # FIXME document this properly
+    # Deal with weight conversion from transformers
+    if not is_transformers_ge_v5:
+        # weight conversion is only required for >= v5
+        return peft_config
+
+    if not hasattr(model, "config"):
+        # not a transformer model
+        return peft_config
+
+    if not hasattr(model.config, "model_type"):
+        # not a transformer model
+        return peft_config
+
+    # transformers v5
+    from transformers.core_model_loading import WeightRenaming, rename_source_key
+
+    renamings = [conversion for conversion in conversions if isinstance(conversion, WeightRenaming)]
+    new_target_modules = [rename_source_key(key, renamings, [])[0] for key in peft_config.target_modules]
+    peft_config.target_modules.clear()
+    peft_config.target_modules.update(new_target_modules)
+
+    # TODO So far, only dealing with Mixtral
+    if model.config.model_type == "mixtral":
+        peft_config.target_parameters = peft_config.target_parameters or set()
+        # add gate.weight to target_parameters
+        for target in peft_config.target_modules:
+            if (target == "gate") or target.endswith(".gate"):
+                peft_config.target_parameters.add(f"{target}.weight")
+
+        # remove gate from target_modules
+        peft_config.target_modules = {
+            key for key in peft_config.target_modules if not ((key == "gate") or (key.endswith(".gate")))
+        }
+
+    return peft_config
+
+
 ##################################
 # START: ADAPTED FROM ACCELERATE #
 ##################################
