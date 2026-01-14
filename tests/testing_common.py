@@ -612,6 +612,9 @@ class PeftCommonTester:
             atol, rtol = 1e-4, 1e-4
             if self.torch_device in ["mlu"]:
                 atol, rtol = 1e-3, 1e-3  # MLU
+            if model_id == "trl-internal-testing/tiny-GptOssForCausalLM":
+                # this tolerance issue with the target_parameters test only occurrs on CI with transformers v5
+                atol, rtol = 1e-3, 1e-3
             if config.peft_type in ("ADALORA", "OFT"):
                 # these methods require a bit higher tolerance
                 atol, rtol = 1e-2, 1e-2
