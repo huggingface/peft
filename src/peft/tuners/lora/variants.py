@@ -460,21 +460,15 @@ class QALoraLinearVariant(LoraVariant):
         Args:
             module (Linear): The linear module to be adapted.
             adapter_name (str): The name of the adapter.
+            config (LoraConfig): The config of the LoRA adapter.
             **kwargs: Additional keyword arguments.
-                qalora_group_size (int): The size of groups for pooling. This is expected to be passed.
         """
-        if "qalora_group_size" not in kwargs:
-            raise ValueError(
-                "`use_qalora=True` requires 'qalora_group_size' to be provided in kwargs."
-                " Please ensure it is passed from the LoraConfig."
-            )
-
-        if module.in_features is not None and module.in_features % kwargs["qalora_group_size"] != 0:
+        qalora_group_size = config.qalora_group_size
+        if module.in_features is not None and module.in_features % qalora_group_size != 0:
             raise ValueError(
                 f"`use_qalora=True` requires `module.in_features` ({module.in_features}) to be"
-                f"divisible by 'qalora_group_size' ({kwargs['qalora_group_size']})"
+                f"divisible by 'qalora_group_size' ({qalora_group_size})"
             )
-        qalora_group_size = kwargs["qalora_group_size"]
 
         if "qalora_group_size" not in module.other_param_names:
             module.other_param_names = module.other_param_names + ("qalora_group_size",)
