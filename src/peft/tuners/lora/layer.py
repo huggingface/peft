@@ -123,9 +123,12 @@ class LoraLayer(BaseTunerLayer):
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
-        in_features, out_features = _get_in_out_features(base_layer)
+        in_features, out_features = self._get_in_out_features(base_layer)
         self.in_features = in_features
         self.out_features = out_features
+
+    def _get_in_out_features(self, module: nn.Module) -> tuple[int, int] | tuple[None, None]:
+        return _get_in_out_features(module)
 
     def resolve_lora_variant(self, *, use_dora: bool, use_bdlora=None, **kwargs) -> Optional[LoraVariant]:
         """Return a matching LoRA variant for this layer type.
@@ -1947,20 +1950,10 @@ class ParamWrapper(nn.Module, LoraLayer):
         lora_bias: bool = False,
         **kwargs,
     ) -> None:
+        self.parameter_name = parameter_name
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
-        self.parameter_name = parameter_name
-        param = self.get_param()
-        if param.ndim == 3:
-            self.num_experts, self.in_features, self.out_features = param.shape
-        else:
-            self.num_experts, self.in_features, self.out_features = 1, param.shape[1], param.shape[0]
 
-        if param.ndim not in (2, 3):
-            raise ValueError(
-                f"lora.{self.__class__.__name__} was initialized with {param.ndim} dimensional Parameter, but only 2d "
-                "and 3d are supported."
-            )
         if lora_dropout:
             # It's not possible to factor out x from lora_B(lora_A(dropout(x))), so dropout can't be correctly
             # implemented
@@ -1986,6 +1979,23 @@ class ParamWrapper(nn.Module, LoraLayer):
             use_dora=use_dora,
             lora_bias=lora_bias,
         )
+
+    def _get_in_out_features(self, module: nn.Module) -> tuple[int, int] | tuple[None, None]:
+        # For ParamWrapper, we don't derive the in_features and out_features based on the base layer type, but directly
+        # from the targeted parameter.
+        param = self.get_param()
+        if param.ndim == 3:
+            num_experts, in_features, out_features = param.shape
+        else:
+            num_experts, in_features, out_features = 1, param.shape[1], param.shape[0]
+        if param.ndim not in (2, 3):
+            raise ValueError(
+                f"lora.{self.__class__.__name__} was initialized with {param.ndim} dimensional Parameter, but only 2d "
+                "and 3d are supported."
+            )
+        # we have to store the num_experts attribute here, as the parent class only stores in_features and out_features.
+        self.num_experts = num_experts
+        return in_features, out_features
 
     def update_layer(
         self,
