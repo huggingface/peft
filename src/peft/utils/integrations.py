@@ -14,9 +14,10 @@
 
 from __future__ import annotations
 
+import copy
 import functools
 from contextlib import contextmanager
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 import packaging.version
 import torch
@@ -185,41 +186,100 @@ def map_cache_to_layer_device_map(model, cache) -> None:
             cache.value_cache[idx] = cache.value_cache[idx].to(layer_device)
 
 
-def convert_peft_config_for_transformers(peft_config, model, conversions):
+def _convert_peft_config_mixtral(peft_config):
+    peft_config.target_parameters = peft_config.target_parameters or set()
+
+    # add gate.weight to target_parameters
+    for target in peft_config.target_modules:
+        if (target == "gate") or target.endswith(".gate"):
+            # TODO: what if only specific layers are targeted, e.g. '0.gate'
+            peft_config.target_parameters.add(f"{target}.weight")
+    # remove gate from target_modules
+    peft_config.target_modules = {
+        key for key in peft_config.target_modules if not ((key == "gate") or (key.endswith(".gate")))
+    }
+
+    # add expert layers: w1 & w3 => gate_up_proj, ModuleList of layers is now a stacked parameter.
+    for target in peft_config.target_modules:
+        # if only w1 or only w3 are targeted, conversion is not possible
+        if (target == "w1") or target.endswith(".w1"):
+            if target.replace("w1", "w3") not in peft_config.target_modules:
+                raise ValueError("Cannot convert because blabla")  # TODO
+        if (target == "w3") or target.endswith(".w3"):
+            if target.replace("w3", "w1") not in peft_config.target_modules:
+                raise ValueError("Cannot convert because blabla")  # TODO
+
+        if (target == "w1") or target.endswith(".w1"):
+            # TODO: what if only specific layers are targeted, e.g. '0.w1'
+            peft_config.target_parameters.add("gate_up_proj")
+    # remove w1 and w3
+    peft_config.target_modules = {
+        key for key in peft_config.target_modules if not ((key == "w1") or (key.endswith(".w1")))
+    }
+    peft_config.target_modules = {
+        key for key in peft_config.target_modules if not ((key == "w3") or (key.endswith(".w3")))
+    }
+
+    # add expert layers: w2 => down_proj, ModuleList of layers is now a stacked parameter.
+    for target in peft_config.target_modules:
+        if (target == "w2") or target.endswith(".w2"):
+            # TODO: what if only specific layers are targeted, e.g. '0.w2'
+            peft_config.target_parameters.add("down_proj")
+    # remove w1 and w3
+    peft_config.target_modules = {
+        key for key in peft_config.target_modules if not ((key == "w2") or (key.endswith(".w2")))
+    }
+    return peft_config
+
+
+def convert_peft_config_for_transformers(peft_config, model: nn.Module, conversions: list[Any] | None):
     # FIXME document this properly
     # Deal with weight conversion from transformers
+
+    ##############################
+    # check if conversion needed #
+    ##############################
+
+    # If, for any reason, we cannot apply conversion, we just return the PEFT config as is.
+    from peft import PeftType  # avoid circular import
+
     if not is_transformers_ge_v5:
         # weight conversion is only required for >= v5
         return peft_config
-
+    if peft_config.peft_type != PeftType.LORA:
+        # weight conversion is currently only supported for LoRA
+        return peft_config
     if not hasattr(model, "config"):
         # not a transformer model
         return peft_config
-
     if not hasattr(model.config, "model_type"):
         # not a transformer model
         return peft_config
 
+    peft_config = copy.deepcopy(peft_config)  # don't mutate the original config
+
     # transformers v5
     from transformers.core_model_loading import WeightRenaming, rename_source_key
 
-    renamings = [conversion for conversion in conversions if isinstance(conversion, WeightRenaming)]
-    new_target_modules = [rename_source_key(key, renamings, [])[0] for key in peft_config.target_modules]
-    peft_config.target_modules.clear()
-    peft_config.target_modules.update(new_target_modules)
+    ############
+    # renaming #
+    ############
+
+    if not isinstance(peft_config.target_modules, str):
+        # if target_modules is a string (=> regex), the required conversion is not trivial, we don't deal with this case
+        # for now
+        renamings = [conversion for conversion in conversions if isinstance(conversion, WeightRenaming)]
+        new_target_modules = [rename_source_key(key, renamings, [])[0] for key in peft_config.target_modules]
+        peft_config.target_modules.clear()
+        peft_config.target_modules.update(new_target_modules)
+
+    ##########################
+    # model specific changes #
+    ##########################
 
     # TODO So far, only dealing with Mixtral
     if model.config.model_type == "mixtral":
-        peft_config.target_parameters = peft_config.target_parameters or set()
-        # add gate.weight to target_parameters
-        for target in peft_config.target_modules:
-            if (target == "gate") or target.endswith(".gate"):
-                peft_config.target_parameters.add(f"{target}.weight")
-
-        # remove gate from target_modules
-        peft_config.target_modules = {
-            key for key in peft_config.target_modules if not ((key == "gate") or (key.endswith(".gate")))
-        }
+        peft_config = _convert_peft_config_mixtral(peft_config)
 
     return peft_config
 
