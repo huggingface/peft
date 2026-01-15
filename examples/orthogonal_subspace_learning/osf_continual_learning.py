@@ -236,9 +236,7 @@ def train_with_osf(
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.pad_token = tokenizer.eos_token
 
-    base_model = AutoModelForCausalLM.from_pretrained(
-        model_name, torch_dtype=torch.bfloat16, device_map="auto"
-    )
+    base_model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16, device_map="auto")
 
     # Load all datasets with task-specific sizes
     # FOMC only has 496 samples total, so we use 350 train + 146 eval for it
@@ -461,9 +459,7 @@ def train_full_finetuning(
     }
 
     # Load base model once
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name, torch_dtype=torch.bfloat16, device_map="auto"
-    )
+    model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16, device_map="auto")
 
     # Sequential task training
     for task_idx, task in enumerate(tasks):
