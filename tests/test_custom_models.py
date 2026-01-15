@@ -1745,20 +1745,18 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_adapter_name(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adapter_name(model_id, config_cls, config_kwargs)
 
-    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
-    def test_prepare_for_training_parametrized(self, test_name, model_id, config_cls, config_kwargs):
-        # This test does not work with custom models because it assumes that
-        # there is always a method get_input_embeddings that returns a layer
-        # which does not need updates. Instead, a new test is added below that
-        # checks that LoRA works as expected.
-        pass
+    # Note: skipping _test_prepare_for_training: test does not work with custom models because it assumes that there is
+    # always a method get_input_embeddings that returns a layer which does not need updates. Instead, a new test is
+    # added below that checks that LoRA works as expected.
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_save_pretrained(self, test_name, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_save_pretrained_pickle(self, test_name, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs, safe_serialization=False)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
@@ -1827,32 +1825,18 @@ class TestPeftCustomModel(PeftCommonTester):
         with pytest.raises(RuntimeError, match=err_msg):
             model.merge_adapter(safe_merge=safe_merge)
 
-    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
-    def test_generate(self, test_name, model_id, config_cls, config_kwargs):
-        # Custom models do not (necessarily) have a generate method, so this test is not performed
-        pass
-
-    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
-    def test_generate_half_prec(self, test_name, model_id, config_cls, config_kwargs):
-        # Custom models do not (necessarily) have a generate method, so this test is not performed
-        pass
+    # Note: Skipping _test_generate, _test_generate_pos_args, _test_generate_half_prec, as the custom models don't have
+    # a generate method
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_training_custom_models(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training(model_id, config_cls, config_kwargs)
 
-    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
-    def test_training_custom_models_layer_indexing(self, test_name, model_id, config_cls, config_kwargs):
-        # At the moment, layer indexing only works when layer names conform to a specific pattern, which is not
-        # guaranteed here. Therefore, this test is not performed.
-        pass
+    # Note: skipping _test_training_layer_indexing because layer indexing only works when layer names conform to a
+    # specific pattern, which is not guaranteed here. Therefore, this test is not performed.
 
-    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
-    @pytest.mark.parametrize("use_reentrant", [True, False])
-    def test_training_custom_models_gradient_checkpointing(
-        self, test_name, model_id, config_cls, config_kwargs, use_reentrant
-    ):
-        self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs, use_reentrant=use_reentrant)
+    # Note: skipping _test_training_gradient_checkpointing because the model explicitly needs to support it, which is
+    # not the case for custom models
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_inference_safetensors(self, test_name, model_id, config_cls, config_kwargs):
@@ -2047,6 +2031,71 @@ class TestPeftCustomModel(PeftCommonTester):
         model(**X)
         model = model.merge_and_unload()
         model(**X)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @pytest.mark.parametrize("autocast_adapter_dtype", [True, False])
+    @pytest.mark.parametrize("low_cpu_mem_usage", [False, True])
+    def test_adapter_dtype_autocast(
+        self,
+        test_name,
+        model_id,
+        config_cls,
+        config_kwargs,
+        dtype,
+        autocast_adapter_dtype,
+        low_cpu_mem_usage,
+        tmp_path,
+    ):
+        """checks that the dtype of the PEFT adapter corresponds to the expected dtype.
+
+        Checks:
+        - get_peft_model
+        - add_adapter
+        - PeftModel.from_pretrained
+        - load_adapter
+        - with and without autocasting adapter dtype
+        - with and without low_cpu_mem_usage (which only makes sense for loading adapters)
+        """
+        if autocast_adapter_dtype and (config_cls == LNTuningConfig):
+            # LN Tuning basically copies the base weight and makes it trainable, hence it makes sense to keep the dtype
+            # of the base model weight.
+            pytest.skip("LNTuning is exempted from casting the adapter weights to float32")
+
+        if autocast_adapter_dtype:
+            expected_dtype = torch.float32
+        else:
+            expected_dtype = dtype
+
+        model = self.transformers_class.from_pretrained(model_id, dtype=dtype).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config, autocast_adapter_dtype=autocast_adapter_dtype)
+        if config_kwargs.get("target_parameters", None) is None:
+            # target_parameters does not allow multiple adapters on the same parameter
+            model.add_adapter("other", config, autocast_adapter_dtype=autocast_adapter_dtype)
+        peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
+        assert all(p.dtype == expected_dtype for p in peft_params)
+
+        model.save_pretrained(tmp_path)
+        del model
+
+        model = self.transformers_class.from_pretrained(model_id, dtype=dtype).to(self.torch_device)
+        model = PeftModel.from_pretrained(
+            model, tmp_path, autocast_adapter_dtype=autocast_adapter_dtype, low_cpu_mem_usage=low_cpu_mem_usage
+        )
+        if config_kwargs.get("target_parameters", None) is None:
+            # target_parameters does not allow multiple adapters on the same parameter
+            model.load_adapter(
+                tmp_path / "other",
+                adapter_name="other",
+                autocast_adapter_dtype=autocast_adapter_dtype,
+                low_cpu_mem_usage=low_cpu_mem_usage,
+            )
+        peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
+        assert all(p.dtype == expected_dtype for p in peft_params)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_only_params_are_updated(self, test_name, model_id, config_cls, config_kwargs):
