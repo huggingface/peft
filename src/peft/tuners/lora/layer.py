@@ -156,6 +156,7 @@ class LoraLayer(BaseTunerLayer):
         arrow_config: ArrowConfig = None,
         qalora_group_size: int = 32,
         inference_mode: bool = False,
+        lora_ga_config=None,
         use_bdlora=None,
         **kwargs,
     ):
@@ -228,6 +229,9 @@ class LoraLayer(BaseTunerLayer):
         elif init_lora_weights == "orthogonal":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.orthogonal_init(adapter_name)
+        elif init_lora_weights == "lora_ga":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.lora_ga_init(adapter_name, lora_ga_config)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
         # call this before init of the lora variants
@@ -476,6 +480,124 @@ class LoraLayer(BaseTunerLayer):
         self.lora_A[adapter_name].weight = nn.Parameter(lora_A.contiguous().to(dtype))
         self.lora_B[adapter_name].weight = nn.Parameter(lora_B.contiguous().to(dtype))
 
+    def lora_ga_init(self, adapter_name, lora_ga_config):
+        """
+        Initialize LoRA weights using gradient approximation.
+
+        Uses SVD on the gradient matrix to initialize adapters in a way that aligns with the direction of full
+        fine-tuning.
+
+        Expects that `preprocess_loraga` has been called before this, which attaches the `loraga_grad` attribute to the
+        base layer.
+
+        If gradients are not available (e.g., when loading from a saved adapter), falls back to gaussian
+        initialization. The weights will be overwritten by the state_dict anyway.
+        """
+        base_layer = self.get_base_layer()
+
+        # Check for gradient attached by preprocess_loraga
+        if not hasattr(base_layer, "_peft_loraga_grad"):
+            # When loading from saved adapter, gradients won't be available
+            # Fall back to gaussian initialization (weights will be overwritten by state_dict)
+            self.reset_lora_parameters(adapter_name, init_lora_weights=True)
+            return
+
+        grad = base_layer._peft_loraga_grad
+
+        # Check for lora_ga_config
+        if lora_ga_config is None:
+            raise ValueError(
+                "lora_ga_config must be provided when init_lora_weights='lora_ga'. "
+                "Please pass lora_ga_config=LoraGAConfig(...) to LoraConfig."
+            )
+        direction = lora_ga_config.direction
+        scale = lora_ga_config.scale
+        stable_gamma = lora_ga_config.stable_gamma
+        dtype = self.get_base_layer().weight.dtype
+
+        grad = grad.to(torch.float32)
+        weight = self.get_base_layer().weight
+
+        grad = transpose(grad, self.fan_in_fan_out)
+
+        r = self.r[adapter_name]
+
+        # torch.svd_lowrank returns (U, S, V) where grad ≈ U @ diag(S) @ V.T
+        # So V is shape (in_features, k) and we need V.T which is (k, in_features) for lora_A
+        U, S, V = torch.svd_lowrank(grad, q=min(4 * r, min(grad.shape)), niter=4)
+
+        # V is (in_features, k), we need Vh = V.T which is (k, in_features)
+        Vh = V.t()
+
+        U = U[:, : 2 * r]
+        S = S[: 2 * r]
+        Vh = Vh[: 2 * r, :]
+
+        if direction == "ArBr":
+            # Alternating: A takes rows at odd indices [1,3,5,7], B takes columns at even indices [0,2,4,6]
+            lora_A_weight = Vh[1 : 2 * r : 2, :]  # Shape: (r, in_features)
+            lora_B_weight = U[:, 0 : 2 * r : 2]  # Shape: (out_features, r)
+            S_B = S[0 : 2 * r : 2]
+            lora_B_weight = lora_B_weight @ torch.diag(S_B)
+
+        elif direction == "A2rBr":
+            # A takes second half rows [r:2r], B takes first half columns [:r]
+            lora_A_weight = Vh[r : 2 * r, :]  # Shape: (r, in_features)
+            lora_B_weight = U[:, :r]  # Shape: (out_features, r)
+            S_B = S[:r]
+            lora_B_weight = lora_B_weight @ torch.diag(S_B)
+
+        elif direction == "ArB2r":
+            # A takes first half rows [:r], B takes second half columns [r:2r]
+            lora_A_weight = Vh[:r, :]  # Shape: (r, in_features)
+            lora_B_weight = U[:, r : 2 * r]  # Shape: (out_features, r)
+            S_B = S[r : 2 * r]
+            lora_B_weight = lora_B_weight @ torch.diag(S_B)
+
+        elif direction == "random":
+            indices = torch.randperm(2 * r)[:r]
+            lora_A_weight = Vh[indices, :]  # Shape: (r, in_features)
+            S_B = S[indices]
+            lora_B_weight = U[:, indices] @ torch.diag(S_B)  # Shape: (out_features, r)
+
+        scaling_factor = self.scaling[adapter_name]
+        out_features = weight.shape[0]
+
+        if scale == "stable":
+            scale_factor = (out_features**0.25) / (stable_gamma**0.5)
+            lora_B_weight = lora_B_weight * scale_factor
+
+        elif scale == "weight_svd":
+            weight_data = transpose(weight.data.to(torch.float32), self.fan_in_fan_out)
+            _, weight_S, _ = torch.svd_lowrank(weight_data, q=r, niter=4)
+            if S_B[0] > 0:
+                scale_factor = weight_S[0] / S_B[0]
+                lora_B_weight = lora_B_weight * scale_factor
+
+        elif scale == "gd_scale":
+            lora_A_weight = lora_A_weight / scaling_factor
+            lora_B_weight = lora_B_weight / scaling_factor
+
+        # Convert to target dtype first to ensure weight offset matches adapter precision
+        lora_A_weight = lora_A_weight.to(dtype)
+        lora_B_weight = lora_B_weight.to(dtype)
+
+        # Assign LoRA weights
+        # lora_A should be (r, in_features), lora_B should be (out_features, r)
+        self.lora_A[adapter_name].weight.data = lora_A_weight.contiguous()
+        self.lora_B[adapter_name].weight.data = lora_B_weight.contiguous()
+
+        # Modify base weights: W_new = W_old - scaling * (B @ A)
+        # Important: compute offset in fp32 using dtype-converted weights to match forward pass precision
+        weight_data = transpose(weight.data.to(torch.float32), self.fan_in_fan_out)
+        weight_offset = scaling_factor * (lora_B_weight.float() @ lora_A_weight.float())
+        weight_data = weight_data - weight_offset
+        weight_data = transpose(weight_data.to(dtype), self.fan_in_fan_out)
+        self.get_base_layer().weight.data = weight_data
+
+        # Remove redundant fields
+        del base_layer._peft_loraga_grad
+
     def _cache_store(self, key: str, value: Any) -> None:
         # cache intermediate values, e.g. weight norm of DoRA
         self._caches[key] = value
@@ -630,6 +752,7 @@ class Linear(nn.Module, LoraLayer):
         arrow_config: ArrowConfig = None,
         use_bdlora=None,
         lora_bias: bool = False,
+        lora_ga_config=None,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -648,6 +771,7 @@ class Linear(nn.Module, LoraLayer):
             use_alora=use_alora,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
+            lora_ga_config=lora_ga_config,
             use_bdlora=use_bdlora,
             **kwargs,
         )
@@ -866,6 +990,7 @@ class Embedding(nn.Module, LoraLayer):
         use_dora: bool = False,
         arrow_config: ArrowConfig = None,
         lora_bias: bool = False,
+        lora_ga_config=None,
         **kwargs,
     ) -> None:
         if lora_bias:
@@ -887,6 +1012,7 @@ class Embedding(nn.Module, LoraLayer):
             use_dora=use_dora,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
+            lora_ga_config=lora_ga_config,
         )
 
     def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
@@ -948,6 +1074,9 @@ class Embedding(nn.Module, LoraLayer):
 
         if init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
+        elif init_lora_weights == "lora_ga":
+            # Embedding layers don't support LoRA-GA, fall back to standard initialization
+            self.reset_lora_parameters(adapter_name, True)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
 
@@ -1176,6 +1305,7 @@ class _ConvNd(nn.Module, LoraLayer):
         use_dora: bool = False,
         arrow_config: ArrowConfig = None,
         lora_bias: bool = False,
+        lora_ga_config=None,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -1205,6 +1335,7 @@ class _ConvNd(nn.Module, LoraLayer):
             use_dora=use_dora,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
+            lora_ga_config=lora_ga_config,
         )
 
     def update_layer(
@@ -1271,6 +1402,9 @@ class _ConvNd(nn.Module, LoraLayer):
 
         if init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
+        elif init_lora_weights == "lora_ga":
+            # Conv layers don't support LoRA-GA, fall back to standard initialization
+            self.reset_lora_parameters(adapter_name, True)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
 
@@ -1548,6 +1682,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        lora_ga_config=None,
         **kwargs,
     ) -> None:
         # TODO work with separate weights
@@ -1576,13 +1711,16 @@ class MultiheadAttention(nn.Module, LoraLayer):
                 init_lora_weights=init_lora_weights,
                 use_rslora=use_rslora,
                 use_dora=use_dora,
+                lora_ga_config=lora_ga_config,
                 **kwargs,
             )
         else:
             raise ValueError(f"out_proj must be an instance of nn.Linear for {self.__class__.__name__}.")
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+        self.update_layer(
+            adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, lora_ga_config=lora_ga_config
+        )
 
     @property
     def embed_dim(self) -> int:
@@ -1945,6 +2083,7 @@ class ParamWrapper(nn.Module, LoraLayer):
         use_rslora: bool = False,
         use_dora: bool = False,
         lora_bias: bool = False,
+        lora_ga_config=None,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -1985,6 +2124,7 @@ class ParamWrapper(nn.Module, LoraLayer):
             use_rslora=use_rslora,
             use_dora=use_dora,
             lora_bias=lora_bias,
+            lora_ga_config=lora_ga_config,
         )
 
     def update_layer(
@@ -2000,6 +2140,7 @@ class ParamWrapper(nn.Module, LoraLayer):
         lora_bias: bool = False,
         qalora_group_size: int = 32,
         inference_mode: bool = False,
+        lora_ga_config=None,
         **kwargs,
     ):
         # same method as in lora.Linear but taking into account that there can be multiple experts (3d parameter)
@@ -2061,6 +2202,9 @@ class ParamWrapper(nn.Module, LoraLayer):
         elif init_lora_weights == "orthogonal":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.orthogonal_init(adapter_name)
+        elif init_lora_weights == "lora_ga":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.lora_ga_init(adapter_name, lora_ga_config)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
         # call this before init of the lora variants
