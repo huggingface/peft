@@ -159,6 +159,7 @@ class LoraLayer(BaseTunerLayer):
         arrow_config: ArrowConfig = None,
         qalora_group_size: int = 32,
         inference_mode: bool = False,
+        tied_adapter: Optional[dict[str, nn.Parameter]] = None,
         lora_ga_config=None,
         use_bdlora=None,
         **kwargs,
@@ -203,6 +204,17 @@ class LoraLayer(BaseTunerLayer):
         # Actual trainable parameters
         self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
         self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=lora_bias)
+
+        # Tying adapters is only implemented for Linear layers
+        # where the source is the embedding layer.
+        # Currently, this is the most prevelant way of tying layers (weight tying)
+        if tied_adapter:
+            lora_A_params = tied_adapter["lora_A"]
+            lora_B_params = tied_adapter["lora_B"]
+
+            self.lora_A[adapter_name].weight = torch.nn.Parameter(lora_A_params)
+            self.lora_B[adapter_name].weight = torch.nn.Parameter(lora_B_params)
+
         self.lora_bias[adapter_name] = lora_bias
 
         if use_rslora:
@@ -774,6 +786,7 @@ class Linear(nn.Module, LoraLayer):
             use_alora=use_alora,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
+            tied_adapter=kwargs.pop("tied_adapter", None),
             lora_ga_config=lora_ga_config,
             use_bdlora=use_bdlora,
             **kwargs,
