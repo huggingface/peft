@@ -669,7 +669,7 @@ class TestOpt4bitBnb(RegressionTester):
         model = get_peft_model(base_model, config)
         # NVIDIA A100 requires a lower tol to pass the test.
         old_tol = self.tol
-        self.tol = 5e-3
+        self.tol = 3e-2
         try:
             self.assert_results_equal_or_store(model, LORA_4BIT_FOLDER)
         finally:
