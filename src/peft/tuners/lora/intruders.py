@@ -24,6 +24,7 @@ def reduce_intruder_dimension(
     top_k=10,
     threshold_epsilon=0.5,
     mitigation_lambda=0.75,
+    logging_sink=print,
 ):
     """
     Intruder dimension mitigation based on https://huggingface.co/papers/2410.21228
@@ -50,13 +51,21 @@ def reduce_intruder_dimension(
             The relative portion of the intruder dimensions that is subtracted from the adapter's delta weight.
             The higher the value the more of the intruder dimension is subtracted but the more information is
             lost. Refer to Figure 8 in the paper for a trade-off analysis.
+
+        logging_sink (default: print)
+            Function that prints information about the mitigation process. Set to None if you don't want any output.
     """
+    if logging_sink is None:
+        logging_sink = lambda *x, **y: None
+
     # TODO check if peft method is supported
+
+    # TODO handle layer.lora_embedding_A/B
 
     peft_model.add_adapter(new_adapter_name, peft_model.peft_config[old_adapter_name])
 
     # apply mitigation on the old adapter's weights and move them to the new adapter's weights
-    for _name, layer in peft_model.named_modules():
+    for layer_name, layer in peft_model.named_modules():
         if not isinstance(layer, LoraLayer):
             continue
 
@@ -64,14 +73,14 @@ def reduce_intruder_dimension(
         dW = layer.get_delta_weight(old_adapter_name)
         W_merged = W + dW
 
-        cast_to_fp32 = W.device.type == "cpu" and W.dtype in (torch.float16, torch.bfloat16)
+        cast_to_fp32 = W.dtype in (torch.float16, torch.bfloat16)
 
         if cast_to_fp32:
             W_dtype = W.dtype
             W = W.float()
 
         # compare base weights and adapter weights using cosine similarity.
-        # based on this similarit we can find intruder dimensions using threshold_epsilon
+        # based on this similarity we can find intruder dimensions using threshold_epsilon
         # on the top_k dimensions
         U_base, _S_base, _V_base = torch.linalg.svd(W, full_matrices=False)
         U_merged, S_merged, V_merged = torch.linalg.svd(W_merged, full_matrices=False)
@@ -80,7 +89,16 @@ def reduce_intruder_dimension(
         intruder_idcs = torch.where(cos_sim[:top_k] < threshold_epsilon)[0].tolist()
 
         if not intruder_idcs:
+            logging_sink(f'{layer_name}: No intruders')
+
+            # we're not modifying the weights since there are no intruders but we make sure to copy the 
+            # adapter weights unmodified to the new adapter, otherwise these weights will be 
+            # initialized randomly
+            layer.lora_B[new_adapter_name].weight.data = layer.lora_B[old_adapter_name].weight.data.clone()
+            layer.lora_A[new_adapter_name].weight.data = layer.lora_A[old_adapter_name].weight.data.clone()
             continue
+        else:
+            logging_sink(f'{layer_name}: Intruders: {len(intruder_idcs)}')
 
         # the paper computes the intruder dimensions that are subtracted on (W + dW)
         # so we do the same. experiments showed that this achieves better knowledge
@@ -100,7 +118,7 @@ def reduce_intruder_dimension(
 
         U_dW, S_dW, V_dW = torch.linalg.svd(W_merged, full_matrices=False)
 
-        effective_rank = layer.lora_A[old_adapter_name].out_features
+        effective_rank = layer.r[old_adapter_name]
         B_new = U_dW[:, :effective_rank] * S_dW[:effective_rank]
         A_new = V_dW[:effective_rank]
 
@@ -111,4 +129,5 @@ def reduce_intruder_dimension(
         if cast_to_fp32:
             W = W.to(W_dtype)
 
+    logging_sink(f"Enabling new adapter {new_adapter_name}")
     peft_model.set_adapter(new_adapter_name)
