@@ -30,7 +30,8 @@ from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
-    replicate_layers, get_device_map,
+    get_device_map,
+    replicate_layers,
 )
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,

@@ -22,7 +22,8 @@ from torch import nn
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.road.config import RoadConfig
 from peft.tuners.tuners_utils import (
-    BaseTuner, get_device_map,
+    BaseTuner,
+    get_device_map,
 )
 from peft.utils import TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING
 
