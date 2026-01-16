@@ -74,9 +74,9 @@ def reduce_intruder_dimension(
         # based on this similarit we can find intruder dimensions using threshold_epsilon
         # on the top_k dimensions
         U_base, _S_base, _V_base = torch.linalg.svd(W, full_matrices=False)
-        U_lora, _S_lora, _V_lora = torch.linalg.svd(W_merged, full_matrices=False)
+        U_merged, S_merged, V_merged = torch.linalg.svd(W_merged, full_matrices=False)
 
-        cos_sim = (U_lora.T @ U_base).abs().max(dim=1).values
+        cos_sim = (U_merged.T @ U_base).abs().max(dim=1).values
         intruder_idcs = torch.where(cos_sim[:top_k] < threshold_epsilon)[0].tolist()
 
         if not intruder_idcs:
@@ -85,7 +85,6 @@ def reduce_intruder_dimension(
         # the paper computes the intruder dimensions that are subtracted on (W + dW)
         # so we do the same. experiments showed that this achieves better knowledge
         # recovery than on dW alone.
-        U_merged, S_merged, V_merged = torch.linalg.svd(W_merged, full_matrices=False)
         B_intruder = (U_merged[:, intruder_idcs] @ torch.diag(S_merged)[intruder_idcs, :].sqrt())
         A_intruder = (torch.diag(S_merged)[:, intruder_idcs]).sqrt() @ V_merged[intruder_idcs, :]
 
