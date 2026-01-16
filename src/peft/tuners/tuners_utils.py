@@ -2057,3 +2057,17 @@ def set_requires_grad(model, adapter_names: str | Sequence[str], requires_grad: 
     for module in model.modules():
         if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
             module.set_requires_grad(adapter_names=adapter_names, requires_grad=requires_grad)
+
+
+def get_device_map(model) -> dict:
+    if hasattr(model, "hf_device_map"):
+        # Multi-device case: accelerate dispatch is active and exposes hf_device_map
+        device_map = model.hf_device_map
+    else:
+        # Single-device case:
+        # Recent Transformers versions intentionally skip accelerate hooks when the
+        # device_map resolves to a single device (e.g. "cpu" or one GPU), so
+        # hf_device_map is not set. All parameters are guaranteed to be on the
+        # same device, which can be inferred from the first parameter.
+        device_map = {"": next(model.parameters()).device}
+    return device_map

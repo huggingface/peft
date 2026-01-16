@@ -15,7 +15,7 @@
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import (
-    BaseTuner,
+    BaseTuner, get_device_map,
 )
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_OFT_TARGET_MODULES_MAPPING,
@@ -123,7 +123,7 @@ class OFTModel(BaseTuner):
 
         # If it is not a OFTLayer, create a new module, else update it with new adapters
         if not isinstance(target, OFTLayer):
-            device_map = self.model.hf_device_map if hasattr(self.model, "hf_device_map") else None
+            device_map = get_device_map(self.model)
             new_module = self._create_new_module(oft_config, adapter_name, target, device_map=device_map, **kwargs)
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
