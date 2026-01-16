@@ -1634,6 +1634,74 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         return self.base_model.supports_lora_conversion()
 
+    def get_base_model_state_dict(self) -> dict[str, torch.Tensor]:
+        """
+        Returns the state dict of the base model with the original model keys.
+
+        This method extracts the base model's parameters, removing PEFT-specific key modifications and filtering out
+        adapter-specific parameters (like LoRA matrices).
+
+        This is useful when you need to access or save the base model's weights with their original key names.
+
+        Returns:
+            `dict[str, torch.Tensor]`:
+                The base model's state dict with original keys (without PEFT modifications).
+
+        Example:
+            ```python
+            >>> from transformers import AutoModelForCausalLM
+            >>> from peft import get_peft_model, LoraConfig
+
+            >>> base_model = AutoModelForCausalLM.from_pretrained("gpt2")
+            >>> original_keys = set(base_model.state_dict().keys())
+
+            >>> peft_model = get_peft_model(base_model, LoraConfig(target_modules=["c_attn"]))
+            >>> base_state_dict = peft_model.get_base_model_state_dict()
+
+            >>> # The keys match the original model
+            >>> assert set(base_state_dict.keys()) == original_keys
+            ```
+        """
+        # for prompt learning methods the base model structure is not modified
+        if self._is_prompt_learning:
+            return dict(self.base_model.state_dict())
+
+        # Get state dict from the underlying model
+        state_dict = self.base_model.model.state_dict()
+
+        # Collect all adapter prefixes to identify adapter-specific parameters
+        adapter_prefixes: set[str] = set()
+        for config in self.peft_config.values():
+            prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(config.peft_type)
+            if prefix:
+                adapter_prefixes.add(prefix)
+
+        result: dict[str, torch.Tensor] = {}
+
+        for key, value in state_dict.items():
+            # skip adapter specific params such as .lora_A, .lora_B
+            is_adapter_param = False
+            for prefix in adapter_prefixes:
+                if f".{prefix}" in key or key.startswith(f"{prefix}"):
+                    is_adapter_param = True
+                    break
+
+            if is_adapter_param:
+                continue
+
+            # skip adapter-specific copies in modules_to_save
+            if ".modules_to_save." in key:
+                continue
+
+            # Transform keys to original format by removing PEFT-specific infixes
+            new_key = key
+            new_key = new_key.replace(".base_layer.", ".")  # for tuner layers
+            new_key = new_key.replace(".original_module.", ".")  # for modules_to_save
+
+            result[new_key] = value
+
+        return result
+
 
 class PeftModelForSequenceClassification(PeftModel):
     """
