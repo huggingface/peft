@@ -154,12 +154,13 @@ class AdaDoraLinearVariant(LoraVariant):
         scaling = module.scaling[active_adapter]
         ranknum = module.ranknum[active_adapter].item()
 
-        # get weight norm using the AdaDoRA layer
-        weight_norm = (
-            module.lora_magnitude_vector[active_adapter]
-            .get_weight_norm(orig_weight, lora_A, lora_B, lora_E, scaling, ranknum)
-            .detach()
+        # compute lora weight for weight norm calculation
+        lora_weight = module.lora_magnitude_vector[active_adapter]._compute_lora_weight(
+            lora_A, lora_B, lora_E, scaling, ranknum
         )
+
+        # get weight norm using the AdaDoRA layer
+        weight_norm = module.lora_magnitude_vector[active_adapter].get_weight_norm(orig_weight, lora_weight).detach()
 
         # cache weight_norm for potential unmerge operation
         module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
@@ -189,11 +190,12 @@ class AdaDoraLinearVariant(LoraVariant):
         scaling = module.scaling[active_adapter]
         ranknum = module.ranknum[active_adapter].item()
 
-        weight_norm = (
-            module.lora_magnitude_vector[active_adapter]
-            .get_weight_norm(orig_weight, lora_A, lora_B, lora_E, scaling, ranknum)
-            .detach()
+        # compute lora weight for weight norm calculation
+        lora_weight = module.lora_magnitude_vector[active_adapter]._compute_lora_weight(
+            lora_A, lora_B, lora_E, scaling, ranknum
         )
+
+        weight_norm = module.lora_magnitude_vector[active_adapter].get_weight_norm(orig_weight, lora_weight).detach()
 
         # cache weight_norm for potential unmerge operation
         module._cache_store(f"{active_adapter}-weight_norm", weight_norm)

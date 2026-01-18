@@ -92,6 +92,16 @@ ALL_CONFIGS = [
             "total_step": 1,
         },
     ),
+    # AdaDoRA (AdaLoRA + DoRA)
+    (
+        AdaLoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "total_step": 1,
+            "use_dora": True,
+        },
+    ),
     (
         BOFTConfig,
         {
