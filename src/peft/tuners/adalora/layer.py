@@ -138,7 +138,6 @@ class SVDLinear(nn.Module, AdaLoraLayer):
 
         return AdaDoraLinearVariant()
 
-
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
