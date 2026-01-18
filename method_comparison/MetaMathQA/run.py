@@ -115,9 +115,9 @@ def calculate_mean_per_token_loss(model, tokenizer, rows: list[str], batch_size:
         outputs = model(**batch, pad_token_id=tokenizer.eos_token_id)
         logits = outputs.logits
         for logit, target, mask in zip(logits, batch["input_ids"], batch["attention_mask"]):
-            # calculate loss per token so that the mean is not skewed by sequence length of sample
+            # calculate loss per token so that the mean is not skewed by sequence length of sample, padding from left
             num_tokens = mask.sum()
-            token_losses = torch.nn.functional.cross_entropy(logit[:num_tokens], target[:num_tokens], reduction="none")
+            token_losses = torch.nn.functional.cross_entropy(logit[-num_tokens:], target[-num_tokens:], reduction="none")
             losses.extend(loss.item() for loss in token_losses)
     return torch.tensor(losses).mean().item()
 

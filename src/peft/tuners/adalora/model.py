@@ -119,7 +119,6 @@ class AdaLoraModel(LoraModel):
         kwargs = {
             "r": lora_config.init_r,
             "lora_alpha": lora_config.lora_alpha,
-            "fan_in_fan_out": lora_config.fan_in_fan_out,  # Still needed for Conv1D detection
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -146,7 +145,7 @@ class AdaLoraModel(LoraModel):
                 adapter_name,
                 lora_config.init_r,
                 lora_config.lora_alpha,
-                lora_config,  # Pass config object instead of individual params
+                config=lora_config,
             )
 
     @staticmethod
@@ -197,19 +196,19 @@ class AdaLoraModel(LoraModel):
             new_module = SVDQuantLinear(target, adapter_name, config=lora_config, **kwargs)
         else:
             if isinstance(target_base_layer, torch.nn.Linear):
-                if kwargs["fan_in_fan_out"]:
+                if lora_config.fan_in_fan_out:
                     warnings.warn(
                         "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                         "Setting fan_in_fan_out to False."
                     )
-                    kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
+                    lora_config.fan_in_fan_out = False
             elif isinstance(target_base_layer, Conv1D):
-                if not kwargs["fan_in_fan_out"]:
+                if not lora_config.fan_in_fan_out:
                     warnings.warn(
                         "fan_in_fan_out is set to False but the target module is `Conv1D`. "
                         "Setting fan_in_fan_out to True."
                     )
-                    kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = True
+                    lora_config.fan_in_fan_out = True
             else:
                 raise ValueError(
                     f"Target module {target} is not supported. "
