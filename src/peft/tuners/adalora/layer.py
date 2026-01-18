@@ -61,6 +61,13 @@ class AdaLoraLayer(LoraLayer):
         inference_mode = config.inference_mode
         use_dora = config.use_dora  # Extract use_dora for AdaDoRA support
 
+<<<<<<< HEAD
+=======
+    def update_layer(self, adapter_name: str, r: int, lora_alpha: int, config: AdaLoraConfig, **kwargs) -> None:
+        lora_dropout = config.lora_dropout
+        init_lora_weights = config.init_lora_weights
+        inference_mode = config.inference_mode
+>>>>>>> c2fcc73d60b01f5c7cec4007edfeaa534a012def
         if r < 0:
             # note: r == 0 is allowed for AdaLora, see #1539
             raise ValueError(f"`r` should be a positive integer or 0, but the value passed is {r}")
@@ -128,6 +135,7 @@ class SVDLinear(nn.Module, AdaLoraLayer):
         self.fan_in_fan_out = config.fan_in_fan_out
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, lora_alpha, config=config)
+<<<<<<< HEAD
 
     def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
         """Return AdaDoRA variant if use_dora is True."""
@@ -138,6 +146,8 @@ class SVDLinear(nn.Module, AdaLoraLayer):
 
         return AdaDoraLinearVariant()
 
+=======
+>>>>>>> c2fcc73d60b01f5c7cec4007edfeaa534a012def
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
