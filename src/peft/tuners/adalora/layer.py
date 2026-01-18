@@ -33,8 +33,8 @@ else:
 
 
 class AdaLoraLayer(LoraLayer):
-    # list all names of layers that may contain adapter weights
-    # note: ranknum doesn't need to be included as it is not an nn.Module
+    # List all names of layers that may contain adapter weights
+    # Note: ranknum doesn't need to be included as it is not an nn.Module
     adapter_layer_names = (
         "lora_A",
         "lora_B",
@@ -43,7 +43,7 @@ class AdaLoraLayer(LoraLayer):
         "lora_embedding_B",
         "lora_magnitude_vector",
     )
-    # all names of other parameters that may contain adapter-related parameters
+    # All names of other parameters that may contain adapter-related parameters
     other_param_names = ("r", "lora_alpha", "scaling", "lora_dropout", "ranknum")
 
     def __init__(self, base_layer: nn.Module) -> None:
@@ -77,14 +77,14 @@ class AdaLoraLayer(LoraLayer):
             lora_dropout_layer = nn.Identity()
 
         self.lora_dropout[adapter_name] = lora_dropout_layer
-        # actual trainable parameters
-        # right singular vectors
+        # Actual trainable parameters
+        # Right singular vectors
         self.lora_A[adapter_name] = nn.Parameter(torch.randn(r, self.in_features))
-        # singular values
+        # Singular values
         self.lora_E[adapter_name] = nn.Parameter(torch.randn(r, 1))
-        # left singular vectors
+        # Left singular vectors
         self.lora_B[adapter_name] = nn.Parameter(torch.randn(self.out_features, r))
-        # the current rank
+        # The current rank
         self.ranknum[adapter_name] = nn.Parameter(torch.randn(1), requires_grad=False)
         self.ranknum[adapter_name].data.fill_(float(r))
         self.ranknum[adapter_name].requires_grad = False
@@ -130,7 +130,7 @@ class SVDLinear(nn.Module, AdaLoraLayer):
     ) -> None:
         super().__init__()
         AdaLoraLayer.__init__(self, base_layer)
-        # freezing the pre-trained weight matrix
+        # Freezing the pre-trained weight matrix
         self.get_base_layer().weight.requires_grad = False
 
         self.fan_in_fan_out = fan_in_fan_out
