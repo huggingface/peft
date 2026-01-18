@@ -119,10 +119,7 @@ class AdaLoraModel(LoraModel):
         kwargs = {
             "r": lora_config.init_r,
             "lora_alpha": lora_config.lora_alpha,
-            "lora_dropout": lora_config.lora_dropout,
-            "fan_in_fan_out": lora_config.fan_in_fan_out,
-            "init_lora_weights": lora_config.init_lora_weights,
-            "use_dora": lora_config.use_dora,
+            "fan_in_fan_out": lora_config.fan_in_fan_out,  # Still needed for Conv1D detection
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -149,9 +146,7 @@ class AdaLoraModel(LoraModel):
                 adapter_name,
                 lora_config.init_r,
                 lora_config.lora_alpha,
-                lora_config.lora_dropout,
-                lora_config.init_lora_weights,
-                use_dora=lora_config.use_dora,
+                lora_config,  # Pass config object instead of individual params
             )
 
     @staticmethod
@@ -187,7 +182,7 @@ class AdaLoraModel(LoraModel):
                     "index": target_base_layer.index,
                 }
             )
-            new_module = SVDLinear8bitLt(target, adapter_name, **kwargs)
+            new_module = SVDLinear8bitLt(target, adapter_name, config=lora_config, **kwargs)
         elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target_base_layer, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
@@ -197,9 +192,9 @@ class AdaLoraModel(LoraModel):
                     "quant_type": target_base_layer.weight.quant_type,
                 }
             )
-            new_module = SVDLinear4bit(target, adapter_name, **fourbit_kwargs)
+            new_module = SVDLinear4bit(target, adapter_name, config=lora_config, **fourbit_kwargs)
         elif QuantLinear is not None and isinstance(target, QuantLinear):
-            new_module = SVDQuantLinear(target, adapter_name, **kwargs)
+            new_module = SVDQuantLinear(target, adapter_name, config=lora_config, **kwargs)
         else:
             if isinstance(target_base_layer, torch.nn.Linear):
                 if kwargs["fan_in_fan_out"]:
@@ -220,7 +215,7 @@ class AdaLoraModel(LoraModel):
                     f"Target module {target} is not supported. "
                     f"Currently, only `torch.nn.Linear` and `Conv1D` are supported."
                 )
-            new_module = SVDLinear(target, adapter_name, **kwargs)
+            new_module = SVDLinear(target, adapter_name, config=lora_config, **kwargs)
 
         return new_module
 
