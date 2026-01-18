@@ -1,6 +1,6 @@
 # AdaDoRA (AdaLoRA + DoRA) Example
 
-This example demonstrates how to use **AdaDoRA** - a combination of AdaLoRA's adaptive rank allocation with DoRA's weight-decomposition approach for parameter-efficient fine-tuning.
+This example demonstrates how to use **AdaDoRA** - a combination of [AdaLoRA's](https://arxiv.org/abs/2303.10512) adaptive rank allocation with [DoRA's](https://arxiv.org/abs/2402.09353) weight-decomposed low-rank adaptation.
 
 ## Usage
 
