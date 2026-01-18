@@ -119,14 +119,7 @@ class AdaLoraModel(LoraModel):
         kwargs = {
             "r": lora_config.init_r,
             "lora_alpha": lora_config.lora_alpha,
-<<<<<<< HEAD
             "fan_in_fan_out": lora_config.fan_in_fan_out,  # Still needed for Conv1D detection
-=======
-<<<<<<< HEAD
-            "fan_in_fan_out": lora_config.fan_in_fan_out,  # Still needed for Conv1D detection
-=======
->>>>>>> c2fcc73d60b01f5c7cec4007edfeaa534a012def
->>>>>>> 6345da1b0ba4ad5c199d6f678caa42a7fa1a32a6
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
