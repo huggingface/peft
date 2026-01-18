@@ -118,16 +118,19 @@ class AdaDoraLinearLayer(DoraLinearLayer):
         magnitude = self.weight
         weight = dequantize_module_weight(base_layer).to(x.dtype)
 
+        # compute lora_weight (B @ (A * E) * scaling / ranknum) once
+        lora_weight = self._compute_lora_weight(lora_A, lora_B, lora_E, scaling, ranknum)
+
         # weight norm is detached per DoRA paper section 4.3:
         # "[...] we suggest treating ||V + ΔV||_c as a constant, thereby
         # detaching it from the gradient graph."
-        lora_weight = self._compute_lora_weight(lora_A.detach(), lora_B.detach(), lora_E.detach(), scaling, ranknum)
-        weight_norm = self.get_weight_norm(weight, lora_weight)
+        weight_norm = self.get_weight_norm(weight, lora_weight.detach())
         weight_norm = weight_norm.detach()
         mag_norm_scale = (magnitude / weight_norm).view(1, -1)
 
-        # compute adapter output: x @ (A*E).T @ B.T * scaling / ranknum
-        lora_result = (x @ (lora_A * lora_E).T @ lora_B.T) * (scaling / (ranknum + 1e-5))
+        # reuse lora_weight for adapter output: x @ lora_weight.T
+        # Note: we use torch.matmul instead of recomputing to avoid redundant computation
+        lora_result = x @ lora_weight.T
 
         # handle base result (subtract bias if present)
         if base_result is not None:
