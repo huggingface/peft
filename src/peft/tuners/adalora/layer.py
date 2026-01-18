@@ -128,7 +128,6 @@ class SVDLinear(nn.Module, AdaLoraLayer):
         self.fan_in_fan_out = config.fan_in_fan_out
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, lora_alpha, config=config)
-<<<<<<< HEAD
 
     def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
         """Return AdaDoRA variant if use_dora is True."""
@@ -139,8 +138,6 @@ class SVDLinear(nn.Module, AdaLoraLayer):
 
         return AdaDoraLinearVariant()
 
-=======
->>>>>>> c2fcc73d60b01f5c7cec4007edfeaa534a012def
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
