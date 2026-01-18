@@ -41,7 +41,6 @@ class AdaLoraLayer(LoraLayer):
         "lora_E",
         "lora_embedding_A",
         "lora_embedding_B",
-        "lora_magnitude_vector",
     )
     # All names of other parameters that may contain adapter-related parameters
     other_param_names = ("r", "lora_alpha", "scaling", "lora_dropout", "ranknum")
@@ -95,11 +94,10 @@ class AdaLoraLayer(LoraLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         # initialize variant if needed (e.g., DoRA) - must happen after device move
-        if use_dora:
-            lora_variant = self.resolve_lora_variant(use_dora=use_dora, **kwargs)
-            if lora_variant is not None:
-                self.lora_variant[adapter_name] = lora_variant
-                lora_variant.init(self, adapter_name, **kwargs)
+        lora_variant = self.resolve_lora_variant(use_dora=use_dora, **kwargs)
+        if lora_variant is not None:
+            self.lora_variant[adapter_name] = lora_variant
+            lora_variant.init(self, adapter_name, **kwargs)
 
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
