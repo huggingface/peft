@@ -13,7 +13,7 @@ Example usage:
         --adamss_k 10 \\
         --adamss_ri 3 \\
         --use_asa \\
-        --target_kk 5 \\
+        --asa_target_subspaces 5 \\
         --num_epochs 10 \\
         --output_dir ./output
 
@@ -46,7 +46,7 @@ from torchvision.transforms import (
     ToTensor,
 )
 
-from peft import AdaMSSConfig, get_peft_model, ASACallback
+from peft import AdaMSSConfig, get_peft_model, AdamssASACallback
 
 
 # Hyperparameters from Table 18 in the paper
@@ -147,13 +147,13 @@ class ImageClassificationArguments:
     
     # ASA Configuration
     use_asa: bool = field(default=False, metadata={"help": "Enable Adaptive Subspace Allocation"})
-    target_kk: int = field(default=5, metadata={"help": "Target active subspaces for ASA"})
+    asa_target_subspaces: int = field(default=5, metadata={"help": "Target active subspaces for ASA"})
     asa_init_warmup: int = field(default=50, metadata={"help": "ASA init warmup in STEPS"})
     asa_final_warmup: int = field(default=1000, metadata={"help": "ASA final warmup in STEPS"})
     asa_mask_interval: int = field(default=100, metadata={"help": "ASA mask interval in STEPS"})
-    asa_beta1: float = field(default=0.85, metadata={"help": "EMA coefficient for importance"})
-    asa_beta2: float = field(default=0.85, metadata={"help": "EMA coefficient for uncertainty"})
-    asa_tt: float = field(default=3.0, metadata={"help": "ASA schedule exponent"})
+    asa_importance_beta: float = field(default=0.85, metadata={"help": "EMA coefficient for importance"})
+    asa_uncertainty_beta: float = field(default=0.85, metadata={"help": "EMA coefficient for uncertainty"})
+    asa_schedule_exponent: float = field(default=3.0, metadata={"help": "ASA schedule exponent"})
     
     # Training Configuration
     num_epochs: int = field(default=10, metadata={"help": "Number of training epochs"})
@@ -226,7 +226,7 @@ def main():
     print(f"Model: {model_type}")
     print(f"AdaMSS: r={args.adamss_r}, K={args.adamss_k}, ri={args.adamss_ri}")
     if args.use_asa:
-        print(f"ASA: Target {args.target_kk}/{args.adamss_k} subspaces")
+        print(f"ASA: Target {args.asa_target_subspaces}/{args.adamss_k} subspaces")
         print(f"     Warmup steps {args.asa_init_warmup} → {args.asa_final_warmup}")
     print(f"Training: {args.num_epochs} epochs, batch_size={args.batch_size}, seed={args.seed}")
     print("="*80 + "\n")
@@ -319,7 +319,13 @@ def main():
         subspace_rank=args.adamss_ri,
         target_modules=["query", "value"],
         use_asa=args.use_asa,
-        target_kk=args.target_kk if args.use_asa else None,
+        asa_target_subspaces=args.asa_target_subspaces if args.use_asa else None,
+        init_warmup=args.asa_init_warmup if args.use_asa else None,
+        final_warmup=args.asa_final_warmup if args.use_asa else None,
+        mask_interval=args.asa_mask_interval if args.use_asa else None,
+        asa_importance_beta=args.asa_importance_beta if args.use_asa else None,
+        asa_uncertainty_beta=args.asa_uncertainty_beta if args.use_asa else None,
+        asa_schedule_exponent=args.asa_schedule_exponent if args.use_asa else None,
         modules_to_save=["classifier"],
     )
     
@@ -340,16 +346,7 @@ def main():
     callbacks = []
     if args.use_asa:
         print("\nSetting up ASA callback...")
-        asa_callback = ASACallback(
-            target_kk=args.target_kk,
-            init_warmup=args.asa_init_warmup,
-            final_warmup=args.asa_final_warmup,
-            mask_interval=args.asa_mask_interval,
-            beta1=args.asa_beta1,
-            beta2=args.asa_beta2,
-            tt=args.asa_tt,
-            verbose=True,  # Enable verbose output for ASA monitoring
-        )
+        asa_callback = AdamssASACallback(verbose=True)
         callbacks.append(asa_callback)
     
     # Metrics

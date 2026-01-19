@@ -19,14 +19,14 @@ pip install transformers datasets torch torchvision evaluate accelerate
 
 Verify installation:
 ```bash
-python -c "from peft import AdaMSSConfig, ASACallback; print('AdaMSS ready')"
+python -c "from peft import AdaMSSConfig, AdamssASACallback; print('AdaMSS ready')"
 ```
 
 ## Detailed Code Explanation
 
 **Core AdaMSS Configuration:**
 ```python
-from peft import AdaMSSConfig, get_peft_model, ASACallback
+from peft import AdaMSSConfig, get_peft_model, AdamssASACallback
 
 # Configure AdaMSS with ASA
 config = AdaMSSConfig(
@@ -43,7 +43,7 @@ peft_model = get_peft_model(model, config)
 
 **ASA Callback Setup:**
 ```python
-asa_callback = ASACallback(
+asa_callback = AdamssASACallback(
     target_kk=5,            # Gradually mask to 5 active subspaces
     init_warmup=50,         # Start ASA after 50 steps (Vision) or 5 epochs (NLU)
     final_warmup=1000,      # Complete masking by step 1000 (Vision) or epoch 95 (NLU)
@@ -122,7 +122,7 @@ python examples/adamss_finetuning/glue_adamss_asa_example.py \
 | `target_kk` | int | None | Target active subspaces when ASA enabled |
 | `modules_to_save` | list | None | Modules to train without decomposition |
 
-### ASACallback Parameters
+### AdamssASACallback Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|

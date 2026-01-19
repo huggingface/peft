@@ -25,54 +25,153 @@ from peft.utils import PeftType
 class AdamssConfig(PeftConfig):
     """
     Configuration class for Adamss (Adaptive Multi-Subspaces) method.
-    
+
     AdaMSS is a parameter-efficient fine-tuning method that decomposes weight matrices
     using SVD and clusters the decomposed space into multiple trainable subspaces.
-    
+    It learns low-rank updates within these subspaces while keeping the original weights frozen.
+
     Args:
-        r (`int`): 
-            Rank for SVD decomposition (adamss_R). Default is 500.
+        r (`int`):
+            Total rank for SVD decomposition (denoted as R in the paper). This determines
+            how many singular vectors are used to represent the weight matrix before clustering.
+            Higher values capture more information from the original weights but require more
+            computation and memory. Lower values provide stronger regularization.
+            Typical values range from 50 to 500. Default is 100.
+
         num_subspaces (`int`):
-            Number of subspaces for clustering (adamss_K). Default is 5.
+            Number of subspaces (K) to cluster the SVD-decomposed space into. Each subspace
+            learns independent low-rank updates. Increasing this value allows finer-grained
+            adaptation but increases the number of trainable parameters proportionally.
+            When using ASA (Adaptive Subspace Allocation), this determines the initial number
+            of subspaces before pruning. Typical values range from 3 to 10. Default is 5.
+
         subspace_rank (`int`):
-            Rank for each subspace (adamss_ri). Default is 1.
+            The rank (r_i) for each trainable subspace. This controls the capacity of each
+            subspace to learn adaptations. Higher values increase expressiveness but also
+            increase trainable parameters. Total trainable parameters scale as
+            O(num_subspaces * subspace_rank * (in_dim + out_dim) / num_subspaces).
+            For most tasks, values of 1-4 work well. Default is 1.
+
         target_modules (`Optional[Union[list[str], str]]`):
             The names of the modules to apply AdaMSS to. If specified, only these modules
-            will be adapted. Can be a list or a regex expression.
+            will be adapted. Can be a list of exact module names or a regex expression.
+            For example, `['q_proj', 'v_proj']` for attention layers, or
+            `'.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'` for regex matching.
+
         modules_to_save (`Optional[list[str]]`):
-            List of modules apart from AdaMSS layers to be set as trainable and saved in the final checkpoint.
-            For example, in Sequence Classification task, the classification head is randomly initialized and 
-            needs to be trained.
+            List of modules apart from AdaMSS layers to be set as trainable and saved in
+            the final checkpoint. These modules will be fully fine-tuned (not just low-rank).
+            Required for randomly initialized heads like `classifier` or `score` in
+            classification tasks.
+
         init_weights (`Literal["orthogonal"]`):
-            Initialization method for AdaMSS weights. Currently only supports "orthogonal".
-            Default is "orthogonal".
+            Initialization method for AdaMSS trainable weights. Currently only "orthogonal"
+            is supported, which uses orthogonal initialization for the B matrices (output
+            projection). The A matrices are initialized to zero to ensure the model starts
+            from the pretrained weights. Set to None to skip initialization when loading
+            from a checkpoint. Default is "orthogonal".
+
         layers_to_transform (`Optional[Union[list[int], int]]`):
-            The layer indices to transform. If specified, only these layer indices will be adapted.
-        use_asa (`bool`):
-            Whether to enable Adaptive Subspace Allocation. If True, dynamically selects important
-            subspaces during training. Default is False.
-        target_kk (`int`):
-            Target number of active subspaces when ASA is enabled. Default is 50.
-        init_warmup (`int`):
-            Initial warmup steps before starting ASA masking. Default is 50.
-        final_warmup (`int`):
-            Final warmup steps when ASA reaches target_kk. Default is 1000.
-        mask_interval (`int`):
-            Steps between ASA updates. Default is 100.
-        beta1 (`float`):
-            EMA coefficient for importance averaging. Default is 0.85.
-        beta2 (`float`):
-            EMA coefficient for uncertainty averaging. Default is 0.85.
-        tt (`float`):
-            Temperature parameter for importance scoring. Default is 0.01.
+            Specific layer indices to apply AdaMSS to. If specified, only these layers
+            will be adapted, useful for experimenting with which layers benefit most from
+            adaptation. Can be a single integer or a list of integers.
+
         layers_pattern (`Optional[Union[list[str], str]]`):
-            The layer pattern name for layer index matching if `layers_to_transform` is specified.
+            Pattern to match layer names when `layers_to_transform` is specified. Used to
+            extract layer indices from module names that don't follow the common pattern.
+
+        use_asa (`bool`):
+            Whether to enable Adaptive Subspace Allocation (ASA). When enabled, ASA
+            dynamically prunes less important subspaces during training based on gradient
+            information, reducing the effective number of parameters while maintaining
+            performance. Requires integration with a training callback. Default is False.
+
+        asa_target_subspaces (`int`):
+            Target total number of active subspaces across all layers when ASA is enabled.
+            ASA will progressively prune subspaces until this target is reached. Lower
+            values result in more aggressive pruning and fewer trainable parameters.
+            Should be less than `num_subspaces * num_target_modules`. Typical values
+            range from 20 to 100 depending on model size. Default is 50.
+
+        init_warmup (`int`):
+            Number of training steps to wait before starting ASA pruning. During warmup,
+            all subspaces remain active to allow importance scores to stabilize. Higher
+            values give more time for accurate importance estimation but delay pruning.
+            Typical values range from 50 to 200. Default is 50.
+
+        final_warmup (`int`):
+            Training step at which ASA completes pruning and reaches `asa_target_subspaces`
+            active subspaces. The pruning is distributed between `init_warmup` and
+            `final_warmup`. Should be set based on total training steps; typically 1/3
+            to 1/2 of total training steps. Default is 1000.
+
+        mask_interval (`int`):
+            Number of training steps between ASA mask updates. Lower values allow more
+            frequent adaptation but increase overhead. Higher values provide more stable
+            importance estimates between updates. Typical values range from 50 to 200.
+            Default is 100.
+
+        asa_importance_beta (`float`):
+            Exponential moving average (EMA) coefficient for smoothing subspace importance
+            scores. Higher values (closer to 1.0) give more weight to historical importance,
+            providing stability. Lower values make importance more responsive to recent
+            gradients. Typical values range from 0.8 to 0.95. Default is 0.85.
+
+        asa_uncertainty_beta (`float`):
+            EMA coefficient for smoothing importance uncertainty estimates. Controls how
+            quickly uncertainty adapts to gradient variance. Similar to asa_importance_beta,
+            higher values provide more stable estimates. Typical values range from 0.8 to 0.95.
+            Default is 0.85.
+
+        asa_schedule_exponent (`float`):
+            Schedule exponent controlling the decay rate from total subspaces to
+            `asa_target_subspaces` during ASA warmup. Higher values result in faster initial
+            pruning (more aggressive early reduction), while lower values provide a more
+            gradual, linear-like decay. The formula is:
+            current_active_subspaces = asa_target_subspaces + (asa_total_subspaces - asa_target_subspaces) * (progress ** exponent).
+            Typical values range from 1.0 (linear) to 5.0 (aggressive). Default is 3.0.
+
+        use_dynamic_rank (`bool`):
+            Whether to dynamically determine subspace ranks based on singular value magnitudes.
+            When True, each subspace's rank is determined by counting singular values above
+            a threshold, allowing different subspaces to have different effective ranks.
+            When False, all subspaces use the fixed `subspace_rank`. Default is False.
+
+        svd_threshold (`float`):
+            Threshold ratio for dynamic rank selection, only used when `use_dynamic_rank=True`.
+            A singular value is considered significant if it exceeds `threshold * max_singular_value`.
+            Higher values result in lower effective ranks (more aggressive truncation).
+            Typical values range from 0.05 to 0.2. Default is 0.1 (10% of max).
     """
 
-    r: int = field(default=100, metadata={"help": "Rank for SVD decomposition (adamss_R). Will be automatically clamped to min(r, matrix dimensions)"})
-    num_subspaces: int = field(default=5, metadata={"help": "Number of subspaces for clustering (adamss_K)"})
+    r: int = field(
+        default=100,
+        metadata={
+            "help": (
+                "Total rank for SVD decomposition (R in the paper). Higher values capture more "
+                "information but require more computation. The actual rank is clamped to "
+                "min(r, in_features, out_features). Typical values: 50-500. Default: 100."
+            )
+        },
+    )
+    num_subspaces: int = field(
+        default=5,
+        metadata={
+            "help": (
+                "Number of subspaces (K) to cluster the SVD space into. Each subspace learns "
+                "independent low-rank updates. Increasing this allows finer-grained adaptation "
+                "but increases trainable parameters. Typical values: 3-10. Default: 5."
+            )
+        },
+    )
     subspace_rank: int = field(
-        default=1, metadata={"help": "Rank for each trainable subspace (adamss_ri)"}
+        default=1,
+        metadata={
+            "help": (
+                "Rank (r_i) for each trainable subspace. Higher values increase expressiveness "
+                "but also increase parameters. For most tasks, values of 1-4 work well. Default: 1."
+            )
+        },
     )
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
@@ -88,9 +187,10 @@ class AdamssConfig(PeftConfig):
         default="orthogonal",
         metadata={
             "help": (
-                "Initialization method for AdaMSS weights. Currently only 'orthogonal' is supported, "
-                "which uses orthogonal initialization for subspace matrices. "
-                "Set to None (or False for backward compatibility) to skip initialization when loading from checkpoint."
+                "Initialization method for AdaMSS trainable weights. Currently only 'orthogonal' "
+                "is supported, which uses orthogonal initialization for B matrices. A matrices "
+                "are initialized to zero to start from pretrained weights. Set to None to skip "
+                "initialization when loading from a checkpoint. Default: 'orthogonal'."
             )
         },
     )
@@ -107,29 +207,104 @@ class AdamssConfig(PeftConfig):
     layers_to_transform: Optional[Union[list[int], int]] = field(
         default=None,
         metadata={
-            "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index."
+            "help": (
+                "Specific layer indices to apply AdaMSS to. If specified, only these layers will "
+                "be adapted, useful for experimenting with which layers benefit most. Can be a "
+                "single integer or a list of integers. Default: None (adapt all matching layers)."
+            )
         },
     )
     layers_pattern: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
-            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
+            "help": (
+                "Pattern to match layer names when `layers_to_transform` is specified. Used to "
+                "extract layer indices from module names that don't follow common patterns."
+            )
         },
     )
     # ASA (Adaptive Subspace Allocation) parameters
-    use_asa: bool = field(default=False, metadata={"help": "Enable Adaptive Subspace Allocation"})
-    target_kk: int = field(default=50, metadata={"help": "Target number of active subspaces for ASA"})
-    init_warmup: int = field(default=50, metadata={"help": "Initial warmup steps for ASA"})
-    final_warmup: int = field(default=1000, metadata={"help": "Final warmup steps for ASA"})
-    mask_interval: int = field(default=100, metadata={"help": "Steps between ASA updates"})
-    beta1: float = field(default=0.85, metadata={"help": "EMA coefficient for importance"})
-    beta2: float = field(default=0.85, metadata={"help": "EMA coefficient for uncertainty"})
-    tt: float = field(
+    use_asa: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Whether to enable Adaptive Subspace Allocation (ASA). When enabled, ASA dynamically "
+                "prunes less important subspaces during training based on gradient information, "
+                "reducing parameters while maintaining performance. Requires a training callback. "
+                "Default: False."
+            )
+        },
+    )
+    asa_target_subspaces: int = field(
+        default=50,
+        metadata={
+            "help": (
+                "Target total number of active subspaces across all layers when ASA is enabled. "
+                "ASA progressively prunes subspaces until this target is reached. Lower values "
+                "result in more aggressive pruning. Typical values: 20-100. Default: 50."
+            )
+        },
+    )
+    init_warmup: int = field(
+        default=50,
+        metadata={
+            "help": (
+                "Training steps to wait before starting ASA pruning. During warmup, all subspaces "
+                "remain active to allow importance scores to stabilize. Higher values give more "
+                "time for accurate estimation. Typical values: 50-200. Default: 50."
+            )
+        },
+    )
+    final_warmup: int = field(
+        default=1000,
+        metadata={
+            "help": (
+                "Training step at which ASA completes pruning and reaches asa_target_subspaces. "
+                "Should be set based on total training steps; typically 1/3 to 1/2 of total steps. "
+                "Default: 1000."
+            )
+        },
+    )
+    mask_interval: int = field(
+        default=100,
+        metadata={
+            "help": (
+                "Training steps between ASA mask updates. Lower values allow more frequent "
+                "adaptation but increase overhead. Higher values provide more stable estimates. "
+                "Typical values: 50-200. Default: 100."
+            )
+        },
+    )
+    asa_importance_beta: float = field(
+        default=0.85,
+        metadata={
+            "help": (
+                "EMA coefficient for smoothing subspace importance scores during ASA. Higher "
+                "values (closer to 1.0) give more weight to historical importance, providing "
+                "stability. Lower values make importance more responsive to recent gradients. "
+                "Typical values: 0.8-0.95. Default: 0.85."
+            )
+        },
+    )
+    asa_uncertainty_beta: float = field(
+        default=0.85,
+        metadata={
+            "help": (
+                "EMA coefficient for smoothing importance uncertainty estimates during ASA. "
+                "Controls how quickly uncertainty adapts to gradient variance. Higher values "
+                "provide more stable estimates. Typical values: 0.8-0.95. Default: 0.85."
+            )
+        },
+    )
+    asa_schedule_exponent: float = field(
         default=3.0,
         metadata={
             "help": (
-                "Schedule exponent controlling decay from total_kk to target_kk during ASA warmup. "
-                "Aligned with adamss_pkg where curr_kk = target_kk + (total_kk - target_kk) * (mul_coeff ** tt)."
+                "Schedule exponent controlling the decay rate from total subspaces to "
+                "asa_target_subspaces. Higher values result in faster initial pruning (aggressive "
+                "early reduction), lower values provide gradual linear-like decay. Formula: "
+                "current_active_subspaces = asa_target_subspaces + (total - target) * (progress ** exponent). "
+                "Typical values: 1.0 (linear) to 5.0 (aggressive). Default: 3.0."
             )
         },
     )
@@ -138,9 +313,10 @@ class AdamssConfig(PeftConfig):
         default=False,
         metadata={
             "help": (
-                "Whether to use dynamic rank selection based on singular value threshold. "
-                "If True, adaptively determines rank per subspace using SVD threshold. "
-                "If False (default, matches adamss_pkg), uses fixed subspace_rank for all subspaces."
+                "Whether to dynamically determine subspace ranks based on singular value magnitudes. "
+                "When True, each subspace's rank is determined by counting singular values above "
+                "a threshold, allowing different subspaces to have different effective ranks. "
+                "When False (default), all subspaces use the fixed subspace_rank. Default: False."
             )
         },
     )
@@ -148,10 +324,10 @@ class AdamssConfig(PeftConfig):
         default=0.1,
         metadata={
             "help": (
-                "Singular value threshold ratio for dynamic rank selection. "
-                "Only used when use_dynamic_rank=True. "
-                "Rank is determined by counting singular values > threshold * largest_singular_value. "
-                "Default is 0.1 (10% of largest singular value)."
+                "Threshold ratio for dynamic rank selection (only used when use_dynamic_rank=True). "
+                "A singular value is significant if it exceeds threshold * max_singular_value. "
+                "Higher values result in lower effective ranks (more aggressive truncation). "
+                "Typical values: 0.05-0.2. Default: 0.1 (10% of max)."
             )
         },
     )

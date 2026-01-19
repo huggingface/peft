@@ -2,11 +2,11 @@
 GLUE Task Fine-tuning with AdaMSS and Manual ASA
 
 This script demonstrates how to manually call update_and_allocate() for ASA
-instead of using ASACallback. This approach is useful for custom training loops.
+instead of using AdamssASACallback. This approach is useful for custom training loops.
 
 Note:
-    This is an alternative to using ASACallback. Choose ONE approach:
-    - Use ASACallback (recommended, see glue_adamss_asa_example.py)
+    This is an alternative to using AdamssASACallback. Choose ONE approach:
+    - Use AdamssASACallback (recommended, see glue_adamss_asa_example.py)
     - Use manual update_and_allocate() (this script, for custom control)
     DO NOT use both together!
 
@@ -15,7 +15,7 @@ Example usage:
     python glue_adamss_asa_manual_example.py \
         --dataset_name cola \
         --use_asa \
-        --target_kk 5 \
+        --asa_target_subspaces 5 \
         --num_epochs 100 \
         --batch_size 32 \
         --warmup_ratio 0.06 \
@@ -50,7 +50,7 @@ class CustomTrainerWithManualASA(Trainer):
     """
     Custom Trainer that manually calls update_and_allocate() for ASA.
     
-    This demonstrates the manual approach as an alternative to using ASACallback.
+    This demonstrates the manual approach as an alternative to using AdamssASACallback.
     The update_and_allocate() method is called after optimizer.step() but before
     zero_grad() to compute importance scores from gradients.
     """
@@ -133,7 +133,7 @@ class AdaMSSArguments:
         default=False,
         metadata={"help": "Enable Adaptive Subspace Allocation (manual mode)."}
     )
-    target_kk: int = field(
+    asa_target_subspaces: int = field(
         default=5,
         metadata={"help": "Target number of active subspaces when ASA is enabled."}
     )
@@ -149,15 +149,15 @@ class AdaMSSArguments:
         default=10,
         metadata={"help": "EPOCHS between ASA updates."}
     )
-    asa_beta1: float = field(
+    asa_importance_beta: float = field(
         default=0.85,
         metadata={"help": "EMA coefficient for importance."}
     )
-    asa_beta2: float = field(
+    asa_uncertainty_beta: float = field(
         default=0.85,
         metadata={"help": "EMA coefficient for uncertainty."}
     )
-    asa_tt: float = field(
+    asa_schedule_exponent: float = field(
         default=3.0,
         metadata={"help": "ASA schedule exponent."}
     )
@@ -240,9 +240,9 @@ def main():
     print(f"Training: {adamss_args.num_epochs} epochs, batch_size={adamss_args.batch_size}, seed={adamss_args.seed}")
     
     if adamss_args.use_asa:
-        print(f"Manual ASA Mode: Target {adamss_args.target_kk}/{adamss_args.adamss_k} subspaces")
+        print(f"Manual ASA Mode: Target {adamss_args.asa_target_subspaces}/{adamss_args.adamss_k} subspaces")
         print(f"     Warmup epochs {adamss_args.asa_init_warmup} → {adamss_args.asa_final_warmup}")
-        print(f"     Using update_and_allocate() instead of ASACallback")
+        print(f"     Using update_and_allocate() instead of AdamssASACallback")
     
     # Load dataset
     print(f"\nLoading {data_args.dataset_name} dataset...")
@@ -347,14 +347,14 @@ def main():
         subspace_rank=adamss_args.adamss_ri,
         target_modules=["query", "value"],
         use_asa=adamss_args.use_asa,
-        target_kk=adamss_args.target_kk if adamss_args.use_asa else None,
+        asa_target_subspaces=adamss_args.asa_target_subspaces if adamss_args.use_asa else None,
         # Store step-based ASA parameters in config
         init_warmup=asa_init_warmup_steps if adamss_args.use_asa else None,
         final_warmup=asa_final_warmup_steps if adamss_args.use_asa else None,
         mask_interval=asa_mask_interval_steps if adamss_args.use_asa else None,
-        beta1=adamss_args.asa_beta1 if adamss_args.use_asa else None,
-        beta2=adamss_args.asa_beta2 if adamss_args.use_asa else None,
-        tt=adamss_args.asa_tt if adamss_args.use_asa else None,
+        asa_importance_beta=adamss_args.asa_importance_beta if adamss_args.use_asa else None,
+        asa_uncertainty_beta=adamss_args.asa_uncertainty_beta if adamss_args.use_asa else None,
+        asa_schedule_exponent=adamss_args.asa_schedule_exponent if adamss_args.use_asa else None,
         modules_to_save=["classifier"],
     )
     

@@ -17,7 +17,7 @@ from peft.utils import register_peft_method
 from .config import AdamssConfig
 from .layer import AdamssLayer, Linear
 from .model import AdamssModel
-from .asa_callback import ASACallback
+from .asa_callback import AdamssASACallback
 
 
 __all__ = [
@@ -25,7 +25,7 @@ __all__ = [
     "AdamssLayer",
     "AdamssModel",
     "Linear",
-    "ASACallback",
+    "AdamssASACallback",
 ]
 
 # Register Adamss as a PEFT method

@@ -9,7 +9,7 @@ Example usage:
     python glue_adamss_asa_example.py --dataset_name cola --num_epochs 100 --seed 0
 
     # With ASA enabled (K: 10→5)
-    python glue_adamss_asa_example.py --dataset_name cola --num_epochs 100 --use_asa --target_kk 5
+    python glue_adamss_asa_example.py --dataset_name cola --num_epochs 100 --use_asa --asa_target_subspaces 5
 
     # MRPC with RoBERTa-large
     python glue_adamss_asa_example.py --dataset_name mrpc --model_name_or_path roberta-large --num_epochs 10
@@ -37,7 +37,7 @@ from transformers import (
 )
 from torch.optim import AdamW
 
-from peft import AdamssConfig, get_peft_model, ASACallback
+from peft import AdamssConfig, get_peft_model, AdamssASACallback
 
 
 # Table 19: Hyperparameters for GLUE tasks (from paper)
@@ -92,13 +92,13 @@ class AdaMSSTrainingArguments:
     
     # ASA Configuration
     use_asa: bool = field(default=False, metadata={"help": "Enable Adaptive Subspace Allocation"})
-    target_kk: int = field(default=5, metadata={"help": "Target active subspaces for ASA"})
+    asa_target_subspaces: int = field(default=5, metadata={"help": "Target active subspaces for ASA"})
     asa_init_warmup: int = field(default=5, metadata={"help": "ASA init warmup in EPOCHS"})
     asa_final_warmup: int = field(default=95, metadata={"help": "ASA final warmup in EPOCHS"})
     asa_mask_interval: int = field(default=10, metadata={"help": "ASA mask interval in EPOCHS"})
-    asa_beta1: float = field(default=0.85, metadata={"help": "EMA coefficient for importance"})
-    asa_beta2: float = field(default=0.85, metadata={"help": "EMA coefficient for uncertainty"})
-    asa_tt: float = field(default=3.0, metadata={"help": "ASA schedule exponent"})
+    asa_importance_beta: float = field(default=0.85, metadata={"help": "EMA coefficient for importance"})
+    asa_uncertainty_beta: float = field(default=0.85, metadata={"help": "EMA coefficient for uncertainty"})
+    asa_schedule_exponent: float = field(default=3.0, metadata={"help": "ASA schedule exponent"})
     
     # Training Configuration
     num_epochs: int = field(default=100, metadata={"help": "Number of training epochs"})
@@ -180,7 +180,7 @@ def main():
     print(f"  Model: {model_short}")
     print(f"  AdaMSS: r={args.adamss_r}, K={args.adamss_k}, ri={args.adamss_ri}")
     if args.use_asa:
-        print(f"  ASA: K={args.adamss_k} → target={args.target_kk}")
+        print(f"  ASA: K={args.adamss_k} → target={args.asa_target_subspaces}")
     print(f"  Hyperparameters (Table 19): lr={hp['lr']}, head_lr={hp['head_lr']}, wd={hp['wd']}")
     print(f"  Training: {args.num_epochs} epochs, batch_size={args.batch_size}, seed={args.seed}")
     print("=" * 80 + "\n")
@@ -210,6 +210,15 @@ def main():
         cache_dir=args.cache_dir,
     )
     
+    # Convert epoch-based ASA parameters to step-based (before config creation)
+    steps_per_epoch = len(train_ds) // args.batch_size
+    if len(train_ds) % args.batch_size != 0:
+        steps_per_epoch += 1
+    
+    asa_init_warmup_steps = args.asa_init_warmup * steps_per_epoch
+    asa_final_warmup_steps = args.asa_final_warmup * steps_per_epoch
+    asa_mask_interval_steps = args.asa_mask_interval * steps_per_epoch
+    
     # Apply AdaMSS
     print("\nApplying AdaMSS...")
     config = AdamssConfig(
@@ -218,7 +227,13 @@ def main():
         subspace_rank=args.adamss_ri,
         target_modules=["query", "value"],
         use_asa=args.use_asa,
-        target_kk=args.target_kk if args.use_asa else None,
+        asa_target_subspaces=args.asa_target_subspaces if args.use_asa else None,
+        init_warmup=asa_init_warmup_steps if args.use_asa else None,
+        final_warmup=asa_final_warmup_steps if args.use_asa else None,
+        mask_interval=asa_mask_interval_steps if args.use_asa else None,
+        asa_importance_beta=args.asa_importance_beta if args.use_asa else None,
+        asa_uncertainty_beta=args.asa_uncertainty_beta if args.use_asa else None,
+        asa_schedule_exponent=args.asa_schedule_exponent if args.use_asa else None,
         modules_to_save=["classifier"],
     )
     
@@ -256,15 +271,6 @@ def main():
     if args.use_asa:
         print("\nSetting up ASA callback...")
         
-        # Convert epoch-based parameters to step-based
-        steps_per_epoch = len(train_ds) // args.batch_size
-        if len(train_ds) % args.batch_size != 0:
-            steps_per_epoch += 1
-        
-        asa_init_warmup_steps = args.asa_init_warmup * steps_per_epoch
-        asa_final_warmup_steps = args.asa_final_warmup * steps_per_epoch
-        asa_mask_interval_steps = args.asa_mask_interval * steps_per_epoch
-        
         print(f"\n[ASA Configuration]")
         print(f"Dataset size: {len(train_ds)}, Batch size: {args.batch_size}")
         print(f"Steps per epoch: {steps_per_epoch}")
@@ -274,16 +280,7 @@ def main():
         print(f"  final_warmup: {args.asa_final_warmup} epochs → {asa_final_warmup_steps} steps")
         print(f"  mask_interval: {args.asa_mask_interval} epochs → {asa_mask_interval_steps} steps\n")
         
-        asa_callback = ASACallback(
-            target_kk=args.target_kk,
-            init_warmup=asa_init_warmup_steps,
-            final_warmup=asa_final_warmup_steps,
-            mask_interval=asa_mask_interval_steps,
-            beta1=args.asa_beta1,
-            beta2=args.asa_beta2,
-            tt=args.asa_tt,
-            verbose=True,  # Enable verbose output for ASA monitoring
-        )
+        asa_callback = AdamssASACallback(verbose=True)
         callbacks.append(asa_callback)
     
     # Training configuration

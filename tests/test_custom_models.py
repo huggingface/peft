@@ -1021,7 +1021,7 @@ TEST_CASES = [
             "r": 8,
             "num_subspaces": 6,
             "use_asa": True,
-            "target_kk": 3,
+            "asa_target_subspaces": 3,
         },
     ),
 ]
