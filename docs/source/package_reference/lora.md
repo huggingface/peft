@@ -30,6 +30,7 @@ The abstract from the paper is:
 
 [[autodoc]] tuners.lora.model.LoraModel
 
+
 ## Utility
 
 ### ArrowConfig
@@ -39,6 +40,7 @@ The abstract from the paper is:
 ### LoftQ
 
 [[autodoc]] utils.loftq_utils.replace_lora_weights_loftq
+
 
 ### Eva
 
@@ -53,3 +55,38 @@ The abstract from the paper is:
 #### get_eva_state_dict
 
 [[autodoc]] tuners.lora.eva.get_eva_state_dict
+
+
+## Variants
+
+### LoRA-GA
+
+[LoRA-GA](https://hf.co/papers/2407.05000) (Low-Rank Adaptation with Gradient Approximation) improves upon standard LoRA by using gradient information during initialization to achieve faster convergence. Instead of random initialization, LoRA-GA performs SVD on estimated gradients to initialize adapter weights in a direction that aligns with full fine-tuning, resulting in 2-4x faster convergence with the same final performance.
+
+The abstract from the paper is:
+
+*Low-rank adaptation (LoRA) is a popular technique for parameter-efficient fine-tuning of large language models. However, LoRA's random initialization of adapter weights leads to slow convergence during the initial training phase. In this paper, we propose LoRA-GA (Low-Rank Adaptation with Gradient Approximation), a novel initialization method that leverages gradient information to initialize LoRA adapters. Specifically, we estimate gradients on a small set of training samples and perform singular value decomposition (SVD) to extract principal components. These components are used to initialize the adapter matrices, aligning the initial update direction with that of full fine-tuning. Our experiments across various tasks and model scales demonstrate that LoRA-GA achieves 2-4x faster convergence compared to standard LoRA while maintaining the same final performance. The method is orthogonal to existing LoRA variants and can be easily integrated with techniques like DoRA and LoRA+.*
+
+### Usage Tips
+
+- **Gradient Estimation**: LoRA-GA requires a gradient estimation phase before model initialization. Use `preprocess_loraga()` with a `train_step` callback to compute gradients over a small number of training batches (typically 64-128 batches).
+
+
+- **Initialization Strategies**: LoRA-GA supports four direction strategies (`direction`): `"ArBr"`, `"A2rBr"`, `"ArB2r"` (default), and `"random"`, and four scaling strategies (`scale`): `"stable"` (default), `"weight_svd"`, `"gd_scale"`, and `"unit"`. The default combination provides the best balance of convergence speed and stability.
+
+- **Base Weight Modification**: Unlike standard LoRA, LoRA-GA modifies the base model weights during initialization by subtracting a scaled version of the low-rank approximation. This enables better alignment with full fine-tuning gradients. Since base weights are modified, use `save_pretrained()` with the `save_embedding_layers` argument or `save_mutated_as_lora` pattern to properly save the adapter.
+
+- **Computational Overhead**: The gradient estimation adds a small overhead during initialization (typically 1-2 minutes for 64 batches), but this is quickly amortized by faster convergence during training.
+
+- **Compatibility**: LoRA-GA requires full-precision weights and does not support quantized models. Can be combined with other LoRA variants like DoRA.
+
+### LoraGAConfig
+
+[[autodoc]] tuners.lora.config.LoraGAConfig
+
+### Utilities
+
+[[autodoc]] tuners.lora.loraga.estimate_gradients
+
+[[autodoc]] tuners.lora.loraga.preprocess_loraga
+
