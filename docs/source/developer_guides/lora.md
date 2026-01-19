@@ -170,7 +170,7 @@ config = LoraConfig(use_rslora=True, ...)
 
 ### LoRA-GA
 
-[LoRA-GA](../package_resources/lora.md#LoRA-GA) (Low-Rank Adaptation with Gradient Approximation) initializes the adapter
+[LoRA-GA](../package_reference/lora.md#lora-ga) (Low-Rank Adaptation with Gradient Approximation) initializes the adapter
 weights by performing SVD on estimated gradients, so that the weights are aligning closer to full-finetuning for faster
 convergence.
 

@@ -67,7 +67,7 @@ The abstract from the paper is:
 
 *Low-rank adaptation (LoRA) is a popular technique for parameter-efficient fine-tuning of large language models. However, LoRA's random initialization of adapter weights leads to slow convergence during the initial training phase. In this paper, we propose LoRA-GA (Low-Rank Adaptation with Gradient Approximation), a novel initialization method that leverages gradient information to initialize LoRA adapters. Specifically, we estimate gradients on a small set of training samples and perform singular value decomposition (SVD) to extract principal components. These components are used to initialize the adapter matrices, aligning the initial update direction with that of full fine-tuning. Our experiments across various tasks and model scales demonstrate that LoRA-GA achieves 2-4x faster convergence compared to standard LoRA while maintaining the same final performance. The method is orthogonal to existing LoRA variants and can be easily integrated with techniques like DoRA and LoRA+.*
 
-### Usage Tips
+#### Usage Tips
 
 - **Gradient Estimation**: LoRA-GA requires a gradient estimation phase before model initialization. Use `preprocess_loraga()` with a `train_step` callback to compute gradients over a small number of training batches (typically 64-128 batches).
 
@@ -80,11 +80,11 @@ The abstract from the paper is:
 
 - **Compatibility**: LoRA-GA requires full-precision weights and does not support quantized models. Can be combined with other LoRA variants like DoRA.
 
-### LoraGAConfig
+#### LoraGAConfig
 
 [[autodoc]] tuners.lora.config.LoraGAConfig
 
-### Utilities
+#### Utilities
 
 [[autodoc]] tuners.lora.loraga.estimate_gradients
 
