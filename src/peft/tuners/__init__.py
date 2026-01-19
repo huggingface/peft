@@ -33,12 +33,14 @@ from .lora import (
     EvaConfig,
     LoftQConfig,
     LoraConfig,
+    LoraGAConfig,
     LoraModel,
     LoraRuntimeConfig,
     convert_to_lora,
     create_arrow_model,
     get_eva_state_dict,
     initialize_lora_eva_weights,
+    preprocess_loraga,
     save_as_lora,
 )
 from .miss import MissConfig, MissModel
@@ -96,6 +98,7 @@ __all__ = [
     "LoKrModel",
     "LoftQConfig",
     "LoraConfig",
+    "LoraGAConfig",
     "LoraModel",
     "LoraRuntimeConfig",
     "MissConfig",
@@ -138,5 +141,6 @@ __all__ = [
     "create_arrow_model",
     "get_eva_state_dict",
     "initialize_lora_eva_weights",
+    "preprocess_loraga",
     "save_as_lora",
 ]

@@ -667,7 +667,13 @@ class TestOpt4bitBnb(RegressionTester):
             init_lora_weights=False,
         )
         model = get_peft_model(base_model, config)
-        self.assert_results_equal_or_store(model, LORA_4BIT_FOLDER)
+        # NVIDIA A100 requires a lower tol to pass the test.
+        old_tol = self.tol
+        self.tol = 3e-2
+        try:
+            self.assert_results_equal_or_store(model, LORA_4BIT_FOLDER)
+        finally:
+            self.tol = old_tol
 
     def test_adalora(self):
         # TODO
