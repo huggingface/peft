@@ -130,15 +130,17 @@ def reduce_intruder_dimension(
         #
         # note that we also remove the scaling from dW which is applied in get_delta_weight() since
         # it impacts mitigation performance both in task accuracy and forgetting.
-        W_merged += (mitigation_lambda - 1) * (B_intruder @ A_intruder)
-        W_merged -= W
-        W_merged /= layer.scaling[old_adapter_name]
+        W_mitigated = W_merged + (mitigation_lambda - 1) * (B_intruder @ A_intruder)
+        dW_mitigated = W_mitigated - W
+        dW_mitigated /= layer.scaling[old_adapter_name]
 
-        U_dW, S_dW, V_dW = torch.linalg.svd(W_merged, full_matrices=False)
+        U_dW, S_dW, V_dW = torch.linalg.svd(dW_mitigated, full_matrices=False)
 
+        # Note: share scaling by S equally between B and A to avoid one matrix having a significantly
+        # different norm and avoid possibly weird training dynamics.
         effective_rank = layer.r[old_adapter_name]
-        B_new = U_dW[:, :effective_rank] * S_dW[:effective_rank]
-        A_new = V_dW[:effective_rank]
+        B_new = U_dW[:, :effective_rank] @ torch.diag(S_dW[:effective_rank]).sqrt()
+        A_new = torch.diag(S_dW[:effective_rank]).sqrt() @ V_dW[:effective_rank]
 
         if is_embedding:
             layer.lora_embedding_B[new_adapter_name].data = B_new
