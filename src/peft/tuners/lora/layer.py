@@ -32,10 +32,11 @@ from peft.utils.integrations import (
     get_bnb_param_type,
     skip_init_on_device,
 )
+from peft.utils.loftq_utils import loftq_init
 from peft.utils.other import transpose
 from peft.utils.warning import PeftWarning
 
-from .config import ArrowConfig, LoraConfig
+from .config import LoraConfig
 
 
 VARIANT_KWARG_KEYS = ["alora_offsets"]
@@ -115,7 +116,7 @@ class LoraLayer(BaseTunerLayer):
         self.use_rslora: dict[str, bool] = {}
         self.lora_bias: dict[str, bool] = {}
         self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA
-        self._caches: dict[str, Any] = {}
+        self._caches: dict[str, Any] = {}  # small ad hoc cache; values are not part of the state_dict
         self.ephemeral_gpu_offload: bool = ephemeral_gpu_offload
         # flag to enable/disable casting of input to weight dtype during forward call
         self.cast_input_dtype_enabled: bool = True
@@ -123,11 +124,14 @@ class LoraLayer(BaseTunerLayer):
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
-        in_features, out_features = _get_in_out_features(base_layer)
+        in_features, out_features = self._get_in_out_features(base_layer)
         self.in_features = in_features
         self.out_features = out_features
 
-    def resolve_lora_variant(self, *, use_dora: bool, use_bdlora=None, **kwargs) -> Optional[LoraVariant]:
+    def _get_in_out_features(self, module: nn.Module) -> tuple[int, int] | tuple[None, None]:
+        return _get_in_out_features(module)
+
+    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
         """Return a matching LoRA variant for this layer type.
 
         Given the init arguments of this layer, return the correct LoRA variant, if any. E.g., if `use_dora=True`, this
@@ -143,26 +147,20 @@ class LoraLayer(BaseTunerLayer):
 
     def update_layer(
         self,
-        adapter_name,
-        r,
-        lora_alpha,
-        lora_dropout,
-        init_lora_weights,
-        use_rslora,
-        use_dora: bool = False,
-        use_alora: bool = False,
-        use_qalora: bool = False,
-        lora_bias: bool = False,
-        arrow_config: ArrowConfig = None,
-        qalora_group_size: int = 32,
-        inference_mode: bool = False,
-        use_bdlora=None,
+        adapter_name: str,
+        r: int,
+        lora_alpha: int,
+        config: LoraConfig,
         **kwargs,
-    ):
+    ) -> None:
         # collect the kwargs
+        lora_dropout = config.lora_dropout
+        init_lora_weights = config.init_lora_weights
+        use_rslora = config.use_rslora
+        lora_bias = config.lora_bias
+        inference_mode = config.inference_mode
+
         target_name = kwargs.get("target_name", "")  # preserve target_name before overwriting kwargs
-        kwargs = locals().copy()
-        del kwargs["self"]
         kwargs["target_name"] = target_name  # restore target_name
 
         # This code works for linear layers, override for other layer types
@@ -176,14 +174,7 @@ class LoraLayer(BaseTunerLayer):
                 PeftWarning,
             )
 
-        lora_variant = self.resolve_lora_variant(
-            use_dora=use_dora,
-            use_alora=use_alora,
-            use_qalora=use_qalora,
-            qalora_group_size=qalora_group_size,
-            arrow_config=arrow_config,
-            use_bdlora=use_bdlora,
-        )
+        lora_variant = self.resolve_lora_variant(config=config)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -208,7 +199,7 @@ class LoraLayer(BaseTunerLayer):
 
         self.use_rslora[adapter_name] = use_rslora
 
-        self.use_dora[adapter_name] = use_dora
+        self.use_dora[adapter_name] = config.use_dora
 
         # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
@@ -222,19 +213,22 @@ class LoraLayer(BaseTunerLayer):
                 self.olora_init(adapter_name)
         elif init_lora_weights == "loftq":
             with gather_params_ctx(self.get_base_layer().weight):
-                self.loftq_init(adapter_name)
+                self.loftq_init(adapter_name, config)
         elif init_lora_weights == "eva":
             nn.init.zeros_(self.lora_B[adapter_name].weight)
         elif init_lora_weights == "orthogonal":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.orthogonal_init(adapter_name)
+        elif init_lora_weights == "lora_ga":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.lora_ga_init(adapter_name, config.lora_ga_config)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
         # call this before init of the lora variants
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         if adapter_name in self.lora_variant:
-            self.lora_variant[adapter_name].init(self, **kwargs)
+            self.lora_variant[adapter_name].init(self, adapter_name=adapter_name, config=config, **kwargs)
 
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
@@ -438,14 +432,12 @@ class LoraLayer(BaseTunerLayer):
         # Remove redundant fields
         del linear.eigens
 
-    def loftq_init(self, adapter_name):
-        from peft.utils.loftq_utils import loftq_init
-
+    def loftq_init(self, adapter_name, config: LoraConfig):
         weight = self.get_base_layer().weight
         kwargs = {
-            "num_bits": self.kwargs.get("loftq_bits", 4),
+            "num_bits": config.loftq_config["loftq_bits"],
             "reduced_rank": self.r[adapter_name],
-            "num_iter": self.kwargs.get("loftq_iter", 1),
+            "num_iter": config.loftq_config["loftq_iter"],
         }
 
         qweight, lora_A, lora_B = loftq_init(weight, **kwargs)
@@ -476,10 +468,130 @@ class LoraLayer(BaseTunerLayer):
         self.lora_A[adapter_name].weight = nn.Parameter(lora_A.contiguous().to(dtype))
         self.lora_B[adapter_name].weight = nn.Parameter(lora_B.contiguous().to(dtype))
 
+    def lora_ga_init(self, adapter_name, lora_ga_config):
+        """
+        Initialize LoRA weights using gradient approximation.
+
+        Uses SVD on the gradient matrix to initialize adapters in a way that aligns with the direction of full
+        fine-tuning.
+
+        Expects that `preprocess_loraga` has been called before this, which attaches the `loraga_grad` attribute to the
+        base layer.
+
+        If gradients are not available (e.g., when loading from a saved adapter), falls back to gaussian
+        initialization. The weights will be overwritten by the state_dict anyway.
+        """
+        base_layer = self.get_base_layer()
+
+        # Check for gradient attached by preprocess_loraga
+        if not hasattr(base_layer, "_peft_loraga_grad"):
+            # When loading from saved adapter, gradients won't be available
+            # Fall back to gaussian initialization (weights will be overwritten by state_dict)
+            self.reset_lora_parameters(adapter_name, init_lora_weights=True)
+            return
+
+        grad = base_layer._peft_loraga_grad
+
+        # Check for lora_ga_config
+        if lora_ga_config is None:
+            raise ValueError(
+                "lora_ga_config must be provided when init_lora_weights='lora_ga'. "
+                "Please pass lora_ga_config=LoraGAConfig(...) to LoraConfig."
+            )
+        direction = lora_ga_config.direction
+        scale = lora_ga_config.scale
+        stable_gamma = lora_ga_config.stable_gamma
+        dtype = self.get_base_layer().weight.dtype
+
+        grad = grad.to(torch.float32)
+        weight = self.get_base_layer().weight
+
+        grad = transpose(grad, self.fan_in_fan_out)
+
+        r = self.r[adapter_name]
+
+        # torch.svd_lowrank returns (U, S, V) where grad ≈ U @ diag(S) @ V.T
+        # So V is shape (in_features, k) and we need V.T which is (k, in_features) for lora_A
+        U, S, V = torch.svd_lowrank(grad, q=min(4 * r, min(grad.shape)), niter=4)
+
+        # V is (in_features, k), we need Vh = V.T which is (k, in_features)
+        Vh = V.t()
+
+        U = U[:, : 2 * r]
+        S = S[: 2 * r]
+        Vh = Vh[: 2 * r, :]
+
+        if direction == "ArBr":
+            # Alternating: A takes rows at odd indices [1,3,5,7], B takes columns at even indices [0,2,4,6]
+            lora_A_weight = Vh[1 : 2 * r : 2, :]  # Shape: (r, in_features)
+            lora_B_weight = U[:, 0 : 2 * r : 2]  # Shape: (out_features, r)
+            S_B = S[0 : 2 * r : 2]
+            lora_B_weight = lora_B_weight @ torch.diag(S_B)
+
+        elif direction == "A2rBr":
+            # A takes second half rows [r:2r], B takes first half columns [:r]
+            lora_A_weight = Vh[r : 2 * r, :]  # Shape: (r, in_features)
+            lora_B_weight = U[:, :r]  # Shape: (out_features, r)
+            S_B = S[:r]
+            lora_B_weight = lora_B_weight @ torch.diag(S_B)
+
+        elif direction == "ArB2r":
+            # A takes first half rows [:r], B takes second half columns [r:2r]
+            lora_A_weight = Vh[:r, :]  # Shape: (r, in_features)
+            lora_B_weight = U[:, r : 2 * r]  # Shape: (out_features, r)
+            S_B = S[r : 2 * r]
+            lora_B_weight = lora_B_weight @ torch.diag(S_B)
+
+        elif direction == "random":
+            indices = torch.randperm(2 * r)[:r]
+            lora_A_weight = Vh[indices, :]  # Shape: (r, in_features)
+            S_B = S[indices]
+            lora_B_weight = U[:, indices] @ torch.diag(S_B)  # Shape: (out_features, r)
+
+        scaling_factor = self.scaling[adapter_name]
+        out_features = weight.shape[0]
+
+        if scale == "stable":
+            scale_factor = (out_features**0.25) / (stable_gamma**0.5)
+            lora_B_weight = lora_B_weight * scale_factor
+
+        elif scale == "weight_svd":
+            weight_data = transpose(weight.data.to(torch.float32), self.fan_in_fan_out)
+            _, weight_S, _ = torch.svd_lowrank(weight_data, q=r, niter=4)
+            if S_B[0] > 0:
+                scale_factor = weight_S[0] / S_B[0]
+                lora_B_weight = lora_B_weight * scale_factor
+
+        elif scale == "gd_scale":
+            lora_A_weight = lora_A_weight / scaling_factor
+            lora_B_weight = lora_B_weight / scaling_factor
+
+        # Convert to target dtype first to ensure weight offset matches adapter precision
+        lora_A_weight = lora_A_weight.to(dtype)
+        lora_B_weight = lora_B_weight.to(dtype)
+
+        # Assign LoRA weights
+        # lora_A should be (r, in_features), lora_B should be (out_features, r)
+        self.lora_A[adapter_name].weight.data = lora_A_weight.contiguous()
+        self.lora_B[adapter_name].weight.data = lora_B_weight.contiguous()
+
+        # Modify base weights: W_new = W_old - scaling * (B @ A)
+        # Important: compute offset in fp32 using dtype-converted weights to match forward pass precision
+        weight_data = transpose(weight.data.to(torch.float32), self.fan_in_fan_out)
+        weight_offset = scaling_factor * (lora_B_weight.float() @ lora_A_weight.float())
+        weight_data = weight_data - weight_offset
+        weight_data = transpose(weight_data.to(dtype), self.fan_in_fan_out)
+        self.get_base_layer().weight.data = weight_data
+
+        # Remove redundant fields
+        del base_layer._peft_loraga_grad
+
     def _cache_store(self, key: str, value: Any) -> None:
+        # cache intermediate values, e.g. weight norm of DoRA
         self._caches[key] = value
 
     def _cache_pop(self, key: str) -> Any:
+        # retrieve and remove from ad hoc cache
         value = self._caches.pop(key)
         return value
 
@@ -616,55 +728,39 @@ class Linear(nn.Module, LoraLayer):
         self,
         base_layer,
         adapter_name: str,
+        config: LoraConfig,
         r: int = 0,
         lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
-        init_lora_weights: Union[bool, str] = True,
-        use_rslora: bool = False,
-        use_dora: bool = False,
-        use_alora: bool = False,
-        arrow_config: ArrowConfig = None,
-        use_bdlora=None,
-        lora_bias: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
 
         self._active_adapter = adapter_name
         self.update_layer(
             adapter_name,
             r,
             lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout,
-            init_lora_weights=init_lora_weights,
-            use_rslora=use_rslora,
-            use_dora=use_dora,
-            use_alora=use_alora,
-            lora_bias=lora_bias,
-            arrow_config=arrow_config,
-            use_bdlora=use_bdlora,
+            config=config,
             **kwargs,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def resolve_lora_variant(
-        self, *, arrow_config: ArrowConfig, use_dora: bool, use_alora: bool, use_bdlora=None, **kwargs
-    ) -> Optional[LoraVariant]:
-        if arrow_config is not None:
+    def resolve_lora_variant(self, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
+        if config.arrow_config is not None:
             from .variants import ArrowLinearVariant
 
             return ArrowLinearVariant()
 
-        if use_bdlora is not None:
+        if config.use_bdlora is not None:
             from .variants import BdLoraLinearVariant
 
             return BdLoraLinearVariant()
 
-        if not use_dora and not use_alora:
+        use_alora = config.alora_invocation_tokens is not None
+        if not config.use_dora and not use_alora:
             return None
 
         from .variants import ALoraLinearVariant, DoraLinearVariant
@@ -855,40 +951,30 @@ class Embedding(nn.Module, LoraLayer):
         self,
         base_layer: nn.Module,
         adapter_name: str,
+        config: LoraConfig,
         r: int = 0,
         lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         init_lora_weights: Union[bool, str] = True,
-        use_rslora: bool = False,
-        use_dora: bool = False,
-        arrow_config: ArrowConfig = None,
-        lora_bias: bool = False,
         **kwargs,
     ) -> None:
-        if lora_bias:
+        if config.lora_bias:
             # lora_bias=True is not supported (yet) for embedding layers, as they use nn.Parameter
-            raise ValueError(f"lora_bias={lora_bias} is not supported for {self.__class__.__name__}.")
+            raise ValueError(f"lora_bias={config.lora_bias} is not supported for {self.__class__.__name__}.")
 
         super().__init__()
         LoraLayer.__init__(self, base_layer)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
 
         self._active_adapter = adapter_name
         self.update_layer(
             adapter_name,
             r,
             lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout,
-            init_lora_weights=init_lora_weights,
-            use_rslora=use_rslora,
-            use_dora=use_dora,
-            lora_bias=lora_bias,
-            arrow_config=arrow_config,
+            config=config,
         )
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
-        if not use_dora:
+    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
+        if not config.use_dora:
             return None
 
         from .variants import DoraEmbeddingVariant
@@ -897,26 +983,22 @@ class Embedding(nn.Module, LoraLayer):
 
     def update_layer(
         self,
-        adapter_name,
-        r,
-        lora_alpha,
-        lora_dropout,
-        init_lora_weights,
-        use_rslora,
-        use_dora,
-        lora_bias,
-        arrow_config: ArrowConfig = None,
-        inference_mode: bool = False,
+        adapter_name: str,
+        r: int,
+        lora_alpha: int,
+        config: LoraConfig,
         **kwargs,
-    ):
-        # collect the kwargs
-        kwargs = locals().copy()
-        del kwargs["self"]
+    ) -> None:
+        lora_dropout = config.lora_dropout
+        init_lora_weights = config.init_lora_weights
+        use_rslora = config.use_rslora
+        lora_bias = config.lora_bias
+        inference_mode = config.inference_mode
 
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        lora_variant = self.resolve_lora_variant(use_dora=use_dora, arrow_config=arrow_config)
+        lora_variant = self.resolve_lora_variant(config=config)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -942,10 +1024,13 @@ class Embedding(nn.Module, LoraLayer):
 
         self.use_rslora[adapter_name] = use_rslora
 
-        self.use_dora[adapter_name] = use_dora
+        self.use_dora[adapter_name] = config.use_dora
 
         if init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
+        elif init_lora_weights == "lora_ga":
+            # Embedding layers don't support LoRA-GA, fall back to standard initialization
+            self.reset_lora_parameters(adapter_name, True)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
 
@@ -953,7 +1038,7 @@ class Embedding(nn.Module, LoraLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         if adapter_name in self.lora_variant:
-            self.lora_variant[adapter_name].init(self, **kwargs)
+            self.lora_variant[adapter_name].init(self, adapter_name=adapter_name, config=config, **kwargs)
 
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
@@ -1166,14 +1251,9 @@ class _ConvNd(nn.Module, LoraLayer):
         self,
         base_layer: nn.Module,
         adapter_name: str,
+        config: LoraConfig,
         r: int = 0,
         lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
-        init_lora_weights: Union[bool, str] = True,
-        use_rslora: bool = False,
-        use_dora: bool = False,
-        arrow_config: ArrowConfig = None,
-        lora_bias: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -1197,31 +1277,22 @@ class _ConvNd(nn.Module, LoraLayer):
             adapter_name,
             r,
             lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout,
-            init_lora_weights=init_lora_weights,
-            use_rslora=use_rslora,
-            use_dora=use_dora,
-            lora_bias=lora_bias,
-            arrow_config=arrow_config,
+            config=config,
         )
 
     def update_layer(
         self,
-        adapter_name,
-        r,
-        lora_alpha,
-        lora_dropout,
-        init_lora_weights,
-        use_rslora,
-        use_dora,
-        lora_bias,
-        arrow_config: ArrowConfig = None,
-        inference_mode: bool = False,
+        adapter_name: str,
+        r: int,
+        lora_alpha: int,
+        config: LoraConfig,
         **kwargs,
-    ):
-        # collect the kwargs
-        kwargs = locals().copy()
-        del kwargs["self"]
+    ) -> None:
+        lora_dropout = config.lora_dropout
+        init_lora_weights = config.init_lora_weights
+        use_rslora = config.use_rslora
+        lora_bias = config.lora_bias
+        inference_mode = config.inference_mode
 
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -1233,7 +1304,7 @@ class _ConvNd(nn.Module, LoraLayer):
                 PeftWarning,
             )
 
-        lora_variant = self.resolve_lora_variant(use_dora=use_dora, arrow_config=arrow_config)
+        lora_variant = self.resolve_lora_variant(config=config)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -1265,10 +1336,13 @@ class _ConvNd(nn.Module, LoraLayer):
 
         self.use_rslora[adapter_name] = use_rslora
 
-        self.use_dora[adapter_name] = use_dora
+        self.use_dora[adapter_name] = config.use_dora
 
         if init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
+        elif init_lora_weights == "lora_ga":
+            # Conv layers don't support LoRA-GA, fall back to standard initialization
+            self.reset_lora_parameters(adapter_name, True)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
 
@@ -1276,7 +1350,7 @@ class _ConvNd(nn.Module, LoraLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         if adapter_name in self.lora_variant:
-            self.lora_variant[adapter_name].init(self, **kwargs)
+            self.lora_variant[adapter_name].init(self, adapter_name=adapter_name, config=config, **kwargs)
 
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
@@ -1477,8 +1551,8 @@ class Conv2d(_ConvNd):
             raise ValueError(f"Conv2d layer kernel must have 4 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv2d
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
-        if not use_dora:
+    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
+        if not config.use_dora:
             return None
 
         from .variants import DoraConv2dVariant
@@ -1494,8 +1568,8 @@ class Conv1d(_ConvNd):
             raise ValueError(f"Conv1d layer kernel must have 3 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv1d
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
-        if not use_dora:
+    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
+        if not config.use_dora:
             return None
 
         from .variants import DoraConv1dVariant
@@ -1511,8 +1585,8 @@ class Conv3d(_ConvNd):
             raise ValueError(f"Conv3d layer kernel must have 5 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv3d
 
-    def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
-        if not use_dora:
+    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
+        if not config.use_dora:
             return None
 
         from .variants import DoraConv3dVariant
@@ -1540,12 +1614,9 @@ class MultiheadAttention(nn.Module, LoraLayer):
         self,
         base_layer,
         adapter_name: str,
+        config: LoraConfig,
         r: int = 0,
         lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
-        init_lora_weights: Union[bool, str] = True,
-        use_rslora: bool = False,
-        use_dora: bool = False,
         **kwargs,
     ) -> None:
         # TODO work with separate weights
@@ -1555,7 +1626,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
             raise ValueError(
                 f"Only same embed for query/key/value is supported as of now for {self.__class__.__name__}."
             )
-        if use_dora:
+        if config.use_dora:
             # TODO: probably not so hard to implement
             raise ValueError(f"{self.__class__.__name__} does not support DoRA (yet), please set use_dora to False")
         if kwargs.get("use_alora", False):
@@ -1570,17 +1641,14 @@ class MultiheadAttention(nn.Module, LoraLayer):
                 adapter_name,
                 r=r,
                 lora_alpha=lora_alpha,
-                lora_dropout=lora_dropout,
-                init_lora_weights=init_lora_weights,
-                use_rslora=use_rslora,
-                use_dora=use_dora,
+                config=config,
                 **kwargs,
             )
         else:
             raise ValueError(f"out_proj must be an instance of nn.Linear for {self.__class__.__name__}.")
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+        self.update_layer(adapter_name, r, lora_alpha=lora_alpha, config=config)
 
     @property
     def embed_dim(self) -> int:
@@ -1934,84 +2002,75 @@ class ParamWrapper(nn.Module, LoraLayer):
         base_layer,
         adapter_name: str,
         parameter_name: str,
+        config: LoraConfig,
         r: int = 0,
         lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
-        init_lora_weights: Union[bool, str] = True,
-        use_rslora: bool = False,
-        use_dora: bool = False,
-        lora_bias: bool = False,
         **kwargs,
     ) -> None:
+        self.parameter_name = parameter_name
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
-        self.parameter_name = parameter_name
-        param = self.get_param()
-        if param.ndim == 3:
-            self.num_experts, self.in_features, self.out_features = param.shape
-        else:
-            self.num_experts, self.in_features, self.out_features = 1, param.shape[1], param.shape[0]
 
-        if param.ndim not in (2, 3):
-            raise ValueError(
-                f"lora.{self.__class__.__name__} was initialized with {param.ndim} dimensional Parameter, but only 2d "
-                "and 3d are supported."
-            )
-        if lora_dropout:
+        if config.lora_dropout:
             # It's not possible to factor out x from lora_B(lora_A(dropout(x))), so dropout can't be correctly
             # implemented
             raise ValueError(f"lora.{self.__class__.__name__} does not work with lora_dropout != 0.")
-        if fan_in_fan_out:
+        if config.fan_in_fan_out:
             raise ValueError(f"lora.{self.__class__.__name__} does not work with fan_in_fan_out.")
-        if lora_bias:
+        if config.lora_bias:
             raise ValueError(f"lora.{self.__class__.__name__} does not work with lora_bias=True.")
-        if use_dora:
+        if config.use_dora:
             raise ValueError(f"lora.{self.__class__.__name__} does not work with use_dora=True.")
         if is_target_conv_1d_layer:
             raise ValueError(f"lora.{self.__class__.__name__} does not work with is_target_conv_1d_layer=True.")
 
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
         self._active_adapter = adapter_name
         self.update_layer(
             adapter_name,
             r,
             lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout,
-            init_lora_weights=init_lora_weights,
-            use_rslora=use_rslora,
-            use_dora=use_dora,
-            lora_bias=lora_bias,
+            config=config,
         )
+
+    def _get_in_out_features(self, module: nn.Module) -> tuple[int, int] | tuple[None, None]:
+        # For ParamWrapper, we don't derive the in_features and out_features based on the base layer type, but directly
+        # from the targeted parameter.
+        param = self.get_param()
+        if param.ndim == 3:
+            num_experts, in_features, out_features = param.shape
+        else:
+            num_experts, in_features, out_features = 1, param.shape[1], param.shape[0]
+        if param.ndim not in (2, 3):
+            raise ValueError(
+                f"lora.{self.__class__.__name__} was initialized with {param.ndim} dimensional Parameter, but only 2d "
+                "and 3d are supported."
+            )
+        # we have to store the num_experts attribute here, as the parent class only stores in_features and out_features.
+        self.num_experts = num_experts
+        return in_features, out_features
 
     def update_layer(
         self,
-        adapter_name,
-        r,
-        lora_alpha,
-        lora_dropout,
-        init_lora_weights,
-        use_rslora,
-        use_dora: bool = False,
-        use_qalora: bool = False,
-        lora_bias: bool = False,
-        qalora_group_size: int = 32,
-        inference_mode: bool = False,
+        adapter_name: str,
+        r: int,
+        lora_alpha: int,
+        config: LoraConfig,
         **kwargs,
-    ):
+    ) -> None:
         # same method as in lora.Linear but taking into account that there can be multiple experts (3d parameter)
-        # collect the kwargs
-        kwargs = locals().copy()
-        del kwargs["self"]
+        lora_dropout = config.lora_dropout
+        init_lora_weights = config.init_lora_weights
+        use_rslora = config.use_rslora
+        lora_bias = config.lora_bias
+        inference_mode = config.inference_mode
 
         # This code works for linear layers, override for other layer types
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        lora_variant = self.resolve_lora_variant(
-            use_dora=use_dora, use_qalora=use_qalora, qalora_group_size=qalora_group_size
-        )
+        lora_variant = self.resolve_lora_variant(config=config)
         if lora_variant is not None:
             raise ValueError(f"lora.{self.__class__.__name__} does not work with LoRA variants like DoRA.")
 
@@ -2039,7 +2098,7 @@ class ParamWrapper(nn.Module, LoraLayer):
 
         self.use_rslora[adapter_name] = use_rslora
 
-        self.use_dora[adapter_name] = use_dora
+        self.use_dora[adapter_name] = config.use_dora
 
         # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
@@ -2059,13 +2118,16 @@ class ParamWrapper(nn.Module, LoraLayer):
         elif init_lora_weights == "orthogonal":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.orthogonal_init(adapter_name)
+        elif init_lora_weights == "lora_ga":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.lora_ga_init(adapter_name, config.lora_ga_config)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
         # call this before init of the lora variants
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         if adapter_name in self.lora_variant:
-            self.lora_variant[adapter_name].init(self, **kwargs)
+            self.lora_variant[adapter_name].init(self, config=config, **kwargs)
 
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
@@ -2266,7 +2328,7 @@ class ParamWrapper(nn.Module, LoraLayer):
 def dispatch_default(
     target: torch.nn.Module,
     adapter_name: str,
-    lora_config: LoraConfig,
+    config: LoraConfig,
     parameter_name: Optional[str] = None,
     **kwargs,
 ) -> Optional[torch.nn.Module]:
@@ -2278,40 +2340,31 @@ def dispatch_default(
         target_base_layer = target
 
     if parameter_name is not None:
-        new_module = ParamWrapper(target, adapter_name, parameter_name=parameter_name, **kwargs)
+        new_module = ParamWrapper(target, adapter_name, parameter_name=parameter_name, config=config, **kwargs)
     elif isinstance(target_base_layer, torch.nn.Embedding):
-        embedding_kwargs = kwargs.copy()
-        embedding_kwargs.pop("fan_in_fan_out", None)
-        embedding_kwargs.update(lora_config.loftq_config)
-        new_module = Embedding(target, adapter_name, **embedding_kwargs)
+        new_module = Embedding(target, adapter_name, config=config, **kwargs)
     elif isinstance(target_base_layer, torch.nn.Conv2d):
-        kwargs.update(lora_config.loftq_config)
-        new_module = Conv2d(target, adapter_name, **kwargs)
+        new_module = Conv2d(target, adapter_name, config=config, **kwargs)
     elif isinstance(target_base_layer, torch.nn.Conv3d):
-        kwargs.update(lora_config.loftq_config)
-        new_module = Conv3d(target, adapter_name, **kwargs)
+        new_module = Conv3d(target, adapter_name, config=config, **kwargs)
     elif isinstance(target_base_layer, nn.Conv1d):
-        kwargs.update(lora_config.loftq_config)
-        new_module = Conv1d(target, adapter_name, **kwargs)
+        new_module = Conv1d(target, adapter_name, config=config, **kwargs)
     elif isinstance(target_base_layer, torch.nn.MultiheadAttention):
-        kwargs.update(lora_config.loftq_config)
-        new_module = MultiheadAttention(target, adapter_name, **kwargs)
+        new_module = MultiheadAttention(target, adapter_name, config=config, **kwargs)
     elif isinstance(target_base_layer, torch.nn.Linear):
-        if kwargs["fan_in_fan_out"]:
+        if config.fan_in_fan_out:
             warnings.warn(
                 "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                 "Setting fan_in_fan_out to False."
             )
-            kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
-        kwargs.update(lora_config.loftq_config)
-        new_module = Linear(target, adapter_name, **kwargs)
+            config.fan_in_fan_out = False
+        new_module = Linear(target, adapter_name, config=config, **kwargs)
     elif isinstance(target_base_layer, Conv1D):
-        if not kwargs["fan_in_fan_out"]:
+        if not config.fan_in_fan_out:
             warnings.warn(
                 "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
             )
-            kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = True
-        kwargs.update(lora_config.loftq_config)
-        new_module = Linear(target, adapter_name, is_target_conv_1d_layer=True, **kwargs)
+            config.fan_in_fan_out = True
+        new_module = Linear(target, adapter_name, is_target_conv_1d_layer=True, config=config, **kwargs)
 
     return new_module

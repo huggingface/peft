@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import importlib
 import warnings
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
@@ -631,6 +632,15 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    lora_ga_config: Optional[LoraGAConfig] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The configuration of LoRA-GA. If this is passed, then LoRA-GA will be used to initialize the adapter layers. "
+                "Also set `init_lora_weights='lora_ga'` in this case."
+            )
+        },
+    )
     use_dora: bool = field(
         default=False,
         metadata={
@@ -797,8 +807,6 @@ class LoraConfig(PeftConfig):
 
         # handle init_lora_weights and loftq_config
         if self.init_lora_weights == "loftq":
-            import importlib
-
             if not importlib.util.find_spec("scipy"):
                 raise ImportError("The required package 'scipy' is not installed. Please install it to continue.")
             if not self.loftq_config:
@@ -836,7 +844,7 @@ class LoraConfig(PeftConfig):
         if self.alora_invocation_tokens is not None and self.task_type != "CAUSAL_LM":
             warnings.warn("aLoRA is currently only supported for CAUSAL_LM task.")
 
-        # Using post training conversion of modified base weights to restore their initial values PiSSA/CorDA/OLoRA cannot
+        # Using post training conversion of modified base weights to restore their initial values PiSSA/CorDA/OLoRA/LoRA-GA cannot
         # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends
         # this when they'll eventually call save_pretrained (i.e. if they'll pass
         # path_initial_model_for_weight_conversionl). Therefore, we only warn but don't raise an error here.
@@ -847,11 +855,12 @@ class LoraConfig(PeftConfig):
                 (isinstance(self.init_lora_weights, str) and (self.init_lora_weights.startswith("pissa")))
                 or (self.init_lora_weights == "olora")
                 or (self.init_lora_weights == "corda")
+                or (self.init_lora_weights == "lora_ga")
             )
         ):
             msg = (
                 "Using Rank-Stabilized LoRA with rank_pattern/alpha_pattern and post-training conversion of modified "
-                "base weights PiSSA/CorDA/OLoRA means that you won't be able to pass "
+                "base weights PiSSA/CorDA/OLoRA/LoRA-GA means that you won't be able to pass "
                 "`path_initial_model_for_weight_conversion` to `save_pretrained` to restore the initial values of the "
                 "base weights; if you intend to do this, please ensure not to use rslora or rank_pattern/alpha_pattern."
             )
@@ -877,3 +886,42 @@ class LoraConfig(PeftConfig):
         if self._custom_modules is None:
             self._custom_modules = {}
         self._custom_modules.update(mapping)
+
+
+@dataclass
+class LoraGAConfig:
+    """
+    This is the sub-configuration class to store the configuration for LoRA-GA initialization.
+
+    LoRA-GA (Low-Rank Adaptation with Gradient Approximation) uses gradient information during initialization to
+    achieve faster convergence (2-4x speedup) by aligning the initial adapter weights with the direction of full
+    fine-tuning gradients.
+
+    Reference: https://arxiv.org/abs/2407.05000
+
+    Args:
+        direction (`Literal["ArBr", "A2rBr", "ArB2r", "random"]`):
+            Strategy for distributing gradient SVD components to lora_A and lora_B matrices.
+            - "ArBr": Alternating indices (A takes odd, B takes even)
+            - "A2rBr": A takes indices [r:2r], B takes indices [:r]
+            - "ArB2r": A takes indices [:r], B takes indices [r:2r] (recommended)
+            - "random": Random selection of indices
+            Default: "ArB2r"
+        scale (`Literal["stable", "weight_svd", "gd_scale", "unit"]`):
+            Scaling strategy for adapter initialization.
+            - "stable": Stable scaling with gamma parameter
+            - "weight_svd": Scale based on weight matrix singular values
+            - "gd_scale": Gradient descent based scaling
+            - "unit": No additional scaling
+            Default: "stable"
+        stable_gamma (`int`):
+            Gamma parameter for stable scaling method. Default: 16
+    """
+
+    direction: Literal["ArBr", "A2rBr", "ArB2r", "random"] = field(
+        default="ArB2r", metadata={"help": "Component distribution strategy from gradient SVD"}
+    )
+    scale: Literal["stable", "weight_svd", "gd_scale", "unit"] = field(
+        default="stable", metadata={"help": "Scaling strategy for initialization"}
+    )
+    stable_gamma: int = field(default=16, metadata={"help": "Gamma parameter for stable scaling"})
