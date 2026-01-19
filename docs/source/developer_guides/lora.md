@@ -511,8 +511,9 @@ If we would have used full fine-tuning with `modules_to_save=['embed_tokens']` w
 
 To give a bit of an indication how much VRAM can be saved, a rudimentary comparison of the above example was made between training the embedding matrix fully (`modules_to_save=["embed_tokens"]`), using a LoRA for the embedding matrix (`target_modules=[..., "embed_tokens"]`, rank 32) and trainable tokens (`trainable_token_indices=[...]`, 6 tokens). Trainable tokens used about as much VRAM (15,562MB vs. 15,581MB) as LoRA while being specific to the tokens and saved ~1GB of VRAM over fully training the embedding matrix.
 
+## Postprocessing of LoRA adapters
 
-## Merge LoRA weights into the base model
+### Merge LoRA weights into the base model
 
 While LoRA is significantly smaller and faster to train, you may encounter latency issues during inference due to separately loading the base model and the LoRA adapter. To eliminate latency, use the [`~LoraModel.merge_and_unload`] function to merge the adapter weights with the base model. This allows you to use the newly merged model as a standalone model. The [`~LoraModel.merge_and_unload`] function doesn't keep the adapter weights in memory.
 
@@ -603,6 +604,40 @@ with torch.no_grad():
 outputs = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
 print(outputs)
 ```
+
+### Recovering base model performance via intruder dimension reduction
+
+The paper [LoRA vs Full Fine-tuning: An Illusion of Equivalence](https://huggingface.co/papers/2410.21228) argues
+that LoRA training introduces extra dimensions into the weights that have very little in common with the already
+learnt weights and lead to forgetting of already learned information. PEFT implements the suggested mitigation
+as [`peft.tuners.lora.intruders.reduce_intruder_dimension`](../package_reference/lora#Intruder Dimension Reduction).
+
+The mitigation will take a PEFT model with a loaded LoRA and create a new, modified adapter that is loaded alongside
+the existing adapter and now the active adapter.
+
+Example usage:
+
+```python
+from peft.tuners.lora.intruders import reduce_intruder_dimension
+
+peft_model = AutoPeftModelForCausalLM.from_pretrained('my-account/my-lora-adapter')
+
+reduce_intruder_dimension(
+    peft_model,
+    mitigation_lambda=0.75,
+)
+
+peft_model.generate(...)
+```
+
+There are a few hyper-parameters that can be used for tuning the effectiveness of the mitigation but, as evidenced
+in Figure 8 of the paper, it will always be a trade-off between task accuracy learned by the adapter and forgetting
+of the base model's knowledge. For example, the stronger the `mitigation_lambda`, the stronger the reduction in
+accuracy but the less previous knowledge is forgotten.
+
+While the defaults are set to deliver a good trade-off between the two factors it is not guaranteed that the defaults
+will hold for your adapter, your model and your data, therefore it is wise to have a benchmark ready to measure
+the effect.
 
 ## Load adapters
 

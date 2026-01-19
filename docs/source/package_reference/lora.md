@@ -53,3 +53,7 @@ The abstract from the paper is:
 #### get_eva_state_dict
 
 [[autodoc]] tuners.lora.eva.get_eva_state_dict
+
+## Intruder Dimension Reduction
+
+[[autodoc]] tuners.lora.intruders.reduce_intruder_dimension
