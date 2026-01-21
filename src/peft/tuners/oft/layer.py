@@ -380,7 +380,6 @@ class OFTLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-
     def set_scale(self, adapter, scale):
         if adapter not in self.scaling:
             # Ignore the case where the adapter is not in the layer
@@ -664,7 +663,7 @@ class Linear(nn.Module, OFTLayer):
         cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
         oft_R_module = self.oft_R[adapter]
-        
+
         if cast_to_fp32:
             # Temporarily work in fp32 for faster CPU matmul
             original_weight = oft_R_module.weight.data
@@ -929,7 +928,7 @@ class Conv2d(nn.Module, OFTLayer):
         cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
         oft_R_module = self.oft_embedding_R[adapter]
-        
+
         if cast_to_fp32:
             # Temporarily work in fp32 for faster CPU matmul
             original_weight = oft_R_module.weight.data
@@ -1150,7 +1149,7 @@ class Embedding(nn.Module, OFTLayer):
         cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
         oft_R_module = self.oft_embedding_R[adapter]
-        
+
         if cast_to_fp32:
             # Temporarily work in fp32 for faster CPU matmul
             original_weight = oft_R_module.weight.data
