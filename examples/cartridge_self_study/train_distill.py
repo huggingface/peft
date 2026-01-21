@@ -140,7 +140,7 @@ def main():
     parser.add_argument("--per_device_train_batch_size", type=int, default=1)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--max_steps", type=int, default=1000)
-    parser.add_argument("--device", type=str, default="cuda", choices=["cpu", "mps", "cuda"])
+    parser.add_argument("--device", type=str, default="cuda", choices=["cpu", "mps", "cuda", "xpu"])
     parser.add_argument(
         "--max_init_length", type=int, default=2048, help="Max tokens for text initialization (truncate long docs)"
     )
@@ -148,10 +148,12 @@ def main():
 
     if args.device == "mps" and not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
         raise ValueError("Requested device 'mps' but MPS is not available.")
+    if args.device == "xpu" and not torch.xpu.is_available():
+        raise ValueError("Requested device 'xpu' but XPU is not available.")
     if args.device == "cuda" and not torch.cuda.is_available():
         raise ValueError("Requested device 'cuda' but CUDA is not available.")
 
-    model_dtype = torch.float16 if args.device in {"cuda", "mps"} else None
+    model_dtype = torch.float16 if args.device in {"cuda", "mps", "xpu"} else None
     device_map = args.device if args.device != "cpu" else None
 
     tokenizer = AutoTokenizer.from_pretrained(args.model)

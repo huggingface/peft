@@ -20,9 +20,11 @@ from torch import nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import LoraConfig, get_peft_model
-from peft.helpers import check_if_peft_model, disable_input_dtype_casting, rescale_adapter_scale
+from peft.helpers import DoraCaching, check_if_peft_model, disable_input_dtype_casting, rescale_adapter_scale
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
+
+from .testing_utils import hub_online_once
 
 
 class TestCheckIsPeftModel:
@@ -471,3 +473,127 @@ class TestDisableInputDtypeCasting:
         msg = r"expected m.*1 and m.*2 to have the same dtype"
         with pytest.raises(RuntimeError, match=msg):
             model(inputs)
+
+
+class TestDoraCaching:
+    # Check that DoRA caching works (same results with and without caching, cache is filled/cleared). Note that this test
+    # does not check the actual runtime benefit of caching, because this could be flaky and measuring it reliably and in
+    # realistic conditions is expensive. Run examples/dora_finetuning/dora-caching.py instead to measure this.
+    device = infer_device()
+
+    @pytest.fixture(autouse=True)
+    def disable_dora_caching(self):
+        # auto-fixture to ensure that no test accidentically permanently enables DoRA caching
+        DoraCaching()(enabled=False)
+
+    def get_caches(self, model):
+        # utility function to collect all the caches in the model
+        caches = []
+        for module in model.modules():
+            if hasattr(module, "_dora_cache"):
+                caches.append(module._dora_cache)
+        return caches
+
+    def get_output(self, model, inputs):
+        output = model(inputs)
+        if hasattr(output, "logits"):
+            return output.logits
+        return output
+
+    def test_dora_caching_linear(self):
+        # ensure that the results don't change due to caching
+        inputs = torch.arange(10).view(1, -1).to(self.device)
+        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        config = LoraConfig(init_lora_weights=False, use_dora=True)
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
+            self.check_dora_caching(model, config, inputs)
+
+    def test_dora_caching_embedding(self):
+        # ensure that the results don't change due to caching
+        inputs = torch.arange(10).view(1, -1).to(self.device)
+        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        config = LoraConfig(init_lora_weights=False, use_dora=True, target_modules=["model.embed_tokens"])
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
+            self.check_dora_caching(model, config, inputs)
+
+    def test_dora_caching_conv(self):
+        # ensure that the results don't change due to caching
+        # note: don't use something like small resnet, because batch norm affects outputs in train mode
+
+        class ModelConv2D(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv0 = nn.Conv2d(3, 5, kernel_size=3, stride=1, padding=1)
+                self.conv1 = nn.Conv2d(5, 5, kernel_size=3, stride=1, padding=1)
+                self.linear = nn.Linear(5 * 3 * 3, 10)
+
+            def forward(self, X):
+                X = self.conv0(X)
+                X = nn.functional.relu(X)
+                X = self.conv1(X)
+                X = nn.functional.relu(X)
+                X = X.view(X.size(0), -1)
+                X = self.linear(X)
+                return X
+
+        inputs = torch.randn(1, 3, 3, 3).to(self.device)
+        config = LoraConfig(init_lora_weights=False, use_dora=True, target_modules=["conv0", "conv1"])
+        model = ModelConv2D().to(self.device)
+        self.check_dora_caching(model, config, inputs)
+
+    def check_dora_caching(self, model, config, inputs):
+        atol, rtol = 1e-6, 1e-6
+
+        # BASE RESULT
+        base_result = self.get_output(model, inputs)
+
+        # DEFAULT: WITHOUT DoRA CACHING
+        model = get_peft_model(model, config)
+        caches = self.get_caches(model)
+        dora_result = self.get_output(model, inputs)
+
+        # sanity check: the results should be different
+        assert not torch.allclose(base_result, dora_result, atol=atol, rtol=rtol)
+        # ensure that there are dora caches but they're all empty
+        assert caches
+        assert not any(cache for cache in caches)
+
+        # ENABLE DORA CACHING
+        model.eval()
+        with DoraCaching():
+            cached_result = self.get_output(model, inputs)
+            # the caches should be populated now
+            assert all(cache for cache in caches)
+        # the results should be the same
+        assert torch.allclose(cached_result, dora_result, atol=atol, rtol=rtol)
+
+        # AFTER EXITING THE CONTEXT
+        cached_result_after_context = self.get_output(model, inputs)
+        assert torch.allclose(cached_result_after_context, dora_result, atol=atol, rtol=rtol)
+        # since we called forward outside of the context, the caches should be cleared
+        assert not any(cache for cache in caches)
+
+        # NO CACHING IN TRAIN MODE
+        model.train()
+        # switching to train model immediately clears the caches
+        assert not any(cache for cache in caches)
+        with DoraCaching():
+            results_train_mode = self.get_output(model, inputs)
+            # the caches should still be empty
+            assert not any(cache for cache in caches)
+        # results should not change
+        assert torch.allclose(results_train_mode, dora_result, atol=atol, rtol=rtol)
+        # still not any caches expected
+        assert not any(cache for cache in caches)
+
+        # PERMANENTLY ENABLE DORA CACHING
+        DoraCaching()(enabled=True)
+        model.eval()
+        # putting the model in eval mode clears the caches
+        assert not any(cache for cache in caches)
+        # the results should be the same
+        cached_result_permanent = self.get_output(model, inputs)
+        assert torch.allclose(cached_result_permanent, dora_result, atol=atol, rtol=rtol)
+        DoraCaching()(enabled=False)

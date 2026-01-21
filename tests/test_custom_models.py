@@ -1745,20 +1745,18 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_adapter_name(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adapter_name(model_id, config_cls, config_kwargs)
 
-    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
-    def test_prepare_for_training_parametrized(self, test_name, model_id, config_cls, config_kwargs):
-        # This test does not work with custom models because it assumes that
-        # there is always a method get_input_embeddings that returns a layer
-        # which does not need updates. Instead, a new test is added below that
-        # checks that LoRA works as expected.
-        pass
+    # Note: skipping _test_prepare_for_training: test does not work with custom models because it assumes that there is
+    # always a method get_input_embeddings that returns a layer which does not need updates. Instead, a new test is
+    # added below that checks that LoRA works as expected.
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_save_pretrained(self, test_name, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_save_pretrained_pickle(self, test_name, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs, safe_serialization=False)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
@@ -1827,32 +1825,18 @@ class TestPeftCustomModel(PeftCommonTester):
         with pytest.raises(RuntimeError, match=err_msg):
             model.merge_adapter(safe_merge=safe_merge)
 
-    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
-    def test_generate(self, test_name, model_id, config_cls, config_kwargs):
-        # Custom models do not (necessarily) have a generate method, so this test is not performed
-        pass
-
-    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
-    def test_generate_half_prec(self, test_name, model_id, config_cls, config_kwargs):
-        # Custom models do not (necessarily) have a generate method, so this test is not performed
-        pass
+    # Note: Skipping _test_generate, _test_generate_pos_args, _test_generate_half_prec, as the custom models don't have
+    # a generate method
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_training_custom_models(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training(model_id, config_cls, config_kwargs)
 
-    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
-    def test_training_custom_models_layer_indexing(self, test_name, model_id, config_cls, config_kwargs):
-        # At the moment, layer indexing only works when layer names conform to a specific pattern, which is not
-        # guaranteed here. Therefore, this test is not performed.
-        pass
+    # Note: skipping _test_training_layer_indexing because layer indexing only works when layer names conform to a
+    # specific pattern, which is not guaranteed here. Therefore, this test is not performed.
 
-    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
-    @pytest.mark.parametrize("use_reentrant", [True, False])
-    def test_training_custom_models_gradient_checkpointing(
-        self, test_name, model_id, config_cls, config_kwargs, use_reentrant
-    ):
-        self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs, use_reentrant=use_reentrant)
+    # Note: skipping _test_training_gradient_checkpointing because the model explicitly needs to support it, which is
+    # not the case for custom models
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_inference_safetensors(self, test_name, model_id, config_cls, config_kwargs):
