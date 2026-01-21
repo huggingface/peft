@@ -16,11 +16,11 @@
 from peft.utils import register_peft_method
 
 from .config import PveraConfig
-from .layer import Linear, PVeRALayer
+from .layer import Linear, PveraLayer
 from .model import PveraModel
 
 
-__all__ = ["Linear", "PVeRALayer", "PveraConfig", "PveraModel"]
+__all__ = ["Linear", "PveraConfig", "PveraLayer", "PveraModel"]
 
 
 register_peft_method(name="pvera", config_cls=PveraConfig, model_cls=PveraModel, prefix="pvera_lambda_")

@@ -26,7 +26,7 @@ from peft.utils.other import transpose
 from .._buffer_dict import BufferDict
 
 
-class PVeRALayer(BaseTunerLayer):
+class PveraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
     adapter_layer_names = ("pvera_lambda_b", "pvera_lambda_d")
     other_param_names = ("pvera_A", "pvera_B")
@@ -140,7 +140,7 @@ class PVeRALayer(BaseTunerLayer):
                 nn.init.zeros_(self.pvera_lambda_b[adapter_name])
 
 
-class Linear(nn.Linear, PVeRALayer):
+class Linear(nn.Linear, PveraLayer):
     # PVeRA implemented in a dense layer
     def __init__(
         self,
@@ -159,7 +159,7 @@ class Linear(nn.Linear, PVeRALayer):
     ) -> None:
         # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__, which should always be called
         super(nn.Linear, self).__init__()
-        PVeRALayer.__init__(self, base_layer, **kwargs)
+        PveraLayer.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
         self.sample_at_inference = sample_at_inference
 

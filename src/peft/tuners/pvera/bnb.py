@@ -24,12 +24,12 @@ from peft.tuners.tuners_utils import check_adapters_to_merge
 from peft.utils.integrations import dequantize_bnb_weight
 from peft.utils.other import transpose
 
-from .layer import PVeRALayer
+from .layer import PveraLayer
 
 
 if is_bnb_available():
 
-    class Linear8bitLt(torch.nn.Module, PVeRALayer):
+    class Linear8bitLt(torch.nn.Module, PveraLayer):
         def __init__(
             self,
             base_layer: torch.nn.Module,
@@ -44,7 +44,7 @@ if is_bnb_available():
             **kwargs,
         ) -> None:
             super().__init__()
-            PVeRALayer.__init__(self, base_layer)
+            PveraLayer.__init__(self, base_layer)
             self.fan_in_fan_out = fan_in_fan_out
 
             self._active_adapter = adapter_name
@@ -247,7 +247,7 @@ if is_bnb_available():
 
 if is_bnb_4bit_available():
 
-    class Linear4bit(torch.nn.Module, PVeRALayer):
+    class Linear4bit(torch.nn.Module, PveraLayer):
         def __init__(
             self,
             base_layer: torch.nn.Module,
@@ -262,7 +262,7 @@ if is_bnb_4bit_available():
             **kwargs,
         ) -> None:
             super().__init__()
-            PVeRALayer.__init__(self, base_layer)
+            PveraLayer.__init__(self, base_layer)
             self.fan_in_fan_out = fan_in_fan_out
 
             self._active_adapter = adapter_name

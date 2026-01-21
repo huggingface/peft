@@ -29,7 +29,7 @@ from peft.utils import (
 from .._buffer_dict import BufferDict
 from ..tuners_utils import _maybe_include_all_linear_layers
 from .config import PveraConfig
-from .layer import Linear, PVeRALayer
+from .layer import Linear, PveraLayer
 
 
 class PveraModel(BaseTuner):
@@ -63,7 +63,7 @@ class PveraModel(BaseTuner):
     """
 
     prefix: str = "pvera_lambda_"
-    tuner_layer_cls = PVeRALayer
+    tuner_layer_cls = PveraLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_PVERA_TARGET_MODULES_MAPPING
 
     def _find_dim(self, config) -> tuple[int, int]:

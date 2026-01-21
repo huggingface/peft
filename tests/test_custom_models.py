@@ -2141,7 +2141,9 @@ class TestPeftCustomModel(PeftCommonTester):
             lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high
         elif issubclass(config_cls, (VBLoRAConfig, RandLoraConfig, OSFConfig)):
             lr = 0.01  # otherwise we get nan
-        elif issubclass(config_cls, PveraConfig):  # needs very small lr to not get nan
+        elif issubclass(
+            config_cls, PveraConfig
+        ):  # needs a very small lr to not get nan in pvera_lambda_b due to high input values in this test (up to 90)
             lr = 1e-6
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 

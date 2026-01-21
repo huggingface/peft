@@ -80,7 +80,8 @@ class PveraConfig(PeftConfig):
             "help": (
                 "List of module names or regex expression of the module names to replace with PVeRA."
                 "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. "
-                "Only linear layers are supported."
+                "Only linear layers are supported. "
+                "Default is None."
             )
         },
     )
@@ -89,7 +90,8 @@ class PveraConfig(PeftConfig):
         metadata={
             "help": (
                 "PVeRA PRNG init key. Used for initialising pvera_A and pvera_B for new models or when loading a "
-                "checkpoint that did not include these projections."
+                "checkpoint that did not include these projections. "
+                "Default is 0."
             )
         },
     )
@@ -99,15 +101,20 @@ class PveraConfig(PeftConfig):
             "help": (
                 "Whether to save the pvera_A / pvera_B projections in the state dict alongside per layer lambda_b / "
                 "lambda_d weights. This will increase the size of the checkpoint, but guarantee that we can reload "
-                "the checkpoint on all system configurations."
+                "the checkpoint on all system configurations. "
+                "Default is True."
             )
         },
     )
     pvera_dropout: float = field(default=0.0, metadata={"help": "PVeRA dropout"})
-    d_initial: float = field(default=0.1, metadata={"help": "Initial init value for d vector."})
+    d_initial: float = field(default=0.1, metadata={"help": "Initial value for d vector. Default is 0.1."})
     fan_in_fan_out: bool = field(
         default=False,
-        metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
+        metadata={
+            "help": (
+                "Set this to True if the layer to replace stores weight like (fan_in, fan_out). Default is False."
+            )
+        },
     )
     bias: str = field(default="none", metadata={"help": "Bias type for PVeRA. Can be 'none', 'all' or 'pvera_only'"})
     modules_to_save: Optional[list[str]] = field(
@@ -116,7 +123,8 @@ class PveraConfig(PeftConfig):
             "help": (
                 "List of modules apart from PVeRA layers to be set as trainable and saved in the final checkpoint. For"
                 " example, in Sequence Classification or Token Classification tasks, the final layer"
-                " `classifier/score` are randomly initialized and as such need to be trainable and saved."
+                " `classifier/score` are randomly initialized and as such need to be trainable and saved. "
+                "Default is None."
             )
         },
     )
@@ -125,7 +133,8 @@ class PveraConfig(PeftConfig):
         metadata={
             "help": (
                 "Whether to initialize the weights of the PVeRA layers with their default initialization. Don't change "
-                "this setting, except if you know exactly what you're doing."
+                "this setting, except if you know exactly what you're doing. "
+                "Default is True."
             ),
         },
     )
@@ -135,7 +144,8 @@ class PveraConfig(PeftConfig):
             "help": (
                 "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers"
                 " indexes that are specified inside this list. If a single integer is passed, PEFT will transform only"
-                " the layer at this index."
+                " the layer at this index. "
+                "Default is None."
             )
         },
     )
@@ -145,7 +155,8 @@ class PveraConfig(PeftConfig):
             "help": (
                 "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer "
                 "pattern is not in the common layers pattern. This should target the `nn.ModuleList` of the "
-                "model, which is often called `'layers'` or `'h'`."
+                "model, which is often called `'layers'` or `'h'`. "
+                "Default is None."
             )
         },
     )
@@ -153,7 +164,8 @@ class PveraConfig(PeftConfig):
         default=False,
         metadata={
             "help": (
-                "Whether to sample from the learned PVeRA distribution at inference. If false, the learned mean is used."
+                "Whether to sample from the learned PVeRA distribution at inference. If false, the learned mean is used. "
+                "Default is False."
             ),
         },
     )

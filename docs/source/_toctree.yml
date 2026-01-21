@@ -114,6 +114,8 @@
       title: Layernorm tuning
     - local: package_reference/vera
       title: VeRA
+    - local: package_reference/pvera
+      title: PVeRA
     - local: package_reference/fourierft
       title: FourierFT
     - local: package_reference/gralora

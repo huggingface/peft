@@ -302,13 +302,9 @@ ALL_CONFIGS = [
     (
         PveraConfig,
         {
-            "task_type": "CAUSAL_LM",
             "r": 8,
-            "target_modules": None,
             "pvera_dropout": 0.05,
-            "d_initial": 0.1,
-            "save_projection": True,
-            "bias": "none",
+            "task_type": "CAUSAL_LM",
         },
     ),
     (
