@@ -1,4 +1,4 @@
-# Copyright 2024-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,11 +13,12 @@
 # limitations under the License.
 from peft.utils import register_peft_method
 
-from .config import UniLoRAConfig
-from .layer import Linear, UniLoRALayer
-from .model import UniLoRAModel
+from .config import UniLoraConfig
+from .layer import Linear, UniLoraLayer
+from .model import UniLoraModel
 
 
-__all__ = ["UniLoRAConfig", "UniLoRALayer", "Linear", "UniLoRAModel"]
-register_peft_method(name="unilora", config_cls=UniLoRAConfig, model_cls=UniLoRAModel)
+__all__ = ["UniLoraConfig", "UniLoraLayer", "Linear", "UniLoraModel"]
+register_peft_method(name="unilora", config_cls=UniLoraConfig, model_cls=UniLoraModel)
+
 

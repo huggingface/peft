@@ -56,6 +56,7 @@ from peft import (
     TaskType,
     TrainableTokensConfig,
     VBLoRAConfig,
+    UniLoraConfig,
     VeraConfig,
     WaveFTConfig,
     get_peft_model,
@@ -669,6 +670,60 @@ TEST_CASES = [
             "init_weights": True,
         },
     ),
+
+    #############
+    # Unilora #
+    #############
+    ("Vanilla MLP 1 UniLora", 
+     "MLP", 
+     UniLoraConfig, 
+     {"target_modules": "lin0"}),
+
+    (
+        "Vanilla MLP 2 UniLora",
+        "MLP",
+        UniLoraConfig,
+        {"theta_d_length": 128, "target_modules": ["lin0"]},
+    ),
+
+    (
+        "Vanilla MLP 3 UniLora",
+        "MLP",
+        UniLoraConfig,
+        {"theta_d_length": 128, "target_modules": ["lin1"]},
+    ),
+
+    (
+        "Vanilla MLP 4 UniLora",
+        "MLP",
+        UniLoraConfig,
+        {"theta_d_length": 128, "target_modules": ["lin0", "lin1"]},
+    ),
+
+     (
+        "Vanilla MLP 5 UniLora",
+        "MLP",
+        UniLoraConfig,
+        {"theta_d_length": 128,"target_modules": ["lin0"], "modules_to_save": ["lin1"]},
+    ),
+
+       (
+        "Vanilla MLP 6 UniLora",
+        "MLP",
+        UniLoraConfig,
+        {"theta_d_length": 128,"target_modules": ["lin0", "lin1"], "modules_to_save": ["lin1"]},
+    ),
+
+      (
+        "Embedding + transformers Conv1D 1 UniLora",
+        "EmbConv1D",
+         UniLoraConfig,
+        {"target_modules": ["conv1d"]},
+    ),
+
+
+
+
     ###########
     # GraLoRA #
     ###########
@@ -2160,6 +2215,9 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, VBLoRAConfig):
             # Manually set the `vblora_vector_bank` to zero so that VB-LoRA functions as an identity operation.
             torch.nn.init.zeros_(model.vblora_vector_bank["default"])
+        if issubclass(config_cls, UniLoraConfig):
+            # Manually set the `unilora_theta_d` to zero so that Uni-LoRA functions as an identity operation.
+            torch.nn.init.zeros_(model.unilora_theta_d["default"])
         model.eval()
         outputs_before = model(**X)
         # OSF uses SVD reconstruction which introduces small numerical differences
@@ -2170,7 +2228,12 @@ class TestPeftCustomModel(PeftCommonTester):
 
         if issubclass(config_cls, VBLoRAConfig):
             # initialize `vblora_vector_bank` so it can be trained
-            model._init_vblora_vector_bank(config, "default")
+            model._init_vblora_vector_bank(config, "def1ault")
+
+        if issubclass(config_cls, UniLoraConfig):
+            # initialize `unilora_theta_d` so it can be trained
+            model._init_unilora_theta_d(config, "default")
+
         model.train()
         # EmbConv1D is slow to learn for some reason
         lr = 0.01 if model_id != "EmbConv1D" else 1.0
@@ -2226,12 +2289,20 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, VBLoRAConfig):
             # Manually set the `vblora_vector_bank` to zero so that VB-LoRA functions as an identity operation.
             torch.nn.init.zeros_(model.vblora_vector_bank["default"])
+        if issubclass(config_cls, UniLoraConfig):
+            # Manually set the `unilora_theta_d` to zero so that Uni-LoRA functions as an identity operation.
+            torch.nn.init.zeros_(model.unilora_theta_d["default"])
+        
+        
         model.eval()
         outputs_before = model(**X)
 
         if issubclass(config_cls, VBLoRAConfig):
             # initialize `vblora_vector_bank` so it can be trained
             model._init_vblora_vector_bank(config, "default")
+        if issubclass(config_cls, UniLoraConfig):
+            # initialize `unilora_theta_d` so it can be trained
+            model._init_unilora_theta_d(config, "default")
         model.train()
         if isinstance(config_cls, LNTuningConfig):
             # LayerNorm tuning is slow to learn

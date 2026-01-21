@@ -5,73 +5,80 @@ import torch.nn as nn
 from transformers.pytorch_utils import Conv1D
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING 
-from .config import UniLoRAConfig
-from .layer import Linear, UniLoRALayer
+from .config import UniLoraConfig
+from .layer import Linear, UniLoraLayer
 
-class UniLoRAModel(BaseTuner):
+class UniLoraModel(BaseTuner):
     """
-    Creates UniLoRA model from a pretrained transformers model.
+    Creates UniLora model from a pretrained transformers model.
     """
     prefix: str = "unilora_"
-    tuner_layer_cls = UniLoRALayer 
+    tuner_layer_cls = UniLoraLayer 
     target_module_mapping = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING
 
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False) -> None:
-        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
+    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False,state_dict=None) -> None:
+        super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage,state_dict=state_dict)
         
-        # --- UniLoRA-specific initialization logic (global hash index assignment) ---
+        # --- UniLora-specific initialization logic (global hash index assignment) ---
         # 1. Count the total number of required indices (using the new `indices` variable)
-        LoRA_para_cnt = 0
+        lora_param_count = 0
         for name, module in model.named_modules():
-             if isinstance(module, UniLoRALayer):
-               LoRA_para_cnt += module.unilora_indices_A[adapter_name].numel()
-               LoRA_para_cnt += module.unilora_indices_B[adapter_name].numel()
+             if isinstance(module, UniLoraLayer):
+               lora_param_count += module.unilora_indices_A[adapter_name].numel()
+               lora_param_count += module.unilora_indices_B[adapter_name].numel()
         
 
         # 2. Generate globally uniform-distributed indices
-        theta_d_length = config[adapter_name].theta_d_length
-        proj_seed = config[adapter_name].proj_seed
-        all_elements = self.generate_index(LoRA_para_cnt,theta_d_length,proj_seed)
+        adapter_cfg = self.peft_config[adapter_name]
+        theta_d_length = adapter_cfg.theta_d_length
+        proj_seed = adapter_cfg.proj_seed
+        indices = self.generate_index(lora_param_count,theta_d_length,proj_seed)
         pointer = 0
         
         # 3. Assign the generated indices back to each layer (replacing the randomly initialized indices)
         for name, module in model.named_modules():
-            if isinstance(module, UniLoRALayer):
+            if isinstance(module, UniLoraLayer):
              
                 param_numel = module.unilora_indices_A[adapter_name].numel()
-                chunk = all_elements[pointer: pointer + param_numel]
+                chunk = indices[pointer: pointer + param_numel]
                 module.unilora_indices_A[adapter_name] = chunk.view_as(module.unilora_indices_A[adapter_name]).clone()
                 pointer += param_numel
                 
            
                 param_numel = module.unilora_indices_B[adapter_name].numel()
-                chunk = all_elements[pointer: pointer + param_numel]
+                chunk = indices[pointer: pointer + param_numel]
                 module.unilora_indices_B[adapter_name] = chunk.view_as(module.unilora_indices_B[adapter_name]).clone()
                 pointer += param_numel
         
-        assert pointer == len(all_elements)
+        assert pointer == len(indices)
         
         # 4. Compute the usage frequency of each index for normalization (Scales)
-        counts = torch.bincount(all_elements, minlength=theta_d_length) 
+        counts = torch.bincount(indices, minlength=theta_d_length) 
         sqrt_counts = 1/torch.sqrt(counts.float()) 
         
         index_ls = []
         for name, module in model.named_modules():
-             if isinstance(module, UniLoRALayer):
+             if isinstance(module, UniLoraLayer):
                index_ls.append(module.unilora_indices_A[adapter_name].long())
                index_ls.append(module.unilora_indices_B[adapter_name].long())
         
         norm_factors = [sqrt_counts[t] for t in index_ls]
         
         # 5. Update the Scales of each layer (formerly Norm)
-        uni_modules = [m for m in self.modules() if isinstance(m, UniLoRALayer)]
+        uni_modules = [m for m in self.modules() if isinstance(m, UniLoraLayer)]
        
         for module, (scale_a, scale_b) in zip(uni_modules, zip(*[iter(norm_factors)] * 2)):
-            module.update_norm(adapter_name, scale_a, scale_b)
+            module.update_scaling(adapter_name, scale_a, scale_b)
 
-    def generate_index(self, LoRA_para_cnt, theta_d_length,proj_seed):
+ 
+    # Assigns a deterministic index in `[0, theta_d_length - 1]` to each LoRA parameter.
+    # This function maps the flattened LoRA parameter space of size `lora_param_count` 
+    # (i.e., D) into `theta_d_length` buckets (i.e., d), where `d << D`. The resulting 
+    # index tensor determines which entry of the global UniLoRA vector `theta_d` 
+    # will be used to reconstruct each LoRA parameter.
+    def generate_index(self, lora_param_count, theta_d_length,proj_seed):
         import numpy as np
-        total_length = LoRA_para_cnt
+        total_length = lora_param_count
         num_unique = theta_d_length
         base_count = total_length // num_unique
         remaining = total_length % num_unique
@@ -83,12 +90,12 @@ class UniLoRAModel(BaseTuner):
         rng.shuffle(data)
         return torch.tensor(data)
 
-    def _init_unilora_theta_d(self, config: UniLoRAConfig, adapter_name: str) -> None:
+    def _init_unilora_theta_d(self, config: UniLoraConfig, adapter_name: str) -> None:
         unilora_theta_d = torch.zeros(config.theta_d_length)
         torch.nn.init.uniform_(unilora_theta_d, -config.init_theta_d_bound, config.init_theta_d_bound)
         self.unilora_theta_d[adapter_name] = unilora_theta_d
 
-    def _pre_injection_hook(self, model: nn.Module, config: UniLoRAConfig, adapter_name: str) -> None:
+    def _pre_injection_hook(self, model: nn.Module, config: UniLoraConfig, adapter_name: str) -> None:
         self.unilora_theta_d = nn.ParameterDict({})
         
 
@@ -130,6 +137,29 @@ class UniLoRAModel(BaseTuner):
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
 
+    def _replace_module(self, parent, child_name, new_module, child):
+       
+        setattr(parent, child_name, new_module)
+        if hasattr(child, "base_layer"):
+            child = child.base_layer
+
+        meta = torch.device("meta")
+        # dispatch to correct device
+        for name, module in new_module.named_modules():
+            if (self.prefix in name) or ("ranknum" in name):
+                if hasattr(child, "qweight"):
+                    weight = child.qweight
+                elif hasattr(child, "W_q"):
+                    weight = child.W_q
+                elif hasattr(child, "weight"):
+                    weight = child.weight
+                elif getattr(child, "in_proj_weight", None) is not None:  # MHA
+                    weight = child.in_proj_weight
+                else:
+                    weight = next(child.parameters())
+                if not any(p.device == meta for p in module.parameters()):
+                    module.to(weight.device)
+
     @staticmethod
     def _create_new_module(unilora_config, unilora_theta_d, adapter_name, target, **kwargs):
         if isinstance(target, BaseTunerLayer):
@@ -168,22 +198,6 @@ class UniLoRAModel(BaseTuner):
         )
         return new_module
 
-    def get_nb_savable_parameters(self, adapter="default") -> tuple[int, int]:
-        """
-        Returns the number of savable Uni-LoRA parameters and other savable parameters.
-        """
-        theta_d_params = 0
-        other_params = 0
-        for name, param in self.named_parameters():
-            if "unilora_theta_d" in name:
-                theta_d_params += param.numel()
-            elif "unilora_indices" in name:
-                other_params += param.numel()
-            elif "unilora_scales" in name:
-                other_params += param.numel()
-       
-        unilora_params = theta_d_params 
-        return unilora_params, other_params
 
     def print_savable_parameters(self) -> None:
         """

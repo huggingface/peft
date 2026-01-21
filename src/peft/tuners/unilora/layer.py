@@ -24,7 +24,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.other import transpose
 from .._buffer_dict import BufferDict
 
-class UniLoRALayer(BaseTunerLayer):
+class UniLoraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
     # unilora_theta_d is a shared parameter.
     #But it is referenced within individual layers.
@@ -34,14 +34,15 @@ class UniLoRALayer(BaseTunerLayer):
         self.base_layer = base_layer
         self.r = {}
         self.unilora_dropout = nn.ModuleDict({})
+        device = next(self.base_layer.parameters()).device
 
         
-        self.unilora_indices_A = BufferDict({}, persistent=True)
-        self.unilora_indices_B = BufferDict({}, persistent=True)
+        self.unilora_indices_A = BufferDict({}, persistent=False)
+        self.unilora_indices_B = BufferDict({}, persistent=False)
         
        
-        self.unilora_scales_A = BufferDict({}, persistent=True)
-        self.unilora_scales_B = BufferDict({}, persistent=True)
+        self.unilora_scales_A = BufferDict({}, persistent=False)
+        self.unilora_scales_B = BufferDict({}, persistent=False)
 
         # Mark the weight as unmerged
         self._disable_adapters = False
@@ -95,14 +96,26 @@ class UniLoRALayer(BaseTunerLayer):
         Renamed from reset_unilora_logits to ensure clarity.
         """
         if adapter_name in self.unilora_theta_d.keys():
+            base_layer = self.get_base_layer()
+            device = base_layer.weight.device
+            dtype = base_layer.weight.dtype
             # Generate random indices pointing to the vector bank
             indices_A = torch.randint(0, theta_d_length, (self.r[adapter_name], self.in_features), dtype=torch.long)
             indices_B = torch.randint(0, theta_d_length, (self.out_features, self.r[adapter_name]), dtype=torch.long) 
             
             self.unilora_indices_A[adapter_name] = indices_A
             self.unilora_indices_B[adapter_name] = indices_B
+
+            if adapter_name not in self.unilora_scales_A:
+                self.unilora_scales_A[adapter_name] = torch.ones(
+                    indices_A.shape, device=device, dtype=dtype
+                )
+            if adapter_name not in self.unilora_scales_B:
+                self.unilora_scales_B[adapter_name] = torch.ones(
+                    indices_B.shape, device=device, dtype=dtype
+                )
               
-    def update_norm(
+    def update_scaling(
         self,
         adapter_name: str,
         unilora_scales_A,
@@ -110,8 +123,6 @@ class UniLoRALayer(BaseTunerLayer):
     ):   
         """
         Updates the scaling factors. 
-        Note: Method name kept as update_norm for compatibility if called externally, 
-        but arguments updated to 'scales'.
         """
         if adapter_name in self.unilora_theta_d.keys():
             base_layer = self.get_base_layer()
@@ -125,8 +136,45 @@ class UniLoRALayer(BaseTunerLayer):
                 device=target_device, dtype=target_dtype
             )
 
-class Linear(nn.Linear, UniLoRALayer):
-    # UniLoRA implemented in a dense layer
+    def _ensure_device(self, adapter):
+        """
+        Ensure all UniLoRA buffers/params for the given adapter are on the same device as base_layer.
+        This is lazy-migration (only happens if device mismatch is detected).
+        """
+        # get target device from base_layer
+        device = next(self.base_layer.parameters()).device
+
+        # ---- indices ----
+        if adapter in self.unilora_indices_A:
+            t = self.unilora_indices_A[adapter]
+            if t.device != device:
+                self.unilora_indices_A[adapter] = t.to(device)
+
+        if adapter in self.unilora_indices_B:
+            t = self.unilora_indices_B[adapter]
+            if t.device != device:
+                self.unilora_indices_B[adapter] = t.to(device)
+
+        # ---- scales ----
+        if adapter in self.unilora_scales_A:
+            t = self.unilora_scales_A[adapter]
+            if t.device != device:
+                self.unilora_scales_A[adapter] = t.to(device)
+
+        if adapter in self.unilora_scales_B:
+            t = self.unilora_scales_B[adapter]
+            if t.device != device:
+                self.unilora_scales_B[adapter] = t.to(device)
+
+        # ---- theta_d ---- (ParameterDict, but ensure consistency)
+        if adapter in self.unilora_theta_d:
+            p = self.unilora_theta_d[adapter]
+            if p.device != device:
+                # Parameter migration: need .data to avoid creating new graph edges
+                self.unilora_theta_d[adapter].data = p.data.to(device)
+
+class Linear(nn.Linear, UniLoraLayer):
+    # UniLora implemented in a dense layer
     def __init__(
         self,
         base_layer,
@@ -140,7 +188,7 @@ class Linear(nn.Linear, UniLoRALayer):
         **kwargs,
     ) -> None:
         super(nn.Linear, self).__init__()
-        UniLoRALayer.__init__(self, base_layer, **kwargs)
+        UniLoraLayer.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name
         self.update_layer(
@@ -180,6 +228,8 @@ class Linear(nn.Linear, UniLoRALayer):
 
     def _get_lora_matrices(self, adapter, cast_to_fp32=False) -> Tuple[torch.Tensor, torch.Tensor]:
         # Changed: Accessing the renamed buffers
+        self._ensure_device(adapter)
+        
         unilora_indices_A = self.unilora_indices_A[adapter] 
         unilora_indices_B = self.unilora_indices_B[adapter] 
 
@@ -190,9 +240,7 @@ class Linear(nn.Linear, UniLoRALayer):
         if cast_to_fp32:
             unilora_theta_d = unilora_theta_d.float()
 
-        # Changed: Replaced 'logits' with 'indices' and 'norm' with 'scales'
-        # Core Logic: Retrieve vector from bank using indices, then scale it.
-        # A_matrix = Bank[Indices] * Scale
+        
         A = unilora_theta_d[unilora_indices_A.long()] * self.unilora_scales_A[adapter]
         B = unilora_theta_d[unilora_indices_B.long()] * self.unilora_scales_B[adapter]
         
@@ -205,12 +253,13 @@ class Linear(nn.Linear, UniLoRALayer):
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         # Changed: Accessing the renamed buffer for device check
+        self._ensure_device(adapter)
         device = self.unilora_indices_A[adapter].device
         # Note: indices are Long, we usually want the dtype of the output (which depends on theta_d/scales)
         # Using theta_d's dtype is safer for checking fp16/32 mismatch
         dtype = self.unilora_theta_d[adapter].dtype 
         
-        cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
+        cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
         
         A, B = self._get_lora_matrices(adapter, cast_to_fp32)
         

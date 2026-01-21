@@ -142,6 +142,8 @@
       title: WaveFT
     - local: package_reference/delora
       title: DeLoRA
+    - local: package_reference/unilora
+      title: Uni-LoRA
 
     title: Adapters
   - sections:

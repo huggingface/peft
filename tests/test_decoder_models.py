@@ -52,6 +52,7 @@ from peft import (
     ShiraConfig,
     TaskType,
     VBLoRAConfig,
+    UniLoraConfig,
     VeraConfig,
     WaveFTConfig,
     get_peft_model,
@@ -283,6 +284,15 @@ ALL_CONFIGS = [
             "vblora_dropout": 0.05,
             "vector_length": 1,
             "num_vectors": 2,
+        },
+    ),
+    (
+        UniLoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "unilora_dropout": 0.05,
+            "theta_d_length": 128,
         },
     ),
     (

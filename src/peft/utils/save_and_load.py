@@ -18,6 +18,7 @@ import platform
 import re
 import warnings
 from typing import Optional
+import copy
 
 import huggingface_hub
 import torch
@@ -453,19 +454,33 @@ def set_peft_model_state_dict(
             # Not every module has a 1:1 mapping. ModulesToSaveWrapper, for example, removes the
             # `modules_to_save.{adapter_name}.` prefix. This prefix must be restored when loading the model from the
             # saved state dict which is why we fetch a load key map from the wrapper.
-            key_map = module.adapter_state_dict_load_map(adapter_name)
+            key_map = module.adapter_state_dict_load_map(adapter_name) 
+
             if name.startswith("_fsdp_wrapped_module."):
                 # If FSDP is used, the state_dict is from the unwrapped model, which will result in a key mismatch if we
                 # don't remove the FSDP-specific prefix
                 name = name.removeprefix("_fsdp_wrapped_module.")
-            for k in key_map:
-                lookup_key = f"{name}.{k}"
-                store_key = f"{name}.{key_map[k]}"
+            
+            if config.peft_type != PeftType.UNILORA:
+                for k in key_map:
+                    lookup_key = f"{name}.{k}"
+                    store_key = f"{name}.{key_map[k]}"
 
-                state_dict[store_key] = peft_model_state_dict[lookup_key]
+                    state_dict[store_key] = peft_model_state_dict[lookup_key]
 
-                # delete the old key from the previous `state_dict = peft_model_state_dict` statement.
-                del state_dict[lookup_key]
+                    # delete the old key from the previous `state_dict = peft_model_state_dict` statement.
+                    del state_dict[lookup_key]
+            else:
+                 for k in key_map:
+                    lookup_key = f"{name}.{k}"
+                    store_key = f"{name}.{key_map[k]}"
+
+                    if  lookup_key in   peft_model_state_dict.keys(): 
+                        state_dict[store_key] = peft_model_state_dict[lookup_key]
+
+                        # delete the old key from the previous `state_dict = peft_model_state_dict` statement.
+                        del state_dict[lookup_key]
+
 
     if config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT:
         peft_model_state_dict = state_dict
