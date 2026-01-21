@@ -53,7 +53,7 @@ class PveraModel(BaseTuner):
         >>> from peft import PveraConfig, get_peft_model
 
         >>> base_model = AutoModel.from_pretrained("facebook/dinov2-base")
-        >>> config = PveraConfig(r=128)
+        >>> config = PveraConfig(r=128, sample_at_inference=False)
         >>> model = get_peft_model(base_model, config)
         ```
 
