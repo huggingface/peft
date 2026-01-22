@@ -971,6 +971,7 @@ class Embedding(nn.Module, LoraLayer):
             r,
             lora_alpha=lora_alpha,
             config=config,
+            target_name=self.kwargs.get("target_name", ""),
         )
 
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
@@ -2032,6 +2033,7 @@ class ParamWrapper(nn.Module, LoraLayer):
             r,
             lora_alpha=lora_alpha,
             config=config,
+            target_name=kwargs.get("target_name", ""),
         )
 
     def _get_in_out_features(self, module: nn.Module) -> tuple[int, int] | tuple[None, None]:
@@ -2065,6 +2067,7 @@ class ParamWrapper(nn.Module, LoraLayer):
         use_rslora = config.use_rslora
         lora_bias = config.lora_bias
         inference_mode = config.inference_mode
+        target_name = kwargs.get("target_name", "")
 
         # This code works for linear layers, override for other layer types
         if r <= 0:
@@ -2073,6 +2076,13 @@ class ParamWrapper(nn.Module, LoraLayer):
         lora_variant = self.resolve_lora_variant(config=config)
         if lora_variant is not None:
             raise ValueError(f"lora.{self.__class__.__name__} does not work with LoRA variants like DoRA.")
+
+        if (
+            config.moe_rank_normalization
+            and self.num_experts > 1
+            and "experts" in target_name.split(".")
+        ):
+            r = max(1, r // self.num_experts)
 
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha

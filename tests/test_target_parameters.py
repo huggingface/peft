@@ -19,6 +19,7 @@ from transformers import AutoModelForCausalLM
 
 import peft
 from peft import LoraConfig, TaskType, get_peft_model
+from peft.tuners.lora.layer import ParamWrapper
 
 from .testing_common import PeftCommonTester
 from .testing_utils import hub_online_once, set_init_weights_false
@@ -161,6 +162,35 @@ class MyAutoModelForCausalLM(AutoModelForCausalLM):
                 for param in model.parameters():
                     param.data = torch.randn(param.shape)
         return model
+
+
+def test_moe_rank_normalization_for_target_parameters():
+    model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
+    with hub_online_once(model_id):
+        model = MyAutoModelForCausalLM.from_pretrained(model_id)
+        num_experts = model.model.layers[0].feed_forward.experts.gate_up_proj.shape[0]
+        r = 8
+        config = LoraConfig(
+            r=r,
+            lora_alpha=32,
+            target_modules=[],
+            target_parameters=["feed_forward.experts.gate_up_proj"],
+            moe_rank_normalization=True,
+            init_lora_weights=False,
+        )
+        model = get_peft_model(model, config)
+
+        wrappers = [
+            module
+            for module in model.modules()
+            if isinstance(module, ParamWrapper) and module.parameter_name == "gate_up_proj"
+        ]
+        assert wrappers, "Expected to find ParamWrapper for gate_up_proj."
+        lora_module = wrappers[0]
+        effective_r = max(1, r // num_experts)
+        assert lora_module.r["default"] == effective_r
+        assert lora_module.lora_A["default"].weight.shape[0] == effective_r * num_experts
+        assert lora_module.scaling["default"] == config.lora_alpha / effective_r
 
 
 class TestDecoderModelsTargetParameters(PeftCommonTester):

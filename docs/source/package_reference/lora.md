@@ -30,6 +30,34 @@ The abstract from the paper is:
 
 [[autodoc]] tuners.lora.model.LoraModel
 
+## MoE expert parameters and vLLM
+
+Some MoE models in Transformers store expert weights as `nn.Parameter` tensors (often 3D), not `nn.Linear` modules.
+To apply LoRA to those experts, use `target_parameters` and (optionally) MoE rank normalization:
+
+```python
+config = LoraConfig(
+    r=8,
+    lora_alpha=32,
+    target_modules=[],
+    target_parameters=[
+        # Mixtral / Qwen3-MoE / GPT-OSS
+        "mlp.experts.gate_up_proj",
+        "mlp.experts.down_proj",
+        # Llama4
+        # "feed_forward.experts.gate_up_proj",
+        # "feed_forward.experts.down_proj",
+    ],
+    moe_rank_normalization=True,  # effective_r = max(1, r // num_experts) for expert params
+)
+```
+
+`moe_rank_normalization=True` reduces the per-expert LoRA rank to keep the total LoRA parameter budget similar to dense layers (see
+[LoRA Without Regret](https://thinkingmachines.ai/blog/lora/) by Schulman et. al.).
+
+vLLM (v0.11.2+) supports LoRA on fused MoE expert layers. The fused MoE kernels expect LoRA weights in expert-major
+stacked form; for gate/up projections the kernel uses two slices (gate and up), while the down projection uses one slice.
+PEFT’s expert LoRA (via `target_parameters`) is compatible with this layout when exporting adapters.
 
 ## Utility
 
@@ -89,4 +117,3 @@ The abstract from the paper is:
 [[autodoc]] tuners.lora.loraga.estimate_gradients
 
 [[autodoc]] tuners.lora.loraga.preprocess_loraga
-
