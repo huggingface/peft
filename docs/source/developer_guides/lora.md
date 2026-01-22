@@ -620,7 +620,7 @@ Example usage:
 ```python
 from peft.tuners.lora.intruders import reduce_intruder_dimension
 
-peft_model = AutoPeftModelForCausalLM.from_pretrained('my-account/my-lora-adapter')
+peft_model = AutoPeftModelForCausalLM.from_pretrained('hubnemo/llama-3.2b-metamathqa-lora64')
 
 reduce_intruder_dimension(
     peft_model,
