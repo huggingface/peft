@@ -55,7 +55,7 @@ config = LoraConfig(
 `moe_rank_normalization=True` reduces the per-expert LoRA rank to keep the total LoRA parameter budget similar to dense layers (see
 [LoRA Without Regret](https://thinkingmachines.ai/blog/lora/) by Schulman et. al.).
 
-vLLM (v0.11.2+) supports LoRA on fused MoE expert layers. The fused MoE kernels expect LoRA weights in expert-major
+[vLLM](https://vllm.ai/) (v0.11.2+) supports LoRA on fused MoE expert layers. The fused MoE kernels expect LoRA weights in expert-major
 stacked form; for gate/up projections the kernel uses two slices (gate and up), while the down projection uses one slice.
 PEFT’s expert LoRA (via `target_parameters`) is compatible with this layout when exporting adapters.
 
