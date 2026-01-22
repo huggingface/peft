@@ -170,11 +170,11 @@ config = LoraConfig(use_rslora=True, ...)
 
 ### LoRA-GA
 
-[LoRA-GA](../package_reference/lora.md#lora-ga) (Low-Rank Adaptation with Gradient Approximation) initializes the adapter
+[LoRA-GA](../package_reference/lora#lora-ga) (Low-Rank Adaptation with Gradient Approximation) initializes the adapter
 weights by performing SVD on estimated gradients, so that the weights are aligning closer to full-finetuning for faster
 convergence.
 
-Next to the [`LoraGAConfig`], similar to EVA and CorDA, this method needs you to call an initialization function
+This method requires an initialization function to estimate the gradients
 before beginning the actual training:
 
 ```python
@@ -195,7 +195,7 @@ preprocess_loraga(model, lora_config, train_step)
 
 ## Variants
 
-PEFT implements variations of the original LoRA recipe that improve upon aspects of the original.
+PEFT implements LoRA variants that improve upon the original LoRA.
 
 ### Weight-Decomposed Low-Rank Adaptation (DoRA)
 
@@ -264,7 +264,7 @@ Caching can thus make inference with DoRA significantly faster but it also requi
 
 ## Training
 
-This section shows you some ways how to handle more complex training scenarios than just applying a low-rank adapter
+This section shows how to handle more complex training scenarios instead of only applying a low-rank adapter
 to the model and feed data.
 
 ### QLoRA-style training
@@ -275,7 +275,7 @@ The default LoRA settings in PEFT add trainable weights to the query and value l
 config = LoraConfig(target_modules="all-linear", ...)
 ```
 
-For more information about how to apply quantization to PEFT adapters, refer to the [quantization guide](quantization.md).
+For more information about how to apply quantization to PEFT adapters, refer to the [quantization guide](quantization).
 
 ### Memory efficient Layer Replication with LoRA
 
@@ -334,7 +334,7 @@ Generally, you should use `target_modules` to target the module (e.g. `nn.Linear
 
 ### Efficiently train tokens alongside LoRA
 
-Sometimes it is necessary to not only change some layer's weights but to add new tokens as well. With larger models this can be a memory-costly endeavour. PEFT LoRA adapters support the `trainable_token_indices` parameter which allows tuning of other tokens alongside fine-tuning of specific layers with LoRA. This method only trains the tokens you specify and leaves all other tokens untouched. This saves memory and doesn't throw away learned context of existing token embeddings in contrast to when training the whole embedding matrix. Under the hood this method uses the layer of [`TrainableTokensModel`].
+PEFT LoRA adapters support adding new tokens with the `trainable_token_indices` parameter. This allows tuning of other tokens alongside fine-tuning specific layers. Only the specified tokens are trained and all other tokens are untouched. It saves memory and doesn't throw away learned context from existing token embeddings unlike training the whole embedding matrix. Under the hood this method uses the layer of [`TrainableTokensModel`].
 
 ```py
 # for layer 'embed_tokens'
@@ -372,8 +372,7 @@ peft_model = get_peft_model(base_model, lora_config)
 [...]
 ```
 
-The token weights are part of your adapter state dict and saved alongside the LoRA weights.
-If we would have used full fine-tuning with `modules_to_save=['embed_tokens']` we would have stored the full embedding matrix in the checkpoint, leading to a much bigger file.
+The token weights are saved as a part of the adapter state dict alongside the LoRA weights. Full fine-tuning and saving the embedding matrix would have stored a much bigger file.
 
 To give a bit of an indication how much VRAM can be saved, a rudimentary comparison of the above example was made between training the embedding matrix fully (`modules_to_save=["embed_tokens"]`), using a LoRA for the embedding matrix (`target_modules=[..., "embed_tokens"]`, rank 32) and trainable tokens (`trainable_token_indices=[...]`, 6 tokens). Trainable tokens used about as much VRAM (15,562MB vs. 15,581MB) as LoRA while being specific to the tokens and saved ~1GB of VRAM over fully training the embedding matrix.
 
@@ -568,14 +567,13 @@ model.delete_adapter("dpo")
 
 ## Inference
 
-While merging the LoRA onto the base model is good for performance there are times when you want the flexibility
-to have the adapter uncoupled. This section showcases what you can do during inference time with LoRA.
+This section showcases what you can do during inference time with LoRA, such as uncoupling the adapter.
 
 ### Activated LoRA (aLoRA)
 
-Activated LoRA (aLoRA) is a low rank adapter architecture for Causal LMs that allows for reusing existing base model KV cache for more efficient inference. This approach is best suited for inference pipelines which rely on the base model for most tasks/generations, but use aLoRA adapter(s) to perform specialized task(s) within the chain. For example, checking or correcting generated outputs of the base model. In these settings, inference times can be sped up by an order of magnitude or more. For more information on aLoRA and many example use cases, see https://huggingface.co/papers/2504.12397.
+Activated LoRA (aLoRA) is a low rank adapter architecture for causal LMs that reuses the existing base model KV cache for more efficient inference. This approach is best suited for inference pipelines which rely on the base model for most tasks/generations, but use aLoRA adapter(s) to perform specialized task(s) within the chain. For example, checking or correcting generated outputs of the base model. In these settings, inference times can be sped up by an order of magnitude or more. For more information on aLoRA and many example use cases, see the aLoRA [paper](https://huggingface.co/papers/2504.12397).
 
-This technique scans for the last occurence of an invocation sequence (`alora_invocation_tokens`) in each input (this can be as short as 1 token), and activates the adapter weights on tokens starting with the beginning of the invocation sequence (any inputs after the invocation sequence are also adapted, and all generated tokens will use the adapted weights). Weights on prior tokens are left un-adapted -- making the cache for those tokens interchangeable with base model cache due to the causal attention mask in Causal LMs. Usage is very similar to standard LoRA, with the key difference that this invocation sequence must be specified when the adapter is created:
+This technique scans for the last occurrence of an invocation sequence (`alora_invocation_tokens`) in each input (this can be as short as 1 token). It activates the adapter weights on tokens starting with the beginning of the invocation sequence. Any inputs after the invocation sequence are also adapted, and all generated tokens will use the adapted weights. Weights on prior tokens are left un-adapted, making the cache for those tokens interchangeable with base model cache due to the causal attention mask in causal LMs. Usage is very similar to standard LoRA. The key difference is that the invocation sequence must be specified when the adapter is created:
 
 ```py
 from peft import LoraConfig
@@ -583,23 +581,23 @@ from peft import LoraConfig
 config = LoraConfig(alora_invocation_tokens=alora_invocation_tokens, task_type="CAUSAL_LM", ...)
 ```
 
-where `alora_invocation_tokens` is a list of integer token ids. Given a desired invocation string, this can be obtained as
-```
+alora_invocation_tokens` is a list of integer token ids. Given a desired invocation string, this can be obtained as:
+```py
 invocation_string = "placeholder"
 alora_invocation_tokens = tokenizer.encode(invocation_string, add_special_tokens=False).
 ```
-where the tokenizer is the tokenizer for the base model. Note that we have `add_special_tokens=False` to avoid adding SOS/EOS tokens in our search string (which will most likely cause failure to find).
+The tokenizer is the base model's tokenizer. Use `add_special_tokens=False` to avoid adding `SOS`/`EOS` tokens in our search string (which will most likely cause the search to fail).
 
 **Notes**
 * aLoRA is only supported for `task_type=CAUSAL_LM` tasks due to its focus on cache reuse.
 * Since the weights are adapted on fewer tokens, often (not always) aLoRA requires higher rank (`r`) than LoRA. `r=32` can be a good starting point.
 * aLoRA weights cannot be merged into the base model by definition, since the adapter weights are selectively applied to a subset of tokens. Attempts to merge will throw errors.
 * Beam search is not yet supported.
-* It is generally not recommended to add new tokens to the tokenizer that are not present in the base model, as this can complicate the target use case of both the base model and adapter model operating on overlapping context. That said, there is a possible workaround by first efficiently adding [trainable tokens](https://huggingface.co/docs/peft/en/package_reference/trainable_tokens) to the base model prior to training the adapter.
+* It is generally not recommended to add new tokens to the tokenizer that are not present in the base model. This can complicate the target use case of both the base model and adapter model operating on overlapping context. You can workaround this by adding [trainable tokens](../package_reference/trainable_tokens) to the base model prior to training the adapter.
 
 #### Choice of invocation sequence and SFT design
 
-Each input must have the `alora_invocation_tokens` sequence present, it is not added automatically. To maximize model performance without compromising cache reuse, it is recommended to have the adapter weights activated early, i.e. at the start of any adapter-specific prompting, but after any long inputs such as prior generations or documents. As with any model,
+You must add the `alora_invocation_tokens` sequence because it is not added automatically. We recommend activating the adapter weights early (at the start of any adapter-specific prompting), but after any long inputs, to maximize model performance without compromising cache reuse. As with any model,
 formatting should be consistent between train and test.
 
 Consider the following example, where the base model has a chat template,
@@ -608,24 +606,25 @@ and the goal is to train the adapter to generate a desired output.
 * Option 1: If there is no task-specific prompt, i.e. the input is a chat history with the `assistant` prompt, then the chat template's `assistant` prompt (e.g. `<|start_of_role|>assistant<|end_of_role|>`) is a natural choice for the invocation string. See the model's chat template to find the prompt for the model.
 * Option 2: If there is a task-specific prompt for the adapter that describes the task the adapter is learning, and that prompt is put as a `user` turn immediately prior to the generation, then the chat template's `user` prompt (e.g. `<|start_of_role|>user<|end_of_role|>`) is a natural choice for the invocation string.
 
-Once deciding on an invocation string, get the model tokenizer and obtain `alora_invocation_tokens` as
-```
+After deciding on an invocation string, get the model tokenizer and obtain `alora_invocation_tokens` as
+```py
 alora_invocation_tokens = tokenizer.encode(invocation_string, add_special_tokens=False).
 ```
 
 An example inference setup is at [alora finetuning](https://github.com/huggingface/peft/blob/main/examples/alora_finetuning/alora_finetuning.py).
 
-**Note** If using custom strings for the invocation string, make sure that the start and end of the string are special tokens to avoid issues with tokenization at the boundaries.
+> [!NOTE]
+> If using custom strings for the invocation string, make sure that the start and end of the string are special tokens to avoid issues with tokenization at the boundaries.
 
 To see why, imagine that 'a', 'b', 'c', and 'ab' are tokens in your tokenizer (numbers 1, 2, 3, 4 respectively). Suppose that your alora_invocation_tokens = [2, 3]. Now imagine your input string is "abc". Because "ab" is a token, this will get tokenized as [4,3]. So the alora_invocation_tokens will fail to be found, despite the string "bc" being in it. If the start and end of the invocation string are special tokens, however, this failure case will never happen since special tokens are never tokenized into the same token with other characters.
 
 #### Using (and reusing) cache for generation
-The main purpose of Activated LoRA is to make KV cache interchangeable between the base model and aLoRA adapter models **prior to the invocation sequence** since base and adapted KV values are not compatible. Specifically, keys and values stored during one model generation can be used in subsequent generations to avoid expensive prefill operations for context tokens. When sharing cache between the base model and aLoRA adapters, there are 2 main patterns:
-1. The base model has generated something, and an aLoRA adapter is then called to do a followup generation. Example: the base model answers a question, and an aLoRA trained to detect hallucinations checks the base model response.
-2. An aLoRA adapter has generated something, and the base model or a different aLoRA adapter is called to do a followup generation where there is partial context overlap with the original aLoRA. Example: The user provides a query, and an aLoRA rewrites the query to be more self-contained and improve retrieval in a RAG system. Then, documents are retrieved and loaded into context, an aLoRA checks if these documents are indeed relevant to the question, and then the base model generates an answer.
+The main purpose of aLoRA is to make KV cache interchangeable between the base model and aLoRA adapter models **prior to the invocation sequence** since base and adapted KV values are not compatible. Specifically, keys and values stored during one model generation can be used in subsequent generations to avoid expensive prefill operations for context tokens. When sharing cache between the base model and aLoRA adapters, there are 2 main patterns:
+1. The base model has generated something, and an aLoRA adapter is then called to do a follow-up generation. For example, the base model answers a question, and an aLoRA trained to detect hallucinations checks the base model response.
+2. An aLoRA adapter has generated something, and the base model or a different aLoRA adapter is called to do a follow-up generation where there is partial context overlap with the original aLoRA. For example, the user provides a query, and an aLoRA rewrites the query to be more self-contained and improve retrieval in a RAG system. Then, documents are retrieved and loaded into context, aLoRA checks if these documents are relevant to the question, and then the base model generates an answer.
 
 
-To demonstrate the above behaviors when using caching, we're using [DynamicCache](https://huggingface.co/docs/transformers/en/kv_cache) from `transformers`. Care must be taken to ensure that adapted cache values are not mixed with base cache values. In particular, an extra step is required for sharing the cache when there is partial context overlap (pattern 2).
+To demonstrate the above behaviors when using caching, we're using [DynamicCache](https://huggingface.co/docs/transformers/en/kv_cache) from `transformers`. Take care to ensure that adapted cache values are not mixed with base cache values. In particular, an extra step is required for sharing the cache when there is partial context overlap (pattern 2).
 
 **Pattern 1: Base model followed by aLoRA** Here, the entire input and generation from the base model is input into the aLoRA adapter, along with the invocation sequence:
 ```
@@ -749,7 +748,7 @@ Using this feature has some drawbacks, namely:
 #### Arrow
 [Arrow](https://huggingface.co/papers/2405.11157) is a modular routing algorithm designed to combine multiple pre-trained task-specific LoRA adapters to solve a given task. Rather than merging all adapters naively, Arrow introduces a **gradient-free, token-wise mixture-of-experts (MoE) routing mechanism**. At inference time, it first computes a _prototype_ for each LoRA by extracting the top right singular vector from its SVD decomposition. Each token representation is then compared to these prototypes via cosine similarity to obtain routing coefficients. Tokens are assigned to the top-k most relevant LoRA adapters, with the coefficients normalized through softmax, and their outputs linearly combined. This allows effective reuse of existing LoRA modules for new tasks and leads to stronger zero-shot generalization.
 
-In PEFT, Arrow is enabled through ```ArrowConfig``` and ```create_arrow_model```. You can also configure parameters such as ```top_k``` (the number of LoRA adapters combined per token), ```router_temperature``` (the softmax temperature applied to the routing coefficients), and ```rng_seed``` (for reproducibility).
+In PEFT, Arrow is enabled through [`ArrowConfig]` and `create_arrow_model`. You can also configure parameters such as `top_k` (the number of LoRA adapters combined per token), `router_temperature` (the softmax temperature applied to the routing coefficients), and `rng_seed` (for reproducibility).
 
 ```py
 from peft import create_arrow_model, ArrowConfig
