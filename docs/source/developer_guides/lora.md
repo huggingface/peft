@@ -374,7 +374,12 @@ peft_model = get_peft_model(base_model, lora_config)
 
 The token weights are saved as a part of the adapter state dict alongside the LoRA weights. Full fine-tuning and saving the embedding matrix would have stored a much bigger file.
 
-To give a bit of an indication how much VRAM can be saved, a rudimentary comparison of the above example was made between training the embedding matrix fully (`modules_to_save=["embed_tokens"]`), using a LoRA for the embedding matrix (`target_modules=[..., "embed_tokens"]`, rank 32) and trainable tokens (`trainable_token_indices=[...]`, 6 tokens). Trainable tokens used about as much VRAM (15,562MB vs. 15,581MB) as LoRA while being specific to the tokens and saved ~1GB of VRAM over fully training the embedding matrix.
+To give a bit of an indication how much VRAM can be saved, a rudimentary comparison of the above example was made between training the embedding matrix fully (`modules_to_save=["embed_tokens"]`), using a LoRA for the embedding matrix (`target_modules=[..., "embed_tokens"]`, rank 32) and trainable tokens (`trainable_token_indices=[...]`, 6 tokens):
+
+|           | Trainable Tokens |       LoRA | Full Fine-tuning |
+| --------: | :--------------: | :--------: | :--------------: |
+| VRAM      |        15,562 MB |   15,581MB |     ~16,500MB    |
+| Influence |         6 tokens | all tokens |       all tokens |
 
 
 ## Optimizers
