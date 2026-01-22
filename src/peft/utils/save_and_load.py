@@ -17,6 +17,7 @@ import os
 import platform
 import re
 import warnings
+from collections import namedtuple
 from typing import Optional
 import copy
 
@@ -419,7 +420,7 @@ def set_peft_model_state_dict(
     adapter_name="default",
     ignore_mismatched_sizes: bool = False,
     low_cpu_mem_usage: bool = False,
-) -> None:
+) -> namedtuple:
     """
     Set the state dict of the PEFT model.
 
@@ -441,6 +442,10 @@ def set_peft_model_state_dict(
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             This argument must be `True` if the `model` was loaded with adapter weights on the meta device, e.g. after
             calling `inject_adapter_in_model` with `low_cpu_mem_usage=True`. Otherwise, leave it as `False`.
+
+    Returns:
+        load_result (`_IncompatibleKeys`)
+            A named tuple with `missing_keys` and `unexpected_keys` fields.
 
     """
     config = model.peft_config[adapter_name]
@@ -590,9 +595,12 @@ def set_peft_model_state_dict(
         load_result = model.load_state_dict(peft_model_state_dict, strict=False)
 
     if config.is_prompt_learning:
-        model.prompt_encoder[adapter_name].embedding.load_state_dict(
-            {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
-        )
+        if config.peft_type == PeftType.CARTRIDGE:
+            model.prompt_encoder[adapter_name].load_prompt_embeddings(peft_model_state_dict["prompt_embeddings"])
+        else:
+            model.prompt_encoder[adapter_name].embedding.load_state_dict(
+                {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
+            )
 
     if config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
         model.prompt_encoder[adapter_name].load_state_dict(peft_model_state_dict, strict=False)

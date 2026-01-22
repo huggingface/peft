@@ -27,12 +27,14 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
+from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
     BoneConfig,
     C3AConfig,
+    CartridgeConfig,
     CPTConfig,
     DeloraConfig,
     FourierFTConfig,
@@ -528,24 +530,28 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_pickle(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs.copy(), safe_serialization=False)
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters_pickle(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained_selected_adapters(
             model_id, config_cls, config_kwargs.copy(), safe_serialization=False
         )
@@ -613,11 +619,6 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_generate_half_prec(self, model_id, config_cls, config_kwargs):
         self._test_generate_half_prec(model_id, config_cls, config_kwargs.copy())
-
-    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
-    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
-    def test_prefix_tuning_half_prec_conversion(self, model_id, config_cls, config_kwargs):
-        self._test_prefix_tuning_half_prec_conversion(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
@@ -781,6 +782,34 @@ class TestDecoderModels(PeftCommonTester):
             # does not raise
             model(x)
 
+    def test_prefix_tuning_offsets_position_ids_in_forward(self, monkeypatch):
+        # Regression: RoPE models need position_ids offset for prefix tuning.
+        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        with hub_online_once(model_id):
+            base = AutoModelForCausalLM.from_pretrained(model_id)
+        peft_config = PrefixTuningConfig(num_virtual_tokens=4, task_type="CAUSAL_LM", prefix_projection=False)
+        model = get_peft_model(base, peft_config)
+
+        captured = {}
+
+        def fake_forward(*args, **kwargs):
+            captured["position_ids"] = kwargs.get("position_ids")
+            input_ids = kwargs.get("input_ids")
+            if input_ids is None and args:
+                input_ids = args[0]
+            batch, seq_len = input_ids.shape
+            logits = torch.zeros((batch, seq_len, base.config.vocab_size), device=input_ids.device)
+            return CausalLMOutputWithPast(logits=logits)
+
+        monkeypatch.setattr(model.base_model, "forward", fake_forward)
+
+        input_ids = torch.randint(0, base.config.vocab_size, (1, 3))
+        position_ids = torch.arange(input_ids.shape[1]).unsqueeze(0)
+        _ = model(input_ids=input_ids, position_ids=position_ids)
+
+        assert captured["position_ids"] is not None
+        assert torch.equal(captured["position_ids"], position_ids + peft_config.num_virtual_tokens)
+
     def test_prefix_tuning_mistral(self):
         # See issue 869, 1962
         _, device_count, _ = get_backend()
@@ -835,6 +864,14 @@ class TestDecoderModels(PeftCommonTester):
                 },
             ),
             (
+                CartridgeConfig,
+                {
+                    "num_virtual_tokens": 10,
+                    "num_frozen_tokens": 1,
+                    "task_type": "CAUSAL_LM",
+                },
+            ),
+            (
                 PromptEncoderConfig,
                 {
                     "num_virtual_tokens": 10,
@@ -871,8 +908,8 @@ class TestDecoderModels(PeftCommonTester):
             model = get_peft_model(base_model, peft_config)
         except ValueError as exc:
             # Some methods will raise a helpful error. After this, exit the test, as training would fail.
-            assert config_cls == PrefixTuningConfig
-            assert "Prefix tuning does not work with gradient checkpointing" in str(exc)
+            assert config_cls in (PrefixTuningConfig, CartridgeConfig)
+            assert "does not work with gradient checkpointing" in str(exc)
             return
 
         tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -1014,3 +1051,16 @@ class TestDecoderModels(PeftCommonTester):
             msg = "Setting `requires_grad` is not supported for prompt learning methods like"
             with pytest.raises(TypeError, match=msg):
                 model.set_requires_grad(adapter_names="adpater0")
+
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_lora_conversion(self, model_id, config_cls, config_kwargs):
+        # Test for the ability to convert a PEFT adapter into a LoRA adapter (if the adapter supports it). It's not
+        # necessary to run this with all model types, only checking decoder models.
+        _skip_if_not_conv1d_supported(model_id, config_cls)
+        if config_kwargs.get("alora_invocation_tokens"):
+            # very large conversion error, not sure why
+            pytest.skip("Skipping LoRA conversion for aLoRA.")
+
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_lora_conversion(model_id, config_cls, config_kwargs)

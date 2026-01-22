@@ -18,6 +18,7 @@ import torch
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 
+from .config import AdaLoraConfig
 from .layer import AdaLoraLayer
 
 
@@ -29,10 +30,9 @@ if is_bnb_available():
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
+            config: AdaLoraConfig,
             r: int = 0,
             lora_alpha: int = 1,
-            lora_dropout: float = 0.0,
-            init_lora_weights: bool = True,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -41,7 +41,7 @@ if is_bnb_available():
             self.get_base_layer().weight.requires_grad = False
 
             self._active_adapter = adapter_name
-            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+            self.update_layer(adapter_name, r, lora_alpha, config=config)
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             # note: no check for self.merged because merging is not supported (yet)
@@ -87,10 +87,8 @@ if is_bnb_4bit_available():
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
+            config: AdaLoraConfig,
             r: int = 0,
-            lora_alpha: int = 1,
-            lora_dropout: float = 0.0,
-            init_lora_weights: bool = True,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -99,7 +97,7 @@ if is_bnb_4bit_available():
             self.get_base_layer().weight.requires_grad = False
 
             self._active_adapter = adapter_name
-            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+            self.update_layer(adapter_name, r, config=config)
 
         def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
             # note: no check for self.merged because merging is not supported (yet)

@@ -25,14 +25,14 @@ from peft.tuners.lora.config import BdLoraConfig
 from peft.utils.other import transpose
 
 from .arrow import ArrowLoraLinearLayer
-from .config import PeftConfig
+from .config import LoraConfig, PeftConfig
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
 from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
 
 
 class ArrowLinearVariant(LoraVariant):
     @staticmethod
-    def init(module: Linear, adapter_name: str, **kwargs):
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs):
         """
         Initialise the ArrowLoraLinearLayer() inside lora_arrow. lora_arrow is nn.ModuleDict(), serving as a container
         for ArrowLoraLinearLayer(). A layer of the base model with LoRA adapter loaded on it will be like:
@@ -51,7 +51,7 @@ class ArrowLinearVariant(LoraVariant):
             The adapter_name is "arrow_router" by default, set in create_arrow_model() in ./arrow.py
         """
         # Checking for arrow necessary config
-        arrow_config = kwargs.get("arrow_config")
+        arrow_config = config.arrow_config
         if arrow_config is None:
             raise ValueError("ArrowLinearVariant.init() did not receive an arrow_config")
 
@@ -237,6 +237,7 @@ class DoraLinearVariant(LoraVariant):
             scaling=scaling,
             base_layer=module.get_base_layer(),
             base_result=base_result,
+            adapter_name=active_adapter,
         )
         return result
 
@@ -326,6 +327,7 @@ class DoraEmbeddingVariant(DoraLinearVariant):
             scaling=scaling,
             base_layer=module.get_base_layer(),
             embed_fn=module._embed,
+            adapter_name=active_adapter,
         )
 
         # Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling in their forward method.
@@ -423,55 +425,50 @@ class _DoraConvNdVariant(LoraVariant):
             scaling=scaling,
             base_layer=module.get_base_layer(),
             base_result=base_result,
+            adapter_name=active_adapter,
         )
         return result
 
 
 class DoraConv1dVariant(_DoraConvNdVariant):
     @staticmethod
-    def init(module: Conv1d, adapter_name: str, **kwargs: Any) -> None:
+    def init(module: Conv1d, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
         dora_layer = DoraConv1dLayer(fan_in_fan_out=False)
         _DoraConvNdVariant.init_convd_variant(module, adapter_name, dora_layer=dora_layer)
 
 
 class DoraConv2dVariant(_DoraConvNdVariant):
     @staticmethod
-    def init(module: Conv2d, adapter_name: str, **kwargs: Any) -> None:
+    def init(module: Conv2d, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
         dora_layer = DoraConv2dLayer(fan_in_fan_out=False)
         _DoraConvNdVariant.init_convd_variant(module, adapter_name, dora_layer=dora_layer)
 
 
 class DoraConv3dVariant(_DoraConvNdVariant):
     @staticmethod
-    def init(module: Conv3d, adapter_name: str, **kwargs: Any) -> None:
+    def init(module: Conv3d, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
         dora_layer = DoraConv3dLayer(fan_in_fan_out=False)
         _DoraConvNdVariant.init_convd_variant(module, adapter_name, dora_layer=dora_layer)
 
 
 class QALoraLinearVariant(LoraVariant):
     @staticmethod
-    def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
         """
         Initializes QALoRA specific parameters for a given adapter.
 
         Args:
             module (Linear): The linear module to be adapted.
             adapter_name (str): The name of the adapter.
+            config (LoraConfig): The config of the LoRA adapter.
             **kwargs: Additional keyword arguments.
-                qalora_group_size (int): The size of groups for pooling. This is expected to be passed.
         """
-        if "qalora_group_size" not in kwargs:
-            raise ValueError(
-                "`use_qalora=True` requires 'qalora_group_size' to be provided in kwargs."
-                " Please ensure it is passed from the LoraConfig."
-            )
-
-        if module.in_features is not None and module.in_features % kwargs["qalora_group_size"] != 0:
+        qalora_group_size = config.qalora_group_size
+        if module.in_features is not None and module.in_features % qalora_group_size != 0:
             raise ValueError(
                 f"`use_qalora=True` requires `module.in_features` ({module.in_features}) to be"
-                f"divisible by 'qalora_group_size' ({kwargs['qalora_group_size']})"
+                f"divisible by 'qalora_group_size' ({qalora_group_size})"
             )
-        qalora_group_size = kwargs["qalora_group_size"]
 
         if "qalora_group_size" not in module.other_param_names:
             module.other_param_names = module.other_param_names + ("qalora_group_size",)
@@ -552,7 +549,7 @@ class QALoraLinearVariant(LoraVariant):
 
 class ALoraLinearVariant(LoraVariant):
     @staticmethod
-    def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
         pass
 
     @staticmethod
@@ -821,8 +818,8 @@ class BlockDiagonalLinear(nn.Module):
 
 class BdLoraLinearVariant(LoraVariant):
     @staticmethod
-    def init(module: Linear, adapter_name: str, **kwargs) -> None:
-        use_bdlora = kwargs.get("use_bdlora")
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs) -> None:
+        use_bdlora = config.use_bdlora
         target_name = kwargs.get("target_name", "")
 
         # Handle case where use_bdlora is a dict (from saved config) instead of BdLoraConfig object
