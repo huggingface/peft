@@ -971,7 +971,6 @@ class Embedding(nn.Module, LoraLayer):
             r,
             lora_alpha=lora_alpha,
             config=config,
-            target_name=self.kwargs.get("target_name", ""),
         )
 
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
