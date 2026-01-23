@@ -58,6 +58,9 @@ config = LoraConfig(
 [vLLM](https://vllm.ai/) (v0.11.2+) supports LoRA on fused MoE expert layers. The fused MoE kernels expect LoRA weights in expert-major
 stacked form; for gate/up projections the kernel uses two slices (gate and up), while the down projection uses one slice.
 PEFT’s expert LoRA (via `target_parameters`) is compatible with this layout when exporting adapters.
+When expert weights are fused (e.g., gate+up), LoRA A weights are concatenated along the rank dimension and LoRA B
+weights are combined in a block-diagonal fashion (per expert for 3D tensors). This preserves the original per-projection
+updates while targeting a single fused parameter tensor.
 
 ## Utility
 
