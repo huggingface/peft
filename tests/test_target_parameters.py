@@ -20,6 +20,7 @@ from transformers import AutoModelForCausalLM
 import peft
 from peft import LoraConfig, TaskType, get_peft_model
 from peft.tuners.lora.layer import ParamWrapper
+from safetensors.torch import load_file as safe_load_file
 
 from .testing_common import PeftCommonTester
 from .testing_utils import hub_online_once, set_init_weights_false
@@ -164,7 +165,7 @@ class MyAutoModelForCausalLM(AutoModelForCausalLM):
         return model
 
 
-def test_moe_rank_normalization_for_target_parameters():
+def test_moe_rank_normalization_for_target_parameters(tmp_path):
     model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
     with hub_online_once(model_id):
         model = MyAutoModelForCausalLM.from_pretrained(model_id)
@@ -191,6 +192,23 @@ def test_moe_rank_normalization_for_target_parameters():
         assert lora_module.r["default"] == effective_r
         assert lora_module.lora_A["default"].weight.shape[0] == effective_r * num_experts
         assert lora_module.scaling["default"] == config.lora_alpha / effective_r
+
+        model.save_pretrained(tmp_path)
+        state_dict = safe_load_file(tmp_path / "adapter_model.safetensors")
+        suffix_a = "feed_forward.experts.lora_A.weight"
+        suffix_b = "feed_forward.experts.lora_B.weight"
+        lora_a_keys = [k for k in state_dict if k.endswith(suffix_a)]
+        lora_b_keys = [k for k in state_dict if k.endswith(suffix_b)]
+        assert lora_a_keys, "Expected LoRA A weights for experts in exported adapter."
+        assert lora_b_keys, "Expected LoRA B weights for experts in exported adapter."
+        base_layers = model.base_model.model.model.layers
+        gate_up_proj = base_layers[0].feed_forward.experts.base_layer.gate_up_proj
+        in_features = gate_up_proj.shape[1]
+        out_features = gate_up_proj.shape[2]
+        expected_a_shape = (effective_r * num_experts, in_features)
+        expected_b_shape = (out_features, effective_r * num_experts)
+        assert all(state_dict[k].shape == expected_a_shape for k in lora_a_keys)
+        assert all(state_dict[k].shape == expected_b_shape for k in lora_b_keys)
 
 
 class TestDecoderModelsTargetParameters(PeftCommonTester):
