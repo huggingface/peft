@@ -742,17 +742,6 @@ class LoraConfig(PeftConfig):
             )
         },
     )
-    moe_rank_normalization: bool = field(
-        default=False,
-        metadata={
-            "help": (
-                "Whether to normalize the LoRA rank for MoE expert parameters targeted via `target_parameters`. "
-                "When enabled, and the target name contains an `experts` segment, the effective rank becomes "
-                "`max(1, r // num_experts)` and scaling uses this effective rank. This mirrors the Thinking Machines "
-                "LoRA MoE approach."
-            )
-        },
-    )
     use_bdlora: Optional[BdLoraConfig] = field(
         default=None,
         metadata={

@@ -165,18 +165,21 @@ class MyAutoModelForCausalLM(AutoModelForCausalLM):
         return model
 
 
-def test_moe_rank_normalization_for_target_parameters(tmp_path):
+def test_rank_pattern_for_moe_target_parameters(tmp_path):
     model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
     with hub_online_once(model_id):
         model = MyAutoModelForCausalLM.from_pretrained(model_id)
         num_experts = model.model.layers[0].feed_forward.experts.gate_up_proj.shape[0]
         r = 8
+        effective_r = max(1, r // num_experts)
         config = LoraConfig(
             r=r,
             lora_alpha=32,
-            target_modules=[],
+            target_modules=["q_proj", "v_proj"],
             target_parameters=["feed_forward.experts.gate_up_proj"],
-            moe_rank_normalization=True,
+            rank_pattern={
+                "experts.gate_up_proj": effective_r,
+            },
             init_lora_weights=False,
         )
         model = get_peft_model(model, config)
@@ -188,10 +191,10 @@ def test_moe_rank_normalization_for_target_parameters(tmp_path):
         ]
         assert wrappers, "Expected to find ParamWrapper for gate_up_proj."
         lora_module = wrappers[0]
-        effective_r = max(1, r // num_experts)
         assert lora_module.r["default"] == effective_r
         assert lora_module.lora_A["default"].weight.shape[0] == effective_r * num_experts
         assert lora_module.scaling["default"] == config.lora_alpha / effective_r
+        assert config.r == r
 
         model.save_pretrained(tmp_path)
         state_dict = safe_load_file(tmp_path / "adapter_model.safetensors")

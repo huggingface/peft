@@ -33,13 +33,14 @@ The abstract from the paper is:
 ## MoE expert parameters and vLLM
 
 Some MoE models in Transformers store expert weights as `nn.Parameter` tensors (often 3D), not `nn.Linear` modules.
-To apply LoRA to those experts, use `target_parameters` and (optionally) MoE rank normalization:
+To apply LoRA to those experts, use `target_parameters` and set a per-layer rank with `rank_pattern`:
 
 ```python
+effective_r = max(1, r // model.config.num_experts)
 config = LoraConfig(
-    r=8,
+    r=r,
     lora_alpha=32,
-    target_modules=[],
+    target_modules=["q_proj", "v_proj"],
     target_parameters=[
         # Mixtral / Qwen3-MoE / GPT-OSS
         "mlp.experts.gate_up_proj",
@@ -48,12 +49,16 @@ config = LoraConfig(
         # "feed_forward.experts.gate_up_proj",
         # "feed_forward.experts.down_proj",
     ],
-    moe_rank_normalization=True,  # effective_r = max(1, r // num_experts) for expert params
+    rank_pattern={
+        "experts.gate_up_proj": effective_r,
+        "experts.down_proj": effective_r,
+    },
 )
 ```
 
-`moe_rank_normalization=True` reduces the per-expert LoRA rank to keep the total LoRA parameter budget similar to dense layers (see
+This keeps the total LoRA parameter budget similar to dense layers (see
 [LoRA Without Regret](https://thinkingmachines.ai/blog/lora/) by Schulman et. al.).
+Non-expert modules use the default rank `r`.
 
 [vLLM](https://vllm.ai/) (v0.11.2+) supports LoRA on fused MoE expert layers. The fused MoE kernels expect LoRA weights in expert-major
 stacked form; for gate/up projections the kernel uses two slices (gate and up), while the down projection uses one slice.
