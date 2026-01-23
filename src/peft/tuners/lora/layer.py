@@ -2077,11 +2077,7 @@ class ParamWrapper(nn.Module, LoraLayer):
         if lora_variant is not None:
             raise ValueError(f"lora.{self.__class__.__name__} does not work with LoRA variants like DoRA.")
 
-        if (
-            config.moe_rank_normalization
-            and self.num_experts > 1
-            and "experts" in target_name.split(".")
-        ):
+        if config.moe_rank_normalization and self.num_experts > 1 and "experts" in target_name.split("."):
             r = max(1, r // self.num_experts)
 
         self.r[adapter_name] = r
