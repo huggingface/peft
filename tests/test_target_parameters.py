@@ -169,7 +169,8 @@ def test_rank_pattern_for_moe_target_parameters(tmp_path):
     model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
     with hub_online_once(model_id):
         model = MyAutoModelForCausalLM.from_pretrained(model_id)
-        num_experts = model.model.layers[0].feed_forward.experts.gate_up_proj.shape[0]
+        num_experts = getattr(model.config, "num_local_experts", None) or getattr(model.config, "num_experts", None)
+        assert num_experts is not None
         r = 8
         effective_r = max(1, r // num_experts)
         config = LoraConfig(

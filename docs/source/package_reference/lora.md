@@ -36,7 +36,8 @@ Some MoE models in Transformers store expert weights as `nn.Parameter` tensors (
 To apply LoRA to those experts, use `target_parameters` and set a per-layer rank with `rank_pattern`:
 
 ```python
-effective_r = max(1, r // model.config.num_experts)
+num_experts = getattr(model.config, "num_local_experts", None) or model.config.num_experts
+effective_r = max(1, r // num_experts)
 config = LoraConfig(
     r=r,
     lora_alpha=32,
