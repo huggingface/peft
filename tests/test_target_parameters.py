@@ -14,13 +14,13 @@
 
 import pytest
 import torch
+from safetensors.torch import load_file as safe_load_file
 from torch import nn
 from transformers import AutoModelForCausalLM
 
 import peft
 from peft import LoraConfig, TaskType, get_peft_model
 from peft.tuners.lora.layer import ParamWrapper
-from safetensors.torch import load_file as safe_load_file
 
 from .testing_common import PeftCommonTester
 from .testing_utils import hub_online_once, set_init_weights_false
