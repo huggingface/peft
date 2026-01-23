@@ -832,6 +832,15 @@ class BaseTuner(nn.Module, ABC):
                 peft_config=peft_config, model=model, adapter_name=adapter_name, low_cpu_mem_usage=low_cpu_mem_usage
             )
 
+        if getattr(peft_config, "moe_rank_normalization", False):
+            has_expert_params = any("experts" in name.split(".") for name in self.targeted_parameter_names)
+            if self.targeted_parameter_names and not has_expert_params:
+                warnings.warn(
+                    "moe_rank_normalization=True was set but no expert parameters were matched. "
+                    "Rank normalization will have no effect.",
+                    RuntimeWarning,
+                )
+
         ####################
         # CHECK FOR ERRORS #
         ####################
