@@ -20,6 +20,7 @@ from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import get_auto_gptq_quant_linear
 
+from .config import LoraConfig
 from .layer import LoraVariant
 
 
@@ -28,21 +29,15 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
         self,
         base_layer,
         adapter_name: str,
+        config: LoraConfig,
         r: int = 0,
         lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
-        init_lora_weights: bool = True,
-        use_rslora: bool = False,
-        use_dora: bool = False,
-        use_qalora: bool = False,
-        lora_bias: bool = False,
-        qalora_group_size: int = 32,
         **kwargs,
     ):
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
-        if use_dora:
+        if config.use_dora:
             raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
 
         # self.base_layer and self.quant_linear_module are the same; we need the former for consistency and the latter
@@ -53,25 +48,19 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
             adapter_name,
             r,
             lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout,
-            init_lora_weights=init_lora_weights,
-            use_rslora=use_rslora,
-            use_dora=use_dora,
-            use_qalora=use_qalora,
-            lora_bias=lora_bias,
-            qalora_group_size=qalora_group_size,
+            config=config,
         )
 
-    def resolve_lora_variant(self, *, use_dora: bool, use_qalora: bool, **kwargs) -> Optional[LoraVariant]:
-        if use_dora and use_qalora:
+    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
+        if config.use_dora and config.use_qalora:
             raise NotImplementedError(
-                f"Dora and QA_lora at the same time is not supported for {self.__class__.__name__} (yet)."
+                f"DoRA and QA-LoRA at the same time is not supported for {self.__class__.__name__} (yet)."
             )
-        elif use_dora:
+        elif config.use_dora:
             from .variants import DoraLinearVariant
 
             variant = DoraLinearVariant()
-        elif use_qalora:
+        elif config.use_qalora:
             from .variants import QALoraLinearVariant
 
             variant = QALoraLinearVariant()
@@ -127,6 +116,7 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
 def dispatch_gptq(
     target: torch.nn.Module,
     adapter_name: str,
+    config: LoraConfig,
     **kwargs: Any,
 ) -> Optional[torch.nn.Module]:
     new_module = None
@@ -142,13 +132,13 @@ def dispatch_gptq(
         from gptqmodel.nn_modules.qlinear import BaseQuantLinear
 
         if isinstance(target_base_layer, BaseQuantLinear):
-            new_module = GPTQLoraLinear(target, adapter_name, **kwargs)
+            new_module = GPTQLoraLinear(target, adapter_name, config=config, **kwargs)
             target.qweight = target_base_layer.qweight
     else:
         quant_linear = get_auto_gptq_quant_linear(cfg)
 
         if quant_linear is not None and isinstance(target_base_layer, quant_linear):
-            new_module = GPTQLoraLinear(target, adapter_name, **kwargs)
+            new_module = GPTQLoraLinear(target, adapter_name, config=config, **kwargs)
             target.qweight = target_base_layer.qweight
 
     return new_module
