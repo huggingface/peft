@@ -551,7 +551,7 @@ print(outputs)
 The paper [LoRA vs Full Fine-tuning: An Illusion of Equivalence](https://huggingface.co/papers/2410.21228) argues
 that LoRA training introduces extra dimensions into the weights that have very little in common with the already
 learnt weights and lead to forgetting of already learned information. PEFT implements the suggested mitigation
-as [`peft.tuners.lora.intruders.reduce_intruder_dimension`](../package_reference/lora#Intruder Dimension Reduction).
+in [`peft.tuners.lora.intruders.reduce_intruder_dimension`].
 
 The mitigation will take a PEFT model with a loaded LoRA and create a new, modified adapter that is loaded alongside
 the existing adapter and now the active adapter.
