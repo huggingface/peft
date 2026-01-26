@@ -66,6 +66,9 @@ def reduce_intruder_dimension(
         logging_sink (default: print)
             Function that prints information about the mitigation process. Set to None if you don't want any output.
     """
+    # Note that this function currently doesn't support `compile_kwargs` similar to the LoRA conversion tooling
+    # since there's was no clear way how `torch.compile` can be used to improve performance at the time of
+    # implementation. See discussion: https://github.com/huggingface/peft/pull/2999#discussion_r2717989613
 
     def no_logging_sink(*args, **kwargs):
         pass

@@ -632,8 +632,9 @@ peft_model.generate(...)
 
 There are a few hyper-parameters that can be used for tuning the effectiveness of the mitigation but, as evidenced
 in Figure 8 of the paper, it will always be a trade-off between task accuracy learned by the adapter and forgetting
-of the base model's knowledge. For example, the stronger the `mitigation_lambda`, the stronger the reduction in
-accuracy but the less previous knowledge is forgotten.
+of the base model's knowledge. The mitigation will remove information from the adapter to reduce the impact on
+forgetting previous knowledge but this also means that some information about the task learned by the adapter is
+lost as well.
 
 While the defaults are set to deliver a good trade-off between the two factors it is not guaranteed that the defaults
 will hold for your adapter, your model and your data, therefore it is wise to have a benchmark ready to measure
