@@ -14,7 +14,6 @@
 
 import pytest
 import torch
-from safetensors.torch import load_file as safe_load_file
 from torch import nn
 from transformers import AutoModelForCausalLM
 
@@ -196,7 +195,6 @@ def test_rank_pattern_for_moe_target_parameters(tmp_path):
         assert lora_module.lora_A["default"].weight.shape[0] == effective_r * num_experts
         assert lora_module.scaling["default"] == config.lora_alpha / effective_r
         assert config.r == r
-
 
 
 class TestDecoderModelsTargetParameters(PeftCommonTester):
