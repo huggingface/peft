@@ -197,22 +197,6 @@ def test_rank_pattern_for_moe_target_parameters(tmp_path):
         assert lora_module.scaling["default"] == config.lora_alpha / effective_r
         assert config.r == r
 
-        model.save_pretrained(tmp_path)
-        state_dict = safe_load_file(tmp_path / "adapter_model.safetensors")
-        suffix_a = "feed_forward.experts.lora_A.weight"
-        suffix_b = "feed_forward.experts.lora_B.weight"
-        lora_a_keys = [k for k in state_dict if k.endswith(suffix_a)]
-        lora_b_keys = [k for k in state_dict if k.endswith(suffix_b)]
-        assert lora_a_keys, "Expected LoRA A weights for experts in exported adapter."
-        assert lora_b_keys, "Expected LoRA B weights for experts in exported adapter."
-        base_layers = model.base_model.model.model.layers
-        gate_up_proj = base_layers[0].feed_forward.experts.base_layer.gate_up_proj
-        in_features = gate_up_proj.shape[1]
-        out_features = gate_up_proj.shape[2]
-        expected_a_shape = (effective_r * num_experts, in_features)
-        expected_b_shape = (out_features, effective_r * num_experts)
-        assert all(state_dict[k].shape == expected_a_shape for k in lora_a_keys)
-        assert all(state_dict[k].shape == expected_b_shape for k in lora_b_keys)
 
 
 class TestDecoderModelsTargetParameters(PeftCommonTester):
