@@ -332,6 +332,39 @@ Generally, you should use `target_modules` to target the module (e.g. `nn.Linear
 - At the moment, this argument allows to target 2-dim or 3-dim `nn.Parameter`s. It is assumed that in the case of a 3-dim parameter, the 0th dimension is the expert dimension.
 - It is currently not possible to add multiple LoRA adapters (via `model.add_adapter` or `model.load_adapter`) that use `target_parameters` at the same time.
 
+#### MoE expert parameters and vLLM
+
+Some MoE models in Transformers store expert weights as `nn.Parameter` tensors (often 3D), not `nn.Linear` modules.
+To apply LoRA to those experts, use `target_parameters` and set a per-layer rank with `rank_pattern`:
+
+```python
+num_experts = getattr(model.config, "num_local_experts", None) or model.config.num_experts
+effective_r = max(1, r // num_experts)
+config = LoraConfig(
+    r=r,
+    lora_alpha=32,
+    target_modules=["q_proj", "v_proj"],
+    target_parameters=[
+        # Mixtral / Qwen3-MoE / GPT-OSS
+        "mlp.experts.gate_up_proj",
+        "mlp.experts.down_proj",
+        # Llama4
+        # "feed_forward.experts.gate_up_proj",
+        # "feed_forward.experts.down_proj",
+    ],
+    rank_pattern={
+        "experts.gate_up_proj": effective_r,
+        "experts.down_proj": effective_r,
+    },
+)
+```
+
+This keeps the total LoRA parameter budget similar to dense layers (see
+[LoRA Without Regret](https://thinkingmachines.ai/blog/lora/) by Schulman et. al.).
+Non-expert modules use the default rank `r`.
+
+Accelerated inference with the fine-tuned model is possible with, for example, [vLLM](https://vllm.ai/) which supports fused MoE expert layers since v0.11.2.
+
 ### Efficiently train tokens alongside LoRA
 
 PEFT LoRA adapters support adding new tokens with the `trainable_token_indices` parameter. This allows tuning of other tokens alongside fine-tuning specific layers. Only the specified tokens are trained and all other tokens are untouched. It saves memory and doesn't throw away learned context from existing token embeddings unlike training the whole embedding matrix. Under the hood this method uses the layer of [`TrainableTokensModel`].

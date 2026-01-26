@@ -30,44 +30,6 @@ The abstract from the paper is:
 
 [[autodoc]] tuners.lora.model.LoraModel
 
-## MoE expert parameters and vLLM
-
-Some MoE models in Transformers store expert weights as `nn.Parameter` tensors (often 3D), not `nn.Linear` modules.
-To apply LoRA to those experts, use `target_parameters` and set a per-layer rank with `rank_pattern`:
-
-```python
-num_experts = getattr(model.config, "num_local_experts", None) or model.config.num_experts
-effective_r = max(1, r // num_experts)
-config = LoraConfig(
-    r=r,
-    lora_alpha=32,
-    target_modules=["q_proj", "v_proj"],
-    target_parameters=[
-        # Mixtral / Qwen3-MoE / GPT-OSS
-        "mlp.experts.gate_up_proj",
-        "mlp.experts.down_proj",
-        # Llama4
-        # "feed_forward.experts.gate_up_proj",
-        # "feed_forward.experts.down_proj",
-    ],
-    rank_pattern={
-        "experts.gate_up_proj": effective_r,
-        "experts.down_proj": effective_r,
-    },
-)
-```
-
-This keeps the total LoRA parameter budget similar to dense layers (see
-[LoRA Without Regret](https://thinkingmachines.ai/blog/lora/) by Schulman et. al.).
-Non-expert modules use the default rank `r`.
-
-[vLLM](https://vllm.ai/) (v0.11.2+) supports LoRA on fused MoE expert layers. The fused MoE kernels expect LoRA weights in expert-major
-stacked form; for gate/up projections the kernel uses two slices (gate and up), while the down projection uses one slice.
-PEFT’s expert LoRA (via `target_parameters`) is compatible with this layout when exporting adapters.
-When expert weights are fused (e.g., gate+up), LoRA A weights are concatenated along the rank dimension and LoRA B
-weights are combined in a block-diagonal fashion (per expert for 3D tensors). This preserves the original per-projection
-updates while targeting a single fused parameter tensor.
-
 ## Utility
 
 ### ArrowConfig
