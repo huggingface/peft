@@ -46,6 +46,7 @@ from peft import (
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
+    PveraConfig,
     RoadConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -774,6 +775,8 @@ class PeftCommonTester:
             conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
             if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
                 atol, rtol = 1e-3, 1e-3
+            elif issubclass(config_cls, PveraConfig):
+                atol, rtol = 1e-5, 1e-5
 
             # check that the logits are the same after unloading
             assert torch.allclose(logits_peft, logits_unloaded, atol=atol, rtol=rtol)
@@ -1089,7 +1092,6 @@ class PeftCommonTester:
 
             # check if `training` works
             output = model(**inputs)[0]
-            logits = output[0]
 
             loss = output.sum()
             loss.backward()
@@ -1105,6 +1107,9 @@ class PeftCommonTester:
                     assert param.grad is None
 
             with tempfile.TemporaryDirectory() as tmp_dirname:
+                model.eval()
+                logits = model(**inputs)[0][0]
+
                 model.save_pretrained(tmp_dirname)
 
                 model_from_pretrained = self.transformers_class.from_pretrained(model_id)
