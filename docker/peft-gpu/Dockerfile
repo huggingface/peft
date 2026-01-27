@@ -8,7 +8,7 @@ ENV PYTHON_VERSION=3.11
 # Install apt libs - copied from https://github.com/huggingface/accelerate/blob/main/docker/accelerate-gpu/Dockerfile
 # Install audio-related libraries
 RUN apt-get update && \
-    apt-get install -y curl git wget software-properties-common git-lfs ffmpeg libsndfile1-dev && \
+    apt-get install -y curl git wget git-lfs ffmpeg libsndfile1-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists*
 
@@ -26,7 +26,7 @@ RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
 
 # Stage 2
-FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS build-image
+FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS build-image
 COPY --from=compile-image /opt/conda /opt/conda
 ENV PATH /opt/conda/bin:$PATH
 
@@ -44,10 +44,17 @@ RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum auto-gptq
 RUN \
     # Add autoawq for quantization testing
     conda run -n peft pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ/releases/download/v0.2.7.post2/autoawq-0.2.7.post2-py3-none-any.whl && \
-    conda run -n peft pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ_kernels/releases/download/v0.0.9/autoawq_kernels-0.0.9-cp311-cp311-linux_x86_64.whl && \
+    conda run -n peft pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ_kernels/releases/download/v0.0.9/autoawq_kernels-0.0.9-cp311-cp311-linux_x86_64.whl
+
+RUN \
     # Add eetq for quantization testing; needs to run without build isolation since the setup
     # script directly imports torch from the environment which would fail with isolation.
-    conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
+    # As long as PR https://github.com/NetEase-FuXi/EETQ/pull/41 is not merged we need a patch
+    # for CUDA 12.4+.
+    git clone --recurse-submodules https://github.com/NetEase-FuXi/EETQ.git /tmp/eetq && \
+    (grep NVTX_VERSION /tmp/eetq/csrc/utils/torch_utils.h \
+     || sed -i 's/#include <nvToolsExt.h>/#ifndef NVTX_VERSION\n#include <nvToolsExt.h>\n#endif/' /tmp/eetq/csrc/utils/torch_utils.h) && \
+    conda run -n peft pip install --no-build-isolation /tmp/eetq
 
 # Activate the conda env and install transformers + accelerate from source
 RUN conda run -n peft pip install -U --no-cache-dir \
