@@ -1389,7 +1389,18 @@ class BaseTunerLayer(ABC):
             # disable grads on all adapter layers
             for layer_name in self.adapter_layer_names:
                 layer = getattr(self, layer_name)
-                layer.requires_grad_(False)
+                # Handle FSDP case where params may be non-leaf tensors
+                # layer.parameters() returns an iterator, so we need to check if layer is a module
+                if hasattr(layer, "parameters"):
+                    for param in layer.parameters():
+                        if param.is_leaf:
+                            param.requires_grad_(False)
+                else:
+                    # layer is a parameter/tensor itself (e.g., from ParameterDict)
+                    # In this case we need to iterate through the dict
+                    for param in layer.values():
+                        if param.is_leaf:
+                            param.requires_grad_(False)
             self._disable_adapters = True
 
     def set_adapter(self, adapter_names: str | list[str], inference_mode: bool = False) -> None:
@@ -1411,12 +1422,18 @@ class BaseTunerLayer(ABC):
         for layer_name in self.adapter_layer_names:
             module_dict = getattr(self, layer_name)
             for key, layer in module_dict.items():
-                if (key in adapter_names) and (not inference_mode):
-                    # Note: It is possible that not a single layer is called with requires_grad_(True) here. This may
-                    # happen if a completely different adapter layer is being activated.
-                    layer.requires_grad_(True)
+                should_require_grad = (key in adapter_names) and (not inference_mode)
+                # Handle FSDP case where params may be non-leaf tensors
+                # Check if layer is a module or a parameter/tensor directly
+                if isinstance(layer, (torch.nn.Parameter, torch.Tensor)):
+                    # layer is a parameter/tensor itself (e.g., from ParameterDict)
+                    if layer.is_leaf:
+                        layer.requires_grad_(should_require_grad)
                 else:
-                    layer.requires_grad_(False)
+                    # layer is a module with parameters
+                    for param in layer.parameters():
+                        if param.is_leaf:
+                            param.requires_grad_(should_require_grad)
 
         self._active_adapter = adapter_names
 
