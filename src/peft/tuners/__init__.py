@@ -57,6 +57,7 @@ from .road import RoadConfig, RoadModel
 from .shira import ShiraConfig, ShiraModel
 from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
 from .vblora import VBLoRAConfig, VBLoRAModel
+from .unilora import UniLoraConfig, UniLoraModel
 from .vera import VeraConfig, VeraModel
 from .waveft import WaveFTConfig, WaveFTModel
 from .xlora import XLoraConfig, XLoraModel
@@ -137,6 +138,8 @@ __all__ = [
     "WaveFTModel",
     "XLoraConfig",
     "XLoraModel",
+    "UniLoraConfig",
+    "UniLoraModel",
     "convert_to_lora",
     "create_arrow_model",
     "get_eva_state_dict",
