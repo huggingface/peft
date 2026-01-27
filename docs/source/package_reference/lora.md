@@ -89,3 +89,8 @@ The abstract from the paper is:
 [[autodoc]] tuners.lora.loraga.estimate_gradients
 
 [[autodoc]] tuners.lora.loraga.preprocess_loraga
+
+
+## Intruder Dimension Reduction
+
+[[autodoc]] tuners.lora.intruders.reduce_intruder_dimension
