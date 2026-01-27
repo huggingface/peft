@@ -92,8 +92,10 @@ class AdaptionPromptModel(nn.Module):
         if config.inference_mode:
             _freeze_adapter(self.model, adapter_name)
 
-    def set_adapter(self, adapter_name: str) -> None:
+    def set_adapter(self, adapter_name: str, inference_mode: bool = False) -> None:
         """Set the model to use the adapter with the given name."""
+        if inference_mode:
+            raise ValueError("inference_mode is not supported for AdaptionPromptModel.")
         if self._active_adapter == adapter_name:
             return
         if adapter_name not in self.peft_config:
