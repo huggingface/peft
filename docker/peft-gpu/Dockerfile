@@ -49,12 +49,7 @@ RUN \
 RUN \
     # Add eetq for quantization testing; needs to run without build isolation since the setup
     # script directly imports torch from the environment which would fail with isolation.
-    # As long as PR https://github.com/NetEase-FuXi/EETQ/pull/41 is not merged we need a patch
-    # for CUDA 12.4+.
-    git clone --recurse-submodules https://github.com/NetEase-FuXi/EETQ.git /tmp/eetq && \
-    (grep NVTX_VERSION /tmp/eetq/csrc/utils/torch_utils.h \
-     || sed -i 's/#include <nvToolsExt.h>/#ifndef NVTX_VERSION\n#include <nvToolsExt.h>\n#endif/' /tmp/eetq/csrc/utils/torch_utils.h) && \
-    conda run -n peft pip install --no-build-isolation /tmp/eetq
+    conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
 
 # Activate the conda env and install transformers + accelerate from source
 RUN conda run -n peft pip install -U --no-cache-dir \
