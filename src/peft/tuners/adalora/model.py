@@ -177,7 +177,7 @@ class AdaLoraModel(LoraModel):
                     "index": target_base_layer.index,
                 }
             )
-            new_module = SVDLinear8bitLt(target, adapter_name, **kwargs)
+            new_module = SVDLinear8bitLt(target, adapter_name, config=lora_config, **kwargs)
         elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target_base_layer, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
@@ -187,7 +187,7 @@ class AdaLoraModel(LoraModel):
                     "quant_type": target_base_layer.weight.quant_type,
                 }
             )
-            new_module = SVDLinear4bit(target, adapter_name, **fourbit_kwargs)
+            new_module = SVDLinear4bit(target, adapter_name, config=lora_config, **fourbit_kwargs)
         elif QuantLinear is not None and isinstance(target, QuantLinear):
             new_module = SVDQuantLinear(target, adapter_name, **kwargs)
         else:
