@@ -4133,7 +4133,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
     @pytest.mark.single_gpu_tests
     @pytest.mark.xfail(
         reason="int4_weight_only still has issues",
-        raises=RuntimeError,
+        raises=(RuntimeError, ValueError),
     )
     def test_causal_lm_training_single_gpu_torchao_int4_raises(self):
         # TODO: Once proper torchao support for int4 is added, remove this test and add int4 to supported_quant_types
