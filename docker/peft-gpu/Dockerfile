@@ -39,12 +39,7 @@ RUN apt-get update && \
 RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
 
-RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum auto-gptq
-
-RUN \
-    # Add autoawq for quantization testing
-    conda run -n peft pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ/releases/download/v0.2.7.post2/autoawq-0.2.7.post2-py3-none-any.whl && \
-    conda run -n peft pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ_kernels/releases/download/v0.0.9/autoawq_kernels-0.0.9-cp311-cp311-linux_x86_64.whl
+RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum gptqmodel
 
 RUN \
     # Add eetq for quantization testing; needs to run without build isolation since the setup
