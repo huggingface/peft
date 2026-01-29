@@ -43,6 +43,7 @@ from .lora import (
     preprocess_loraga,
     save_as_lora,
 )
+from .loretta import LORETTaConfig
 from .miss import MissConfig, MissModel
 from .mixed import MixedModel
 from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTuningConfig, MultitaskPromptTuningInit
@@ -101,6 +102,7 @@ __all__ = [
     "LoraGAConfig",
     "LoraModel",
     "LoraRuntimeConfig",
+    "LORETTaConfig",
     "MissConfig",
     "MissModel",
     "MixedModel",
