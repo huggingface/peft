@@ -455,6 +455,11 @@ class LoraConfig(PeftConfig):
             `target_parameters`. As an example, for Llama4, you can pass:
             `target_parameters=['feed_forward.experts.gate_up_proj', 'feed_forward.experts.down_proj]`. Passing a
             string for regex matching is not implemented yet.
+        ensure_weight_tying (`bool`, *optional*)
+            Whether to tie weights or not after peft initialization. This will ensure that the adapters added to the
+            tied layers are also tied. This is only applicable for layers passed via `modules_to_save` and
+            `target_modules`.
+
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
@@ -760,8 +765,8 @@ class LoraConfig(PeftConfig):
             "help": (
                 "Whether to tie weights or not after peft initialization. "
                 "This will ensure that the adapters added to the tied layers "
-                "are also tied. This is applicable for layers passed via "
-                "`modules_to_save` and `trainable_token_indices`."
+                "are also tied. This is only applicable for layers passed via "
+                "`modules_to_save`, `target_modules` and `trainable_token_indices`."
             )
         },
     )
@@ -786,6 +791,7 @@ class LoraConfig(PeftConfig):
 
         if self.ensure_weight_tying:
             self.modules_to_tie = None
+            self.target_modules_to_tie = None
 
         if isinstance(self.target_parameters, str):
             raise TypeError("`target_parameters` must be a list of strings or None.")
