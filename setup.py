@@ -25,6 +25,7 @@ extras["quality"] = [
 ]
 extras["docs_specific"] = [
     "black",  # doc-builder has an implicit dependency on Black, see huggingface/doc-builder#434
+    "requests",  # doc-builder has an implicit dependency on requests (setup.py doesn't mention it, pyproject does)
     "hf-doc-builder",
 ]
 extras["dev"] = extras["quality"] + extras["docs_specific"]
