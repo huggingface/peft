@@ -32,7 +32,7 @@ jobs:
           CHANGED_FILES: "${{ steps.changed-files.outputs.all_changed_files }}"
         run: |
           echo "matrix<<EOF" >> $GITHUB_OUTPUT
-          echo "${CHANGED_FILES}" | jq -r >> $GITHUB_OUTPUT
+          echo "${CHANGED_FILES}" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
   build_modified_files:
     needs: get_changed_files
