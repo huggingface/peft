@@ -32,7 +32,7 @@ jobs:
           CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
         run: |
           cat <<EOF >> $GITHUB_OUTPUT
-          matrix="${CHANGED_FILES}"
+          matrix=${CHANGED_FILES}
           EOF
   build_modified_files:
     needs: get_changed_files
