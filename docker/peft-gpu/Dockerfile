@@ -39,7 +39,10 @@ RUN apt-get update && \
 RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
 
-RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum gptqmodel
+RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum
+
+# GPTQmodel doesn't find torch without build isolation
+RUN conda run -n peft pip install --no-build-isolation gptqmodel
 
 RUN \
     # Add eetq for quantization testing; needs to run without build isolation since the setup
