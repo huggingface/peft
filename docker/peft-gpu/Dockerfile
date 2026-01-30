@@ -14,6 +14,8 @@ RUN apt-get update && \
 
 RUN git lfs install
 
+RUN echo modified
+
 # Create our conda env - copied from https://github.com/huggingface/accelerate/blob/main/docker/accelerate-gpu/Dockerfile
 RUN conda create --name peft python=${PYTHON_VERSION} ipython jupyter pip
 
