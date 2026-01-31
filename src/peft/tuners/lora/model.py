@@ -211,7 +211,9 @@ class LoraModel(BaseTuner):
             "use_dora": lora_config.use_dora,
             "use_alora": lora_config.alora_invocation_tokens is not None,
             "use_qalora": lora_config.use_qalora,
+            "use_monteclora": lora_config.use_monteclora,
             "qalora_group_size": lora_config.qalora_group_size,
+            "monteclora_config": lora_config.monteclora_config,
             "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
             "lora_bias": lora_config.lora_bias,
             "arrow_config": lora_config.arrow_config,
@@ -248,8 +250,10 @@ class LoraModel(BaseTuner):
                 init_lora_weights=lora_config.init_lora_weights,
                 use_rslora=lora_config.use_rslora,
                 use_dora=lora_config.use_dora,
+                use_monteclora=lora_config.use_monteclora,
                 lora_bias=lora_config.lora_bias,
                 arrow_config=lora_config.arrow_config,
+                monteclora_config=lora_config.monteclora_config,
                 inference_mode=lora_config.inference_mode,
             )
         else:

@@ -13,8 +13,9 @@
 # limitations under the License.
 
 from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Optional, Union, List
+from typing import Optional, Union
 
 from peft.tuners.lora.config import LoraConfig
 from peft.utils import PeftType, TaskType
@@ -25,19 +26,20 @@ class MonteCLoraConfig(LoraConfig):
     """
     Configuration class for MonteCLoRA.
     """
+
     # MonteCLoRA toggles
     use_monteclora: bool = True
 
     # Where to apply MonteCLoRA injection: ["lora_A"], ["lora_B"], etc.
-    monteclora_at: Union[str, List[str]] = field(default_factory=lambda: ["lora_A"])
-    
-    # Specific modules to target (e.g. ["q_proj", "v_proj"]). 
+    monteclora_at: Union[str, list[str]] = field(default_factory=lambda: ["lora_A"])
+
+    # Specific modules to target (e.g. ["q_proj", "v_proj"]).
     # If None, defaults to LoraConfig.target_modules in post_init.
-    monteclora_targets: Optional[Union[List[str], str]] = None
+    monteclora_targets: Optional[Union[list[str], str]] = None
 
     # Monte Carlo parameters
     monteclora_n: int = 8
-    monteclora_m: Optional[int] = None # Added: Required by layer.py sampler
+    monteclora_m: Optional[int] = None  # Added: Required by layer.py sampler
     use_entropy: bool = False
     dirichlet_prior: float = 0.1
     sample_scaler: float = 1e-4
@@ -65,13 +67,13 @@ class MonteCLoraConfig(LoraConfig):
             self.peft_type = PeftType.MONTECLORA
         except AttributeError:
             # Fallback if MONTECLORA isn't in the Enum yet
-            self.peft_type = "MONTECLORA" 
+            self.peft_type = "MONTECLORA"
 
     @property
     def monteclora_config(self):
         """
         Backward compatibility helper.
-        Allows model.py to access `config.monteclora_config` 
+        Allows model.py to access `config.monteclora_config`
         even though this object IS the config.
         """
         return self

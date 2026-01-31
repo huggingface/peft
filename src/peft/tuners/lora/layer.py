@@ -152,8 +152,10 @@ class LoraLayer(BaseTunerLayer):
         use_dora: bool = False,
         use_alora: bool = False,
         use_qalora: bool = False,
+        use_monteclora: bool = False,
         lora_bias: bool = False,
         arrow_config: ArrowConfig = None,
+        monteclora_config=None,
         qalora_group_size: int = 32,
         inference_mode: bool = False,
         **kwargs,
@@ -177,8 +179,10 @@ class LoraLayer(BaseTunerLayer):
             use_dora=use_dora,
             use_alora=use_alora,
             use_qalora=use_qalora,
+            use_monteclora=use_monteclora,
             qalora_group_size=qalora_group_size,
             arrow_config=arrow_config,
+            monteclora_config=monteclora_config,
         )
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
@@ -611,7 +615,9 @@ class Linear(nn.Module, LoraLayer):
         use_rslora: bool = False,
         use_dora: bool = False,
         use_alora: bool = False,
+        use_monteclora: bool = False,
         arrow_config: ArrowConfig = None,
+        monteclora_config=None,
         lora_bias: bool = False,
         **kwargs,
     ) -> None:
@@ -629,18 +635,25 @@ class Linear(nn.Module, LoraLayer):
             use_rslora=use_rslora,
             use_dora=use_dora,
             use_alora=use_alora,
+            use_monteclora=use_monteclora,
             lora_bias=lora_bias,
             arrow_config=arrow_config,
+            monteclora_config=monteclora_config,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def resolve_lora_variant(
-        self, *, arrow_config: ArrowConfig, use_dora: bool, use_alora: bool, **kwargs
+        self, *, arrow_config: ArrowConfig, use_dora: bool, use_alora: bool, use_monteclora: bool = False, **kwargs
     ) -> Optional[LoraVariant]:
         if arrow_config is not None:
             from .variants import ArrowLinearVariant
 
             return ArrowLinearVariant()
+
+        if use_monteclora:
+            from peft.tuners.monteclora_new.variant import MonteCLoraLinearVariant
+
+            return MonteCLoraLinearVariant()
 
         if not use_dora and not use_alora:
             return None
