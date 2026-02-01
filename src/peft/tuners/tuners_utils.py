@@ -1722,13 +1722,22 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
             # TODO: It's still unclear how empty layers_pattern (None, [], or "") should behave
             # For now, empty layers_pattern means any layer pattern is ok
             if layers_pattern is None or len(layers_pattern) == 0:
-                layer_index = re.match(r".*\.[^.]*\.(\d+)\.", key)
+                layer_index = re.search(r"(?:^|\.)[^.]*\.(\d+)\.", key)
+                # Avoid treating expert index as "layer index" in MoE module paths like "...experts.<i>...."
+                if layer_index is not None and key[layer_index.start() :].startswith(".experts."):
+                    layer_index = None
             else:
                 layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
+                layer_index = None
                 for pattern in layers_pattern:
-                    layer_index = re.match(rf".*\.{pattern}\.(\d+)\.", key)
-                    if layer_index is not None:
+                    m = re.search(rf"(?:^|\.){pattern}\.(\d+)\.", key)
+                    # Avoid treating expert index as "layer index" in MoE module paths like "...experts.<i>...."
+                    if m is not None and key[m.start() :].startswith(".experts."):
+                        continue
+                    if m is not None:
+                        layer_index = m
                         break
+
 
             if layer_index is None:
                 target_module_found = False
