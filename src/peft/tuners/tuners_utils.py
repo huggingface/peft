@@ -1738,7 +1738,6 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
                         layer_index = m
                         break
 
-
             if layer_index is None:
                 target_module_found = False
             else:
