@@ -42,7 +42,13 @@ SHELL ["/bin/bash", "-c"]
 RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum
 
 # GPTQmodel doesn't find torch without build isolation
-RUN conda run -n peft pip install --no-build-isolation gptqmodel
+#
+# Note: we are hard-coding CUDA_ARCH_LIST here since `gptqmodel` requires either nvidia-smi
+# or CUDA_ARCH_LIST for compute capability information. Since the docker build is unlikely
+# to have compute hardware available we use the information from the CI runner (which hosts
+# a NVIDIA L4). So we fix the compute capability to 8.9. In the future we might extend this
+# to a list of compute capabilities (separated by ;).
+RUN CUDA_ARCH_LIST=8.9 conda run -n peft pip install --no-build-isolation gptqmodel
 
 RUN \
     # Add eetq for quantization testing; needs to run without build isolation since the setup
