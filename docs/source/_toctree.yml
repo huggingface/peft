@@ -108,6 +108,8 @@
       title: P-tuning
     - local: package_reference/prefix_tuning
       title: Prefix tuning
+    - local: package_reference/cartridges
+      title: Cartridges
     - local: package_reference/prompt_tuning
       title: Prompt tuning
     - local: package_reference/layernorm_tuning
@@ -153,5 +155,7 @@
       title: Hotswapping adapters
     - local: package_reference/functional
       title: Functions for PEFT integration
+    - local: package_reference/lora_conversion
+      title: Converting non-LoRA adapters to LoRA
     title: Utilities
   title: API reference

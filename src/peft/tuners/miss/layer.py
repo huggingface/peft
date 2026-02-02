@@ -388,6 +388,10 @@ class MissLinear(nn.Module, MissLayer):
         result = result.to(previous_dtype)
         return result
 
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        # only 'bat' can be converted in a straightforward way
+        return self.miss_fn == "bat"
+
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "miss." + rep

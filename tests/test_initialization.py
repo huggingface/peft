@@ -1195,6 +1195,44 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match="DoRA does not support megatron_core"):
             LoraConfig(target_modules=["linear"], use_dora=True, megatron_config=megatron_config)
 
+    def test_bdlora_both_patterns_raises(self):
+        model = self.get_model()
+
+        bdlora_config = {"target_modules_bd_a": ["linear"], "target_modules_bd_b": ["linear"], "nblocks": 2}
+
+        config = LoraConfig(target_modules=["linear"], use_bdlora=bdlora_config)
+
+        with pytest.raises(ValueError, match="Found overlapping modules in target_modules_bd lists"):
+            get_peft_model(model, config)
+
+    def test_bdlora_strict_matching_raises(self):
+        model = self.get_model()
+
+        bdlora_config = {
+            "target_modules_bd_a": ["nonexistent"],
+            "target_modules_bd_b": [],
+            "nblocks": 2,
+            "match_strict": True,
+        }
+
+        config = LoraConfig(target_modules=["linear"], use_bdlora=bdlora_config)
+
+        with pytest.raises(ValueError, match="matches neither A nor B block-diagonal patterns"):
+            get_peft_model(model, config)
+
+    def test_bdlora_feature_size_non_divisible_by_blocksize_raises(self):
+        model = self.get_model()
+        bdlora_config = {
+            "target_modules_bd_a": ["linear"],
+            "target_modules_bd_b": [],
+            "nblocks": 13,
+            "match_strict": True,
+        }
+        config = LoraConfig(target_modules=["linear"], use_bdlora=bdlora_config)
+
+        with pytest.raises(ValueError, match="not divisible by"):
+            get_peft_model(model, config)
+
     @pytest.fixture
     def mha_cls(self):
         class ModelMha(nn.Module):
@@ -3261,6 +3299,46 @@ class TestCordaInitialization:
             peft_model.save_pretrained(
                 tmp_path / "corda-model", path_initial_model_for_weight_conversion=tmp_path / "init-model"
             )
+
+    @pytest.mark.parametrize("corda_method", ("ipm", "kpm"))
+    def test_lora_corda_conv1d_gpt2(self, tmp_path, corda_method):
+        """Test that CoRDA works with Conv1D layers (GPT-2)."""
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-gpt2").to(self.torch_device)
+
+        # Create random input
+        input_ids = torch.randint(0, model.config.vocab_size, (1, 10), device=self.torch_device)
+
+        # Get baseline output
+        with torch.no_grad():
+            output_base = model(input_ids).logits
+
+        corda_config = CordaConfig(
+            cache_file=tmp_path / "corda_cache.pt",
+            corda_method=corda_method,
+        )
+        config = LoraConfig(
+            init_lora_weights="corda",
+            target_modules=["c_fc"],  # Conv1D layer in GPT-2
+            fan_in_fan_out=True,  # Required for Conv1D
+            corda_config=corda_config,
+        )
+
+        # Preprocess with CoRDA - this is the critical step that used to fail with Conv1D layers
+        # See issue: https://github.com/huggingface/peft/issues/2991
+        preprocess_corda(
+            model,
+            config,
+            run_model=lambda: model(input_ids),
+        )
+
+        # Create PEFT model
+        peft_model = get_peft_model(model, config)
+
+        # Sanity check: verify adapter performs identity transformation initially
+        # The important test is the preprocessing step above - this just confirms correctness
+        with torch.no_grad():
+            output_peft = peft_model(input_ids).logits
+        assert torch.allclose(output_base, output_peft, atol=1e-5)
 
 
 class TestEvaInitialization:

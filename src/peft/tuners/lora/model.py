@@ -21,14 +21,16 @@ from dataclasses import replace
 from functools import partial, reduce
 from typing import Literal, Optional
 
+import packaging.version
 import torch
+import transformers
 from torch import nn
-from transformers.modeling_layers import GradientCheckpointingLayer
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
+    get_device_map,
     replicate_layers,
 )
 from peft.utils import (
@@ -204,17 +206,7 @@ class LoraModel(BaseTuner):
         kwargs = {
             "r": r,
             "lora_alpha": alpha,
-            "lora_dropout": lora_config.lora_dropout,
-            "fan_in_fan_out": lora_config.fan_in_fan_out,
-            "init_lora_weights": lora_config.init_lora_weights,
-            "use_rslora": lora_config.use_rslora,
-            "use_dora": lora_config.use_dora,
-            "use_alora": lora_config.alora_invocation_tokens is not None,
-            "use_qalora": lora_config.use_qalora,
-            "qalora_group_size": lora_config.qalora_group_size,
-            "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
-            "lora_bias": lora_config.lora_bias,
-            "arrow_config": lora_config.arrow_config,
+            "target_name": current_key,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
             "parameter_name": parameter_name,
@@ -244,13 +236,8 @@ class LoraModel(BaseTuner):
                 adapter_name,
                 r,
                 lora_alpha=alpha,
-                lora_dropout=lora_config.lora_dropout,
-                init_lora_weights=lora_config.init_lora_weights,
-                use_rslora=lora_config.use_rslora,
-                use_dora=lora_config.use_dora,
-                lora_bias=lora_config.lora_bias,
-                arrow_config=lora_config.arrow_config,
-                inference_mode=lora_config.inference_mode,
+                target_name=current_key,
+                config=lora_config,
             )
         else:
             if isinstance(target, ParamWrapper) and (parameter_name == target.parameter_name):
@@ -258,7 +245,7 @@ class LoraModel(BaseTuner):
                     "Trying to target the same nn.Parameter twice, this should not happen. Please open an issue on the "
                     "PEFT repo: https://github.com/huggingface/peft/issues"
                 )
-            device_map = self.model.hf_device_map if hasattr(self.model, "hf_device_map") else None
+            device_map = get_device_map(self.model)
             new_module = self._create_new_module(lora_config, adapter_name, target, device_map=device_map, **kwargs)
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
@@ -302,7 +289,7 @@ class LoraModel(BaseTuner):
         if lora_config._custom_modules:
             # Experimental custom LoRA module support. Allows users to pass a custom mapping for unsupported layer
             # types by impelementing their own LoRA layers.
-            def dynamic_dispatch_func(target, adapter_name, lora_config, **kwargs):
+            def dynamic_dispatch_func(target, adapter_name, config, **kwargs):
                 new_module = None
 
                 if isinstance(target, BaseTunerLayer):
@@ -310,9 +297,9 @@ class LoraModel(BaseTuner):
                 else:
                     target_base_layer = target
 
-                for key, custom_cls in lora_config._custom_modules.items():
+                for key, custom_cls in config._custom_modules.items():
                     if isinstance(target_base_layer, key):
-                        new_module = custom_cls(target, adapter_name, **kwargs)
+                        new_module = custom_cls(target, adapter_name, config=config, **kwargs)
                         break
 
                 return new_module
@@ -346,7 +333,7 @@ class LoraModel(BaseTuner):
 
         new_module = None
         for dispatcher in dispatchers:
-            new_module = dispatcher(target, adapter_name, lora_config=lora_config, **kwargs)
+            new_module = dispatcher(target, adapter_name, config=lora_config, **kwargs)
             if new_module is not None:  # first match wins
                 break
 
@@ -373,6 +360,16 @@ class LoraModel(BaseTuner):
         hook_handles = []
 
         if alora_offsets is not None:
+            # TODO: remove once transformers 4.52 is no longer supported. Note that 4.52.0 is yanked, so 4.52.1
+            # is the first 4.52 release.
+            transformers_lt_4_52 = packaging.version.parse(transformers.__version__) < packaging.version.parse(
+                "4.52.1"
+            )
+            if transformers_lt_4_52:
+                raise ValueError("Using aLoRA requires transformers >= 4.52.1.")
+
+            from transformers.modeling_layers import GradientCheckpointingLayer
+
             for n, layer in self.named_modules():
                 # gradient checkpointing layer are executed concurrently to the 'normal' forward call
                 # (in the backward step the gradient checkpointing layer's forward will be executed again).
