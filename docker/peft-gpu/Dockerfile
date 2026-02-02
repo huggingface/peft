@@ -20,7 +20,7 @@ RUN conda create --name peft python=${PYTHON_VERSION} ipython jupyter pip
 # Below is copied from https://github.com/huggingface/accelerate/blob/main/docker/accelerate-gpu/Dockerfile
 # We don't install pytorch here yet since CUDA isn't available
 # instead we use the direct torch wheel
-ENV PATH /opt/conda/envs/peft/bin:$PATH
+ENV PATH=/opt/conda/envs/peft/bin:$PATH
 # Activate our bash shell
 RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
@@ -28,7 +28,7 @@ SHELL ["/bin/bash", "-c"]
 # Stage 2
 FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS build-image
 COPY --from=compile-image /opt/conda /opt/conda
-ENV PATH /opt/conda/bin:$PATH
+ENV PATH=/opt/conda/bin:$PATH
 
 # Install apt libs
 RUN apt-get update && \
