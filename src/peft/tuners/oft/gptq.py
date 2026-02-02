@@ -18,7 +18,6 @@ import torch
 from peft.import_utils import is_gptqmodel_available
 from peft.tuners.oft.layer import OFTLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
-from peft.utils import get_auto_gptq_quant_linear
 
 
 class GPTQOFTLinear(torch.nn.Module, OFTLayer):
@@ -60,8 +59,6 @@ class GPTQOFTLinear(torch.nn.Module, OFTLayer):
 
     def forward(self, x: torch.Tensor):
         # note: logic differs from default Linear because merging is not supported
-        result = self.quant_linear_module(x)
-
         if self.disable_adapters:
             return self.quant_linear_module(x)
 
@@ -70,17 +67,16 @@ class GPTQOFTLinear(torch.nn.Module, OFTLayer):
                 continue
 
             oft_R = self.oft_R[active_adapter]
-
             requires_conversion = not torch.is_autocast_enabled()
             if requires_conversion:
                 expected_dtype = x.dtype
                 x = self._cast_input_dtype(x, oft_R.weight.dtype)
 
             x = oft_R(x)
+            if requires_conversion:
+                x = x.to(expected_dtype)
 
         result = self.quant_linear_module(x)
-        if requires_conversion:
-            result = result.to(expected_dtype)
         return result
 
     def __repr__(self) -> str:
@@ -100,18 +96,10 @@ def dispatch_gptq(
     else:
         target_base_layer = target
 
-    cfg = kwargs.get("gptq_quantization_config", None)
-
     if is_gptqmodel_available():
         from gptqmodel.nn_modules.qlinear import BaseQuantLinear
 
         if isinstance(target_base_layer, BaseQuantLinear):
-            new_module = GPTQOFTLinear(target, adapter_name, **kwargs)
-            target.qweight = target_base_layer.qweight
-    else:
-        quant_linear = get_auto_gptq_quant_linear(cfg)
-
-        if quant_linear is not None and isinstance(target_base_layer, quant_linear):
             new_module = GPTQOFTLinear(target, adapter_name, **kwargs)
             target.qweight = target_base_layer.qweight
 

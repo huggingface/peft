@@ -31,7 +31,6 @@ from accelerate.test_utils.testing import get_backend, run_command
 from accelerate.utils import patch_environment
 from accelerate.utils.imports import is_bf16_available
 from accelerate.utils.memory import clear_device_cache
-from accelerate.utils.versions import is_torch_version
 from datasets import Audio, Dataset, DatasetDict, load_dataset
 from packaging import version
 from parameterized import parameterized
@@ -88,14 +87,14 @@ from peft.utils.other import fsdp_auto_wrap_policy
 from tests.testing_utils import hub_online_once
 
 from .testing_utils import (
+    DEVICE_MAP_MAP,
     device_count,
     load_dataset_english_quotes,
     require_aqlm,
-    require_auto_awq,
-    require_auto_gptq,
     require_bitsandbytes,
     require_deterministic_for_xpu,
     require_eetq,
+    require_gptqmodel,
     require_hqq,
     require_non_cpu,
     require_non_xpu,
@@ -111,93 +110,6 @@ from .testing_utils import (
 device, _, _ = get_backend()
 if device == "cpu":
     pytest.skip(allow_module_level=True, reason="GPU tests require hardware accelerator, got CPU only")
-
-
-# Some tests with multi GPU require specific device maps to ensure that the models are loaded in two devices
-DEVICE_MAP_MAP: dict[str, dict[str, int]] = {
-    "facebook/opt-6.7b": {
-        "model.decoder.embed_tokens": 0,
-        "model.decoder.embed_positions": 0,
-        "model.decoder.final_layer_norm": 0,
-        "model.decoder.layers.0": 0,
-        "model.decoder.layers.1": 0,
-        "model.decoder.layers.2": 0,
-        "model.decoder.layers.3": 0,
-        "model.decoder.layers.4": 0,
-        "model.decoder.layers.5": 0,
-        "model.decoder.layers.6": 0,
-        "model.decoder.layers.7": 0,
-        "model.decoder.layers.8": 0,
-        "model.decoder.layers.9": 0,
-        "model.decoder.layers.10": 0,
-        "model.decoder.layers.11": 0,
-        "model.decoder.layers.12": 0,
-        "model.decoder.layers.13": 0,
-        "model.decoder.layers.14": 0,
-        "model.decoder.layers.15": 0,
-        "model.decoder.layers.16": 1,
-        "model.decoder.layers.17": 1,
-        "model.decoder.layers.18": 1,
-        "model.decoder.layers.19": 1,
-        "model.decoder.layers.20": 1,
-        "model.decoder.layers.21": 1,
-        "model.decoder.layers.22": 1,
-        "model.decoder.layers.23": 1,
-        "model.decoder.layers.24": 1,
-        "model.decoder.layers.25": 1,
-        "model.decoder.layers.26": 1,
-        "model.decoder.layers.27": 1,
-        "model.decoder.layers.28": 1,
-        "model.decoder.layers.29": 1,
-        "model.decoder.layers.30": 1,
-        "model.decoder.layers.31": 1,
-        "lm_head": 0,  # tied with embed_tokens
-    },
-    "peft-internal-testing/opt-125m": {
-        "model.decoder.embed_tokens": 0,
-        "model.decoder.embed_positions": 0,
-        "model.decoder.final_layer_norm": 1,
-        "model.decoder.layers.0": 0,
-        "model.decoder.layers.1": 0,
-        "model.decoder.layers.2": 0,
-        "model.decoder.layers.3": 0,
-        "model.decoder.layers.4": 0,
-        "model.decoder.layers.5": 0,
-        "model.decoder.layers.6": 1,
-        "model.decoder.layers.7": 1,
-        "model.decoder.layers.8": 1,
-        "model.decoder.layers.9": 1,
-        "model.decoder.layers.10": 1,
-        "model.decoder.layers.11": 1,
-        "lm_head": 0,
-    },
-    "marcsun13/opt-350m-gptq-4bit": {
-        "model.decoder.embed_tokens": 0,
-        "model.decoder.embed_positions": 0,
-        "model.decoder.layers.0": 0,
-        "model.decoder.layers.1": 0,
-        "model.decoder.layers.2": 0,
-        "model.decoder.layers.3": 0,
-        "model.decoder.layers.4": 0,
-        "model.decoder.layers.5": 0,
-        "model.decoder.layers.6": 1,
-        "model.decoder.layers.7": 1,
-        "model.decoder.layers.8": 1,
-        "model.decoder.layers.9": 1,
-        "model.decoder.layers.10": 1,
-        "model.decoder.layers.11": 1,
-        "model.decoder.final_layer_norm": 1,
-        "lm_head": 0,  # tied with embed_tokens
-    },
-    "google/flan-t5-base": {
-        "shared": 0,
-        "encoder": 0,
-        "decoder": 1,
-        "final_layer_norm": 1,
-        "decoder.embed_tokens": 0,  # tied with encoder.embed_tokens
-        "lm_head": 0,  # tied with encoder.embed_tokens
-    },
-}
 
 
 # A full testing suite that tests all the necessary features on GPU. The tests should
@@ -2041,7 +1953,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
 
 @require_torch_gpu
-@require_auto_gptq
+@require_gptqmodel
 @require_optimum
 class PeftGPTQGPUTests(unittest.TestCase):
     r"""
@@ -2050,10 +1962,10 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
     def setUp(self):
         from transformers import GPTQConfig
+        from transformers.utils.quantization_config import AwqBackend
 
         self.causal_lm_model_id = "marcsun13/opt-350m-gptq-4bit"
-        # TODO : check if it works for Exllamav2 kernels
-        self.quantization_config = GPTQConfig(bits=4, use_exllama=False)
+        self.quantization_config = GPTQConfig(bits=4, backend=AwqBackend.AUTO_TRAINABLE)
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
 
     def tearDown(self):
@@ -3733,21 +3645,18 @@ class PeftHqqGPUTests(unittest.TestCase):
 
 
 @require_non_cpu
-@require_auto_awq
+@require_gptqmodel
 class PeftAwqGPUTests(unittest.TestCase):
     r"""
     Awq + peft tests
-
-    Note that AWQ is no longer being maintained:
-
-    https://github.com/casper-hansen/AutoAWQ/blob/88e4c76b20755db275574e6a03c83c84ba3bece5/README.md
-
-    It is therefore expected that more tests will start failing in the future. If this happens, remove AWQ support from
-    PEFT.
     """
 
     def setUp(self):
+        from transformers import AwqConfig
+        from transformers.utils.quantization_config import AwqBackend
+
         self.causal_lm_model_id = "peft-internal-testing/opt-125m-awq"
+        self.quantization_config = AwqConfig(backend=AwqBackend.AUTO_TRAINABLE)
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
 
     def tearDown(self):
@@ -3775,6 +3684,7 @@ class PeftAwqGPUTests(unittest.TestCase):
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
                 device_map="auto",
+                quantization_config=self.quantization_config,
             )
 
             model = prepare_model_for_kbit_training(model)
@@ -3821,13 +3731,6 @@ class PeftAwqGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    # TODO remove marker if/once issue is resolved, most likely requiring a fix in AutoAWQ:
-    # https://github.com/casper-hansen/AutoAWQ/issues/754
-    @pytest.mark.xfail(
-        condition=is_torch_version(">=", "2.7.0"),
-        reason="Multi-GPU test currently not working with AutoAWQ and PyTorch 2.7+",
-        strict=True,
-    )
     @require_torch_multi_accelerator
     def test_causal_lm_training_multi_accelerator(self):
         r"""
@@ -3859,6 +3762,7 @@ class PeftAwqGPUTests(unittest.TestCase):
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
                 device_map=device_map,
+                quantization_config=self.quantization_config,
             )
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
@@ -4219,7 +4123,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
     @pytest.mark.single_gpu_tests
     @pytest.mark.xfail(
         reason="int4_weight_only still has issues",
-        raises=RuntimeError,
+        raises=(RuntimeError, ValueError),
     )
     def test_causal_lm_training_single_gpu_torchao_int4_raises(self):
         # TODO: Once proper torchao support for int4 is added, remove this test and add int4 to supported_quant_types
@@ -5472,3 +5376,211 @@ class TestArrowQuantized:
 
         assert out is not None
         assert out.shape[0] == 1  # batch size 1
+
+
+@require_non_cpu
+@require_bitsandbytes
+class TestDtypeAutocastBnb:
+    """Ensure that the dtype of the PEFT weights have the expected value, even when using quantized base models.
+
+    The autocast argument should be honored.
+
+    """
+
+    model_id = "trl-internal-testing/tiny-Qwen2ForCausalLM-2.5"
+    # no need to check each possible peft type, a selection should be enough
+    peft_types_to_test = ["lora", "vera", "lora-target-param"]
+
+    def check_dtype(self, quant_config, autocast_adapter_dtype, base_dtype, expected_dtype, peft_type, tmp_path=None):
+        """helper function that creates the PEFT model and checks that the dtype of the PEFT adapter is as expected.
+
+        Checks:
+        - get_peft_model
+        - add_adapter
+        - PeftModel.from_pretrained
+        - load_adapter
+        """
+        if peft_type == "lora":
+            peft_config = LoraConfig()
+        elif peft_type == "vera":
+            peft_config = VeraConfig()
+        elif peft_type == "lora-target-param":
+            peft_config = LoraConfig(target_modules=[], target_parameters=["q_proj.weight", "v_proj.weight"])
+        else:
+            raise ValueError("Argument must be one of 'lora' or 'vera'")
+
+        with hub_online_once(self.model_id):
+            model = AutoModelForCausalLM.from_pretrained(
+                self.model_id,
+                quantization_config=quant_config,
+                dtype=base_dtype,
+                device_map="auto",
+            )
+            model = get_peft_model(model, peft_config, autocast_adapter_dtype=autocast_adapter_dtype)
+            if peft_type != "lora-target-param":
+                # target_parameters does not allow multiple adapters on the same parameter
+                model.add_adapter("other", peft_config, autocast_adapter_dtype=autocast_adapter_dtype)
+            peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
+            assert all(p.dtype == expected_dtype for p in peft_params)
+
+            model.save_pretrained(tmp_path)
+            del model
+
+            model = AutoModelForCausalLM.from_pretrained(
+                self.model_id,
+                quantization_config=quant_config,
+                dtype=base_dtype,
+                device_map="auto",
+            )
+            model = PeftModel.from_pretrained(model, tmp_path, autocast_adapter_dtype=autocast_adapter_dtype)
+            if peft_type != "lora-target-param":
+                # target_parameters does not allow multiple adapters on the same parameter
+                model.load_adapter(
+                    tmp_path / "other", adapter_name="other", autocast_adapter_dtype=autocast_adapter_dtype
+                )
+            peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
+            assert all(p.dtype == expected_dtype for p in peft_params)
+
+    @pytest.mark.parametrize("peft_type", peft_types_to_test)
+    @pytest.mark.parametrize("base_dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_lora_no_quantization_dtype_no_autocast(self, base_dtype, peft_type, tmp_path):
+        # sanity check that without bnb, everything works as expected
+        quant_config = None
+        self.check_dtype(
+            quant_config,
+            autocast_adapter_dtype=False,
+            base_dtype=base_dtype,
+            expected_dtype=base_dtype,
+            peft_type=peft_type,
+            tmp_path=tmp_path,
+        )
+
+    @pytest.mark.parametrize("peft_type", peft_types_to_test)
+    @pytest.mark.parametrize("base_dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_lora_no_quantization_dtype_autocast(self, base_dtype, peft_type, tmp_path):
+        # sanity check that without bnb, everything works as expected
+        quant_config = None
+        self.check_dtype(
+            quant_config,
+            autocast_adapter_dtype=True,
+            base_dtype=base_dtype,
+            expected_dtype=torch.float32,
+            peft_type=peft_type,
+            tmp_path=tmp_path,
+        )
+
+    @pytest.mark.parametrize("peft_type", peft_types_to_test)
+    @pytest.mark.parametrize("base_dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_lora_4bit_bnb_dtype_no_autocast(self, base_dtype, peft_type, tmp_path):
+        # Ensure that the compute dtype of the 4bit weights is honored, see #2889
+        quant_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=base_dtype,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+        )
+        self.check_dtype(
+            quant_config,
+            autocast_adapter_dtype=False,
+            base_dtype=base_dtype,
+            expected_dtype=base_dtype,
+            peft_type=peft_type,
+            tmp_path=tmp_path,
+        )
+
+    @pytest.mark.parametrize("peft_type", peft_types_to_test)
+    @pytest.mark.parametrize("base_dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_lora_4bit_bnb_dtype_autocast(self, base_dtype, peft_type, tmp_path):
+        # With autocast, the adapter weights should always be in float32
+        quant_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=base_dtype,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+        )
+        self.check_dtype(
+            quant_config,
+            autocast_adapter_dtype=True,
+            base_dtype=base_dtype,
+            expected_dtype=torch.float32,
+            peft_type=peft_type,
+            tmp_path=tmp_path,
+        )
+
+    @pytest.mark.parametrize("peft_type", peft_types_to_test)
+    def test_lora_4bit_bnb_dtype_no_autocast_compute_dtype_diverges(self, peft_type, tmp_path):
+        # In this test, the compute dtype of the bnb weights and the dtype of the base model diverge. In this case the
+        # bnb dtype should 'win'.
+        quant_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+        )
+        self.check_dtype(
+            quant_config,
+            autocast_adapter_dtype=False,
+            base_dtype=torch.float16,
+            expected_dtype=torch.bfloat16,
+            peft_type=peft_type,
+            tmp_path=tmp_path,
+        )
+
+    @pytest.mark.parametrize("peft_type", peft_types_to_test)
+    @pytest.mark.parametrize("base_dtype", [torch.float16, torch.bfloat16])
+    @pytest.mark.xfail(reason="Currently, dtype casting with 8bit bnb does not work", strict=True)
+    def test_lora_8bit_bnb_dtype_no_autocast(self, base_dtype, peft_type, tmp_path):
+        # With 8bit bnb, the base layer carries no information about the intended dtype, thus we cannot cast to the same dtype
+        quant_config = BitsAndBytesConfig(load_in_8bit=True)
+        self.check_dtype(
+            quant_config,
+            autocast_adapter_dtype=False,
+            base_dtype=base_dtype,
+            expected_dtype=base_dtype,
+            peft_type=peft_type,
+            tmp_path=tmp_path,
+        )
+
+    @pytest.mark.parametrize("peft_type", peft_types_to_test)
+    def test_lora_8bit_bnb_dtype_no_autocast_float32(self, peft_type, tmp_path):
+        # for 8bit bnb with float32, everything works as expected
+        # TODO: once dtype != float32 works, merge this test with the one above
+        quant_config = BitsAndBytesConfig(load_in_8bit=True)
+        base_dtype = torch.float32
+        self.check_dtype(
+            quant_config,
+            autocast_adapter_dtype=False,
+            base_dtype=base_dtype,
+            expected_dtype=base_dtype,
+            peft_type=peft_type,
+            tmp_path=tmp_path,
+        )
+
+    @pytest.mark.parametrize("peft_type", peft_types_to_test)
+    @pytest.mark.parametrize("base_dtype", [torch.float16, torch.bfloat16])
+    def test_lora_8bit_bnb_dtype_autocast(self, base_dtype, peft_type, tmp_path):
+        # With 8bit bnb, the base layer carries no information about the intended dtype, thus we cannot cast to the same dtype
+        quant_config = BitsAndBytesConfig(load_in_8bit=True)
+        self.check_dtype(
+            quant_config,
+            autocast_adapter_dtype=True,
+            base_dtype=base_dtype,
+            expected_dtype=torch.float32,
+            peft_type=peft_type,
+            tmp_path=tmp_path,
+        )
+
+    @pytest.mark.parametrize("peft_type", peft_types_to_test)
+    def test_lora_8bit_bnb_dtype_autocast_float32(self, peft_type, tmp_path):
+        # for 8bit bnb with float32, everything works as expected
+        # TODO: once dtype != float32 works, merge this test with the one above
+        base_dtype = torch.float32
+        quant_config = BitsAndBytesConfig(load_in_8bit=True)
+        self.check_dtype(
+            quant_config,
+            autocast_adapter_dtype=True,
+            base_dtype=base_dtype,
+            expected_dtype=torch.float32,
+            peft_type=peft_type,
+            tmp_path=tmp_path,
+        )

@@ -11,15 +11,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import importlib.metadata as importlib_metadata
 from typing import Any, Optional
 
-import packaging.version
 import torch
 
-from peft.import_utils import is_auto_awq_available
+from peft.import_utils import is_gptqmodel_available
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
+
+from .config import LoraConfig
 
 
 class AwqLoraLinear(torch.nn.Module, LoraLayer):
@@ -27,16 +27,12 @@ class AwqLoraLinear(torch.nn.Module, LoraLayer):
         self,
         base_layer,
         adapter_name,
+        config: LoraConfig,
         r: int = 0,
         lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
-        init_lora_weights: bool = True,
-        use_rslora: bool = False,
-        use_dora: bool = False,
-        lora_bias: bool = False,
         **kwargs,
     ):
-        if use_dora:
+        if config.use_dora:
             raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
 
         super().__init__()
@@ -51,11 +47,7 @@ class AwqLoraLinear(torch.nn.Module, LoraLayer):
             adapter_name,
             r,
             lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout,
-            init_lora_weights=init_lora_weights,
-            use_rslora=use_rslora,
-            use_dora=use_dora,
-            lora_bias=lora_bias,
+            config=config,
         )
 
     def forward(self, x: torch.Tensor):
@@ -92,6 +84,7 @@ class AwqLoraLinear(torch.nn.Module, LoraLayer):
 def dispatch_awq(
     target: torch.nn.Module,
     adapter_name: str,
+    config: LoraConfig,
     **kwargs: Any,
 ) -> Optional[torch.nn.Module]:
     new_module = None
@@ -101,21 +94,11 @@ def dispatch_awq(
     else:
         target_base_layer = target
 
-    if is_auto_awq_available():
-        from awq.modules.linear import WQLinear_GEMM
+    if is_gptqmodel_available():
+        from gptqmodel.nn_modules.qlinear.gemm_awq import AwqGEMMQuantLinear
 
-        if isinstance(target_base_layer, WQLinear_GEMM):
-            # Raise the error only at the dispatch level
-            AUTOAWQ_MINIMUM_VERSION = packaging.version.parse("0.2.0")
-            version_autoawq = packaging.version.parse(importlib_metadata.version("autoawq"))
-
-            if AUTOAWQ_MINIMUM_VERSION > version_autoawq:
-                raise ImportError(
-                    f"Found an incompatible version of auto-awq. Found version {version_autoawq}, "
-                    f"but only versions above {AUTOAWQ_MINIMUM_VERSION} are supported for PEFT."
-                )
-
-            new_module = AwqLoraLinear(target, adapter_name, **kwargs)
+        if isinstance(target_base_layer, AwqGEMMQuantLinear):
+            new_module = AwqLoraLinear(target, adapter_name, config=config, **kwargs)
             target.qweight = target_base_layer.qweight
 
     return new_module

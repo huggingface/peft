@@ -108,6 +108,11 @@ jobs:
           source activate peft
           make tests_core_multi_gpu
 
+      - name: Run training on multi GPU
+        run: |
+          source activate peft
+          make tests_training
+
       - name: Generate Report
         if: always()
         run: |

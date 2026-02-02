@@ -33,9 +33,18 @@ def pytest_configure(config):
         def emit(self, record):
             msg = record.getMessage().lower()
             if "deprecat" in msg or "future" in msg:
-                if "torch_dtype" not in msg:
-                    # let's ignore the torch_dtype => dtype deprecation for now
-                    raise AssertionError(f"**Transformers Deprecation**: {msg}")
+                # let's ignore the torch_dtype => dtype deprecation for now
+                if "torch_dtype" in msg:
+                    return
+
+                # BPE warning comes from transformers and we cannot do anything about it, transformers has to fix it
+                bpe_warning = (
+                    "Deprecated in 0.9.0: BPE.__init__ will not create from files anymore, try `BPE.from_file` instead"
+                )
+                if bpe_warning in msg:
+                    return
+
+                raise AssertionError(f"**Transformers Deprecation**: {msg}")
 
     # Add our handler
     handler = ErrorOnDeprecation()
