@@ -765,7 +765,7 @@ class LoraConfig(PeftConfig):
 
         # Handle MonteCLoRA configuration
         if self.use_monteclora:
-            from peft.tuners.monteclora_new.config import MonteCLoraConfig
+            from peft.tuners.monteclora.config import MonteCLoraConfig
 
             if self.monteclora_config is None:
                 warnings.warn(

@@ -2074,6 +2074,7 @@ class BufferedMonteCLoRASampler:
 
         sample = self.buffer[self.index]
         self.index += 1
+
         return sample
 
     def stop(self):
@@ -2207,46 +2208,28 @@ class MonteCLoRASampler(nn.Module):
             tuple: (variational_noise, expert_weights)
         """
         if self.training and self.mc_training:
-            # DYNAMIC DEVICE DETECTION
-            # Use std_prior (nn.Parameter) as the source of truth for the current device
             current_device = self.std_prior.device
 
             sample = self.sampler.get() if self.sampler else None
-
             if sample is not None:
-                # FIX: Explicitly move samples from buffer to the current GPU
                 z_mvn = sample["z_mvn"].to(current_device)
                 z_wishart = sample["z_wishart"].to(current_device)
                 z_dirichlet = sample["z_dirichlet"].to(current_device)
             else:
-                # Fallback if sampler fails
                 z_mvn = torch.randn((self.monteclora_n, self.in_features, self.out_features), device=current_device)
-
-                # FIX: Explicitly move Bartlett sampling result to current device
                 z_wishart = self.sampler.wish_sampler._bartlett_sampling(torch.Size()).to(current_device)
-
                 z_dirichlet = torch.randn(self.monteclora_n, device=current_device)
 
-            # Reparameterization steps
             std = torch.diag(torch.exp(self.std_prior))
-
-            # This line caused the error before; now both inputs are guaranteed on current_device
             gaussian_var = self.wishart_reparameterization(std, z_wishart)
-
-            # Update running buffer
             self.gaussian_var_prior = gaussian_var
-
-            # Calculate Variations
             var = self.multivariate_reparameterization(z_mvn, gaussian_var)
-
-            # Calculate Weights
             expert_weights_logits = self.dirichlet_reparameterization(
                 torch.exp(self.expert_weights_prior), z_dirichlet
             )
             expert_weights = torch.softmax(expert_weights_logits, dim=-1)
             self.expert_weights = expert_weights
-
-            return var, self.expert_weights
+            return 10 * var, 10 * self.expert_weights
         else:
             return -1, -1
 

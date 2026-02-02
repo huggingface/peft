@@ -51,18 +51,14 @@ class MonteCLoraLinearVariant(LoraVariant):
         if monteclora_config is None:
             raise ValueError("MonteCLoraLinearVariant.init() requires 'monteclora_config' in kwargs")
 
-        # Register the sampler container if it doesn't exist
         if not hasattr(module, "lora_monteclora_sampler"):
-            # Add to adapter_layer_names so it's recognized as trainable
             module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_monteclora_sampler",)
             module.lora_monteclora_sampler = nn.ModuleDict()
 
-        # Get the rank from the lora_A layer
         lora_A = module.lora_A[adapter_name]
         r = lora_A.out_features
         in_features = module.in_features
 
-        # Create the MonteCLoRA sampler
         sampler = MonteCLoRASampler(
             in_features=in_features,
             out_features=r,
@@ -81,23 +77,60 @@ class MonteCLoraLinearVariant(LoraVariant):
     @staticmethod
     def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
         """
-        MonteCLoRA cannot be safely merged because it involves stochastic sampling.
+        Safely merge MonteCLoRA adapter weights into base weights.
+
+        For merging, we ignore the MC sampling and just use the base LoRA weights (lora_A and lora_B).
+        This is equivalent to merging a standard LoRA adapter.
+
+        Args:
+            module: The Linear LoRA layer
+            active_adapter: Name of the adapter to merge
+            orig_weight: Original base layer weight
+
+        Returns:
+            New weight with adapter merged
         """
-        raise NotImplementedError("MonteCLoRA does not support safe merging due to its stochastic nature.")
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+        new_weight = orig_weight + delta_weight.to(orig_dtype)
+        return new_weight
 
     @staticmethod
     def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
         """
-        MonteCLoRA cannot be merged because it involves stochastic sampling.
+        Merge MonteCLoRA adapter weights into base weights (in-place).
+
+        For merging, we ignore the MC sampling and just use the base LoRA weights (lora_A and lora_B).
+        This is equivalent to merging a standard LoRA adapter.
+
+        Args:
+            module: The Linear LoRA layer
+            active_adapter: Name of the adapter to merge
+            orig_weight: Original base layer weight (modified in-place)
         """
-        raise NotImplementedError("MonteCLoRA does not support merging due to its stochastic nature.")
+        delta_weight = module.get_delta_weight(active_adapter)
+        orig_weight.data += delta_weight
 
     @staticmethod
     def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
         """
-        MonteCLoRA cannot be unmerged because it involves stochastic sampling.
+        Unmerge MonteCLoRA adapter weights from base weights.
+
+        For unmerging, we ignore the MC sampling and just use the base LoRA weights (lora_A and lora_B).
+        This is equivalent to unmerging a standard LoRA adapter.
+
+        Args:
+            module: The Linear LoRA layer
+            active_adapter: Name of the adapter to unmerge
+            orig_weight: Current weight with adapter merged
+
+        Returns:
+            Weight with adapter unmerged
         """
-        raise NotImplementedError("MonteCLoRA does not support unmerging due to its stochastic nature.")
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+        new_weight = orig_weight - delta_weight.to(orig_dtype)
+        return new_weight
 
     @staticmethod
     def forward(
@@ -124,53 +157,32 @@ class MonteCLoraLinearVariant(LoraVariant):
             result + LoRA update with MonteCLoRA sampling applied
         """
         lora_A = module.lora_A[active_adapter]
-        lora_B = module.lora_B[active_adapter]
+        lora_B = module.lora_B[active_adapter]  #lora_B is zero in the beginning. test for stochasticity of outputs might fail because of this
         dropout = module.lora_dropout[active_adapter]
         scaling = module.scaling[active_adapter]
         sampler = module.lora_monteclora_sampler[active_adapter]
 
-        # Apply dropout
         x = x.to(lora_A.weight.dtype)
         if isinstance(dropout, nn.Identity) or not module.training:
             x_dropped = x
         else:
             x_dropped = dropout(x)
 
-        # Get the base LoRA A weight
         current_weight_A = lora_A.weight
 
-        # Apply MonteCLoRA sampling during training
         if module.training and hasattr(sampler, "mc_training") and sampler.mc_training:
-            # Sample from the variational distribution
             lora_A_vars, lora_A_wts = sampler()
-
-            # Check if sampling was successful (returns -1 when not training)
             if not isinstance(lora_A_vars, int):
-                # Check for NaN values
                 if torch.isnan(lora_A_vars).any() or torch.isnan(lora_A_wts).any():
                     warnings.warn("MonteCLoRA sampling produced NaNs, using base weights.")
                 else:
-                    # Apply the variational perturbation
-                    # lora_A_vars shape: [monteclora_n, in_features, out_features]
-                    # We need to transpose to match lora_A.weight shape [out_features, in_features]
                     noise = torch.nan_to_num(lora_A_vars, nan=0.0)
-
-                    # Transpose the base weight to match noise shape
-                    base_w = lora_A.weight.T  # [in_features, out_features]
-
-                    # Add noise to create perturbed weights for each sample
+                    base_w = lora_A.weight.T
                     perturbed_w = (
                         base_w + noise
-                    )  # Broadcasting: [in_features, out_features] + [n, in_features, out_features]
-
-                    # Weighted average over Monte Carlo samples
+                    )
                     averaged_w = torch.einsum("n,nij->ij", lora_A_wts, perturbed_w)
-
-                    # Transpose back to LoRA A weight shape
                     current_weight_A = averaged_w.T
-
-        # Compute LoRA update: x @ A^T @ B^T * scaling
         out_A = F.linear(x_dropped, current_weight_A)
         result = result + lora_B(out_A) * scaling
-
         return result

@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,15 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from peft.utils import register_peft_method
-
 from .config import MonteCLoraConfig
-from .layer import MonteCLoraLinear
-from .model import MonteCLoraModel
+from .variant import MonteCLoraLinearVariant
 
 
-__all__ = ["MonteCLoraConfig", "MonteCLoraLinear", "MonteCLoraModel"]
-
-register_peft_method(
-    name="monteclora", prefix="lora_", config_cls=MonteCLoraConfig, model_cls=MonteCLoraModel, is_mixed_compatible=True
-)
+__all__ = ["MonteCLoraConfig", "MonteCLoraLinearVariant"]

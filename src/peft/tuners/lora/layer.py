@@ -651,7 +651,7 @@ class Linear(nn.Module, LoraLayer):
             return ArrowLinearVariant()
 
         if use_monteclora:
-            from peft.tuners.monteclora_new.variant import MonteCLoraLinearVariant
+            from peft.tuners.monteclora.variant import MonteCLoraLinearVariant
 
             return MonteCLoraLinearVariant()
 
