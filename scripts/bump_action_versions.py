@@ -94,8 +94,12 @@ def build_compare_url(project, old_version, new_version):
 
 def process_workflow_file(workflow_file):
     # note: not using 'safe' loading but round-trip to be able to modify the data without
-    # changing anything but the version tags
-    yaml_data = YAML().load(workflow_file)
+    # changing as little as possible except for the version tags and their comments.
+    yaml = YAML(typ='rt')
+    yaml.preserve_quotes = True
+    yaml.width = 200  # prevents inserted line breaks
+    yaml_data = yaml.load(workflow_file)
+
 
     if 'jobs' not in yaml_data:
         log("no jobs section in workflow file, not updating any versions")
@@ -136,10 +140,11 @@ def process_workflow_file(workflow_file):
             new_version = release_data['commit_sha']
             update_summary[(repo, version)] = {"old_version": version, 'new_version': new_version, 'release': release_data}
             yaml_data_new['jobs'][job]['steps'][step_idx]['uses'] = f"{repo}@{new_version}"
+            yaml_data_new['jobs'][job]['steps'][step_idx].yaml_add_eol_comment(f'# {release_data["tag_name"]}', 'uses')
 
             log(f"Updated: {step_name=} {repo=} {version} -> {new_version}")
 
-    return yaml_data_new, update_summary
+    return yaml, yaml_data_new, update_summary
 
 
 def print_summary(update_summaries):
@@ -173,12 +178,12 @@ def main(args):
     update_summaries = []
 
     for workflow_file in args.workflow_files:
-        yaml_data_new, update_summary = process_workflow_file(workflow_file)
+        yaml, yaml_data_new, update_summary = process_workflow_file(workflow_file)
 
         update_summaries.append(update_summary)
 
         with open(workflow_file.name, 'w') as f:
-            YAML().dump(yaml_data_new, f)
+            yaml.dump(yaml_data_new, f)
 
     print('\n')
     print_summary(update_summaries)
