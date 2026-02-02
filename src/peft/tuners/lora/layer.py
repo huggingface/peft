@@ -147,6 +147,21 @@ class LoraLayer(BaseTunerLayer):
 
     def update_layer(
         self,
+        adapter_name,
+        r,
+        lora_alpha,
+        lora_dropout,
+        init_lora_weights,
+        use_rslora,
+        use_dora: bool = False,
+        use_alora: bool = False,
+        use_qalora: bool = False,
+        use_monteclora: bool = False,
+        lora_bias: bool = False,
+        arrow_config: ArrowConfig = None,
+        monteclora_config=None,
+        qalora_group_size: int = 32,
+        inference_mode: bool = False,
         adapter_name: str,
         r: int,
         lora_alpha: int,
@@ -174,7 +189,15 @@ class LoraLayer(BaseTunerLayer):
                 PeftWarning,
             )
 
-        lora_variant = self.resolve_lora_variant(config=config)
+        lora_variant = self.resolve_lora_variant(
+            use_dora=use_dora,
+            use_alora=use_alora,
+            use_qalora=use_qalora,
+            use_monteclora=use_monteclora,
+            qalora_group_size=qalora_group_size,
+            arrow_config=arrow_config,
+            monteclora_config=monteclora_config,
+        )
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -732,6 +755,14 @@ class Linear(nn.Module, LoraLayer):
         r: int = 0,
         lora_alpha: int = 1,
         is_target_conv_1d_layer: bool = False,
+        init_lora_weights: Union[bool, str] = True,
+        use_rslora: bool = False,
+        use_dora: bool = False,
+        use_alora: bool = False,
+        use_monteclora: bool = False,
+        arrow_config: ArrowConfig = None,
+        monteclora_config=None,
+        lora_bias: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -743,24 +774,32 @@ class Linear(nn.Module, LoraLayer):
             adapter_name,
             r,
             lora_alpha=lora_alpha,
-            config=config,
-            **kwargs,
+            lora_dropout=lora_dropout,
+            init_lora_weights=init_lora_weights,
+            use_rslora=use_rslora,
+            use_dora=use_dora,
+            use_alora=use_alora,
+            use_monteclora=use_monteclora,
+            lora_bias=lora_bias,
+            arrow_config=arrow_config,
+            monteclora_config=monteclora_config,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def resolve_lora_variant(self, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if config.arrow_config is not None:
+    def resolve_lora_variant(
+        self, *, arrow_config: ArrowConfig, use_dora: bool, use_alora: bool, use_monteclora: bool = False, **kwargs
+    ) -> Optional[LoraVariant]:
+        if arrow_config is not None:
             from .variants import ArrowLinearVariant
 
             return ArrowLinearVariant()
 
-        if config.use_bdlora is not None:
-            from .variants import BdLoraLinearVariant
+        if use_monteclora:
+            from peft.tuners.monteclora.variant import MonteCLoraLinearVariant
 
-            return BdLoraLinearVariant()
+            return MonteCLoraLinearVariant()
 
-        use_alora = config.alora_invocation_tokens is not None
-        if not config.use_dora and not use_alora:
+        if not use_dora and not use_alora:
             return None
 
         from .variants import ALoraLinearVariant, DoraLinearVariant

@@ -25,6 +25,7 @@ from .auto import (
     AutoPeftModelForTokenClassification,
 )
 from .config import PeftConfig, PromptLearningConfig
+from .helpers import MonteCLoRATrainerMixin
 from .mapping import (
     PEFT_TYPE_TO_CONFIG_MAPPING,
     PEFT_TYPE_TO_MIXED_MODEL_MAPPING,
@@ -87,7 +88,6 @@ from .tuners import (
     MissConfig,
     MissModel,
     MonteCLoraConfig,
-    MonteCLoraModel,
     MultitaskPromptTuningConfig,
     MultitaskPromptTuningInit,
     OFTConfig,
@@ -202,8 +202,8 @@ __all__ = [
     "LoraRuntimeConfig",
     "MissConfig",
     "MissModel",
+    "MonteCLoRATrainerMixin",
     "MonteCLoraConfig",
-    "MonteCLoraModel",
     "MultitaskPromptTuningConfig",
     "MultitaskPromptTuningInit",
     "OFTConfig",
