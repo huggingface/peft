@@ -131,11 +131,5 @@ def dispatch_gptq(
         if isinstance(target_base_layer, BaseQuantLinear):
             new_module = GPTQLoraLinear(target, adapter_name, config=config, **kwargs)
             target.qweight = target_base_layer.qweight
-    else:
-        quant_linear = get_auto_gptq_quant_linear(cfg)
-
-        if quant_linear is not None and isinstance(target_base_layer, quant_linear):
-            new_module = GPTQLoraLinear(target, adapter_name, config=config, **kwargs)
-            target.qweight = target_base_layer.qweight
 
     return new_module

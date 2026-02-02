@@ -52,5 +52,7 @@ markers = [
 
 filterwarnings = [
     "error::DeprecationWarning:transformers",
+    # in sync with tests/conftest.py regarding BPE deprecation
+    "ignore:.*BPE.__init__ will not create from files anymore.*:DeprecationWarning:transformers",
     "error::FutureWarning:transformers",
 ]
