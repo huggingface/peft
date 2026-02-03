@@ -118,6 +118,7 @@ class AdaLoraModel(LoraModel):
         kwargs = {
             "r": lora_config.init_r,
             "lora_alpha": lora_config.lora_alpha,
+            "fan_in_fan_out": lora_config.fan_in_fan_out,  # Still needed for Conv1D detection
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -189,7 +190,7 @@ class AdaLoraModel(LoraModel):
             )
             new_module = SVDLinear4bit(target, adapter_name, config=lora_config, **fourbit_kwargs)
         elif QuantLinear is not None and isinstance(target, QuantLinear):
-            new_module = SVDQuantLinear(target, adapter_name, **kwargs)
+            new_module = SVDQuantLinear(target, adapter_name, config=lora_config, **kwargs)
         else:
             if isinstance(target_base_layer, torch.nn.Linear):
                 if lora_config.fan_in_fan_out:
