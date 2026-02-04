@@ -2750,7 +2750,7 @@ class TestLoftQ:
     """
 
     def get_error_factor(self, device):
-        error_factor = 0.40 if device in ("xpu", "cpu") else 0.66
+        error_factor = 0.66 if device in ("xpu", "cpu") else 0.40
         return error_factor
 
     def get_input(self, model_id, device):
