@@ -2750,10 +2750,7 @@ class TestLoftQ:
     """
 
     def get_error_factor(self, device):
-        # The error factor indicates by how much the quantization error should be decreased when using LoftQ compared to
-        # quantization without LoftQ. Thus 0.89 means that the error should be decreased by 11% at least. This is a very
-        # conservative value to prevent flakiness, in practice most gains are > 1.5
-        error_factor = 0.74 if device in ("xpu", "cpu") else 0.89
+        error_factor = 0.40 if device in ("xpu", "cpu") else 0.66
         return error_factor
 
     def get_input(self, model_id, device):
