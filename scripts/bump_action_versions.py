@@ -135,6 +135,7 @@ def process_workflow_file(workflow_file):
             release_data, error = get_latest_release(repo)
             if error is not None:
                 log(f"Error {step_name=} release fetch {repo=}: {error}")
+                update_summary[(repo, version)] = {"old_version": version, "error": f"Fetching release failed: {error}"}
                 continue
 
             new_version = release_data['commit_sha']
@@ -159,17 +160,19 @@ def print_summary(update_summaries):
         summaries_merged.update(summary)
 
     for (repo, version), summary in summaries_merged.items():
-        release_data = summary['release']
-
         tag_current = get_tag_for_hash(repo, version)
         if not tag_current:
             tag_current = "UNKNOWN TAG"
 
         print(f"* Repository: {repo}, current version: {version} (tag: {tag_current})")
-        print(f"  This was updated to version {summary['new_version']}")
-        print(f"  This corresponds to release {release_data['tag_name']}")
-        print(f"  Release information: {release_data['release_url']}")
-        print(f"  See what changed: {build_compare_url(repo, version, summary['new_version'])}")
+        if "error" in summary:
+            print(f"  Was not updated. Error: {summary['error']}")
+        else:
+            release_data = summary['release']
+            print(f"  This was updated to version {summary['new_version']}")
+            print(f"  This corresponds to release {release_data['tag_name']}")
+            print(f"  Release information: {release_data['release_url']}")
+            print(f"  See what changed: {build_compare_url(repo, version, summary['new_version'])}")
         print()
 
 
