@@ -2252,8 +2252,7 @@ class TestPeftCustomModel(PeftCommonTester):
             model._init_vblora_vector_bank(config, "default")
         if issubclass(config_cls, TinyLoraConfig):
             # Re-initialize tinylora_v so it can be trained
-            for key in model.base_model.tinylora_v.keys():
-                torch.nn.init.uniform_(model.base_model.tinylora_v[key], -config.init_v_bound, config.init_v_bound)
+            model.base_model._init_tinylora_v(config, "default")
         model.train()
         # EmbConv1D is slow to learn for some reason
         lr = 0.01 if model_id != "EmbConv1D" else 1.0
@@ -2321,8 +2320,7 @@ class TestPeftCustomModel(PeftCommonTester):
             model._init_vblora_vector_bank(config, "default")
         if issubclass(config_cls, TinyLoraConfig):
             # Re-initialize tinylora_v so it can be trained
-            for key in model.base_model.tinylora_v.keys():
-                torch.nn.init.uniform_(model.base_model.tinylora_v[key], -config.init_v_bound, config.init_v_bound)
+            model.base_model._init_tinylora_v(config, "default")
         model.train()
         if isinstance(config_cls, LNTuningConfig):
             # LayerNorm tuning is slow to learn

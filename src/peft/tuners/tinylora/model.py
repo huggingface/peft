@@ -70,6 +70,12 @@ class TinyLoraModel(BaseTuner):
     def __init__(self, model, config, adapter_name, low_cpu_mem_usage=False, **kwargs):
         super().__init__(model, config, adapter_name, low_cpu_mem_usage, **kwargs)
 
+    def _init_tinylora_v(self, config: TinyLoraConfig, adapter_name: str) -> None:
+        """Re-initialize the tinylora_v vectors with uniform random values."""
+        for key, v in self.tinylora_v.items():
+            if key.startswith(f"{adapter_name}_group_"):
+                nn.init.uniform_(v, -config.init_v_bound, config.init_v_bound)
+
     def _pre_injection_hook(self, model: nn.Module, config: TinyLoraConfig, adapter_name: str) -> None:
         """Initialize shared trainable vectors based on ntie before layer injection."""
         # Initialize the shared parameter dict for v vectors
