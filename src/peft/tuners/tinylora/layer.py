@@ -224,8 +224,10 @@ class TinyLoraLayer(BaseTunerLayer):
         gen = torch.Generator().manual_seed(seed)
 
         # P has shape (u, r, r)
+        # Note: The paper describes P as "fixed random matrices" but does not specify the distribution.
+        # We use Gaussian (torch.randn) with 1/√r normalization, which is standard for random projections
+        # (see Johnson-Lindenstrauss lemma: https://en.wikipedia.org/wiki/Johnson-Lindenstrauss_lemma).
         P = torch.randn(u, r, r, generator=gen)
-        # Normalize for stability (following TinyLoRA paper)
         P = P / (r**0.5)
 
         self.tinylora_P[adapter_name] = P
