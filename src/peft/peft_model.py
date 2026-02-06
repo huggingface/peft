@@ -580,11 +580,21 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             **kwargs,
         )
 
+        # Filter out shared parameters that are duplicated at layer level:
         # 1. Remove VB-LoRA vector bank, since it's a shared parameter set via the VBLoRAModel
         # 2. Remove the prompt encoder, as it does not need to be part of the checkpoint
-        missing_keys = [
-            k for k in load_result.missing_keys if "vblora_vector_bank" not in k and "prompt_encoder" not in k
-        ]
+        # 3. Remove TinyLoRA layer-level tinylora_v references (they share with model-level tinylora_v)
+        def is_expected_missing_key(k):
+            if "vblora_vector_bank" in k:
+                return False
+            if "prompt_encoder" in k:
+                return False
+            # TinyLoRA: layer-level tinylora_v is a reference to model-level, exclude from warning
+            if ".model." in k and ".tinylora_v." in k:
+                return False
+            return True
+
+        missing_keys = [k for k in load_result.missing_keys if is_expected_missing_key(k)]
         if missing_keys:
             # Let's warn here since (in contrast to load_adapter) we don't return the load result, so it could be quite
             # difficult for users to even notice that something might have gone wrong here. As we filter out non PEFT
@@ -1406,6 +1416,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # Filter missing keys specific to the current adapter and tuner prefix.
         for key in load_result.missing_keys:
             if tuner_prefix in key and adapter_name in key:
+                # TinyLoRA: layer-level tinylora_v is a reference to model-level, skip it
+                if ".model." in key and ".tinylora_v." in key:
+                    continue
                 adapter_missing_keys.append(key)
 
         load_result.missing_keys.clear()

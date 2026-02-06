@@ -197,6 +197,25 @@ def get_peft_model_state_dict(
                 )
             to_return["base_model.vera_A." + adapter_name] = state_dict["base_model.vera_A." + adapter_name]
             to_return["base_model.vera_B." + adapter_name] = state_dict["base_model.vera_B." + adapter_name]
+    elif config.peft_type == PeftType.TINYLORA:
+        tinylora_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
+        # Add all tinylora keys except tinylora_v (which are references to shared model-level params)
+        # The tinylora_v appears both at model level (base_model.tinylora_v) and layer level
+        # (base_model.model.*.tinylora_v) - they're the same data, so only save model-level
+        to_return = {k: state_dict[k] for k in state_dict if tinylora_prefix in k and ".tinylora_v." not in k}
+        # Handle model-level shared v vectors
+        # The keys have format "base_model.tinylora_v.{adapter_name}_group_{idx}"
+        # We transform them to "base_model.tinylora_v.group_{idx}" for saving
+        for k in state_dict:
+            if k.startswith("base_model.tinylora_v.") and adapter_name in k:
+                # Transform key: remove "{adapter_name}_" from the group key
+                new_key = k.replace(f".{adapter_name}_group_", ".group_")
+                to_return[new_key] = state_dict[k]
+        # Save projection tensors P if save_projection is True
+        if config.save_projection:
+            for k in state_dict:
+                if ".tinylora_P." in k and adapter_name in k:
+                    to_return[k] = state_dict[k]
     elif config.peft_type == PeftType.XLORA:
         to_return = {k: state_dict[k] for k in state_dict if "internal_xlora_classifier" in k}
     elif config.peft_type == PeftType.VBLORA:
@@ -497,9 +516,29 @@ def set_peft_model_state_dict(
                     del state_dict[k]
                     del state_dict[k.replace("_topk_indices", "_topk_weights")]
 
+        # For TinyLora, handle tinylora_v keys separately since they have a special format
+        # that doesn't follow the standard "{prefix}.{adapter_name}" pattern
+        tinylora_v_state_dict = {}
+        if config.peft_type == PeftType.TINYLORA:
+            # Extract tinylora_v keys before _insert_adapter_name_into_state_dict
+            # The saved keys are like "base_model.tinylora_v.group_{idx}"
+            # We need to transform them to "base_model.tinylora_v.{adapter_name}_group_{idx}"
+            tinylora_v_keys = [k for k in state_dict if ".tinylora_v." in k]
+            for k in tinylora_v_keys:
+                # Transform key: add adapter_name back
+                if ".tinylora_v.group_" in k:
+                    new_key = k.replace(".tinylora_v.group_", f".tinylora_v.{adapter_name}_group_")
+                    tinylora_v_state_dict[new_key] = state_dict.pop(k)
+                else:
+                    tinylora_v_state_dict[k] = state_dict.pop(k)
+
         peft_model_state_dict = _insert_adapter_name_into_state_dict(
             state_dict, adapter_name=adapter_name, parameter_prefix=parameter_prefix
         )
+
+        # Add back the tinylora_v keys (now in the correct format)
+        if config.peft_type == PeftType.TINYLORA:
+            peft_model_state_dict.update(tinylora_v_state_dict)
 
         if config.peft_type == PeftType.ADALORA:
             rank_pattern = config.rank_pattern
@@ -536,6 +575,25 @@ def set_peft_model_state_dict(
                 warnings.warn(
                     "Specified to not load vera_A and vera_B from state dictionary. This means we will be relying on"
                     " PRNG initialisation to restore these projections using `config.projection_prng_key`, which may"
+                    " not be accurate on all system configurations."
+                )
+        elif config.peft_type == PeftType.TINYLORA:
+            has_projection = any(".tinylora_P." in k for k in peft_model_state_dict)
+            if config.save_projection and not has_projection:
+                warnings.warn(
+                    "Specified to load tinylora_P from state dictionary however it was not present! "
+                    "Projection tensors will be regenerated from the projection_seed."
+                )
+            elif not config.save_projection and has_projection:
+                warnings.warn(
+                    "Specified to not load tinylora_P from state dictionary however they are present in state"
+                    " dictionary! Consider using them to ensure checkpoint loading is correct on all platforms using"
+                    " `peft_config.save_projection = True`"
+                )
+            elif not config.save_projection:  # and no tinylora_P in state dictionary
+                warnings.warn(
+                    "Specified to not load tinylora_P from state dictionary. This means we will be relying on"
+                    " PRNG initialisation to restore these projections using `config.projection_seed`, which may"
                     " not be accurate on all system configurations."
                 )
         elif config.peft_type == PeftType.LORA:
