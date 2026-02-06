@@ -183,17 +183,12 @@ class AdamssASACallback(TrainerCallback):
         top asa_target_subspaces subspaces to keep active.
         """
         
-        if self.verbose:
-            print(f"[DEBUG][_mask_model_to_target] Starting global top-{asa_target_subspaces} masking")
-        
         # Ensure we have adapters info collected
         if not getattr(self, "_collected_asa_total_subspaces", False):
             self._collect_asa_total_subspaces(model)
 
         adapters = getattr(self, "_adapters_info", [])
         if not adapters:
-            if self.verbose:
-                print("[DEBUG][_mask_model_to_target] No adapters collected, skipping")
             return
 
         # Step 1: Collect importance scores for all subspaces across all layers
@@ -202,8 +197,6 @@ class AdamssASACallback(TrainerCallback):
         
         for module, adapter_name, n_subspaces in adapters:
             if adapter_name not in module.exp_avg_ipt:
-                if self.verbose:
-                    print(f"[DEBUG] Adapter {adapter_name} has no importance tracking, skipping")
                 continue
             
             exp_avg_ipt = module.exp_avg_ipt[adapter_name]
@@ -226,30 +219,20 @@ class AdamssASACallback(TrainerCallback):
                 subspace_scores.append((module, adapter_name, i, total_score))
         
         if not subspace_scores:
-            if self.verbose:
-                print("[DEBUG][_mask_model_to_target] No importance scores available, skipping")
             return
         
         # Step 2: Use kthvalue to find threshold (matches adamss_pkg exactly)
         # Collect all scores into a tensor
         all_scores = torch.stack([s[3] for s in subspace_scores])
         
-        if self.verbose:
-            print(f"[DEBUG][_mask_model_to_target] Collected {len(subspace_scores)} subspaces globally")
-            print(f"[DEBUG][_mask_model_to_target] Top 5 scores: {[float(s) for s in all_scores.topk(min(5, len(all_scores)))[0]]}")
-        
         # Step 3: Find kth largest value as threshold
         # If asa_target_subspaces >= total subspaces, keep all active
         if asa_target_subspaces >= len(subspace_scores):
             mask_threshold = float('-inf')  # Keep all
-            if self.verbose:
-                print(f"[DEBUG][_mask_model_to_target] asa_target_subspaces >= total subspaces, keeping all active")
         else:
             # Use kthvalue: find the asa_target_subspaces-th largest score
             # Note: kthvalue returns kth smallest, so we negate the scores
             mask_threshold = -torch.kthvalue(-all_scores, asa_target_subspaces)[0].item()
-            if self.verbose:
-                print(f"[DEBUG][_mask_model_to_target] Mask threshold: {mask_threshold}")
         
         # Step 4: Apply masking - subspaces with score > threshold are active
         # This matches adamss_pkg: is_dict[name_mat] > mask_threshold
@@ -291,9 +274,7 @@ class AdamssASACallback(TrainerCallback):
                 
                 if is_active:
                     num_active_in_adapter += 1
-            
-            if self.verbose:
-                print(f"[DEBUG][_mask_model_to_target] Adapter {adapter_name}: {num_active_in_adapter}/{n_subspaces} subspaces active")
+
     
     def _reset_model_importance(self, model):
         """Reset importance stats for all Adamss layers."""
@@ -332,36 +313,12 @@ class AdamssASACallback(TrainerCallback):
             # Calculate threshold and apply mask
             current_active_subspaces, should_mask = self._schedule_threshold(current_step)
             
-            if self.verbose:
-                print(f"[DEBUG][ASA] step={current_step}, init_warmup={self.init_warmup}, final_warmup={self.final_warmup}, mask_interval={self.mask_interval}")
-                print(f"[DEBUG][ASA] Masking condition: True")
-                print(f"[DEBUG][ASA] Called _schedule_threshold: current_active_subspaces={current_active_subspaces}, should_mask={should_mask}")
-            
             if should_mask:
                 self._mask_model_to_target(model, current_active_subspaces)
 
                 # Critical: Rebuild optimizer to sync requires_grad changes
                 if self.trainer is not None:
                     self.trainer.create_optimizer_and_scheduler(self.trainer.num_training_steps)
-                    if self.verbose:
-                        print("[DEBUG][ASA] Optimizer param groups after masking:")
-                        for i, group in enumerate(self.trainer.optimizer.param_groups):
-                            print(f"  Param group {i}:")
-                            for p in group['params']:
-                                print(f"    shape={tuple(p.shape)}, requires_grad={p.requires_grad}")
-
-                # Print current active AdaMSS trainable parameter count for alignment checks
-                active_adamss = sum(
-                    p.numel() for n, p in model.named_parameters() if ('adamss' in n.lower() and p.requires_grad)
-                )
-                total_adamss = sum(
-                    p.numel() for n, p in model.named_parameters() if ('adamss' in n.lower())
-                )
-                
-                print(
-                    f"ASA step {current_step}: Masked to {current_active_subspaces}/{self.asa_total_subspaces} subspaces | "
-                    f"AdaMSS active: {active_adamss:,}/{total_adamss:,}"
-                )
             
             # Reset importance AFTER masking to start fresh accumulation for next interval
             self._reset_model_importance(model)
@@ -387,7 +344,8 @@ class AdamssASACallback(TrainerCallback):
             
             # Validate warmup schedule
             if self.total_steps and self.final_warmup > self.total_steps:
-                print(f"Warning: final_warmup ({self.final_warmup}) > total_steps ({self.total_steps}), adjusting...")
+                import warnings
+                warnings.warn(f"final_warmup ({self.final_warmup}) > total_steps ({self.total_steps}), adjusting to 80% of total_steps")
                 self.final_warmup = int(self.total_steps * 0.8)
         
         self.current_step = state.global_step
@@ -455,18 +413,7 @@ class AdamssASACallback(TrainerCallback):
         model = kwargs.get("model")
         if model is not None:
             self._load_config_from_model(model)
-        
-        print("="*80)
-        print("ASA (Adaptive Subspace Allocation) Enabled")
-        print("="*80)
-        print(f"  Target subspaces: {self.asa_target_subspaces}")
-        print(f"  Initial warmup: {self.init_warmup} steps")
-        print(f"  Final warmup: {self.final_warmup} steps")
-        print(f"  Mask interval: {self.mask_interval} steps")
-        print(f"  Importance beta: {self.asa_importance_beta}")
-        print(f"  Uncertainty beta: {self.asa_uncertainty_beta}")
-        print(f"  Schedule exponent: {self.asa_schedule_exponent}")
-        print("="*80 + "\n")
+
         return control
 
     def on_train_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
