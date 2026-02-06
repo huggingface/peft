@@ -208,11 +208,7 @@ class AdamssLayer(BaseTunerLayer):
         """
         Mask (freeze) less important subspaces to reach asa_target_subspaces active subspaces.
         """
-        if verbose:
-            print(f"[DEBUG][mask_to_target] Starting processing for adapter: {adapter_name}, asa_target_subspaces={asa_target_subspaces}")
         if adapter_name not in self.exp_avg_ipt:
-            if verbose:
-                print(f"[DEBUG][mask_to_target] Adapter {adapter_name} not in exp_avg_ipt, skipping")
             return  # ASA not enabled
         
         num_subspaces = self.num_subspaces[adapter_name]
@@ -222,9 +218,6 @@ class AdamssLayer(BaseTunerLayer):
         exp_avg_ipt = self.exp_avg_ipt[adapter_name]
         exp_avg_unc = self.exp_avg_unc[adapter_name]
 
-        if verbose:
-            print(f"[DEBUG][mask_to_target] exp_avg_ipt keys: {list(exp_avg_ipt.keys())}")
-            print(f"[DEBUG][mask_to_target] exp_avg_unc keys: {list(exp_avg_unc.keys())}")
 
         subspace_scores = []
         for i in range(num_subspaces):
@@ -238,11 +231,6 @@ class AdamssLayer(BaseTunerLayer):
             score_B = (exp_avg_ipt[key_B] * exp_avg_unc[key_B]).mean()
             subspace_scores.append((i, score_A + score_B))
 
-        # Debug: Print subspace scores for verification
-        if verbose:
-            print(f"[DEBUG][mask_to_target] Subspace scores for {adapter_name}:")
-            for idx, score in subspace_scores:
-                print(f"  Subspace {idx}: Score={score}")
 
         if len(subspace_scores) <= asa_target_subspaces and asa_target_subspaces > 0:
             return
@@ -259,9 +247,6 @@ class AdamssLayer(BaseTunerLayer):
                 subspace_scores.sort(key=lambda x: x[1], reverse=True)
                 active_indices = {idx for idx, _ in subspace_scores[:asa_target_subspaces]}
 
-        # Debug: Print active indices after thresholding
-        if verbose:
-            print(f"[DEBUG][mask_to_target] Active indices for {adapter_name}: {sorted(active_indices)}")
 
         # Access ParameterLists for this adapter
         param_list_A = self.adamss_A[adapter_name]
@@ -275,22 +260,6 @@ class AdamssLayer(BaseTunerLayer):
                 param_list_A[i].grad = None
                 param_list_B[i].grad = None
 
-        # Debug print: Output requires_grad status and statistics for all adamss parameters
-        if verbose:
-            print(f"[DEBUG][mask_to_target] {adapter_name} parameter requires_grad status:")
-            trainable_count = 0
-            total_count = 0
-            for i, param in enumerate(param_list_A):
-                print(f"  A_{i}: requires_grad={param.requires_grad}")
-                total_count += param.numel()
-                if param.requires_grad:
-                    trainable_count += param.numel()
-            for i, param in enumerate(param_list_B):
-                print(f"  B_{i}: requires_grad={param.requires_grad}")
-                total_count += param.numel()
-                if param.requires_grad:
-                    trainable_count += param.numel()
-            print(f"[DEBUG][mask_to_target] Current trainable parameters: {trainable_count} / {total_count} ({100*trainable_count/total_count:.2f}%)")
 
     def update_layer(
         self,
@@ -461,7 +430,6 @@ class AdamssLayer(BaseTunerLayer):
 
         # Use user-specified subspace_rank
         rank_per_subspace = subspace_rank
-        print(f"      [INFO] Using rank_per_subspace = {rank_per_subspace} (user specified)")
 
         # Initialize trainable subspace parameters
         # Collect parameters in lists, then create ParameterList for proper state_dict keys
@@ -494,8 +462,7 @@ class AdamssLayer(BaseTunerLayer):
                 # Handle edge case: ensure at least rank 1
                 if actual_rank == 0:
                     actual_rank = 1
-                
-                print(f"      [INFO] Subspace {i}: dynamic rank = {actual_rank} (threshold {svd_threshold} from {len(S_row)} row singular values)")
+
             else:
                 # Fixed rank: match adamss_pkg behavior exactly
                 # adamss_pkg uses: num_ii_jj = min(len(seg_result[indx]), args.adamss_ri)
