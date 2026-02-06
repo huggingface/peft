@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+g# Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ from peft import (
     PromptTuningConfig,
     RoadConfig,
     ShiraConfig,
+    TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -213,6 +214,18 @@ ALL_CONFIGS = [
             "d_initial": 0.1,
             "save_projection": True,
             "bias": "none",
+        },
+    ),
+    (
+        TinyLoraConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "r": 2,
+            "u": 64,
+            "target_modules": None,
+            "tinylora_dropout": 0.0,
+            "projection_seed": 42,
+            "save_projection": True,
         },
     ),
     (
