@@ -28,6 +28,7 @@ from peft import (
     LNTuningConfig,
     LoraConfig,
     PromptLearningConfig,
+    TinyLoraConfig,
     VBLoRAConfig,
 )
 from peft.import_utils import (
@@ -299,7 +300,7 @@ def set_init_weights_false(config_cls, kwargs):
 
     if issubclass(config_cls, PromptLearningConfig):
         return kwargs
-    if config_cls in (LNTuningConfig, VBLoRAConfig):
+    if config_cls in (LNTuningConfig, TinyLoraConfig, VBLoRAConfig):
         return kwargs
 
     if config_cls in (LoraConfig, AdaLoraConfig):

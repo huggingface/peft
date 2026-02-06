@@ -137,8 +137,9 @@ class TinyLoraConfig(PeftConfig):
         default=True,
         metadata={
             "help": (
-                "Whether to initialize the weights of the TinyLoRA layers with their default initialization. "
-                "Don't change this setting, except if you know exactly what you're doing."
+                "Whether to initialize the trainable vector v with random values. If True, v is initialized "
+                "with uniform random values. If False, v is initialized to zeros, making the adapter an "
+                "identity operation (no change to base model output)."
             ),
         },
     )

@@ -148,7 +148,11 @@ class TinyLoraModel(BaseTuner):
             else:
                 dtype = None  # Will default to float32
             v = nn.Parameter(torch.empty(tinylora_config.u, dtype=dtype))
-            nn.init.uniform_(v, -tinylora_config.init_v_bound, tinylora_config.init_v_bound)
+            if tinylora_config.init_weights:
+                nn.init.uniform_(v, -tinylora_config.init_v_bound, tinylora_config.init_v_bound)
+            else:
+                # Initialize to zeros for identity operation
+                nn.init.zeros_(v)
             self.tinylora_v[v_key] = v
 
         kwargs = {

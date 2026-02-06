@@ -2227,6 +2227,10 @@ class TestPeftCustomModel(PeftCommonTester):
             config_kwargs = config_kwargs.copy()
             # override the default value and make PEFT operation a no-op
             config_kwargs["init_weights"] = True
+        if issubclass(config_cls, TinyLoraConfig):
+            config_kwargs = config_kwargs.copy()
+            # Set init_weights=False so TinyLoRA functions as an identity operation
+            config_kwargs["init_weights"] = False
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -2235,10 +2239,6 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, VBLoRAConfig):
             # Manually set the `vblora_vector_bank` to zero so that VB-LoRA functions as an identity operation.
             torch.nn.init.zeros_(model.vblora_vector_bank["default"])
-        if issubclass(config_cls, TinyLoraConfig):
-            # Manually set the tinylora_v vectors to zero so that TinyLoRA functions as an identity operation.
-            for key in model.base_model.tinylora_v.keys():
-                torch.nn.init.zeros_(model.base_model.tinylora_v[key])
         model.eval()
         outputs_before = model(**X)
         # OSF uses SVD reconstruction which introduces small numerical differences
@@ -2301,6 +2301,10 @@ class TestPeftCustomModel(PeftCommonTester):
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        if issubclass(config_cls, TinyLoraConfig):
+            config_kwargs = config_kwargs.copy()
+            # Set init_weights=False so TinyLoRA functions as an identity operation
+            config_kwargs["init_weights"] = False
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -2309,10 +2313,6 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, VBLoRAConfig):
             # Manually set the `vblora_vector_bank` to zero so that VB-LoRA functions as an identity operation.
             torch.nn.init.zeros_(model.vblora_vector_bank["default"])
-        if issubclass(config_cls, TinyLoraConfig):
-            # Manually set the tinylora_v vectors to zero so that TinyLoRA functions as an identity operation.
-            for key in model.base_model.tinylora_v.keys():
-                torch.nn.init.zeros_(model.base_model.tinylora_v[key])
         model.eval()
         outputs_before = model(**X)
 
