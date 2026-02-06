@@ -26,7 +26,7 @@ When saving the adapter parameters, it's possible to eschew storing the random p
 
 TinyLoRA currently has the following constraints:
 
-- Only `nn.Linear` and `transformers.pytorch_utils.Conv1D` layers are supported.
+- Only `nn.Linear`, `nn.Embedding`, and `transformers.pytorch_utils.Conv1D` layers are supported.
 
 The abstract from the paper is:
 

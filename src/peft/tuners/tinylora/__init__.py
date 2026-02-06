@@ -15,11 +15,11 @@
 from peft.utils import register_peft_method
 
 from .config import TinyLoraConfig
-from .layer import Linear, TinyLoraLayer
+from .layer import Embedding, Linear, TinyLoraLayer
 from .model import TinyLoraModel
 
 
-__all__ = ["Linear", "TinyLoraConfig", "TinyLoraLayer", "TinyLoraModel"]
+__all__ = ["Embedding", "Linear", "TinyLoraConfig", "TinyLoraLayer", "TinyLoraModel"]
 
 
 register_peft_method(name="tinylora", config_cls=TinyLoraConfig, model_cls=TinyLoraModel, prefix="tinylora_")

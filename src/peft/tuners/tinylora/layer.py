@@ -80,6 +80,11 @@ class TinyLoraLayer(BaseTunerLayer):
             in_features, out_features = (
                 base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
             )
+        elif isinstance(base_layer, nn.Embedding):
+            in_features, out_features = base_layer.num_embeddings, base_layer.embedding_dim
+        else:
+            # Fallback for other layer types
+            in_features, out_features = None, None
 
         self.in_features = in_features
         self.out_features = out_features
@@ -448,6 +453,242 @@ class Linear(nn.Linear, TinyLoraLayer):
                 result = result + delta
 
         result = result.to(previous_dtype)
+        return result
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "tinylora." + rep
+
+
+class Embedding(nn.Module, TinyLoraLayer):
+    """TinyLoRA implemented in an Embedding layer."""
+
+    def __init__(
+        self,
+        base_layer: nn.Module,
+        tinylora_v: nn.ParameterDict,
+        tinylora_v_key: str,
+        adapter_name: str,
+        r: int = 2,
+        u: int = 64,
+        tinylora_dropout: float = 0.0,
+        init_weights: bool = True,
+        projection_seed: int = 42,
+        **kwargs,
+    ) -> None:
+        super().__init__()
+        TinyLoraLayer.__init__(self, base_layer, **kwargs)
+
+        self._active_adapter = adapter_name
+        self.update_layer(
+            adapter_name,
+            tinylora_v,
+            tinylora_v_key,
+            r,
+            u,
+            tinylora_dropout,
+            init_weights,
+            projection_seed,
+        )
+
+    def update_layer(
+        self,
+        adapter_name: str,
+        tinylora_v: nn.ParameterDict,
+        tinylora_v_key: str,
+        r: int,
+        u: int,
+        tinylora_dropout: float,
+        init_weights: bool,
+        projection_seed: int,
+        inference_mode: bool = False,
+        **kwargs,
+    ):
+        """Initialize layer with SVD decomposition and projection tensors."""
+        if r <= 0:
+            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+        if u <= 0:
+            raise ValueError(f"`u` should be a positive integer value but the value passed is {u}")
+
+        self.u[adapter_name] = u
+
+        if tinylora_dropout > 0.0:
+            tinylora_dropout_layer = nn.Dropout(p=tinylora_dropout)
+        else:
+            tinylora_dropout_layer = nn.Identity()
+
+        self.tinylora_dropout.update(nn.ModuleDict({adapter_name: tinylora_dropout_layer}))
+
+        # Store reference to shared v
+        self.tinylora_v = tinylora_v
+        self.tinylora_v_key[adapter_name] = tinylora_v_key
+
+        # Compute truncated SVD of embedding weights
+        actual_r = self._init_svd_embedding(adapter_name, r)
+        self.r[adapter_name] = actual_r
+
+        # Initialize random projection tensors P using the actual rank
+        self._init_projection(adapter_name, u, actual_r, projection_seed)
+
+        self._move_adapter_to_device_of_base_layer(adapter_name)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
+
+    def _init_svd_embedding(self, adapter_name: str, r: int) -> int:
+        """
+        Compute truncated SVD of embedding weights and store as frozen buffers.
+
+        Embedding weight shape: (num_embeddings, embedding_dim) We treat this as W where:
+        - W = U @ S @ V^T (full SVD)
+        - tinylora_A = V[:r, :] (shape: r x embedding_dim)
+        - tinylora_B = U[:, :r] @ diag(S[:r]) (shape: num_embeddings x r)
+
+        Returns:
+            int: The actual rank used (may be less than r if dimensions are smaller)
+        """
+        base_layer = self.get_base_layer()
+        weight = base_layer.weight.data  # (num_embeddings, embedding_dim)
+
+        dtype = weight.dtype
+        device = weight.device
+
+        # Compute SVD in float32 for numerical stability
+        weight_fp32 = weight.float()
+        U, S, Vh = torch.linalg.svd(weight_fp32, full_matrices=False)
+
+        # The actual rank is limited by the matrix dimensions
+        max_rank = min(weight.shape[0], weight.shape[1])
+        actual_r = min(r, max_rank)
+
+        # Truncate to actual rank
+        U_r = U[:, :actual_r].to(dtype)
+        S_r = S[:actual_r].to(dtype)
+        V_r = Vh[:actual_r, :].to(dtype)
+
+        # Store in LoRA-XS convention:
+        # tinylora_A = V_r (actual_r x embedding_dim)
+        # tinylora_B = U_r @ diag(S_r) (num_embeddings x actual_r)
+        self.tinylora_A[adapter_name] = V_r.contiguous()
+        self.tinylora_B[adapter_name] = (U_r * S_r.unsqueeze(0)).contiguous()
+
+        return actual_r
+
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+        """Merge the active adapter weights into the base weights."""
+        adapter_names = check_adapters_to_merge(self, adapter_names)
+        if not adapter_names:
+            return
+
+        for active_adapter in adapter_names:
+            if active_adapter in self.tinylora_A.keys():
+                base_layer = self.get_base_layer()
+                if safe_merge:
+                    orig_weights = base_layer.weight.data.clone()
+                    delta_weight = self.get_delta_weight(active_adapter)
+                    orig_weights += delta_weight
+
+                    if not torch.isfinite(orig_weights).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
+
+                    base_layer.weight.data = orig_weights
+                else:
+                    delta_weight = self.get_delta_weight(active_adapter)
+                    base_layer.weight.data += delta_weight
+
+                self.merged_adapters.append(active_adapter)
+
+    def unmerge(self) -> None:
+        """Unmerge all merged adapters from the base weights."""
+        if not self.merged:
+            warnings.warn("Already unmerged. Nothing to do.")
+            return
+
+        while len(self.merged_adapters) > 0:
+            active_adapter = self.merged_adapters.pop()
+            if active_adapter in self.tinylora_A.keys():
+                delta_weight = self.get_delta_weight(active_adapter)
+                self.get_base_layer().weight.data -= delta_weight
+
+    def delete_adapter(self, adapter_name: str) -> None:
+        """Delete an adapter from the layer."""
+        if adapter_name in self.tinylora_v_key:
+            del self.tinylora_v_key[adapter_name]
+
+        for attr in self.other_param_names:
+            param_dict = getattr(self, attr, None)
+            if param_dict is not None and adapter_name in param_dict:
+                del param_dict[adapter_name]
+
+        if adapter_name in self.r:
+            del self.r[adapter_name]
+        if adapter_name in self.u:
+            del self.u[adapter_name]
+
+        if adapter_name in self.tinylora_dropout:
+            del self.tinylora_dropout[adapter_name]
+
+        if adapter_name in self.active_adapters:
+            active_adapters = self.active_adapters[:]
+            active_adapters.remove(adapter_name)
+            if active_adapters:
+                self.set_adapter(active_adapters)
+            else:
+                remaining_adapters = self._all_available_adapter_names()
+                if not remaining_adapters:
+                    self.set_adapter([])
+                else:
+                    new_active_adapter = remaining_adapters[0]
+                    warnings.warn(
+                        f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to "
+                        f"{new_active_adapter}."
+                    )
+                    self.set_adapter(new_active_adapter)
+
+    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        if self.disable_adapters:
+            if self.merged:
+                self.unmerge()
+            return self.base_layer(x, *args, **kwargs)
+
+        if self.merged:
+            return self.base_layer(x, *args, **kwargs)
+
+        result = self.base_layer(x, *args, **kwargs)
+
+        for active_adapter in self.active_adapters:
+            if active_adapter not in self.tinylora_A.keys():
+                continue
+
+            A = self.tinylora_A[active_adapter]  # (r, embedding_dim)
+            B = self.tinylora_B[active_adapter]  # (num_embeddings, r)
+            R = self._compute_R(active_adapter)  # (r, r)
+
+            dropout = self.tinylora_dropout[active_adapter]
+
+            # Move components to input device
+            device = result.device
+            dtype = result.dtype
+            A = A.to(device=device, dtype=dtype)
+            B = B.to(device=device, dtype=dtype)
+            R = R.to(device=device, dtype=dtype)
+
+            # For embedding, we need to:
+            # 1. Look up B[x] to get the low-rank representation (batch, seq, r)
+            # 2. Multiply by R to get (batch, seq, r)
+            # 3. Multiply by A to get the delta (batch, seq, embedding_dim)
+            # delta = B[x] @ R @ A
+
+            # B[x]: embedding lookup in the low-rank space
+            after_B = F.embedding(x, B)  # (batch, seq, r)
+            after_B = dropout(after_B)
+
+            # Multiply by R and A
+            after_R = after_B @ R  # (batch, seq, r)
+            delta = after_R @ A  # (batch, seq, embedding_dim)
+
+            result = result + delta
+
         return result
 
     def __repr__(self) -> str:

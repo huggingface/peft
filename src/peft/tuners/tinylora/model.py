@@ -27,7 +27,7 @@ from peft.utils import (
 
 from ..tuners_utils import _maybe_include_all_linear_layers
 from .config import TinyLoraConfig
-from .layer import Linear, TinyLoraLayer
+from .layer import Embedding, Linear, TinyLoraLayer
 
 
 class TinyLoraModel(BaseTuner):
@@ -91,7 +91,7 @@ class TinyLoraModel(BaseTuner):
         for key, module in self.model.named_modules():
             if not self._check_target_module_exists(peft_config, key):
                 continue
-            if isinstance(module, (nn.Linear, Conv1D)):
+            if isinstance(module, (nn.Linear, Conv1D, nn.Embedding)):
                 count += 1
 
         return count
@@ -214,6 +214,13 @@ class TinyLoraModel(BaseTuner):
                     "Setting fan_in_fan_out to False."
                 )
                 kwargs["fan_in_fan_out"] = tinylora_config.fan_in_fan_out = False
+            new_module = Linear(
+                target,
+                tinylora_v,
+                v_key,
+                adapter_name,
+                **kwargs,
+            )
         elif isinstance(target_base_layer, Conv1D):
             kwargs["is_target_conv_1d_layer"] = True
             if not kwargs["fan_in_fan_out"]:
@@ -221,19 +228,28 @@ class TinyLoraModel(BaseTuner):
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
                 kwargs["fan_in_fan_out"] = tinylora_config.fan_in_fan_out = True
+            new_module = Linear(
+                target,
+                tinylora_v,
+                v_key,
+                adapter_name,
+                **kwargs,
+            )
+        elif isinstance(target_base_layer, torch.nn.Embedding):
+            # Remove Linear-specific kwargs not applicable to Embedding
+            kwargs.pop("fan_in_fan_out", None)
+            new_module = Embedding(
+                target,
+                tinylora_v,
+                v_key,
+                adapter_name,
+                **kwargs,
+            )
         else:
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                "`torch.nn.Linear`, `transformers.pytorch_utils.Conv1D`."
+                "`torch.nn.Linear`, `torch.nn.Embedding`, `transformers.pytorch_utils.Conv1D`."
             )
-
-        new_module = Linear(
-            target,
-            tinylora_v,
-            v_key,
-            adapter_name,
-            **kwargs,
-        )
 
         return new_module
 
