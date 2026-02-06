@@ -225,10 +225,9 @@ class TinyLoraLayer(BaseTunerLayer):
 
         # P has shape (u, r, r)
         # Note: The paper describes P as "fixed random matrices" but does not specify the distribution.
-        # We use Gaussian (torch.randn) with 1/√r normalization, which is standard for random projections
+        # We sample from N(0, 1/r) which is standard for random projections
         # (see Johnson-Lindenstrauss lemma: https://en.wikipedia.org/wiki/Johnson-Lindenstrauss_lemma).
-        P = torch.randn(u, r, r, generator=gen)
-        P = P / (r**0.5)
+        P = torch.normal(mean=0.0, std=1.0 / (r**0.5), size=(u, r, r), generator=gen)
 
         self.tinylora_P[adapter_name] = P
 
