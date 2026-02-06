@@ -29,9 +29,9 @@ jobs:
         if: steps.changed-files.outputs.any_changed == 'true'
         id: set-matrix
         env:
-          ALL_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
+          CHANGED_FILES: "${{ steps.changed-files.outputs.all_changed_files }}"
         run: |
-          echo "matrix=${ALL_CHANGED_FILES}" >> $GITHUB_OUTPUT
+          echo "matrix=$(echo ${CHANGED_FILES} | sed -e 's/\\\"/\"/g')" >> $GITHUB_OUTPUT
   build_modified_files:
     needs: get_changed_files
     name: Build Docker images on modified files

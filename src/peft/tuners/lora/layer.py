@@ -2065,7 +2065,6 @@ class ParamWrapper(nn.Module, LoraLayer):
         use_rslora = config.use_rslora
         lora_bias = config.lora_bias
         inference_mode = config.inference_mode
-
         # This code works for linear layers, override for other layer types
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")

@@ -8,7 +8,7 @@ ENV PYTHON_VERSION=3.11
 # Install apt libs - copied from https://github.com/huggingface/accelerate/blob/main/docker/accelerate-gpu/Dockerfile
 # Install audio-related libraries
 RUN apt-get update && \
-    apt-get install -y curl git wget software-properties-common git-lfs ffmpeg libsndfile1-dev && \
+    apt-get install -y curl git wget git-lfs ffmpeg libsndfile1-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists*
 
@@ -20,15 +20,15 @@ RUN conda create --name peft python=${PYTHON_VERSION} ipython jupyter pip
 # Below is copied from https://github.com/huggingface/accelerate/blob/main/docker/accelerate-gpu/Dockerfile
 # We don't install pytorch here yet since CUDA isn't available
 # instead we use the direct torch wheel
-ENV PATH /opt/conda/envs/peft/bin:$PATH
+ENV PATH=/opt/conda/envs/peft/bin:$PATH
 # Activate our bash shell
 RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
 
 # Stage 2
-FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS build-image
+FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS build-image
 COPY --from=compile-image /opt/conda /opt/conda
-ENV PATH /opt/conda/bin:$PATH
+ENV PATH=/opt/conda/bin:$PATH
 
 # Install apt libs
 RUN apt-get update && \
@@ -39,12 +39,18 @@ RUN apt-get update && \
 RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
 
-RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum auto-gptq
+RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum
+
+# GPTQmodel doesn't find torch without build isolation
+#
+# Note: we are hard-coding CUDA_ARCH_LIST here since `gptqmodel` requires either nvidia-smi
+# or CUDA_ARCH_LIST for compute capability information. Since the docker build is unlikely
+# to have compute hardware available we use the information from the CI runner (which hosts
+# a NVIDIA L4). So we fix the compute capability to 8.9. In the future we might extend this
+# to a list of compute capabilities (separated by ;).
+RUN CUDA_ARCH_LIST=8.9 conda run -n peft pip install --no-build-isolation gptqmodel
 
 RUN \
-    # Add autoawq for quantization testing
-    conda run -n peft pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ/releases/download/v0.2.7.post2/autoawq-0.2.7.post2-py3-none-any.whl && \
-    conda run -n peft pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ_kernels/releases/download/v0.0.9/autoawq_kernels-0.0.9-cp311-cp311-linux_x86_64.whl && \
     # Add eetq for quantization testing; needs to run without build isolation since the setup
     # script directly imports torch from the environment which would fail with isolation.
     conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
