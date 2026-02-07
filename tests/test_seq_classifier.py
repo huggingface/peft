@@ -34,6 +34,7 @@ from peft import (
     PromptTuningInit,
     RoadConfig,
     ShiraConfig,
+    TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -214,6 +215,18 @@ ALL_CONFIGS = [
             "d_initial": 0.1,
             "save_projection": True,
             "bias": "none",
+        },
+    ),
+    (
+        TinyLoraConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "r": 2,
+            "u": 64,
+            "target_modules": None,
+            "tinylora_dropout": 0.0,
+            "projection_seed": 42,
+            "save_projection": True,
         },
     ),
     (
