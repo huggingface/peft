@@ -128,6 +128,16 @@ REGEX_TEST_CASES = [
     ("blocks.1.bias", ["weight"], [1], ["blocks"], False),
     ("mlp.blocks.1.weight", ["weight"], [1], ["blocks"], True),
     ("mlp.blocks.1.bias", ["weight"], [1], ["blocks"], False),
+    # MoE models: layers_to_transform should match layer index, not expert index
+    # For "model.layers.1.mlp.experts.0.up_proj", should match layer 1, not expert 0
+    ("model.layers.1.mlp.experts.0.up_proj", ["up_proj"], [1], ["layers"], True),
+    ("model.layers.1.mlp.experts.0.up_proj", ["up_proj"], [0], ["layers"], False),  # expert 0, but layer 1
+    ("model.layers.1.mlp.experts.1.up_proj", ["up_proj"], [1], ["layers"], True),  # expert 1, layer 1
+    ("model.layers.2.mlp.experts.1.up_proj", ["up_proj"], [1], ["layers"], False),  # layer 2, not 1
+    # MoE without explicit layers_pattern - should still match layer index, not expert index
+    ("model.layers.1.mlp.experts.0.up_proj", ["up_proj"], [1], None, True),
+    ("model.layers.1.mlp.experts.0.up_proj", ["up_proj"], [0], None, False),  # must not match expert 0
+    ("model.layers.2.mlp.experts.1.up_proj", ["up_proj"], [1], None, False),  # must not match expert 1
 ]
 
 MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES = [
