@@ -50,7 +50,8 @@ class TinyLoraConfig(PeftConfig):
             Uniform initialization bound for the trainable vector v. Values are initialized in [-init_v_bound,
             init_v_bound].
         target_modules (`Union[List[str], str]`, *optional*):
-            The names of the modules to apply TinyLoRA to. Only linear layers are supported.
+            The names of the modules to apply TinyLoRA to. Only `nn.Linear`, `nn.Embedding`, and
+            `transformers.pytorch_utils.Conv1D` layers are supported.
         tinylora_dropout (`float`, *optional*, defaults to `0.0`):
             The dropout probability for TinyLoRA layers.
         fan_in_fan_out (`bool`, *optional*, defaults to `False`):
@@ -61,7 +62,9 @@ class TinyLoraConfig(PeftConfig):
         modules_to_save (`List[str]`, *optional*):
             List of modules apart from TinyLoRA layers to be set as trainable and saved.
         init_weights (`bool`, *optional*, defaults to `True`):
-            Whether to initialize the weights of the TinyLoRA layers with their default initialization.
+            Whether to initialize the trainable vector v with random values. If `True`, v is initialized with
+            uniform random values. If `False`, v is initialized to zeros, making the adapter an identity operation
+            (no change to base model output).
         layers_to_transform (`Union[List[int], int]`, *optional*):
             The layer indexes to transform. If specified, only these layers will be adapted.
         layers_pattern (`Optional[Union[List[str], str]]`, *optional*):
@@ -111,7 +114,7 @@ class TinyLoraConfig(PeftConfig):
             "help": (
                 "List of module names or regex expression of the module names to replace with TinyLoRA. "
                 "For example, ['q_proj', 'v_proj'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. "
-                "Only linear layers are supported."
+                "Only nn.Linear, nn.Embedding, and transformers.pytorch_utils.Conv1D layers are supported."
             )
         },
     )
