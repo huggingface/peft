@@ -62,9 +62,9 @@ class TinyLoraConfig(PeftConfig):
         modules_to_save (`List[str]`, *optional*):
             List of modules apart from TinyLoRA layers to be set as trainable and saved.
         init_weights (`bool`, *optional*, defaults to `True`):
-            Whether to initialize the trainable vector v with random values. If `True`, v is initialized with
-            uniform random values. If `False`, v is initialized to zeros, making the adapter an identity operation
-            (no change to base model output).
+            Whether to initialize the trainable vector v with random values. If `True`, v is initialized with uniform
+            random values. If `False`, v is initialized to zeros, making the adapter an identity operation (no change
+            to base model output).
         layers_to_transform (`Union[List[int], int]`, *optional*):
             The layer indexes to transform. If specified, only these layers will be adapted.
         layers_pattern (`Optional[Union[List[str], str]]`, *optional*):
