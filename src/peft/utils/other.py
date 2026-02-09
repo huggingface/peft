@@ -77,6 +77,7 @@ if version.parse(accelerate.__version__) >= version.parse("0.29.0"):
 
     mlu_available = is_mlu_available()
 
+is_transformers_ge_v5_1_0 = version.parse(transformers.__version__) >= version.parse("5.1.0")
 
 __all__ = [
     "CONFIG_NAME",
@@ -1145,6 +1146,10 @@ def _get_no_split_modules(model) -> set[str]:
     _no_split_modules: set[str] = set()
     if not hasattr(model, "_no_split_modules"):
         return _no_split_modules
+
+    if is_transformers_ge_v5_1_0:
+        # See https://github.com/huggingface/transformers/commit/36ec3bfa33ebf6c3b38a1d6808292aeea4aae84d
+        return model._no_split_modules
 
     modules_to_check = [model]
     while len(modules_to_check) > 0:

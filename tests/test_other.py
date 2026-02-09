@@ -18,6 +18,8 @@ from unittest.mock import patch
 
 import pytest
 import torch
+import transformers
+from packaging import version
 from torch import nn
 from transformers import (
     AutoModelForCausalLM,
@@ -30,6 +32,9 @@ from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model
 from peft.utils.other import ModulesToSaveWrapper, _get_module_names_tied_with_embedding, _get_no_split_modules
 
 from .testing_utils import hub_online_once
+
+
+is_transformers_ge_v5_1_0 = version.parse(transformers.__version__) >= version.parse("5.1.0")
 
 
 class ModelWithModuleDict(nn.Module):
@@ -526,7 +531,7 @@ class TestGetNoSplitModules:
         # choose a model where recursively visiting children is *not* required
         model_id = "peft-internal-testing/opt-125m"
         model = AutoModelForCausalLM.from_pretrained(model_id)
-        assert model._no_split_modules == ["OPTDecoderLayer"]
+        assert list(model._no_split_modules) == ["OPTDecoderLayer"]
         no_split_modules = _get_no_split_modules(model)
         assert no_split_modules == {"OPTDecoderLayer"}
 
@@ -534,8 +539,12 @@ class TestGetNoSplitModules:
         # choose a model where recursively visiting children is required
         model_id = "hf-internal-testing/tiny-random-LlavaForConditionalGeneration"
         model = LlavaForConditionalGeneration.from_pretrained(model_id)
-        # sanity check: just visiting the model itself is not enough:
-        assert model._no_split_modules == []
+
+        if not is_transformers_ge_v5_1_0:
+            # sanity check: just visiting the model itself is not enough:
+            assert model._no_split_modules == []
+        else:
+            assert model._no_split_modules == {"CLIPEncoderLayer", "LlamaDecoderLayer"}
 
         no_split_modules = _get_no_split_modules(model)
         assert no_split_modules == {"CLIPEncoderLayer", "LlamaDecoderLayer"}
