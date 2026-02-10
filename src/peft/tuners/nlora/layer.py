@@ -16,10 +16,10 @@ def make_phi(name: str) -> nn.Module:
 
 class NonlinearLoraLinear(nn.Module, BaseTunerLayer):
     """
-    y = base(x) + scaling * ( phi(x @ A) @ B )
-    A: [in, r], B: [r, out]
+    y = base(x) + scaling * ( phi(x @ V) @ U )
+    V: [in, r], U: [r, out]
     """
-    adapter_layer_names = ("nlora_A", "nlora_B")   # what PEFT saves
+    adapter_layer_names = ("nlora_V", "nlora_U")   # what PEFT saves
     other_param_names = ("r", "nlora_alpha", "scaling")
 
     def __init__(self, base_layer: nn.Linear):
@@ -38,8 +38,8 @@ class NonlinearLoraLinear(nn.Module, BaseTunerLayer):
         self.scaling = {}
 
         self.nlora_dropout = nn.ModuleDict()
-        self.nlora_A = nn.ModuleDict()
-        self.nlora_B = nn.ModuleDict()
+        self.nlora_V = nn.ModuleDict()
+        self.nlora_U = nn.ModuleDict()
         self.phi = nn.ModuleDict()
 
         self._disable_adapters = False
@@ -50,14 +50,14 @@ class NonlinearLoraLinear(nn.Module, BaseTunerLayer):
         self.nlora_alpha[adapter_name] = alpha
         self.scaling[adapter_name] = alpha / max(1, r)
 
-        self.nlora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
-        self.nlora_B[adapter_name] = nn.Linear(r, self.out_features, bias=False)
+        self.nlora_V[adapter_name] = nn.Linear(self.in_features, r, bias=False)
+        self.nlora_U[adapter_name] = nn.Linear(r, self.out_features, bias=False)
         self.nlora_dropout[adapter_name] = nn.Dropout(dropout)
         self.phi[adapter_name] = make_phi(activation_fn)
 
-        # init: A random, B zeros => starts as base model
-        nn.init.kaiming_uniform_(self.nlora_A[adapter_name].weight, a=math.sqrt(5))
-        nn.init.zeros_(self.nlora_B[adapter_name].weight)
+        # init: V random, U zeros => starts as base model
+        nn.init.kaiming_uniform_(self.nlora_V[adapter_name].weight, a=math.sqrt(5))
+        nn.init.zeros_(self.nlora_U[adapter_name].weight)
 
         self.set_adapter(adapter_name)
 
@@ -68,10 +68,114 @@ class NonlinearLoraLinear(nn.Module, BaseTunerLayer):
 
         active = self.active_adapters if isinstance(self.active_adapters, list) else [self.active_adapters]
         for name in active:
-            if name not in self.nlora_A:
+            if name not in self.nlora_V:
                 continue
             z = self.nlora_dropout[name](x)
-            z = self.nlora_A[name](z)
+            z = self.nlora_V[name](z)
             z = self.phi[name](z)
-            out = out + self.nlora_B[name](z) * self.scaling[name]
+            out = out + self.nlora_U[name](z) * self.scaling[name]
         return out
+    
+    @torch.no_grad()
+    def adapter_delta(self, x, adapter_name: str):
+        z = self.nlora_V[adapter_name](self.nlora_dropout[adapter_name](x))
+        z = self.phi[adapter_name](z)
+        delta = self.nlora_U[adapter_name](z) * self.scaling[adapter_name]
+        return delta
+
+    @torch.no_grad()
+    def accumulate_consolidation_stats(self, x, adapter_name: str, state: dict, off_load_to_cpu: bool = False, accum_dtype=torch.float32,):
+        """
+        Docstring for accumulate_consolidation_stats
+        x: [*, d_in]
+        the state should hold
+            - "xxt": [d_in, d_in] sum of x_i x_i^T
+            - "xzt": [d_in, r] sum of x_i z_i^T, where z_i is (phi(x @ V) @ U)_i
+        :param self: Description
+        :param x: Description
+        :param adapter_name: Description
+        :type adapter_name: str
+        :param state: Description
+        :type state: dict
+        """
+        if x.dim() == 3:
+            x2 = x.reshape(-1, x.size(-1))
+        else:
+            x2 = x
+
+        delta = self.adapter_delta(x, adapter_name)  # [*, d_out]
+        if delta.dim() == 3:
+            delta2 = delta.reshape(-1, delta.size(-1))
+        else:
+            delta2 = delta
+
+        dev = torch.device('cpu' if off_load_to_cpu else delta2.device)
+        xA = x2.to(dev, dtype=accum_dtype)
+        rA = delta2.to(dev, dtype=accum_dtype)
+
+        if "xxt" not in state:
+            d = xA.size(1)
+            m = rA.size(1)
+
+            state["xxt"] = torch.zeros((d, d), device=dev, dtype=accum_dtype)
+            state["xzt"] = torch.zeros((d, m), device=dev, dtype=accum_dtype)
+        
+        state["xxt"].add_(xA.t() @ xA)
+        state["xzt"].add_(xA.t() @ rA)
+
+    @torch.no_grad()
+    def solve_dW(self, state: dict, lambda_: float, scale_lambda_by_trace=True):
+        """
+        Solve for optimal U given V and the accumulated stats.
+        This is equivalent to solving a ridge regression problem with Tikhonov regularization of strength lambda_.
+        Returns dW of shape [r, out] which can be merged into base weights as base_w += (V @ dW).T
+        """
+        xxt = state["xxt"]  # [d, d]
+        xzt = state["xzt"]  # [d, out]
+
+        d = xxt.size(0)
+
+        I = torch.eye(d, device=xxt.device, dtype=xxt.dtype)
+
+        if scale_lambda_by_trace:
+            # your stabilization heuristic, but now correctly applied
+            lam = lambda_ * (torch.trace(xxt) / d).clamp_min(1e-6)
+        else:
+            lam = lambda_
+
+        A = xxt + lam * I  # add scaled identity for numerical stability (and to prevent overfitting when data is limited)
+
+        dW = torch.linalg.solve(A, xzt)  # [d, out]
+        return dW
+
+    @torch.no_grad()
+    def solve_and_merge(self, state: dict, lambda_: float, lr_: float, adapter_name:str, inplace_disable_adapter=False,
+                        scale_lambda_by_trace=True):
+        """
+        Solve for optimal U given V and the accumulated stats, then merge into base layer.
+        This is equivalent to solving a ridge regression problem with Tikhonov regularization of strength lambda_.
+        """
+        xxt = state["xxt"]  # [d, d]
+        xzt = state["xzt"]  # [d, out]
+
+        d = xxt.size(0)
+
+        I = torch.eye(d, device=xxt.device, dtype=xxt.dtype)
+
+        if scale_lambda_by_trace:
+            # your stabilization heuristic, but now correctly applied
+            lam = lambda_ * (torch.trace(xxt) / d).clamp_min(1e-6)
+        else:
+            lam = lambda_
+
+        A = xxt + lam * I  # add scaled identity for numerical stability (and to prevent overfitting when data is limited)
+
+        dW = torch.linalg.solve(A, xzt)  # [d, out]
+
+        base_w = self.base_layer.weight.data  # [out, in]
+        dW = dW.to(base_w.device)
+
+        base_w.data.add_(dW.t() * lr_)
+
+        if inplace_disable_adapter:
+            self._disable_adapters = True
