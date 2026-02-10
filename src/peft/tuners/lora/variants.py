@@ -616,7 +616,7 @@ def calculate_alora_offsets(
     peft_config: PeftConfig, active_adapter: str, input_ids: torch.Tensor, adapter_names: Optional[list[str]] = None
 ) -> list[int]:
     """
-    This is a helper function for Activated LoRA (aLoRA) that searches each input token sequence for the last occurence
+    This is a helper function for Activated LoRA (aLoRA) that searches each input token sequence for the last occurrence
     of the appropriate "alora_invocation_tokens" invocation sequence. The calculated alora_offset is the location of
     the *start* of the invocation tokens, counting backward from the end (will therefore always be >=
     len(alora_invocation_tokens). If adapter_names is passed, then each input uses the appropriate invocation sequence
