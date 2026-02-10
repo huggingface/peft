@@ -146,6 +146,7 @@ from .utils import (
     shift_tokens_right,
 )
 
+from .tuners.nlora import NonlinearLoraConfig, NonlinearLoraModel
 
 __all__ = [
     "MODEL_TYPE_TO_PEFT_MODEL_MAPPING",
