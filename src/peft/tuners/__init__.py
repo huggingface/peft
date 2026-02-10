@@ -60,8 +60,7 @@ from .vblora import VBLoRAConfig, VBLoRAModel
 from .vera import VeraConfig, VeraModel
 from .waveft import WaveFTConfig, WaveFTModel
 from .xlora import XLoraConfig, XLoraModel
-
-
+from . import nlora
 __all__ = [
     "AdaLoraConfig",
     "AdaLoraModel",
@@ -137,6 +136,8 @@ __all__ = [
     "WaveFTModel",
     "XLoraConfig",
     "XLoraModel",
+    "NonlinearLoraConfig",
+    "NonlinearLoraModel",
     "convert_to_lora",
     "create_arrow_model",
     "get_eva_state_dict",

@@ -525,7 +525,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
     ) -> torch.nn.Module:
-        """Handles unloading when called from PEFT models. Returns the wrapped module
+        """Handles unloading when called from peft models. Returns the wrapped module
         and handles merging onto the wrapped module if requested.
         """
         raise NotImplementedError
