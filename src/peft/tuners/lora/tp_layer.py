@@ -16,7 +16,7 @@ from __future__ import annotations
 import importlib
 import math
 import warnings
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -26,6 +26,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils import transpose
 from peft.utils.integrations import gather_params_ctx
 
+from .config import LoraConfig
 from .layer import LoraLayer
 
 
@@ -41,30 +42,25 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         self,
         base_layer,
         adapter_name: str,
+        config: LoraConfig,
         backend,
         r: int = 0,
         lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
-        fan_in_fan_out: bool = False,
         is_target_conv_1d_layer: bool = False,
-        init_lora_weights: Union[bool, str] = True,
-        use_rslora: bool = False,
-        use_dora: bool = False,
-        lora_bias: bool = False,
         **kwargs,
     ):
-        if lora_bias:
+        if config.lora_bias:
             raise ValueError(f"{self.__class__.__name__} does not support lora_bias yet, set it to False")
 
         super().__init__()
         LoraLayer.__init__(self, base_layer=base_layer, **kwargs)
 
-        if use_dora:
+        if config.use_dora:
             raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
 
         self.backend = backend
         self.is_parallel_a = isinstance(base_layer, backend.RowParallelLinear)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
         self._active_adapter = adapter_name
 
         megatron_config = kwargs["megatron_config"]
@@ -82,10 +78,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
             adapter_name,
             r,
             lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout,
-            init_lora_weights=init_lora_weights,
-            use_rslora=use_rslora,
-            use_dora=use_dora,
+            config=config,
             init_method=init_method,
             input_is_parallel=input_is_parallel,
             gather_output=gather_output,
@@ -100,22 +93,20 @@ class LoraParallelLinear(nn.Module, LoraLayer):
 
     def update_layer(
         self,
-        adapter_name,
-        r,
-        lora_alpha,
-        lora_dropout,
-        init_lora_weights,
-        use_rslora,
-        use_dora=False,
+        adapter_name: str,
+        r: int,
+        lora_alpha: int,
+        config: LoraConfig,
         init_method=init.xavier_normal_,
-        input_is_parallel=True,
-        gather_output=False,
+        input_is_parallel: bool = True,
+        gather_output: bool = False,
         inference_mode: bool = False,
         **parallel_linear_kwargs,
-    ):
-        # collect the kwargs
-        kwargs = locals().copy()
-        del kwargs["self"]
+    ) -> None:
+        lora_dropout = config.lora_dropout
+        init_lora_weights = config.init_lora_weights
+        use_rslora = config.use_rslora
+        use_dora = config.use_dora
 
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -181,7 +172,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         if adapter_name in self.lora_variant:
-            self.lora_variant[adapter_name].init(self, **kwargs)
+            self.lora_variant[adapter_name].init(self, adapter_name=adapter_name, config=config)
 
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
@@ -311,7 +302,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
 def dispatch_megatron(
     target: torch.nn.Module,
     adapter_name: str,
-    lora_config,
+    config: LoraConfig,
     **kwargs: Any,
 ) -> Optional[torch.nn.Module]:
     new_module = None
@@ -321,8 +312,8 @@ def dispatch_megatron(
     else:
         target_base_layer = target
 
-    if lora_config.megatron_config:
-        megatron_core = importlib.import_module(lora_config.megatron_core)
+    if config.megatron_config:
+        megatron_core = importlib.import_module(config.megatron_core)
     else:
         megatron_core = None
 
@@ -331,10 +322,10 @@ def dispatch_megatron(
         (megatron_core.tensor_parallel.ColumnParallelLinear, megatron_core.tensor_parallel.RowParallelLinear),
     ):
         megatron_kwargs = kwargs.copy()
-        megatron_config = lora_config.megatron_config
+        megatron_config = config.megatron_config
         if isinstance(megatron_config, dict):
             transformer_config_class = megatron_core.transformer.transformer_config.TransformerConfig
-            megatron_config = transformer_config_class(**lora_config.megatron_config)
+            megatron_config = transformer_config_class(**config.megatron_config)
         megatron_kwargs["megatron_config"] = megatron_config
         if megatron_kwargs["fan_in_fan_out"]:
             warnings.warn(
@@ -342,9 +333,13 @@ def dispatch_megatron(
                 "or `RowParallelLinear`. "
                 "Setting fan_in_fan_out to False."
             )
-            megatron_kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
+            megatron_kwargs["fan_in_fan_out"] = config.fan_in_fan_out = False
         new_module = LoraParallelLinear(
-            base_layer=target, adapter_name=adapter_name, backend=megatron_core.tensor_parallel, **megatron_kwargs
+            base_layer=target,
+            adapter_name=adapter_name,
+            config=config,
+            backend=megatron_core.tensor_parallel,
+            **megatron_kwargs,
         )
 
     return new_module

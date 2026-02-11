@@ -15,7 +15,7 @@
 from setuptools import find_packages, setup
 
 
-VERSION = "0.18.1.dev0"
+VERSION = "0.18.2.dev0"
 
 extras = {}
 extras["quality"] = [
@@ -25,6 +25,7 @@ extras["quality"] = [
 ]
 extras["docs_specific"] = [
     "black",  # doc-builder has an implicit dependency on Black, see huggingface/doc-builder#434
+    "requests",  # doc-builder has an implicit dependency on requests (setup.py doesn't mention it, pyproject does)
     "hf-doc-builder",
 ]
 extras["dev"] = extras["quality"] + extras["docs_specific"]

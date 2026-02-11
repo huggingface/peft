@@ -36,23 +36,9 @@ def is_bnb_4bit_available() -> bool:
 
 
 @lru_cache
-def is_auto_gptq_available():
-    if importlib.util.find_spec("auto_gptq") is not None:
-        AUTOGPTQ_MINIMUM_VERSION = packaging.version.parse("0.5.0")
-        version_autogptq = packaging.version.parse(importlib_metadata.version("auto_gptq"))
-        if AUTOGPTQ_MINIMUM_VERSION <= version_autogptq:
-            return True
-        else:
-            raise ImportError(
-                f"Found an incompatible version of auto-gptq. Found version {version_autogptq}, "
-                f"but only versions above {AUTOGPTQ_MINIMUM_VERSION} are supported"
-            )
-
-
-@lru_cache
 def is_gptqmodel_available():
     if importlib.util.find_spec("gptqmodel") is not None:
-        GPTQMODEL_MINIMUM_VERSION = packaging.version.parse("2.0.0")
+        GPTQMODEL_MINIMUM_VERSION = packaging.version.parse("5.6.12")
         OPTIMUM_MINIMUM_VERSION = packaging.version.parse("1.24.0")
         version_gptqmodel = packaging.version.parse(importlib_metadata.version("gptqmodel"))
         if GPTQMODEL_MINIMUM_VERSION <= version_gptqmodel:
@@ -101,11 +87,6 @@ def is_torch_tpu_available(check_device=True):
 @lru_cache
 def is_aqlm_available():
     return importlib.util.find_spec("aqlm") is not None
-
-
-@lru_cache
-def is_auto_awq_available():
-    return importlib.util.find_spec("awq") is not None
 
 
 @lru_cache

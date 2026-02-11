@@ -191,7 +191,7 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     elif hasattr(module, "codebooks") and module.__class__.__name__ == "QuantizedLinear":
         # AQLM QuantLinear
         in_features, out_features = module.in_features, module.out_features
-    elif hasattr(module, "w_bit") and module.__class__.__name__ == "WQLinear_GEMM":
+    elif hasattr(module, "bits") and module.__class__.__name__ == "AwqGEMMQuantLinear":
         # Awq layers
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "EetqLinear":
@@ -1222,6 +1222,16 @@ class BaseTuner(nn.Module, ABC):
                 )
                 warnings.warn(msg)
 
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        """
+        Whether it is possible for the adapter of this model to be converted to LoRA.
+
+        Normally, this works if the PEFT method is additive, i.e. W' = W_base + delta_weight.
+        """
+        return all(
+            module.supports_lora_conversion() for module in self.modules() if isinstance(module, BaseTunerLayer)
+        )
+
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
         try:
@@ -1559,6 +1569,14 @@ class BaseTunerLayer(ABC):
         if (not cast_input_dtype_enabled) or (x.dtype == dtype):
             return x
         return x.to(dtype=dtype)
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        """
+        Whether it is possible for this layer type to be converted to LoRA.
+
+        Normally, this works if the PEFT method is additive, i.e. W' = W_base + delta_weight.
+        """
+        return False
 
 
 def _find_minimal_target_modules(
@@ -2039,3 +2057,17 @@ def set_requires_grad(model, adapter_names: str | Sequence[str], requires_grad: 
     for module in model.modules():
         if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
             module.set_requires_grad(adapter_names=adapter_names, requires_grad=requires_grad)
+
+
+def get_device_map(model) -> dict:
+    if hasattr(model, "hf_device_map"):
+        # Multi-device case: accelerate dispatch is active and exposes hf_device_map
+        device_map = model.hf_device_map
+    else:
+        # Single-device case:
+        # Recent Transformers versions intentionally skip accelerate hooks when the
+        # device_map resolves to a single device (e.g. "cpu" or one GPU), so
+        # hf_device_map is not set. All parameters are guaranteed to be on the
+        # same device, which can be inferred from the first parameter.
+        device_map = {"": next(model.parameters()).device}
+    return device_map
