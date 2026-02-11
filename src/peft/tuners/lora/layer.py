@@ -1133,8 +1133,8 @@ class Embedding(nn.Module, LoraLayer):
             output_tensor = output_tensor.to(dtype=dtype)
 
             # cast back the weights
-            self.lora_embedding_A[adapter] = weight_A.to(dtype)
-            self.lora_embedding_B[adapter] = weight_B.to(dtype)
+            self.lora_embedding_A[adapter].data = weight_A.to(dtype)
+            self.lora_embedding_B[adapter].data = weight_B.to(dtype)
 
         return output_tensor
 
