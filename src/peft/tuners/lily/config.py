@@ -38,7 +38,7 @@ class LilyConfig(PeftConfig):
 
     r: int = field(default=4, metadata={"help": "Lily's rank"})
     lily_dropout: float = field(default=0.0, metadata={"help": "dropout during training"})
-    lily_scaling: int = field(default=1.0, metadata={"help": "scaling factor for lily"})
+    lily_scaling: float = field(default=1.0, metadata={"help": "scaling factor for lily"})
     num_A: int = field(default=4, metadata={"help": "Lily's number of adapter A"})
     num_B: int = field(default=4, metadata={"help": "Lily's number of adapter B"})
     target_modules: Optional[Union[list[str], str]] = field(
