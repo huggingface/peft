@@ -50,7 +50,9 @@ def log_validation(val_dataset, text_encoder, unet, controlnet, args, accelerato
             [validation_image],
             num_inference_steps=50,
             generator=generator,
-        )[0][0]
+        )[
+            0
+        ][0]
 
         image_logs.append(
             {

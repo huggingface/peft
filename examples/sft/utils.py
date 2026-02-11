@@ -160,9 +160,11 @@ def create_and_prepare_model(args, data_args, training_args):
             r=args.lora_r,
             bias="none",
             task_type="CAUSAL_LM",
-            target_modules=args.lora_target_modules.split(",")
-            if args.lora_target_modules != "all-linear"
-            else args.lora_target_modules,
+            target_modules=(
+                args.lora_target_modules.split(",")
+                if args.lora_target_modules != "all-linear"
+                else args.lora_target_modules
+            ),
         )
 
     special_tokens = None
@@ -208,9 +210,11 @@ def create_and_prepare_model(args, data_args, training_args):
             lora_alpha=args.lora_alpha,
             lora_dropout=args.lora_dropout,
             r=args.lora_r,
-            target_modules=args.lora_target_modules.split(",")
-            if args.lora_target_modules != "all-linear"
-            else args.lora_target_modules,
+            target_modules=(
+                args.lora_target_modules.split(",")
+                if args.lora_target_modules != "all-linear"
+                else args.lora_target_modules
+            ),
             use_gradient_checkpointing=training_args.gradient_checkpointing,
             random_state=training_args.seed,
             max_seq_length=training_args.max_length,
