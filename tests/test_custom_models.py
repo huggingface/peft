@@ -1365,6 +1365,10 @@ class ModelEmbConv1D(nn.Module):
         super().__init__()
         self.emb = nn.Embedding(emb_size, 5)
         self.conv1d = Conv1D(1, 5)
+        # make sure that we have a good signal-to-noise ratio
+        # since apparently CUDA ReLU clips the gradient at a
+        # certain point.
+        self.conv1d.weight.data += 10
         self.relu = nn.ReLU()
         self.flat = nn.Flatten()
         self.lin0 = nn.Linear(10, 2)
