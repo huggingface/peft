@@ -3361,6 +3361,40 @@ class TestPeftCustomModel(PeftCommonTester):
                 # windows error
                 pass
 
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_embedding_get_delta_weight_preserves_parameter_type(self, dtype):
+        # Test that Embedding.get_delta_weight does not replace nn.Parameter with plain tensor
+        # when running on CPU with float16/bfloat16 weights (cast_to_fp32 path).
+        # See: https://github.com/huggingface/peft/pull/3038
+        model = ModelEmbConv1D(emb_size=100)
+        config = LoraConfig(target_modules=["emb"], init_lora_weights=False)
+        peft_model = get_peft_model(model, config)
+        # Cast entire model (including LoRA params) to the target dtype
+        peft_model = peft_model.to(dtype)
+
+        emb_layer = peft_model.base_model.model.emb
+
+        # Ensure weights are the expected dtype and on CPU (triggers cast_to_fp32)
+        assert emb_layer.lora_embedding_A["default"].dtype == dtype
+        assert emb_layer.lora_embedding_B["default"].dtype == dtype
+        assert emb_layer.lora_embedding_A["default"].device.type == "cpu"
+
+        # Verify they are nn.Parameter before calling get_delta_weight
+        assert isinstance(emb_layer.lora_embedding_A["default"], nn.Parameter)
+        assert isinstance(emb_layer.lora_embedding_B["default"], nn.Parameter)
+
+        # Call get_delta_weight, which internally casts to fp32 and back
+        emb_layer.get_delta_weight("default")
+
+        # After the call, lora_embedding_A and lora_embedding_B must still be nn.Parameter
+        assert isinstance(emb_layer.lora_embedding_A["default"], nn.Parameter), (
+            "lora_embedding_A was replaced with a plain tensor after get_delta_weight"
+        )
+        assert isinstance(emb_layer.lora_embedding_B["default"], nn.Parameter), (
+            "lora_embedding_B was replaced with a plain tensor after get_delta_weight"
+        )
+
+
     @pytest.mark.parametrize(
         "config0",
         [
