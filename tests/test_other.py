@@ -536,6 +536,12 @@ class TestGetNoSplitModules:
         model_id = "hf-internal-testing/tiny-random-LlavaForConditionalGeneration"
         model = LlavaForConditionalGeneration.from_pretrained(model_id)
 
+        # model._no_split_modules is recursively generated as of transformers 5.1.0 so
+        # depending on which transformers version we have in the test environment the
+        # attribute will deliver either the same result as `_get_no_split_modules`
+        # or an empty list.
+        #
+        # TODO remove this distinction once transformers <5.1.0 is not supported anymore
         if not is_transformers_ge_v5_1_0:
             # sanity check: just visiting the model itself is not enough:
             assert model._no_split_modules == []
