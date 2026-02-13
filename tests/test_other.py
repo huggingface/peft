@@ -18,8 +18,6 @@ from unittest.mock import patch
 
 import pytest
 import torch
-import transformers
-from packaging import version
 from torch import nn
 from transformers import (
     AutoModelForCausalLM,
@@ -29,12 +27,10 @@ from transformers import (
 )
 
 from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model
+from peft.import_utils import is_transformers_ge_v5_1_0
 from peft.utils.other import ModulesToSaveWrapper, _get_module_names_tied_with_embedding, _get_no_split_modules
 
 from .testing_utils import hub_online_once
-
-
-is_transformers_ge_v5_1_0 = version.parse(transformers.__version__) >= version.parse("5.1.0")
 
 
 class ModelWithModuleDict(nn.Module):

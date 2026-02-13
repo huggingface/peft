@@ -37,8 +37,8 @@ from peft.import_utils import (
     is_hqq_available,
     is_optimum_available,
     is_torchao_available,
+    is_transformers_ge_v5,
 )
-from peft.utils import is_transformers_ge_v5
 
 
 # Globally shared model cache used by `hub_online_once`.

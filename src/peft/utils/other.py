@@ -36,7 +36,7 @@ from packaging import version
 from safetensors.torch import storage_ptr, storage_size
 from transformers import PreTrainedModel
 
-from ..import_utils import is_gptqmodel_available, is_torch_tpu_available
+from ..import_utils import is_gptqmodel_available, is_torch_tpu_available, is_transformers_ge_v5_1_0
 from .constants import (
     CONFIG_NAME,
     EMBEDDING_LAYER_NAMES,
@@ -76,8 +76,6 @@ if version.parse(accelerate.__version__) >= version.parse("0.29.0"):
     from accelerate.utils import is_mlu_available
 
     mlu_available = is_mlu_available()
-
-is_transformers_ge_v5_1_0 = version.parse(transformers.__version__) >= version.parse("5.1.0")
 
 __all__ = [
     "CONFIG_NAME",
