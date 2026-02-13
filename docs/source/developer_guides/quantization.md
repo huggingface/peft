@@ -108,6 +108,7 @@ There are currently two intended ways of applying LoftQ:
    `BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")` and load the LoftQ-initialized adapter on top
 2. load the quantized base model, initialize a PEFT model with LoRA (no loftq) and use `replace_lora_weights_loftq` to
    apply LoftQ initialization by streaming the reference weights of the non-quantized base model from the weights file
+   (explained further in the next section)
 
 #### Using `replace_lora_weights_loftq` for on-the-fly LoftQ application
 
