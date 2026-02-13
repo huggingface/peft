@@ -71,9 +71,6 @@ class AdaLoraConfig(LoraConfig):
         super().__post_init__()
         self.peft_type = PeftType.ADALORA
 
-        if self.use_dora:
-            raise ValueError(f"{self.peft_type} does not support DoRA.")
-
         if self.loftq_config:
             raise ValueError(f"{self.peft_type} does not support LOFTQ.")
 
