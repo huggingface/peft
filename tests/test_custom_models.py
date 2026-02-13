@@ -54,6 +54,7 @@ from peft import (
     RoadConfig,
     ShiraConfig,
     TaskType,
+    TinyLoraConfig,
     TrainableTokensConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -623,6 +624,31 @@ TEST_CASES = [
         "EmbConv1D",
         VeraConfig,
         {"target_modules": ["conv1d"]},
+    ),
+    ############
+    # TinyLoRA #
+    ############
+    ("Vanilla MLP 1 TinyLoRA", "MLP", TinyLoraConfig, {"target_modules": "lin0", "r": 2, "u": 16}),
+    ("Vanilla MLP 2 TinyLoRA", "MLP", TinyLoraConfig, {"target_modules": ["lin0"], "r": 2, "u": 16}),
+    ("Vanilla MLP 3 TinyLoRA", "MLP", TinyLoraConfig, {"target_modules": ["lin1"], "r": 2, "u": 16}),
+    ("Vanilla MLP 4 TinyLoRA", "MLP", TinyLoraConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "u": 32}),
+    (
+        "Vanilla MLP 5 TinyLoRA",
+        "MLP",
+        TinyLoraConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2, "u": 16},
+    ),
+    (
+        "Vanilla MLP TinyLoRA ntie",
+        "MLP",
+        TinyLoraConfig,
+        {"target_modules": ["lin0", "lin1"], "r": 2, "u": 8, "ntie": 2},
+    ),
+    (
+        "Embedding + transformers Conv1D 1 TinyLoRA",
+        "EmbConv1D",
+        TinyLoraConfig,
+        {"target_modules": ["conv1d"], "r": 2, "u": 16},
     ),
     #############
     # FourierFT #
@@ -2205,6 +2231,10 @@ class TestPeftCustomModel(PeftCommonTester):
             config_kwargs = config_kwargs.copy()
             # override the default value and make PEFT operation a no-op
             config_kwargs["init_weights"] = True
+        if issubclass(config_cls, TinyLoraConfig):
+            config_kwargs = config_kwargs.copy()
+            # Set init_weights=False so TinyLoRA functions as an identity operation
+            config_kwargs["init_weights"] = False
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -2224,6 +2254,9 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, VBLoRAConfig):
             # initialize `vblora_vector_bank` so it can be trained
             model._init_vblora_vector_bank(config, "default")
+        if issubclass(config_cls, TinyLoraConfig):
+            # Re-initialize tinylora_v so it can be trained
+            model.base_model._init_tinylora_v(config, "default")
         model.train()
         # EmbConv1D is slow to learn for some reason
         lr = 0.01 if model_id != "EmbConv1D" else 1.0
@@ -2271,6 +2304,10 @@ class TestPeftCustomModel(PeftCommonTester):
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        if issubclass(config_cls, TinyLoraConfig):
+            config_kwargs = config_kwargs.copy()
+            # Set init_weights=False so TinyLoRA functions as an identity operation
+            config_kwargs["init_weights"] = False
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -2285,6 +2322,9 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, VBLoRAConfig):
             # initialize `vblora_vector_bank` so it can be trained
             model._init_vblora_vector_bank(config, "default")
+        if issubclass(config_cls, TinyLoraConfig):
+            # Re-initialize tinylora_v so it can be trained
+            model.base_model._init_tinylora_v(config, "default")
         model.train()
         if isinstance(config_cls, LNTuningConfig):
             # LayerNorm tuning is slow to learn
