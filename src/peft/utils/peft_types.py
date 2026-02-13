@@ -83,6 +83,7 @@ class PeftType(str, enum.Enum):
     DELORA = "DELORA"
     GRALORA = "GRALORA"
     CARTRIDGE = "CARTRIDGE"
+    PSOFT = "PSOFT"
 
 
 class TaskType(str, enum.Enum):

@@ -124,9 +124,9 @@ def main(path_peft_model: str, rank: int | float | None) -> None:
     model.print_trainable_parameters()
 
     load_result = set_peft_model_state_dict(model, lora_state_dict)
-    assert not load_result.unexpected_keys, (
-        f"Unexpected keys when loading LoRA state dict: {load_result.unexpected_keys}"
-    )
+    assert (
+        not load_result.unexpected_keys
+    ), f"Unexpected keys when loading LoRA state dict: {load_result.unexpected_keys}"
 
     del lora_state_dict
     model.eval()

@@ -50,6 +50,7 @@ from peft import (
     PromptEncoderConfig,
     PromptTuningConfig,
     PromptTuningInit,
+    PSOFTConfig,
     RoadConfig,
     ShiraConfig,
     TaskType,
@@ -322,6 +323,14 @@ ALL_CONFIGS = [
             "task_type": "CAUSAL_LM",
         },
     ),
+    (
+        PSOFTConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "r": 4,
+            "psoft_alpha": 4,
+        },
+    ),
 ]
 
 
@@ -337,8 +346,9 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         C3AConfig,
         MissConfig,
         DeloraConfig,
+        PSOFTConfig,
     ]:
-        pytest.skip("Skipping BOFT/HRA/OFT/Bone/Road/SHiRA/C3A/MiSS/OSF/DeLoRA for GPT2LMHeadModel")
+        pytest.skip("Skipping BOFT/HRA/OFT/Bone/Road/SHiRA/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel")
 
 
 def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
@@ -744,9 +754,9 @@ class TestDecoderModels(PeftCommonTester):
             and layers[2].mlp.up_proj.lora_A.default.weight.data.storage().data_ptr()
             != layers[3].mlp.up_proj.lora_A.default.weight.data.storage().data_ptr()
         ), "Expected all LoRA adapters to have distinct weights"
-        assert len([n for n, _ in model.named_parameters() if ".lora_A." in n]) == 8, (
-            "Expected 8 LoRA adapters since we are adding one each for up and down."
-        )
+        assert (
+            len([n for n, _ in model.named_parameters() if ".lora_A." in n]) == 8
+        ), "Expected 8 LoRA adapters since we are adding one each for up and down."
         self._test_prepare_for_training(model_id, LoraConfig, config_kwargs.copy())
         self._test_generate(model_id, LoraConfig, config_kwargs.copy())
 

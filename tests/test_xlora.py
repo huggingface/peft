@@ -423,9 +423,9 @@ class TestXlora:
 
         for scaling in captured_data:
             weight_sums = scaling.sum(dim=-1)
-            assert torch.allclose(weight_sums, torch.ones_like(weight_sums), atol=1e-5), (
-                "Per-token scaling weights are not normalized to sum to 1."
-            )
+            assert torch.allclose(
+                weight_sums, torch.ones_like(weight_sums), atol=1e-5
+            ), "Per-token scaling weights are not normalized to sum to 1."
 
     def test_xlora_embed_scale_is_applied(self, tmp_path):
         """Test that X-LoRA correctly handles embeddings with scaling (e.g., Gemma3)."""

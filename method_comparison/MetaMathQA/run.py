@@ -30,6 +30,7 @@ from functools import partial
 from typing import Any, Literal, Optional
 
 import torch
+from data import get_train_valid_test_datasets, get_wiki_small
 from torch import nn
 from torch.amp import GradScaler, autocast
 from tqdm import tqdm
@@ -53,7 +54,6 @@ from utils import (
     validate_experiment_path,
 )
 
-from data import get_train_valid_test_datasets, get_wiki_small
 from peft import AdaLoraConfig, PeftConfig
 from peft.utils import CONFIG_NAME, infer_device
 
@@ -117,7 +117,9 @@ def calculate_mean_per_token_loss(model, tokenizer, rows: list[str], batch_size:
         for logit, target, mask in zip(logits, batch["input_ids"], batch["attention_mask"]):
             # calculate loss per token so that the mean is not skewed by sequence length of sample, padding from left
             num_tokens = mask.sum()
-            token_losses = torch.nn.functional.cross_entropy(logit[-num_tokens:], target[-num_tokens:], reduction="none")
+            token_losses = torch.nn.functional.cross_entropy(
+                logit[-num_tokens:], target[-num_tokens:], reduction="none"
+            )
             losses.extend(loss.item() for loss in token_losses)
     return torch.tensor(losses).mean().item()
 
@@ -499,6 +501,7 @@ if __name__ == "__main__":
         def print_verbose(*args, **kwargs) -> None:
             kwargs["file"] = sys.stderr
             print(*args, **kwargs)
+
     else:
 
         def print_verbose(*args, **kwargs) -> None:

@@ -4983,12 +4983,12 @@ class TestWeightTying:
 
         model = get_peft_model(model, embed_token_config)
 
-        assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper), (
-            "Embed tokens is not added in Modules to Save"
-        )
-        assert type(model.base_model.model.model.embed_tokens) is type(model.base_model.model.lm_head), (
-            "Embed tokens and LM head types are not same"
-        )
+        assert isinstance(
+            model.base_model.model.model.embed_tokens, ModulesToSaveWrapper
+        ), "Embed tokens is not added in Modules to Save"
+        assert type(model.base_model.model.model.embed_tokens) is type(
+            model.base_model.model.lm_head
+        ), "Embed tokens and LM head types are not same"
 
         # Validating that all model parameters are same
         embed_np = dict(model.base_model.model.model.embed_tokens.named_parameters())
@@ -5008,12 +5008,12 @@ class TestWeightTying:
         with pytest.warns(UserWarning, match="no tied modules were found in the model"):
             model = get_peft_model(model, embed_token_config)
 
-        assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper), (
-            "Embed tokens is not added in Modules to Save"
-        )
-        assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear), (
-            "LM head is not of type nn.linear"
-        )
+        assert isinstance(
+            model.base_model.model.model.embed_tokens, ModulesToSaveWrapper
+        ), "Embed tokens is not added in Modules to Save"
+        assert isinstance(
+            model.base_model.model.lm_head, torch.nn.modules.linear.Linear
+        ), "LM head is not of type nn.linear"
 
     def test_not_weight_tying_tied_model_lora(self):
         model = self.get_lm_model()
@@ -5025,12 +5025,12 @@ class TestWeightTying:
         with pytest.warns(UserWarning, match="`ensure_weight_tying` is not set to True"):
             model = get_peft_model(model, embed_token_config)
 
-        assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper), (
-            "Embed tokens is not added in Modules to Save"
-        )
-        assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear), (
-            "LM head is not of type nn.linear"
-        )
+        assert isinstance(
+            model.base_model.model.model.embed_tokens, ModulesToSaveWrapper
+        ), "Embed tokens is not added in Modules to Save"
+        assert isinstance(
+            model.base_model.model.lm_head, torch.nn.modules.linear.Linear
+        ), "LM head is not of type nn.linear"
 
     def test_weight_tying_tied_model_no_embed_lora(self):
         model = self.get_lm_model()
@@ -5061,9 +5061,9 @@ class TestWeightTying:
         with pytest.warns(UserWarning, match="no implementation exists to tie the adapters"):
             model = get_peft_model(model, embed_token_config)
 
-        assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper), (
-            "Embed tokens is not added in Modules to Save"
-        )
-        assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear), (
-            "LM head is not of type nn.linear"
-        )
+        assert isinstance(
+            model.base_model.model.model.embed_tokens, ModulesToSaveWrapper
+        ), "Embed tokens is not added in Modules to Save"
+        assert isinstance(
+            model.base_model.model.lm_head, torch.nn.modules.linear.Linear
+        ), "LM head is not of type nn.linear"
