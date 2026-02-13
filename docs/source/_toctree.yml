@@ -122,6 +122,8 @@
       title: GraLoRA
     - local: package_reference/vblora
       title: VB-LoRA
+    - local: package_reference/hira
+      title: HiRA
     - local: package_reference/hra
       title: HRA
     - local: package_reference/cpt
