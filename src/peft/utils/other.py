@@ -1149,6 +1149,7 @@ def _get_no_split_modules(model) -> set[str]:
         # See https://github.com/huggingface/transformers/commit/36ec3bfa33ebf6c3b38a1d6808292aeea4aae84d
         return model._no_split_modules
 
+    # TODO remove once transformers <5.1.0 is not supported anymore
     modules_to_check = [model]
     while len(modules_to_check) > 0:
         module = modules_to_check.pop(-1)
