@@ -17,14 +17,13 @@ import warnings
 import torch
 from transformers.pytorch_utils import Conv1D
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_gptqmodel_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.lora import LoraConfig, LoraModel
-from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTunerLayer, get_device_map
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
     _freeze_adapter,
     _get_submodules,
-    get_auto_gptq_quant_linear,
     get_gptqmodel_quant_linear,
     get_quantization_config,
 )
@@ -119,9 +118,6 @@ class AdaLoraModel(LoraModel):
         kwargs = {
             "r": lora_config.init_r,
             "lora_alpha": lora_config.lora_alpha,
-            "lora_dropout": lora_config.lora_dropout,
-            "fan_in_fan_out": lora_config.fan_in_fan_out,
-            "init_lora_weights": lora_config.init_lora_weights,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -137,7 +133,7 @@ class AdaLoraModel(LoraModel):
 
         # If it is not an AdaLoraLayer, create a new module, else update it with new adapters
         if not isinstance(target, AdaLoraLayer):
-            device_map = self.model.hf_device_map if hasattr(self.model, "hf_device_map") else None
+            device_map = get_device_map(self.model)
             new_module = self._create_new_module(lora_config, adapter_name, target, device_map=device_map, **kwargs)
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
@@ -148,8 +144,7 @@ class AdaLoraModel(LoraModel):
                 adapter_name,
                 lora_config.init_r,
                 lora_config.lora_alpha,
-                lora_config.lora_dropout,
-                lora_config.init_lora_weights,
+                config=lora_config,
             )
 
     @staticmethod
@@ -164,10 +159,7 @@ class AdaLoraModel(LoraModel):
 
         gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
 
-        if is_gptqmodel_available():
-            QuantLinear = get_gptqmodel_quant_linear(gptq_quantization_config, device_map=device_map)
-        else:
-            QuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
+        QuantLinear = get_gptqmodel_quant_linear(gptq_quantization_config, device_map=device_map)
 
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
@@ -185,7 +177,7 @@ class AdaLoraModel(LoraModel):
                     "index": target_base_layer.index,
                 }
             )
-            new_module = SVDLinear8bitLt(target, adapter_name, **kwargs)
+            new_module = SVDLinear8bitLt(target, adapter_name, config=lora_config, **kwargs)
         elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target_base_layer, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
@@ -195,30 +187,30 @@ class AdaLoraModel(LoraModel):
                     "quant_type": target_base_layer.weight.quant_type,
                 }
             )
-            new_module = SVDLinear4bit(target, adapter_name, **fourbit_kwargs)
+            new_module = SVDLinear4bit(target, adapter_name, config=lora_config, **fourbit_kwargs)
         elif QuantLinear is not None and isinstance(target, QuantLinear):
             new_module = SVDQuantLinear(target, adapter_name, **kwargs)
         else:
             if isinstance(target_base_layer, torch.nn.Linear):
-                if kwargs["fan_in_fan_out"]:
+                if lora_config.fan_in_fan_out:
                     warnings.warn(
                         "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                         "Setting fan_in_fan_out to False."
                     )
-                    kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
+                    lora_config.fan_in_fan_out = False
             elif isinstance(target_base_layer, Conv1D):
-                if not kwargs["fan_in_fan_out"]:
+                if not lora_config.fan_in_fan_out:
                     warnings.warn(
                         "fan_in_fan_out is set to False but the target module is `Conv1D`. "
                         "Setting fan_in_fan_out to True."
                     )
-                    kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = True
+                    lora_config.fan_in_fan_out = True
             else:
                 raise ValueError(
                     f"Target module {target} is not supported. "
                     f"Currently, only `torch.nn.Linear` and `Conv1D` are supported."
                 )
-            new_module = SVDLinear(target, adapter_name, **kwargs)
+            new_module = SVDLinear(target, adapter_name, config=lora_config, **kwargs)
 
         return new_module
 

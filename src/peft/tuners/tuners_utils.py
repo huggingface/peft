@@ -161,8 +161,7 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     this function returns a valid result does not imply that the layer type is supported.
     """
     if isinstance(module, nn.Linear):
-        torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
-        if torch_supports_dtensor and isinstance(module.weight, torch.distributed.tensor.DTensor):
+        if _torch_supports_distributed and isinstance(module.weight, torch.distributed.tensor.DTensor):
             # If Tensor Parallel is used, the weight is sharded, so we need to get the local shape
             out_features, in_features = module.weight.to_local().shape
         else:
@@ -192,7 +191,7 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     elif hasattr(module, "codebooks") and module.__class__.__name__ == "QuantizedLinear":
         # AQLM QuantLinear
         in_features, out_features = module.in_features, module.out_features
-    elif hasattr(module, "w_bit") and module.__class__.__name__ == "WQLinear_GEMM":
+    elif hasattr(module, "bits") and module.__class__.__name__ == "AwqGEMMQuantLinear":
         # Awq layers
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "EetqLinear":
@@ -773,7 +772,9 @@ class BaseTuner(nn.Module, ABC):
         module_names: set[str] = set()
         if state_dict is not None:
             prefix = PEFT_TYPE_TO_PREFIX_MAPPING[peft_config.peft_type]
-            module_names = {k.rsplit("." + prefix, 1)[0] for k in state_dict}
+            # Find the module name from the state_dict. Also defensively remove '_orig_mod.', which might be inserted if
+            # the model was torch.compiled beforehand
+            module_names = {k.rsplit("." + prefix, 1)[0].removeprefix("_orig_mod.") for k in state_dict}
 
         for key, module in named_modules:
             if not key:
@@ -806,6 +807,8 @@ class BaseTuner(nn.Module, ABC):
                             peft_config, adapter_name, target, target_name, parent, current_key=key
                         )
             else:
+                # defensively remove _orig_mod prefix in case the model is compiled
+                key = key.removeprefix("_orig_mod.")
                 # use the state_dict to match modules instead
                 if key not in module_names:
                     unmatched_modules.append(key)
@@ -1219,6 +1222,16 @@ class BaseTuner(nn.Module, ABC):
                 )
                 warnings.warn(msg)
 
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        """
+        Whether it is possible for the adapter of this model to be converted to LoRA.
+
+        Normally, this works if the PEFT method is additive, i.e. W' = W_base + delta_weight.
+        """
+        return all(
+            module.supports_lora_conversion() for module in self.modules() if isinstance(module, BaseTunerLayer)
+        )
+
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
         try:
@@ -1476,24 +1489,44 @@ class BaseTunerLayer(ABC):
                 if key in adapter_names_set:
                     layer.requires_grad_(requires_grad)
 
+    def _get_base_layer_device_and_dtype(self, base_layer):
+        """
+        Helper function to determine the device and dtype of the base layer. If not possible to determine, return None.
+        """
+        device, dtype = None, None
+
+        # check weight and qweight (for GPTQ)
+        for weight_name in ("weight", "qweight"):
+            weight = getattr(base_layer, weight_name, None)
+            if weight is not None:
+                device = weight.device
+                dtype = weight.dtype
+                break
+
+        if hasattr(base_layer, "compute_dtype"):  # bnb Linear4bitLt
+            dtype = base_layer.compute_dtype
+
+        return device, dtype
+
     def _move_adapter_to_device_of_base_layer(self, adapter_name: str, device: Optional[torch.device] = None) -> None:
         """
-        Move the adapter of the given name to the device of the base layer.
+        Move the adapter of the given name to the device, and possibly dtype, of the base layer.
         """
-        if device is None:
-            base_layer = self.get_base_layer()
-            if isinstance(base_layer, nn.MultiheadAttention):
-                base_layer = base_layer.out_proj
-            # check weight and qweight (for GPTQ)
-            for weight_name in ("weight", "qweight"):
-                weight = getattr(base_layer, weight_name, None)
-                if weight is not None:
-                    device = weight.device
-                    dtype = weight.dtype
-                    break
-            else:
-                # no break encountered: could not determine the device
-                return
+        base_layer = self.get_base_layer()
+        if isinstance(base_layer, nn.MultiheadAttention):
+            base_layer = base_layer.out_proj
+        base_layer_device, base_layer_dtype = self._get_base_layer_device_and_dtype(base_layer)
+
+        target_device = device if device is not None else base_layer_device
+        if target_device is None:
+            # could not determine device
+            return
+
+        target_dtype = None
+        if base_layer_dtype is not None:
+            # don't cast to int dtype
+            if base_layer_dtype.is_floating_point or base_layer_dtype.is_complex:
+                target_dtype = base_layer_dtype
 
         meta = torch.device("meta")
 
@@ -1509,11 +1542,10 @@ class BaseTunerLayer(ABC):
             if any(p.device == meta for p in adapter_layer.parameters()):
                 continue
 
-            # TODO: weight is not necessarily defined here, leading to a NameError, fix that
-            if weight.dtype.is_floating_point or weight.dtype.is_complex:
-                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device, dtype=dtype)
+            if target_dtype is not None:
+                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(target_device, dtype=target_dtype)
             else:
-                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device)
+                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(target_device)
 
     @overload
     def _cast_input_dtype(self, x: None, dtype: torch.dtype) -> None: ...
@@ -1537,6 +1569,14 @@ class BaseTunerLayer(ABC):
         if (not cast_input_dtype_enabled) or (x.dtype == dtype):
             return x
         return x.to(dtype=dtype)
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        """
+        Whether it is possible for this layer type to be converted to LoRA.
+
+        Normally, this works if the PEFT method is additive, i.e. W' = W_base + delta_weight.
+        """
+        return False
 
 
 def _find_minimal_target_modules(
@@ -2074,7 +2114,6 @@ class BufferedMonteCLoRASampler:
 
         sample = self.buffer[self.index]
         self.index += 1
-
         return sample
 
     def stop(self):
@@ -2208,28 +2247,46 @@ class MonteCLoRASampler(nn.Module):
             tuple: (variational_noise, expert_weights)
         """
         if self.training and self.mc_training:
+            # DYNAMIC DEVICE DETECTION
+            # Use std_prior (nn.Parameter) as the source of truth for the current device
             current_device = self.std_prior.device
 
             sample = self.sampler.get() if self.sampler else None
+
             if sample is not None:
+                # FIX: Explicitly move samples from buffer to the current GPU
                 z_mvn = sample["z_mvn"].to(current_device)
                 z_wishart = sample["z_wishart"].to(current_device)
                 z_dirichlet = sample["z_dirichlet"].to(current_device)
             else:
+                # Fallback if sampler fails
                 z_mvn = torch.randn((self.monteclora_n, self.in_features, self.out_features), device=current_device)
+
+                # FIX: Explicitly move Bartlett sampling result to current device
                 z_wishart = self.sampler.wish_sampler._bartlett_sampling(torch.Size()).to(current_device)
+
                 z_dirichlet = torch.randn(self.monteclora_n, device=current_device)
 
+            # Reparameterization steps
             std = torch.diag(torch.exp(self.std_prior))
+
+            # This line caused the error before; now both inputs are guaranteed on current_device
             gaussian_var = self.wishart_reparameterization(std, z_wishart)
+
+            # Update running buffer
             self.gaussian_var_prior = gaussian_var
+
+            # Calculate Variations
             var = self.multivariate_reparameterization(z_mvn, gaussian_var)
+
+            # Calculate Weights
             expert_weights_logits = self.dirichlet_reparameterization(
                 torch.exp(self.expert_weights_prior), z_dirichlet
             )
             expert_weights = torch.softmax(expert_weights_logits, dim=-1)
             self.expert_weights = expert_weights
-            return 10 * var, 10 * self.expert_weights
+
+            return var, self.expert_weights
         else:
             return -1, -1
 

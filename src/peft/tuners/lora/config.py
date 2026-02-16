@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import importlib
 import warnings
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
@@ -117,6 +118,78 @@ class ArrowConfig:
             raise ValueError("top_k cannot be negative.")
         if self.router_temperature <= 0:
             raise ValueError("router_temperature must be greater than 0.")
+
+
+@dataclass
+class BdLoraConfig:
+    """
+    Configuration for BD-LoRA (Block-Diagonal LoRA). BD-LoRA is a LoRA variant that can be used for efficient
+    multi-LoRA serving in inference engines. The speedup results from reduced inter-GPU communication by setting
+    certain LoRA modules to be block-diagonal.
+
+    To determine which LoRA factors should be set as block-diagonal, follow these guidelines:
+    - For attention, set
+      - Q,K,V projections to be LoRA-B block-diagonal
+      - Out projection to be LoRA-A block-diagonal
+    - For MLPs, set
+      - Up, Gate projection to be LoRA-B block-diagonal
+      - Down projection to be LoRA-A block-diagonal
+
+    For other modules and/or architectures, look into the code of your target inference engine. Modules that are
+    row-sharded should have LoRA-A block-diagonal, modules that are column-sharded should have LoRA-B block-diagonal.
+
+    Args:
+        target_modules_bd_a:
+            Modules where the LoRA-A is block-diagonal. Matches each pattern in the list against the module name via
+            `pattern is in target_name`. Example: ['up_proj', 'q_proj', 'v_proj', 'k_proj']
+        target_modules_bd_b:
+            Modules where the LoRA-B is block-diagonal. Matches each pattern in the list against the module name via
+            `pattern is in target_name`. Example: ['out_proj', 'down_proj']
+        nblocks: Number of blocks in block-diagonal matrices
+    """
+
+    target_modules_bd_a: Optional[list[str]] = field(
+        default=None,
+        metadata={
+            "help": "Modules where the LoRA-A is block-diagonal. Matches each pattern in the list against the "
+            "module name via `pattern is in target_name`. "
+            "Usually one should specify the q,k,v,up and gate projections here. "
+            "Example: ['up_proj', 'q_proj', 'v_proj', 'k_proj']"
+        },
+    )
+    target_modules_bd_b: Optional[list[str]] = field(
+        default=None,
+        metadata={
+            "help": "Modules where the LoRA-B is block-diagonal. Matches each pattern in the list against the module "
+            "name via `pattern is in target_name`. Usually, one should specify out and down projections here. "
+            "Example: ['out_proj', 'down_proj']"
+        },
+    )
+    nblocks: int = (
+        field(
+            default=1,
+            metadata={
+                "help": "Number of blocks each block-diagonal matrix has. If using BD-LoRA to speed up inference, "
+                "set it to be equal to the desired sharding degree during serving."
+            },
+        ),
+    )
+    match_strict: bool = field(
+        default=True,
+        metadata={
+            "help": "If set to true, requires each target_module to have either a block-diagonal LoRA-A or LoRA-B, "
+            "and raises an error otherwise. You can set this to False to mix LoRA and BD-LoRA training, "
+            "e.g. if some layers in your module do not benefit from BD-LoRA."
+        },
+    )
+
+    def __post_init__(self):
+        overlap = set(self.target_modules_bd_a or []) & set(self.target_modules_bd_b or [])
+        if overlap:
+            raise ValueError(
+                "Found overlapping modules in target_modules_bd lists:"
+                f"{self.target_modules_bd_a} (A) and {self.target_modules_bd_b} (B)."
+            )
 
 
 @dataclass
@@ -559,6 +632,15 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    lora_ga_config: Optional[LoraGAConfig] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The configuration of LoRA-GA. If this is passed, then LoRA-GA will be used to initialize the adapter layers. "
+                "Also set `init_lora_weights='lora_ga'` in this case."
+            )
+        },
+    )
     use_dora: bool = field(
         default=False,
         metadata={
@@ -680,6 +762,15 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    use_bdlora: Optional[BdLoraConfig] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Enable BD-LoRA (Block-Diagonal LoRA) by providing a BdLoraConfig. This technique uses block-diagonal matrices for LoRA-A or LoRA-B "
+                "factors to enable faster multi-LoRA serving by eliminating communication overheads in distributed settings."
+            )
+        },
+    )
     arrow_config: Optional[ArrowConfig] = field(
         default=None, metadata={"help": "The necessary config to apply arrow routing on the model."}
     )
@@ -689,8 +780,8 @@ class LoraConfig(PeftConfig):
             "help": (
                 "Whether to tie weights or not after peft initialization. "
                 "This will ensure that the adapters added to the tied layers "
-                "are also tied. This is only applicable for layers passed via "
-                "`modules_to_save`."
+                "are also tied. This is applicable for layers passed via "
+                "`modules_to_save` and `trainable_token_indices`."
             )
         },
     )
@@ -736,8 +827,6 @@ class LoraConfig(PeftConfig):
 
         # handle init_lora_weights and loftq_config
         if self.init_lora_weights == "loftq":
-            import importlib
-
             if not importlib.util.find_spec("scipy"):
                 raise ImportError("The required package 'scipy' is not installed. Please install it to continue.")
             if not self.loftq_config:
@@ -789,7 +878,7 @@ class LoraConfig(PeftConfig):
         if self.alora_invocation_tokens is not None and self.task_type != "CAUSAL_LM":
             warnings.warn("aLoRA is currently only supported for CAUSAL_LM task.")
 
-        # Using post training conversion of modified base weights to restore their initial values PiSSA/CorDA/OLoRA cannot
+        # Using post training conversion of modified base weights to restore their initial values PiSSA/CorDA/OLoRA/LoRA-GA cannot
         # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends
         # this when they'll eventually call save_pretrained (i.e. if they'll pass
         # path_initial_model_for_weight_conversionl). Therefore, we only warn but don't raise an error here.
@@ -800,11 +889,12 @@ class LoraConfig(PeftConfig):
                 (isinstance(self.init_lora_weights, str) and (self.init_lora_weights.startswith("pissa")))
                 or (self.init_lora_weights == "olora")
                 or (self.init_lora_weights == "corda")
+                or (self.init_lora_weights == "lora_ga")
             )
         ):
             msg = (
                 "Using Rank-Stabilized LoRA with rank_pattern/alpha_pattern and post-training conversion of modified "
-                "base weights PiSSA/CorDA/OLoRA means that you won't be able to pass "
+                "base weights PiSSA/CorDA/OLoRA/LoRA-GA means that you won't be able to pass "
                 "`path_initial_model_for_weight_conversion` to `save_pretrained` to restore the initial values of the "
                 "base weights; if you intend to do this, please ensure not to use rslora or rank_pattern/alpha_pattern."
             )
@@ -830,3 +920,42 @@ class LoraConfig(PeftConfig):
         if self._custom_modules is None:
             self._custom_modules = {}
         self._custom_modules.update(mapping)
+
+
+@dataclass
+class LoraGAConfig:
+    """
+    This is the sub-configuration class to store the configuration for LoRA-GA initialization.
+
+    LoRA-GA (Low-Rank Adaptation with Gradient Approximation) uses gradient information during initialization to
+    achieve faster convergence (2-4x speedup) by aligning the initial adapter weights with the direction of full
+    fine-tuning gradients.
+
+    Reference: https://arxiv.org/abs/2407.05000
+
+    Args:
+        direction (`Literal["ArBr", "A2rBr", "ArB2r", "random"]`):
+            Strategy for distributing gradient SVD components to lora_A and lora_B matrices.
+            - "ArBr": Alternating indices (A takes odd, B takes even)
+            - "A2rBr": A takes indices [r:2r], B takes indices [:r]
+            - "ArB2r": A takes indices [:r], B takes indices [r:2r] (recommended)
+            - "random": Random selection of indices
+            Default: "ArB2r"
+        scale (`Literal["stable", "weight_svd", "gd_scale", "unit"]`):
+            Scaling strategy for adapter initialization.
+            - "stable": Stable scaling with gamma parameter
+            - "weight_svd": Scale based on weight matrix singular values
+            - "gd_scale": Gradient descent based scaling
+            - "unit": No additional scaling
+            Default: "stable"
+        stable_gamma (`int`):
+            Gamma parameter for stable scaling method. Default: 16
+    """
+
+    direction: Literal["ArBr", "A2rBr", "ArB2r", "random"] = field(
+        default="ArB2r", metadata={"help": "Component distribution strategy from gradient SVD"}
+    )
+    scale: Literal["stable", "weight_svd", "gd_scale", "unit"] = field(
+        default="stable", metadata={"help": "Scaling strategy for initialization"}
+    )
+    stable_gamma: int = field(default=16, metadata={"help": "Gamma parameter for stable scaling"})
