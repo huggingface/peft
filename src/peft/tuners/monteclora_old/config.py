@@ -72,8 +72,7 @@ class MonteCLoraConfig(LoraConfig):
     @property
     def monteclora_config(self):
         """
-        Backward compatibility helper.
-        Allows model.py to access `config.monteclora_config`
-        even though this object IS the config.
+        Backward compatibility helper. Allows model.py to access `config.monteclora_config` even though this object IS
+        the config.
         """
         return self

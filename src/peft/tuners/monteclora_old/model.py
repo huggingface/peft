@@ -12,8 +12,8 @@ from .layer import MonteCLoraLinear
 
 class MonteCLoraModel(LoraModel):
     """
-    Creates a Monte Carlo Low Rank Adapter (MonteCLoRA) model.
-    Inherits from LoraModel but overrides creation logic to handle MonteCLoRA targeting.
+    Creates a Monte Carlo Low Rank Adapter (MonteCLoRA) model. Inherits from LoraModel but overrides creation logic to
+    handle MonteCLoRA targeting.
     ```python
     from transformers import AutoModelForCausalLM
     from peft import MonteCLoraConfig, TaskType, get_peft_model, LoraConfig
@@ -23,20 +23,21 @@ class MonteCLoraModel(LoraModel):
     model_id = "meta-llama/Llama-3.2-3B-Instruct"
     model = AutoModelForCausalLM.from_pretrained(model_id, device_map=device)
     peft_config = MonteCLoraConfig(
-                r=16,
-                lora_alpha=32,
-                target_modules=["q_proj", "v_proj"],
-                use_monteclora=True,
-                monteclora_n=8,
-                sample_scaler=3e-4,
-                kl_loss_weight=1e-5,
-                task_type="CAUSAL_LM",
-            )
+        r=16,
+        lora_alpha=32,
+        target_modules=["q_proj", "v_proj"],
+        use_monteclora=True,
+        monteclora_n=8,
+        sample_scaler=3e-4,
+        kl_loss_weight=1e-5,
+        task_type="CAUSAL_LM",
+    )
     model = get_peft_model(model, peft_config)
 
     ### Important: MonteCLoraModel requires additional loss functions. Use the following code in Huggingface Trainer class.
 
     from transformers import Trainer
+
 
     class MonteCLoRATrainer(Trainer):
         def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
@@ -46,7 +47,7 @@ class MonteCLoraModel(LoraModel):
                 task_loss, outputs = super().compute_loss(model, inputs, return_outputs=True)
             else:
                 task_loss = super().compute_loss(model, inputs, return_outputs=False)
-                outputs = None # Placeholder if return_outputs is False
+                outputs = None  # Placeholder if return_outputs is False
             # 2. Calculate Variational Loss (KLD + Entropy)
             # We iterate through modules to find MonteCLoRA layers
             var_loss_sum = 0.0
@@ -54,8 +55,8 @@ class MonteCLoraModel(LoraModel):
             # We assume the model might be wrapped (DDP, FSDP, etc.), so we look at named_modules
             for name, module in model.named_modules():
                 # Using string checks prevents import errors if MonteCLoRA isn't imported globally
-                if module.__class__.__name__ in ['MonteCLoRASampler', 'MonteCLoRALinear']:
-                    if hasattr(module, 'get_variational_loss'):
+                if module.__class__.__name__ in ["MonteCLoRASampler", "MonteCLoRALinear"]:
+                    if hasattr(module, "get_variational_loss"):
                         # Retrieve the losses
                         l1, l2 = module.get_variational_loss()
 
@@ -72,20 +73,21 @@ class MonteCLoraModel(LoraModel):
 
             return (total_loss, outputs) if return_outputs else total_loss
 
+
     training_args = TrainingArguments(
-            output_dir="./results",
-            num_train_epochs=3,
-            per_device_train_batch_size=4,
-            # ... other args
+        output_dir="./results",
+        num_train_epochs=3,
+        per_device_train_batch_size=4,
+        # ... other args
     )
 
     # Instantiate the CUSTOM trainer
     trainer = MonteCLoRATrainer(
-            model=model,
-            args=training_args,
-            train_dataset=train_dataset,
-            eval_dataset=eval_dataset,
-            processing_class=tokenizer, # Note: 'tokenizer' arg is deprecated in HF v5+, use processing_class
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        processing_class=tokenizer,  # Note: 'tokenizer' arg is deprecated in HF v5+, use processing_class
     )
 
     trainer.train()
@@ -102,8 +104,8 @@ class MonteCLoraModel(LoraModel):
         current_key,
     ):
         """
-        Overridden from LoraModel to explicitly pass `current_key` to `_create_new_module`.
-        Standard LoraModel logic calculates rank/alpha patterns but does not forward the key.
+        Overridden from LoraModel to explicitly pass `current_key` to `_create_new_module`. Standard LoraModel logic
+        calculates rank/alpha patterns but does not forward the key.
         """
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")

@@ -255,8 +255,8 @@ class MonteCLoRATrainerMixin:
     """
     Mixin class for adding MonteCLoRA variational loss to the Trainer's compute_loss method.
 
-    This mixin can be used with any Trainer class (e.g., Trainer, SFTTrainer) to add support for
-    MonteCLoRA's variational regularization during training.
+    This mixin can be used with any Trainer class (e.g., Trainer, SFTTrainer) to add support for MonteCLoRA's
+    variational regularization during training.
 
     Example:
         ```python
@@ -265,9 +265,11 @@ class MonteCLoRATrainerMixin:
         from peft.helpers import MonteCLoRATrainerMixin
         from peft.tuners.monteclora_new import MonteCLoraConfig
 
-        #custom trainer that supports MonteCLoRA
+
+        # custom trainer that supports MonteCLoRA
         class MonteCLoRATrainer(MonteCLoRATrainerMixin, Trainer):
             pass
+
 
         # Configure LoRA with MonteCLoRA
         monteclora_config = MonteCLoraConfig(
@@ -294,8 +296,8 @@ class MonteCLoRATrainerMixin:
         """
         Compute loss with MonteCLoRA variational regularization.
 
-        This method extends the standard compute_loss by adding the variational loss
-        (KL divergence + entropy) from MonteCLoRA samplers to the task loss.
+        This method extends the standard compute_loss by adding the variational loss (KL divergence + entropy) from
+        MonteCLoRA samplers to the task loss.
 
         Args:
             model: The model being trained

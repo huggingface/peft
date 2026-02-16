@@ -29,9 +29,9 @@ class MonteCLoraLinearVariant(LoraVariant):
     """
     MonteCLoRA (Monte Carlo Low-Rank Adaptation) variant implementation.
 
-    This variant adds variational inference to LoRA by introducing Monte Carlo sampling
-    to the adapter weights during training. The sampling is controlled by a MonteCLoRASampler
-    that maintains variational parameters and produces perturbations to the LoRA weights.
+    This variant adds variational inference to LoRA by introducing Monte Carlo sampling to the adapter weights during
+    training. The sampling is controlled by a MonteCLoRASampler that maintains variational parameters and produces
+    perturbations to the LoRA weights.
     """
 
     @staticmethod
@@ -39,8 +39,8 @@ class MonteCLoraLinearVariant(LoraVariant):
         """
         Initialize MonteCLoRA for a LoRA layer.
 
-        This adds a MonteCLoRASampler to the layer that will be used during forward passes
-        to sample variational perturbations for the LoRA A matrix.
+        This adds a MonteCLoRASampler to the layer that will be used during forward passes to sample variational
+        perturbations for the LoRA A matrix.
 
         Args:
             module: The Linear LoRA layer to add MonteCLoRA to
@@ -79,8 +79,8 @@ class MonteCLoraLinearVariant(LoraVariant):
         """
         Safely merge MonteCLoRA adapter weights into base weights.
 
-        For merging, we ignore the MC sampling and just use the base LoRA weights (lora_A and lora_B).
-        This is equivalent to merging a standard LoRA adapter.
+        For merging, we ignore the MC sampling and just use the base LoRA weights (lora_A and lora_B). This is
+        equivalent to merging a standard LoRA adapter.
 
         Args:
             module: The Linear LoRA layer
@@ -100,8 +100,8 @@ class MonteCLoraLinearVariant(LoraVariant):
         """
         Merge MonteCLoRA adapter weights into base weights (in-place).
 
-        For merging, we ignore the MC sampling and just use the base LoRA weights (lora_A and lora_B).
-        This is equivalent to merging a standard LoRA adapter.
+        For merging, we ignore the MC sampling and just use the base LoRA weights (lora_A and lora_B). This is
+        equivalent to merging a standard LoRA adapter.
 
         Args:
             module: The Linear LoRA layer
@@ -116,8 +116,8 @@ class MonteCLoraLinearVariant(LoraVariant):
         """
         Unmerge MonteCLoRA adapter weights from base weights.
 
-        For unmerging, we ignore the MC sampling and just use the base LoRA weights (lora_A and lora_B).
-        This is equivalent to unmerging a standard LoRA adapter.
+        For unmerging, we ignore the MC sampling and just use the base LoRA weights (lora_A and lora_B). This is
+        equivalent to unmerging a standard LoRA adapter.
 
         Args:
             module: The Linear LoRA layer
@@ -143,8 +143,8 @@ class MonteCLoraLinearVariant(LoraVariant):
         """
         Forward pass with MonteCLoRA sampling.
 
-        This samples variational perturbations from the MonteCLoRASampler and applies them
-        to the LoRA A weights before computing the LoRA update.
+        This samples variational perturbations from the MonteCLoRASampler and applies them to the LoRA A weights before
+        computing the LoRA update.
 
         Args:
             module: The Linear LoRA layer
@@ -157,7 +157,9 @@ class MonteCLoraLinearVariant(LoraVariant):
             result + LoRA update with MonteCLoRA sampling applied
         """
         lora_A = module.lora_A[active_adapter]
-        lora_B = module.lora_B[active_adapter]  #lora_B is zero in the beginning. test for stochasticity of outputs might fail because of this
+        lora_B = module.lora_B[
+            active_adapter
+        ]  # lora_B is zero in the beginning. test for stochasticity of outputs might fail because of this
         dropout = module.lora_dropout[active_adapter]
         scaling = module.scaling[active_adapter]
         sampler = module.lora_monteclora_sampler[active_adapter]
@@ -178,9 +180,7 @@ class MonteCLoraLinearVariant(LoraVariant):
                 else:
                     noise = torch.nan_to_num(lora_A_vars, nan=0.0)
                     base_w = lora_A.weight.T
-                    perturbed_w = (
-                        base_w + noise
-                    )
+                    perturbed_w = base_w + noise
                     averaged_w = torch.einsum("n,nij->ij", lora_A_wts, perturbed_w)
                     current_weight_A = averaged_w.T
         out_A = F.linear(x_dropped, current_weight_A)

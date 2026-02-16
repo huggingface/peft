@@ -15,8 +15,8 @@
 """
 Tests for MonteCLoRA variant implementation.
 
-This test suite verifies that MonteCLoRA works correctly as a LoRA variant,
-following the same pattern as DoRA, aLoRA, etc.
+This test suite verifies that MonteCLoRA works correctly as a LoRA variant, following the same pattern as DoRA, aLoRA,
+etc.
 """
 
 import tempfile
@@ -26,7 +26,6 @@ import torch
 from torch import nn
 
 from peft import LoraConfig, PeftModel, get_peft_model
-from peft.tuners.lora import Linear as LoraLinear
 from peft.tuners.monteclora import MonteCLoraConfig
 
 
@@ -68,13 +67,12 @@ class TestMonteCLoraVariant(unittest.TestCase):
         self.lora_config = LoraConfig(
             r=8,
             lora_alpha=16,
-            target_modules=["lin0","lin1"],
+            target_modules=["lin0", "lin1"],
             lora_dropout=0.1,
-            task_type=None, 
+            task_type=None,
             use_monteclora=True,
             monteclora_config=self.monteclora_config,
         )
-
 
     def test_variant_in_lora_variant_dict(self):
         """
@@ -89,7 +87,6 @@ class TestMonteCLoraVariant(unittest.TestCase):
 
         variant = lin0.lora_variant["default"]
         assert variant.__class__.__name__ == "MonteCLoraLinearVariant", "Variant should be MonteCLoraLinearVariant"
-
 
     def test_trainable_parameters(self):
         """
@@ -111,13 +108,12 @@ class TestMonteCLoraVariant(unittest.TestCase):
             "expert_weights_prior should be trainable in MonteCLoRA sampler"
         )
 
-
     def test_forward_pass_training(self):
         """
         Test that the forward pass runs in training mode with Monte Carlo sampling.
         """
         model = get_peft_model(self.model, self.lora_config)
-        model.train()  
+        model.train()
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = model.to(device)
@@ -137,14 +133,12 @@ class TestMonteCLoraVariant(unittest.TestCase):
             if param.requires_grad:
                 assert param.grad is not None, f"Gradient not computed for {name}"
 
-
-
     def test_eval_mode_consistency(self):
         """
         Test that eval mode turns off sampling and produces deterministic results.
         """
         model = get_peft_model(self.model, self.lora_config)
-        model.eval() 
+        model.eval()
 
         input_data = torch.randn(1, self.input_dim)
 
@@ -153,7 +147,6 @@ class TestMonteCLoraVariant(unittest.TestCase):
             out2 = model(input_data)
 
         assert torch.allclose(out1, out2, atol=1e-08), "Outputs should be deterministic in eval mode (no MC sampling)"
-
 
     def test_variational_loss_computation(self):
         """
@@ -178,7 +171,6 @@ class TestMonteCLoraVariant(unittest.TestCase):
         assert var_loss_sum > 0, "Variational loss should be positive"
         assert not torch.isnan(var_loss_sum), "Variational loss contains NaN"
 
-
     def test_save_and_load(self):
         """
         Test saving the adapter and loading it back.
@@ -198,7 +190,6 @@ class TestMonteCLoraVariant(unittest.TestCase):
             state_dict = model_loaded.state_dict()
             sampler_keys = [k for k in state_dict.keys() if "lora_monteclora_sampler" in k]
             assert len(sampler_keys) > 0, "No MonteCLoRA sampler parameters in loaded state dict"
-
 
     def test_merging_and_unmerging(self):
         """
@@ -237,7 +228,6 @@ class TestMonteCLoraVariant(unittest.TestCase):
             "Output should match original after unmerge"
         )
 
-
     def test_config_validation(self):
         """
         Test that MonteCLoraConfig validates parameters correctly.
@@ -253,7 +243,6 @@ class TestMonteCLoraVariant(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             MonteCLoraConfig(buffer_size=-10)
-
 
     def test_different_monteclora_configs(self):
         """
@@ -281,7 +270,6 @@ class TestMonteCLoraVariant(unittest.TestCase):
             output = model(input_data)
 
             assert output.shape == (2, self.output_dim)
-
 
     def test_compatibility_with_standard_lora(self):
         """

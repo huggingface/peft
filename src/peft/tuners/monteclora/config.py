@@ -34,8 +34,8 @@ class MonteCLoraConfig:
         dirichlet_prior (`float`):
             Prior parameter for Dirichlet distribution used in expert weight sampling. Default is 0.1.
         sample_scaler (`float`):
-            Scaling factor for the Monte Carlo samples. Controls the magnitude of variational perturbations.
-            Default is 1e-4.
+            Scaling factor for the Monte Carlo samples. Controls the magnitude of variational perturbations. Default is
+            1e-4.
         kl_loss_weight (`float`):
             Weight for the KL divergence loss component in the variational objective. Default is 1e-5.
         mc_training (`bool`):
