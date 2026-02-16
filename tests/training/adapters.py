@@ -15,7 +15,8 @@
 """
 Script to test FSDP adapter operations (disable_adapters, set_adapter, etc.) in a distributed environment.
 
-This script is designed to be run with `accelerate launch` to properly test FSDP behavior while running one pass with autograd and another with adapters being disabled.
+This script is designed to be run with `accelerate launch` to properly test FSDP behavior while running one pass with
+autograd and another with adapters being disabled.
 
 Usage:
     accelerate launch --config_file tests/training/fsdp_config.yaml tests/training/adapters.py
@@ -150,6 +151,8 @@ def test_training(model_id: str):
         final_base_weights = get_base_model_weights(model.peft_model)
         final_second_adapter_weights = get_adapter_weights(model.peft_model, "second_adapter")
 
+    # Test to make sure that through this FSDP setup the base weights remain unchanged
+    # (i.e. adapter training doesn't somehow influence the base weights)
     verify_weights_unchanged(initial_base_weights, final_base_weights, "Base model")
     verify_weights_unchanged(initial_second_adapter_weights, final_second_adapter_weights, "second_adapter")
 
