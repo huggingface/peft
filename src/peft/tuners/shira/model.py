@@ -90,7 +90,7 @@ class ShiraModel(BaseTuner):
                 adapter_name,
                 mask,
                 shira_config.r,
-                init_weights=shira_config.init_weights,
+                config=shira_config,
             )
         else:
             new_module = self._create_new_module(shira_config, adapter_name, target, **kwargs)
@@ -133,9 +133,9 @@ class ShiraModel(BaseTuner):
             target,
             mask,
             adapter_name,
-            shira_config.r,
-            fan_in_fan_out,
-            init_weights=shira_config.init_weights,
+            config=shira_config,
+            r=shira_config.r,
+            fan_in_fan_out=fan_in_fan_out,
             **kwargs,
         )
 
