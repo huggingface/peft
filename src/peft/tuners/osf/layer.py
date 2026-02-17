@@ -24,6 +24,7 @@ import torch.nn.functional as F
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import BaseTunerLayer
 
+from .config import OSFConfig
 from .utils import (
     decompose_weight_matrix,
     reconstruct_weight_matrix,
@@ -81,7 +82,7 @@ class OSFLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-    def update_layer(self, adapter_name: str, effective_rank: int, **kwargs):
+    def update_layer(self, adapter_name: str, effective_rank: int, config: OSFConfig | None = None, **kwargs):
         """Update layer to add a new OSF adapter."""
         if effective_rank <= 0:
             raise ValueError(
@@ -226,6 +227,7 @@ class Linear(nn.Module, OSFLayer):
         self,
         base_layer,
         adapter_name: str,
+        config: OSFConfig | None = None,
         effective_rank: int = None,
         **kwargs,
     ) -> None:
@@ -238,7 +240,7 @@ class Linear(nn.Module, OSFLayer):
             effective_rank = min(self.in_features, self.out_features) // 2
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, effective_rank, **kwargs)
+        self.update_layer(adapter_name, effective_rank, config=config, **kwargs)
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         if self.disable_adapters:

@@ -98,6 +98,7 @@ class OSFModel(BaseTuner):
 
         kwargs = {
             "effective_rank": effective_rank,
+            "config": osf_config,
         }
 
         # Create a new or update an existing OSF layer in place
