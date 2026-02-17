@@ -21,6 +21,8 @@ import torch.nn.functional as F
 
 from peft.tuners.lycoris_utils import LycorisLayer
 
+from .config import LoKrConfig
+
 
 class LoKrLayer(nn.Module, LycorisLayer):
     # All names of layers that may contain adapter weights
@@ -160,13 +162,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
         adapter_name: str,
         r: int,
         alpha: float,
-        rank_dropout: float,
-        module_dropout: float,
-        init_weights: bool,
-        use_effective_conv2d: bool,
-        decompose_both: bool,
-        decompose_factor: int,
-        inference_mode: bool = False,
+        config: Optional[LoKrConfig],
         **kwargs,
     ) -> None:
         """Internal function to create lokr adapter
@@ -175,13 +171,19 @@ class LoKrLayer(nn.Module, LycorisLayer):
             adapter_name (`str`): Name for the adapter to add.
             r (`int`): Rank for the added adapter.
             alpha (`float`): Alpha for the added adapter.
-            rank_dropout (`float`): The dropout probability for rank dimension during training
-            module_dropout (`float`): The dropout probability for disabling adapter during training.
-            init_weights (`bool`): Whether to initialize adapter weights.
-            use_effective_conv2d (`bool`): Use parameter effective decomposition for Conv2d with ksize > 1.
-            decompose_both (`bool`): Perform rank decomposition of left kronecker product matrix.
-            decompose_factor (`int`): Kronecker product decomposition factor.
+            config (`LoKrConfig`): The adapter configuration for this layer.
         """
+        if config is None:
+            raise ValueError("`config` must be provided for LoKr layer initialization.")
+
+        rank_dropout = config.rank_dropout
+        module_dropout = config.module_dropout
+        init_weights = config.init_weights
+        use_effective_conv2d = config.use_effective_conv2d
+        decompose_both = config.decompose_both
+        decompose_factor = config.decompose_factor
+        inference_mode = config.inference_mode
+
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -190,7 +192,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
         self.scaling[adapter_name] = alpha / r
         self.rank_dropout[adapter_name] = rank_dropout
         self.module_dropout[adapter_name] = module_dropout
-        self.rank_dropout_scale[adapter_name] = kwargs["rank_dropout_scale"]
+        self.rank_dropout_scale[adapter_name] = config.rank_dropout_scale
         base_layer = self.get_base_layer()
 
         # Determine shape of LoKr weights
@@ -324,18 +326,16 @@ class Linear(LoKrLayer):
         device: Optional[Union[str, torch.device]] = None,
         dtype: Optional[torch.dtype] = None,
         adapter_name: str = "default",
+        config: Optional[LoKrConfig] = None,
         r: int = 0,
         alpha: float = 0.0,
-        rank_dropout: float = 0.0,
-        module_dropout: float = 0.0,
-        init_weights: bool = True,
         **kwargs,
     ):
         super().__init__(base_layer)
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, **kwargs)
+        self.update_layer(adapter_name, r, alpha, config=config, **kwargs)
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
@@ -362,21 +362,16 @@ class Conv2d(LoKrLayer):
         device: Optional[Union[str, torch.device]] = None,
         dtype: Optional[torch.dtype] = None,
         adapter_name: str = "default",
+        config: Optional[LoKrConfig] = None,
         r: int = 0,
         alpha: float = 0.0,
-        rank_dropout: float = 0.0,
-        module_dropout: float = 0.0,
-        use_effective_conv2d: bool = False,
-        init_weights: bool = True,
         **kwargs,
     ):
         super().__init__(base_layer)
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(
-            adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
-        )
+        self.update_layer(adapter_name, r, alpha, config=config, **kwargs)
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
@@ -408,21 +403,16 @@ class Conv1d(LoKrLayer):
         device: Optional[Union[str, torch.device]] = None,
         dtype: Optional[torch.dtype] = None,
         adapter_name: str = "default",
+        config: Optional[LoKrConfig] = None,
         r: int = 0,
         alpha: float = 0.0,
-        rank_dropout: float = 0.0,
-        module_dropout: float = 0.0,
-        use_effective_conv2d: bool = False,
-        init_weights: bool = True,
         **kwargs,
     ):
         super().__init__(base_layer)
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(
-            adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
-        )
+        self.update_layer(adapter_name, r, alpha, config=config, **kwargs)
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any

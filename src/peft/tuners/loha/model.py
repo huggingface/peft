@@ -105,9 +105,11 @@ class LoHaModel(LycorisTuner):
         """
         r_key = get_pattern_key(config.rank_pattern.keys(), current_key)
         alpha_key = get_pattern_key(config.alpha_pattern.keys(), current_key)
-        kwargs = config.to_dict()
-        kwargs["r"] = config.rank_pattern.get(r_key, config.r)
-        kwargs["alpha"] = config.alpha_pattern.get(alpha_key, config.alpha)
+        kwargs = {
+            "config": config,
+            "r": config.rank_pattern.get(r_key, config.r),
+            "alpha": config.alpha_pattern.get(alpha_key, config.alpha),
+        }
 
         if isinstance(target, LoHaLayer):
             target.update_layer(adapter_name, **kwargs)
