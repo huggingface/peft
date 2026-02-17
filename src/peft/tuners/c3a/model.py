@@ -67,15 +67,15 @@ class C3AModel(BaseTuner):
 
         block_size = c3a_config.block_size_pattern.get(target_name_key, c3a_config.block_size)
         kwargs = {
+            "config": c3a_config,
             "block_size": block_size,
-            "init_weights": c3a_config.init_weights,
         }
 
         if isinstance(target, C3ALinear):
             target.update_layer(
                 adapter_name,
                 block_size,
-                c3a_config.init_weights,
+                config=c3a_config,
             )
         else:
             new_module = self._create_new_module(c3a_config, adapter_name, target, **kwargs)

@@ -15,13 +15,14 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
+from .config import C3AConfig
 from .utils import BlockCircularConvolution, get_circulant_fast
 
 
@@ -56,7 +57,10 @@ class C3ALayer(BaseTunerLayer):
         delta_weight = get_circulant_fast(c3a_kernel.to(torch.float32)).to(base_layer_weight_dtype)
         return delta_weight / base_layer_weight.size(-1)
 
-    def update_layer(self, adapter_name, block_size, init_weights, inference_mode: bool = False, **kwargs):
+    def update_layer(self, adapter_name: str, block_size: int, config: C3AConfig, **kwargs):
+        init_weights = config.init_weights
+        inference_mode = config.inference_mode
+
         if block_size <= 0:
             raise ValueError(f"`block_size` should be a positive integer value but the value passed is {block_size}")
         if self.in_features % block_size != 0:
@@ -114,14 +118,14 @@ class C3ALinear(nn.Module, C3ALayer):
         self,
         base_layer,
         adapter_name: str,
+        config: C3AConfig,
         block_size: int,
-        init_weights: bool | Literal["gaussian", "kaiming_uniform", "xavier_uniform"],
         **kwargs,
     ) -> None:
         super().__init__()
         C3ALayer.__init__(self, base_layer, **kwargs)
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, block_size, init_weights)
+        self.update_layer(adapter_name, block_size, config=config)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
