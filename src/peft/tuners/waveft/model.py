@@ -124,11 +124,9 @@ class WaveFTModel(BaseTuner):
         bias = hasattr(target, "bias") and target.bias is not None
         # Prepare kwargs for module creation/update
         kwargs = {
+            "config": waveft_config,
             "n_frequency": n_frequency,
-            "scaling": scaling,
             "fan_in_fan_out": waveft_config.fan_in_fan_out,
-            "init_weights": waveft_config.init_weights,
-            "random_loc_seed": waveft_config.random_loc_seed,
             "wavelet_family": wavelet_family,  # Use determined wavelet family
         }
         kwargs["bias"] = bias
@@ -137,11 +135,8 @@ class WaveFTModel(BaseTuner):
             target.update_layer(
                 adapter_name,
                 n_frequency,
-                scaling,
-                waveft_config.init_weights,
-                random_loc_seed,
+                config=waveft_config,
                 wavelet_family=wavelet_family,  # Pass determined wavelet family
-                use_idwt=waveft_config.use_idwt,
             )
         else:
             new_module = self._create_new_module(waveft_config, adapter_name, target, **kwargs)
@@ -176,8 +171,6 @@ class WaveFTModel(BaseTuner):
                 "`torch.nn.Linear`."
             )
 
-        kwargs["wavelet_family"] = waveft_config.wavelet_family
-        kwargs["use_idwt"] = waveft_config.use_idwt
         new_module = WaveFTLinear(target, adapter_name, **kwargs)
 
         return new_module
