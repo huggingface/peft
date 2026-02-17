@@ -237,6 +237,25 @@ def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start
     return shifted_input_ids
 
 
+def _set_layer_requires_grad(layer, requires_grad: bool) -> None:
+    """Set requires_grad on all leaf parameters of a layer.
+
+    This handles the FSDP case where params may be non-leaf tensors (wrapped in DTensors). Only leaf tensors can have
+    their requires_grad flag toggled, so non-leaf tensors are silently skipped
+
+    Args:
+        layer: A module, parameter or tensor
+        requires_grad: enable or disable gradients
+    """
+    if isinstance(layer, (torch.nn.Parameter, torch.Tensor)):
+        if layer.is_leaf:
+            layer.requires_grad_(requires_grad)
+    else:
+        for param in layer.parameters():
+            if param.is_leaf:
+                param.requires_grad_(requires_grad)
+
+
 class AuxiliaryTrainingWrapper(torch.nn.Module):
     """Wrap a specific module so that it can be trained and saved in a way that is tangential to how
     PEFT normally works, e.g. fully training a classification layer instead of using an adapter.
@@ -507,7 +526,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
             module_dict = attrgetter(layer_name)(self)
             for key, layer in module_dict.items():
                 if key in adapter_names_set:
-                    layer.requires_grad_(requires_grad)
+                    _set_layer_requires_grad(layer, requires_grad)
 
     def adapter_state_dict(self, adapter_name):
         """Return the state dict of this module for a given adapter."""
