@@ -56,6 +56,7 @@ from peft import (
     prepare_model_for_kbit_training,
     set_peft_model_state_dict,
 )
+from peft.import_utils import is_transformers_ge_v5
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -65,7 +66,6 @@ from peft.utils import (
     TrainableTokensWrapper,
     _get_submodules,
     infer_device,
-    is_transformers_ge_v5,
 )
 
 from .testing_utils import get_state_dict, hub_online_once
