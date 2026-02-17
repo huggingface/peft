@@ -102,16 +102,9 @@ class OFTModel(BaseTuner):
             raise ValueError("Current Key shouldn't be `None`")
 
         kwargs = {
+            "config": oft_config,
             "r": oft_config.r,
-            "oft_block_size": oft_config.oft_block_size,
-            "module_dropout": oft_config.module_dropout,
-            "coft": oft_config.coft,
-            "eps": oft_config.eps,
-            "block_share": oft_config.block_share,
-            "use_cayley_neumann": oft_config.use_cayley_neumann,
-            "num_cayley_neumann_terms": oft_config.num_cayley_neumann_terms,
             "fan_in_fan_out": oft_config.fan_in_fan_out,
-            "init_weights": oft_config.init_weights,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -134,14 +127,7 @@ class OFTModel(BaseTuner):
             target.update_layer(
                 adapter_name,
                 r=oft_config.r,
-                oft_block_size=oft_config.oft_block_size,
-                module_dropout=oft_config.module_dropout,
-                coft=oft_config.coft,
-                eps=oft_config.eps,
-                block_share=oft_config.block_share,
-                use_cayley_neumann=oft_config.use_cayley_neumann,
-                num_cayley_neumann_terms=oft_config.num_cayley_neumann_terms,
-                init_weights=oft_config.init_weights,
+                config=oft_config,
             )
 
     @staticmethod
