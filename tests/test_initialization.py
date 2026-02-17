@@ -4969,7 +4969,7 @@ class TestWeightTying:
 
         return CausalLM().eval().to(self.torch_device)
 
-    @pytest.mark.parametrize("layer", ["lm_head", "embed_tokens", ["lm_head", "embed_tokens"]])
+    @pytest.mark.parametrize("modules_to_save", [["lm_head"], ["embed_tokens"], ["lm_head", "embed_tokens"]])
     def test_weight_tying_tied_model_lora(self, layer):
         # If weight tying is enabled and `embed_tokens`
         # is passed as a `modules_to_save`, it needs to be ensured
