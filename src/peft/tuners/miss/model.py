@@ -90,10 +90,8 @@ class MissModel(BaseTuner):
 
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
+            "config": miss_config,
             "r": miss_config.r,
-            "mini_r": miss_config.mini_r,
-            "miss_dropout": miss_config.miss_dropout,
-            "init_weights": miss_config.init_weights,
         }
         kwargs["bias"] = bias
 
@@ -108,9 +106,7 @@ class MissModel(BaseTuner):
             target.update_layer(
                 adapter_name,
                 r=miss_config.r,
-                init_weights=miss_config.init_weights,
-                miss_dropout=miss_config.miss_dropout,
-                mini_r=miss_config.mini_r,
+                config=miss_config,
             )
 
     @staticmethod

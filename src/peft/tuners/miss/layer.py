@@ -23,6 +23,8 @@ import torch.nn.functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
+from .config import MissConfig
+
 
 class MissLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
@@ -53,9 +55,7 @@ class MissLayer(BaseTunerLayer):
         self,
         adapter_name: str,
         r: int,
-        mini_r: int,
-        miss_dropout,
-        init_weights: bool | str,
+        config: MissConfig,
         inference_mode: bool = False,
         **kwargs,
     ) -> None:
@@ -66,6 +66,10 @@ class MissLayer(BaseTunerLayer):
             r (`int`): Rank for the added adapter.
             init_weights (`bool`): Whether to initialize weights.
         """
+        mini_r = config.mini_r
+        miss_dropout = config.miss_dropout
+        init_weights = config.init_weights
+
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -145,17 +149,15 @@ class MissLinear(nn.Module, MissLayer):
         self,
         base_layer,
         adapter_name: str,
+        config: MissConfig,
         r: int = 0,
-        mini_r: int = 0,
-        miss_dropout: float = 0.0,
-        init_weights: Union[bool, str] = True,
         **kwargs,
     ) -> None:
         super().__init__()
         MissLayer.__init__(self, base_layer, **kwargs)
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, mini_r, miss_dropout, init_weights, **kwargs)
-        self.miss_fn = init_weights
+        self.update_layer(adapter_name, r, config=config, **kwargs)
+        self.miss_fn = config.init_weights
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
