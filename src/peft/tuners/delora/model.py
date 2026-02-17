@@ -77,10 +77,9 @@ class DeloraModel(BaseTuner):
         delora_lambda = delora_config.lambda_pattern.get(lambda_key, delora_config.delora_lambda)
 
         kwargs = {
+            "config": delora_config,
             "r": r,
             "delora_lambda": delora_lambda,
-            "module_dropout": delora_config.module_dropout,
-            "init_weights": delora_config.init_weights,
         }
 
         if isinstance(target, DeloraLinear):
