@@ -102,11 +102,7 @@ class VBLoRAModel(BaseTuner):
                 adapter_name=adapter_name,
                 vblora_vector_bank=self.vblora_vector_bank,
                 r=vblora_config.r,
-                topk=vblora_config.topk,
-                num_vectors=vblora_config.num_vectors,
-                vector_length=vblora_config.vector_length,
-                vblora_dropout=vblora_config.vblora_dropout,
-                init_logits_std=vblora_config.init_logits_std,
+                config=vblora_config,
             )
         else:
             new_module = self._create_new_module(
@@ -151,12 +147,8 @@ class VBLoRAModel(BaseTuner):
             base_layer=target,
             vblora_vector_bank=vblora_vector_bank,
             adapter_name=adapter_name,
+            config=vblora_config,
             r=vblora_config.r,
-            num_vectors=vblora_config.num_vectors,
-            vector_length=vblora_config.vector_length,
-            topk=vblora_config.topk,
-            vblora_dropout=vblora_config.vblora_dropout,
-            init_logits_std=vblora_config.init_logits_std,
             **kwargs,
         )
 
