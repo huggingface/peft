@@ -221,7 +221,7 @@ class LycorisTuner(BaseTuner):
 
     @classmethod
     def _create_new_module(
-        cls, lycoris_config: LycorisConfig, adapter_name: str, target: nn.Module, **kwargs
+        cls, config: LycorisConfig, adapter_name: str, target: nn.Module, **kwargs
     ) -> LycorisLayer:
         # Find corresponding subtype of provided target module
         new_module_cls = None
@@ -252,9 +252,9 @@ class LycorisTuner(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, (torch.nn.Conv2d, torch.nn.Conv1d)):
-            new_module = new_module_cls(target, adapter_name=adapter_name, **kwargs)
+            new_module = new_module_cls(target, adapter_name=adapter_name, config=config, **kwargs)
         elif isinstance(target_base_layer, torch.nn.Linear):
-            new_module = new_module_cls(target, adapter_name=adapter_name, **kwargs)
+            new_module = new_module_cls(target, adapter_name=adapter_name, config=config, **kwargs)
         else:
             supported_modules = ", ".join(layer.__name__ for layer in cls.layers_mapping.keys())
             raise ValueError(

@@ -105,7 +105,7 @@ class LoHaLayer(nn.Module, LycorisLayer):
         adapter_name: str,
         r: int,
         alpha: float,
-        config: Optional[LoHaConfig],
+        config: LoHaConfig,
         **kwargs,
     ) -> None:
         """Internal function to create loha adapter
@@ -116,9 +116,6 @@ class LoHaLayer(nn.Module, LycorisLayer):
             alpha (`float`): Alpha for the added adapter.
             config (`LoHaConfig`): The adapter configuration for this layer.
         """
-        if config is None:
-            raise ValueError("`config` must be provided for LoHa layer initialization.")
-
         rank_dropout = config.rank_dropout
         module_dropout = config.module_dropout
         init_weights = config.init_weights

@@ -162,7 +162,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
         adapter_name: str,
         r: int,
         alpha: float,
-        config: Optional[LoKrConfig],
+        config: LoKrConfig,
         **kwargs,
     ) -> None:
         """Internal function to create lokr adapter
@@ -173,9 +173,6 @@ class LoKrLayer(nn.Module, LycorisLayer):
             alpha (`float`): Alpha for the added adapter.
             config (`LoKrConfig`): The adapter configuration for this layer.
         """
-        if config is None:
-            raise ValueError("`config` must be provided for LoKr layer initialization.")
-
         rank_dropout = config.rank_dropout
         module_dropout = config.module_dropout
         init_weights = config.init_weights
