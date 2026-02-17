@@ -87,6 +87,7 @@ class IA3Model(BaseTuner):
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
         is_feedforward = kwargs.pop("is_feedforward", False)
+        config = kwargs.pop("config")
 
         if isinstance(target, BaseTunerLayer):
             target_base_layer = target.get_base_layer()
@@ -102,7 +103,9 @@ class IA3Model(BaseTuner):
                     "index": target_base_layer.index,
                 }
             )
-            new_module = Linear8bitLt(target, adapter_name, is_feedforward=is_feedforward, **eightbit_kwargs)
+            new_module = Linear8bitLt(
+                target, adapter_name, config=config, is_feedforward=is_feedforward, **eightbit_kwargs
+            )
         elif loaded_in_4bit and isinstance(target_base_layer, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
@@ -112,27 +115,32 @@ class IA3Model(BaseTuner):
                     "quant_type": target_base_layer.weight.quant_type,
                 }
             )
-            new_module = Linear4bit(target, adapter_name, is_feedforward=is_feedforward, **fourbit_kwargs)
+            new_module = Linear4bit(target, adapter_name, config=config, is_feedforward=is_feedforward, **fourbit_kwargs)
         elif isinstance(target, torch.nn.Conv2d):
-            new_module = Conv2d(target, adapter_name, is_feedforward=is_feedforward, **kwargs)
+            new_module = Conv2d(target, adapter_name, config=config, is_feedforward=is_feedforward, **kwargs)
         elif isinstance(target, torch.nn.Conv3d):
-            new_module = Conv3d(target, adapter_name, is_feedforward=is_feedforward, **kwargs)
+            new_module = Conv3d(target, adapter_name, config=config, is_feedforward=is_feedforward, **kwargs)
         elif isinstance(target_base_layer, torch.nn.Linear):
-            if kwargs["fan_in_fan_out"]:
+            if config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
-                kwargs["fan_in_fan_out"] = ia3_config.fan_in_fan_out = False
-            new_module = Linear(target, adapter_name, is_feedforward=is_feedforward, **kwargs)
+                config.fan_in_fan_out = ia3_config.fan_in_fan_out = False
+            new_module = Linear(target, adapter_name, config=config, is_feedforward=is_feedforward, **kwargs)
         elif isinstance(target_base_layer, Conv1D):
-            if not kwargs["fan_in_fan_out"]:
+            if not config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
-                kwargs["fan_in_fan_out"] = ia3_config.fan_in_fan_out = True
+                config.fan_in_fan_out = ia3_config.fan_in_fan_out = True
             new_module = Linear(
-                target, adapter_name, is_feedforward=is_feedforward, is_target_conv_1d_layer=True, **kwargs
+                target,
+                adapter_name,
+                config=config,
+                is_feedforward=is_feedforward,
+                is_target_conv_1d_layer=True,
+                **kwargs,
             )
         else:
             raise ValueError(
@@ -154,8 +162,7 @@ class IA3Model(BaseTuner):
         is_feedforward = self._check_target_module_feedforward(ia3_config, current_key)
 
         kwargs = {
-            "fan_in_fan_out": ia3_config.fan_in_fan_out,
-            "init_ia3_weights": ia3_config.init_ia3_weights,
+            "config": ia3_config,
             "is_feedforward": is_feedforward,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
@@ -164,7 +171,7 @@ class IA3Model(BaseTuner):
         if isinstance(target, IA3Layer):
             target.update_layer(
                 adapter_name,
-                ia3_config.init_ia3_weights,
+                config=ia3_config,
             )
         else:
             new_module = self._create_new_module(ia3_config, adapter_name, target, **kwargs)
