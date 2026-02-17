@@ -88,13 +88,10 @@ class HRAModel(BaseTuner):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
-        bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
+            "config": hra_config,
             "r": hra_config.r,
-            "apply_GS": hra_config.apply_GS,
-            "init_weights": hra_config.init_weights,
         }
-        kwargs["bias"] = bias
 
         # If it is not a HRALayer, create a new module, else update it with new adapters
         if not isinstance(target, HRALayer):
@@ -107,8 +104,7 @@ class HRAModel(BaseTuner):
             target.update_layer(
                 adapter_name,
                 r=hra_config.r,
-                apply_GS=hra_config.apply_GS,
-                init_weights=hra_config.init_weights,
+                config=hra_config,
             )
 
     @staticmethod

@@ -22,6 +22,8 @@ import torch.nn.functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
+from .config import HRAConfig
+
 
 class HRALayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
@@ -53,9 +55,7 @@ class HRALayer(BaseTunerLayer):
         self,
         adapter_name: str,
         r: int,
-        apply_GS: bool,
-        init_weights: bool,
-        inference_mode: bool = False,
+        config: HRAConfig,
         **kwargs,
     ) -> None:
         """Internal function to create hra adapter
@@ -63,9 +63,12 @@ class HRALayer(BaseTunerLayer):
         Args:
             adapter_name (`str`): Name for the adapter to add.
             r (`int`): Rank for the added adapter.
-            init_weights (`bool`): Whether to initialize weights.
-            apply_GS (`bool`): Whether to apply Gram-Schmidt orthogonalization or not.
+            config (`HRAConfig`): The adapter configuration for this layer.
         """
+        apply_GS = config.apply_GS
+        init_weights = config.init_weights
+        inference_mode = config.inference_mode
+
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -134,15 +137,14 @@ class HRALinear(nn.Module, HRALayer):
         self,
         base_layer,
         adapter_name: str,
+        config: HRAConfig,
         r: int = 0,
-        apply_GS: bool = False,
-        init_weights: Union[bool, str] = True,
         **kwargs,
     ) -> None:
         super().__init__()
         HRALayer.__init__(self, base_layer, **kwargs)
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, apply_GS, init_weights, **kwargs)
+        self.update_layer(adapter_name, r, config=config, **kwargs)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -277,15 +279,14 @@ class HRAConv2d(nn.Module, HRALayer):
         self,
         base_layer,
         adapter_name: str,
+        config: HRAConfig,
         r: int = 0,
-        apply_GS: bool = False,
-        init_weights: Union[bool, str] = True,
         **kwargs,
     ):
         super().__init__()
         HRALayer.__init__(self, base_layer)
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, apply_GS, init_weights, **kwargs)
+        self.update_layer(adapter_name, r, config=config, **kwargs)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
