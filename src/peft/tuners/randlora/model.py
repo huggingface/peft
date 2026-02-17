@@ -257,11 +257,9 @@ class RandLoraModel(BaseTuner):
         r = randlora_config.r
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
+            "config": randlora_config,
             "r": r,
-            "randlora_alpha": randlora_config.randlora_alpha,
-            "randlora_dropout": randlora_config.randlora_dropout,
             "fan_in_fan_out": randlora_config.fan_in_fan_out,
-            "init_weights": randlora_config.init_weights,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -272,9 +270,7 @@ class RandLoraModel(BaseTuner):
                 self.randlora_A,
                 self.randlora_B,
                 r,
-                randlora_config.randlora_alpha,
-                randlora_config.randlora_dropout,
-                randlora_config.init_weights,
+                config=randlora_config,
             )
         else:
             new_module = self._create_new_module(

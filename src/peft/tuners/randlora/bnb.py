@@ -53,9 +53,7 @@ if is_bnb_available():
                 randlora_A,
                 randlora_B,
                 r,
-                randlora_alpha=randlora_alpha,
-                randlora_dropout=randlora_dropout,
-                init_weights=init_weights,
+                config=kwargs["config"],
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -280,9 +278,7 @@ if is_bnb_4bit_available():
                 randlora_A,
                 randlora_B,
                 r,
-                randlora_alpha=randlora_alpha,
-                randlora_dropout=randlora_dropout,
-                init_weights=init_weights,
+                config=kwargs["config"],
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
