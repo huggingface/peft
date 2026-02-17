@@ -55,7 +55,7 @@ from peft import (
     get_peft_model,
     prepare_model_for_kbit_training,
 )
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_xpu_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_gptqmodel_available, is_xpu_available
 from peft.tuners.lora.config import LoraRuntimeConfig
 from peft.utils import infer_device
 
@@ -64,10 +64,14 @@ from .testing_utils import (
     load_cat_image,
     require_bitsandbytes,
     require_deterministic_for_xpu,
+    require_gptqmodel,
     require_non_cpu,
     require_torch_multi_accelerator,
 )
 
+
+if is_gptqmodel_available():
+    from gptqmodel import BACKEND
 
 if is_bnb_available():
     import bitsandbytes as bnb
@@ -516,6 +520,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.ia3_l
             assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.ia3_l
 
+    @require_gptqmodel
     @pytest.mark.single_gpu_tests
     def test_lora_gptq_quantization_from_pretrained_safetensors(self):
         r"""
@@ -524,7 +529,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         from transformers import GPTQConfig
 
         model_id = "marcsun13/opt-350m-gptq-4bit"
-        quantization_config = GPTQConfig(bits=4, use_exllama=False)
+        quantization_config = GPTQConfig(bits=4, backend=BACKEND.AUTO_TRAINABLE)
         kwargs = {
             "pretrained_model_name_or_path": model_id,
             "dtype": torch.float16,

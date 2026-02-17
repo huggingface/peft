@@ -76,7 +76,7 @@ python bone_finetuning.py \
     --logging_steps 1 \
     --learning_rate 2e-5 \
     --weight_decay 0. \
-    --warmup_ratio 0.03 \
+    --warmup_steps 0.03 \
     --tf32 True \
     --report_to none
 ```

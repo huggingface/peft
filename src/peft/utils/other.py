@@ -36,7 +36,7 @@ from packaging import version
 from safetensors.torch import storage_ptr, storage_size
 from transformers import PreTrainedModel
 
-from ..import_utils import is_auto_gptq_available, is_gptqmodel_available, is_torch_tpu_available
+from ..import_utils import is_gptqmodel_available, is_torch_tpu_available, is_transformers_ge_v5_1_0
 from .constants import (
     CONFIG_NAME,
     EMBEDDING_LAYER_NAMES,
@@ -76,7 +76,6 @@ if version.parse(accelerate.__version__) >= version.parse("0.29.0"):
     from accelerate.utils import is_mlu_available
 
     mlu_available = is_mlu_available()
-
 
 __all__ = [
     "CONFIG_NAME",
@@ -1146,6 +1145,11 @@ def _get_no_split_modules(model) -> set[str]:
     if not hasattr(model, "_no_split_modules"):
         return _no_split_modules
 
+    if is_transformers_ge_v5_1_0:
+        # See https://github.com/huggingface/transformers/commit/36ec3bfa33ebf6c3b38a1d6808292aeea4aae84d
+        return model._no_split_modules
+
+    # TODO remove once transformers <5.1.0 is not supported anymore
     modules_to_check = [model]
     while len(modules_to_check) > 0:
         module = modules_to_check.pop(-1)
@@ -1250,42 +1254,6 @@ def get_quantization_config(model: torch.nn.Module, method: str):
     return None
 
 
-def get_auto_gptq_quant_linear(gptq_quantization_config):
-    """
-    Get the right AutoGPTQQuantLinear class based on the quantization config file
-    """
-    if gptq_quantization_config is None:
-        return None
-
-    if is_auto_gptq_available():
-        from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
-    else:
-        return None
-
-    desc_act = gptq_quantization_config.desc_act
-    group_size = gptq_quantization_config.group_size
-    bits = gptq_quantization_config.bits
-    if hasattr(gptq_quantization_config, "use_exllama"):
-        use_exllama = gptq_quantization_config.use_exllama
-    else:
-        use_exllama = not gptq_quantization_config.disable_exllama
-    if hasattr(gptq_quantization_config, "exllama_config"):
-        exllama_version = gptq_quantization_config.exllama_config["version"]
-    else:
-        exllama_version = 1
-
-    QuantLinear = dynamically_import_QuantLinear(
-        use_triton=False,
-        desc_act=desc_act,
-        group_size=group_size,
-        bits=bits,
-        disable_exllama=not (use_exllama and exllama_version == 1),
-        disable_exllamav2=not (use_exllama and exllama_version == 2),
-    )
-
-    return QuantLinear
-
-
 def get_gptqmodel_quant_linear(gptq_quantization_config, device_map=None):
     """
     Get the right GPTQQuantLinear class based on the quantization config file
@@ -1296,7 +1264,9 @@ def get_gptqmodel_quant_linear(gptq_quantization_config, device_map=None):
     if not is_gptqmodel_available():
         return None
 
-    from gptqmodel.utils.importer import hf_select_quant_linear
+    from gptqmodel import BACKEND
+    from gptqmodel.quantization import METHOD
+    from gptqmodel.utils.importer import hf_select_quant_linear_v2
 
     desc_act = gptq_quantization_config.desc_act
     group_size = gptq_quantization_config.group_size
@@ -1309,15 +1279,17 @@ def get_gptqmodel_quant_linear(gptq_quantization_config, device_map=None):
     sym = gptq_quantization_config.sym
     meta = gptq_quantization_config.meta if hasattr(gptq_quantization_config, "meta") else None
 
-    QuantLinear = hf_select_quant_linear(
+    QuantLinear = hf_select_quant_linear_v2(
         bits=bits,
         group_size=group_size,
         desc_act=desc_act,
         sym=sym,
         device_map=device_map,
-        checkpoint_format=checkpoint_format,
+        format=checkpoint_format,
+        quant_method=METHOD.GPTQ,
         meta=meta,
-        backend="auto_trainable",
+        backend=BACKEND.AUTO_TRAINABLE,
+        pack=False,
     )
 
     return QuantLinear
