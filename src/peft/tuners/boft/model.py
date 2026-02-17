@@ -77,16 +77,11 @@ class BOFTModel(BaseTuner):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
-        bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
+            "config": boft_config,
             "boft_block_size": boft_config.boft_block_size,
             "boft_block_num": boft_config.boft_block_num,
-            "boft_n_butterfly_factor": boft_config.boft_n_butterfly_factor,
-            "boft_dropout": boft_config.boft_dropout,
-            "fan_in_fan_out": boft_config.fan_in_fan_out,
-            "init_weights": boft_config.init_weights,
         }
-        kwargs["bias"] = bias
 
         # If it is not a BOFTLayer, create a new module, else update it with new adapters
         if not isinstance(target, BOFTLayer):
@@ -100,9 +95,7 @@ class BOFTModel(BaseTuner):
                 adapter_name,
                 boft_block_size=boft_config.boft_block_size,
                 boft_block_num=boft_config.boft_block_num,
-                boft_n_butterfly_factor=boft_config.boft_n_butterfly_factor,
-                boft_dropout=boft_config.boft_dropout,
-                init_weights=boft_config.init_weights,
+                config=boft_config,
             )
 
     @staticmethod
@@ -113,12 +106,12 @@ class BOFTModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            if kwargs["fan_in_fan_out"]:
+            if boft_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
-                kwargs["fan_in_fan_out"] = boft_config.fan_in_fan_out = False
+                boft_config.fan_in_fan_out = False
             new_module = Linear(target, adapter_name, **kwargs)
         elif isinstance(target_base_layer, torch.nn.Conv2d):
             new_module = Conv2d(target, adapter_name, **kwargs)
