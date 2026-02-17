@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .integrations import is_transformers_ge_v5, map_cache_to_layer_device_map
+from .integrations import map_cache_to_layer_device_map
 from .loftq_utils import replace_lora_weights_loftq
 from .other import (
     CONFIG_NAME,
@@ -55,7 +55,6 @@ from .other import (
     _set_trainable,
     bloom_model_postprocess_past_key_value,
     cast_mixed_precision_params,
-    get_auto_gptq_quant_linear,
     get_gptqmodel_quant_linear,
     get_quantization_config,
     id_tensor_storage,
@@ -114,13 +113,11 @@ __all__ = [
     "_set_trainable",
     "bloom_model_postprocess_past_key_value",
     "cast_mixed_precision_params",
-    "get_auto_gptq_quant_linear",
     "get_gptqmodel_quant_linear",
     "get_peft_model_state_dict",
     "get_quantization_config",
     "id_tensor_storage",
     "infer_device",
-    "is_transformers_ge_v5",
     "load_peft_weights",
     "map_cache_to_layer_device_map",
     "prepare_model_for_kbit_training",

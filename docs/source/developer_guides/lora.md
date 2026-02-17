@@ -128,35 +128,8 @@ EVA works out of the box with bitsandbytes. Simply initialize the model with `qu
 
 When quantizing the base model for QLoRA training, consider using the [LoftQ initialization](https://huggingface.co/papers/2310.08659), which has been shown to improve performance when training quantized models. The idea is that the LoRA weights are initialized such that the quantization error is minimized. To use LoftQ, follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/loftq_finetuning).
 
-In general, for LoftQ to work best, it is recommended to target as many layers with LoRA as possible, since those not targeted cannot have LoftQ applied. This means that passing `LoraConfig(..., target_modules="all-linear")` will most likely give the best results. Also, you should use `nf4` as quant type in your quantization config when using 4bit quantization, i.e. `BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")`.
-
-#### A more convenient way
-
-An easier but more limited way to apply LoftQ initialization is to use the convenience function `replace_lora_weights_loftq`. This takes the quantized PEFT model as input and replaces the LoRA weights in-place with their LoftQ-initialized counterparts.
-
-```python
-from peft import replace_lora_weights_loftq
-from transformers import BitsAndBytesConfig
-
-bnb_config = BitsAndBytesConfig(load_in_4bit=True, ...)
-base_model = AutoModelForCausalLM.from_pretrained(..., quantization_config=bnb_config)
-# note: don't pass init_lora_weights="loftq" or loftq_config!
-lora_config = LoraConfig(task_type="CAUSAL_LM")
-peft_model = get_peft_model(base_model, lora_config)
-replace_lora_weights_loftq(peft_model)
-```
-
-`replace_lora_weights_loftq` also allows you to pass a `callback` argument to give you more control over which layers should be modified or not, which empirically can improve the results quite a lot. To see a more elaborate example of this, check out [this notebook](https://github.com/huggingface/peft/blob/main/examples/loftq_finetuning/LoftQ_weight_replacement.ipynb).
-
-`replace_lora_weights_loftq` implements only one iteration step of LoftQ. This means that only the LoRA weights are updated, instead of iteratively updating LoRA weights and quantized base model weights. This may lead to lower performance but has the advantage that we can use the original quantized weights derived from the base model, instead of having to keep an extra copy of modified quantized weights. Whether this tradeoff is worthwhile depends on the use case.
-
-At the moment, `replace_lora_weights_loftq` has these additional limitations:
-
-- Model files must be stored as a `safetensors` file.
-- Only bitsandbytes 4bit quantization is supported.
-
 > [!TIP]
-> Learn more about how PEFT works with quantization in the [Quantization](quantization) guide.
+> Learn more about how PEFT works with quantization and how to use LoftQ in the [Quantization](quantization) guide.
 
 ### Rank-stabilized LoRA
 
@@ -331,6 +304,39 @@ Generally, you should use `target_modules` to target the module (e.g. `nn.Linear
 
 - At the moment, this argument allows to target 2-dim or 3-dim `nn.Parameter`s. It is assumed that in the case of a 3-dim parameter, the 0th dimension is the expert dimension.
 - It is currently not possible to add multiple LoRA adapters (via `model.add_adapter` or `model.load_adapter`) that use `target_parameters` at the same time.
+
+#### MoE expert parameters and vLLM
+
+Some MoE models in Transformers store expert weights as `nn.Parameter` tensors (often 3D), not `nn.Linear` modules.
+To apply LoRA to those experts, use `target_parameters` and set a per-layer rank with `rank_pattern`:
+
+```python
+num_experts = getattr(model.config, "num_local_experts", None) or model.config.num_experts
+effective_r = max(1, r // num_experts)
+config = LoraConfig(
+    r=r,
+    lora_alpha=32,
+    target_modules=["q_proj", "v_proj"],
+    target_parameters=[
+        # Mixtral / Qwen3-MoE / GPT-OSS
+        "mlp.experts.gate_up_proj",
+        "mlp.experts.down_proj",
+        # Llama4
+        # "feed_forward.experts.gate_up_proj",
+        # "feed_forward.experts.down_proj",
+    ],
+    rank_pattern={
+        "experts.gate_up_proj": effective_r,
+        "experts.down_proj": effective_r,
+    },
+)
+```
+
+This keeps the total LoRA parameter budget similar to dense layers (see
+[LoRA Without Regret](https://thinkingmachines.ai/blog/lora/) by Schulman et. al.).
+Non-expert modules use the default rank `r`.
+
+Accelerated inference with the fine-tuned model is possible with, for example, [vLLM](https://vllm.ai/) which supports fused MoE expert layers since v0.11.2.
 
 ### Efficiently train tokens alongside LoRA
 
