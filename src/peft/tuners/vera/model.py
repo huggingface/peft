@@ -196,10 +196,9 @@ class VeraModel(BaseTuner):
         r = vera_config.r
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
+            "config": vera_config,
             "r": r,
-            "vera_dropout": vera_config.vera_dropout,
             "fan_in_fan_out": vera_config.fan_in_fan_out,
-            "init_weights": vera_config.init_weights,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -211,9 +210,7 @@ class VeraModel(BaseTuner):
                 self.vera_A,
                 self.vera_B,
                 r,
-                vera_config.vera_dropout,
-                vera_config.init_weights,
-                d_initial=vera_config.d_initial,
+                config=vera_config,
             )
         else:
             new_module = self._create_new_module(vera_config, self.vera_A, self.vera_B, adapter_name, target, **kwargs)
@@ -287,7 +284,6 @@ class VeraModel(BaseTuner):
             vera_B,
             adapter_name,
             bias=bias,
-            d_initial=vera_config.d_initial,
             **kwargs,
         )
 

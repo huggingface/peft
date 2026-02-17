@@ -24,6 +24,7 @@ from peft.tuners.tuners_utils import check_adapters_to_merge
 from peft.utils.integrations import dequantize_bnb_weight
 from peft.utils.other import transpose
 
+from .config import VeraConfig
 from .layer import VeraLayer
 
 
@@ -36,11 +37,9 @@ if is_bnb_available():
             adapter_name: str,
             vera_A,
             vera_B,
+            config: VeraConfig,
             r: int = 0,
-            vera_dropout: float = 0.0,
             fan_in_fan_out: bool = False,
-            init_weights: bool = True,
-            d_initial: float = 0.1,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -53,9 +52,7 @@ if is_bnb_available():
                 vera_A,
                 vera_B,
                 r,
-                vera_dropout=vera_dropout,
-                init_weights=init_weights,
-                d_initial=d_initial,
+                config=config,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -250,11 +247,9 @@ if is_bnb_4bit_available():
             adapter_name: str,
             vera_A,
             vera_B,
+            config: VeraConfig,
             r: int = 0,
-            vera_dropout: float = 0.0,
             fan_in_fan_out: bool = False,
-            init_weights: bool = True,
-            d_initial: float = 0.1,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -267,9 +262,7 @@ if is_bnb_4bit_available():
                 vera_A,
                 vera_B,
                 r,
-                vera_dropout=vera_dropout,
-                init_weights=init_weights,
-                d_initial=d_initial,
+                config=config,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
