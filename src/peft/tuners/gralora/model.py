@@ -76,28 +76,17 @@ class GraloraModel(BaseTuner):
             raise ValueError("Current Key shouldn't be `None`")
 
         r = gralora_config.r
-        bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
+            "config": gralora_config,
             "r": r,
-            "alpha": gralora_config.alpha,
-            "gralora_dropout": gralora_config.gralora_dropout,
-            "gralora_k": gralora_config.gralora_k,
-            "fan_in_fan_out": gralora_config.fan_in_fan_out,
-            "hybrid_r": gralora_config.hybrid_r,
-            "init_weights": gralora_config.init_weights,
         }
-        kwargs["bias"] = bias
 
         if isinstance(target, Linear):
             target.update_layer(
                 adapter_name,
                 current_key,
                 r,
-                gralora_config.alpha,
-                gralora_config.gralora_dropout,
-                gralora_config.gralora_k,
-                gralora_config.hybrid_r,
-                gralora_config.init_weights,
+                config=gralora_config,
             )
         else:
             new_module = self._create_new_module(gralora_config, adapter_name, target, current_key, **kwargs)
@@ -114,19 +103,19 @@ class GraloraModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            if kwargs["fan_in_fan_out"]:
+            if gralora_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
-                kwargs["fan_in_fan_out"] = gralora_config.fan_in_fan_out = False
+                gralora_config.fan_in_fan_out = False
         elif isinstance(target_base_layer, Conv1D):
             kwargs["is_target_conv_1d_layer"] = True
-            if not kwargs["fan_in_fan_out"]:
+            if not gralora_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
-                kwargs["fan_in_fan_out"] = gralora_config.fan_in_fan_out = True
+                gralora_config.fan_in_fan_out = True
         else:
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
