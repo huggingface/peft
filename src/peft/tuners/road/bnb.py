@@ -46,9 +46,7 @@ if is_bnb_available():
             self._active_adapter = adapter_name
             self.update_layer(
                 adapter_name,
-                variant=variant,
-                group_size=group_size,
-                init_weights=init_weights,
+                config=kwargs["config"],
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -235,9 +233,7 @@ if is_bnb_4bit_available():
             self._active_adapter = adapter_name
             self.update_layer(
                 adapter_name,
-                variant=variant,
-                group_size=group_size,
-                init_weights=init_weights,
+                config=kwargs["config"],
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:

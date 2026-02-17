@@ -60,6 +60,7 @@ class RoadModel(BaseTuner):
         group_size = road_config.group_size
 
         kwargs = {
+            "config": road_config,
             "variant": variant,
             "group_size": group_size,
             "init_weights": road_config.init_weights,
@@ -77,9 +78,7 @@ class RoadModel(BaseTuner):
         if isinstance(target, RoadLayer):
             target.update_layer(
                 adapter_name,
-                variant,
-                group_size,
-                init_weights=road_config.init_weights,
+                config=road_config,
             )
         else:
             device_map = get_device_map(self.model)
