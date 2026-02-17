@@ -28,7 +28,12 @@ import transformers
 from torch import nn
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, find_parameter_name_by_tensor, replicate_layers
+from peft.tuners.tuners_utils import (
+    BaseTuner,
+    BaseTunerLayer,
+    get_device_map,
+    replicate_layers,
+)
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     AuxiliaryTrainingWrapper,
@@ -216,6 +221,7 @@ class LoraModel(BaseTuner):
             "target_name": current_key,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
+            "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
             "parameter_name": parameter_name,
             "tied_adapter": tied_adapter,
         }
@@ -253,7 +259,7 @@ class LoraModel(BaseTuner):
                     "Trying to target the same nn.Parameter twice, this should not happen. Please open an issue on the "
                     "PEFT repo: https://github.com/huggingface/peft/issues"
                 )
-            device_map = self.model.hf_device_map if hasattr(self.model, "hf_device_map") else None
+            device_map = get_device_map(self.model)
             new_module = self._create_new_module(lora_config, adapter_name, target, device_map=device_map, **kwargs)
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
