@@ -150,19 +150,6 @@ class LoraLayer(BaseTunerLayer):
         adapter_name: str,
         r: int,
         lora_alpha: int,
-        lora_dropout,
-        init_lora_weights,
-        use_rslora,
-        use_dora: bool = False,
-        use_alora: bool = False,
-        use_qalora: bool = False,
-        lora_bias: bool = False,
-        arrow_config: ArrowConfig = None,
-        qalora_group_size: int = 32,
-        inference_mode: bool = False,
-        tied_adapter: Optional[dict[str, nn.Parameter]] = None,
-        lora_ga_config=None,
-        use_bdlora=None,
         config: LoraConfig,
         **kwargs,
     ) -> None:
@@ -175,6 +162,7 @@ class LoraLayer(BaseTunerLayer):
 
         target_name = kwargs.get("target_name", "")  # preserve target_name before overwriting kwargs
         kwargs["target_name"] = target_name  # restore target_name
+        tied_adapter = kwargs.get("tied_adapter", None)
 
         # This code works for linear layers, override for other layer types
         if r <= 0:
@@ -767,16 +755,6 @@ class Linear(nn.Module, LoraLayer):
             adapter_name,
             r,
             lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout,
-            init_lora_weights=init_lora_weights,
-            use_rslora=use_rslora,
-            use_dora=use_dora,
-            use_alora=use_alora,
-            lora_bias=lora_bias,
-            arrow_config=arrow_config,
-            tied_adapter=kwargs.pop("tied_adapter", None),
-            lora_ga_config=lora_ga_config,
-            use_bdlora=use_bdlora,
             config=config,
             **kwargs,
         )

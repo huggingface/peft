@@ -31,6 +31,7 @@ from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
+    find_parameter_name_by_module,
     get_device_map,
     replicate_layers,
 )
@@ -264,7 +265,6 @@ class LoraModel(BaseTuner):
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
-
             self._replace_module(parent, target_name, new_module, target)
 
     def _replace_module(self, parent, child_name, new_module, child):
@@ -886,11 +886,7 @@ class LoraModel(BaseTuner):
         peft_config.modules_to_tie = tied_weight_keys
 
         modules_to_save = getattr(peft_config, "modules_to_save", []) or []
-
-        embed_layer_name = find_parameter_name_by_tensor(self.model, self.model.get_input_embeddings())
-        # find_parameter_name_by_tensor returns the parameter name, so we need to strip the weight from the name
-        if embed_layer_name.endswith(".weight"):
-            embed_layer_name = embed_layer_name.removesuffix(".weight")
+        embed_layer_name = find_parameter_name_by_module(self.model, self.model.get_input_embeddings())
         prefix, sep, suffix = embed_layer_name.partition(".")
         if sep and "model" in prefix:
             embed_layer_name = suffix
@@ -902,7 +898,10 @@ class LoraModel(BaseTuner):
         # fully qualified keys and remove matching keys from
         # `modules_to_save`. It will only remove first encounter
         # in `module_to_save`, which should be safe, because `tied_weight_keys`
-        # is a unique set of keys
+        # is a unique set of keys. These keys are removed because all the
+        # tied keys are handled in a separate flow
+        # outside of the usual `modules_to_save` flow
+        # See: peft.utils.other.set_additional_trainable_modules for details
         for key in tied_weight_keys:
             for m in modules_to_save:
                 if re.match(rf"(^|.*\.){m}($|\..*)", key):
@@ -925,19 +924,13 @@ class LoraModel(BaseTuner):
 
         raw_target_modules = getattr(peft_config, "target_modules", None)
 
-        embed_layer_name = find_parameter_name_by_tensor(self.model, self.model.get_input_embeddings())
-        # find_parameter_name_by_tensor returns the parameter name, so we need to strip the weight from the name
-        if embed_layer_name.endswith(".weight"):
-            embed_layer_name = embed_layer_name.removesuffix(".weight")
-        prefix, sep, suffix = embed_layer_name.partition(".")
-        if sep and "model" in prefix:
-            embed_layer_name = suffix
+        embed_layer_name = find_parameter_name_by_module(self.model, self.model.get_input_embeddings())
 
         if isinstance(raw_target_modules, str):
             # The way weight tying is handled for adapters, we always want to add
             # lora adapters to the input embedding layer (embed_tokens)
-            # instead of output embedding lauyer.
-            raw_target_modules = rf"(?:{raw_target_modules}|.*{embed_layer_name}$)"
+            # instead of output embedding layer.
+            raw_target_modules = rf"(?:{raw_target_modules}|^{re.escape(embed_layer_name)}$)"
             peft_config.target_modules = raw_target_modules
             return
 
@@ -948,7 +941,10 @@ class LoraModel(BaseTuner):
         # fully qualified keys and remove matching keys from
         # `target_modules`. It will only remove first encounter
         # in `target_modules`, which should be safe, because `tied_weight_keys`
-        # is a unique set of keys
+        # is a unique set of keys. These keys are removed because all the
+        # tied keys are handled in a separate flow
+        # outside of the usual `target_modules` flow
+        # See: peft.tuners.tuners_utils.BaseTuner.inject_adapter for details
         for key in tied_weight_keys:
             for m in target_modules:
                 if re.match(rf"(^|.*\.){m}($|\..*)", key):

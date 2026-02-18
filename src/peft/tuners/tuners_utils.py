@@ -1977,19 +1977,19 @@ def replicate_layers(model: nn.Module, layer_map: list[tuple[int, int]]):
         model.config.num_hidden_layers = len(new_layers)
 
 
-def find_parameter_name_by_tensor(model: nn.Module, reference_tensor: torch.Tensor) -> str:
+def find_parameter_name_by_module(model: nn.Module, reference_module: nn.Module) -> str:
     """
-    Find layer name from the model by matching the reference tensor to the model parameters
+    Find layer name from the model by matching the reference module to the model named modules
 
     Args:
         model (nn.Module): The model with named modules
-        reference_tensor (torch.Tensor): The reference tensor to find
+        reference_module (nn.Module): The reference module to find
 
     Returns:
         str: Name of the layer
     """
     for n, m in model.named_modules():
-        if m is reference_tensor:
+        if m is reference_module:
             return n
 
     return ""

@@ -4969,8 +4969,50 @@ class TestWeightTying:
 
         return CausalLM().eval().to(self.torch_device)
 
+    def get_seq2seq_lm_model(self, tie_weights=True):
+        # Mimicking a encoder-decoder LM with shared embeddings
+        class Seq2SeqStack(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embed_tokens = nn.Embedding(1000, 1000)
+                self.linear = nn.Linear(1000, 1000, bias=False)
+
+        class MySeq2SeqModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.shared = nn.Embedding(1000, 1000)
+                self.encoder = Seq2SeqStack()
+                self.decoder = Seq2SeqStack()
+
+        class Seq2SeqLM(nn.Module):
+            if tie_weights:
+                _tied_weights_keys = {
+                    "model.encoder.embed_tokens.weight": "model.shared.weight",
+                    "model.decoder.embed_tokens.weight": "model.shared.weight",
+                    "lm_head.weight": "model.shared.weight",
+                }
+
+            def __init__(self):
+                super().__init__()
+                self.model = MySeq2SeqModule()
+                self.config = {"tie_word_embeddings": tie_weights}
+                self.lm_head = nn.Linear(1000, 1000, bias=False)
+
+                if tie_weights:
+                    self.model.encoder.embed_tokens.weight = self.model.shared.weight
+                    self.model.decoder.embed_tokens.weight = self.model.shared.weight
+                    self.lm_head.weight = self.model.shared.weight
+
+            def prepare_inputs_for_generation(self):
+                return
+
+            def get_input_embeddings(self):
+                return self.model.shared
+
+        return Seq2SeqLM().eval().to(self.torch_device)
+
     @pytest.mark.parametrize("modules_to_save", [["lm_head"], ["embed_tokens"], ["lm_head", "embed_tokens"]])
-    def test_weight_tying_tied_model_lora(self, layer):
+    def test_weight_tying_tied_model_lora(self, modules_to_save):
         # If weight tying is enabled and `embed_tokens`
         # is passed as a `modules_to_save`, it needs to be ensured
         # that lm_head is tied to the adapter added to `embed_tokens`
@@ -4978,7 +5020,7 @@ class TestWeightTying:
         model = self.get_lm_model()
 
         embed_token_config = LoraConfig(
-            modules_to_save=layer if isinstance(layer, list) else [layer],
+            modules_to_save=modules_to_save,
             target_modules=["linear"],
             ensure_weight_tying=True,
         )
@@ -4997,20 +5039,20 @@ class TestWeightTying:
             assert embed_np[k].data_ptr() == lm_head_np[k].data_ptr()
 
     @pytest.mark.parametrize(
-        "layer,tie_weights",
+        "modules_to_save,tie_weights",
         [
-            ("lm_head", True),
-            ("lm_head", False),
-            ("embed_tokens", True),
-            ("embed_tokens", False),
+            (["lm_head"], True),
+            (["lm_head"], False),
+            (["embed_tokens"], True),
+            (["embed_tokens"], False),
             (["embed_tokens", "lm_head"], True),
             (["embed_tokens", "lm_head"], False),
         ],
     )
-    def test_alt_weight_tying_tied_model_lora(self, layer, tie_weights):
+    def test_alt_weight_tying_tied_model_lora(self, modules_to_save, tie_weights):
         model = self.get_lm_model(tie_weights=tie_weights)
         embed_token_config = LoraConfig(
-            modules_to_save=layer if isinstance(layer, list) else [layer],
+            modules_to_save=modules_to_save,
             target_modules=["linear"],
             ensure_weight_tying=not tie_weights,
         )
@@ -5023,13 +5065,13 @@ class TestWeightTying:
         with pytest.warns(UserWarning, match=wrn_msg):
             model = get_peft_model(model, embed_token_config)
 
-        if layer == "embed_tokens":
+        if modules_to_save == ["embed_tokens"]:
             assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper)
             assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
-        elif layer == "lm_head":
+        elif modules_to_save == ["lm_head"]:
             assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
             assert isinstance(model.base_model.model.lm_head, ModulesToSaveWrapper)
-        elif layer == ["embed_tokens", "lm_head"]:
+        elif modules_to_save == ["embed_tokens", "lm_head"]:
             assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper)
             assert isinstance(model.base_model.model.lm_head, ModulesToSaveWrapper)
         else:
@@ -5069,14 +5111,14 @@ class TestWeightTying:
         )
         assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
 
-    @pytest.mark.parametrize("layer", ["lm_head", "embed_tokens", ["lm_head", "embed_tokens"]])
-    def test_weight_tying_tied_model_target_modules_lora(self, layer):
+    @pytest.mark.parametrize("target_modules", [["lm_head"], ["embed_tokens"], ["lm_head", "embed_tokens"]])
+    def test_weight_tying_tied_model_target_modules_lora(self, target_modules):
         # Same as `test_weight_tying_tied_model_lora` but the tied module is passed
         # in `target_modules` instead of `modules_to_save`.
         model = self.get_lm_model()
 
         embed_token_config = LoraConfig(
-            target_modules=["linear"] + layer if isinstance(layer, list) else [layer],
+            target_modules=["linear"] + target_modules,
             ensure_weight_tying=True,
         )
 
@@ -5100,14 +5142,14 @@ class TestWeightTying:
         assert embed_lora_A.data_ptr() == lm_lora_B.data_ptr()
         assert embed_lora_B.data_ptr() == lm_lora_A.data_ptr()
 
-    @pytest.mark.parametrize("layer", [".*embed_tokens$", ".*lm_head$", ".*(embed_tokens|lm_head)$"])
-    def test_weight_tying_tied_model_target_modules_str_lora(self, layer):
+    @pytest.mark.parametrize("target_modules", [".*embed_tokens$", ".*lm_head$", ".*(embed_tokens|lm_head)$"])
+    def test_weight_tying_tied_model_target_modules_str_lora(self, target_modules):
         # Same as `test_weight_tying_tied_model_target_modules_lora` but the tied module
         # are passed as str
         model = self.get_lm_model()
 
         embed_token_config = LoraConfig(
-            target_modules=layer,
+            target_modules=target_modules,
             ensure_weight_tying=True,
         )
 
@@ -5131,23 +5173,38 @@ class TestWeightTying:
         assert embed_lora_A.data_ptr() == lm_lora_B.data_ptr()
         assert embed_lora_B.data_ptr() == lm_lora_A.data_ptr()
 
+    @pytest.mark.parametrize("target_modules", ["all-linear"])
+    def test_weight_tying_tied_model_target_modules_all_linear_lora(self, target_modules):
+        # Passing just the all-linear as target_modules
+        model = self.get_lm_model()
+
+        embed_token_config = LoraConfig(
+            target_modules=target_modules,
+            ensure_weight_tying=True,
+        )
+
+        model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.linear, LoraLayer)
+        assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
+
     @pytest.mark.parametrize(
-        "layer,tie_weights",
+        "target_modules,tie_weights",
         [
-            ("lm_head", True),
-            ("lm_head", False),
-            ("embed_tokens", True),
-            ("embed_tokens", False),
+            (["lm_head"], True),
+            (["lm_head"], False),
+            (["embed_tokens"], True),
+            (["embed_tokens"], False),
             (["embed_tokens", "lm_head"], True),
             (["embed_tokens", "lm_head"], False),
         ],
     )
-    def test_alt_weight_tying_tied_model_target_modules_lora(self, layer, tie_weights):
+    def test_alt_weight_tying_tied_model_target_modules_lora(self, target_modules, tie_weights):
         # When model weights are not tied, ensure a warning is raised even if
         # the tied module name is present in `target_modules`.
         model = self.get_lm_model(tie_weights=tie_weights)
         embed_token_config = LoraConfig(
-            target_modules=["linear"] + layer if isinstance(layer, list) else [layer],
+            target_modules=["linear"] + target_modules,
             ensure_weight_tying=not tie_weights,
         )
 
@@ -5159,13 +5216,13 @@ class TestWeightTying:
         with pytest.warns(UserWarning, match=wrn_msg):
             model = get_peft_model(model, embed_token_config)
 
-        if layer == "embed_tokens":
+        if target_modules == ["embed_tokens"]:
             assert isinstance(model.base_model.model.model.embed_tokens, LoraLayer)
             assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
-        elif layer == "lm_head":
+        elif target_modules == ["lm_head"]:
             assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
             assert isinstance(model.base_model.model.lm_head, LoraLayer)
-        elif layer == ["embed_tokens", "lm_head"]:
+        elif target_modules == ["embed_tokens", "lm_head"]:
             assert isinstance(model.base_model.model.model.embed_tokens, LoraLayer)
             assert isinstance(model.base_model.model.lm_head, LoraLayer)
 
@@ -5192,3 +5249,70 @@ class TestWeightTying:
 
         assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
         assert isinstance(model.base_model.model.lm_head, LoKrLayer)
+
+    @pytest.mark.parametrize("modules_to_save", [["lm_head"], ["embed_tokens"], ["lm_head", "embed_tokens"]])
+    def test_weight_tying_enc_dec_modules_to_save_lora(self, modules_to_save):
+        model = self.get_seq2seq_lm_model()
+        embed_token_config = LoraConfig(
+            modules_to_save=modules_to_save,
+            target_modules=["linear"],
+            ensure_weight_tying=True,
+        )
+
+        model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.shared, ModulesToSaveWrapper)
+        assert isinstance(model.base_model.model.model.encoder.embed_tokens, ModulesToSaveWrapper)
+        assert isinstance(model.base_model.model.model.decoder.embed_tokens, ModulesToSaveWrapper)
+        assert isinstance(model.base_model.model.lm_head, ModulesToSaveWrapper)
+
+        shared_np = dict(model.base_model.model.model.shared.named_parameters())
+        lm_head_np = dict(model.base_model.model.lm_head.named_parameters())
+
+        for k in shared_np.keys():
+            assert torch.allclose(shared_np[k], lm_head_np[k])
+            assert shared_np[k].data_ptr() == lm_head_np[k].data_ptr()
+
+    @pytest.mark.parametrize("target_modules", [["lm_head"], ["embed_tokens"], ["lm_head", "embed_tokens"]])
+    def test_weight_tying_enc_dec_target_modules_lora(self, target_modules):
+        model = self.get_seq2seq_lm_model()
+        embed_token_config = LoraConfig(
+            target_modules=["linear"] + target_modules,
+            ensure_weight_tying=True,
+        )
+
+        model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.shared, LoraLayer)
+        assert isinstance(model.base_model.model.model.encoder.embed_tokens, LoraLayer)
+        assert isinstance(model.base_model.model.model.decoder.embed_tokens, LoraLayer)
+        assert isinstance(model.base_model.model.lm_head, LoraLayer)
+
+        adapter_name = "default"
+
+        shared_lora_A = model.base_model.model.model.shared.lora_embedding_A[adapter_name]
+        shared_lora_B = model.base_model.model.model.shared.lora_embedding_B[adapter_name]
+
+        lm_lora_A = model.base_model.model.lm_head.lora_A[adapter_name].weight
+        lm_lora_B = model.base_model.model.lm_head.lora_B[adapter_name].weight
+
+        assert torch.allclose(shared_lora_A, lm_lora_B.T)
+        assert torch.allclose(shared_lora_B, lm_lora_A.T)
+        assert shared_lora_A.data_ptr() == lm_lora_B.data_ptr()
+        assert shared_lora_B.data_ptr() == lm_lora_A.data_ptr()
+
+    @pytest.mark.parametrize("target_modules", [["linear"], ["encoder.linear"], ["decoder.linear"]])
+    def test_weight_tying_enc_dec_no_tied_module_targeted_warns(self, target_modules):
+        model = self.get_seq2seq_lm_model()
+        embed_token_config = LoraConfig(
+            target_modules=target_modules,
+            ensure_weight_tying=True,
+        )
+
+        with pytest.warns(UserWarning, match="no tied modules are added"):
+            model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.shared, torch.nn.modules.sparse.Embedding)
+        assert isinstance(model.base_model.model.model.encoder.embed_tokens, torch.nn.modules.sparse.Embedding)
+        assert isinstance(model.base_model.model.model.decoder.embed_tokens, torch.nn.modules.sparse.Embedding)
+        assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
