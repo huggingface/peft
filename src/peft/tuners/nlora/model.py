@@ -10,6 +10,7 @@ class NonlinearLoraModel(BaseTuner):
     tuner_layer_cls = NonlinearLoraLinear
 
     def _prepare_adapter_config(self, peft_config, model_config):
+        self.consolidation_updates = 0
         if peft_config.target_modules is None:
             raise ValueError("NonlinearLoraConfig.target_modules must be set.")
         return peft_config
@@ -46,8 +47,11 @@ class NonlinearLoraModel(BaseTuner):
         offload_cpu: bool | None = None,
         accum_dtype: torch.dtype | None = None,
         scale_lambda_by_trace: bool | None = None,
-        max_batches: int | None = None,
+        max_batches: int | None = 1,
         inplace_disable_adapter: bool = False,
+        consolidate_rls: bool | None = None,
+        update_frequency: int | None = None,
+        zeroshift: bool | None = None,
     ):
         """
         Data-dependent consolidation: fit ΔW per wrapped layer using ridge regression on calibration inputs,
@@ -71,34 +75,48 @@ class NonlinearLoraModel(BaseTuner):
             scale_lambda_by_trace = getattr(cfg, "consolidate_scale_lambda_by_trace", True)
         if max_batches is None:
             max_batches = getattr(cfg, "consolidate_batches", None)  # allow None = all
+        
+        if consolidate_rls is None:
+            consolidate_rls = getattr(cfg, "consolidate_rls", False)
 
         if accum_dtype is None:
             dtype_str = getattr(cfg, "consolidate_dtype", "float32")
             accum_dtype = torch.float64 if dtype_str == "float64" else torch.float32
+
+        if update_frequency is None:
+            update_frequency = getattr(cfg, "consolidate_layer_update_frequency", 1.0) # which layers to update 1 update all layers 2, update every other layer etc.
+        
+        if zeroshift is None:
+            zeroshift = getattr(cfg, "consolidate_zero_shift", False)
 
         layer_states: dict[NonlinearLoraLinear, dict] = {}
         hooks = []
 
         def make_hook(layer: NonlinearLoraLinear):
             def hook(module, inputs, output):
-                x = inputs[0]
+                x = inputs[0] # (batch_size, seq_len, in_features)
                 layer.accumulate_consolidation_stats(
                     x=x,
                     adapter_name=adapter_name,
                     state=layer_states[layer],
                     off_load_to_cpu=offload_cpu,
                     accum_dtype=accum_dtype,
+                    lambda_=lambda_,
+                    scale_lambda_by_trace=scale_lambda_by_trace,
+                    consolidate_rls=consolidate_rls,
                 )
             return hook
 
         # register hooks + init states
         layers = []
+        update_count = self.consolidation_updates % update_frequency
         for m in self.model.modules():
             if isinstance(m, NonlinearLoraLinear):
-                layers.append(m)
-                layer_states[m] = {}
-                hooks.append(m.register_forward_hook(make_hook(m)))
-
+                if (update_count % update_frequency) == 0:
+                    layers.append(m)
+                    layer_states[m] = {}
+                    hooks.append(m.register_forward_hook(make_hook(m)))
+                update_count += 1
         # accumulate stats
         self.model.eval()
         dev = next(self.model.parameters()).device
@@ -120,11 +138,15 @@ class NonlinearLoraModel(BaseTuner):
         for layer in layers:
             layer.solve_and_merge(
                 state=layer_states[layer],
-                lambda_=lambda_,
                 lr_=lr,
+                lambda_w=lambda_,
+                scale_by_lambda_=scale_lambda_by_trace,
                 adapter_name=adapter_name,
                 inplace_disable_adapter=inplace_disable_adapter,
-                scale_lambda_by_trace=scale_lambda_by_trace,
+                consolidate_rls=consolidate_rls,
+                zeroshift=zeroshift,
             )
+
+        self.consolidation_updates += 1
 
         return layer_states
