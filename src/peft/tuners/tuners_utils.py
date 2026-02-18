@@ -1485,7 +1485,7 @@ class BaseTunerLayer(ABC):
             module_dict = getattr(self, layer_name)
             for key, layer in module_dict.items():
                 if key in adapter_names_set:
-                    layer.requires_grad_(requires_grad)
+                    _set_layer_requires_grad(layer, requires_grad)
 
     def _get_base_layer_device_and_dtype(self, base_layer):
         """

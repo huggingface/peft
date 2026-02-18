@@ -45,7 +45,7 @@ def get_base_model_weights(peft_model):
     """Extract base model weights (non-LoRA weights)."""
     base_weights = {}
     for name, param in peft_model.named_parameters():
-        if "lora" not in name.lower():
+        if "lora" not in name.lower() and "modules_to_save" not in name:
             base_weights[name] = param.detach().clone()
     return base_weights
 
@@ -83,6 +83,7 @@ class Model(nn.Module):
             r=16,
             lora_alpha=32,
             target_modules=["q_proj", "v_proj"],
+            modules_to_save=["lm_head"],
             lora_dropout=0.05,
             bias="none",
             task_type="CAUSAL_LM",
@@ -94,6 +95,7 @@ class Model(nn.Module):
             r=8,
             lora_alpha=16,
             target_modules=["q_proj", "v_proj"],
+            modules_to_save=["lm_head"],
             lora_dropout=0.05,
             bias="none",
             task_type="CAUSAL_LM",
@@ -103,8 +105,8 @@ class Model(nn.Module):
         self.peft_model.set_adapter("default")
         self.peft_model.to(torch.bfloat16)
 
-        for name, param in self.peft_model.named_parameters():
-            param.requires_grad = "lora_" in name.lower() and "second_adapter" not in name
+        self.peft_model.set_requires_grad("default", requires_grad=True)
+        self.peft_model.set_requires_grad("second_adapter", requires_grad=False)
 
     def forward(self, input_ids=None, attention_mask=None, labels=None):
         out1 = self.peft_model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
