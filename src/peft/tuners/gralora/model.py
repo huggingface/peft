@@ -76,20 +76,15 @@ class GraloraModel(BaseTuner):
             raise ValueError("Current Key shouldn't be `None`")
 
         r = gralora_config.r
-        kwargs = {
-            "config": gralora_config,
-            "r": r,
-        }
-
         if isinstance(target, Linear):
             target.update_layer(
                 adapter_name,
                 current_key,
-                r,
+                r=r,
                 config=gralora_config,
             )
         else:
-            new_module = self._create_new_module(gralora_config, adapter_name, target, current_key, **kwargs)
+            new_module = self._create_new_module(gralora_config, adapter_name, target, current_key, r=r)
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
@@ -125,6 +120,7 @@ class GraloraModel(BaseTuner):
             target,
             adapter_name,
             module_name,
+            config=gralora_config,
             **kwargs,
         )
 

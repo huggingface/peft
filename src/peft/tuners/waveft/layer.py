@@ -67,14 +67,11 @@ class WaveFTLayer(BaseTunerLayer):
 
     def update_layer(
         self,
-        adapter_name,
-        n_frequency,
+        adapter_name: str,
+        n_frequency: int,
         config: WaveFTConfig,
-        wavelet_family: str | None = None,
-        inference_mode: bool = False,
     ):
-        if wavelet_family is None:
-            wavelet_family = config.wavelet_family
+        wavelet_family = config.wavelet_family
         scaling = config.scaling
         init_weights = config.init_weights
         random_loc_seed = config.random_loc_seed
@@ -120,7 +117,7 @@ class WaveFTLayer(BaseTunerLayer):
             self.waveft_spectrum[adapter_name] = nn.Parameter(torch.randn(n_frequency) * std_dev, requires_grad=True)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
+        self.set_adapter(self.active_adapters, inference_mode=config.inference_mode)
 
     @torch.no_grad()
     def reset_wave_parameters(self, adapter_name):

@@ -24,6 +24,7 @@ from peft.tuners.tuners_utils import check_adapters_to_merge
 from peft.utils.integrations import dequantize_bnb_weight
 from peft.utils.other import transpose
 
+from .config import RandLoraConfig
 from .layer import RandLoraLayer, UniqueBaseGrad
 
 
@@ -34,18 +35,17 @@ if is_bnb_available():
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
+            config: RandLoraConfig,
             randlora_A,
             randlora_B,
             r: int = 0,
             randlora_alpha: int = 0,
-            randlora_dropout: float = 0.0,
-            fan_in_fan_out: bool = False,
             init_weights: bool = True,
             **kwargs,
         ) -> None:
             super().__init__()
             RandLoraLayer.__init__(self, base_layer)
-            self.fan_in_fan_out = fan_in_fan_out
+            self.fan_in_fan_out = config.fan_in_fan_out
 
             self._active_adapter = adapter_name
             self.update_layer(
@@ -53,7 +53,7 @@ if is_bnb_available():
                 randlora_A,
                 randlora_B,
                 r,
-                config=kwargs["config"],
+                config=config,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -260,18 +260,17 @@ if is_bnb_4bit_available():
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
+            config: RandLoraConfig,
             randlora_A,
             randlora_B,
             r: int = 0,
             randlora_alpha: int = 0,
-            randlora_dropout: float = 0.0,
-            fan_in_fan_out: bool = False,
             init_weights: bool = True,
             **kwargs,
         ) -> None:
             super().__init__()
             RandLoraLayer.__init__(self, base_layer)
-            self.fan_in_fan_out = fan_in_fan_out
+            self.fan_in_fan_out = config.fan_in_fan_out
             self._active_adapter = adapter_name
             self.update_layer(
                 adapter_name,

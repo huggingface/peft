@@ -265,14 +265,14 @@ class BOFTLayer(BaseTunerLayer):
     def update_layer(
         self,
         adapter_name: str,
-        boft_block_size: int,
-        boft_block_num: int,
         config: BOFTConfig,
         **kwargs,
     ):
         """
         Update the linear layer with trainable BOFT weights. Override for other layer types.
         """
+        boft_block_size = config.boft_block_size
+        boft_block_num = config.boft_block_num
         boft_n_butterfly_factor = config.boft_n_butterfly_factor
         boft_dropout = config.boft_dropout
         init_weights = config.init_weights
@@ -477,8 +477,6 @@ class Linear(nn.Module, BOFTLayer):
         base_layer,
         adapter_name: str,
         config: BOFTConfig,
-        boft_block_size: int = 8,
-        boft_block_num: int = 0,
         is_target_conv_1d_layer: bool = False,
         **kwargs,
     ) -> None:
@@ -488,7 +486,7 @@ class Linear(nn.Module, BOFTLayer):
 
         self._active_adapter = adapter_name
 
-        self.update_layer(adapter_name, boft_block_size, boft_block_num, config=config)
+        self.update_layer(adapter_name, config=config)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -674,27 +672,25 @@ class Conv2d(nn.Module, BOFTLayer):
         base_layer: nn.Module,
         adapter_name: str,
         config: BOFTConfig,
-        boft_block_size: int = 8,
-        boft_block_num: int = 0,
         **kwargs,
     ) -> None:
         super().__init__()
         BOFTLayer.__init__(self, base_layer)
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, boft_block_size, boft_block_num, config=config)
+        self.update_layer(adapter_name, config=config)
 
     def update_layer(
         self,
         adapter_name: str,
-        boft_block_size: int,
-        boft_block_num: int,
         config: BOFTConfig,
         **kwargs,
     ):
         """
         Update the conv2d layer with trainable BOFT weights.
         """
+        boft_block_size = config.boft_block_size
+        boft_block_num = config.boft_block_num
         boft_n_butterfly_factor = config.boft_n_butterfly_factor
         boft_dropout = config.boft_dropout
         init_weights = config.init_weights

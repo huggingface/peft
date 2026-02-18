@@ -125,19 +125,19 @@ class VBLoRAModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            if kwargs["fan_in_fan_out"]:
+            if vblora_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
-                kwargs["fan_in_fan_out"] = vblora_config.fan_in_fan_out = False
+                vblora_config.fan_in_fan_out = False
         elif isinstance(target_base_layer, Conv1D):
-            kwargs["is_target_conv_1d_layer"] = True
-            if not kwargs["fan_in_fan_out"]:
+            vblora_config.is_target_conv_1d_layer = True
+            if vblora_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
-                kwargs["fan_in_fan_out"] = vblora_config.fan_in_fan_out = True
+                vblora_config.fan_in_fan_out = True
         else:
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "

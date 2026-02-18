@@ -82,7 +82,7 @@ class OSFLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-    def update_layer(self, adapter_name: str, effective_rank: int, config: OSFConfig | None = None, **kwargs):
+    def update_layer(self, adapter_name: str, effective_rank: int, config: OSFConfig, **kwargs):
         """Update layer to add a new OSF adapter."""
         if effective_rank <= 0:
             raise ValueError(
@@ -227,8 +227,8 @@ class Linear(nn.Module, OSFLayer):
         self,
         base_layer,
         adapter_name: str,
-        config: OSFConfig | None = None,
-        effective_rank: int = None,
+        config: OSFConfig,
+        effective_rank: Optional[int] = None,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -275,7 +275,7 @@ class Linear(nn.Module, OSFLayer):
 def dispatch_default(
     target: torch.nn.Module,
     adapter_name: str,
-    osf_config,
+    osf_config: OSFConfig,
     **kwargs,
 ) -> Optional[torch.nn.Module]:
     new_module = None
@@ -286,6 +286,6 @@ def dispatch_default(
         target_base_layer = target
 
     if isinstance(target_base_layer, torch.nn.Linear):
-        new_module = Linear(target, adapter_name, **kwargs)
+        new_module = Linear(target, adapter_name, config=osf_config, **kwargs)
 
     return new_module

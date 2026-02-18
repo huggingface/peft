@@ -87,7 +87,6 @@ class IA3Model(BaseTuner):
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
         is_feedforward = kwargs.pop("is_feedforward", False)
-        config = kwargs.pop("config")
 
         if isinstance(target, BaseTunerLayer):
             target_base_layer = target.get_base_layer()
@@ -104,7 +103,7 @@ class IA3Model(BaseTuner):
                 }
             )
             new_module = Linear8bitLt(
-                target, adapter_name, config=config, is_feedforward=is_feedforward, **eightbit_kwargs
+                target, adapter_name, config=ia3_config, is_feedforward=is_feedforward, **eightbit_kwargs
             )
         elif loaded_in_4bit and isinstance(target_base_layer, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
@@ -116,30 +115,30 @@ class IA3Model(BaseTuner):
                 }
             )
             new_module = Linear4bit(
-                target, adapter_name, config=config, is_feedforward=is_feedforward, **fourbit_kwargs
+                target, adapter_name, config=ia3_config, is_feedforward=is_feedforward, **fourbit_kwargs
             )
         elif isinstance(target, torch.nn.Conv2d):
-            new_module = Conv2d(target, adapter_name, config=config, is_feedforward=is_feedforward, **kwargs)
+            new_module = Conv2d(target, adapter_name, config=ia3_config, is_feedforward=is_feedforward, **kwargs)
         elif isinstance(target, torch.nn.Conv3d):
-            new_module = Conv3d(target, adapter_name, config=config, is_feedforward=is_feedforward, **kwargs)
+            new_module = Conv3d(target, adapter_name, config=ia3_config, is_feedforward=is_feedforward, **kwargs)
         elif isinstance(target_base_layer, torch.nn.Linear):
-            if config.fan_in_fan_out:
+            if ia3_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
-                config.fan_in_fan_out = ia3_config.fan_in_fan_out = False
-            new_module = Linear(target, adapter_name, config=config, is_feedforward=is_feedforward, **kwargs)
+                ia3_config.fan_in_fan_out = False
+            new_module = Linear(target, adapter_name, config=ia3_config, is_feedforward=is_feedforward, **kwargs)
         elif isinstance(target_base_layer, Conv1D):
-            if not config.fan_in_fan_out:
+            if not ia3_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
-                config.fan_in_fan_out = ia3_config.fan_in_fan_out = True
+                ia3_config.fan_in_fan_out = True
             new_module = Linear(
                 target,
                 adapter_name,
-                config=config,
+                config=ia3_config,
                 is_feedforward=is_feedforward,
                 is_target_conv_1d_layer=True,
                 **kwargs,
@@ -164,7 +163,6 @@ class IA3Model(BaseTuner):
         is_feedforward = self._check_target_module_feedforward(ia3_config, current_key)
 
         kwargs = {
-            "config": ia3_config,
             "is_feedforward": is_feedforward,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),

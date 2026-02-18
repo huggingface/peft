@@ -107,6 +107,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         return token_weights
 
     def update_layer(self, adapter_name, config: TrainableTokensConfig | dict | None = None, **kwargs):
+        # normalize config
         if isinstance(config, dict):
             cfg = config
         elif config is not None:

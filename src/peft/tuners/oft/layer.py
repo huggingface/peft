@@ -913,7 +913,7 @@ def dispatch_default(
         target_base_layer = target
 
     if isinstance(target_base_layer, torch.nn.Conv2d):
-        new_module = Conv2d(target, adapter_name, **kwargs)
+        new_module = Conv2d(target, adapter_name, config=oft_config, **kwargs)
     elif isinstance(target_base_layer, torch.nn.Linear):
         if kwargs["fan_in_fan_out"]:
             warnings.warn(
@@ -921,6 +921,6 @@ def dispatch_default(
                 "Setting fan_in_fan_out to False."
             )
             kwargs["fan_in_fan_out"] = oft_config.fan_in_fan_out = False
-        new_module = Linear(target, adapter_name, **kwargs)
+        new_module = Linear(target, adapter_name, config=oft_config, **kwargs)
 
     return new_module

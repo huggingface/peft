@@ -411,6 +411,6 @@ def dispatch_default(
         target_base_layer = target
 
     if isinstance(target_base_layer, torch.nn.Linear):
-        new_module = Linear(target, adapter_name, **kwargs)
+        new_module = Linear(target, adapter_name, config=road_config, **kwargs)
 
     return new_module

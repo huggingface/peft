@@ -71,7 +71,6 @@ class FourierFTModel(BaseTuner):
 
         n_frequency = fourierft_config.n_frequency_pattern.get(target_name_key, fourierft_config.n_frequency)
         kwargs = {
-            "config": fourierft_config,
             "n_frequency": n_frequency,
         }
         if isinstance(target, FourierFTLayer):
@@ -114,6 +113,6 @@ class FourierFTModel(BaseTuner):
                 "`torch.nn.Linear`."
             )
 
-        new_module = FourierFTLinear(target, adapter_name, **kwargs)
+        new_module = FourierFTLinear(target, adapter_name, config=fourierft_config, **kwargs)
 
         return new_module

@@ -98,12 +98,11 @@ class OSFModel(BaseTuner):
 
         kwargs = {
             "effective_rank": effective_rank,
-            "config": osf_config,
         }
 
         # Create a new or update an existing OSF layer in place
         if isinstance(target, OSFLayer):
-            target.update_layer(adapter_name, **kwargs)
+            target.update_layer(adapter_name, config=osf_config, **kwargs)
         else:
             new_module = dispatch_default(target, adapter_name, osf_config, **kwargs)
             if new_module is None:

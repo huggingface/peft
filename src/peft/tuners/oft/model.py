@@ -102,7 +102,6 @@ class OFTModel(BaseTuner):
             raise ValueError("Current Key shouldn't be `None`")
 
         kwargs = {
-            "config": oft_config,
             "r": oft_config.r,
             "fan_in_fan_out": oft_config.fan_in_fan_out,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),

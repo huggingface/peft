@@ -101,8 +101,6 @@ class ShiraModel(BaseTuner):
 
     @staticmethod
     def _create_new_module(shira_config, adapter_name, target, **kwargs):
-        fan_in_fan_out = shira_config.fan_in_fan_out
-
         _ = kwargs.pop("bias", False)
 
         if isinstance(target, BaseTunerLayer):
@@ -111,12 +109,12 @@ class ShiraModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            if fan_in_fan_out:
+            if shira_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
-                fan_in_fan_out = shira_config.fan_in_fan_out = False
+                shira_config.fan_in_fan_out = False
         else:
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
@@ -135,7 +133,6 @@ class ShiraModel(BaseTuner):
             adapter_name,
             config=shira_config,
             r=shira_config.r,
-            fan_in_fan_out=fan_in_fan_out,
             **kwargs,
         )
 

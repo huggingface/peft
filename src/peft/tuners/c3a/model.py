@@ -67,7 +67,6 @@ class C3AModel(BaseTuner):
 
         block_size = c3a_config.block_size_pattern.get(target_name_key, c3a_config.block_size)
         kwargs = {
-            "config": c3a_config,
             "block_size": block_size,
         }
 
@@ -92,7 +91,7 @@ class C3AModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            new_module = C3ALinear(target, adapter_name, **kwargs)
+            new_module = C3ALinear(target, adapter_name, config=c3a_config, **kwargs)
         else:
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only `torch.nn.Linear` is supported."

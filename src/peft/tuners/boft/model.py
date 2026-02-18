@@ -77,15 +77,9 @@ class BOFTModel(BaseTuner):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
-        kwargs = {
-            "config": boft_config,
-            "boft_block_size": boft_config.boft_block_size,
-            "boft_block_num": boft_config.boft_block_num,
-        }
-
         # If it is not a BOFTLayer, create a new module, else update it with new adapters
         if not isinstance(target, BOFTLayer):
-            new_module = self._create_new_module(boft_config, adapter_name, target, **kwargs)
+            new_module = self._create_new_module(boft_config, adapter_name, target)
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
@@ -93,8 +87,6 @@ class BOFTModel(BaseTuner):
         else:
             target.update_layer(
                 adapter_name,
-                boft_block_size=boft_config.boft_block_size,
-                boft_block_num=boft_config.boft_block_num,
                 config=boft_config,
             )
 
@@ -112,9 +104,9 @@ class BOFTModel(BaseTuner):
                     "Setting fan_in_fan_out to False."
                 )
                 boft_config.fan_in_fan_out = False
-            new_module = Linear(target, adapter_name, **kwargs)
+            new_module = Linear(target, adapter_name, config=boft_config, **kwargs)
         elif isinstance(target_base_layer, torch.nn.Conv2d):
-            new_module = Conv2d(target, adapter_name, **kwargs)
+            new_module = Conv2d(target, adapter_name, config=boft_config, **kwargs)
         else:
             raise ValueError(
                 f"Target module {target} is not supported. "

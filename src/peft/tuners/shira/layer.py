@@ -122,12 +122,11 @@ class Linear(nn.Module, ShiraLayer):
         adapter_name: str,
         config: ShiraConfig,
         r: int = 0,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stored weight like (fan_in, fan_out)
         **kwargs,
     ) -> None:
         super().__init__()
         ShiraLayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
         if self.base_layer is not self.get_base_layer():
             raise ValueError("SHiRA does not support nested base layers")
 

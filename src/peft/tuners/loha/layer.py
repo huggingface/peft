@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import math
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -250,8 +250,8 @@ class Linear(LoHaLayer):
     def __init__(
         self,
         base_layer: nn.Module,
-        adapter_name: str = "default",
-        config: Optional[LoHaConfig] = None,
+        adapter_name: str,
+        config: LoHaConfig,
         r: int = 0,
         alpha: float = 0.0,
         **kwargs,
@@ -284,8 +284,8 @@ class Conv2d(LoHaLayer):
     def __init__(
         self,
         base_layer: nn.Module,
-        adapter_name: str = "default",
-        config: Optional[LoHaConfig] = None,
+        adapter_name: str,
+        config: LoHaConfig,
         r: int = 0,
         alpha: float = 0.0,
         **kwargs,
@@ -323,8 +323,8 @@ class Conv1d(LoHaLayer):
     def __init__(
         self,
         base_layer: nn.Module,
-        adapter_name: str = "default",
-        config: Optional[LoHaConfig] = None,
+        adapter_name: str,
+        config: LoHaConfig,
         r: int = 0,
         alpha: float = 0.0,
         **kwargs,
