@@ -115,7 +115,9 @@ class IA3Model(BaseTuner):
                     "quant_type": target_base_layer.weight.quant_type,
                 }
             )
-            new_module = Linear4bit(target, adapter_name, config=config, is_feedforward=is_feedforward, **fourbit_kwargs)
+            new_module = Linear4bit(
+                target, adapter_name, config=config, is_feedforward=is_feedforward, **fourbit_kwargs
+            )
         elif isinstance(target, torch.nn.Conv2d):
             new_module = Conv2d(target, adapter_name, config=config, is_feedforward=is_feedforward, **kwargs)
         elif isinstance(target, torch.nn.Conv3d):

@@ -220,9 +220,7 @@ class LycorisTuner(BaseTuner):
     ): ...
 
     @classmethod
-    def _create_new_module(
-        cls, config: LycorisConfig, adapter_name: str, target: nn.Module, **kwargs
-    ) -> LycorisLayer:
+    def _create_new_module(cls, config: LycorisConfig, adapter_name: str, target: nn.Module, **kwargs) -> LycorisLayer:
         # Find corresponding subtype of provided target module
         new_module_cls = None
         for subtype, target_cls in cls.layers_mapping.items():

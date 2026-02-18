@@ -22,8 +22,8 @@ import torch
 from peft.import_utils import is_hqq_available
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
-from .layer import OFTLayer
 from .config import OFTConfig
+from .layer import OFTLayer
 
 
 if is_hqq_available():

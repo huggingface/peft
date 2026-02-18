@@ -23,8 +23,8 @@ from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.integrations import dequantize_bnb_weight
 
-from .layer import OFTLayer
 from .config import OFTConfig
+from .layer import OFTLayer
 
 
 if is_bnb_available():

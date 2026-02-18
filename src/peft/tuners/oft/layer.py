@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
