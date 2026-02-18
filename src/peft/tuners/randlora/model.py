@@ -309,7 +309,14 @@ class RandLoraModel(BaseTuner):
                     "index": target_base_layer.index,
                 }
             )
-            return Linear8bitLt(target, adapter_name, randlora_A, randlora_B, **eightbit_kwargs)
+            return Linear8bitLt(
+                target,
+                adapter_name,
+                config=randlora_config,
+                randlora_A=randlora_A,
+                randlora_B=randlora_B,
+                **eightbit_kwargs,
+            )
         elif loaded_in_4bit and isinstance(target_base_layer, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
@@ -319,7 +326,14 @@ class RandLoraModel(BaseTuner):
                     "quant_type": target_base_layer.weight.quant_type,
                 }
             )
-            return Linear4bit(target, adapter_name, randlora_A, randlora_B, **fourbit_kwargs)
+            return Linear4bit(
+                target,
+                adapter_name,
+                config=randlora_config,
+                randlora_A=randlora_A,
+                randlora_B=randlora_B,
+                **fourbit_kwargs,
+            )
         elif isinstance(target_base_layer, torch.nn.Linear):
             if randlora_config.fan_in_fan_out:
                 warnings.warn(
