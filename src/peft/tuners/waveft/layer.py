@@ -210,12 +210,11 @@ class WaveFTLinear(nn.Module, WaveFTLayer):
         adapter_name: str,
         config: WaveFTConfig,
         n_frequency: int = 1000,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         **kwargs,
     ) -> None:
         super().__init__()
         WaveFTLayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, n_frequency, config=config)
 
