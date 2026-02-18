@@ -891,6 +891,7 @@ class LoraModel(BaseTuner):
         if sep and "model" in prefix:
             embed_layer_name = suffix
 
+        # the name suffix may already be included but we assume that adding the same module twice is not a problem
         if embed_layer_name not in modules_to_save:
             modules_to_save.append(embed_layer_name)
 
