@@ -277,7 +277,7 @@ if is_bnb_4bit_available():
                 randlora_A,
                 randlora_B,
                 r,
-                config=kwargs["config"],
+                config=config,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:

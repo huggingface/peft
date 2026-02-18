@@ -197,7 +197,6 @@ class VeraModel(BaseTuner):
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "r": r,
-            "fan_in_fan_out": vera_config.fan_in_fan_out,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
             "bias": bias,
@@ -229,16 +228,12 @@ class VeraModel(BaseTuner):
         if is_bnb_4bit_available():
             from .bnb import Linear4bit
 
-        bias = kwargs.pop("bias", False)
-        loaded_in_8bit = kwargs.get("loaded_in_8bit", False)
-        loaded_in_4bit = kwargs.get("loaded_in_4bit", False)
-
         if isinstance(target, BaseTunerLayer):
             target_base_layer = target.get_base_layer()
         else:
             target_base_layer = target
 
-        if loaded_in_8bit and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
+        if kwargs["loaded_in_8bit"] and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
             eightbit_kwargs = kwargs.copy()
             eightbit_kwargs.update(
                 {
@@ -248,7 +243,7 @@ class VeraModel(BaseTuner):
                 }
             )
             return Linear8bitLt(target, adapter_name, vera_A, vera_B, **eightbit_kwargs)
-        elif loaded_in_4bit and isinstance(target_base_layer, bnb.nn.Linear4bit):
+        elif kwargs["loaded_in_4bit"] and isinstance(target_base_layer, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
                 {
@@ -266,7 +261,7 @@ class VeraModel(BaseTuner):
                 )
                 vera_config.fan_in_fan_out = False
         elif isinstance(target_base_layer, Conv1D):
-            vera_config.is_target_conv_1d_layer = True
+            kwargs["is_target_conv_1d_layer"] = True
             if not vera_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
@@ -283,7 +278,6 @@ class VeraModel(BaseTuner):
             vera_B,
             adapter_name,
             config=vera_config,
-            bias=bias,
             **kwargs,
         )
 

@@ -132,8 +132,8 @@ class VBLoRAModel(BaseTuner):
                 )
                 vblora_config.fan_in_fan_out = False
         elif isinstance(target_base_layer, Conv1D):
-            vblora_config.is_target_conv_1d_layer = True
-            if vblora_config.fan_in_fan_out:
+            kwargs["is_target_conv_1d_layer"] = True
+            if not vblora_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )

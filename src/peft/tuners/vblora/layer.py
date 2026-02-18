@@ -121,14 +121,13 @@ class Linear(nn.Linear, VBLoRALayer):
         adapter_name: str,
         config: VBLoRAConfig,
         r: int,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
         **kwargs,
     ) -> None:
         # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__, which should always be called
         super(nn.Linear, self).__init__()
         VBLoRALayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, vblora_vector_bank, r, config=config)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
