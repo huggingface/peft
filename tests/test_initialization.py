@@ -3363,13 +3363,13 @@ class TestEvaInitialization:
     # for caching purposes:
     _dataset = load_dataset_english_quotes()["train"]
 
-    @pytest.fixture
+    @pytest.fixture(scope="class")
     def tokenizer(self):
         tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2")
         tokenizer.pad_token = tokenizer.eos_token
         return tokenizer
 
-    @pytest.fixture
+    @pytest.fixture(scope="class")
     def dataset(self, tokenizer):
         # concatenate examples
         examples = []
@@ -3391,9 +3391,11 @@ class TestEvaInitialization:
 
     @pytest.fixture
     def model(self):
-        model = AutoModelForCausalLM.from_pretrained("openai-community/gpt2")
-        model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
-        return model.to(self.DEVICE)
+        model_id = "openai-community/gpt2"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
+            yield model.to(self.DEVICE)
 
     @pytest.fixture
     def peft_config(self):
