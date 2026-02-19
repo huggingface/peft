@@ -51,35 +51,35 @@ class PolyLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-    def update_layer(self, adapter_name, poly_config, inference_mode: bool = False, **kwargs):
-        if poly_config.r <= 0:
-            raise ValueError(f"`r` should be a positive integer value but the value passed is {poly_config.r}")
+    def update_layer(self, adapter_name, config: PolyConfig, inference_mode: bool = False, **kwargs):
+        if config.r <= 0:
+            raise ValueError(f"`r` should be a positive integer value but the value passed is {config.r}")
 
-        self.r[adapter_name] = poly_config.r
-        self.n_tasks[adapter_name] = poly_config.n_tasks
-        self.n_skills[adapter_name] = poly_config.n_skills
-        self.n_splits[adapter_name] = poly_config.n_splits
-        self.poly_type[adapter_name] = poly_config.poly_type
+        self.r[adapter_name] = config.r
+        self.n_tasks[adapter_name] = config.n_tasks
+        self.n_skills[adapter_name] = config.n_skills
+        self.n_splits[adapter_name] = config.n_splits
+        self.poly_type[adapter_name] = config.poly_type
 
         self.poly_lora_A[adapter_name] = nn.Parameter(
             torch.empty(
-                poly_config.n_splits,
-                poly_config.n_skills,
-                self.in_features // poly_config.n_splits,
-                poly_config.r,
+                config.n_splits,
+                config.n_skills,
+                self.in_features // config.n_splits,
+                config.r,
             )
         )
         self.poly_lora_B[adapter_name] = nn.Parameter(
             torch.empty(
-                poly_config.n_splits,
-                poly_config.n_skills,
-                poly_config.r,
-                self.out_features // poly_config.n_splits,
+                config.n_splits,
+                config.n_skills,
+                config.r,
+                self.out_features // config.n_splits,
             )
         )
-        self.poly_router[adapter_name] = get_router(poly_config)
+        self.poly_router[adapter_name] = get_router(config)
 
-        self.reset_poly_parameters(adapter_name, init_weights=poly_config.init_weights)
+        self.reset_poly_parameters(adapter_name, init_weights=config.init_weights)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
@@ -124,7 +124,7 @@ class Linear(nn.Module, PolyLayer):
         PolyLayer.__init__(self, base_layer, **kwargs)
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, poly_config)
+        self.update_layer(adapter_name, config=poly_config)
 
     def forward(self, x: torch.Tensor, *args: Any, task_ids: torch.Tensor = None, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype

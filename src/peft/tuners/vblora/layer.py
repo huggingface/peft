@@ -23,6 +23,8 @@ from transformers.pytorch_utils import Conv1D
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.other import transpose
 
+from .config import VBLoRAConfig
+
 
 class VBLoRALayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
@@ -63,14 +65,16 @@ class VBLoRALayer(BaseTunerLayer):
         adapter_name: str,
         vblora_vector_bank,
         r: int,
-        topk: int,
-        num_vectors: int,
-        vector_length: float,
-        vblora_dropout: float = 0.0,
-        init_logits_std: float = 0.01,
+        config: VBLoRAConfig,
         inference_mode: bool = False,
         **kwargs,
     ):
+        topk = config.topk
+        num_vectors = config.num_vectors
+        vector_length = config.vector_length
+        vblora_dropout = config.vblora_dropout
+        init_logits_std = config.init_logits_std
+
         if r <= 0:
             raise ValueError(f"`r` {r} should be a positive integer value")
         if topk <= 0:
@@ -115,24 +119,17 @@ class Linear(nn.Linear, VBLoRALayer):
         base_layer,
         vblora_vector_bank,
         adapter_name: str,
+        config: VBLoRAConfig,
         r: int,
-        num_vectors: int,
-        vector_length: int,
-        topk: int = 2,
-        vblora_dropout: float = 0.0,
-        init_logits_std: float = 0.01,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
         **kwargs,
     ) -> None:
         # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__, which should always be called
         super(nn.Linear, self).__init__()
         VBLoRALayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
         self._active_adapter = adapter_name
-        self.update_layer(
-            adapter_name, vblora_vector_bank, r, topk, num_vectors, vector_length, vblora_dropout, init_logits_std
-        )
+        self.update_layer(adapter_name, vblora_vector_bank, r, config=config)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:

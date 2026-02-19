@@ -23,7 +23,7 @@ from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.integrations import dequantize_bnb_weight
 
-from .config import RoadVariant
+from .config import RoadConfig, RoadVariant
 from .layer import RoadLayer, _apply_road, _get_delta_weight
 
 
@@ -35,6 +35,7 @@ if is_bnb_available():
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
+            config: RoadConfig,
             variant: RoadVariant = "road_1",
             group_size: int = 64,
             init_weights: bool = True,
@@ -46,9 +47,7 @@ if is_bnb_available():
             self._active_adapter = adapter_name
             self.update_layer(
                 adapter_name,
-                variant=variant,
-                group_size=group_size,
-                init_weights=init_weights,
+                config=config,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -193,7 +192,7 @@ if is_bnb_available():
             rep = super().__repr__()
             return "road." + rep
 
-    def dispatch_bnb_8bit(target: torch.nn.Module, adapter_name: str, **kwargs):
+    def dispatch_bnb_8bit(target: torch.nn.Module, adapter_name: str, road_config: RoadConfig, **kwargs):
         new_module = None
 
         if isinstance(target, BaseTunerLayer):
@@ -211,7 +210,7 @@ if is_bnb_available():
                     "index": target.index,
                 }
             )
-            new_module = Linear8bitLt(target, adapter_name, **eightbit_kwargs)
+            new_module = Linear8bitLt(target, adapter_name, config=road_config, **eightbit_kwargs)
 
         return new_module
 
@@ -224,6 +223,7 @@ if is_bnb_4bit_available():
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
+            config: RoadConfig,
             variant: RoadVariant = "road_1",
             group_size: int = 64,
             init_weights: bool = True,
@@ -235,9 +235,7 @@ if is_bnb_4bit_available():
             self._active_adapter = adapter_name
             self.update_layer(
                 adapter_name,
-                variant=variant,
-                group_size=group_size,
-                init_weights=init_weights,
+                config=config,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -384,7 +382,7 @@ if is_bnb_4bit_available():
             rep = super().__repr__()
             return "oft." + rep
 
-    def dispatch_bnb_4bit(target: torch.nn.Module, adapter_name: str, **kwargs):
+    def dispatch_bnb_4bit(target: torch.nn.Module, adapter_name: str, road_config: RoadConfig, **kwargs):
         new_module = None
 
         if isinstance(target, BaseTunerLayer):
@@ -402,6 +400,6 @@ if is_bnb_4bit_available():
                     "quant_type": target_base_layer.weight.quant_type,
                 }
             )
-            new_module = Linear4bit(target, adapter_name, **fourbit_kwargs)
+            new_module = Linear4bit(target, adapter_name, config=road_config, **fourbit_kwargs)
 
         return new_module

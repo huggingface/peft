@@ -70,24 +70,14 @@ class FourierFTModel(BaseTuner):
         target_name_key = next(filter(lambda key: re.match(rf".*\.{key}$", current_key), pattern_keys), current_key)
 
         n_frequency = fourierft_config.n_frequency_pattern.get(target_name_key, fourierft_config.n_frequency)
-        scaling = fourierft_config.scaling
-        random_loc_seed = fourierft_config.random_loc_seed
-        bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "n_frequency": n_frequency,
-            "scaling": scaling,
-            "fan_in_fan_out": fourierft_config.fan_in_fan_out,
-            "init_weights": fourierft_config.init_weights,
-            "random_loc_seed": fourierft_config.random_loc_seed,
         }
-        kwargs["bias"] = bias
         if isinstance(target, FourierFTLayer):
             target.update_layer(
                 adapter_name,
                 n_frequency,
-                scaling,
-                fourierft_config.init_weights,
-                random_loc_seed,
+                config=fourierft_config,
             )
         else:
             new_module = self._create_new_module(fourierft_config, adapter_name, target, **kwargs)
@@ -104,25 +94,25 @@ class FourierFTModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            if kwargs["fan_in_fan_out"]:
+            if fourierft_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
-                kwargs["fan_in_fan_out"] = fourierft_config.fan_in_fan_out = False
+                fourierft_config.fan_in_fan_out = False
         elif isinstance(target_base_layer, Conv1D):
             kwargs["is_target_conv_1d_layer"] = True
-            if not kwargs["fan_in_fan_out"]:
+            if not fourierft_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
-                kwargs["fan_in_fan_out"] = fourierft_config.fan_in_fan_out = True
+                fourierft_config.fan_in_fan_out = True
         else:
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`."
             )
 
-        new_module = FourierFTLinear(target, adapter_name, **kwargs)
+        new_module = FourierFTLinear(target, adapter_name, config=fourierft_config, **kwargs)
 
         return new_module

@@ -79,12 +79,10 @@ class DeloraModel(BaseTuner):
         kwargs = {
             "r": r,
             "delora_lambda": delora_lambda,
-            "module_dropout": delora_config.module_dropout,
-            "init_weights": delora_config.init_weights,
         }
 
         if isinstance(target, DeloraLinear):
-            target.update_layer(adapter_name, **kwargs)
+            target.update_layer(adapter_name, config=delora_config, **kwargs)
         else:
             new_module = self._create_new_module(delora_config, adapter_name, target, **kwargs)
             if adapter_name != self.active_adapter:
@@ -100,6 +98,6 @@ class DeloraModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            new_module = DeloraLinear(target, adapter_name, **kwargs)
+            new_module = DeloraLinear(target, adapter_name, config=delora_config, **kwargs)
 
         return new_module

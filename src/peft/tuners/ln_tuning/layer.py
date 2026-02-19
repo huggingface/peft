@@ -21,6 +21,8 @@ import torch.nn as nn
 
 from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 
+from .config import LNTuningConfig
+
 
 class LNTuningLayer(nn.Module, BaseTunerLayer):
     """
@@ -29,11 +31,11 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
 
     adapter_layer_names = ("ln_tuning_layers",)
 
-    def __init__(self, base_layer: nn.Module, adapter_name: str):
+    def __init__(self, base_layer: nn.Module, adapter_name: str, config: LNTuningConfig):
         super().__init__()
         self.base_layer = base_layer
         self.ln_tuning_layers = nn.ModuleDict({})
-        self.update_layer(self.base_layer, adapter_name)
+        self.update_layer(self.base_layer, adapter_name, config=config)
         self._active_adapter = adapter_name
         self.merged_adapters = []
 
@@ -41,7 +43,8 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-    def update_layer(self, layer: nn.Module, adapter_name: str, inference_mode: bool = False, **kwargs):
+    def update_layer(self, layer: nn.Module, adapter_name: str, config: LNTuningConfig, **kwargs):
+        inference_mode = config.inference_mode
         self.ln_tuning_layers[adapter_name] = deepcopy(layer)
         self.set_adapter(adapter_name, inference_mode=inference_mode)
 
