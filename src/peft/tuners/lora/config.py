@@ -693,6 +693,26 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    use_monteclora: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Enable MonteCLoRA (Monte Carlo Low-Rank Adaptation). This technique introduces variational "
+                "inference into LoRA by adding Monte Carlo sampling to the adapter weights during training. "
+                "This can improve model performance and uncertainty estimation. When enabled, you should also "
+                "provide `monteclora_config` with the MonteCLoRA hyperparameters."
+            )
+        },
+    )
+    monteclora_config: Optional[MonteCLoraConfig] = field(  # noqa: F821
+        default=None,
+        metadata={
+            "help": (
+                "The configuration of MonteCLoRA. If this is passed along with `use_monteclora=True`, then "
+                "MonteCLoRA will be used to add variational sampling to the LoRA adapters."
+            )
+        },
+    )
     # Enables replicating layers in a model to expand it to a larger model.
     layer_replication: Optional[list[tuple[int, int]]] = field(
         default=None,
@@ -831,6 +851,20 @@ class LoraConfig(PeftConfig):
             self.corda_config = CordaConfig()
         elif self.init_lora_weights != "corda" and self.corda_config is not None:
             warnings.warn("`corda_config` specified but will be ignored when `init_lora_weights` is not 'corda'.")
+
+        # Handle MonteCLoRA configuration
+        if self.use_monteclora:
+            from peft.tuners.monteclora.config import MonteCLoraConfig
+
+            if self.monteclora_config is None:
+                warnings.warn(
+                    "`use_monteclora=True` but `monteclora_config` is not specified. Using default MonteCLoRA config."
+                )
+                self.monteclora_config = MonteCLoraConfig()
+            elif isinstance(self.monteclora_config, dict):
+                self.monteclora_config = MonteCLoraConfig(**self.monteclora_config)
+        elif self.monteclora_config is not None:
+            warnings.warn("`monteclora_config` specified but will be ignored when `use_monteclora=False`.")
 
         if self.lora_bias:
             if self.init_lora_weights not in (True, False):

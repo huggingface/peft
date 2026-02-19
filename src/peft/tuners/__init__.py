@@ -45,6 +45,7 @@ from .lora import (
 )
 from .miss import MissConfig, MissModel
 from .mixed import MixedModel
+from .monteclora import MonteCLoraConfig
 from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTuningConfig, MultitaskPromptTuningInit
 from .oft import OFTConfig, OFTModel
 from .osf import OSFConfig, OSFModel
@@ -104,6 +105,7 @@ __all__ = [
     "MissConfig",
     "MissModel",
     "MixedModel",
+    "MonteCLoraConfig",
     "MultitaskPromptEmbedding",
     "MultitaskPromptTuningConfig",
     "MultitaskPromptTuningInit",
