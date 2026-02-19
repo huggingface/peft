@@ -1436,6 +1436,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 dispatch_model_kwargs["offload_index"] = offload_index
 
             no_split_module_classes = self._no_split_modules
+            if isinstance(no_split_module_classes, set):
+                no_split_module_classes = list(no_split_module_classes)
 
             if device_map != "sequential":
                 max_memory = get_balanced_memory(

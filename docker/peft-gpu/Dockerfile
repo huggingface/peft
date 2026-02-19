@@ -68,7 +68,8 @@ RUN conda run -n peft pip install -U --no-cache-dir \
         # Add aqlm for quantization testing
         aqlm[gpu]>=1.0.2 \
         # Add HQQ for quantization testing
-        hqq
+        hqq \
+        deepspeed
 
 RUN conda run -n peft pip freeze | grep transformers
 
