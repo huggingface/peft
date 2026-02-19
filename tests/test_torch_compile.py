@@ -38,7 +38,6 @@ from transformers import (
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
-    BoneConfig,
     HRAConfig,
     IA3Config,
     LNTuningConfig,
@@ -82,11 +81,6 @@ SETTINGS = {
     "vblora": (VBLoRAConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], vector_length=2), {}),
     "vera": (VeraConfig(task_type=TaskType.CAUSAL_LM), {}),
     "hra": (HRAConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"]), {}),
-    "bone": (BoneConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2), {}),
-    "bone-bat": (
-        BoneConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2, init_weights="bat"),
-        {},
-    ),
     "miss": (MissConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2), {}),
     "miss-bat": (
         MissConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"], r=2, init_weights="bat"),
