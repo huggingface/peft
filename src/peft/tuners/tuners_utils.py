@@ -47,6 +47,7 @@ from peft.utils.other import (
     AuxiliaryTrainingWrapper,
     _get_module_names_tied_with_embedding,
     _set_adapter,
+    _set_layer_requires_grad,
     match_target_against_key,
     set_additional_trainable_modules,
 )
@@ -1388,8 +1389,9 @@ class BaseTunerLayer(ABC):
         else:
             # disable grads on all adapter layers
             for layer_name in self.adapter_layer_names:
-                layer = getattr(self, layer_name)
-                layer.requires_grad_(False)
+                module_dict = getattr(self, layer_name)
+                for layer in module_dict.values():
+                    _set_layer_requires_grad(layer, False)
             self._disable_adapters = True
 
     def set_adapter(self, adapter_names: str | list[str], inference_mode: bool = False) -> None:
@@ -1411,12 +1413,8 @@ class BaseTunerLayer(ABC):
         for layer_name in self.adapter_layer_names:
             module_dict = getattr(self, layer_name)
             for key, layer in module_dict.items():
-                if (key in adapter_names) and (not inference_mode):
-                    # Note: It is possible that not a single layer is called with requires_grad_(True) here. This may
-                    # happen if a completely different adapter layer is being activated.
-                    layer.requires_grad_(True)
-                else:
-                    layer.requires_grad_(False)
+                should_require_grad = (key in adapter_names) and (not inference_mode)
+                _set_layer_requires_grad(layer, should_require_grad)
 
         self._active_adapter = adapter_names
 
@@ -1487,7 +1485,7 @@ class BaseTunerLayer(ABC):
             module_dict = getattr(self, layer_name)
             for key, layer in module_dict.items():
                 if key in adapter_names_set:
-                    layer.requires_grad_(requires_grad)
+                    _set_layer_requires_grad(layer, requires_grad)
 
     def _get_base_layer_device_and_dtype(self, base_layer):
         """

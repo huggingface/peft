@@ -236,6 +236,25 @@ def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start
     return shifted_input_ids
 
 
+def _set_layer_requires_grad(layer, requires_grad: bool) -> None:
+    """Set requires_grad on all leaf parameters of a layer.
+
+    This handles the FSDP case where params may be non-leaf tensors (wrapped in DTensors). Only leaf tensors can have
+    their requires_grad flag toggled, so non-leaf tensors are silently skipped
+
+    Args:
+        layer: A module, parameter or tensor
+        requires_grad: enable or disable gradients
+    """
+    if isinstance(layer, (torch.nn.Parameter, torch.Tensor)):
+        if layer.is_leaf:
+            layer.requires_grad_(requires_grad)
+    else:
+        for param in layer.parameters():
+            if param.is_leaf:
+                param.requires_grad_(requires_grad)
+
+
 class AuxiliaryTrainingWrapper(torch.nn.Module):
     """Wrap a specific module so that it can be trained and saved in a way that is tangential to how
     PEFT normally works, e.g. fully training a classification layer instead of using an adapter.
@@ -506,7 +525,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
             module_dict = attrgetter(layer_name)(self)
             for key, layer in module_dict.items():
                 if key in adapter_names_set:
-                    layer.requires_grad_(requires_grad)
+                    _set_layer_requires_grad(layer, requires_grad)
 
     def adapter_state_dict(self, adapter_name):
         """Return the state dict of this module for a given adapter."""
@@ -599,7 +618,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         # since there would be no clear way to decide which adapter's weights are the correct ones. therefore we
         # assume that there is only one active adapter. this precondition is enforced by _set_adapter.
         if adapter_name == self.active_adapter:
-            self.modules_to_save[adapter_name].requires_grad_(True)
+            _set_layer_requires_grad(self.modules_to_save[adapter_name], True)
 
     def enable_adapters(self, enabled: bool):
         """Takes care of setting the required_grad flag on the wrapped module.
@@ -609,9 +628,10 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
         if enabled:
             for adapter_name in self.active_adapters:
-                self.modules_to_save[adapter_name].requires_grad_(True)
+                _set_layer_requires_grad(self.modules_to_save[adapter_name], True)
         else:
-            self.modules_to_save.requires_grad_(False)
+            for module in self.modules_to_save.values():
+                _set_layer_requires_grad(module, False)
 
     def check_set_adapter(self, adapter_name: str | list[str]) -> str | None:
         """Helper function to check if the given adapter(s) can be set.
@@ -657,7 +677,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             raise ValueError(f"Attempted to set multiple ({adapter_names}) adapters at once for modules_to_save.")
 
         for currently_active_adapter_name in self.active_adapters:
-            self.modules_to_save[currently_active_adapter_name].requires_grad_(False)
+            _set_layer_requires_grad(self.modules_to_save[currently_active_adapter_name], False)
 
         if len(adapter_names) == 0:
             # when calling model.add_adapter, the new adapter is not automatically active
@@ -669,7 +689,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         if adapter_name not in self._adapters:
             raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
 
-        self.modules_to_save[adapter_name].requires_grad_(not inference_mode)
+        _set_layer_requires_grad(self.modules_to_save[adapter_name], not inference_mode)
         self._active_adapter = adapter_name
 
     def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
