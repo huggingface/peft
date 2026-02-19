@@ -36,7 +36,7 @@ from packaging import version
 from safetensors.torch import storage_ptr, storage_size
 from transformers import PreTrainedModel
 
-from ..import_utils import is_gptqmodel_available, is_torch_tpu_available
+from ..import_utils import is_gptqmodel_available, is_torch_tpu_available, is_transformers_ge_v5_1_0
 from .constants import (
     CONFIG_NAME,
     EMBEDDING_LAYER_NAMES,
@@ -76,7 +76,6 @@ if version.parse(accelerate.__version__) >= version.parse("0.29.0"):
     from accelerate.utils import is_mlu_available
 
     mlu_available = is_mlu_available()
-
 
 __all__ = [
     "CONFIG_NAME",
@@ -1146,6 +1145,11 @@ def _get_no_split_modules(model) -> set[str]:
     if not hasattr(model, "_no_split_modules"):
         return _no_split_modules
 
+    if is_transformers_ge_v5_1_0:
+        # See https://github.com/huggingface/transformers/commit/36ec3bfa33ebf6c3b38a1d6808292aeea4aae84d
+        return model._no_split_modules
+
+    # TODO remove once transformers <5.1.0 is not supported anymore
     modules_to_check = [model]
     while len(modules_to_check) > 0:
         module = modules_to_check.pop(-1)
