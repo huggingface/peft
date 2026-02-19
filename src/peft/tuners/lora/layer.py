@@ -151,6 +151,7 @@ class LoraLayer(BaseTunerLayer):
         r: int,
         lora_alpha: int,
         config: LoraConfig,
+        linear_class=nn.Linear,
         **kwargs,
     ) -> None:
         # collect the kwargs
@@ -188,8 +189,8 @@ class LoraLayer(BaseTunerLayer):
         self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
 
         # Actual trainable parameters
-        self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
-        self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=lora_bias)
+        self.lora_A[adapter_name] = linear_class(self.in_features, r, bias=False)
+        self.lora_B[adapter_name] = linear_class(r, self.out_features, bias=lora_bias)
         self.lora_bias[adapter_name] = lora_bias
 
         if use_rslora:
