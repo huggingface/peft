@@ -5640,7 +5640,7 @@ class TestDtypeFp8:
         # sanity check
         assert torch.isfinite(output_base.logits).all()
 
-        config = LoraConfig(target_modules=["k_proj", "v_proj"], target_parameters=["q_proj"])
+        config = LoraConfig(target_modules=["k_proj", "v_proj"], target_parameters=["q_proj.weight"])
         model = get_peft_model(model, config)
         with torch.inference_mode():
             # check that there are no errors

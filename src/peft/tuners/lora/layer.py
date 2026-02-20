@@ -1994,7 +1994,7 @@ class _LoraParameterProxy(nn.Module):
         return z.to(orig_dtype)
 
     def forward(self, W):
-        if W.dtype in UPCAST_DTYPES:
+        if any(getattr(torch, dtype_name, None) == W.dtype for dtype_name in UPCAST_DTYPES):
             return self._low_prec_add(W, self.delta_weight)
         return W + self.delta_weight
 
