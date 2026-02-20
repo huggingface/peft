@@ -34,6 +34,7 @@ from peft import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    PveraConfig,
     RoadConfig,
     ShiraConfig,
     TaskType,
@@ -213,6 +214,14 @@ ALL_CONFIGS = [
             "d_initial": 0.1,
             "save_projection": True,
             "bias": "none",
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        PveraConfig,
+        {
+            "r": 8,
+            "pvera_dropout": 0.05,
             "task_type": "SEQ_2_SEQ_LM",
         },
     ),
