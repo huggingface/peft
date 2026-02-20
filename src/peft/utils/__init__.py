@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from .constants import ALLOWED_COMPUTE_DTYPES, UPCAST_DTYPES
 from .integrations import map_cache_to_layer_device_map
 from .loftq_utils import replace_lora_weights_loftq
 from .other import (
@@ -70,6 +71,7 @@ from .warning import PeftWarning
 
 
 __all__ = [
+    "ALLOWED_COMPUTE_DTYPES",
     "CONFIG_NAME",
     "INCLUDE_LINEAR_LAYERS_SHORTHAND",
     "SAFETENSORS_WEIGHTS_NAME",
@@ -96,6 +98,7 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING",
+    "UPCAST_DTYPES",
     "WEIGHTS_NAME",
     "AuxiliaryTrainingWrapper",
     "ModulesToSaveWrapper",

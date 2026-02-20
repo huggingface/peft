@@ -359,3 +359,7 @@ DUMMY_MODEL_CONFIG = {"model_type": "custom"}
 # otherwise there is no point in optimizing and there is a small chance of bugs in the optimization algorithm, so no
 # point in taking unnecessary risks. See #2045 for more context.
 MIN_TARGET_MODULES_FOR_OPTIMIZATION = 20
+# dtypes that are allowed to be used for adapter computation
+ALLOWED_COMPUTE_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
+# float dtypes that should be upcast in the adapter for computation
+UPCAST_DTYPES = ("float8_e4m3fn", "float8_e4m3fnuz", "float8_e5m2", "float8_e5m2fnuz", "float8_e8m0fnu")

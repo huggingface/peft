@@ -43,6 +43,7 @@ from transformers import (
     AutoTokenizer,
     BitsAndBytesConfig,
     DataCollatorForLanguageModeling,
+    FineGrainedFP8Config,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
     Trainer,
@@ -5585,3 +5586,64 @@ class TestDtypeAutocastBnb:
             peft_type=peft_type,
             tmp_path=tmp_path,
         )
+
+
+@pytest.mark.skipif(not hasattr(torch, "float8_e4m3fn"), reason="Platform does not support torch.float8_e4m3fn")
+@require_torch_gpu
+@pytest.mark.single_gpu_tests
+class TestDtypeFp8:
+    """Tests that float8 models work.
+
+    For now, only testing LoRA.
+    """
+
+    @pytest.fixture(scope="class", autouse=True)
+    def setup_cleanup(self):
+        yield
+        clear_device_cache(garbage_collection=True)
+
+    @pytest.fixture
+    def model(self):
+        model_id = "facebook/opt-125m"
+        # only convert q_proj to fp8, otherwise we get nan results
+        modules_not_to_convert = ["embed_tokens", "lm_head", "v_proj", "k_proj", "out_proj", "fc1", "fc2"]
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            device_map=0,
+            quantization_config=FineGrainedFP8Config(
+                modules_to_not_convert=modules_not_to_convert,
+            ),
+        )
+        # sanity check
+        assert model.model.decoder.layers[0].self_attn.q_proj.weight.dtype == torch.float8_e4m3fn
+        return model
+
+    def test_target_modules_float8_e4m3fn(self, model):
+        inputs = torch.arange(10).view(1, -1).to(model.device)
+        with torch.inference_mode():
+            output_base = model(inputs)
+        # sanity check
+        assert torch.isfinite(output_base.logits).all()
+
+        config = LoraConfig(target_modules=["q_proj", "v_proj"])
+        model = get_peft_model(model, config)
+        with torch.inference_mode():
+            # check that there are no errors
+            output_lora = model(inputs)
+        # with default init, lora should be a no-op
+        assert torch.allclose(output_lora.logits, output_base.logits)
+
+    def test_target_parameters_float8_e4m3fn(self, model):
+        inputs = torch.arange(10).view(1, -1).to(model.device)
+        with torch.inference_mode():
+            output_base = model(inputs)
+        # sanity check
+        assert torch.isfinite(output_base.logits).all()
+
+        config = LoraConfig(target_modules=["k_proj", "v_proj"], target_parameters=["q_proj"])
+        model = get_peft_model(model, config)
+        with torch.inference_mode():
+            # check that there are no errors
+            output_lora = model(inputs)
+        # with default init, lora should be a no-op
+        assert torch.allclose(output_lora.logits, output_base.logits)
