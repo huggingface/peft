@@ -23,6 +23,7 @@ import torch
 from peft.import_utils import is_inc_available
 from peft.tuners.tuners_utils import BaseTunerLayer
 
+from .config import LoraConfig
 from .layer import Linear
 
 
@@ -33,9 +34,10 @@ if is_inc_available():
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
+            config: LoraConfig,
             **kwargs,
         ):
-            super().__init__(base_layer, adapter_name, **kwargs)
+            super().__init__(base_layer, adapter_name, config=config, **kwargs)
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
@@ -59,7 +61,7 @@ if is_inc_available():
             raise NotImplementedError("Unmerging LoRA from INC layers is not yet implemented")
 
 
-def dispatch_inc(target: torch.nn.Module, adapter_name: str, **kwargs):
+def dispatch_inc(target: torch.nn.Module, adapter_name: str, config: LoraConfig, **kwargs):
     new_module = None
 
     if isinstance(target, BaseTunerLayer):
@@ -73,6 +75,6 @@ def dispatch_inc(target: torch.nn.Module, adapter_name: str, **kwargs):
         )
 
         if isinstance(target_base_layer, PatchedLinear):
-            new_module = IncLoraLinear(target, adapter_name, **kwargs)
+            new_module = IncLoraLinear(target, adapter_name, config=config, **kwargs)
 
     return new_module

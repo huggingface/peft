@@ -19,6 +19,7 @@ from transformers import AutoModelForCausalLM
 
 import peft
 from peft import LoraConfig, TaskType, get_peft_model
+from peft.tuners.lora.layer import ParamWrapper
 
 from .testing_common import PeftCommonTester
 from .testing_utils import hub_online_once, set_init_weights_false
@@ -163,6 +164,39 @@ class MyAutoModelForCausalLM(AutoModelForCausalLM):
         return model
 
 
+def test_rank_pattern_for_moe_target_parameters(tmp_path):
+    model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
+    with hub_online_once(model_id):
+        model = MyAutoModelForCausalLM.from_pretrained(model_id)
+        num_experts = getattr(model.config, "num_local_experts", None) or getattr(model.config, "num_experts", None)
+        assert num_experts is not None
+        r = 8
+        effective_r = max(1, r // num_experts)
+        config = LoraConfig(
+            r=r,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"],
+            target_parameters=["feed_forward.experts.gate_up_proj"],
+            rank_pattern={
+                "experts.gate_up_proj": effective_r,
+            },
+            init_lora_weights=False,
+        )
+        model = get_peft_model(model, config)
+
+        wrappers = [
+            module
+            for module in model.modules()
+            if isinstance(module, ParamWrapper) and module.parameter_name == "gate_up_proj"
+        ]
+        assert wrappers, "Expected to find ParamWrapper for gate_up_proj."
+        lora_module = wrappers[0]
+        assert lora_module.r["default"] == effective_r
+        assert lora_module.lora_A["default"].weight.shape[0] == effective_r * num_experts
+        assert lora_module.scaling["default"] == config.lora_alpha / effective_r
+        assert config.r == r
+
+
 class TestDecoderModelsTargetParameters(PeftCommonTester):
     # This is more or less a copy of TestDecoderModels at the time of the PR being added. Unnecessary code is removed,
     # like code required for testing non-LoRA methods. The tests being included are not selected to test specific
@@ -189,20 +223,24 @@ class TestDecoderModelsTargetParameters(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id,config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained(self, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id,config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_pickle(self, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs.copy(), safe_serialization=False)
 
     @pytest.mark.skip(reason="Multiple adapters with target_parameters are not supported yet.")
     @pytest.mark.parametrize("model_id,config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.skip(reason="Multiple adapters with target_parameters are not supported yet.")
     @pytest.mark.parametrize("model_id,config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters_pickle(self, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained_selected_adapters(
             model_id, config_cls, config_kwargs.copy(), safe_serialization=False
         )
@@ -544,3 +582,19 @@ class TestTargetParameters:
             # sanity check: a second forward call _does_ trigger a new forward
             output = model(x, output_hidden_states=True)
             assert len(set(map(id, tensor_storage))) == 4
+
+    def test_target_parameter_init_does_not_warn_about_unknown_layer_type(self, recwarn):
+        # For target parameters, the layer type is not known. This is fine, as the in_features and out_features are
+        # derived from the targeted parameter shape. But we need to ensure that there is no warning about the unknown
+        # layer type.
+        model_id = "trl-internal-testing/tiny-GptOssForCausalLM"
+        with hub_online_once(model_id):
+            model0 = AutoModelForCausalLM.from_pretrained(model_id)
+            config = LoraConfig(
+                target_modules=[],
+                target_parameters=["0.mlp.experts.gate_up_proj"],
+            )
+            model = get_peft_model(model0, config)
+            warn_messages = (w.message.args[0] for w in recwarn.list)
+            msg_start = "Unsupported layer type"
+            assert not any(msg.startswith(msg_start) for msg in warn_messages)

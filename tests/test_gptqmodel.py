@@ -41,7 +41,7 @@ from peft.tuners.lora import GPTQLoraLinear
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 
 from .testing_utils import (
-    device_count,
+    DEVICE_MAP_MAP,
     load_dataset_english_quotes,
     require_gptqmodel,
     require_optimum,
@@ -354,11 +354,11 @@ class PeftGPTQModelTests(unittest.TestCase):
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
                 dtype=torch.float16,
-                device_map="auto",
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
                 quantization_config=self.quantization_config,
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert set(model.hf_device_map.values()) == set(range(2))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -417,11 +417,11 @@ class PeftGPTQModelTests(unittest.TestCase):
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
                 dtype=torch.float16,
-                device_map="auto",
+                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
                 quantization_config=self.quantization_config,
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
+            assert set(model.hf_device_map.values()) == set(range(2))
 
             model = prepare_model_for_kbit_training(model)
 

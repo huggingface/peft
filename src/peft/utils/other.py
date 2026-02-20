@@ -36,7 +36,7 @@ from packaging import version
 from safetensors.torch import storage_ptr, storage_size
 from transformers import PreTrainedModel
 
-from ..import_utils import is_auto_gptq_available, is_gptqmodel_available, is_torch_tpu_available
+from ..import_utils import is_gptqmodel_available, is_torch_tpu_available, is_transformers_ge_v5_1_0
 from .constants import (
     CONFIG_NAME,
     EMBEDDING_LAYER_NAMES,
@@ -77,7 +77,6 @@ if version.parse(accelerate.__version__) >= version.parse("0.29.0"):
     from accelerate.utils import is_mlu_available
 
     mlu_available = is_mlu_available()
-
 
 __all__ = [
     "CONFIG_NAME",
@@ -237,6 +236,25 @@ def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start
     shifted_input_ids.masked_fill_(shifted_input_ids == -100, pad_token_id)
 
     return shifted_input_ids
+
+
+def _set_layer_requires_grad(layer, requires_grad: bool) -> None:
+    """Set requires_grad on all leaf parameters of a layer.
+
+    This handles the FSDP case where params may be non-leaf tensors (wrapped in DTensors). Only leaf tensors can have
+    their requires_grad flag toggled, so non-leaf tensors are silently skipped
+
+    Args:
+        layer: A module, parameter or tensor
+        requires_grad: enable or disable gradients
+    """
+    if isinstance(layer, (torch.nn.Parameter, torch.Tensor)):
+        if layer.is_leaf:
+            layer.requires_grad_(requires_grad)
+    else:
+        for param in layer.parameters():
+            if param.is_leaf:
+                param.requires_grad_(requires_grad)
 
 
 class AuxiliaryTrainingWrapper(torch.nn.Module):
@@ -509,7 +527,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
             module_dict = attrgetter(layer_name)(self)
             for key, layer in module_dict.items():
                 if key in adapter_names_set:
-                    layer.requires_grad_(requires_grad)
+                    _set_layer_requires_grad(layer, requires_grad)
 
     def adapter_state_dict(self, adapter_name):
         """Return the state dict of this module for a given adapter."""
@@ -602,7 +620,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         # since there would be no clear way to decide which adapter's weights are the correct ones. therefore we
         # assume that there is only one active adapter. this precondition is enforced by _set_adapter.
         if adapter_name == self.active_adapter:
-            self.modules_to_save[adapter_name].requires_grad_(True)
+            _set_layer_requires_grad(self.modules_to_save[adapter_name], True)
 
     def enable_adapters(self, enabled: bool):
         """Takes care of setting the required_grad flag on the wrapped module.
@@ -612,9 +630,10 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
         if enabled:
             for adapter_name in self.active_adapters:
-                self.modules_to_save[adapter_name].requires_grad_(True)
+                _set_layer_requires_grad(self.modules_to_save[adapter_name], True)
         else:
-            self.modules_to_save.requires_grad_(False)
+            for module in self.modules_to_save.values():
+                _set_layer_requires_grad(module, False)
 
     def check_set_adapter(self, adapter_name: str | list[str]) -> str | None:
         """Helper function to check if the given adapter(s) can be set.
@@ -660,7 +679,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             raise ValueError(f"Attempted to set multiple ({adapter_names}) adapters at once for modules_to_save.")
 
         for currently_active_adapter_name in self.active_adapters:
-            self.modules_to_save[currently_active_adapter_name].requires_grad_(False)
+            _set_layer_requires_grad(self.modules_to_save[currently_active_adapter_name], False)
 
         if len(adapter_names) == 0:
             # when calling model.add_adapter, the new adapter is not automatically active
@@ -672,7 +691,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         if adapter_name not in self._adapters:
             raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
 
-        self.modules_to_save[adapter_name].requires_grad_(not inference_mode)
+        _set_layer_requires_grad(self.modules_to_save[adapter_name], not inference_mode)
         self._active_adapter = adapter_name
 
     def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
@@ -1119,7 +1138,7 @@ def _prepare_prompt_learning_config(peft_config, model_config):
         peft_config.num_attention_heads = num_attention_heads
 
     # For grouped-query attention, see #1901.
-    if (peft_config.peft_type == "PREFIX_TUNING") and ("num_key_value_heads" in model_config):
+    if (peft_config.peft_type in {"PREFIX_TUNING", "CARTRIDGE"}) and ("num_key_value_heads" in model_config):
         num_key_value_heads = model_config["num_key_value_heads"]
         if model_config.get("head_dim", None) is not None:
             head_dim = model_config["head_dim"]
@@ -1148,6 +1167,11 @@ def _get_no_split_modules(model) -> set[str]:
     if not hasattr(model, "_no_split_modules"):
         return _no_split_modules
 
+    if is_transformers_ge_v5_1_0:
+        # See https://github.com/huggingface/transformers/commit/36ec3bfa33ebf6c3b38a1d6808292aeea4aae84d
+        return model._no_split_modules
+
+    # TODO remove once transformers <5.1.0 is not supported anymore
     modules_to_check = [model]
     while len(modules_to_check) > 0:
         module = modules_to_check.pop(-1)
@@ -1167,13 +1191,13 @@ def fsdp_auto_wrap_policy(model):
         from accelerate.utils.dataclasses import get_module_class_from_name
     from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy, transformer_auto_wrap_policy
 
-    from ..tuners import PrefixEncoder, PromptEmbedding, PromptEncoder
+    from ..tuners import CartridgeEncoder, PrefixEncoder, PromptEmbedding, PromptEncoder
 
     default_transformer_cls_names_to_wrap = ",".join(_get_no_split_modules(model))
     transformer_cls_names_to_wrap = os.environ.get(
         "FSDP_TRANSFORMER_CLS_TO_WRAP", default_transformer_cls_names_to_wrap
     ).split(",")
-    transformer_cls_to_wrap = {PrefixEncoder, PromptEncoder, PromptEmbedding}
+    transformer_cls_to_wrap = {CartridgeEncoder, PrefixEncoder, PromptEncoder, PromptEmbedding}
     for layer_class in transformer_cls_names_to_wrap:
         if len(layer_class) == 0:
             continue
@@ -1252,42 +1276,6 @@ def get_quantization_config(model: torch.nn.Module, method: str):
     return None
 
 
-def get_auto_gptq_quant_linear(gptq_quantization_config):
-    """
-    Get the right AutoGPTQQuantLinear class based on the quantization config file
-    """
-    if gptq_quantization_config is None:
-        return None
-
-    if is_auto_gptq_available():
-        from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
-    else:
-        return None
-
-    desc_act = gptq_quantization_config.desc_act
-    group_size = gptq_quantization_config.group_size
-    bits = gptq_quantization_config.bits
-    if hasattr(gptq_quantization_config, "use_exllama"):
-        use_exllama = gptq_quantization_config.use_exllama
-    else:
-        use_exllama = not gptq_quantization_config.disable_exllama
-    if hasattr(gptq_quantization_config, "exllama_config"):
-        exllama_version = gptq_quantization_config.exllama_config["version"]
-    else:
-        exllama_version = 1
-
-    QuantLinear = dynamically_import_QuantLinear(
-        use_triton=False,
-        desc_act=desc_act,
-        group_size=group_size,
-        bits=bits,
-        disable_exllama=not (use_exllama and exllama_version == 1),
-        disable_exllamav2=not (use_exllama and exllama_version == 2),
-    )
-
-    return QuantLinear
-
-
 def get_gptqmodel_quant_linear(gptq_quantization_config, device_map=None):
     """
     Get the right GPTQQuantLinear class based on the quantization config file
@@ -1298,7 +1286,9 @@ def get_gptqmodel_quant_linear(gptq_quantization_config, device_map=None):
     if not is_gptqmodel_available():
         return None
 
-    from gptqmodel.utils.importer import hf_select_quant_linear
+    from gptqmodel import BACKEND
+    from gptqmodel.quantization import METHOD
+    from gptqmodel.utils.importer import hf_select_quant_linear_v2
 
     desc_act = gptq_quantization_config.desc_act
     group_size = gptq_quantization_config.group_size
@@ -1311,15 +1301,17 @@ def get_gptqmodel_quant_linear(gptq_quantization_config, device_map=None):
     sym = gptq_quantization_config.sym
     meta = gptq_quantization_config.meta if hasattr(gptq_quantization_config, "meta") else None
 
-    QuantLinear = hf_select_quant_linear(
+    QuantLinear = hf_select_quant_linear_v2(
         bits=bits,
         group_size=group_size,
         desc_act=desc_act,
         sym=sym,
         device_map=device_map,
-        checkpoint_format=checkpoint_format,
+        format=checkpoint_format,
+        quant_method=METHOD.GPTQ,
         meta=meta,
-        backend="auto_trainable",
+        backend=BACKEND.AUTO_TRAINABLE,
+        pack=False,
     )
 
     return QuantLinear
@@ -1474,36 +1466,99 @@ def set_additional_trainable_modules(model, peft_config, model_config, adapter_n
 
         modules_to_save = getattr(peft_config, "modules_to_save", None)
         if modules_to_save is not None:
-            for target_layer in target_layers:
-                if target_layer in modules_to_save:
+            for target_layer_name in target_layers:
+                if target_layer_name in modules_to_save:
                     raise ValueError(
                         "The embedding layer is already marked to be trained fully, either specify "
-                        f'`modules_to_save=[..., "{target_layer}", ...]` or '
-                        f"`trainable_tokens={{'{target_layer}': x}}` but not both."
+                        f'`modules_to_save=[..., "{target_layer_name}", ...]` or '
+                        f"`trainable_tokens={{'{target_layer_name}': x}}` but not both."
                     )
 
-        for target_layer, token_indices in target_layers.items():
+        # Check weight tying configuration first to determine which layers to wrap
+        weights_tied = model_config.get("tie_word_embeddings", False)
+        ensure_weight_tying = getattr(peft_config, "ensure_weight_tying", False)
+
+        # When multiple target layers are specified, check if they correspond to tied weights
+        indices_mismatch = False
+        layers_to_skip = set()
+        tied_layer_keys = []
+
+        if len(target_layers) > 1 and weights_tied:
+            # Get module names that are tied with the embedding
+            tied_module_names = set(_get_module_names_tied_with_embedding(model))
+
+            # Also get the input embedding layer name as it's the source of tied weights
+            embedding_module = model.get_input_embeddings()
+            # Get the full embedding name (not just the last part) to support nested structures
+            embedding_name = next(n for n, m in model.named_modules() if m is embedding_module)
+
+            # Find which target layers are in the tied weights (including the embedding source)
+            for target_layer_name in target_layers:
+                # Check if this is the embedding layer (use endswith to allow flexible matching)
+                # This allows users to specify just "embed_tokens" OR "m1.encoder.embed_tokens" for precision
+                if embedding_name.endswith(target_layer_name):
+                    tied_layer_keys.append(target_layer_name)
+                    continue
+                # Check if this target layer matches any tied module (considering nested structures)
+                for tied_module in tied_module_names:
+                    if tied_module.endswith(target_layer_name) or target_layer_name in tied_module.split("."):
+                        tied_layer_keys.append(target_layer_name)
+                        break
+
+            # If we found multiple tied layers in our targets, check their indices
+            if len(tied_layer_keys) >= 2:
+                # Check if all tied layers have the same indices
+                first_indices = target_layers[tied_layer_keys[0]]
+                indices_mismatch = not all(target_layers[key] == first_indices for key in tied_layer_keys[1:])
+
+                # Raise error immediately if ensure_weight_tying=True and indices mismatch
+                if indices_mismatch and ensure_weight_tying:
+                    tied_layers_info = ", ".join([f"{key}: {target_layers[key]}" for key in tied_layer_keys])
+                    raise ValueError(
+                        f"Cannot ensure weight tying when different token indices are specified for tied layers. "
+                        f"Conflicting layers: {tied_layers_info}. "
+                        f"Please use the same indices for all tied layers or set ensure_weight_tying=False."
+                    )
+
+                # If indices match, skip tied modules (except embedding) as they'll be handled by weight tying logic
+                if not indices_mismatch:
+                    layers_to_skip = set(tied_layer_keys) & tied_module_names
+
+        # Wrap target layers (skip those that will be handled by weight tying logic)
+        for target_layer_name, token_indices in target_layers.items():
+            if target_layer_name in layers_to_skip:
+                continue
+
             _set_trainable(
                 model,
                 adapter_name,
                 inference_mode=peft_config.inference_mode,
-                module_names=[target_layer],
+                module_names=[target_layer_name],
                 strict_module_check=True,
                 wrapper_cls=TrainableTokensWrapper,
                 token_indices=token_indices,
                 activate_adapter=activate_adapter,
             )
 
-        tied_weights_module_names = _get_module_names_tied_with_embedding(model)
+        # Warn if user expects weight tying but model doesn't have tied weights
+        if not weights_tied and ensure_weight_tying:
+            warnings.warn(
+                "ensure_weight_tying=True but the model does not have tied weights "
+                "(tie_word_embeddings=False). Weight tying will not be applied for trainable_token_indices."
+            )
 
-        # There might be the possibility that we have output weights that are tied to the input weights.
-        # In that case we will tie any module that wants tied weights to the token adapter to make sure that
-        # any modification is reflected in the tied layers as well.
-        if (
-            tied_weights_module_names
-            and model_config.get("tie_word_embeddings", False)
+        # Apply weight tying when appropriate
+        should_apply_tying = (
+            weights_tied
             and isinstance(model.get_input_embeddings(), TrainableTokensWrapper)
-        ):
+            and (ensure_weight_tying or not indices_mismatch)
+        )
+
+        if should_apply_tying:
+            # There might be the possibility that we have output weights that are tied to the input weights.
+            # In that case we will tie any module that wants tied weights to the token adapter to make sure that
+            # any modification is reflected in the tied layers as well.
+            tied_weights_module_names = _get_module_names_tied_with_embedding(model)
             token_adapter = model.get_input_embeddings().token_adapter
             _set_trainable(
                 model,

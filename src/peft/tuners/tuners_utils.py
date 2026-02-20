@@ -47,6 +47,7 @@ from peft.utils.other import (
     AuxiliaryTrainingWrapper,
     _get_module_names_tied_with_embedding,
     _set_adapter,
+    _set_layer_requires_grad,
     match_target_against_key,
     set_additional_trainable_modules,
 )
@@ -56,6 +57,10 @@ from peft.utils.warning import PeftWarning
 from ..config import PeftConfig
 from ..utils import _get_submodules
 from ._buffer_dict import BufferDict
+
+
+_torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
+_torch_supports_distributed = _torch_supports_dtensor and torch.distributed.is_available()
 
 
 @contextmanager
@@ -157,8 +162,7 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     this function returns a valid result does not imply that the layer type is supported.
     """
     if isinstance(module, nn.Linear):
-        torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
-        if torch_supports_dtensor and isinstance(module.weight, torch.distributed.tensor.DTensor):
+        if _torch_supports_distributed and isinstance(module.weight, torch.distributed.tensor.DTensor):
             # If Tensor Parallel is used, the weight is sharded, so we need to get the local shape
             out_features, in_features = module.weight.to_local().shape
         else:
@@ -188,7 +192,7 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     elif hasattr(module, "codebooks") and module.__class__.__name__ == "QuantizedLinear":
         # AQLM QuantLinear
         in_features, out_features = module.in_features, module.out_features
-    elif hasattr(module, "w_bit") and module.__class__.__name__ == "WQLinear_GEMM":
+    elif hasattr(module, "bits") and module.__class__.__name__ == "AwqGEMMQuantLinear":
         # Awq layers
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "EetqLinear":
@@ -769,7 +773,9 @@ class BaseTuner(nn.Module, ABC):
         module_names: set[str] = set()
         if state_dict is not None:
             prefix = PEFT_TYPE_TO_PREFIX_MAPPING[peft_config.peft_type]
-            module_names = {k.rsplit("." + prefix, 1)[0] for k in state_dict}
+            # Find the module name from the state_dict. Also defensively remove '_orig_mod.', which might be inserted if
+            # the model was torch.compiled beforehand
+            module_names = {k.rsplit("." + prefix, 1)[0].removeprefix("_orig_mod.") for k in state_dict}
 
         for key, module in named_modules:
             if not key:
@@ -802,6 +808,8 @@ class BaseTuner(nn.Module, ABC):
                             peft_config, adapter_name, target, target_name, parent, current_key=key
                         )
             else:
+                # defensively remove _orig_mod prefix in case the model is compiled
+                key = key.removeprefix("_orig_mod.")
                 # use the state_dict to match modules instead
                 if key not in module_names:
                     unmatched_modules.append(key)
@@ -1215,6 +1223,16 @@ class BaseTuner(nn.Module, ABC):
                 )
                 warnings.warn(msg)
 
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        """
+        Whether it is possible for the adapter of this model to be converted to LoRA.
+
+        Normally, this works if the PEFT method is additive, i.e. W' = W_base + delta_weight.
+        """
+        return all(
+            module.supports_lora_conversion() for module in self.modules() if isinstance(module, BaseTunerLayer)
+        )
+
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
         try:
@@ -1371,8 +1389,9 @@ class BaseTunerLayer(ABC):
         else:
             # disable grads on all adapter layers
             for layer_name in self.adapter_layer_names:
-                layer = getattr(self, layer_name)
-                layer.requires_grad_(False)
+                module_dict = getattr(self, layer_name)
+                for layer in module_dict.values():
+                    _set_layer_requires_grad(layer, False)
             self._disable_adapters = True
 
     def set_adapter(self, adapter_names: str | list[str], inference_mode: bool = False) -> None:
@@ -1394,12 +1413,8 @@ class BaseTunerLayer(ABC):
         for layer_name in self.adapter_layer_names:
             module_dict = getattr(self, layer_name)
             for key, layer in module_dict.items():
-                if (key in adapter_names) and (not inference_mode):
-                    # Note: It is possible that not a single layer is called with requires_grad_(True) here. This may
-                    # happen if a completely different adapter layer is being activated.
-                    layer.requires_grad_(True)
-                else:
-                    layer.requires_grad_(False)
+                should_require_grad = (key in adapter_names) and (not inference_mode)
+                _set_layer_requires_grad(layer, should_require_grad)
 
         self._active_adapter = adapter_names
 
@@ -1470,26 +1485,46 @@ class BaseTunerLayer(ABC):
             module_dict = getattr(self, layer_name)
             for key, layer in module_dict.items():
                 if key in adapter_names_set:
-                    layer.requires_grad_(requires_grad)
+                    _set_layer_requires_grad(layer, requires_grad)
+
+    def _get_base_layer_device_and_dtype(self, base_layer):
+        """
+        Helper function to determine the device and dtype of the base layer. If not possible to determine, return None.
+        """
+        device, dtype = None, None
+
+        # check weight and qweight (for GPTQ)
+        for weight_name in ("weight", "qweight"):
+            weight = getattr(base_layer, weight_name, None)
+            if weight is not None:
+                device = weight.device
+                dtype = weight.dtype
+                break
+
+        if hasattr(base_layer, "compute_dtype"):  # bnb Linear4bitLt
+            dtype = base_layer.compute_dtype
+
+        return device, dtype
 
     def _move_adapter_to_device_of_base_layer(self, adapter_name: str, device: Optional[torch.device] = None) -> None:
         """
-        Move the adapter of the given name to the device of the base layer.
+        Move the adapter of the given name to the device, and possibly dtype, of the base layer.
         """
-        if device is None:
-            base_layer = self.get_base_layer()
-            if isinstance(base_layer, nn.MultiheadAttention):
-                base_layer = base_layer.out_proj
-            # check weight and qweight (for GPTQ)
-            for weight_name in ("weight", "qweight"):
-                weight = getattr(base_layer, weight_name, None)
-                if weight is not None:
-                    device = weight.device
-                    dtype = weight.dtype
-                    break
-            else:
-                # no break encountered: could not determine the device
-                return
+        base_layer = self.get_base_layer()
+        if isinstance(base_layer, nn.MultiheadAttention):
+            base_layer = base_layer.out_proj
+        base_layer_device, base_layer_dtype = self._get_base_layer_device_and_dtype(base_layer)
+
+        target_device = device if device is not None else base_layer_device
+        if target_device is None:
+            # could not determine device
+            return
+
+        target_dtype = None
+        if base_layer_dtype is not None:
+            # don't cast to int dtype
+            if base_layer_dtype.is_floating_point or base_layer_dtype.is_complex:
+                target_dtype = base_layer_dtype
 
         meta = torch.device("meta")
 
@@ -1505,11 +1540,10 @@ class BaseTunerLayer(ABC):
             if any(p.device == meta for p in adapter_layer.parameters()):
                 continue
 
-            # TODO: weight is not necessarily defined here, leading to a NameError, fix that
-            if weight.dtype.is_floating_point or weight.dtype.is_complex:
-                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device, dtype=dtype)
+            if target_dtype is not None:
+                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(target_device, dtype=target_dtype)
             else:
-                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device)
+                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(target_device)
 
     @overload
     def _cast_input_dtype(self, x: None, dtype: torch.dtype) -> None: ...
@@ -1533,6 +1567,14 @@ class BaseTunerLayer(ABC):
         if (not cast_input_dtype_enabled) or (x.dtype == dtype):
             return x
         return x.to(dtype=dtype)
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        """
+        Whether it is possible for this layer type to be converted to LoRA.
+
+        Normally, this works if the PEFT method is additive, i.e. W' = W_base + delta_weight.
+        """
+        return False
 
 
 def _find_minimal_target_modules(
@@ -2013,3 +2055,17 @@ def set_requires_grad(model, adapter_names: str | Sequence[str], requires_grad: 
     for module in model.modules():
         if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
             module.set_requires_grad(adapter_names=adapter_names, requires_grad=requires_grad)
+
+
+def get_device_map(model) -> dict:
+    if hasattr(model, "hf_device_map"):
+        # Multi-device case: accelerate dispatch is active and exposes hf_device_map
+        device_map = model.hf_device_map
+    else:
+        # Single-device case:
+        # Recent Transformers versions intentionally skip accelerate hooks when the
+        # device_map resolves to a single device (e.g. "cpu" or one GPU), so
+        # hf_device_map is not set. All parameters are guaranteed to be on the
+        # same device, which can be inferred from the first parameter.
+        device_map = {"": next(model.parameters()).device}
+    return device_map
