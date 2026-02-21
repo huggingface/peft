@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import packaging.version
 import torch
-import transformers
 from transformers import BloomPreTrainedModel
+
+from ..import_utils import is_transformers_le_4_53
 
 
 # needed for prefix-tuning of bloom model
@@ -45,8 +45,7 @@ def starcoder_model_postprocess_past_key_value(past_key_values):
 
 # TODO: remove this once transformers 4.53 is no longer supported
 TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {}
-transformers_le_4_53 = packaging.version.parse(transformers.__version__) < packaging.version.parse("4.54.0.dev0")
-if transformers_le_4_53:
+if is_transformers_le_4_53:
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING["gpt_bigcode"] = (
         starcoder_model_postprocess_past_key_value
     )

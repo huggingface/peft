@@ -23,8 +23,9 @@ from safetensors.torch import load_file as safe_load_file
 from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer, BartConfig, BartModel
 
 from peft import AutoPeftModel, LoraConfig, PeftModel, TrainableTokensConfig, get_peft_model
+from peft.import_utils import is_transformers_ge_v5
 from peft.tuners.trainable_tokens.layer import TrainableTokensLayer
-from peft.utils import TrainableTokensWrapper, get_peft_model_state_dict, is_transformers_ge_v5
+from peft.utils import TrainableTokensWrapper, get_peft_model_state_dict
 
 from .testing_utils import hub_online_once
 

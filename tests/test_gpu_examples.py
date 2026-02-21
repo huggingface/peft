@@ -592,7 +592,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 device_map={"": 0},
             )
 
-            assert set(model.hf_device_map.values()) == {0}
+            # note: transformers v5 doesn't set the device map if there's only one device
+            assert not hasattr(model.hf_device_map) or set(model.hf_device_map.values()) == {0}
 
             tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
             model = prepare_model_for_kbit_training(model)

@@ -21,7 +21,7 @@ torchrun --nproc_per_node 8 --nnodes 1 train.py \
 --learning_rate 1e-4 \
 --lr_scheduler_type "cosine" \
 --weight_decay 1e-4 \
---warmup_ratio 0.0 \
+--warmup_steps 0 \
 --max_grad_norm 1.0 \
 --output_dir "mistral-sft-lora-multigpu" \
 --per_device_train_batch_size 8 \
