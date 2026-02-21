@@ -621,8 +621,8 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             _set_layer_requires_grad(self.modules_to_save[adapter_name], True)
 
     def enable_adapters(self, enabled: bool):
-        """Takes care of setting the required_grad flag on the wrapped module.
-        If adapters are enabled, gradients for the module are required as well.
+        """Takes care of setting the required_grad flag on the modules_to_save.
+        If adapters are enabled, gradients for the modules_to_save are required as well.
         """
         super().enable_adapters(enabled)
 
@@ -685,9 +685,6 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             return
 
         adapter_name = adapter_names[0]
-
-        if adapter_name not in self._adapters:
-            raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
 
         _set_layer_requires_grad(self.modules_to_save[adapter_name], not inference_mode)
         self._active_adapter = adapter_name
