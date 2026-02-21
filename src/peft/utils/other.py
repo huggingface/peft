@@ -686,9 +686,6 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
         adapter_name = adapter_names[0]
 
-        if adapter_name not in self._adapters:
-            raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
-
         _set_layer_requires_grad(self.modules_to_save[adapter_name], not inference_mode)
         self._active_adapter = adapter_name
 
