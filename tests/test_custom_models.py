@@ -1230,7 +1230,6 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin1"], "init_weights": False},
     ),
-    # BD-LoRA different encounters issues as the adapter weights have different shapes then
 ]
 
 
@@ -1365,10 +1364,6 @@ class ModelEmbConv1D(nn.Module):
         super().__init__()
         self.emb = nn.Embedding(emb_size, 5)
         self.conv1d = Conv1D(1, 5)
-        # make sure that we have a good signal-to-noise ratio
-        # since apparently CUDA ReLU clips the gradient at a
-        # certain point.
-        self.conv1d.weight.data += 10
         self.relu = nn.ReLU()
         self.flat = nn.Flatten()
         self.lin0 = nn.Linear(10, 2)
@@ -2271,6 +2266,13 @@ class TestPeftCustomModel(PeftCommonTester):
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+
+        if isinstance(model, ModelEmbConv1D) and (self.torch_device != "cpu"):
+            # Make sure that we have a good signal-to-noise ratio
+            # since apparently CUDA ReLU clips the gradient at a
+            # certain point. On CPU, avoid this.
+            model.conv1d.weight.data += 10
+
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
