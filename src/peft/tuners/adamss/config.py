@@ -337,11 +337,17 @@ class AdamssConfig(PeftConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
-        
+
         # Normalize init_weights: convert False to None for backward compatibility
         if self.init_weights is False:
             self.init_weights = None
-        
+
         # Validate initialization method
         if self.init_weights not in ["orthogonal", None]:
             raise ValueError(f"init_weights must be 'orthogonal' or None, got {self.init_weights}")
+
+        # Early check for scikit-learn availability
+        try:
+            import sklearn  # noqa: F401
+        except ImportError:
+            raise ImportError("scikit-learn is required for AdaMSS. Please install it with: pip install scikit-learn")

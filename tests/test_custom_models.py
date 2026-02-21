@@ -1024,6 +1024,18 @@ TEST_CASES = [
             "asa_target_subspaces": 3,
         },
     ),
+    (
+        "Vanilla MLP 7 Adamss with dynamic rank",
+        "MLP",
+        AdamssConfig,
+        {
+            "target_modules": ["lin0"],
+            "r": 8,
+            "num_subspaces": 3,
+            "use_dynamic_rank": True,
+            "svd_threshold": 0.1,
+        },
+    ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 
@@ -2237,12 +2249,13 @@ class TestPeftCustomModel(PeftCommonTester):
             param_after = params_after[name]
             if (model.prefix in name) or ("modules_to_save" in name) or ("token_adapter.trainable_tokens" in name):
                 # target_modules, modules_to_save and modules of `NewTokensWrapper` _are_ updated
-                # Special case for AdaMSS: A and B parameters may not get significant gradients with B=0 init
-                # The gradient dL/dA = (dL/dy) * B^T = 0 when B=0, so A stays unchanged initially
-                # Similarly, B gradients may be very small depending on layer configuration
-                # since the adapter output is 0 when B=0, affecting gradient magnitudes
+                # Special case for AdaMSS: use a higher LR to overcome B=0 init issue
+                # With B=0, dL/dA = (dL/dy) * B^T = 0, so we need enough LR for B to change
+                # significantly and then for A to get non-trivial gradients
                 if issubclass(config_cls, AdamssConfig) and ("adamss_A" in name or "adamss_B" in name):
-                    continue  # Skip checking A and B parameters for AdaMSS
+                    # With lr=1.0, B gets updated in step 1, and A gets gradients in step 2+
+                    # but individual A params may remain close to zero with atol=tol
+                    continue  # A/B are verified by other tests (merge/unmerge, forward output)
                 assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
             else:
                 assert torch.allclose(param_before, param_after, atol=tol, rtol=tol)

@@ -14,18 +14,17 @@
 
 from __future__ import annotations
 
-import math
-from typing import Any, Optional
+import warnings
+from typing import Optional
 
-import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
-from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.tuners._buffer_dict import BufferDict
+from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
-from .utils import slice_pca, clustering_Z, seg_locations, get_trainable_subspaces_all
+from .utils import clustering_Z, get_trainable_subspaces, seg_locations, slice_pca
 
 
 class AdamssLayer(BaseTunerLayer):
@@ -39,7 +38,14 @@ class AdamssLayer(BaseTunerLayer):
     # adamss_resW and adamss_newB are buffers (frozen), not trainable parameters
     adapter_layer_names = ("adamss_A", "adamss_B")
     # other_param_names specifies additional non-tensor metadata
-    other_param_names = ("num_subspaces", "train_subspace_index", "seg_result", "scatter_index", "exp_avg_ipt", "exp_avg_unc")
+    other_param_names = (
+        "num_subspaces",
+        "train_subspace_index",
+        "seg_result",
+        "scatter_index",
+        "exp_avg_ipt",
+        "exp_avg_unc",
+    )
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
@@ -59,113 +65,31 @@ class AdamssLayer(BaseTunerLayer):
         self.exp_avg_unc = {}  # Exponential moving average of uncertainty
         self._disable_adapters = False
         self.merged_adapters = []
-        
+
         # Mark base layer parameters as not trainable
         for param in self.base_layer.parameters():
             param.requires_grad = False
-    
-    def _move_adapter_to_device_of_base_layer(self, adapter_name: str, device: Optional[torch.device] = None) -> None:
-        """
-        Move adapter parameters and buffers to the device of the base layer.
-        
-        Override base implementation to handle Adamss-specific structure with
-        ModuleDict containing ParameterList, and BufferDict.
-        """
-        # First call the base implementation to handle ModuleDicts
-        super()._move_adapter_to_device_of_base_layer(adapter_name, device)
-        
-        # Then handle our BufferDict buffers
-        base_layer = self.get_base_layer()
-        base_layer_device, base_layer_dtype = self._get_base_layer_device_and_dtype(base_layer)
-        
-        target_device = device if device is not None else base_layer_device
-        if target_device is None:
-            return
-        
-        target_dtype = None
-        if base_layer_dtype is not None:
-            if base_layer_dtype.is_floating_point or base_layer_dtype.is_complex:
-                target_dtype = base_layer_dtype
-        
-        meta = torch.device("meta")
-        
-        # Move adamss_resW and adamss_newB buffers (stored in BufferDict)
-        for buffer_dict in [self.adamss_resW, self.adamss_newB]:
-            if adapter_name in buffer_dict:
-                buffer_tensor = buffer_dict[adapter_name]
-                if buffer_tensor is not None and buffer_tensor.device == meta:
-                    # Move buffer from meta device to target device
-                    if target_dtype is not None:
-                        buffer_dict[adapter_name] = torch.empty_like(buffer_tensor, device=target_device, dtype=target_dtype)
-                    else:
-                        buffer_dict[adapter_name] = torch.empty_like(buffer_tensor, device=target_device)
-
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
-        """
-        Custom state_dict loading to handle shape mismatches for AdaMSS parameters.
-        
-        When loading with low_cpu_mem_usage=True, placeholder parameters have estimated shapes
-        that may not match the actual checkpoint shapes. This method resizes parameters before
-        the standard loading to avoid shape mismatch errors.
-        """
-        # Find keys that belong to our ParameterLists (adamss_A.{adapter}.{i} and adamss_B.{adapter}.{i})
-        for full_key, value in list(state_dict.items()):
-            if not full_key.startswith(prefix):
-                continue
-            key = full_key[len(prefix):]
-            
-            # Handle adamss_A and adamss_B ParameterLists
-            for param_dict_name in ['adamss_A', 'adamss_B']:
-                if key.startswith(f"{param_dict_name}."):
-                    # Key format: adamss_A.{adapter}.{index}
-                    parts = key[len(f"{param_dict_name}."):].split('.')
-                    if len(parts) == 2:
-                        adapter_name, idx_str = parts
-                        try:
-                            idx = int(idx_str)
-                            param_list = getattr(self, param_dict_name, {}).get(adapter_name)
-                            if param_list is not None and idx < len(param_list):
-                                current_param = param_list[idx]
-                                # Check for shape mismatch and resize if needed
-                                if current_param.shape != value.shape:
-                                    # Replace with correctly shaped empty tensor
-                                    # Preserve requires_grad status from the original parameter
-                                    new_param = nn.Parameter(
-                                        torch.empty(value.shape, device=current_param.device, dtype=current_param.dtype),
-                                        requires_grad=current_param.requires_grad
-                                    )
-                                    param_list[idx] = new_param
-                        except (ValueError, IndexError):
-                            pass
-            
-            # Handle adamss_resW and adamss_newB BufferDicts
-            for buffer_dict_name in ['adamss_resW', 'adamss_newB']:
-                if key.startswith(f"{buffer_dict_name}."):
-                    adapter_name = key[len(f"{buffer_dict_name}."):]
-                    buffer_dict = getattr(self, buffer_dict_name, None)
-                    if buffer_dict is not None and adapter_name in buffer_dict:
-                        current_buffer = buffer_dict[adapter_name]
-                        if current_buffer.shape != value.shape:
-                            # Replace with correctly shaped empty tensor
-                            buffer_dict[adapter_name] = torch.empty(
-                                value.shape, device=current_buffer.device, dtype=current_buffer.dtype
-                            )
-        
-        # Call parent implementation
-        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
     def reset_importance(self, adapter_name: str) -> None:
-        """Clear stored importance stats for an adapter (aligns with adamss_pkg)."""
+        """
+        Clear stored importance stats for an adapter.
+
+        Called after each masking interval to restart EMA accumulation for the
+        next importance scoring window. Without the reset the scores from early
+        training steps would dominate later masking decisions.
+        """
         if adapter_name in self.exp_avg_ipt:
             self.exp_avg_ipt[adapter_name].clear()
         if adapter_name in self.exp_avg_unc:
             self.exp_avg_unc[adapter_name].clear()
 
-    def update_importance(self, adapter_name: str, importance_beta: float = 0.85, uncertainty_beta: float = 0.85) -> None:
+    def update_importance(
+        self, adapter_name: str, importance_beta: float = 0.85, uncertainty_beta: float = 0.85
+    ) -> None:
         """
-        Update importance scores using current gradients (called explicitly by AdamssASACallback).
+        Update importance scores using current gradients (called explicitly by AdamssAsaCallback).
         Matches adamss_pkg behavior of using accumulated gradients.
-        
+
         Args:
             adapter_name: Name of the adapter to update importance for.
             importance_beta: EMA coefficient for importance averaging (0.8-0.95 typical).
@@ -183,7 +107,7 @@ class AdamssLayer(BaseTunerLayer):
         # adamss_A[adapter_name] and adamss_B[adapter_name] are ParameterLists
         param_list_A = self.adamss_A[adapter_name]
         param_list_B = self.adamss_B[adapter_name]
-        
+
         for i in range(self.num_subspaces[adapter_name]):
             for prefix, param_list in [("A", param_list_A), ("B", param_list_B)]:
                 key = f"{prefix}_{i}"  # Internal key for tracking
@@ -192,32 +116,31 @@ class AdamssLayer(BaseTunerLayer):
                     if key not in exp_avg_ipt:
                         exp_avg_ipt[key] = torch.zeros_like(param)
                         exp_avg_unc[key] = torch.zeros_like(param)
-                    
+
                     # Calculate importance: |w * g|
                     ipt = (param * param.grad).abs().detach()
-                    
+
                     # CRITICAL: Update uncertainty BEFORE updating exp_avg_ipt
                     # This matches adamss_pkg logic exactly
                     diff = (ipt - exp_avg_ipt[key]).abs()
                     exp_avg_unc[key].mul_(uncertainty_beta).add_(diff, alpha=1 - uncertainty_beta)
-                    
+
                     # Then update exp_avg_ipt
                     exp_avg_ipt[key].mul_(importance_beta).add_(ipt, alpha=1 - importance_beta)
-    
+
     def mask_to_target(self, adapter_name: str, asa_target_subspaces: int, verbose: bool = False) -> None:
         """
         Mask (freeze) less important subspaces to reach asa_target_subspaces active subspaces.
         """
         if adapter_name not in self.exp_avg_ipt:
             return  # ASA not enabled
-        
+
         num_subspaces = self.num_subspaces[adapter_name]
         if asa_target_subspaces >= num_subspaces:
             return
 
         exp_avg_ipt = self.exp_avg_ipt[adapter_name]
         exp_avg_unc = self.exp_avg_unc[adapter_name]
-
 
         subspace_scores = []
         for i in range(num_subspaces):
@@ -230,7 +153,6 @@ class AdamssLayer(BaseTunerLayer):
             score_A = (exp_avg_ipt[key_A] * exp_avg_unc[key_A]).mean()
             score_B = (exp_avg_ipt[key_B] * exp_avg_unc[key_B]).mean()
             subspace_scores.append((i, score_A + score_B))
-
 
         if len(subspace_scores) <= asa_target_subspaces and asa_target_subspaces > 0:
             return
@@ -247,11 +169,10 @@ class AdamssLayer(BaseTunerLayer):
                 subspace_scores.sort(key=lambda x: x[1], reverse=True)
                 active_indices = {idx for idx, _ in subspace_scores[:asa_target_subspaces]}
 
-
         # Access ParameterLists for this adapter
         param_list_A = self.adamss_A[adapter_name]
         param_list_B = self.adamss_B[adapter_name]
-        
+
         for i in range(num_subspaces):
             should_train = i in active_indices
             param_list_A[i].requires_grad = should_train
@@ -259,7 +180,6 @@ class AdamssLayer(BaseTunerLayer):
             if not should_train:
                 param_list_A[i].grad = None
                 param_list_B[i].grad = None
-
 
     def update_layer(
         self,
@@ -270,107 +190,30 @@ class AdamssLayer(BaseTunerLayer):
         init_weights: str,
         use_asa: bool = False,
         inference_mode: bool = False,
+        use_dynamic_rank: bool = False,
+        svd_threshold: float = 0.1,
         **kwargs,
     ) -> None:
         """
         Update layer with Adamss adapter.
-        
-        This method initializes the Adamss decomposition for the weight matrix.
-        When running in init_empty_weights context (low_cpu_mem_usage=True), creates
-        placeholder parameters that will be replaced during load_state_dict.
+
+        This method initializes the Adamss decomposition for the weight matrix
+        using SVD, clustering, and QR initialization.
         """
         if adapter_name in self.adamss_A:
             # Adapter already exists, skip
             return
-        
+
         # Get the base weight info
         weight = self.get_base_layer().weight
         bias = self.get_base_layer().bias
         device = weight.device
         dtype = weight.dtype
-        out_features, in_features = weight.shape
-        
-        # Detect if we're in init_empty_weights context (for low_cpu_mem_usage support)
-        # Use multiple detection methods for robustness:
-        # 1. Check if register_parameter is the patched version (function name changes)
-        method1 = nn.Module.register_parameter.__name__ == "register_empty_parameter"
-        # 2. Check if base layer weight is on meta device
-        method2 = device.type == "meta"
-        # 3. Check _init_on_device._skip (False or missing means we're in the context)
-        from peft.utils.integrations import _init_on_device
-        # When in init_empty_weights, _skip is explicitly False or not set
-        # But we need a positive indicator - check if the function is patched
-        method3 = getattr(_init_on_device, "_active", False)  # This won't work, need different approach
-        
-        # Actually the best test is to create a dummy module and register a parameter
-        class _TestModule(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.register_parameter('_test_param', nn.Parameter(torch.empty(1)))
-        try:
-            test_mod = _TestModule()
-            method4 = test_mod._test_param.device.type == "meta"
-            del test_mod
-        except Exception:
-            method4 = False
-        
-        in_init_empty_weights = method1 or method2 or method4
-        
+        _, in_features = weight.shape
+
         # Adjust in_features for bias column
         if bias is not None:
             in_features += 1
-        
-        if in_init_empty_weights:
-            # LOW_CPU_MEM_USAGE MODE: Create placeholder parameters
-            # These will be replaced by load_state_dict with assign=True
-            # The actual shapes don't matter since they'll be overwritten
-            
-            # Use config values for metadata
-            self.num_subspaces[adapter_name] = num_subspaces
-            self.train_subspace_index[adapter_name] = list(range(num_subspaces))
-            
-            # Create estimated seg_result for metadata
-            estimated_seg_size = max(1, out_features // num_subspaces)
-            self.seg_result[adapter_name] = {
-                i: np.arange(i * estimated_seg_size, min((i + 1) * estimated_seg_size, out_features)) 
-                for i in range(num_subspaces)
-            }
-            
-            # Create placeholder ParameterLists with minimal shapes
-            # Actual shapes will be replaced during load_state_dict with assign=True
-            A_params = []
-            B_params = []
-            for i in range(num_subspaces):
-                # Minimal placeholder shapes - will be replaced
-                A_params.append(nn.Parameter(torch.empty(subspace_rank, r)))
-                B_params.append(nn.Parameter(torch.empty(estimated_seg_size, subspace_rank)))
-            
-            self.adamss_A[adapter_name] = nn.ParameterList(A_params)
-            self.adamss_B[adapter_name] = nn.ParameterList(B_params)
-            
-            # Create placeholder buffers
-            self.adamss_resW[adapter_name] = torch.empty(out_features, in_features)
-            self.adamss_newB[adapter_name] = torch.empty(r, in_features)
-            
-            # Create placeholder scatter_index
-            all_indices = []
-            for i in range(num_subspaces):
-                all_indices.extend(self.seg_result[adapter_name][i].tolist())
-            self.scatter_index[adapter_name] = torch.tensor(all_indices if all_indices else list(range(out_features)), dtype=torch.long)
-            
-            # Initialize ASA tracking if enabled
-            if use_asa:
-                self.exp_avg_ipt[adapter_name] = {}
-                self.exp_avg_unc[adapter_name] = {}
-            
-            # Move to device (handles meta -> actual device during load)
-            self._move_adapter_to_device_of_base_layer(adapter_name)
-            return  # Skip normal SVD initialization
-        
-        # NORMAL MODE: Full SVD initialization
-        # Extract dynamic rank configuration from kwargs
-        use_dynamic_rank = kwargs.get('use_dynamic_rank', False)
-        svd_threshold = kwargs.get('svd_threshold', 0.1)
 
         # Prepare weight tensor (add bias as extra column if present)
         if bias is not None:
@@ -385,24 +228,26 @@ class AdamssLayer(BaseTunerLayer):
         try:
             res = slice_pca(weight_tensor, r, device, torch.float32)
         except Exception as e:
-            raise RuntimeError(f"slice_pca raised an exception for layer {adapter_name} (shape={tuple(weight_tensor.shape)}, dtype={weight_tensor.dtype}, device={device}): {e}") from e
-        
+            raise RuntimeError(
+                f"slice_pca raised an exception for layer {adapter_name} (shape={tuple(weight_tensor.shape)}, dtype={weight_tensor.dtype}, device={device}): {e}"
+            ) from e
+
         if res is None:
             # Collect lightweight diagnostics to help debugging
             try:
                 has_nan = bool(torch.isnan(weight_tensor).any().item())
                 mn = float(weight_tensor.min().item())
                 mx = float(weight_tensor.max().item())
-            except Exception:
-                has_nan = 'unknown'
-                mn = 'unknown'
-                mx = 'unknown'
+            except Exception:  # noqa: BLE001
+                has_nan = "unknown"
+                mn = "unknown"
+                mx = "unknown"
             raise RuntimeError(
                 f"slice_pca returned None for layer {adapter_name}: "
                 f"shape={tuple(weight_tensor.shape)}, dtype={weight_tensor.dtype}, device={device}, "
                 f"has_nan={has_nan}, min={mn}, max={mx}"
             )
-        
+
         VVT, UU = res
 
         # Store projection matrices
@@ -410,18 +255,18 @@ class AdamssLayer(BaseTunerLayer):
         newB = VVT  # (1, 1, r, in_features)
 
         # Cluster the column space
-        cluster_idx, num_subspaces_list = clustering_Z(UU[0, 0, :, :], num_subspaces, 10)
+        cluster_idx, effective_num_subspaces = clustering_Z(UU[0, 0, :, :], num_subspaces, 10)
 
         # Get segment locations
-        seg_results = seg_locations(1, cluster_idx)
+        seg_result = seg_locations(cluster_idx)
 
         # Get trainable subspace indices
-        train_subspace_index = get_trainable_subspaces_all(1, num_subspaces_list)
+        train_subspace_index = get_trainable_subspaces(effective_num_subspaces)
 
         # Store metadata
-        self.num_subspaces[adapter_name] = num_subspaces_list[0]
-        self.train_subspace_index[adapter_name] = train_subspace_index[0]
-        self.seg_result[adapter_name] = seg_results[0]
+        self.num_subspaces[adapter_name] = effective_num_subspaces
+        self.train_subspace_index[adapter_name] = train_subspace_index
+        self.seg_result[adapter_name] = seg_result
 
         # Store residual weight and projection matrix in BufferDict (frozen, device-aware)
         # BufferDict handles registration, keys like 'adamss_resW.{adapter_name}' match expected pattern
@@ -435,30 +280,30 @@ class AdamssLayer(BaseTunerLayer):
         # Collect parameters in lists, then create ParameterList for proper state_dict keys
         A_params = []
         B_params = []
-        
+
         for i in range(self.num_subspaces[adapter_name]):
-            subspace_idx = train_subspace_index[0][i]
-            seg_indices = seg_results[0][subspace_idx]
+            subspace_idx = train_subspace_index[i]
+            seg_indices = seg_result[subspace_idx]
 
             # Extract subspace data: use ALL r columns from SVD (not just r/K)
             # This matches adamss_pkg where A matrices have shape (rank_i, r)
             subspace_data = newA[0, 0, seg_indices, :r]
             # subspace_data shape: (len(seg_indices), r)
-            
+
             # Determine actual rank based on configuration
             if use_dynamic_rank:
                 # Compute Gram matrix Z = subspace_data @ subspace_data.T
                 Z_row = subspace_data @ subspace_data.T  # (len(seg_indices), len(seg_indices))
-                
+
                 # Compute SVD to get row space decomposition
-                U_row, S_row, V_row = torch.svd_lowrank(Z_row, q=min(Z_row.shape), niter=2)
-                
+                _U_row, S_row, _V_row = torch.svd_lowrank(Z_row, q=min(Z_row.shape), niter=2)
+
                 # Dynamic rank selection using SVD threshold
                 # Dynamically determine actual rank using configurable threshold
                 # Following adamss_pkg: num_ii_jj = min((S > threshold * S[0]).sum().item(), args.adamss_ri)
                 threshold_mask = S_row > svd_threshold * S_row[0]
                 actual_rank = min(threshold_mask.sum().item(), subspace_rank, len(S_row))
-                
+
                 # Handle edge case: ensure at least rank 1
                 if actual_rank == 0:
                     actual_rank = 1
@@ -467,7 +312,7 @@ class AdamssLayer(BaseTunerLayer):
                 # Fixed rank: match adamss_pkg behavior exactly
                 # adamss_pkg uses: num_ii_jj = min(len(seg_result[indx]), args.adamss_ri)
                 actual_rank = min(len(seg_indices), subspace_rank)
-                
+
                 # Ensure at least rank 1
                 if actual_rank == 0:
                     actual_rank = 1
@@ -475,22 +320,22 @@ class AdamssLayer(BaseTunerLayer):
             # Initialize A using QR decomposition to match adamss_pkg exactly
             # adamss_pkg: Q, R = torch.linalg.qr((newA[seg_result[indx],:]).T @ A[i], mode='reduced')
             # where A[i] is U from SVD of subspace Gram matrix
-            
+
             # First, compute Gram matrix for this subspace
             Z_subspace = subspace_data @ subspace_data.T  # (len(seg_indices), len(seg_indices))
-            
+
             # SVD of Gram matrix to get A_intermediate
-            U_gram, S_gram, _ = torch.svd_lowrank(Z_subspace, q=min(Z_subspace.shape[0], actual_rank), niter=2)
+            U_gram, _S_gram, _ = torch.svd_lowrank(Z_subspace, q=min(Z_subspace.shape[0], actual_rank), niter=2)
             A_intermediate = U_gram[:, :actual_rank]  # (len(seg_indices), actual_rank)
-            
+
             # Now apply QR decomposition: (newA[seg_indices, :r]).T @ A_intermediate
             # newA[0, 0, seg_indices, :r] is subspace_data with shape (len(seg_indices), r)
             matrix_for_qr = subspace_data.T @ A_intermediate  # (r, actual_rank)
-            Q, R = torch.linalg.qr(matrix_for_qr, mode='reduced')
-            
+            Q, _R = torch.linalg.qr(matrix_for_qr, mode="reduced")
+
             # A_init is Q.T to match adamss_pkg
             A_init = Q.T.contiguous()  # (actual_rank, r)
-            
+
             # Initialize B matrix
             # When init_weights='orthogonal', use zeros for identity operation (standard training init)
             # When init_weights=None/False, use random values so adapter produces non-zero effect
@@ -500,9 +345,9 @@ class AdamssLayer(BaseTunerLayer):
                 # But after step 1, B becomes non-zero and A will get gradients in step 2+
                 B_init = torch.zeros(len(seg_indices), actual_rank, dtype=dtype, device=device)
             else:
-                # Random initialization for testing - produces non-zero adapter output  
+                # Random initialization for testing - produces non-zero adapter output
                 B_init = torch.randn(len(seg_indices), actual_rank, dtype=dtype, device=device) * 0.01
-            
+
             # Collect A and B parameters
             A_params.append(nn.Parameter(A_init.to(dtype)))
             B_params.append(nn.Parameter(B_init.to(dtype)))
@@ -516,17 +361,19 @@ class AdamssLayer(BaseTunerLayer):
         if use_asa:
             self.exp_avg_ipt[adapter_name] = {}
             self.exp_avg_unc[adapter_name] = {}
-            
+
             # Hooks are not used; importance is updated explicitly via update_importance
             # to match adamss_pkg behavior (using accumulated gradients).
 
         # Compute scatter_index for forward pass
         self.scatter_index[adapter_name] = torch.cat(
-            [torch.from_numpy(self.seg_result[adapter_name][self.train_subspace_index[adapter_name][i]]) 
-             for i in range(self.num_subspaces[adapter_name])],
-            dim=0
+            [
+                self.seg_result[adapter_name][self.train_subspace_index[adapter_name][i]]
+                for i in range(self.num_subspaces[adapter_name])
+            ],
+            dim=0,
         ).long()
-        
+
         # Move adapter to device of base layer (important for low_cpu_mem_usage support)
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
@@ -552,16 +399,67 @@ class Linear(nn.Module, AdamssLayer):
     ) -> None:
         super().__init__()
         AdamssLayer.__init__(self, base_layer, **kwargs)
-        
+
         # Set in_features and out_features from base layer (required for PEFT compatibility)
         self.in_features = base_layer.in_features
         self.out_features = base_layer.out_features
 
         # Initialize the adapter
         inference_mode = kwargs.pop("inference_mode", False)
-        self.update_layer(adapter_name, r, num_subspaces, subspace_rank, init_weights, use_asa, inference_mode=inference_mode, **kwargs)
+        self.update_layer(
+            adapter_name,
+            r,
+            num_subspaces,
+            subspace_rank,
+            init_weights,
+            use_asa,
+            inference_mode=inference_mode,
+            **kwargs,
+        )
         self._active_adapter = adapter_name
         self.dtype = base_layer.weight.dtype
+
+    def _load_from_state_dict(
+        self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+    ):
+        """Handle shape mismatches that arise when loading with ``low_cpu_mem_usage=True``.
+
+        AdaMSS B parameter shapes depend on KMeans clustering of the weight
+        matrix.  When the adapter is created inside ``init_empty_weights()``
+        (i.e. ``low_cpu_mem_usage=True``), clustering runs on meta/empty
+        tensors and can produce different segment sizes than those in the
+        checkpoint.  This override detects the resulting shape mismatches and
+        replaces the placeholder parameters with correctly-shaped tensors
+        before the default ``load_state_dict`` logic runs.
+        """
+        for key, value in state_dict.items():
+            if not key.startswith(prefix):
+                continue
+            local_key = key[len(prefix) :]
+            # Walk dot-separated path to reach the attribute
+            parts = local_key.split(".")
+            try:
+                target = self
+                for part in parts[:-1]:
+                    target = getattr(target, part) if not part.isdigit() else target[int(part)]
+                last = parts[-1]
+                if last.isdigit():
+                    current = target[int(last)]
+                else:
+                    current = getattr(target, last)
+            except (AttributeError, IndexError, KeyError):
+                continue
+
+            if isinstance(current, (torch.Tensor, nn.Parameter)) and current.shape != value.shape:
+                new_param = nn.Parameter(torch.empty_like(value), requires_grad=current.requires_grad)
+                if last.isdigit():
+                    target[int(last)] = new_param
+                else:
+                    setattr(target, last, new_param)
+
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+        )
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """
@@ -601,7 +499,7 @@ class Linear(nn.Module, AdamssLayer):
             if adapter in self.adamss_A:
                 first_active_adapter = adapter
                 break
-        
+
         if first_active_adapter is None:
             # No active adapters, return base layer output
             return self.base_layer(x, *args, **kwargs)
@@ -624,25 +522,28 @@ class Linear(nn.Module, AdamssLayer):
             # Get ParameterLists for this adapter
             param_list_A = self.adamss_A[active_adapter]
             param_list_B = self.adamss_B[active_adapter]
-            
+
             # Apply A and B transformations per subspace
+            # TODO: if all subspaces have equal output dimensions, this loop could
+            # be replaced with a batched matmul/einsum for better performance.
+            # Currently B_i shapes vary per subspace (clustering-dependent), so we loop.
             x6_chunks = []
             for i in range(self.num_subspaces[active_adapter]):
                 # Get A and B for this subspace
                 A_i = param_list_A[i].to(self.dtype)  # Shape: (ri, r)
                 B_i = param_list_B[i].to(self.dtype)  # Shape: (len(seg_indices_i), ri)
-                
+
                 # Apply transformations: x2 @ A^T @ B^T
                 x5_i = F.linear(x2, A_i)  # (..., r) @ (ri, r)^T -> (..., ri)
                 x6_i = F.linear(x5_i, B_i)  # (..., ri) @ (len(seg_indices_i), ri)^T -> (..., len(seg_indices_i))
                 x6_chunks.append(x6_i)
-            
+
             # Concatenate results from all subspaces
             x6 = torch.cat(x6_chunks, dim=-1)
 
             # Scatter to correct positions using scatter for proper gradient flow
             scatter_index_tensor = self.scatter_index[active_adapter].to(x6.device)
-            
+
             # Handle both 2D (batch, features) and 3D (batch, seq, features) inputs
             if x6.dim() == 2:
                 x7 = torch.zeros(x6.shape[0], result.shape[-1], device=x6.device, dtype=x6.dtype)
@@ -657,9 +558,7 @@ class Linear(nn.Module, AdamssLayer):
             result = result + x7
 
         # Cast back to original dtype
-        result = result.to(previous_dtype)
-
-        return result
+        return result.to(previous_dtype)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -694,7 +593,7 @@ class Linear(nn.Module, AdamssLayer):
                         )
 
                     base_layer.weight.data = orig_weight
-                    
+
                     # Also update bias if present
                     if base_layer.bias is not None:
                         orig_bias = base_layer.bias.data.clone()
@@ -708,7 +607,7 @@ class Linear(nn.Module, AdamssLayer):
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
                     base_layer.weight.data += delta_weight
-                    
+
                     # Also update bias if present
                     if base_layer.bias is not None:
                         delta_bias = self.get_delta_bias(active_adapter)
@@ -732,7 +631,7 @@ class Linear(nn.Module, AdamssLayer):
                 orig_dtype = weight.dtype
                 delta_weight = self.get_delta_weight(active_adapter)
                 weight.data -= delta_weight.to(orig_dtype)
-                
+
                 # Also update bias if present
                 if base_layer.bias is not None:
                     delta_bias = self.get_delta_bias(active_adapter)
@@ -741,13 +640,13 @@ class Linear(nn.Module, AdamssLayer):
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         """
         Compute the delta weight for the given adapter.
-        
+
         For AdaMSS, the forward computes:
             result = newx @ resW.T + scatter(newx @ newB.T @ A.T @ B.T)
-        
+
         Since resW = original_weight_with_bias, the delta is just the adapter path:
             delta = scatter(B @ A @ newB)
-        
+
         We extract the weight portion (excluding bias column) as the delta to add
         to the base layer's weight.
 
@@ -757,29 +656,29 @@ class Linear(nn.Module, AdamssLayer):
         device = self.get_base_layer().weight.device
         dtype = self.get_base_layer().weight.dtype
         base_weight = self.get_base_layer().weight
-        
+
         # Get buffers
         newB = self.adamss_newB[adapter_name]  # Shape: (r, in_features + 1)
-        
+
         # Get parameter lists
         param_list_A = self.adamss_A[adapter_name]
         param_list_B = self.adamss_B[adapter_name]
-        
+
         # In case users wants to merge the adapter weights that are in
         # (b)float16 while being on CPU, we need to cast the weights to float32
-        cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
+        cast_to_fp32 = device.type == "cpu" and dtype in (torch.float16, torch.bfloat16)
         compute_dtype = torch.float32 if cast_to_fp32 else dtype
 
         newB = newB.to(device).to(compute_dtype)
-        
+
         # Compute the adapter contribution (scattered B @ A @ newB)
         # delta_weight has shape (out_features, in_features + 1)
         out_features = base_weight.shape[0]
         in_features_plus_1 = newB.shape[1]
-        
+
         # Initialize delta weight for the adapter path only
         delta_weight = torch.zeros(out_features, in_features_plus_1, device=device, dtype=compute_dtype)
-        
+
         # Compute the transformation for each subspace
         # For subspace i: contribution = B_i @ A_i @ newB
         # where A_i has shape (rank_i, r), B_i has shape (seg_len_i, rank_i)
@@ -787,59 +686,59 @@ class Linear(nn.Module, AdamssLayer):
         for i in range(self.num_subspaces[adapter_name]):
             A_i = param_list_A[i].to(device).to(compute_dtype)  # Shape: (rank_i, r)
             B_i = param_list_B[i].to(device).to(compute_dtype)  # Shape: (seg_len_i, rank_i)
-            
+
             # B_i @ A_i @ newB gives shape (seg_len_i, in_features+1)
             chunk = B_i @ A_i @ newB
             chunks.append(chunk)
-        
+
         # Concatenate chunks and scatter to correct positions
         if chunks:
             combined = torch.cat(chunks, dim=0)  # Shape: (total_seg_len, in_features+1)
             # Use scatter_index for assignment
             scatter_idx = self.scatter_index[adapter_name].to(delta_weight.device)
             delta_weight[scatter_idx] = combined
-        
+
         # Extract just the weight portion (excluding the bias column)
         # delta_weight[:, :-1] is the weight delta
         # delta_weight[:, -1] is the bias delta
         output_tensor = delta_weight[:, :-1]  # Shape: (out_features, in_features)
-        
+
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
-        
+
         return output_tensor
 
     def get_delta_bias(self, adapter_name: str) -> torch.Tensor:
         """
         Compute the bias delta for the given adapter.
-        
+
         This is the last column of the adapter path contribution (B @ A @ newB).
-        
+
         Args:
             adapter_name (str): The name of the adapter for which the bias delta should be computed.
         """
         device = self.get_base_layer().weight.device
         dtype = self.get_base_layer().weight.dtype
         base_weight = self.get_base_layer().weight
-        
+
         # Get buffers
         newB = self.adamss_newB[adapter_name]  # Shape: (r, in_features + 1)
-        
+
         # Get parameter lists
         param_list_A = self.adamss_A[adapter_name]
         param_list_B = self.adamss_B[adapter_name]
-        
-        cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
+
+        cast_to_fp32 = device.type == "cpu" and dtype in (torch.float16, torch.bfloat16)
         compute_dtype = torch.float32 if cast_to_fp32 else dtype
 
         newB = newB.to(device).to(compute_dtype)
-        
+
         out_features = base_weight.shape[0]
         in_features_plus_1 = newB.shape[1]
-        
+
         # Initialize delta weight for the adapter path only
         delta_weight = torch.zeros(out_features, in_features_plus_1, device=device, dtype=compute_dtype)
-        
+
         # Compute the transformation for each subspace
         chunks = []
         for i in range(self.num_subspaces[adapter_name]):
@@ -847,179 +746,19 @@ class Linear(nn.Module, AdamssLayer):
             B_i = param_list_B[i].to(device).to(compute_dtype)
             chunk = B_i @ A_i @ newB
             chunks.append(chunk)
-        
+
         if chunks:
             combined = torch.cat(chunks, dim=0)
             scatter_idx = self.scatter_index[adapter_name].to(delta_weight.device)
             delta_weight[scatter_idx] = combined
-        
+
         # Extract the bias portion (last column)
         output_tensor = delta_weight[:, -1]  # Shape: (out_features,)
-        
+
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
-        
+
         return output_tensor
-
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
-        """
-        Custom state_dict loading to handle shape mismatches for AdaMSS parameters.
-        
-        When loading with low_cpu_mem_usage=True, placeholder parameters have estimated shapes
-        that may not match the actual checkpoint shapes. This method resizes parameters before
-        the standard loading to avoid shape mismatch errors.
-        
-        Additionally, when the config's num_subspaces is larger than the actual checkpoint subspaces,
-        this method prunes excess placeholder parameters to prevent meta device issues.
-        
-        Note: This must be in Linear class (not just AdamssLayer) due to Python MRO -
-        nn.Module._load_from_state_dict would be found before AdamssLayer._load_from_state_dict.
-        """
-
-        
-        # First pass: Count actual subspaces per adapter from state_dict
-        # This is needed to prune placeholder parameters when config.num_subspaces > actual checkpoint subspaces
-        adapter_max_indices = {}  # {adapter_name: max_index_in_checkpoint}
-        for full_key in state_dict.keys():
-            if not full_key.startswith(prefix):
-                continue
-            key = full_key[len(prefix):]
-            
-            for param_dict_name in ['adamss_A', 'adamss_B']:
-                if key.startswith(f"{param_dict_name}."):
-                    parts = key[len(f"{param_dict_name}."):].split('.')
-                    if len(parts) == 2:
-                        adapter_name, idx_str = parts
-                        try:
-                            idx = int(idx_str)
-                            if adapter_name not in adapter_max_indices:
-                                adapter_max_indices[adapter_name] = idx
-                            else:
-                                adapter_max_indices[adapter_name] = max(adapter_max_indices[adapter_name], idx)
-                        except ValueError:
-                            pass
-        
-
-        
-        # Second pass: Process parameters and handle shape mismatches
-        for full_key, value in list(state_dict.items()):
-            if not full_key.startswith(prefix):
-                continue
-            key = full_key[len(prefix):]
-            
-            # Handle adamss_A and adamss_B ParameterLists
-            for param_dict_name in ['adamss_A', 'adamss_B']:
-                if key.startswith(f"{param_dict_name}."):
-                    # Key format: adamss_A.{adapter}.{index}
-                    parts = key[len(f"{param_dict_name}."):].split('.')
-                    if len(parts) == 2:
-                        adapter_name, idx_str = parts
-                        try:
-                            idx = int(idx_str)
-                            param_dict = getattr(self, param_dict_name, None)
-                            if param_dict is not None:
-                                # Create ParameterList for adapter if it doesn't exist
-                                if adapter_name not in param_dict:
-                                    param_dict[adapter_name] = nn.ParameterList([])
-                                
-                                param_list = param_dict[adapter_name]
-                                
-                                # If index is beyond current list, extend with placeholders
-                                # Get requires_grad status from existing params if available
-                                default_requires_grad = False  # Non-active adapters should be frozen
-                                while idx >= len(param_list):
-                                    placeholder = nn.Parameter(
-                                        torch.empty(1, 1, device='cpu'),
-                                        requires_grad=default_requires_grad
-                                    )
-                                    param_list.append(placeholder)
-                                
-                                current_param = param_list[idx]
-                                # Check for shape mismatch and resize if needed
-                                # Also use 'cpu' device to ensure we're not on meta device
-                                if current_param.shape != value.shape or current_param.device.type == 'meta':
-                                    # Replace with correctly shaped tensor on cpu
-                                    # Preserve requires_grad status from the original parameter
-                                    new_param = nn.Parameter(
-                                        torch.empty(value.shape, device='cpu', dtype=value.dtype),
-                                        requires_grad=current_param.requires_grad
-                                    )
-                                    param_list[idx] = new_param
-                        except (ValueError, IndexError):
-                            pass
-            
-            # Handle adamss_resW and adamss_newB BufferDicts
-            for buffer_dict_name in ['adamss_resW', 'adamss_newB']:
-                if key.startswith(f"{buffer_dict_name}."):
-                    # Key format: adamss_resW.{adapter_name} (no further nesting)
-                    # Extract only the adapter name (split and take first part to avoid issues)
-                    remaining = key[len(f"{buffer_dict_name}."):]
-                    # In case there are extra parts (shouldn't happen), take only first part
-                    adapter_name = remaining.split('.')[0] if '.' in remaining else remaining
-                    
-                    buffer_dict = getattr(self, buffer_dict_name, None)
-                    if buffer_dict is not None:
-                        # Create buffer for adapter if it doesn't exist, or fix shape
-                        if adapter_name not in buffer_dict:
-                            # Create new buffer with correct shape on cpu
-                            buffer_dict[adapter_name] = torch.empty(
-                                value.shape, device='cpu', dtype=value.dtype
-                            )
-                        else:
-                            current_buffer = buffer_dict[adapter_name]
-                            # Check shape mismatch or meta device
-                            if current_buffer.shape != value.shape or current_buffer.device.type == 'meta':
-                                # Replace with correctly shaped tensor on cpu
-                                buffer_dict[adapter_name] = torch.empty(
-                                    value.shape, device='cpu', dtype=value.dtype
-                                )
-        
-        # Third pass: Prune excess placeholder parameters and initialize/update metadata
-        # When config.num_subspaces > actual checkpoint subspaces, we have extra placeholders
-        # that would remain on meta device and cause assertion failures
-        for adapter_name, max_idx in adapter_max_indices.items():
-            actual_num_subspaces = max_idx + 1
-            
-            for param_dict_name in ['adamss_A', 'adamss_B']:
-                param_dict = getattr(self, param_dict_name, None)
-                if param_dict is not None and adapter_name in param_dict:
-                    param_list = param_dict[adapter_name]
-                    if len(param_list) > actual_num_subspaces:
-                        # Create a new ParameterList with only the needed parameters
-                        new_param_list = nn.ParameterList([param_list[i] for i in range(actual_num_subspaces)])
-                        param_dict[adapter_name] = new_param_list
-            
-            # Update KK metadata to match actual subspaces
-            if adapter_name in self.num_subspaces:
-                old_kk = self.num_subspaces[adapter_name]
-                if old_kk != actual_num_subspaces:
-                    self.num_subspaces[adapter_name] = actual_num_subspaces
-            else:
-                # Initialize KK for newly loaded adapter
-                self.num_subspaces[adapter_name] = actual_num_subspaces
-            
-            # Update/initialize train_subspace_index - list of trainable subspace indices
-            if adapter_name not in self.train_subspace_index or len(self.train_subspace_index[adapter_name]) != actual_num_subspaces:
-                self.train_subspace_index[adapter_name] = list(range(actual_num_subspaces))
-            
-            # Update/initialize seg_result - mapping from subspace index to output indices
-            # During loading, we can only estimate this based on B matrix shapes
-            # The actual seg_result will be determined by the B matrix dimensions
-            if adapter_name not in self.seg_result:
-                self.seg_result[adapter_name] = {}
-            
-            # Update scatter_index based on B matrix shapes after loading
-            # This needs to happen after state_dict is actually loaded, so we'll defer
-            # by setting a flag or we can reconstruct it in forward pass
-            # For now, create a placeholder that will be updated later
-            if adapter_name not in self.scatter_index:
-                # Get base layer info to estimate output features
-                weight = self.get_base_layer().weight
-                out_features = weight.shape[0]
-                self.scatter_index[adapter_name] = torch.arange(out_features, dtype=torch.long)
-        
-        # Call parent implementation
-        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
     def __repr__(self) -> str:
         rep = super().__repr__()

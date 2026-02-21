@@ -14,21 +14,14 @@
 
 from __future__ import annotations
 
-import re
-import warnings
-from dataclasses import asdict
-from enum import Enum
 from typing import Optional
 
 import torch
 from torch import nn
-from tqdm import tqdm
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING,
-    ModulesToSaveWrapper,
-    _get_submodules,
 )
 
 from .config import AdamssConfig
@@ -54,13 +47,13 @@ class AdamssModel(BaseTuner):
         ```python
         >>> from transformers import AutoModelForImageClassification
         >>> from peft import AdamssConfig, get_peft_model
-        
+
         >>> config = AdamssConfig(
         ...     r=500,
         ...     num_subspaces=5,
         ...     target_modules=["query", "value"],
         ... )
-        
+
         >>> model = AutoModelForImageClassification.from_pretrained("google/vit-base-patch16-224")
         >>> adamss_model = get_peft_model(model, config)
         ```
@@ -74,7 +67,7 @@ class AdamssModel(BaseTuner):
     tuner_layer_cls = (AdamssLayer,)
     target_module_mapping = TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING
 
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False, state_dict: dict = None) -> None:
+    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False, state_dict: Optional[dict] = None) -> None:
         # Initialize ASA tracking before BaseTuner injects adapters so attribute exists.
         self._asa_total_subspaces = {}
         super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage, state_dict=state_dict)
@@ -119,9 +112,7 @@ class AdamssModel(BaseTuner):
         else:
             # Create new Adamss layer
             new_module = self._create_new_module(
-                adamss_config, adapter_name, target,
-                inference_mode=adamss_config.inference_mode,
-                **optional_kwargs
+                adamss_config, adapter_name, target, inference_mode=adamss_config.inference_mode, **optional_kwargs
             )
             self._record_asa_total_subspaces(adapter_name, adamss_config, new_module)
             # requires_grad is handled inside _create_new_module via set_adapter
@@ -166,114 +157,142 @@ class AdamssModel(BaseTuner):
                 **kwargs,
             )
         else:
-            raise ValueError(
+            raise TypeError(
                 f"Target module {target} is not supported. Currently, only `torch.nn.Linear` is supported."
             )
 
         return new_module
 
-    def _replace_module(self, parent, child_name, new_module, child):
-        """Replace a module with a new module."""
-        setattr(parent, child_name, new_module)
-        # Ensure base layer weight dtype matches
-        # Skip moving if parameters are on meta device (will be loaded later)
-        if hasattr(child, "weight"):
-            # Check if any parameters are on meta device
-            meta_params = any(p.device.type == "meta" for p in new_module.parameters())
-            if not meta_params:
-                new_module.to(child.weight.device)
-
-        # Copy state for modules to save
-        if hasattr(new_module, "base_layer"):
-            new_module.base_layer.load_state_dict(child.state_dict(), strict=False)
-
     def update_and_allocate(self, global_step: int) -> None:
         """
         Update importance scores and apply ASA masking (if enabled).
-        
-        This method should be called in every training step after `loss.backward()` 
-        and before `optimizer.zero_grad()` when ASA is enabled.
-        
+
+        This method should be called in **every** training step after ``loss.backward()``
+        and before ``optimizer.zero_grad()`` when ASA is enabled.  Internally it:
+
+        1. Accumulates importance scores via EMA every step during the warmup period.
+        2. At mask intervals, applies global top-K masking and resets importance.
+
+        This is the single entry point for ASA – using the :class:`AdamssAsaCallback`
+        with HuggingFace ``Trainer`` simply delegates to this method.  For custom
+        training loops, call this directly instead of the callback.
+
         Args:
             global_step (`int`): The current training step.
-            
-        Example:
-            ```python
-            >>> loss = model(**batch).loss
-            >>> loss.backward()
-            >>> optimizer.step()
-            >>> model.base_model.update_and_allocate(global_step)  # Update ASA
-            >>> optimizer.zero_grad()
-            ```
+
+        Example::
+
+            for step, batch in enumerate(dataloader):
+                loss = model(**batch).loss
+                loss.backward()
+                optimizer.step()
+                model.base_model.update_and_allocate(step)
+                optimizer.zero_grad()
         """
-        # Process ASA for all active adapters
         for adapter_name in self.active_adapters:
             if adapter_name not in self.peft_config:
                 continue
-            
-            adamss_config = self.peft_config[adapter_name]
-            
-            # Only proceed if ASA is enabled for this adapter
-            if not adamss_config.use_asa:
-                continue
-                    
-            within_warmup = adamss_config.init_warmup <= global_step <= adamss_config.final_warmup
-            should_mask = within_warmup and (global_step % adamss_config.mask_interval == 0)
 
-            if not should_mask:
+            config = self.peft_config[adapter_name]
+            if not config.use_asa:
                 continue
 
-            asa_layers = []
-            for module in self.model.modules():
-                if isinstance(module, AdamssLayer) and module.exp_avg_ipt:
-                    asa_layers.append(module)
+            within_warmup = config.init_warmup <= global_step <= config.final_warmup
 
+            # --- collect ASA layers once ---
+            asa_layers = [
+                m for m in self.model.modules() if isinstance(m, AdamssLayer) and adapter_name in m.exp_avg_ipt
+            ]
             if not asa_layers:
                 continue
 
-            for module in asa_layers:
-                if adapter_name in module.exp_avg_ipt:
+            # Step 1: accumulate importance EVERY step during warmup
+            if within_warmup:
+                for module in asa_layers:
+                    module.update_importance(adapter_name, config.asa_importance_beta, config.asa_uncertainty_beta)
+
+            # Step 2: at mask intervals → schedule, global mask, then reset
+            is_mask_interval = global_step % config.mask_interval == 0
+            if within_warmup and is_mask_interval:
+                current_target = self._schedule_threshold(global_step, config)
+                if current_target is not None:
+                    self._global_mask_to_target(current_target, adapter_name, asa_layers)
+
+                # Reset importance AFTER masking for fresh accumulation
+                for module in asa_layers:
                     module.reset_importance(adapter_name)
-                    module.update_importance(adapter_name, adamss_config.asa_importance_beta, adamss_config.asa_uncertainty_beta)
 
-            current_active_subspaces = self._schedule_threshold(global_step, adamss_config)
-            if current_active_subspaces is not None:
-                self._mask_to_target(current_active_subspaces, adapter_name)
-    
+    # ------------------------------------------------------------------
+    # ASA helpers
+    # ------------------------------------------------------------------
+
     def _schedule_threshold(self, step: int, config) -> Optional[int]:
-        """Calculate current target subspaces based on warmup schedule (aligned with adamss_pkg)."""
-        asa_total_subspaces = getattr(config, "asa_total_subspaces", None)
-        if not asa_total_subspaces:
-            asa_total_subspaces = self._get_asa_total_subspaces()
-
-        if not asa_total_subspaces:
+        """Calculate current target subspaces based on warmup schedule."""
+        total = self._asa_total_subspaces.get(next(iter(self.active_adapters), "default"), 0)
+        if total == 0:
+            total = self._get_asa_total_subspaces()
+        if total == 0:
             return None
 
         if step < config.init_warmup:
-            # Initial warmup: use all subspaces; no masking
             return None
         elif step <= config.final_warmup:
-            # Gradual decrease following adamss_pkg schedule
             mul_coeff = 1.0 - (step - config.init_warmup) / (config.final_warmup - config.init_warmup)
-            # Clamp for numerical stability
             mul_coeff = max(0.0, min(1.0, mul_coeff))
-            current_active_subspaces = int(config.asa_target_subspaces + (asa_total_subspaces - config.asa_target_subspaces) * (mul_coeff ** getattr(config, 'asa_schedule_exponent', 3.0)))
-            return current_active_subspaces
+            exponent = getattr(config, "asa_schedule_exponent", 3.0)
+            return int(config.asa_target_subspaces + (total - config.asa_target_subspaces) * (mul_coeff**exponent))
         else:
-            # After final warmup: fix asa_target_subspaces
             return config.asa_target_subspaces
-    
+
     def _get_asa_total_subspaces(self) -> int:
-        """Get total number of subspaces from model."""
+        """Get total number of subspaces from model (sum across all layers)."""
+        total = 0
         for module in self.model.modules():
             if isinstance(module, AdamssLayer) and module.num_subspaces:
-                return list(module.num_subspaces.values())[0]
-        return 0
-    
-    def _mask_to_target(self, asa_target_subspaces: int, adapter_name: str) -> None:
-        """Apply masking to specific adapter in all Adamss layers."""
-        for module in self.model.modules():
-            if isinstance(module, AdamssLayer):
-                if adapter_name in module.exp_avg_ipt:
-                    module.mask_to_target(adapter_name, asa_target_subspaces)
+                total += next(iter(module.num_subspaces.values()))
+        return total
 
+    def _global_mask_to_target(self, target_subspaces: int, adapter_name: str, asa_layers: list) -> None:
+        """
+        Apply **global** top-K masking across all layers.
+
+        Collects importance scores from every subspace in every layer, ranks them
+        globally, and keeps only the top ``target_subspaces`` active.
+        """
+        # 1. Collect (module, subspace_idx, score) for every subspace
+        subspace_scores: list[tuple] = []
+        for module in asa_layers:
+            n_subspaces = module.num_subspaces.get(adapter_name, 0)
+            exp_ipt = module.exp_avg_ipt[adapter_name]
+            exp_unc = module.exp_avg_unc[adapter_name]
+
+            for i in range(n_subspaces):
+                key_A, key_B = f"A_{i}", f"B_{i}"
+                if key_A not in exp_ipt or key_B not in exp_ipt:
+                    continue
+                score = (exp_ipt[key_A] * exp_unc[key_A]).mean() + (exp_ipt[key_B] * exp_unc[key_B]).mean()
+                subspace_scores.append((module, i, score))
+
+        if not subspace_scores:
+            return
+
+        # 2. Compute global threshold via kth-value
+        all_scores = torch.stack([s[2] for s in subspace_scores])
+        if target_subspaces >= len(subspace_scores):
+            threshold = float("-inf")
+        else:
+            threshold = -torch.kthvalue(-all_scores, target_subspaces)[0].item()
+
+        # 3. Apply masking
+        for module, idx, score in subspace_scores:
+            is_active = float(score) > threshold
+            param_A = module.adamss_A[adapter_name]
+            param_B = module.adamss_B[adapter_name]
+            if idx < len(param_A):
+                param_A[idx].requires_grad = is_active
+                if not is_active:
+                    param_A[idx].grad = None
+            if idx < len(param_B):
+                param_B[idx].requires_grad = is_active
+                if not is_active:
+                    param_B[idx].grad = None
