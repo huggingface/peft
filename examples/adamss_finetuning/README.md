@@ -14,54 +14,62 @@ See the [paper](https://neurips.cc/virtual/2025/poster/119606) for more details.
 Install from local source:
 ```bash
 cd peft-main && pip install -e .
-pip install transformers datasets torch torchvision evaluate accelerate
+pip install transformers datasets torch torchvision evaluate accelerate scikit-learn
 ```
 
 Verify installation:
 ```bash
-python -c "from peft import AdaMSSConfig, AdamssASACallback; print('AdaMSS ready')"
+python -c "from peft import AdamssConfig; print('AdaMSS ready')"
 ```
 
 ## Detailed Code Explanation
 
 **Core AdaMSS Configuration:**
 ```python
-from peft import AdaMSSConfig, get_peft_model, AdamssASACallback
+from peft import AdamssConfig, get_peft_model
 
 # Configure AdaMSS with ASA
-config = AdaMSSConfig(
+config = AdamssConfig(
     r=100,                          # SVD rank (full decomposition rank)
     num_subspaces=10,               # Number of subspaces (K) - initial capacity
     subspace_rank=3,                # Rank per subspace (ri) - use 1 for NLU, 3 for Vision
     target_modules=["query", "value"],  # Target attention layers
     use_asa=True,                   # Enable Adaptive Subspace Allocation
-    target_kk=5,                    # Target active subspaces (ASA reduces K→5)
+    asa_target_subspaces=5,         # Target active subspaces (ASA reduces K→5)
+    init_warmup=50,                 # Start ASA after 50 steps
+    final_warmup=1000,              # Complete masking by step 1000
+    mask_interval=100,              # Update mask every 100 steps
     modules_to_save=["classifier"], # Modules to train without decomposition
 )
 peft_model = get_peft_model(model, config)
 ```
 
-**ASA Callback Setup:**
+**Option A – With HuggingFace Trainer (callback):**
 ```python
-asa_callback = AdamssASACallback(
-    target_kk=5,            # Gradually mask to 5 active subspaces
-    init_warmup=50,         # Start ASA after 50 steps (Vision) or 5 epochs (NLU)
-    final_warmup=1000,      # Complete masking by step 1000 (Vision) or epoch 95 (NLU)
-    mask_interval=100,      # Update mask every 100 steps (Vision) or 10 epochs (NLU)
-    verbose=True,           # Print ASA progress
-)
+from peft.tuners.adamss.asa_callback import AdamssAsaCallback
 
-# Integrate with Trainer
+# The callback is a thin wrapper around model.update_and_allocate()
 trainer = Trainer(
     model=peft_model,
-    callbacks=[asa_callback],  # Add ASA callback
+    callbacks=[AdamssAsaCallback()],
     # ... other arguments
 )
+trainer.train()
+```
+
+**Option B – Custom training loop (no Trainer needed):**
+```python
+for step, batch in enumerate(dataloader):
+    loss = peft_model(**batch).loss
+    loss.backward()
+    optimizer.step()
+    peft_model.base_model.update_and_allocate(step)   # ← all ASA logic in one call
+    optimizer.zero_grad()
 ```
 
 **Key Points:**
 - **Parameterization**: Total params = `r × (d_in + d_out)`, split into K subspaces of rank `ri` each
-- **ASA Mechanism**: Dynamically selects `target_kk` most important subspaces from initial `num_subspaces`
+- **ASA Mechanism**: Dynamically selects `asa_target_subspaces` most important subspaces from initial `num_subspaces`
 - **Warmup Schedule**: ASA gradually increases masking strength from `init_warmup` to `final_warmup`
 - **Vision vs NLU**: Use `subspace_rank=3` for vision, `subspace_rank=1` for NLU tasks
 
@@ -78,7 +86,7 @@ python examples/adamss_finetuning/image_classification_adamss_asa.py \
     --adamss_k 10 \
     --adamss_ri 3 \
     --use_asa \
-    --target_kk 5 \
+    --asa_target_subspaces 5 \
     --output_dir ./output
 ```
 
@@ -92,7 +100,7 @@ python examples/adamss_finetuning/glue_adamss_asa_example.py \
     --adamss_k 10 \
     --adamss_ri 1 \
     --use_asa \
-    --target_kk 5 \
+    --asa_target_subspaces 5 \
     --num_epochs 100 \
     --batch_size 32 \
     --output_dir ./output_cola_asa
@@ -110,7 +118,7 @@ python examples/adamss_finetuning/glue_adamss_asa_example.py \
     --output_dir ./output_cola_no_asa
 ```
 
-### AdaMSSConfig Parameters
+### AdamssConfig Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -119,19 +127,27 @@ python examples/adamss_finetuning/glue_adamss_asa_example.py \
 | `subspace_rank` | int | 3 | Rank per subspace (ri) |
 | `target_modules` | list | - | Modules to apply AdaMSS (e.g., ["query", "value"]) |
 | `use_asa` | bool | False | Enable Adaptive Subspace Allocation |
-| `target_kk` | int | None | Target active subspaces when ASA enabled |
+| `asa_target_subspaces` | int | None | Target active subspaces when ASA enabled |
 | `modules_to_save` | list | None | Modules to train without decomposition |
 
-### AdamssASACallback Parameters
+### AdamssAsaCallback
+
+The ASA callback reads all parameters from `AdamssConfig`. Import it directly:
+
+```python
+from peft.tuners.adamss.asa_callback import AdamssAsaCallback
+```
+
+ASA-related config parameters:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `target_kk` | int | - | Target number of active subspaces |
 | `init_warmup` | int | 50 | Steps before starting masking |
 | `final_warmup` | int | 1000 | Steps to reach target active subspaces |
 | `mask_interval` | int | 100 | Steps between subspace selection updates |
-| `beta1` | float | 0.85 | EMA decay for importance tracking |
-| `beta2` | float | 0.85 | EMA decay for uncertainty tracking |
+| `asa_importance_beta` | float | 0.85 | EMA decay for importance tracking |
+| `asa_uncertainty_beta` | float | 0.85 | EMA decay for uncertainty tracking |
+| `asa_schedule_exponent` | float | 3.0 | Exponent for masking schedule |
 
 
 ## Experimental Results
