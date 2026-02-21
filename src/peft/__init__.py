@@ -73,6 +73,8 @@ from .tuners import (
     HRAModel,
     IA3Config,
     IA3Model,
+    LilyConfig,
+    LilyModel,
     LNTuningConfig,
     LNTuningModel,
     LoftQConfig,
