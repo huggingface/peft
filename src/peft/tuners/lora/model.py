@@ -209,6 +209,7 @@ class LoraModel(BaseTuner):
             "target_name": current_key,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
+            "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
             "parameter_name": parameter_name,
         }
 
