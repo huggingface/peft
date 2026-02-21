@@ -57,10 +57,10 @@ class LilyConfig(PeftConfig):
             ``['q_proj', 'v_proj']``) or a regex pattern (e.g.
             ``'.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'``). If not specified, Lily will be
             applied to all supported linear layers.
-        lily_scaling (`float`):
+        scaling (`float`):
             A scalar multiplier applied to the combined adapter output (``scaling * A @ combined_B``)
             before adding it to the frozen weight's forward pass. Unlike LoRA, Lily does not use an
-            ``alpha / r`` formulation; instead, ``lily_scaling`` is a direct multiplier. This design
+            ``alpha / r`` formulation; instead, ``scaling`` is a direct multiplier. This design
             makes it straightforward to sweep over values on a log scale (e.g. ``0.01``, ``0.1``,
             ``1.0``, ``10.0``). The optimal value is task-dependent and should be treated as a
             hyperparameter. We recommend starting with ``1.0``.
@@ -89,7 +89,7 @@ class LilyConfig(PeftConfig):
     """
 
     r: int = field(default=4, metadata={"help": "Lily's rank"})
-    lily_scaling: float = field(default=1.0, metadata={"help": "scaling factor for lily"})
+    scaling: float = field(default=1.0, metadata={"help": "scaling factor for lily"})
     num_A: int = field(default=4, metadata={"help": "Lily's number of adapter A"})
     num_B: int = field(default=4, metadata={"help": "Lily's number of adapter B"})
     target_modules: Optional[Union[list[str], str]] = field(
