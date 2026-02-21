@@ -32,6 +32,7 @@ from peft import (
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
+    PSOFTConfig,
     RoadConfig,
     ShiraConfig,
     VBLoRAConfig,
@@ -228,6 +229,15 @@ ALL_CONFIGS = [
         {
             "task_type": "FEATURE_EXTRACTION",
             "n_frequency": 8,
+            "target_modules": None,
+        },
+    ),
+    (
+        PSOFTConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "r": 4,
+            "psoft_alpha": 4,
             "target_modules": None,
         },
     ),
