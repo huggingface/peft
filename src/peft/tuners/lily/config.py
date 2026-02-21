@@ -23,21 +23,72 @@ from peft.utils import PeftType
 @dataclass
 class LilyConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a [`~peft.Lily`].
+    This is the configuration class to store the configuration of a [`LilyModel`].
 
     Args:
-        r (`int`): Lily's rank
-        num_A (`int`): Lily's number of As
-        num_B (`int`): Lily's number of experts (ne) of Bs
-        target_modules (`Union[List[str],str]`): The names of the modules to apply Lily to.
-        lily_scaling (`float`): The scaling factor for lily.
-        lily_dropout (`float`): The dropout probability for Lily layers.
-        modules_to_save (`List[str]`):List of modules apart from Lily layers to be set as trainable
-            and saved in the final checkpoint.
+        r (`int`):
+            Lily's rank. Determines the inner hidden dimension of each adapter and the rank of the
+            weight update ``A @ B``. In Lily, since the number of adapters is typically smaller than in LoRA,
+            each adapter needs to carry more capacity, so it is recommended to use a larger ``r`` than
+            in LoRA — typically ``2x``, ``3x``, or ``4x`` the LoRA rank you would normally use.
+            The total number of trainable parameters scales with ``r * (num_A + num_B)``, so increasing
+            ``r`` while keeping ``num_A`` and ``num_B`` small is the recommended trade-off.
+        num_A (`int`):
+            The number of shared A adapters. Lily groups the model's layers into ``num_A`` consecutive
+            blocks, where each block of ``total_layers / num_A`` adjacent layers shares one A adapter.
+            The A adapter compresses the input into a low-rank representation of size ``r``.
+            For best results, ``num_A`` should evenly divide the
+            total number of layers in your model. It is recommended that ``num_A`` should ideally
+            evenly divide the total number of layers.
+            Suggested values: ``total_layers / 2``, ``total_layers / 3``, or ``total_layers / 4``.
+            Keeping ``num_A`` small and increasing ``r`` instead leads to
+            better performance than the opposite trade-off (large ``num_A``, small ``r``).
+        num_B (`int`):
+            The number of shared B adapters. Unlike A adapters (which are grouped by layer),
+            all B adapters are shared globally across every layer. For each forward pass, a router
+            computes a weighted combination of all ``num_B`` B adapters (using softmax-normalized
+            weights) to produce a single combined B adapter, which then projects the low-rank
+            representation back to the original dimension. It is recommended to set
+            ``num_B`` equal to ``num_A``. Suggested values: ``total_layers / 2``, ``total_layers / 3``, or
+            ``total_layers / 4``. Similar to ``num_A``, prefer smaller ``num_B`` with larger ``r``
+            over larger ``num_B`` with smaller ``r``.
+        target_modules (`Union[List[str], str]`, *optional*):
+            The names of the modules to apply Lily to. Can be a list of module name strings (e.g.
+            ``['q_proj', 'v_proj']``) or a regex pattern (e.g.
+            ``'.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'``). If not specified, Lily will be
+            applied to all supported linear layers.
+        lily_scaling (`float`):
+            A scalar multiplier applied to the combined adapter output (``scaling * A @ combined_B``)
+            before adding it to the frozen weight's forward pass. Unlike LoRA, Lily does not use an
+            ``alpha / r`` formulation; instead, ``lily_scaling`` is a direct multiplier. This design
+            makes it straightforward to sweep over values on a log scale (e.g. ``0.01``, ``0.1``,
+            ``1.0``, ``10.0``). The optimal value is task-dependent and should be treated as a
+            hyperparameter. We recommend starting with ``1.0``.
+        modules_to_save (`List[str]`, *optional*):
+            List of modules apart from FourierFT layers to be set as trainable and saved in the final checkpoint. For
+            example, in Sequence Classification or Token Classification tasks, the final layer `classifier/score` are
+            randomly initialized and as such need to be trainable and saved.
+        exclude_modules (`Union[List[str], str]`, *optional*):
+            The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
+            When passing a list of strings, either an exact match will be performed or it is checked if the name of the
+            module ends with any of the passed strings.
+        layers_to_transform (`Union[list[int],int]`):
+            The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes
+            that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at
+            this index.
+        layers_pattern (`Optional[Union[List[str], str]]`):
+            The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is
+            not in the common layers pattern. This should target the `nn.ModuleList` of the model, which is often
+            called `'layers'` or `'h'`.
+        init_weights (`bool`):
+            Whether to initialize Lily adapter weights using the default initialization scheme: A
+            matrices are initialized with Kaiming uniform, and B matrices are initialized to zero,
+            ensuring that the adapter output is zero at the start of training and does not disturb
+            the pretrained model. It is strongly recommended to keep this as ``True`` unless you have
+            a specific reason to change it.
     """
 
     r: int = field(default=4, metadata={"help": "Lily's rank"})
-    lily_dropout: float = field(default=0.0, metadata={"help": "dropout during training"})
     lily_scaling: float = field(default=1.0, metadata={"help": "scaling factor for lily"})
     num_A: int = field(default=4, metadata={"help": "Lily's number of adapter A"})
     num_B: int = field(default=4, metadata={"help": "Lily's number of adapter B"})
