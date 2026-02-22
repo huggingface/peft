@@ -1701,3 +1701,35 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
 
     # get module names from parameter names
     return sorted({name.rpartition(".")[0] for name in tied_weights})
+
+
+def krylov_svd(X, q, niter=4, oversampling=8):
+    """
+    Drop-in replacement for torch.svd_lowrank with improved numerical accuracy.
+    Uses subspace iteration with QR re-orthogonalization to prevent rank collapse.
+    Same number of matrix multiplications and same O(m*k) memory as svd_lowrank.
+
+    Args:
+        X:            (m, n) input matrix
+        q:            number of singular components (matches svd_lowrank arg name)
+        niter:        number of subspace iterations
+        oversampling: extra columns for numerical stability
+
+    Returns:
+        U (m, q), S (q,), V (n, q) -- same convention as torch.svd_lowrank
+    """
+    k = q + oversampling
+    dtype, device = X.dtype, X.device
+
+    Omega = torch.randn(X.shape[1], k, dtype=dtype, device=device)
+    Q, _  = torch.linalg.qr(Omega)
+    Y, _  = torch.linalg.qr(X @ Q)
+
+    for _ in range(niter):
+        Z    = X.T @ Y
+        Y, _ = torch.linalg.qr(X @ Z)
+
+    B            = Y.T @ X
+    U_hat, S, Vh = torch.linalg.svd(B, full_matrices=False)
+    U = (Y @ U_hat)[:, :q]
+    return U, S[:q], Vh[:q, :].mH
