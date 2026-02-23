@@ -92,10 +92,6 @@ class TinyLoraLayer(BaseTunerLayer):
         self.out_features = out_features
         self.kwargs = kwargs
 
-    @property
-    def merged(self) -> bool:
-        return bool(self.merged_adapters)
-
     def _all_available_adapter_names(self) -> list[str]:
         """Return a sorted list of all available adapter names.
 
