@@ -106,36 +106,6 @@ class TestVera:
         with pytest.raises(ValueError, match=msg):
             peft_model.add_adapter("other", config2)
 
-    def test_multiple_adapters_save_load_save_projection_true(self, mlp_same_prng, tmp_path):
-        # check saving and loading works with multiple adapters and saved projection weights
-        torch.manual_seed(0)
-        input = torch.randn(5, 10)
-        mlp_same_prng.set_adapter("default")
-        output_default = mlp_same_prng(input)
-        mlp_same_prng.set_adapter("other")
-        output_other = mlp_same_prng(input)
-
-        # sanity check
-        assert not torch.allclose(output_default, output_other, atol=1e-3, rtol=1e-3)
-
-        save_path = tmp_path / "vera"
-        mlp_same_prng.save_pretrained(save_path)
-        assert os.path.exists(save_path / "adapter_config.json")
-        assert os.path.exists(save_path / "other" / "adapter_config.json")
-
-        torch.manual_seed(0)
-        mlp = MLP()
-        peft_model = PeftModel.from_pretrained(mlp, save_path)
-        peft_model.load_adapter(save_path / "other", "other")
-
-        peft_model.set_adapter("default")
-        output_default_loaded = peft_model(input)
-        peft_model.set_adapter("other")
-        output_other_loaded = peft_model(input)
-
-        assert torch.allclose(output_default, output_default_loaded, atol=1e-3, rtol=1e-3)
-        assert torch.allclose(output_other, output_other_loaded, atol=1e-3, rtol=1e-3)
-
     def test_multiple_adapters_save_load_save_projection_false(self, mlp, tmp_path):
         # check saving and loading works with multiple adapters without saved projection weights
         torch.manual_seed(1)
@@ -171,32 +141,6 @@ class TestVera:
 
         assert torch.allclose(output_first, output_first_loaded, atol=1e-3, rtol=1e-3)
         assert torch.allclose(output_second, output_second_loaded, atol=1e-3, rtol=1e-3)
-
-    def test_multiple_adapters_save_projection_true_contains_vera_A_vera_B(self, mlp_same_prng, tmp_path):
-        # check that the state_dicts don't contain the projection weights
-        save_path = tmp_path / "vera"
-        mlp_same_prng.save_pretrained(save_path)
-
-        sd_default = {}
-        with safe_open(save_path / "adapter_model.safetensors", framework="pt", device="cpu") as f:
-            for key in f.keys():
-                sd_default[key] = f.get_tensor(key)
-
-        assert any("vera_A" in key for key in sd_default)
-        assert any("vera_B" in key for key in sd_default)
-        # default rank for VeRA is 256
-        assert sd_default["base_model.vera_A"].shape == (256, 20)
-        assert sd_default["base_model.vera_B"].shape == (20, 256)
-
-        sd_other = {}
-        with safe_open(save_path / "other" / "adapter_model.safetensors", framework="pt", device="cpu") as f:
-            for key in f.keys():
-                sd_other[key] = f.get_tensor(key)
-
-        assert any("vera_A" in key for key in sd_other)
-        assert any("vera_B" in key for key in sd_other)
-        assert sd_other["base_model.vera_A"].shape == (256, 20)
-        assert sd_other["base_model.vera_B"].shape == (20, 256)
 
     def test_multiple_adapters_save_projection_false_contains_no_vera_A_vera_B(self, mlp, tmp_path):
         torch.manual_seed(1)

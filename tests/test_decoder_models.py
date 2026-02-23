@@ -50,6 +50,7 @@ from peft import (
     PromptEncoderConfig,
     PromptTuningConfig,
     PromptTuningInit,
+    PveraConfig,
     RoadConfig,
     ShiraConfig,
     TaskType,
@@ -298,6 +299,14 @@ ALL_CONFIGS = [
             "d_initial": 0.1,
             "save_projection": True,
             "bias": "none",
+        },
+    ),
+    (
+        PveraConfig,
+        {
+            "r": 8,
+            "pvera_dropout": 0.05,
+            "task_type": "CAUSAL_LM",
         },
     ),
     (
