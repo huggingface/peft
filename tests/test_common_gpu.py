@@ -64,6 +64,7 @@ from .testing_utils import (
     load_cat_image,
     require_bitsandbytes,
     require_deterministic_for_xpu,
+    require_gptqmodel,
     require_non_cpu,
     require_torch_multi_accelerator,
 )
@@ -519,6 +520,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.ia3_l
             assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.ia3_l
 
+    @require_gptqmodel
     @pytest.mark.single_gpu_tests
     def test_lora_gptq_quantization_from_pretrained_safetensors(self):
         r"""

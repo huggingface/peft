@@ -18,7 +18,6 @@ from transformers import AutoModelForSequenceClassification
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
-    BoneConfig,
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
@@ -68,14 +67,6 @@ ALL_CONFIGS = [
         {
             "task_type": "SEQ_CLS",
             "target_modules": None,
-        },
-    ),
-    (
-        BoneConfig,
-        {
-            "task_type": "SEQ_CLS",
-            "target_modules": None,
-            "r": 2,
         },
     ),
     (

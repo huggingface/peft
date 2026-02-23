@@ -18,7 +18,6 @@ from transformers import AutoModel
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
-    BoneConfig,
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
@@ -67,14 +66,6 @@ ALL_CONFIGS = [
         {
             "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
-        },
-    ),
-    (
-        BoneConfig,
-        {
-            "task_type": "FEATURE_EXTRACTION",
-            "target_modules": None,
-            "r": 2,
         },
     ),
     (
@@ -256,7 +247,7 @@ def skip_deberta_lora_tests(config_cls, model_id):
     if "deberta" not in model_id.lower():
         return
 
-    to_skip = ["lora", "ia3", "boft", "vera", "fourierft", "hra", "bone", "randlora"]
+    to_skip = ["lora", "ia3", "boft", "vera", "fourierft", "hra", "randlora"]
     config_name = config_cls.__name__.lower()
     if any(k in config_name for k in to_skip):
         pytest.skip(f"Skip tests that use {config_name} for Deberta models")

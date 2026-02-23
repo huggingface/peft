@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import packaging.version
 import torch
-import transformers
 from transformers import BloomPreTrainedModel
+
+from ..import_utils import is_transformers_le_4_53
 
 
 # needed for prefix-tuning of bloom model
@@ -45,8 +45,7 @@ def starcoder_model_postprocess_past_key_value(past_key_values):
 
 # TODO: remove this once transformers 4.53 is no longer supported
 TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {}
-transformers_le_4_53 = packaging.version.parse(transformers.__version__) < packaging.version.parse("4.54.0.dev0")
-if transformers_le_4_53:
+if is_transformers_le_4_53:
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING["gpt_bigcode"] = (
         starcoder_model_postprocess_past_key_value
     )
@@ -106,7 +105,6 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
 
 # target module mappings that are identical to LORA
 TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
-TRANSFORMERS_MODELS_TO_BONE_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
@@ -129,6 +127,9 @@ TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING["phi"] = ["q_proj", "v_proj"
 
 TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING["phi"] = ["q_proj", "v_proj"]
+
+TRANSFORMERS_MODELS_TO_PVERA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING.copy()
+TRANSFORMERS_MODELS_TO_PVERA_TARGET_MODULES_MAPPING["dinov2"] = ["query", "value"]
 
 TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING["gpt_bigcode"] = ["mlp.c_proj"]

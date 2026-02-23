@@ -216,6 +216,19 @@ def get_peft_model_state_dict(
             for k in state_dict:
                 if ".tinylora_P." in k and adapter_name in k:
                     to_return[k] = state_dict[k]
+    elif config.peft_type == PeftType.PVERA:
+        vera_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
+        to_return = {k: state_dict[k] for k in state_dict if vera_prefix in k}
+        if config.save_projection:
+            # TODO: adding pvera_A and pvera_B to `self.get_base_layer` would
+            # make name to match here difficult to predict.
+            if f"base_model.pvera_A.{adapter_name}" not in state_dict:
+                raise ValueError(
+                    "Model was initialised to not save pvera_A and pvera_B but config now specifies to save projection!"
+                    + " Set `config.save_projection` to `False`."
+                )
+            to_return["base_model.pvera_A." + adapter_name] = state_dict["base_model.pvera_A." + adapter_name]
+            to_return["base_model.pvera_B." + adapter_name] = state_dict["base_model.pvera_B." + adapter_name]
     elif config.peft_type == PeftType.XLORA:
         to_return = {k: state_dict[k] for k in state_dict if "internal_xlora_classifier" in k}
     elif config.peft_type == PeftType.VBLORA:
@@ -594,6 +607,21 @@ def set_peft_model_state_dict(
                 warnings.warn(
                     "Specified to not load tinylora_P from state dictionary. This means we will be relying on"
                     " PRNG initialisation to restore these projections using `config.projection_seed`, which may"
+        elif config.peft_type == PeftType.PVERA:
+            if config.save_projection and "base_model.pvera_A" not in peft_model_state_dict:
+                raise ValueError(
+                    "Specified to load pvera_A and pvera_B from state dictionary however they were not present!"
+                )
+            elif not config.save_projection and "base_model.pvera_A" in peft_model_state_dict:
+                warnings.warn(
+                    "Specified to not load pvera_A and pvera_B from state dictionary however they are present in state"
+                    " dictionary! Consider using them to ensure checkpoint loading is correct on all platforms using"
+                    " `peft_config.save_projection = True`"
+                )
+            elif not config.save_projection:  # and no vera_A in state dictionary
+                warnings.warn(
+                    "Specified to not load pvera_A and pvera_B from state dictionary. This means we will be relying on"
+                    " PRNG initialisation to restore these projections using `config.projection_prng_key`, which may"
                     " not be accurate on all system configurations."
                 )
         elif config.peft_type == PeftType.LORA:

@@ -18,11 +18,11 @@ jobs:
   check_code_quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
       - name: Set up Python
-        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c  # v6.0.0
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
           python-version: "3.11"
           cache: "pip"
@@ -37,6 +37,8 @@ jobs:
 
   tests:
     needs: check_code_quality
+    # dependabot updates (which don't require approval for CI to run) shouldn't trigger unit tests
+    if: !(github.event_name == 'pull_request' && github.actor == 'dependabot[bot]')
     strategy:
       fail-fast: false
       matrix:
@@ -44,7 +46,7 @@ jobs:
         os: ["ubuntu-latest", "windows-latest"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
       - name: Make space for cache + models
@@ -92,7 +94,7 @@ jobs:
 
           df -h
       - name: Model cache
-        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809  # v4.2.4
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
         with:
           # Avoid caching HF_HOME/modules and Python cache files to prevent interoperability
           # issues and potential cache poisioning. We also avoid lock files to prevent runs
@@ -112,7 +114,7 @@ jobs:
           [ -f "$(which shasum)" ] && SHASUM=shasum
           find "${{ env.HF_HOME }}/hub" -type f -exec "$SHASUM" {} \; > cache_content_initial || true
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c  # v6.0.0
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
@@ -150,7 +152,7 @@ jobs:
           # make sure that cache cleaning doesn't break the pipeline
           python scripts/ci_clean_cache.py -d || true
       - name: Update model cache
-        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809  # v4.2.4
+        uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
         # Only let one runner (preferably the one that covers most tests) update the model cache
         # after *every* run. This way we make sure that our cache is never outdated and we don't
         # have to keep track of hashes.
