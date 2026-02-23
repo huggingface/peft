@@ -215,9 +215,6 @@ ALL_CONFIGS = [
             "r": 2,
             "u": 64,
             "target_modules": None,
-            "tinylora_dropout": 0.0,
-            "projection_seed": 42,
-            "save_projection": True,
         },
     ),
     (
