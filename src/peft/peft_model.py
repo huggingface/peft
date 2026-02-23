@@ -590,7 +590,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if "prompt_encoder" in k:
                 return False
             # TinyLoRA: layer-level tinylora_v is a reference to model-level, exclude from warning
-            if ".model." in k and ".tinylora_v." in k:
+            if ".tinylora_v." in k:
                 return False
             return True
 
