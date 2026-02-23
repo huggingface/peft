@@ -121,8 +121,8 @@ HRA constructs a chain of `r` trainable Householder reflections (HRs). Because t
 The higher `r`, the more trainable parameters, resulting in a larger model capacity and better performance. Besides, due to the chain structure, the orthogonality of HR planes impacts the capacity and regularity of HRA. To achieve a trade-off between the model capacity and regularity, an orthogonality regularizer of the HR planes is added to the loss function. The weight \\(\lambda\\) can control the strength of the regularizer. 
 
 ## Bone
-[MiSS](https://huggingface.co/papers/2409.15371) New version of paper(MiSS: Balancing LoRA Performance and Efficiency with Simple Shard Sharing)
-If you already have a Bone checkpoint, you can use `/scripts/convert-bone-to-miss.py` to convert it into a MiSS checkpoint and proceed with training using MiSS.
+
+Bone was deprecated and removed in PEFT v0.19.0 in favor of [MiSS](https://huggingface.co/papers/2409.15371) (new version of paper: "MiSS: Balancing LoRA Performance and Efficiency with Simple Shard Sharing"). If you already have a Bone checkpoint, you can use `/scripts/convert-bone-to-miss.py` to convert it into a MiSS checkpoint and proceed with training using MiSS.
 
 ## MiSS
 [MiSS](https://huggingface.co/papers/2409.15371) MiSS (Matrix Shard Sharing) is a novel Parameter-Efficient Fine-Tuning (PEFT) method designed to address the trade-off between adaptability and efficiency in Large Language Models. The core approach of MiSS involves a simple shard-sharing mechanism. It achieves low-rank adaptation by decomposing a weight matrix into multiple fragments and then utilizing a shared, trainable "common fragment." The final low-rank update matrix is constructed by replicating these shared, partitioned shards. (MiSS is a novel PEFT method that adopts a low-rank structure, requires only a single trainable matrix, and introduces a new update mechanism distinct from LoRA, achieving an excellent balance between performance and efficiency.)

@@ -19,37 +19,6 @@ from typing import Optional
 class PeftType(str, enum.Enum):
     """
     Enum class for the different types of adapters in PEFT.
-
-    Supported PEFT types:
-    - PROMPT_TUNING
-    - MULTITASK_PROMPT_TUNING
-    - P_TUNING
-    - PREFIX_TUNING
-    - LORA
-    - ADALORA
-    - BOFT
-    - ADAPTION_PROMPT
-    - IA3
-    - LOHA
-    - LOKR
-    - OFT
-    - XLORA
-    - POLY
-    - LN_TUNING
-    - VERA
-    - PVERA
-    - FOURIERFT
-    - HRA
-    - BONE
-    - MISS
-    - RANDLORA
-    - SHIRA
-    - C3A
-    - ROAD
-    - WAVEFT
-    - OSF
-    - DELORA
-    - GRALORA
     """
 
     PROMPT_TUNING = "PROMPT_TUNING"
@@ -73,7 +42,6 @@ class PeftType(str, enum.Enum):
     HRA = "HRA"
     VBLORA = "VBLORA"
     CPT = "CPT"
-    BONE = "BONE"
     MISS = "MISS"
     RANDLORA = "RANDLORA"
     ROAD = "ROAD"
