@@ -549,7 +549,10 @@ class TestOpt(RegressionTester):
 
     def load_base_model(self):
         self.fix_seed()
-        return AutoModelForCausalLM.from_pretrained("facebook/opt-350m").to(self.torch_device)
+        # Note: Since transformers v5, the default dtype for opt has changed from float32 to float16. This causes the
+        # regression test to fail. Therefore, ensure that a float32 model is being used.
+        dtype = torch.float32
+        return AutoModelForCausalLM.from_pretrained("facebook/opt-350m", dtype=dtype).to(self.torch_device)
 
     def test_lora(self):
         base_model = self.load_base_model()

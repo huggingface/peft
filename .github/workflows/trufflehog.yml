@@ -10,9 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
       with:
         fetch-depth: 0
         persist-credentials: false
     - name: Secret Scanning
-      uses: trufflesecurity/trufflehog@0f58ae7c5036094a1e3e750d18772af92821b503  # v3.90.5
+      uses: trufflesecurity/trufflehog@7c0734f987ad0bb30ee8da210773b800ee2016d3  # v3.93.4
