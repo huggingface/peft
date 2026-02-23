@@ -16,7 +16,7 @@ model_name_or_path = "facebook/bart-base"
 tokenizer_name_or_path = "facebook/bart-base"
 
 checkpoint_name = "financial_sentiment_analysis_lora_v1.pt"
-text_column = "sentence"
+text_column = "text"
 label_column = "text_label"
 max_length = 128
 lr = 1e-3
@@ -25,7 +25,7 @@ batch_size = 8
 
 
 # loading dataset
-dataset = load_dataset("financial_phrasebank", "sentences_allagree")
+dataset = load_dataset("zeroshot/twitter-financial-news-sentiment")
 dataset = dataset["train"].train_test_split(test_size=0.1)
 dataset["validation"] = dataset["test"]
 del dataset["test"]
