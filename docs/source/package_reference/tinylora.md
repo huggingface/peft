@@ -20,7 +20,7 @@ rendered properly in your Markdown viewer.
 
 The key innovation of TinyLoRA is replacing the trainable low-rank matrix R with a weighted sum of fixed random projection matrices: `R = Σᵢ vᵢ Pᵢ`, where `v ∈ R^u` is a tiny trainable vector of dimension `u` and `Pᵢ` are fixed random matrices. This dramatically reduces the number of trainable parameters while maintaining competitive performance.
 
-TinyLoRA supports weight tying through the `ntie` parameter, which controls how many modules share the same trainable vector `v`. With full tying across all target modules, you can achieve extreme parameter efficiency with just `u` trainable parameters for the entire model.
+TinyLoRA supports weight tying through the `ntie` parameter, which controls how many modules share the same trainable vector `v`. With full tying across all target modules, you can achieve extreme parameter efficiency with just a single vector of `u` trainable parameters for the entire model.
 
 When saving the adapter parameters, it's possible to eschew storing the random projection matrices by setting `save_projection=False` on the `TinyLoraConfig`. In that case, these matrices will be restored based on the fixed random seed from the `projection_seed` argument. This cuts down on the size of the checkpoint, but we cannot guarantee reproducibility on all devices and for all future versions of PyTorch. If you want to ensure reproducibility, set `save_projection=True` (which is the default).
 
