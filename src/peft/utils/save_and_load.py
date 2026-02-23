@@ -607,6 +607,8 @@ def set_peft_model_state_dict(
                 warnings.warn(
                     "Specified to not load tinylora_P from state dictionary. This means we will be relying on"
                     " PRNG initialisation to restore these projections using `config.projection_seed`, which may"
+                    " not be accurate on all system configurations."
+                )
         elif config.peft_type == PeftType.PVERA:
             if config.save_projection and "base_model.pvera_A" not in peft_model_state_dict:
                 raise ValueError(

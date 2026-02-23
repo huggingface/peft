@@ -303,6 +303,9 @@ ALL_CONFIGS = [
             "tinylora_dropout": 0.0,
             "projection_seed": 42,
             "save_projection": True,
+        },
+    ),
+    (
         PveraConfig,
         {
             "r": 8,
