@@ -49,6 +49,7 @@ from peft import (
     OSFConfig,
     PeftModel,
     PeftWarning,
+    PSOFTConfig,
     PveraConfig,
     RandLoraConfig,
     RoadConfig,
@@ -935,6 +936,63 @@ TEST_CASES = [
             "use_bdlora": BdLoraConfig(target_modules_bd_a=["lin0"], target_modules_bd_b=["lin1"], nblocks=2),
         },
     ),
+    #########
+    # PSOFT #
+    #########
+    ("Vanilla MLP 1 PSOFT", "MLP", PSOFTConfig, {"target_modules": "lin0", "r": 4, "psoft_alpha": 4}),
+    ("Vanilla MLP 2 PSOFT", "MLP", PSOFTConfig, {"target_modules": ["lin0"], "r": 4, "psoft_alpha": 4}),
+    ("Vanilla MLP 3 PSOFT", "MLP", PSOFTConfig, {"target_modules": ["lin1"], "r": 2, "psoft_alpha": 2}),
+    ("Vanilla MLP 4 PSOFT", "MLP", PSOFTConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "psoft_alpha": 2}),
+    (
+        "Vanilla MLP 5 PSOFT (modules_to_save)",
+        "MLP",
+        PSOFTConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 4, "psoft_alpha": 4},
+    ),
+    (
+        "Vanilla MLP PSOFT-SO (PSOFT with strict orthogonality)",
+        "MLP",
+        PSOFTConfig,
+        {"target_modules": ["lin0"], "r": 4, "psoft_alpha": 4, "psoft_mag_a": False, "psoft_mag_b": False},
+    ),
+    (
+        "Vanilla MLP PSOFT lowrank SVD niter 10",
+        "MLP",
+        PSOFTConfig,
+        {"target_modules": ["lin0"], "r": 4, "psoft_alpha": 4, "psoft_svd": "lowrank", "psoft_svd_lowrank_niter": 10},
+    ),
+    (
+        "Vanilla MLP PSOFT Cayley-Neumann approximation term 5",
+        "MLP",
+        PSOFTConfig,
+        {
+            "target_modules": ["lin0"],
+            "r": 4,
+            "psoft_alpha": 4,
+            "use_cayley_neumann": True,
+            "num_cayley_neumann_terms": 5,
+            "cayley_neumann_eps": 0.9,
+        },
+    ),
+    (
+        "Vanilla MLP PSOFT non-orthogonal R",
+        "MLP",
+        PSOFTConfig,
+        {
+            "target_modules": ["lin0"],
+            "r": 4,
+            "psoft_alpha": 4,
+            "psoft_orth": False,
+            "psoft_mag_a": False,
+            "psoft_mag_b": False,
+        },
+    ),
+    (
+        "Vanilla MLP PSOFT PiSSA init",
+        "MLP",
+        PSOFTConfig,
+        {"target_modules": ["lin0"], "r": 4, "psoft_alpha": 4, "init_psoft_weights": "pissa_init"},
+    ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 
@@ -1226,6 +1284,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         DeloraConfig,
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
+        "PSOFT Same",
+        "psoft",
+        PSOFTConfig,
+        {"target_modules": ["lin0"], "r": 4, "psoft_alpha": 4, "init_weights": False},
+        {"target_modules": ["lin0"], "r": 4, "psoft_alpha": 4, "init_weights": False},
+    ),
+    (
+        "PSOFT Different",
+        "psoft",
+        PSOFTConfig,
+        {"target_modules": ["lin0"], "r": 2, "psoft_alpha": 2, "init_weights": False},
+        {"target_modules": ["lin1"], "r": 2, "psoft_alpha": 2, "init_weights": False},
     ),
 ]
 
