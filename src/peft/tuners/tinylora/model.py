@@ -72,35 +72,38 @@ class TinyLoraModel(BaseTuner):
 
     def _init_tinylora_v(self, config: TinyLoraConfig, adapter_name: str) -> None:
         """Re-initialize the tinylora_v vectors with uniform random values."""
-        for key, v in self.tinylora_v.items():
-            if key.startswith(f"{adapter_name}_group_"):
+        if adapter_name in self.tinylora_v:
+            for v in self.tinylora_v[adapter_name].values():
                 nn.init.uniform_(v, -config.init_v_bound, config.init_v_bound)
 
     def _pre_injection_hook(self, model: nn.Module, config: TinyLoraConfig, adapter_name: str) -> None:
-        """Initialize shared trainable vectors based on ntie before layer injection."""
-        # Initialize the shared parameter dict for v vectors
-        self.tinylora_v = nn.ParameterDict({})
+        """Initialize shared trainable vectors on first adapter creation."""
+        # Nested structure: tinylora_v[adapter_name][str(group_idx)] = nn.Parameter
+        self.tinylora_v = nn.ModuleDict({})
 
-        # Count target layers to determine number of groups
-        self._target_layer_count = self._count_target_layers(config)
+    def _build_target_key_mapping(self, config: TinyLoraConfig) -> dict[str, int]:
+        """Build an ordered mapping from target module key to index.
 
-        # Track layer index during injection
-        self._current_layer_idx = 0
-
-    def _count_target_layers(self, config: TinyLoraConfig) -> int:
-        """Count the number of layers that will be targeted."""
+        Iterates the model in the same order as ``inject_adapter`` to assign each target module a deterministic index
+        used for group assignment (ntie) and projection seeding.
+        """
         model_config = self.get_model_config(self.model)
         peft_config = self._prepare_adapter_config(config, model_config)
         peft_config = _maybe_include_all_linear_layers(peft_config, self.model)
 
-        count = 0
+        # Also match TinyLoraLayer since modules may already be wrapped when adding a second adapter
+        target_types = (nn.Linear, Conv1D, nn.Embedding, TinyLoraLayer)
+
+        mapping: dict[str, int] = {}
+        idx = 0
         for key, module in self.model.named_modules():
             if not self._check_target_module_exists(peft_config, key):
                 continue
-            if isinstance(module, (nn.Linear, Conv1D, nn.Embedding)):
-                count += 1
+            if isinstance(module, target_types):
+                mapping[key] = idx
+                idx += 1
 
-        return count
+        return mapping
 
     def _check_new_adapter_config(self, config: TinyLoraConfig) -> None:
         """Check the config when a new adapter is being added."""
@@ -126,18 +129,26 @@ class TinyLoraModel(BaseTuner):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
-        # Get layer index for this module
-        layer_idx = self._current_layer_idx
-        self._current_layer_idx += 1
+        # Build the target key mapping lazily on first call per injection cycle.
+        # This is needed because add_adapter calls inject_adapter directly without _pre_injection_hook.
+        if not hasattr(self, "_target_key_to_idx") or current_key not in self._target_key_to_idx:
+            self._target_key_to_idx = self._build_target_key_mapping(tinylora_config)
+
+        # Look up the deterministic index for this module
+        layer_idx = self._target_key_to_idx[current_key]
+        num_target_layers = len(self._target_key_to_idx)
 
         # Determine the group for this layer based on ntie
-        num_groups = max(1, self._target_layer_count // tinylora_config.ntie)
+        num_groups = max(1, num_target_layers // tinylora_config.ntie)
         group_idx = min(layer_idx // tinylora_config.ntie, num_groups - 1)
-        # Use format "{adapter_name}_group_{idx}" - handled specially in save_and_load.py
-        v_key = f"{adapter_name}_group_{group_idx}"
+        v_key = str(group_idx)
+
+        # Initialize the adapter's ParameterDict if not present
+        if adapter_name not in self.tinylora_v:
+            self.tinylora_v[adapter_name] = nn.ParameterDict({})
 
         # Initialize v for this group if not already done
-        if v_key not in self.tinylora_v:
+        if v_key not in self.tinylora_v[adapter_name]:
             # Get dtype from target layer's weight
             if hasattr(target, "weight"):
                 dtype = target.weight.dtype
@@ -150,7 +161,7 @@ class TinyLoraModel(BaseTuner):
             elif tinylora_config.init_weights == "uniform":
                 nn.init.uniform_(v, -tinylora_config.init_v_bound, tinylora_config.init_v_bound)
             # If init_weights is False, leave v uninitialized
-            self.tinylora_v[v_key] = v
+            self.tinylora_v[adapter_name][v_key] = v
 
         kwargs = {
             "r": tinylora_config.r,
@@ -190,14 +201,13 @@ class TinyLoraModel(BaseTuner):
         if adapter_name in self.active_adapter:
             inference_mode = getattr(tinylora_config, "inference_mode", False)
             if not inference_mode:
-                for key, param in self.tinylora_v.items():
-                    if adapter_name in key:
-                        param.requires_grad = True
+                for param in self.tinylora_v[adapter_name].values():
+                    param.requires_grad = True
 
     @staticmethod
     def _create_new_module(
         tinylora_config: TinyLoraConfig,
-        tinylora_v: nn.ParameterDict,
+        tinylora_v: nn.ModuleDict,
         v_key: str,
         adapter_name: str,
         target: nn.Module,
@@ -258,8 +268,7 @@ class TinyLoraModel(BaseTuner):
         """
         Cast the adapter weights to the correct dtype.
 
-        Override to also handle the model-level tinylora_v parameters which use keys like '{adapter_name}_group_{idx}'
-        instead of just the adapter name.
+        Override to also handle the model-level tinylora_v parameters.
         """
         # Call parent implementation for layer-level parameters
         super()._cast_adapter_dtype(adapter_name, autocast_adapter_dtype)
@@ -269,30 +278,39 @@ class TinyLoraModel(BaseTuner):
 
         # Handle model-level tinylora_v parameters
         dtypes_to_convert_to_fp32 = {torch.float16, torch.bfloat16}
-        for key, param in self.tinylora_v.items():
-            # Check if this key belongs to the adapter (key format: "{adapter_name}_group_{idx}")
-            if key.startswith(f"{adapter_name}_group_"):
+        if adapter_name in self.tinylora_v:
+            for param in self.tinylora_v[adapter_name].values():
                 if param.dtype in dtypes_to_convert_to_fp32:
                     param.data = param.data.to(torch.float32)
+
+    def delete_adapter(self, adapter_name: str) -> None:
+        """Delete an adapter and clean up the model-level shared v parameters."""
+        super().delete_adapter(adapter_name)
+
+        # Remove the adapter's shared v parameters from the model-level ModuleDict
+        if adapter_name in self.tinylora_v:
+            del self.tinylora_v[adapter_name]
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         """
         Mark only the adapter layers as trainable.
 
-        Override the base class method to ensure that the shared tinylora_v parameters remain trainable, since they are
-        stored at the model level. Only do this for adapters that are not in inference mode.
+        Override the base class method to manage the shared tinylora_v parameters which are stored at the model level
+        and thus invisible to the base class's per-layer logic.
         """
         # First, call the parent implementation
         super()._mark_only_adapters_as_trainable(model)
 
-        # Then, explicitly ensure the shared tinylora_v parameters are trainable
-        # for active adapters that are not in inference mode
+        # Freeze all tinylora_v parameters first, then selectively unfreeze for active non-inference adapters
+        for adapter_params in self.tinylora_v.values():
+            for param in adapter_params.values():
+                param.requires_grad = False
+
         for active_adapter in self.active_adapters:
-            # Check if this adapter is in inference mode
             if active_adapter in self.peft_config:
                 inference_mode = getattr(self.peft_config[active_adapter], "inference_mode", False)
                 if inference_mode:
                     continue
-            for key, param in self.tinylora_v.items():
-                if active_adapter in key:
+            if active_adapter in self.tinylora_v:
+                for param in self.tinylora_v[active_adapter].values():
                     param.requires_grad = True

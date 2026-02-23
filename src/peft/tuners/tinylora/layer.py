@@ -42,8 +42,7 @@ class TinyLoraLayer(BaseTunerLayer):
     """
 
     # List all names of layers that may contain adapter weights
-    # Note: tinylora_v is stored at model level and shared across layers
-    # The layer stores a reference to it (like VeRA does with vera_A/vera_B)
+    # Note: tinylora_v is a reference to the per-adapter ParameterDict (shared across layers in the same group)
     adapter_layer_names = ("tinylora_v",)
     other_param_names = ("tinylora_A", "tinylora_B", "tinylora_P")
 
@@ -53,10 +52,13 @@ class TinyLoraLayer(BaseTunerLayer):
         self.u = {}
         self.tinylora_dropout = nn.ModuleDict({})
 
-        # Stores reference to shared trainable vectors (at model level)
-        # The key will be like "{adapter_name}_group_{group_idx}"
-        self.tinylora_v: Optional[nn.ParameterDict] = None
-        self.tinylora_v_key: dict[str, str] = {}  # adapter_name -> key in tinylora_v
+        # Reference to the model-level ModuleDict (set during update_layer).
+        # PyTorch won't double-register the same ModuleDict object across layers.
+        self.tinylora_v: Optional[nn.ModuleDict] = None
+
+        # Direct references to this adapter's v parameter, cached for O(1) forward pass access.
+        # Plain dict to avoid PyTorch double-registering the same Parameter.
+        self._tinylora_v_ref: dict[str, nn.Parameter] = {}
 
         # Frozen SVD components as buffers (following LoRA-XS convention)
         # tinylora_A corresponds to V from SVD (shape: r x in_features)
@@ -78,15 +80,9 @@ class TinyLoraLayer(BaseTunerLayer):
         self.kwargs = kwargs
 
     def _all_available_adapter_names(self) -> list[str]:
-        """Return a sorted list of all available adapter names.
-
-        Override the base class method because TinyLoRA's tinylora_v uses keys like '{adapter_name}_group_{idx}'
-        instead of just the adapter name. We use tinylora_v_key which maps adapter_name -> key in tinylora_v.
-        """
+        """Return a sorted list of all available adapter names."""
         adapter_names = set()
-        # Use tinylora_v_key which has adapter names as keys
-        adapter_names.update(self.tinylora_v_key.keys())
-        # Also check other_param_names which use adapter names directly
+        adapter_names.update(self._tinylora_v_ref.keys())
         for name in self.other_param_names:
             attr = getattr(self, name, None)
             if attr is not None and hasattr(attr, "keys"):
@@ -107,8 +103,8 @@ class TinyLoraLayer(BaseTunerLayer):
     def update_layer(
         self,
         adapter_name: str,
-        tinylora_v: nn.ParameterDict,
-        tinylora_v_key: str,
+        tinylora_v: nn.ModuleDict,
+        v_key: str,
         r: int,
         u: int,
         tinylora_dropout: float,
@@ -133,9 +129,10 @@ class TinyLoraLayer(BaseTunerLayer):
 
         self.tinylora_dropout.update(nn.ModuleDict({adapter_name: tinylora_dropout_layer}))
 
-        # Store reference to shared v
+        # Store reference to model-level ModuleDict (for base class parameter management)
         self.tinylora_v = tinylora_v
-        self.tinylora_v_key[adapter_name] = tinylora_v_key
+        # Cache direct reference to this adapter's v parameter for O(1) forward pass access
+        self._tinylora_v_ref[adapter_name] = tinylora_v[adapter_name][v_key]
 
         # Compute truncated SVD of base weights (following LoRA-XS convention)
         # actual_r may be less than r if matrix dimensions are smaller
@@ -210,8 +207,7 @@ class TinyLoraLayer(BaseTunerLayer):
 
     def _compute_R(self, adapter_name: str) -> torch.Tensor:
         """Reconstruct R matrix from v and P: R = sum_i(v[i] * P[i])."""
-        v_key = self.tinylora_v_key[adapter_name]
-        v = self.tinylora_v[v_key]  # Shape: (u,)
+        v = self._tinylora_v_ref[adapter_name]  # Shape: (u,)
         P = self.tinylora_P[adapter_name]  # Shape: (u, r, r)
 
         # Move P to same device/dtype as v
@@ -264,8 +260,8 @@ class Linear(nn.Linear, TinyLoraLayer):
     def __init__(
         self,
         base_layer: nn.Module,
-        tinylora_v: nn.ParameterDict,
-        tinylora_v_key: str,
+        tinylora_v: nn.ModuleDict,
+        v_key: str,
         adapter_name: str,
         r: int = 2,
         u: int = 64,
@@ -285,7 +281,7 @@ class Linear(nn.Linear, TinyLoraLayer):
         self.update_layer(
             adapter_name,
             tinylora_v,
-            tinylora_v_key,
+            v_key,
             r,
             u,
             tinylora_dropout,
@@ -349,13 +345,10 @@ class Linear(nn.Linear, TinyLoraLayer):
                 self.get_base_layer().weight.data -= delta_weight
 
     def delete_adapter(self, adapter_name: str) -> None:
-        """Delete an adapter from the layer.
-
-        Override to handle tinylora_v_key which maps adapter names to shared v keys.
-        """
-        # Delete from tinylora_v_key (adapter name -> v key mapping)
-        if adapter_name in self.tinylora_v_key:
-            del self.tinylora_v_key[adapter_name]
+        """Delete an adapter from the layer."""
+        # Delete direct v reference
+        if adapter_name in self._tinylora_v_ref:
+            del self._tinylora_v_ref[adapter_name]
 
         # Delete from other params that use adapter name directly
         for attr in self.other_param_names:
@@ -446,8 +439,8 @@ class Embedding(nn.Module, TinyLoraLayer):
     def __init__(
         self,
         base_layer: nn.Module,
-        tinylora_v: nn.ParameterDict,
-        tinylora_v_key: str,
+        tinylora_v: nn.ModuleDict,
+        v_key: str,
         adapter_name: str,
         r: int = 2,
         u: int = 64,
@@ -463,7 +456,7 @@ class Embedding(nn.Module, TinyLoraLayer):
         self.update_layer(
             adapter_name,
             tinylora_v,
-            tinylora_v_key,
+            v_key,
             r,
             u,
             tinylora_dropout,
@@ -474,8 +467,8 @@ class Embedding(nn.Module, TinyLoraLayer):
     def update_layer(
         self,
         adapter_name: str,
-        tinylora_v: nn.ParameterDict,
-        tinylora_v_key: str,
+        tinylora_v: nn.ModuleDict,
+        v_key: str,
         r: int,
         u: int,
         tinylora_dropout: float,
@@ -499,9 +492,10 @@ class Embedding(nn.Module, TinyLoraLayer):
 
         self.tinylora_dropout.update(nn.ModuleDict({adapter_name: tinylora_dropout_layer}))
 
-        # Store reference to shared v
+        # Store reference to model-level ModuleDict (for base class parameter management)
         self.tinylora_v = tinylora_v
-        self.tinylora_v_key[adapter_name] = tinylora_v_key
+        # Cache direct reference to this adapter's v parameter for O(1) forward pass access
+        self._tinylora_v_ref[adapter_name] = tinylora_v[adapter_name][v_key]
 
         # Compute truncated SVD of embedding weights
         actual_r = self._init_svd_embedding(adapter_name, r)
@@ -590,8 +584,8 @@ class Embedding(nn.Module, TinyLoraLayer):
 
     def delete_adapter(self, adapter_name: str) -> None:
         """Delete an adapter from the layer."""
-        if adapter_name in self.tinylora_v_key:
-            del self.tinylora_v_key[adapter_name]
+        if adapter_name in self._tinylora_v_ref:
+            del self._tinylora_v_ref[adapter_name]
 
         for attr in self.other_param_names:
             param_dict = getattr(self, attr, None)

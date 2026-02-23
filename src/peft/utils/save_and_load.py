@@ -204,12 +204,12 @@ def get_peft_model_state_dict(
         # (base_model.model.*.tinylora_v) - they're the same data, so only save model-level
         to_return = {k: state_dict[k] for k in state_dict if tinylora_prefix in k and ".tinylora_v." not in k}
         # Handle model-level shared v vectors
-        # The keys have format "base_model.tinylora_v.{adapter_name}_group_{idx}"
-        # We transform them to "base_model.tinylora_v.group_{idx}" for saving
+        # The keys have format "base_model.tinylora_v.{adapter_name}.{idx}"
+        # We strip the adapter name for saving: "base_model.tinylora_v.{idx}"
+        adapter_v_prefix = f"base_model.tinylora_v.{adapter_name}."
         for k in state_dict:
-            if k.startswith("base_model.tinylora_v.") and adapter_name in k:
-                # Transform key: remove "{adapter_name}_" from the group key
-                new_key = k.replace(f".{adapter_name}_group_", ".group_")
+            if k.startswith(adapter_v_prefix):
+                new_key = k.replace(adapter_v_prefix, "base_model.tinylora_v.")
                 to_return[new_key] = state_dict[k]
         # Save projection tensors P if save_projection is True
         if config.save_projection:
@@ -529,21 +529,17 @@ def set_peft_model_state_dict(
                     del state_dict[k]
                     del state_dict[k.replace("_topk_indices", "_topk_weights")]
 
-        # For TinyLora, handle tinylora_v keys separately since they have a special format
+        # For TinyLora, handle tinylora_v keys separately since they use a nested structure
         # that doesn't follow the standard "{prefix}.{adapter_name}" pattern
         tinylora_v_state_dict = {}
         if config.peft_type == PeftType.TINYLORA:
             # Extract tinylora_v keys before _insert_adapter_name_into_state_dict
-            # The saved keys are like "base_model.tinylora_v.group_{idx}"
-            # We need to transform them to "base_model.tinylora_v.{adapter_name}_group_{idx}"
+            # The saved keys are like "base_model.tinylora_v.{idx}"
+            # We need to transform them to "base_model.tinylora_v.{adapter_name}.{idx}"
             tinylora_v_keys = [k for k in state_dict if ".tinylora_v." in k]
             for k in tinylora_v_keys:
-                # Transform key: add adapter_name back
-                if ".tinylora_v.group_" in k:
-                    new_key = k.replace(".tinylora_v.group_", f".tinylora_v.{adapter_name}_group_")
-                    tinylora_v_state_dict[new_key] = state_dict.pop(k)
-                else:
-                    tinylora_v_state_dict[k] = state_dict.pop(k)
+                new_key = k.replace(".tinylora_v.", f".tinylora_v.{adapter_name}.")
+                tinylora_v_state_dict[new_key] = state_dict.pop(k)
 
         peft_model_state_dict = _insert_adapter_name_into_state_dict(
             state_dict, adapter_name=adapter_name, parameter_prefix=parameter_prefix
