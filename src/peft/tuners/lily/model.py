@@ -65,9 +65,28 @@ class LilyModel(BaseTuner):
         A matrices are shared across consecutive groups of layers:
           stride = total_layers_per_shape / num_A
         B matrices are shared globally across all layers (one per target-module/shape pair).
+
+        All caches are keyed by adapter_name first, so multiple adapters can coexist
+        without overwriting each other's matrices or counters.
         """
         model_config = self.get_model_config(model)
         peft_config = self._prepare_adapter_config(config, model_config)
+
+        # Initialize top-level dicts on first call; keyed as [adapter_name][target][shape]
+        if not hasattr(self, "_lily_As"):
+            self._lily_As: dict[str, dict[str, dict[torch.Size, list[nn.Linear]]]] = {}
+        if not hasattr(self, "_lily_Bs"):
+            self._lily_Bs: dict[str, dict[str, dict[torch.Size, nn.Linear]]] = {}
+        if not hasattr(self, "_lily_counters"):
+            self._lily_counters: dict[str, dict[str, dict[torch.Size, int]]] = {}
+        if not hasattr(self, "_lily_strides"):
+            self._lily_strides: dict[str, dict[str, dict[torch.Size, int]]] = {}
+
+        # Reset all sub-dicts for the current adapter to avoid stale state
+        self._lily_As[adapter_name] = {}
+        self._lily_Bs[adapter_name] = {}
+        self._lily_counters[adapter_name] = {}
+        self._lily_strides[adapter_name] = {}
 
         # Count how many layers match each (target_module, weight_shape) pair
         num_layers: dict[str, dict[torch.Size, int]] = {}
@@ -89,48 +108,45 @@ class LilyModel(BaseTuner):
             shape = base.weight.shape
             num_layers[matched_target][shape] = num_layers[matched_target].get(shape, 0) + 1
 
-        # Compute strides and validate divisibility
-        strides: dict[str, dict[torch.Size, int]] = {}
+        # Compute strides and validate divisibility, stored under adapter_name
         for target, shapes in num_layers.items():
-            strides[target] = {}
+            self._lily_strides[adapter_name][target] = {}
             for shape, count in shapes.items():
                 if count % config.num_A != 0:
                     raise ValueError(
                         f"Number of layers ({count}) for target '{target}' with shape {shape} "
                         f"is not divisible by num_A={config.num_A}."
                     )
-                strides[target][shape] = count // config.num_A
+                self._lily_strides[adapter_name][target][shape] = count // config.num_A
 
-        # Pre-create shared B matrices: one nn.Linear per (target, shape), global across all layers
-        self._lily_Bs: dict[str, dict[torch.Size, nn.Linear]] = {}
+        # Pre-create shared B matrices: one nn.Linear per (target, shape), stored under adapter_name
         for target, shapes in num_layers.items():
-            self._lily_Bs[target] = {}
+            self._lily_Bs[adapter_name][target] = {}
             for shape in shapes:
                 out_features, in_features = shape
-                self._lily_Bs[target][shape] = nn.Linear(out_features, config.num_B * config.r, bias=False)
+                self._lily_Bs[adapter_name][target][shape] = nn.Linear(
+                    out_features, config.num_B * config.r, bias=False
+                )
 
-        # Pre-create shared A matrices: num_A groups per (target, shape)
-        self._lily_As: dict[str, dict[torch.Size, list[nn.Linear]]] = {}
+        # Pre-create shared A matrices: num_A groups per (target, shape), stored under adapter_name
         for target, shapes in num_layers.items():
-            self._lily_As[target] = {}
+            self._lily_As[adapter_name][target] = {}
             for shape in shapes:
                 out_features, in_features = shape
-                self._lily_As[target][shape] = [
+                self._lily_As[adapter_name][target][shape] = [
                     nn.Linear(in_features, config.r, bias=False) for _ in range(config.num_A)
                 ]
 
-        # Counters used during _create_and_replace to assign the correct A group
-        self._lily_counters: dict[str, dict[torch.Size, int]] = {}
+        # Initialize counters for the current adapter; reset to 0 for every (target, shape)
         for target, shapes in num_layers.items():
-            self._lily_counters[target] = {shape: 0 for shape in shapes}
-
-        self._lily_strides = strides
+            self._lily_counters[adapter_name][target] = {shape: 0 for shape in shapes}
 
         logging.info("=" * 50)
         logging.info("Lily adapter injecting, configuration as follows:")
+        logging.info(f"  adapter_name:            {adapter_name}")
         logging.info(f"  num_A (shared A groups): {config.num_A}")
         logging.info(f"  num_B (B experts):       {config.num_B}")
-        logging.info(f"  stride per A group:      {strides}")
+        logging.info(f"  stride per A group:      {self._lily_strides[adapter_name]}")
         for target, shapes in num_layers.items():
             for shape, count in shapes.items():
                 logging.info(f"  layers for '{target}' shape={shape}: {count}")
@@ -158,6 +174,9 @@ class LilyModel(BaseTuner):
     ):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
+    
+        if not hasattr(self, "_lily_As") or adapter_name not in self._lily_As:
+            self._pre_injection_hook(self.model, lily_config, adapter_name)
 
         matched_target = self._match_target(current_key, lily_config.target_modules)
         if matched_target is None:
@@ -166,17 +185,20 @@ class LilyModel(BaseTuner):
         base_layer = target.get_base_layer() if isinstance(target, LilyLayer) else target
         shape = base_layer.weight.shape
 
-        # Select the shared A for the current layer's group, then advance the counter
-        stride = self._lily_strides[matched_target][shape]
-        counter = self._lily_counters[matched_target][shape]
+        # Look up stride, counter and matrices using adapter_name as the top-level key
+        stride = self._lily_strides[adapter_name][matched_target][shape]
+        counter = self._lily_counters[adapter_name][matched_target][shape]
         group_idx = counter // stride
-        lily_A = self._lily_As[matched_target][shape][group_idx]
-        lily_B = self._lily_Bs[matched_target][shape]
-        self._lily_counters[matched_target][shape] += 1
+        lily_A = self._lily_As[adapter_name][matched_target][shape][group_idx]
+        lily_B = self._lily_Bs[adapter_name][matched_target][shape]
+
+        # Advance counter so the next layer in this (adapter, target, shape) group
+        # gets the correct A matrix
+        self._lily_counters[adapter_name][matched_target][shape] += 1
 
         logging.debug(
             f"Assigning A group {group_idx} to '{current_key}' "
-            f"(counter={counter}, stride={stride})"
+            f"(adapter={adapter_name}, counter={counter}, stride={stride})"
         )
 
         out_features, in_features = shape
@@ -191,6 +213,7 @@ class LilyModel(BaseTuner):
                 lily_B=lily_B,
                 num_A=lily_config.num_A,
                 num_B=lily_config.num_B,
+                init_weights=lily_config.init_weights,
             )
         else:
             new_module = self._create_new_module(lily_config, adapter_name, target, lily_A, lily_B, **kwargs)
@@ -201,7 +224,7 @@ class LilyModel(BaseTuner):
     def _replace_module(self, parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
 
-        # child layer wraps the original module, unpack it
+        # Unpack the original module wrapped by the child layer
         if hasattr(child, "base_layer"):
             child = child.base_layer
 
@@ -238,9 +261,10 @@ class LilyModel(BaseTuner):
                 num_B=lily_config.num_B,
                 lily_A=lily_A,
                 lily_B=lily_B,
+                init_weights=lily_config.init_weights,
                 **kwargs,
             )
-        
+
         raise NotImplementedError(
             f"Lily does not support target modules of type {type(target_base_layer)} yet."
         )

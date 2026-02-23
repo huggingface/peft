@@ -41,6 +41,7 @@ from peft import (
     GraloraConfig,
     HRAConfig,
     IA3Config,
+    LilyConfig,
     LNTuningConfig,
     LoHaConfig,
     LoKrConfig,
@@ -932,6 +933,19 @@ TEST_CASES = [
             "use_bdlora": BdLoraConfig(target_modules_bd_a=["lin0"], target_modules_bd_b=["lin1"], nblocks=2),
         },
     ),
+    ########
+    # Lily  #
+    ########
+    ("Vanilla MLP 1 Lily", "MLP", LilyConfig, {"target_modules": "lin0", "r": 2, "num_A": 1, "num_B": 2}),
+    ("Vanilla MLP 2 Lily", "MLP", LilyConfig, {"target_modules": ["lin0"], "r": 2, "num_A": 1, "num_B": 2}),
+    ("Vanilla MLP 3 Lily", "MLP", LilyConfig, {"target_modules": ["lin1"], "r": 2, "num_A": 1, "num_B": 2}),
+    ("Vanilla MLP 4 Lily", "MLP", LilyConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "num_A": 1, "num_B": 2}),
+    (
+        "Vanilla MLP 5 Lily",
+        "MLP",
+        LilyConfig,
+        {"target_modules": ["lin0"], "r": 4, "num_A": 1, "num_B": 2},
+    ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 
@@ -1229,6 +1243,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         DeloraConfig,
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
+        "Lily Same",
+        "lily",
+        LilyConfig,
+        {"target_modules": ["lin0"], "r": 2, "num_A": 1, "num_B": 2, "init_weights": False},
+        {"target_modules": ["lin0"], "r": 2, "num_A": 1, "num_B": 2, "init_weights": False},
+    ),
+    (
+        "Lily Different",
+        "lily",
+        LilyConfig,
+        {"target_modules": ["lin0"], "r": 2, "num_A": 1, "num_B": 2, "init_weights": False},
+        {"target_modules": ["lin1"], "r": 2, "num_A": 1, "num_B": 2, "init_weights": False},
     ),
 ]
 

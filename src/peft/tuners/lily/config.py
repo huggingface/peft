@@ -52,6 +52,8 @@ class LilyConfig(PeftConfig):
             ``num_B`` equal to ``num_A``. Suggested values: ``total_layers / 2``, ``total_layers / 3``, or
             ``total_layers / 4``. Similar to ``num_A``, prefer smaller ``num_B`` with larger ``r``
             over larger ``num_B`` with smaller ``r``.
+            NOTE: to train router, you need at least 2 B adapters (i.e. ``num_B >= 2``), since the router learns to compute a weighted combination of the B adapters.
+             If you set ``num_B = 1``, the router will not be trained.
         target_modules (`Union[List[str], str]`, *optional*):
             The names of the modules to apply Lily to. Can be a list of module name strings (e.g.
             ``['q_proj', 'v_proj']``) or a regex pattern (e.g.
@@ -90,8 +92,8 @@ class LilyConfig(PeftConfig):
 
     r: int = field(default=4, metadata={"help": "Lily's rank"})
     scaling: float = field(default=1.0, metadata={"help": "scaling factor for lily"})
-    num_A: int = field(default=4, metadata={"help": "Lily's number of adapter A"})
-    num_B: int = field(default=4, metadata={"help": "Lily's number of adapter B"})
+    num_A: int = field(default=1, metadata={"help": "Lily's number of adapter A"})
+    num_B: int = field(default=1, metadata={"help": "Lily's number of adapter B"})
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
