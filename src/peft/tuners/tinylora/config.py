@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -50,8 +50,10 @@ class TinyLoraConfig(PeftConfig):
             Uniform initialization bound for the trainable vector v. Values are initialized in [-init_v_bound,
             init_v_bound].
         target_modules (`Union[List[str], str]`, *optional*):
-            The names of the modules to apply TinyLoRA to. Only `nn.Linear`, `nn.Embedding`, and
-            `transformers.pytorch_utils.Conv1D` layers are supported.
+            The names of the modules to apply TinyLoRA to. This can be a list of module names (e.g. `['q_proj',
+            'v_proj']`), a regex pattern (e.g. `'.*decoder.*(q|v)_proj$'`), or the special keyword `"all-linear"` to
+            target all linear modules. Only `nn.Linear`, `nn.Embedding`, and `transformers.pytorch_utils.Conv1D` layers
+            are supported.
         tinylora_dropout (`float`, *optional*, defaults to `0.0`):
             The dropout probability for TinyLoRA layers.
         fan_in_fan_out (`bool`, *optional*, defaults to `False`):
@@ -61,10 +63,10 @@ class TinyLoraConfig(PeftConfig):
             Bias type for TinyLoRA. Can be 'none', 'all' or 'tinylora_only'.
         modules_to_save (`List[str]`, *optional*):
             List of modules apart from TinyLoRA layers to be set as trainable and saved.
-        init_weights (`bool`, *optional*, defaults to `True`):
-            Whether to initialize the trainable vector v with random values. If `True`, v is initialized with uniform
-            random values. If `False`, v is initialized to zeros, making the adapter an identity operation (no change
-            to base model output).
+        init_weights (`bool` | `Literal["uniform"]`, *optional*, defaults to `True`):
+            How to initialize the trainable vector v. Passing `True` (default) initializes v to zeros, making the
+            adapter a no-op (identity operation). Passing `"uniform"` initializes v with uniform random values in
+            `[-init_v_bound, init_v_bound]`. Passing `False` leaves v uninitialized (for advanced use cases).
         layers_to_transform (`Union[List[int], int]`, *optional*):
             The layer indexes to transform. If specified, only these layers will be adapted.
         layers_pattern (`Optional[Union[List[str], str]]`, *optional*):
@@ -112,7 +114,7 @@ class TinyLoraConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "List of module names or regex expression of the module names to replace with TinyLoRA. "
+                "List of module names, regex expression, or the keyword 'all-linear' to replace with TinyLoRA. "
                 "For example, ['q_proj', 'v_proj'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. "
                 "Only nn.Linear, nn.Embedding, and transformers.pytorch_utils.Conv1D layers are supported."
             )
@@ -136,13 +138,12 @@ class TinyLoraConfig(PeftConfig):
             )
         },
     )
-    init_weights: bool = field(
+    init_weights: Union[bool, str] = field(
         default=True,
         metadata={
             "help": (
-                "Whether to initialize the trainable vector v with random values. If True, v is initialized "
-                "with uniform random values. If False, v is initialized to zeros, making the adapter an "
-                "identity operation (no change to base model output)."
+                "How to initialize the trainable vector v. True (default) initializes v to zeros, making the "
+                "adapter a no-op. 'uniform' initializes v with uniform random values. False leaves v uninitialized."
             ),
         },
     )

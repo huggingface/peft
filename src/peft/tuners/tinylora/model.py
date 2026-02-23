@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -106,16 +106,6 @@ class TinyLoraModel(BaseTuner):
         """Check the config when a new adapter is being added."""
         super()._check_new_adapter_config(config)
 
-        for existing_config in self.peft_config.values():
-            if existing_config is config:
-                continue
-
-            if existing_config.projection_seed != config.projection_seed:
-                raise ValueError(
-                    f"TinyLoRA projection seed must be the same for all adapters. Got {config.projection_seed=} but "
-                    f"previous config had {existing_config.projection_seed}."
-                )
-
         save_projection_unique_values = sorted({c.save_projection for c in self.peft_config.values()})
         if len(save_projection_unique_values) > 1:
             raise ValueError(
@@ -154,11 +144,12 @@ class TinyLoraModel(BaseTuner):
             else:
                 dtype = None  # Will default to float32
             v = nn.Parameter(torch.empty(tinylora_config.u, dtype=dtype))
-            if tinylora_config.init_weights:
-                nn.init.uniform_(v, -tinylora_config.init_v_bound, tinylora_config.init_v_bound)
-            else:
-                # Initialize to zeros for identity operation
+            if tinylora_config.init_weights is True:
+                # Default: initialize to zeros for identity/no-op operation
                 nn.init.zeros_(v)
+            elif tinylora_config.init_weights == "uniform":
+                nn.init.uniform_(v, -tinylora_config.init_v_bound, tinylora_config.init_v_bound)
+            # If init_weights is False, leave v uninitialized
             self.tinylora_v[v_key] = v
 
         kwargs = {
@@ -262,31 +253,6 @@ class TinyLoraModel(BaseTuner):
             )
 
         return new_module
-
-    def get_nb_trainable_parameters(self) -> tuple[int, int]:
-        """
-        Returns the number of trainable TinyLoRA parameters and total parameters.
-        """
-        trainable_params = 0
-        all_param = 0
-
-        for name, param in self.named_parameters():
-            num_params = param.numel()
-            all_param += num_params
-            if param.requires_grad:
-                trainable_params += num_params
-
-        return trainable_params, all_param
-
-    def print_trainable_parameters(self) -> None:
-        """
-        Prints the number of trainable parameters in the model.
-        """
-        trainable_params, all_param = self.get_nb_trainable_parameters()
-        print(
-            f"trainable params: {trainable_params:,d} || all params: {all_param:,d} || "
-            f"trainable%: {100 * trainable_params / all_param:.4f}"
-        )
 
     def _cast_adapter_dtype(self, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
         """

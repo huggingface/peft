@@ -212,8 +212,6 @@ ALL_CONFIGS = [
         TinyLoraConfig,
         {
             "task_type": "SEQ_CLS",
-            "r": 2,
-            "u": 64,
             "target_modules": None,
         },
     ),

@@ -1417,7 +1417,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         for key in load_result.missing_keys:
             if tuner_prefix in key and adapter_name in key:
                 # TinyLoRA: layer-level tinylora_v is a reference to model-level, skip it
-                if ".model." in key and ".tinylora_v." in key:
+                if ".tinylora_v." in key:
                     continue
                 adapter_missing_keys.append(key)
 

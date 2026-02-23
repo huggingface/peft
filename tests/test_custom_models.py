@@ -2228,10 +2228,6 @@ class TestPeftCustomModel(PeftCommonTester):
             config_kwargs = config_kwargs.copy()
             # override the default value and make PEFT operation a no-op
             config_kwargs["init_weights"] = True
-        if issubclass(config_cls, TinyLoraConfig):
-            config_kwargs = config_kwargs.copy()
-            # Set init_weights=False so TinyLoRA functions as an identity operation
-            config_kwargs["init_weights"] = False
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -2303,10 +2299,6 @@ class TestPeftCustomModel(PeftCommonTester):
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
-        if issubclass(config_cls, TinyLoraConfig):
-            config_kwargs = config_kwargs.copy()
-            # Set init_weights=False so TinyLoRA functions as an identity operation
-            config_kwargs["init_weights"] = False
 
         if isinstance(model, ModelEmbConv1D) and (self.torch_device != "cpu"):
             # Make sure that we have a good signal-to-noise ratio

@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,9 +20,8 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers.pytorch_utils import Conv1D
 
-from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 from peft.utils.other import transpose
 
 from .._buffer_dict import BufferDict
@@ -75,21 +74,7 @@ class TinyLoraLayer(BaseTunerLayer):
         # Track layer index for seeding
         self._layer_idx: Optional[int] = None
 
-        base_layer = self.get_base_layer()
-        if isinstance(base_layer, nn.Linear):
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif isinstance(base_layer, Conv1D):
-            in_features, out_features = (
-                base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
-            )
-        elif isinstance(base_layer, nn.Embedding):
-            in_features, out_features = base_layer.num_embeddings, base_layer.embedding_dim
-        else:
-            # Fallback for other layer types
-            in_features, out_features = None, None
-
-        self.in_features = in_features
-        self.out_features = out_features
+        self.in_features, self.out_features = _get_in_out_features(self.get_base_layer())
         self.kwargs = kwargs
 
     def _all_available_adapter_names(self) -> list[str]:
@@ -167,12 +152,13 @@ class TinyLoraLayer(BaseTunerLayer):
         """
         Compute truncated SVD of base weights and store as frozen buffers.
 
-        Following LoRA-XS convention:
+        Compute truncated SVD and distribute singular values to both A and B:
         - W = U @ S @ V^T (full SVD)
-        - We store: tinylora_A = V[:r, :] (shape: r x in_features)
-        - We store: tinylora_B = U[:, :r] @ diag(S[:r]) (shape: out_features x r)
+        - We store: tinylora_A = diag(sqrt(S[:r])) @ V[:r, :] (shape: r x in_features)
+        - We store: tinylora_B = U[:, :r] @ diag(sqrt(S[:r])) (shape: out_features x r)
 
-        This allows: delta_W = tinylora_B @ R @ tinylora_A
+        Distributing S equally avoids imbalanced norms between A and B. This allows: delta_W = tinylora_B @ R @
+        tinylora_A
 
         Returns:
             int: The actual rank used (may be less than r if matrix dimensions are smaller)
@@ -184,7 +170,6 @@ class TinyLoraLayer(BaseTunerLayer):
         weight = transpose(weight, fan_in_fan_out)
 
         dtype = weight.dtype
-        device = weight.device
 
         # Compute SVD in float32 for numerical stability
         # W has shape (out_features, in_features)
@@ -196,21 +181,17 @@ class TinyLoraLayer(BaseTunerLayer):
         actual_r = min(r, max_rank)
 
         # Truncate to actual rank
-        # U: (out_features, min(out, in)) -> U_r: (out_features, actual_r)
-        # S: (min(out, in),) -> S_r: (actual_r,)
-        # Vh: (min(out, in), in_features) -> V_r: (actual_r, in_features)
         U_r = U[:, :actual_r].to(dtype)
         S_r = S[:actual_r].to(dtype)
         V_r = Vh[:actual_r, :].to(dtype)
+        sqrt_S_r = torch.sqrt(S_r)
 
-        # Store in LoRA-XS convention:
-        # tinylora_A = V_r (actual_r x in_features) - acts like lora_A
-        # tinylora_B = U_r @ diag(S_r) (out_features x actual_r) - acts like lora_B
+        # Distribute singular values equally to both A and B via sqrt(S_r)
+        # tinylora_A = diag(sqrt(S_r)) @ V_r (actual_r x in_features)
+        # tinylora_B = U_r @ diag(sqrt(S_r)) (out_features x actual_r)
         # Use .contiguous() to ensure tensors can be saved with safetensors
-        self.tinylora_A[adapter_name] = V_r.contiguous()
-        self.tinylora_B[adapter_name] = (
-            U_r * S_r.unsqueeze(0)
-        ).contiguous()  # Broadcasting: (out, actual_r) * (1, actual_r)
+        self.tinylora_A[adapter_name] = (sqrt_S_r.unsqueeze(1) * V_r).contiguous()
+        self.tinylora_B[adapter_name] = (U_r * sqrt_S_r.unsqueeze(0)).contiguous()
 
         return actual_r
 
@@ -538,8 +519,8 @@ class Embedding(nn.Module, TinyLoraLayer):
 
         Embedding weight shape: (num_embeddings, embedding_dim) We treat this as W where:
         - W = U @ S @ V^T (full SVD)
-        - tinylora_A = V[:r, :] (shape: r x embedding_dim)
-        - tinylora_B = U[:, :r] @ diag(S[:r]) (shape: num_embeddings x r)
+        - tinylora_A = diag(sqrt(S[:r])) @ V[:r, :] (shape: r x embedding_dim)
+        - tinylora_B = U[:, :r] @ diag(sqrt(S[:r])) (shape: num_embeddings x r)
 
         Returns:
             int: The actual rank used (may be less than r if dimensions are smaller)
@@ -548,7 +529,6 @@ class Embedding(nn.Module, TinyLoraLayer):
         weight = base_layer.weight.data  # (num_embeddings, embedding_dim)
 
         dtype = weight.dtype
-        device = weight.device
 
         # Compute SVD in float32 for numerical stability
         weight_fp32 = weight.float()
@@ -562,12 +542,11 @@ class Embedding(nn.Module, TinyLoraLayer):
         U_r = U[:, :actual_r].to(dtype)
         S_r = S[:actual_r].to(dtype)
         V_r = Vh[:actual_r, :].to(dtype)
+        sqrt_S_r = torch.sqrt(S_r)
 
-        # Store in LoRA-XS convention:
-        # tinylora_A = V_r (actual_r x embedding_dim)
-        # tinylora_B = U_r @ diag(S_r) (num_embeddings x actual_r)
-        self.tinylora_A[adapter_name] = V_r.contiguous()
-        self.tinylora_B[adapter_name] = (U_r * S_r.unsqueeze(0)).contiguous()
+        # Distribute singular values equally to both A and B via sqrt(S_r)
+        self.tinylora_A[adapter_name] = (sqrt_S_r.unsqueeze(1) * V_r).contiguous()
+        self.tinylora_B[adapter_name] = (U_r * sqrt_S_r.unsqueeze(0)).contiguous()
 
         return actual_r
 

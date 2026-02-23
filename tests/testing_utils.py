@@ -300,13 +300,15 @@ def set_init_weights_false(config_cls, kwargs):
 
     if issubclass(config_cls, PromptLearningConfig):
         return kwargs
-    if config_cls in (LNTuningConfig, TinyLoraConfig, VBLoRAConfig):
+    if config_cls in (LNTuningConfig, VBLoRAConfig):
         return kwargs
 
     if config_cls in (LoraConfig, AdaLoraConfig):
         kwargs["init_lora_weights"] = False
     elif config_cls == IA3Config:
         kwargs["init_ia3_weights"] = False
+    elif config_cls == TinyLoraConfig:
+        kwargs["init_weights"] = "uniform"
     else:
         kwargs["init_weights"] = False
     return kwargs

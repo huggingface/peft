@@ -297,8 +297,6 @@ ALL_CONFIGS = [
         TinyLoraConfig,
         {
             "task_type": "CAUSAL_LM",
-            "r": 2,
-            "u": 64,
             "target_modules": None,
         },
     ),

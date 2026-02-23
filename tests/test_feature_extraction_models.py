@@ -211,8 +211,6 @@ ALL_CONFIGS = [
         TinyLoraConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
-            "r": 2,
-            "u": 64,
             "target_modules": None,
         },
     ),

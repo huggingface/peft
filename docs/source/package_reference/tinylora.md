@@ -16,9 +16,9 @@ rendered properly in your Markdown viewer.
 
 # TinyLoRA: Learning to Reason in 13 Parameters
 
-[TinyLoRA](https://huggingface.co/papers/2602.04118) is an extremely parameter-efficient fine-tuning technique that enables fine-tuning with as few as 1-13 trainable parameters. It builds upon the [LoRA-XS](https://huggingface.co/papers/2405.17604) approach by using SVD decomposition of frozen weights and projecting a tiny trainable vector through fixed random tensors.
+[TinyLoRA](https://huggingface.co/papers/2602.04118) is an extremely parameter-efficient fine-tuning technique that builds upon the [LoRA-XS](https://huggingface.co/papers/2405.17604) approach by using SVD decomposition of frozen weights and projecting a tiny trainable vector through fixed random tensors. When combined with reinforcement learning (RL) training methods like GRPO, TinyLoRA can achieve competitive performance with as few as 1-13 trainable parameters.
 
-The key innovation of TinyLoRA is replacing the trainable low-rank matrix R with a weighted sum of fixed random projection matrices: `R = Σᵢ vᵢ Pᵢ`, where `v` is a tiny trainable vector and `Pᵢ` are fixed random matrices. This dramatically reduces the number of trainable parameters while maintaining competitive performance, especially when combined with reinforcement learning training methods like GRPO.
+The key innovation of TinyLoRA is replacing the trainable low-rank matrix R with a weighted sum of fixed random projection matrices: `R = Σᵢ vᵢ Pᵢ`, where `v ∈ R^u` is a tiny trainable vector of dimension `u` and `Pᵢ` are fixed random matrices. This dramatically reduces the number of trainable parameters while maintaining competitive performance.
 
 TinyLoRA supports weight tying through the `ntie` parameter, which controls how many modules share the same trainable vector `v`. With full tying across all target modules, you can achieve extreme parameter efficiency with just `u` trainable parameters for the entire model.
 
