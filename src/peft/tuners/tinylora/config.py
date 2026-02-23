@@ -38,9 +38,10 @@ class TinyLoraConfig(PeftConfig):
         u (`int`, *optional*, defaults to `64`):
             Trainable vector dimension per group. This controls the expressivity of the adaptation. Can be as low as
             1-13 for extreme parameter efficiency.
-        ntie (`int`, *optional*, defaults to `1`):
-            Weight tying factor. Controls how many modules share the same trainable vector v. ntie=1 means each layer
-            has its own v. Higher values reduce parameters further.
+        weight_tying (`float`, *optional*, defaults to `0.0`):
+            Degree of weight tying across target modules, as a ratio between 0.0 and 1.0. Controls how many modules
+            share the same trainable vector v. 0.0 means no sharing (each module has its own v). 1.0 means full sharing
+            (all modules share one v). Values in between give partial sharing.
         projection_seed (`int`, *optional*, defaults to `42`):
             Random seed for generating the fixed projection matrices P.
         save_projection (`bool`, *optional*, defaults to `True`):
@@ -79,7 +80,7 @@ class TinyLoraConfig(PeftConfig):
         config = TinyLoraConfig(
             r=2,  # SVD rank (paper recommends 2)
             u=64,  # Trainable vector dimension
-            ntie=1,  # Weight tying (1 = no tying)
+            weight_tying=0.0,  # No weight tying (0.0 = none, 1.0 = full)
             target_modules=["q_proj", "v_proj"],
             projection_seed=42,
         )
@@ -89,7 +90,15 @@ class TinyLoraConfig(PeftConfig):
 
     r: int = field(default=2, metadata={"help": "TinyLoRA SVD rank (frozen)"})
     u: int = field(default=64, metadata={"help": "Trainable vector dimension per group"})
-    ntie: int = field(default=1, metadata={"help": "Weight tying factor (modules sharing same v)"})
+    weight_tying: float = field(
+        default=0.0,
+        metadata={
+            "help": (
+                "Degree of weight tying across target modules (0.0 to 1.0). "
+                "0.0 = no sharing, 1.0 = full sharing (all modules share one v)."
+            )
+        },
+    )
     projection_seed: int = field(
         default=42,
         metadata={
@@ -187,5 +196,7 @@ class TinyLoraConfig(PeftConfig):
             raise ValueError(f"`r` should be a positive integer value but the value passed is {self.r}")
         if self.u <= 0:
             raise ValueError(f"`u` should be a positive integer value but the value passed is {self.u}")
-        if self.ntie <= 0:
-            raise ValueError(f"`ntie` should be a positive integer value but the value passed is {self.ntie}")
+        if not (0.0 <= self.weight_tying <= 1.0):
+            raise ValueError(
+                f"`weight_tying` should be a float between 0.0 and 1.0 but the value passed is {self.weight_tying}"
+            )

@@ -85,7 +85,7 @@ class TinyLoraModel(BaseTuner):
         """Build an ordered mapping from target module key to index.
 
         Iterates the model in the same order as ``inject_adapter`` to assign each target module a deterministic index
-        used for group assignment (ntie) and projection seeding.
+        used for group assignment (weight_tying) and projection seeding.
         """
         model_config = self.get_model_config(self.model)
         peft_config = self._prepare_adapter_config(config, model_config)
@@ -138,9 +138,12 @@ class TinyLoraModel(BaseTuner):
         layer_idx = self._target_key_to_idx[current_key]
         num_target_layers = len(self._target_key_to_idx)
 
-        # Determine the group for this layer based on ntie
-        num_groups = max(1, num_target_layers // tinylora_config.ntie)
-        group_idx = min(layer_idx // tinylora_config.ntie, num_groups - 1)
+        # Determine the group for this layer based on weight_tying
+        # weight_tying=0.0 → num_groups = num_target_layers (no sharing)
+        # weight_tying=1.0 → num_groups = 1 (full sharing)
+        num_groups = max(1, round(num_target_layers * (1.0 - tinylora_config.weight_tying)))
+        group_size = max(1, num_target_layers // num_groups)
+        group_idx = min(layer_idx // group_size, num_groups - 1)
         v_key = str(group_idx)
 
         # Initialize the adapter's ParameterDict if not present

@@ -623,10 +623,10 @@ TEST_CASES = [
         {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2, "u": 16},
     ),
     (
-        "Vanilla MLP TinyLoRA ntie",
+        "Vanilla MLP TinyLoRA weight_tying",
         "MLP",
         TinyLoraConfig,
-        {"target_modules": ["lin0", "lin1"], "r": 2, "u": 8, "ntie": 2},
+        {"target_modules": ["lin0", "lin1"], "r": 2, "u": 8, "weight_tying": 1.0},
     ),
     (
         "Embedding + transformers Conv1D 1 TinyLoRA",
