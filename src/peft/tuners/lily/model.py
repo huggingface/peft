@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import Optional
 
@@ -141,17 +140,6 @@ class LilyModel(BaseTuner):
         for target, shapes in num_layers.items():
             self._lily_counters[adapter_name][target] = {shape: 0 for shape in shapes}
 
-        logging.info("=" * 50)
-        logging.info("Lily adapter injecting, configuration as follows:")
-        logging.info(f"  adapter_name:            {adapter_name}")
-        logging.info(f"  num_A (shared A groups): {config.num_A}")
-        logging.info(f"  num_B (B experts):       {config.num_B}")
-        logging.info(f"  stride per A group:      {self._lily_strides[adapter_name]}")
-        for target, shapes in num_layers.items():
-            for shape, count in shapes.items():
-                logging.info(f"  layers for '{target}' shape={shape}: {count}")
-        logging.info("=" * 50)
-
     @staticmethod
     def _match_target(key: str, target_modules) -> Optional[str]:
         """Return the matched target-module name for *key*, or None if no match."""
@@ -201,11 +189,6 @@ class LilyModel(BaseTuner):
         # Advance counter so the next layer in this (adapter, target, shape) group
         # gets the correct A matrix
         self._lily_counters[adapter_name][matched_target][shape] += 1
-
-        logging.debug(
-            f"Assigning A group {group_idx} to '{current_key}' "
-            f"(adapter={adapter_name}, counter={counter}, stride={stride})"
-        )
 
         out_features, in_features = shape
         kwargs = {"in_features": in_features, "out_features": out_features}
