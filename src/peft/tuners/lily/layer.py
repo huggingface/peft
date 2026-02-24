@@ -29,11 +29,8 @@ class LilyLayer(BaseTunerLayer):
     adapter_layer_names: tuple[str, ...] = ("lily_A", "lily_B", "lily_router")
     # All names of other parameters that may contain adapter-related parameters
     other_param_names: tuple[str, ...] = ("r", "scaling", "stride_A", "num_B")
-    def __init__(
-        self,
-        base_layer: nn.Module,
-        **kwargs
-    ) -> None:
+
+    def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
         self.r = {}
         self.scaling = {}
@@ -88,12 +85,14 @@ class LilyLayer(BaseTunerLayer):
 
         # Actual trainble parameters
         self.lily_A[adapter_name] = lily_A if lily_A is not None else nn.Linear(self.in_features, r, bias=False)
-        self.lily_B[adapter_name] = lily_B if lily_B is not None else nn.Linear(self.out_features, num_B * r, bias=False)
+        self.lily_B[adapter_name] = (
+            lily_B if lily_B is not None else nn.Linear(self.out_features, num_B * r, bias=False)
+        )
         self.lily_router[adapter_name] = nn.Linear(r, num_B, bias=False)
 
         self.stride_A[adapter_name] = stride_A
         self.num_B[adapter_name] = num_B
-        self.reset_lily_parameters(adapter_name, init_weights=init_weights) # initialize the parameters
+        self.reset_lily_parameters(adapter_name, init_weights=init_weights)  # initialize the parameters
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
@@ -176,8 +175,8 @@ class Linear(nn.Module, LilyLayer):
             scaling = self.scaling[active_adapter]
             x = self._cast_input_dtype(x, lily_A.weight.dtype)
             hidden = lily_A(x)
-            router_logits = router(hidden) # [B, N, num_of_experts]
-            router_probability = F.softmax(router_logits, dim=-1) # [B, N, num_of_experts]
+            router_logits = router(hidden)  # [B, N, num_of_experts]
+            router_probability = F.softmax(router_logits, dim=-1)  # [B, N, num_of_experts]
             expert_probabilities = router_probability.reshape(-1, num_B).mean(dim=0)
             combined_B = torch.einsum("e,eio->io", expert_probabilities, B)
             delta = torch.matmul(hidden, combined_B)

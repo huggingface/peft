@@ -61,8 +61,8 @@ class LilyModel(BaseTuner):
         **optional_kwargs,
     ):
         """
-        Create a new Lily layer with independent A and B for each layer.
-        Sharing of A/B across layers is deferred to _post_injection_hook.
+        Create a new Lily layer with independent A and B for each layer. Sharing of A/B across layers is deferred to
+        _post_injection_hook.
         """
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
@@ -100,27 +100,25 @@ class LilyModel(BaseTuner):
                 init_weights=lily_config.init_weights,
             )
 
-        raise NotImplementedError(
-            f"Lily does not support target modules of type {type(target_base_layer)} yet."
-        )
+        raise NotImplementedError(f"Lily does not support target modules of type {type(target_base_layer)} yet.")
 
     def _post_injection_hook(self, model: nn.Module, config: LilyConfig, adapter_name: str) -> None:
         """
         After all layers have been independently initialized, apply A/B sharing across layers.
 
-        A sharing: for each (target_module_suffix, weight_shape) group, consecutive blocks of
-        `stride_A` layers share the same A. The first layer in each block keeps its own A;
-        subsequent layers in the block have their lily_A replaced by the group leader's.
+        A sharing: for each (target_module_suffix, weight_shape) group, consecutive blocks of `stride_A` layers share
+        the same A. The first layer in each block keeps its own A; subsequent layers in the block have their lily_A
+        replaced by the group leader's.
 
-        B sharing: all layers in the same (target_module_suffix, weight_shape) group share
-        the B from the very first layer in that group.
+        B sharing: all layers in the same (target_module_suffix, weight_shape) group share the B from the very first
+        layer in that group.
 
-        Both lily_A and lily_B are nn.Linear modules, so they move correctly with
-        model.to(device) via standard nn.Module parameter propagation.
+        Both lily_A and lily_B are nn.Linear modules, so they move correctly with model.to(device) via standard
+        nn.Module parameter propagation.
 
-        Note: (target_module_suffix, weight_shape) is used as the group key rather than
-        target_module_suffix alone, to correctly handle architectures like UNet where the
-        same target key can appear with different shapes across layers.
+        Note: (target_module_suffix, weight_shape) is used as the group key rather than target_module_suffix alone, to
+        correctly handle architectures like UNet where the same target key can appear with different shapes across
+        layers.
         """
         stride_A = config.stride_A
 
