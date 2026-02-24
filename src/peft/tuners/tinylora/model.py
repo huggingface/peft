@@ -177,9 +177,7 @@ class TinyLoraModel(BaseTuner):
                 tinylora_config,
             )
         else:
-            new_module = self._create_new_module(
-                tinylora_config, self.tinylora_v, v_key, adapter_name, target
-            )
+            new_module = self._create_new_module(tinylora_config, self.tinylora_v, v_key, adapter_name, target)
             new_module.set_layer_idx(layer_idx)
 
             if adapter_name not in self.active_adapter:
