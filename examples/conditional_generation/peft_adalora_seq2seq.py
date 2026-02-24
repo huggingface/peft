@@ -15,7 +15,6 @@ device = torch.accelerator.current_accelerator().type if hasattr(torch, "acceler
 model_name_or_path = "facebook/bart-base"
 tokenizer_name_or_path = "facebook/bart-base"
 
-checkpoint_name = "financial_sentiment_analysis_lora_v1.pt"
 text_column = "text"
 label_column = "text_label"
 max_length = 128
