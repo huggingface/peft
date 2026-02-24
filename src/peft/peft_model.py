@@ -329,6 +329,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     output_state_dict = save_mutated_as_lora(
                         peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
                     )
+
+                # Before exporting the parameters we need to make sure all the tensors are contigious as saving
+                # non-contiguous parameters is not supported. Tensors can become non contigiuous
+                # if they are a transpose view of another tensor. This can happen
+                # during adapter tying or parameter sharing.
+                for k, v in output_state_dict.items():
+                    if not v.is_contiguous():
+                        output_state_dict[k] = v.contiguous()
+
                 safe_save_file(
                     output_state_dict,
                     os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
