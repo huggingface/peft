@@ -939,15 +939,15 @@ TEST_CASES = [
     ########
     # Lily  #
     ########
-    ("Vanilla MLP 1 Lily", "MLP", LilyConfig, {"target_modules": "lin0", "r": 2, "num_A": 1, "num_B": 2}),
-    ("Vanilla MLP 2 Lily", "MLP", LilyConfig, {"target_modules": ["lin0"], "r": 2, "num_A": 1, "num_B": 2}),
-    ("Vanilla MLP 3 Lily", "MLP", LilyConfig, {"target_modules": ["lin1"], "r": 2, "num_A": 1, "num_B": 2}),
-    ("Vanilla MLP 4 Lily", "MLP", LilyConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "num_A": 1, "num_B": 2}),
+    ("Vanilla MLP 1 Lily", "MLP", LilyConfig, {"target_modules": "lin0", "r": 2, "stride_A": 1, "num_B": 2}),
+    ("Vanilla MLP 2 Lily", "MLP", LilyConfig, {"target_modules": ["lin0"], "r": 2, "stride_A": 1, "num_B": 2}),
+    ("Vanilla MLP 3 Lily", "MLP", LilyConfig, {"target_modules": ["lin1"], "r": 2, "stride_A": 1, "num_B": 2}),
+    ("Vanilla MLP 4 Lily", "MLP", LilyConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "stride_A": 1, "num_B": 2}),
     (
         "Vanilla MLP 5 Lily",
         "MLP",
         LilyConfig,
-        {"target_modules": ["lin0"], "r": 4, "num_A": 1, "num_B": 2},
+        {"target_modules": ["lin0"], "r": 4, "stride_A": 1, "num_B": 2},
     ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
@@ -1245,15 +1245,15 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         "Lily Same",
         "lily",
         LilyConfig,
-        {"target_modules": ["lin0"], "r": 2, "num_A": 1, "num_B": 2, "init_weights": False},
-        {"target_modules": ["lin0"], "r": 2, "num_A": 1, "num_B": 2, "init_weights": False},
+        {"target_modules": ["lin0"], "r": 2, "stride_A": 1, "num_B": 2, "init_weights": False},
+        {"target_modules": ["lin0"], "r": 2, "stride_A": 1, "num_B": 2, "init_weights": False},
     ),
     (
         "Lily Different",
         "lily",
         LilyConfig,
-        {"target_modules": ["lin0"], "r": 2, "num_A": 1, "num_B": 2, "init_weights": False},
-        {"target_modules": ["lin1"], "r": 2, "num_A": 1, "num_B": 2, "init_weights": False},
+        {"target_modules": ["lin0"], "r": 2, "stride_A": 1, "num_B": 2, "init_weights": False},
+        {"target_modules": ["lin1"], "r": 2, "stride_A": 1, "num_B": 2, "init_weights": False},
     ),
 ]
 
@@ -3793,6 +3793,7 @@ class TestMultipleActiveAdapters:
     def test_multiple_active_adapters_merge_and_unmerge(
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
+        _skip_if_merging_not_supported(test_name, config_cls, config_kwargs_1)
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
 
         torch.manual_seed(0)
@@ -3828,6 +3829,7 @@ class TestMultipleActiveAdapters:
         "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
     )
     def test_merge_layers_multi(self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2):
+        _skip_if_merging_not_supported(test_name, config_cls, config_kwargs_1)
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
 
         torch.manual_seed(0)
