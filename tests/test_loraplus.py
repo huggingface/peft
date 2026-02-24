@@ -43,7 +43,7 @@ class SimpleNet(nn.Module):
 
 
 @require_bitsandbytes
-def test_lora_plus_helper_sucess():
+def test_lora_plus_helper_success():
     model = SimpleNet()
     optimizer_cls = bnb.optim.Adam8bit
     lr = 5e-5
@@ -70,7 +70,7 @@ def test_lora_plus_helper_sucess():
 
 
 @require_bitsandbytes
-def test_lora_plus_optimizer_sucess():
+def test_lora_plus_optimizer_success():
     """
     Test if the optimizer is correctly created and step function runs without any exception
     """
