@@ -167,15 +167,6 @@ class TinyLoraModel(BaseTuner):
             # If init_weights is False, leave v uninitialized
             self.tinylora_v[adapter_name][v_key] = v
 
-        kwargs = {
-            "r": tinylora_config.r,
-            "u": tinylora_config.u,
-            "tinylora_dropout": tinylora_config.tinylora_dropout,
-            "fan_in_fan_out": tinylora_config.fan_in_fan_out,
-            "init_weights": tinylora_config.init_weights,
-            "projection_seed": tinylora_config.projection_seed,
-        }
-
         if isinstance(target, TinyLoraLayer):
             target.set_layer_idx(layer_idx)
             target.update_layer(
@@ -183,15 +174,11 @@ class TinyLoraModel(BaseTuner):
                 self.tinylora_v,
                 v_key,
                 tinylora_config.r,
-                tinylora_config.u,
-                tinylora_config.tinylora_dropout,
-                tinylora_config.init_weights,
-                tinylora_config.projection_seed,
-                fan_in_fan_out=tinylora_config.fan_in_fan_out,
+                tinylora_config,
             )
         else:
             new_module = self._create_new_module(
-                tinylora_config, self.tinylora_v, v_key, adapter_name, target, **kwargs
+                tinylora_config, self.tinylora_v, v_key, adapter_name, target
             )
             new_module.set_layer_idx(layer_idx)
 
@@ -223,41 +210,42 @@ class TinyLoraModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            if kwargs["fan_in_fan_out"]:
+            if tinylora_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
-                kwargs["fan_in_fan_out"] = tinylora_config.fan_in_fan_out = False
+                tinylora_config.fan_in_fan_out = False
             new_module = Linear(
                 target,
                 tinylora_v,
                 v_key,
                 adapter_name,
+                tinylora_config,
                 **kwargs,
             )
         elif isinstance(target_base_layer, Conv1D):
             kwargs["is_target_conv_1d_layer"] = True
-            if not kwargs["fan_in_fan_out"]:
+            if not tinylora_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
-                kwargs["fan_in_fan_out"] = tinylora_config.fan_in_fan_out = True
+                tinylora_config.fan_in_fan_out = True
             new_module = Linear(
                 target,
                 tinylora_v,
                 v_key,
                 adapter_name,
+                tinylora_config,
                 **kwargs,
             )
         elif isinstance(target_base_layer, torch.nn.Embedding):
-            # Remove Linear-specific kwargs not applicable to Embedding
-            kwargs.pop("fan_in_fan_out", None)
             new_module = Embedding(
                 target,
                 tinylora_v,
                 v_key,
                 adapter_name,
+                tinylora_config,
                 **kwargs,
             )
         else:

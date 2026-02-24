@@ -129,6 +129,9 @@ class TinyLoraLayer(BaseTunerLayer):
                     )
                     self.set_adapter(new_active_adapter)
 
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        return True
+
     def set_layer_idx(self, idx: int):
         """Set the layer index, used for deterministic seeding of projection matrices."""
         self._layer_idx = idx
@@ -146,15 +149,17 @@ class TinyLoraLayer(BaseTunerLayer):
         tinylora_v: nn.ModuleDict,
         v_key: str,
         r: int,
-        u: int,
-        tinylora_dropout: float,
-        init_weights: bool,
-        projection_seed: int,
-        fan_in_fan_out: bool = False,
-        inference_mode: bool = False,
+        config,
         **kwargs,
     ):
         """Initialize layer with SVD decomposition and projection tensors."""
+        # Extract config values
+        u = config.u
+        tinylora_dropout = config.tinylora_dropout
+        projection_seed = config.projection_seed
+        inference_mode = config.inference_mode
+        fan_in_fan_out = config.fan_in_fan_out
+
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         if u <= 0:
@@ -261,7 +266,8 @@ class TinyLoraLayer(BaseTunerLayer):
         """
         Compute delta_W = tinylora_B @ R @ tinylora_A for merging.
 
-        Returns weight update in shape (out_features, in_features).
+        Returns weight update in the same shape as the base layer weight. For Conv1D layers (fan_in_fan_out=True), the
+        result is transposed to match the (in_features, out_features) convention.
         """
         A = self.tinylora_A[adapter_name]  # (r, in_features)
         B = self.tinylora_B[adapter_name]  # (out_features, r)
@@ -288,6 +294,10 @@ class TinyLoraLayer(BaseTunerLayer):
         # Result: (out, in)
         delta = B @ R @ A
 
+        # Transpose for Conv1D layers which store weights as (in, out)
+        fan_in_fan_out = getattr(self, "fan_in_fan_out", False)
+        delta = transpose(delta, fan_in_fan_out)
+
         if cast_to_fp32:
             delta = delta.to(dtype=dtype)
 
@@ -303,33 +313,24 @@ class Linear(nn.Linear, TinyLoraLayer):
         tinylora_v: nn.ModuleDict,
         v_key: str,
         adapter_name: str,
-        r: int = 2,
-        u: int = 64,
-        tinylora_dropout: float = 0.0,
-        fan_in_fan_out: bool = False,
-        is_target_conv_1d_layer: bool = False,
-        init_weights: bool = True,
-        projection_seed: int = 42,
+        config,
         **kwargs,
     ) -> None:
         # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__
         super(nn.Linear, self).__init__()
         TinyLoraLayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
+
+        self.fan_in_fan_out = config.fan_in_fan_out
 
         self._active_adapter = adapter_name
         self.update_layer(
             adapter_name,
             tinylora_v,
             v_key,
-            r,
-            u,
-            tinylora_dropout,
-            init_weights,
-            projection_seed,
-            fan_in_fan_out=fan_in_fan_out,
+            config.r,
+            config,
         )
-        self.is_target_conv_1d_layer = is_target_conv_1d_layer
+        self.is_target_conv_1d_layer = kwargs.get("is_target_conv_1d_layer", False)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -355,7 +356,6 @@ class Linear(nn.Linear, TinyLoraLayer):
                 if safe_merge:
                     orig_weights = base_layer.weight.data.clone()
                     delta_weight = self.get_delta_weight(active_adapter)
-                    delta_weight = transpose(delta_weight, self.fan_in_fan_out)
                     orig_weights += delta_weight
 
                     if not torch.isfinite(orig_weights).all():
@@ -366,7 +366,6 @@ class Linear(nn.Linear, TinyLoraLayer):
                     base_layer.weight.data = orig_weights
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
-                    delta_weight = transpose(delta_weight, self.fan_in_fan_out)
                     base_layer.weight.data += delta_weight
 
                 self.merged_adapters.append(active_adapter)
@@ -381,7 +380,6 @@ class Linear(nn.Linear, TinyLoraLayer):
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.tinylora_A.keys():
                 delta_weight = self.get_delta_weight(active_adapter)
-                delta_weight = transpose(delta_weight, self.fan_in_fan_out)
                 self.get_base_layer().weight.data -= delta_weight
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
@@ -442,11 +440,7 @@ class Embedding(nn.Module, TinyLoraLayer):
         tinylora_v: nn.ModuleDict,
         v_key: str,
         adapter_name: str,
-        r: int = 2,
-        u: int = 64,
-        tinylora_dropout: float = 0.0,
-        init_weights: bool = True,
-        projection_seed: int = 42,
+        config,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -457,11 +451,8 @@ class Embedding(nn.Module, TinyLoraLayer):
             adapter_name,
             tinylora_v,
             v_key,
-            r,
-            u,
-            tinylora_dropout,
-            init_weights,
-            projection_seed,
+            config.r,
+            config,
         )
 
     def update_layer(
@@ -470,14 +461,16 @@ class Embedding(nn.Module, TinyLoraLayer):
         tinylora_v: nn.ModuleDict,
         v_key: str,
         r: int,
-        u: int,
-        tinylora_dropout: float,
-        init_weights: bool,
-        projection_seed: int,
-        inference_mode: bool = False,
+        config,
         **kwargs,
     ):
         """Initialize layer with SVD decomposition and projection tensors."""
+        # Extract config values
+        u = config.u
+        tinylora_dropout = config.tinylora_dropout
+        projection_seed = config.projection_seed
+        inference_mode = config.inference_mode
+
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         if u <= 0:
