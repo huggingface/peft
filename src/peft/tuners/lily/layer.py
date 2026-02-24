@@ -27,7 +27,7 @@ class LilyLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names: tuple[str, ...] = ("lily_A", "lily_B", "lily_router")
     # All names of other parameters that may contain adapter-related parameters
-    other_param_names: tuple[str, ...] = ("r", "scaling", "num_A", "num_B")
+    other_param_names: tuple[str, ...] = ("r", "scaling", "stride_A", "num_B")
     def __init__(
         self,
         base_layer: nn.Module, 
@@ -36,7 +36,7 @@ class LilyLayer(BaseTunerLayer):
         self.base_layer = base_layer
         self.r = {}
         self.scaling = {}
-        self.num_A = {}
+        self.stride_A = {}
         self.num_B = {}
         self.lily_A = nn.ModuleDict({})
         self.lily_B = nn.ModuleDict({})
@@ -68,10 +68,10 @@ class LilyLayer(BaseTunerLayer):
         adapter_name,
         r,
         scaling,
-        num_A,
+        stride_A,
         num_B,
-        lily_A=None,
-        lily_B=None,
+        lily_A: Optional[nn.Linear] = None,
+        lily_B: Optional[nn.Linear] = None,
         init_weights: bool = True,
         inference_mode: bool = False,
     ):
@@ -87,10 +87,10 @@ class LilyLayer(BaseTunerLayer):
         
         # Actual trainble parameters
         self.lily_A[adapter_name] = lily_A if lily_A is not None else nn.Linear(self.in_features, r, bias=False)
-        self.lily_B[adapter_name] = lily_B if lily_B is not None else nn.Linear(r, num_B * self.out_features, bias=False)
+        self.lily_B[adapter_name] = lily_B if lily_B is not None else nn.Linear(self.out_features, num_B * r, bias=False)
         self.lily_router[adapter_name] = nn.Linear(r, num_B, bias=False)
 
-        self.num_A[adapter_name] = num_A  
+        self.stride_A[adapter_name] = stride_A  
         self.num_B[adapter_name] = num_B  
         self.reset_lily_parameters(adapter_name, init_weights=init_weights) # initialize the parameters
         self._move_adapter_to_device_of_base_layer(adapter_name)
@@ -112,10 +112,10 @@ class Linear(nn.Module, LilyLayer):
         self,
         base_layer,
         adapter_name: str,
-        r: int = 0,
+        r: int = 32,
         scaling: float = 1.0,
-        num_A: int = 4,
-        num_B: int = 4,
+        stride_A: int = 1,
+        num_B: int = 2,
         lily_A: nn.Linear = None,
         lily_B: nn.Linear = None,
         init_weights: bool = True,
@@ -132,12 +132,12 @@ class Linear(nn.Module, LilyLayer):
             scaling=scaling,
             lily_A=lily_A,
             lily_B=lily_B,
-            num_A=num_A,
+            stride_A=stride_A,
             num_B=num_B,
             init_weights=init_weights,
         )
 
-    def get_delta_weight(self, adapter, x: torch.Tensor) -> torch.Tensor:
+    def get_delta_weight(self, adapter) -> torch.Tensor:
         """
         Compute the delta weight for the given adapter.
 
@@ -170,7 +170,7 @@ class Linear(nn.Module, LilyLayer):
             lily_A = self.lily_A[active_adapter]
             lily_B = self.lily_B[active_adapter]
             router = self.lily_router[active_adapter]
-            num_B = self.num_B[active_adapter] if isinstance(self.num_B, dict) else self.num_B
+            num_B = self.num_B[active_adapter]
             B = einops.rearrange(lily_B.weight, "(e i) o -> e i o", e=num_B)
             scaling = self.scaling[active_adapter]
             x = self._cast_input_dtype(x, lily_A.weight.dtype)

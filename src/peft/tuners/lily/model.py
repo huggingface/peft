@@ -14,18 +14,15 @@
 
 from __future__ import annotations
 
-import re
-from typing import Optional
-
 import torch
 from torch import nn
 
 from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
-    check_target_module_exists,
 )
 from peft.utils import TRANSFORMERS_MODELS_TO_LILY_TARGET_MODULES_MAPPING
+from ..tuners_utils import _maybe_include_all_linear_layers
 from .config import LilyConfig
 from .layer import LilyLayer, Linear
 
@@ -53,103 +50,6 @@ class LilyModel(BaseTuner):
     tuner_layer_cls = LilyLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_LILY_TARGET_MODULES_MAPPING
 
-    @staticmethod
-    def _check_target_module_exists(lily_config, key):
-        return check_target_module_exists(lily_config, key)
-
-    def _pre_injection_hook(self, model: nn.Module, config: LilyConfig, adapter_name: str) -> None:
-        """
-        Pre-compute and cache all shared A and B matrices before adapter injection begins.
-
-        A matrices are shared across consecutive groups of layers:
-          stride = total_layers_per_shape / num_A
-        B matrices are shared globally across all layers (one per target-module/shape pair).
-
-        All caches are keyed by adapter_name first, so multiple adapters can coexist
-        without overwriting each other's matrices or counters.
-        """
-        model_config = self.get_model_config(model)
-        peft_config = self._prepare_adapter_config(config, model_config)
-
-        # Initialize top-level dicts on first call; keyed as [adapter_name][target][shape]
-        if not hasattr(self, "_lily_As"):
-            self._lily_As: dict[str, dict[str, dict[torch.Size, list[nn.Linear]]]] = {}
-        if not hasattr(self, "_lily_Bs"):
-            self._lily_Bs: dict[str, dict[str, dict[torch.Size, nn.Linear]]] = {}
-        if not hasattr(self, "_lily_counters"):
-            self._lily_counters: dict[str, dict[str, dict[torch.Size, int]]] = {}
-        if not hasattr(self, "_lily_strides"):
-            self._lily_strides: dict[str, dict[str, dict[torch.Size, int]]] = {}
-
-        # Reset all sub-dicts for the current adapter to avoid stale state
-        self._lily_As[adapter_name] = {}
-        self._lily_Bs[adapter_name] = {}
-        self._lily_counters[adapter_name] = {}
-        self._lily_strides[adapter_name] = {}
-
-        # Count how many layers match each (target_module, weight_shape) pair
-        num_layers: dict[str, dict[torch.Size, int]] = {}
-        if isinstance(peft_config.target_modules, str):
-            target_modules_iter = [peft_config.target_modules]
-        else:
-            target_modules_iter = list(peft_config.target_modules)
-
-        for target_key in target_modules_iter:
-            num_layers[target_key] = {}
-
-        for key, module in model.named_modules():
-            matched_target = self._match_target(key, peft_config.target_modules)
-            if matched_target is None:
-                continue
-            base = module.get_base_layer() if isinstance(module, BaseTunerLayer) else module
-            if not isinstance(base, torch.nn.Linear):
-                continue
-            shape = base.weight.shape
-            num_layers[matched_target][shape] = num_layers[matched_target].get(shape, 0) + 1
-
-        # Compute strides and validate divisibility, stored under adapter_name
-        for target, shapes in num_layers.items():
-            self._lily_strides[adapter_name][target] = {}
-            for shape, count in shapes.items():
-                if count % config.num_A != 0:
-                    raise ValueError(
-                        f"Number of layers ({count}) for target '{target}' with shape {shape} "
-                        f"is not divisible by num_A={config.num_A}."
-                    )
-                self._lily_strides[adapter_name][target][shape] = count // config.num_A
-
-        # Pre-create shared B matrices: one nn.Linear per (target, shape), stored under adapter_name
-        for target, shapes in num_layers.items():
-            self._lily_Bs[adapter_name][target] = {}
-            for shape in shapes:
-                out_features, in_features = shape
-                self._lily_Bs[adapter_name][target][shape] = nn.Linear(
-                    out_features, config.num_B * config.r, bias=False
-                )
-
-        # Pre-create shared A matrices: num_A groups per (target, shape), stored under adapter_name
-        for target, shapes in num_layers.items():
-            self._lily_As[adapter_name][target] = {}
-            for shape in shapes:
-                out_features, in_features = shape
-                self._lily_As[adapter_name][target][shape] = [
-                    nn.Linear(in_features, config.r, bias=False) for _ in range(config.num_A)
-                ]
-
-        # Initialize counters for the current adapter; reset to 0 for every (target, shape)
-        for target, shapes in num_layers.items():
-            self._lily_counters[adapter_name][target] = {shape: 0 for shape in shapes}
-
-    @staticmethod
-    def _match_target(key: str, target_modules) -> Optional[str]:
-        """Return the matched target-module name for *key*, or None if no match."""
-        if isinstance(target_modules, str):
-            return target_modules if re.fullmatch(target_modules, key) else None
-        for target_key in target_modules:
-            if key.endswith(target_key):
-                return target_key
-        return None
-
     def _create_and_replace(
         self,
         lily_config,
@@ -160,81 +60,30 @@ class LilyModel(BaseTuner):
         current_key,
         **optional_kwargs,
     ):
+        """
+        Create a new Lily layer with independent A and B for each layer.
+        Sharing of A/B across layers is deferred to _post_injection_hook.
+        """
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
-    
-        if not hasattr(self, "_lily_As") or adapter_name not in self._lily_As:
-            self._pre_injection_hook(self.model, lily_config, adapter_name)
-
-        matched_target = self._match_target(current_key, lily_config.target_modules)
-        if matched_target is None:
-            raise ValueError(f"Could not match key '{current_key}' to any target module.")
-
-        base_layer = target.get_base_layer() if isinstance(target, LilyLayer) else target
-
-        if not isinstance(base_layer, torch.nn.Linear):
-            raise ValueError(
-                f"Target module '{current_key}' matched to '{matched_target}' is not a Linear layer, which is currently the only supported target for Lily. Found type {type(base_layer)} instead."
-            )
-        
-        shape = base_layer.weight.shape
-
-        # Look up stride, counter and matrices using adapter_name as the top-level key
-        stride = self._lily_strides[adapter_name][matched_target][shape]
-        counter = self._lily_counters[adapter_name][matched_target][shape]
-        group_idx = counter // stride
-        lily_A = self._lily_As[adapter_name][matched_target][shape][group_idx]
-        lily_B = self._lily_Bs[adapter_name][matched_target][shape]
-
-        # Advance counter so the next layer in this (adapter, target, shape) group
-        # gets the correct A matrix
-        self._lily_counters[adapter_name][matched_target][shape] += 1
-
-        out_features, in_features = shape
-        kwargs = {"in_features": in_features, "out_features": out_features}
 
         if isinstance(target, LilyLayer):
             target.update_layer(
                 adapter_name,
                 lily_config.r,
                 scaling=lily_config.scaling,
-                lily_A=lily_A,
-                lily_B=lily_B,
-                num_A=lily_config.num_A,
+                stride_A=lily_config.stride_A,
                 num_B=lily_config.num_B,
                 init_weights=lily_config.init_weights,
             )
         else:
-            new_module = self._create_new_module(lily_config, adapter_name, target, lily_A, lily_B, **kwargs)
+            new_module = self._create_new_module(lily_config, adapter_name, target)
             if adapter_name not in self.active_adapters:
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
 
-    def _replace_module(self, parent, child_name, new_module, child):
-        setattr(parent, child_name, new_module)
-
-        # Unpack the original module wrapped by the child layer
-        if hasattr(child, "base_layer"):
-            child = child.base_layer
-
-        meta = torch.device("meta")
-        for name, module in new_module.named_modules():
-            if self.prefix in name:
-                if hasattr(child, "qweight"):
-                    weight = child.qweight
-                elif hasattr(child, "W_q"):
-                    weight = child.W_q
-                elif hasattr(child, "weight"):
-                    weight = child.weight
-                elif getattr(child, "in_proj_weight", None) is not None:
-                    weight = child.in_proj_weight
-                else:
-                    weight = next(child.parameters())
-                if not any(p.device == meta for p in module.parameters()):
-                    module.to(weight.device)
-
     @staticmethod
-    def _create_new_module(lily_config, adapter_name, target, lily_A, lily_B, **kwargs):
+    def _create_new_module(lily_config, adapter_name, target):
         if isinstance(target, BaseTunerLayer):
             target_base_layer = target.get_base_layer()
         else:
@@ -246,14 +95,77 @@ class LilyModel(BaseTuner):
                 adapter_name,
                 r=lily_config.r,
                 scaling=lily_config.scaling,
-                num_A=lily_config.num_A,
+                stride_A=lily_config.stride_A,
                 num_B=lily_config.num_B,
-                lily_A=lily_A,
-                lily_B=lily_B,
                 init_weights=lily_config.init_weights,
-                **kwargs,
             )
 
         raise NotImplementedError(
             f"Lily does not support target modules of type {type(target_base_layer)} yet."
         )
+
+    def _post_injection_hook(self, model: nn.Module, config: LilyConfig, adapter_name: str) -> None:
+        """
+        After all layers have been independently initialized, apply A/B sharing across layers.
+
+        A sharing: for each (target_module_suffix, weight_shape) group, consecutive blocks of
+        `stride_A` layers share the same A. The first layer in each block keeps its own A;
+        subsequent layers in the block have their lily_A replaced by the group leader's.
+
+        B sharing: all layers in the same (target_module_suffix, weight_shape) group share
+        the B from the very first layer in that group.
+
+        Both lily_A and lily_B are nn.Linear modules, so they move correctly with
+        model.to(device) via standard nn.Module parameter propagation.
+
+        Note: (target_module_suffix, weight_shape) is used as the group key rather than
+        target_module_suffix alone, to correctly handle architectures like UNet where the
+        same target key can appear with different shapes across layers.
+        """
+        stride_A = config.stride_A
+
+        # Collect all adapted LilyLayer modules in traversal order, grouped by
+        # (target_module_suffix, weight_shape).
+        # Maps (target_suffix, weight_shape) -> list of LilyLayer in traversal order.
+        target_to_layers: dict[tuple[str, torch.Size], list[LilyLayer]] = {}
+
+        for key, module in model.named_modules():
+            if not isinstance(module, LilyLayer):
+                continue
+            if adapter_name not in module.lily_A:
+                continue
+
+            base = module.get_base_layer()
+            shape = base.weight.shape  # (out_features, in_features)
+
+            # Find the longest matching target suffix for this key
+            matched_suffix = None
+            if isinstance(config.target_modules, str):
+                matched_suffix = config.target_modules
+            else:
+                for suffix in config.target_modules:
+                    if key.endswith(suffix):
+                        matched_suffix = suffix
+
+            if matched_suffix is None:
+                # Should not happen since inject_adapter already matched this layer
+                continue
+
+            group_key = (matched_suffix, shape)
+            if group_key not in target_to_layers:
+                target_to_layers[group_key] = []
+            target_to_layers[group_key].append(module)
+
+        # Apply A and B sharing for each (target_suffix, shape) group.
+        for (target_suffix, shape), layers in target_to_layers.items():
+            # B sharing: all layers share the first layer's B
+            shared_B = layers[0].lily_B[adapter_name]
+            for i, layer in enumerate(layers):
+                if i != 0:
+                    layer.lily_B[adapter_name] = shared_B
+
+                # A sharing: layers within the same stride_A block share the group leader's A.
+                # Group leader is the first layer in each block of stride_A consecutive layers.
+                group_idx = (i // stride_A) * stride_A
+                if i != group_idx:
+                    layer.lily_A[adapter_name] = layers[group_idx].lily_A[adapter_name]
