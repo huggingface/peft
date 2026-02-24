@@ -199,10 +199,14 @@ def get_peft_model_state_dict(
             to_return["base_model.vera_B." + adapter_name] = state_dict["base_model.vera_B." + adapter_name]
     elif config.peft_type == PeftType.TINYLORA:
         tinylora_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
-        # Add all tinylora keys except tinylora_v (which are references to shared model-level params)
-        # The tinylora_v appears both at model level (base_model.tinylora_v) and layer level
-        # (base_model.model.*.tinylora_v) - they're the same data, so only save model-level
-        to_return = {k: state_dict[k] for k in state_dict if tinylora_prefix in k and ".tinylora_v." not in k}
+        # Collect tinylora keys (A, B buffers) excluding:
+        # - tinylora_v: shared model-level params (handled separately below)
+        # - tinylora_P: projection buffers (conditionally saved based on save_projection)
+        to_return = {
+            k: state_dict[k]
+            for k in state_dict
+            if tinylora_prefix in k and ".tinylora_v." not in k and ".tinylora_P." not in k
+        }
         # Handle model-level shared v vectors
         # The keys have format "base_model.tinylora_v.{adapter_name}.{idx}"
         # We strip the adapter name for saving: "base_model.tinylora_v.{idx}"
@@ -211,7 +215,8 @@ def get_peft_model_state_dict(
             if k.startswith(adapter_v_prefix):
                 new_key = k.replace(adapter_v_prefix, "base_model.tinylora_v.")
                 to_return[new_key] = state_dict[k]
-        # Save projection tensors P if save_projection is True
+        # Save projection tensors P if save_projection is True; otherwise they'll be
+        # regenerated from projection_seed when loading
         if config.save_projection:
             for k in state_dict:
                 if ".tinylora_P." in k and adapter_name in k:

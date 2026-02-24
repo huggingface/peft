@@ -79,7 +79,8 @@ class TinyLoraModel(BaseTuner):
     def _pre_injection_hook(self, model: nn.Module, config: TinyLoraConfig, adapter_name: str) -> None:
         """Initialize shared trainable vectors on first adapter creation."""
         # Nested structure: tinylora_v[adapter_name][str(group_idx)] = nn.Parameter
-        self.tinylora_v = nn.ModuleDict({})
+        if not hasattr(self, "tinylora_v"):
+            self.tinylora_v = nn.ModuleDict({})
 
     def _build_target_key_mapping(self, config: TinyLoraConfig) -> dict[str, int]:
         """Build an ordered mapping from target module key to index.

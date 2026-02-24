@@ -89,6 +89,46 @@ class TinyLoraLayer(BaseTunerLayer):
                 adapter_names.update(attr.keys())
         return sorted(adapter_names)
 
+    def delete_adapter(self, adapter_name: str) -> None:
+        """Delete an adapter from the layer."""
+        # Delete direct v reference
+        if adapter_name in self._tinylora_v_ref:
+            del self._tinylora_v_ref[adapter_name]
+
+        # Delete from other params that use adapter name directly
+        for attr in self.other_param_names:
+            param_dict = getattr(self, attr, None)
+            if param_dict is not None and adapter_name in param_dict:
+                del param_dict[adapter_name]
+
+        # Delete r and u tracking
+        if adapter_name in self.r:
+            del self.r[adapter_name]
+        if adapter_name in self.u:
+            del self.u[adapter_name]
+
+        # Delete dropout layer
+        if adapter_name in self.tinylora_dropout:
+            del self.tinylora_dropout[adapter_name]
+
+        # Handle active adapters
+        if adapter_name in self.active_adapters:
+            active_adapters = self.active_adapters[:]
+            active_adapters.remove(adapter_name)
+            if active_adapters:
+                self.set_adapter(active_adapters)
+            else:
+                remaining_adapters = self._all_available_adapter_names()
+                if not remaining_adapters:
+                    self.set_adapter([])
+                else:
+                    new_active_adapter = remaining_adapters[0]
+                    warnings.warn(
+                        f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to "
+                        f"{new_active_adapter}."
+                    )
+                    self.set_adapter(new_active_adapter)
+
     def set_layer_idx(self, idx: int):
         """Set the layer index, used for deterministic seeding of projection matrices."""
         self._layer_idx = idx
@@ -344,46 +384,6 @@ class Linear(nn.Linear, TinyLoraLayer):
                 delta_weight = transpose(delta_weight, self.fan_in_fan_out)
                 self.get_base_layer().weight.data -= delta_weight
 
-    def delete_adapter(self, adapter_name: str) -> None:
-        """Delete an adapter from the layer."""
-        # Delete direct v reference
-        if adapter_name in self._tinylora_v_ref:
-            del self._tinylora_v_ref[adapter_name]
-
-        # Delete from other params that use adapter name directly
-        for attr in self.other_param_names:
-            param_dict = getattr(self, attr, None)
-            if param_dict is not None and adapter_name in param_dict:
-                del param_dict[adapter_name]
-
-        # Delete r and u tracking
-        if adapter_name in self.r:
-            del self.r[adapter_name]
-        if adapter_name in self.u:
-            del self.u[adapter_name]
-
-        # Delete dropout layer
-        if adapter_name in self.tinylora_dropout:
-            del self.tinylora_dropout[adapter_name]
-
-        # Handle active adapters
-        if adapter_name in self.active_adapters:
-            active_adapters = self.active_adapters[:]
-            active_adapters.remove(adapter_name)
-            if active_adapters:
-                self.set_adapter(active_adapters)
-            else:
-                remaining_adapters = self._all_available_adapter_names()
-                if not remaining_adapters:
-                    self.set_adapter([])
-                else:
-                    new_active_adapter = remaining_adapters[0]
-                    warnings.warn(
-                        f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to "
-                        f"{new_active_adapter}."
-                    )
-                    self.set_adapter(new_active_adapter)
-
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
 
@@ -581,41 +581,6 @@ class Embedding(nn.Module, TinyLoraLayer):
             if active_adapter in self.tinylora_A.keys():
                 delta_weight = self.get_delta_weight(active_adapter)
                 self.get_base_layer().weight.data -= delta_weight
-
-    def delete_adapter(self, adapter_name: str) -> None:
-        """Delete an adapter from the layer."""
-        if adapter_name in self._tinylora_v_ref:
-            del self._tinylora_v_ref[adapter_name]
-
-        for attr in self.other_param_names:
-            param_dict = getattr(self, attr, None)
-            if param_dict is not None and adapter_name in param_dict:
-                del param_dict[adapter_name]
-
-        if adapter_name in self.r:
-            del self.r[adapter_name]
-        if adapter_name in self.u:
-            del self.u[adapter_name]
-
-        if adapter_name in self.tinylora_dropout:
-            del self.tinylora_dropout[adapter_name]
-
-        if adapter_name in self.active_adapters:
-            active_adapters = self.active_adapters[:]
-            active_adapters.remove(adapter_name)
-            if active_adapters:
-                self.set_adapter(active_adapters)
-            else:
-                remaining_adapters = self._all_available_adapter_names()
-                if not remaining_adapters:
-                    self.set_adapter([])
-                else:
-                    new_active_adapter = remaining_adapters[0]
-                    warnings.warn(
-                        f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to "
-                        f"{new_active_adapter}."
-                    )
-                    self.set_adapter(new_active_adapter)
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         if self.disable_adapters:
