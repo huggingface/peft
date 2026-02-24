@@ -887,11 +887,8 @@ class LoraModel(BaseTuner):
 
         modules_to_save = getattr(peft_config, "modules_to_save", []) or []
         embed_layer_name = find_parameter_name_by_module(self.model, self.model.get_input_embeddings())
-        prefix, sep, suffix = embed_layer_name.partition(".")
-        if sep and "model" in prefix:
-            embed_layer_name = suffix
 
-        # the name suffix may already be included but we assume that adding the same module twice is not a problem
+        # the layer may already be included but we assume that adding the same module twice is not a problem
         if embed_layer_name not in modules_to_save:
             modules_to_save.append(embed_layer_name)
 

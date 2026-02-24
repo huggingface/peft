@@ -1233,7 +1233,9 @@ class BaseTuner(nn.Module, ABC):
         `peft_config` in place with any layers/adapters that needs to be tied
         """
         modules_to_save = set(getattr(peft_config, "modules_to_save", []) or [])
-        is_embedding_to_save = any(m in EMBEDDING_LAYER_NAMES for m in modules_to_save)
+        # `EMBEDDING_LAYER_NAMES` contains only the stripped name of the module
+        # eg: To get a match for model.embed_tokens, we need to extract `embed_tokens`
+        is_embedding_to_save = any(m.split(".")[-1] in EMBEDDING_LAYER_NAMES for m in modules_to_save)
 
         raw_target_modules = getattr(peft_config, "target_modules", None)
         if isinstance(raw_target_modules, str):
@@ -1242,7 +1244,9 @@ class BaseTuner(nn.Module, ABC):
             )
         else:
             target_modules = set(raw_target_modules or [])
-            is_embedding_in_target = any(m in EMBEDDING_LAYER_NAMES for m in target_modules)
+            # `EMBEDDING_LAYER_NAMES` contains only the stripped name of the module
+            # eg: To get a match for model.embed_tokens, we need to extract `embed_tokens`
+            is_embedding_in_target = any(m.split(".")[-1] in EMBEDDING_LAYER_NAMES for m in target_modules)
 
         tied_weight_keys = self._get_module_names_tied_with_embedding()
 
