@@ -22,7 +22,7 @@ from peft.tuners.tuners_utils import (
     BaseTunerLayer,
 )
 from peft.utils import TRANSFORMERS_MODELS_TO_LILY_TARGET_MODULES_MAPPING
-from ..tuners_utils import _maybe_include_all_linear_layers
+
 from .config import LilyConfig
 from .layer import LilyLayer, Linear
 

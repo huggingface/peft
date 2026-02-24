@@ -15,10 +15,10 @@
 from peft.utils import register_peft_method
 
 from .config import LilyConfig
-from .layer import Linear, LilyLayer
+from .layer import LilyLayer, Linear
 from .model import LilyModel
 
 
-__all__ = ["Linear", "LilyConfig", "LilyLayer", "LilyModel"]
+__all__ = ["LilyConfig", "LilyLayer", "LilyModel", "Linear"]
 
 register_peft_method(name="lily", config_cls=LilyConfig, model_cls=LilyModel, prefix="lily_", is_mixed_compatible=False)

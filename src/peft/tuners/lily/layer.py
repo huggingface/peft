@@ -13,15 +13,16 @@
 # limitations under the License.
 
 import math
+import warnings
 from typing import Any, Optional
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import einops
+import torch
+import torch.nn.functional as F
+from torch import nn
+
 from peft.tuners.tuners_utils import BaseTunerLayer
-from transformers.pytorch_utils import Conv1D
-import warnings
+
 
 class LilyLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
@@ -30,7 +31,7 @@ class LilyLayer(BaseTunerLayer):
     other_param_names: tuple[str, ...] = ("r", "scaling", "stride_A", "num_B")
     def __init__(
         self,
-        base_layer: nn.Module, 
+        base_layer: nn.Module,
         **kwargs
     ) -> None:
         self.base_layer = base_layer
@@ -62,7 +63,7 @@ class LilyLayer(BaseTunerLayer):
 
         self.in_features = in_features
         self.out_features = out_features
-    
+
     def update_layer(
         self,
         adapter_name,
@@ -81,30 +82,30 @@ class LilyLayer(BaseTunerLayer):
 
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
-        
+
         self.r[adapter_name] = r
         self.scaling[adapter_name] = scaling
-        
+
         # Actual trainble parameters
         self.lily_A[adapter_name] = lily_A if lily_A is not None else nn.Linear(self.in_features, r, bias=False)
         self.lily_B[adapter_name] = lily_B if lily_B is not None else nn.Linear(self.out_features, num_B * r, bias=False)
         self.lily_router[adapter_name] = nn.Linear(r, num_B, bias=False)
 
-        self.stride_A[adapter_name] = stride_A  
-        self.num_B[adapter_name] = num_B  
+        self.stride_A[adapter_name] = stride_A
+        self.num_B[adapter_name] = num_B
         self.reset_lily_parameters(adapter_name, init_weights=init_weights) # initialize the parameters
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_lily_parameters(self, adapter_name, init_weights: bool = True):
-        if adapter_name in self.lily_A.keys():
+        if adapter_name in self.lily_A:
             nn.init.kaiming_uniform_(self.lily_A[adapter_name].weight, a=math.sqrt(5))
             nn.init.kaiming_uniform_(self.lily_router[adapter_name].weight, a=math.sqrt(5))
             if not init_weights:
                 nn.init.kaiming_uniform_(self.lily_B[adapter_name].weight, a=math.sqrt(5))
             else:
                 nn.init.zeros_(self.lily_B[adapter_name].weight)
-    
+
 
 class Linear(nn.Module, LilyLayer):
     # Lily implemented in a dense layer
@@ -146,7 +147,7 @@ class Linear(nn.Module, LilyLayer):
                 The name of the adapter for which the delta weight should be computed.
         """
         raise NotImplementedError("This method is not supported for Lily.")
-    
+
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         raise NotImplementedError("This method is not supported for Lily.")
 
@@ -158,7 +159,7 @@ class Linear(nn.Module, LilyLayer):
 
         if self.disable_adapters or not self.active_adapters:
             return result
-        
+
         torch_result_dtype = result.dtype
 
         lily_A_keys = self.lily_A.keys()
@@ -183,7 +184,7 @@ class Linear(nn.Module, LilyLayer):
             result = result + (delta * scaling).to(torch_result_dtype)
 
         return result
-    
+
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "lily." + rep
