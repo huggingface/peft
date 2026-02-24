@@ -183,6 +183,12 @@ class LilyModel(BaseTuner):
             raise ValueError(f"Could not match key '{current_key}' to any target module.")
 
         base_layer = target.get_base_layer() if isinstance(target, LilyLayer) else target
+
+        if not isinstance(base_layer, torch.nn.Linear):
+            raise ValueError(
+                f"Target module '{current_key}' matched to '{matched_target}' is not a Linear layer, which is currently the only supported target for Lily. Found type {type(base_layer)} instead."
+            )
+        
         shape = base_layer.weight.shape
 
         # Look up stride, counter and matrices using adapter_name as the top-level key
