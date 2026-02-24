@@ -59,6 +59,13 @@ from ..utils import _get_submodules
 from ._buffer_dict import BufferDict
 
 
+warn_msg_weight_tying = (
+    "Model has `tie_word_embeddings=True` and a tied layer is part of the adapter, "
+    "but no implementation exists to tie the adapters. "
+    "This can lead to complications, for example when merging the adapter "
+    "or converting your model to formats other than safetensors. "
+    "Check the discussion here: https://github.com/huggingface/peft/issues/2777"
+)
 _torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5.0")
 _torch_supports_distributed = _torch_supports_dtensor and torch.distributed.is_available()
 
@@ -367,6 +374,26 @@ class BaseTuner(nn.Module, ABC):
                 The model that is going to be adapted.
         """
         pass
+
+    @staticmethod
+    def _check_tied_module_exists(peft_config: PeftConfig, key: str) -> bool | re.Match[str] | None:
+        """
+        A helper method to check if the passed module's key name matches any of the tied modules
+
+        Args:
+            config (`PeftConfig`):
+                A config to match target modules from.
+            key (`str`):
+                A key to search any matches in config.
+
+        Returns:
+            `bool`
+                True if key matches any tied modules from config, False if no match found.
+        """
+        target_modules_to_tie = getattr(peft_config, "target_modules_to_tie", []) or []
+        return key in target_modules_to_tie or any(
+            key.endswith(f".{target_key}") for target_key in target_modules_to_tie
+        )
 
     @staticmethod
     def _check_target_module_exists(peft_config: PeftConfig, key: str) -> bool | re.Match[str] | None:
@@ -704,6 +731,7 @@ class BaseTuner(nn.Module, ABC):
         excluded_modules = []
         unmatched_modules = []
         targeted_modules_from_peft_config: list[str] = []  # only relevant if state_dict is passed
+        targets_to_tie: list[str] = []
         # Note: If possible, all checks should be performed *at the start of this method*.
         # This way, we can raise early if something goes wrong, without leaving the model
         # in a bad (half-initialized) state.
@@ -794,6 +822,13 @@ class BaseTuner(nn.Module, ABC):
             if state_dict is None:
                 # normal mechanism: match the modules using the peft_config
                 result = self._check_target_module_exists(peft_config, key)
+                # If the module is a tied layer, then we skip injecting
+                # any adapter here and tie it later to the adapter of the source layer.
+                # In this loop we only add adapters to the source layer (eg: embed_tokens)
+                # Only applicable if `ensure_weight_tying = True` for LoraConfig
+                if self._check_tied_module_exists(peft_config, key):
+                    targets_to_tie.append(key)
+                    continue
                 if isinstance(result, _ExcludedModule):
                     excluded_modules.append(key)
                 elif not result:
@@ -814,6 +849,13 @@ class BaseTuner(nn.Module, ABC):
                 if key not in module_names:
                     unmatched_modules.append(key)
                 else:
+                    # If the module is a tied layer, then we skip injecting
+                    # any adapter here and tie it later to the adapter of the source layer.
+                    # In this loop we only add adapters to the source layer (eg: embed_tokens)
+                    # Only applicable if `ensure_weight_tying = True` for LoraConfig
+                    if self._check_tied_module_exists(peft_config, key):
+                        targets_to_tie.append(key)
+                        continue
                     self.targeted_module_names.append(key)
                     parent, target, target_name = _get_submodules(model, key)
                     self._check_target_module_compatiblity(peft_config, model, target_name)
@@ -832,6 +874,16 @@ class BaseTuner(nn.Module, ABC):
             self._inject_parameters(
                 peft_config=peft_config, model=model, adapter_name=adapter_name, low_cpu_mem_usage=low_cpu_mem_usage
             )
+
+        # Here we inject tied adapters for all the layers which were tied
+        # Only applicable if `ensure_weight_tying = True` for LoraConfig
+        for key in targets_to_tie:
+            self.targeted_module_names.append(key)
+            parent, target, target_name = _get_submodules(model, key)
+            self._check_target_module_compatiblity(peft_config, model, target_name)
+            ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
+            with ctx():
+                self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
 
         ####################
         # CHECK FOR ERRORS #
@@ -918,15 +970,6 @@ class BaseTuner(nn.Module, ABC):
                     f"target_parameters={peft_config.target_parameters} were set but no parameter was matched.",
                     RuntimeWarning,
                 )
-
-        tied_target_modules = self._get_tied_target_modules(model=model)
-        if tied_target_modules:
-            warnings.warn(
-                f"Model with `tie_word_embeddings=True` and the {tied_target_modules=} are part of the adapter. "
-                "This can lead to complications, for example when merging the adapter "
-                "or converting your model to formats other than safetensors. "
-                "See for example https://github.com/huggingface/peft/issues/2018."
-            )
 
         ################
         # HOUSEKEEPING #
@@ -1167,43 +1210,62 @@ class BaseTuner(nn.Module, ABC):
     def _get_module_names_tied_with_embedding(self) -> list[str]:
         return _get_module_names_tied_with_embedding(self)
 
-    def _add_modules_to_tie(self, peft_config, tied_weight_keys):
+    def _add_modules_to_save_to_tie(self, peft_config, tied_weight_keys):
         """
         This method adds modules to tie to `peft_config` so that those modules can be tied downstream. By default this
         method raises a warning, and each tuner class extending `BaseTuner` can choose to implement this.
+
+        Check `peft.tuners.lora.LoraModel._add_modules_to_save_to_tie` for an example.
         """
-        msg = (
-            "Model has `tie_word_embeddings=True` and a tied layer is part of the adapter, "
-            "but no implementation exists to tie the adapters. "
-            "This can lead to complications, for example when merging the adapter "
-            "or converting your model to formats other than safetensors. "
-            "Check the discussion here: https://github.com/huggingface/peft/issues/2777"
-        )
-        warnings.warn(msg)
+        warnings.warn(warn_msg_weight_tying)
+
+    def _add_targets_to_tie(self, peft_config, tied_weight_keys):
+        """
+        This method adds targets to tie to `peft_config` so that those modules can be tied downstream. By default this
+        method raises a warning, and each tuner class extending `BaseTuner` can choose to implement this.
+
+        Check `peft.tuners.lora.LoraModel._add_targets_to_tie` for an example.
+        """
+        warnings.warn(warn_msg_weight_tying)
 
     def _check_tied_modules(self, model: nn.Module, peft_config):
         """
-        Checks if any of the tied layers are targetted via `modules_to_save`. Updates the `peft_config.modules_to_tie`
-        with any layers that needs to be tied
+        Checks if any of the tied layers are targetted via `modules_to_save` or `target_modules`. Updates the
+        `peft_config` in place with any layers/adapters that needs to be tied
         """
         modules_to_save = set(getattr(peft_config, "modules_to_save", []) or [])
-        is_embedding_to_save = any(m in EMBEDDING_LAYER_NAMES for m in modules_to_save)
+        # `EMBEDDING_LAYER_NAMES` contains only the stripped name of the module
+        # eg: To get a match for model.embed_tokens, we need to extract `embed_tokens`
+        is_embedding_to_save = any(m.split(".")[-1] in EMBEDDING_LAYER_NAMES for m in modules_to_save)
+
+        raw_target_modules = getattr(peft_config, "target_modules", None)
+        if isinstance(raw_target_modules, str):
+            is_embedding_in_target = any(
+                match_target_against_key(raw_target_modules, m) for m in EMBEDDING_LAYER_NAMES
+            )
+        else:
+            target_modules = set(raw_target_modules or [])
+            # `EMBEDDING_LAYER_NAMES` contains only the stripped name of the module
+            # eg: To get a match for model.embed_tokens, we need to extract `embed_tokens`
+            is_embedding_in_target = any(m.split(".")[-1] in EMBEDDING_LAYER_NAMES for m in target_modules)
 
         tied_weight_keys = self._get_module_names_tied_with_embedding()
 
         if getattr(peft_config, "ensure_weight_tying", False):
-            if is_embedding_to_save and tied_weight_keys:
-                self._add_modules_to_tie(peft_config, tied_weight_keys)
-
-            elif not is_embedding_to_save and tied_weight_keys:
-                warnings.warn(
-                    "You have requested `ensure_weight_tying`, but no tied modules are added in `modules_to_save`"
-                )
-
-            elif not tied_weight_keys:
+            if tied_weight_keys:
+                if is_embedding_to_save:
+                    self._add_modules_to_save_to_tie(peft_config, tied_weight_keys)
+                elif is_embedding_in_target:
+                    self._add_targets_to_tie(peft_config, tied_weight_keys)
+                else:
+                    warnings.warn(
+                        "You have requested `ensure_weight_tying`, but no tied modules are added in either "
+                        "`modules_to_save` or `target_modules`"
+                    )
+            else:
                 warnings.warn("You have requested `ensure_weight_tying`, but no tied modules were found in the model")
 
-        elif is_embedding_to_save and tied_weight_keys:
+        elif (is_embedding_to_save or is_embedding_in_target) and tied_weight_keys:
             if hasattr(peft_config, "ensure_weight_tying"):
                 msg = (
                     "Model has `tie_word_embeddings=True` and a tied layer is part of the adapter, "
@@ -1915,6 +1977,24 @@ def replicate_layers(model: nn.Module, layer_map: list[tuple[int, int]]):
         raise ValueError("Unexpected model type, need to handle post-processing of layers.")
     if hasattr(model.config, "num_hidden_layers"):  # Common to Llama, Bert, Falcon.
         model.config.num_hidden_layers = len(new_layers)
+
+
+def find_parameter_name_by_module(model: nn.Module, reference_module: nn.Module) -> str:
+    """
+    Find layer name from the model by matching the reference module to the model named modules
+
+    Args:
+        model (nn.Module): The model with named modules
+        reference_module (nn.Module): The reference module to find
+
+    Returns:
+        str: Name of the layer
+    """
+    for n, m in model.named_modules():
+        if m is reference_module:
+            return n
+
+    return ""
 
 
 ###############################

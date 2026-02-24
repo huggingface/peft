@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import operator
+import re
 import warnings
 from contextlib import contextmanager
 from dataclasses import replace
@@ -30,6 +31,7 @@ from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
+    find_parameter_name_by_module,
     get_device_map,
     replicate_layers,
 )
@@ -203,6 +205,17 @@ class LoraModel(BaseTuner):
         r = lora_config.rank_pattern.get(r_key, lora_config.r)
         alpha = lora_config.alpha_pattern.get(alpha_key, lora_config.lora_alpha)
 
+        # Checks if the target is marked as a tied layer
+        # If true, we add the reference to lora adapters of embedding layer in `tied_adapter`
+        is_tied = target_name in (getattr(lora_config, "target_modules_to_tie", []) or [])
+        tied_adapter = {}
+        if is_tied:
+            tied_module = self.model.get_input_embeddings()
+            emb_A = tied_module.lora_embedding_A[adapter_name]
+            emb_B = tied_module.lora_embedding_B[adapter_name]
+
+            tied_adapter = {"lora_A": emb_B.t(), "lora_B": emb_A.t()}
+
         kwargs = {
             "r": r,
             "lora_alpha": alpha,
@@ -211,6 +224,7 @@ class LoraModel(BaseTuner):
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
             "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
             "parameter_name": parameter_name,
+            "tied_adapter": tied_adapter,
         }
 
         # for torchao merging, we need the get_apply_tensor_subclass from the quantization config
@@ -859,8 +873,80 @@ class LoraModel(BaseTuner):
 
         return tensors_lora
 
-    def _add_modules_to_tie(self, peft_config, tied_weight_keys):
-        modules_to_save = set(getattr(peft_config, "modules_to_save", []) or [])
-        missing_keys = set(tied_weight_keys) - modules_to_save
+    def _add_modules_to_save_to_tie(self, peft_config: LoraConfig, tied_weight_keys: list[str]):
+        """
+        Add embedding layer to `modules_to_save` and remove rest of the tied layers from `module_to_save`. Maintain a
+        separate set for layers to be tied in `peft_config.tied_weights_keys`.
 
-        peft_config.modules_to_tie = missing_keys
+        Args:
+            peft_config (LoraConfig) -- The configuration of the Lora model.
+            tied_weight_keys (list[str]) -- Contains the layers tied to the embedding layer.
+        """
+        tied_weight_keys = set(tied_weight_keys)
+        peft_config.modules_to_tie = tied_weight_keys
+
+        modules_to_save = getattr(peft_config, "modules_to_save", []) or []
+        embed_layer_name = find_parameter_name_by_module(self.model, self.model.get_input_embeddings())
+
+        # the layer may already be included but we assume that adding the same module twice is not a problem
+        if embed_layer_name not in modules_to_save:
+            modules_to_save.append(embed_layer_name)
+
+        # Iterate over `tied_weight_keys` which are
+        # fully qualified keys and remove matching keys from
+        # `modules_to_save`. It will only remove first encounter
+        # in `module_to_save`, which should be safe, because `tied_weight_keys`
+        # is a unique set of keys. These keys are removed because all the
+        # tied keys are handled in a separate flow
+        # outside of the usual `modules_to_save` flow
+        # See: peft.utils.other.set_additional_trainable_modules for details
+        for key in tied_weight_keys:
+            for m in modules_to_save:
+                if re.match(rf"(^|.*\.){m}($|\..*)", key):
+                    modules_to_save.remove(m)
+                    break
+
+        peft_config.modules_to_save = modules_to_save
+
+    def _add_targets_to_tie(self, peft_config: LoraConfig, tied_weight_keys: list[str]):
+        """
+        Add embedding layer to `target_modules` and remove rest of the tied layers from `target_modules`. Maintain a
+        separate set for layers to be tied in `peft_config.target_modules_to_tie`
+
+        Args:
+            peft_config (LoraConfig) -- The configuration of the Lora model.
+            tied_weight_keys (list[str]) -- Contains the layers tied to the embedding layer.
+        """
+        tied_weight_keys = set(tied_weight_keys)
+        peft_config.target_modules_to_tie = tied_weight_keys
+
+        raw_target_modules = getattr(peft_config, "target_modules", None)
+
+        embed_layer_name = find_parameter_name_by_module(self.model, self.model.get_input_embeddings())
+
+        if isinstance(raw_target_modules, str):
+            # The way weight tying is handled for adapters, we always want to add
+            # lora adapters to the input embedding layer (embed_tokens)
+            # instead of output embedding layer.
+            raw_target_modules = rf"(?:{raw_target_modules}|^{re.escape(embed_layer_name)}$)"
+            peft_config.target_modules = raw_target_modules
+            return
+
+        target_modules = set(raw_target_modules or [])
+        target_modules.add(embed_layer_name)
+
+        # Iterate over `tied_weight_keys` which are
+        # fully qualified keys and remove matching keys from
+        # `target_modules`. It will only remove first encounter
+        # in `target_modules`, which should be safe, because `tied_weight_keys`
+        # is a unique set of keys. These keys are removed because all the
+        # tied keys are handled in a separate flow
+        # outside of the usual `target_modules` flow
+        # See: peft.tuners.tuners_utils.BaseTuner.inject_adapter for details
+        for key in tied_weight_keys:
+            for m in target_modules:
+                if re.match(rf"(^|.*\.){m}($|\..*)", key):
+                    target_modules.remove(m)
+                    break
+
+        peft_config.target_modules = target_modules
