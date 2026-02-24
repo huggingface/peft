@@ -38,7 +38,7 @@ jobs:
   tests:
     needs: check_code_quality
     # dependabot updates (which don't require approval for CI to run) shouldn't trigger unit tests
-    if: !(github.event_name == 'pull_request' && github.actor == 'dependabot[bot]')
+    if: ${{ !(github.event_name == 'pull_request' && github.actor == 'dependabot[bot]') }}
     strategy:
       fail-fast: false
       matrix:
