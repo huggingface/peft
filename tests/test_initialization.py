@@ -53,6 +53,7 @@ from peft import (
     PeftModelForTokenClassification,
     PeftWarning,
     PrefixTuningConfig,
+    PsoftConfig,
     PromptTuningConfig,
     RoadConfig,
     VBLoRAConfig,
@@ -2253,6 +2254,81 @@ class TestGraLoRAInitialization:
         with pytest.raises(ValueError, match=re.escape(msg)):
             get_peft_model(model, config)
 
+class TestPsoftInitialization:
+    """Basic sanity tests for the PSOFT tuner."""
+
+    torch_device = infer_device()
+    
+    def get_model(self, bias=True):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 30, bias=bias)
+                self.lin1 = nn.Linear(30, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP(bias=bias).to(self.torch_device).eval()
+
+    def test_psoft_svd_lowrank_niter_warns_when_backend_not_lowrank_and_user_changes_value(self):
+        default_niter = PsoftConfig.__dataclass_fields__["psoft_svd_lowrank_niter"].default
+
+        msg = re.escape("`psoft_svd_lowrank_niter` is only used when `psoft_svd='lowrank'`.")
+        with pytest.warns(UserWarning, match=msg):
+            _ = PsoftConfig(
+                target_modules=["lin0"],
+                psoft_svd="full",
+                psoft_svd_lowrank_niter=default_niter + 1,
+            )
+
+    def test_psoft_svd_lowrank_niter_no_warning_when_backend_not_lowrank_and_value_is_default(self, recwarn):
+        default_niter = PsoftConfig.__dataclass_fields__["psoft_svd_lowrank_niter"].default
+        _ = PsoftConfig(
+            target_modules=["lin0"],
+            psoft_svd="full",
+            psoft_svd_lowrank_niter=default_niter,
+        )
+        assert len(recwarn) == 0
+
+    def test_cayley_neumann_terms_warns_when_use_cayley_neumann_false_and_user_changes_terms(self):
+        default_terms = PsoftConfig.__dataclass_fields__["num_cayley_neumann_terms"].default
+
+        msg = re.escape("`num_cayley_neumann_terms` is only used when `use_cayley_neumann=True`.")
+        with pytest.warns(UserWarning, match=msg):
+            _ = PsoftConfig(
+                target_modules=["lin0"],
+                use_cayley_neumann=False,
+                num_cayley_neumann_terms=default_terms + 1,
+            )
+
+    def test_cayley_neumann_eps_warns_when_use_cayley_neumann_false_and_eps_is_set(self):
+        msg = re.escape("`cayley_neumann_eps` is only used when `use_cayley_neumann=True`.")
+        with pytest.warns(UserWarning, match=msg):
+            _ = PsoftConfig(
+                target_modules=["lin0"],
+                use_cayley_neumann=False,
+                cayley_neumann_eps=0.9,
+            )
+
+    def test_cayley_neumann_terms_raises_when_use_cayley_neumann_true_and_terms_non_positive(self):
+        with pytest.raises(ValueError, match=re.escape("`num_cayley_neumann_terms` must be a positive integer")):
+            _ = PsoftConfig(
+                target_modules=["lin0"],
+                use_cayley_neumann=True,
+                num_cayley_neumann_terms=0,
+            )
+
+    @pytest.mark.parametrize("bad_eps", [-0.1, 0.0, 1.0, 1.1])
+    def test_cayley_neumann_eps_raises_when_use_cayley_neumann_true_and_eps_out_of_range(self, bad_eps):
+        with pytest.raises(ValueError, match=re.escape("`cayley_neumann_eps` must be in (0, 1)")):
+            _ = PsoftConfig(
+                target_modules=["lin0"],
+                use_cayley_neumann=True,
+                cayley_neumann_eps=bad_eps,
+            )
 
 class TestNoInfiniteRecursionDeepspeed:
     # see #1892 for details

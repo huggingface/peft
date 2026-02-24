@@ -49,7 +49,7 @@ from peft import (
     PromptEncoderConfig,
     PromptTuningConfig,
     PromptTuningInit,
-    PSOFTConfig,
+    PsoftConfig,
     PveraConfig,
     RoadConfig,
     ShiraConfig,
@@ -324,7 +324,7 @@ ALL_CONFIGS = [
         },
     ),
     (
-        PSOFTConfig,
+        PsoftConfig,
         {
             "task_type": "CAUSAL_LM",
             "r": 4,
@@ -345,7 +345,7 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         C3AConfig,
         MissConfig,
         DeloraConfig,
-        PSOFTConfig,
+        PsoftConfig,
     ]:
         pytest.skip("Skipping BOFT/HRA/OFT/Road/SHiRA/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel")
 

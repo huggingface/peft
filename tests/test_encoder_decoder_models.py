@@ -33,7 +33,7 @@ from peft import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
-    PSOFTConfig,
+    PsoftConfig,
     PveraConfig,
     RoadConfig,
     ShiraConfig,
@@ -240,7 +240,7 @@ ALL_CONFIGS = [
         },
     ),
     (
-        PSOFTConfig,
+        PsoftConfig,
         {
             "task_type": "SEQ_2_SEQ_LM",
             "r": 4,

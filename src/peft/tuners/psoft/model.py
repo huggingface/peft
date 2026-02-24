@@ -21,32 +21,32 @@ from torch import nn
 from peft.tuners.tuners_utils import BaseTuner, get_device_map
 from peft.utils import TRANSFORMERS_MODELS_TO_PSOFT_TARGET_MODULES_MAPPING
 
-from .config import PSOFTConfig
-from .layer import PSOFTLayer, dispatch_default
+from .config import PsoftConfig
+from .layer import PsoftLayer, dispatch_default
 
 
-class PSOFTModel(BaseTuner):
+class PsoftModel(BaseTuner):
     """
     PSOFT (Efficient Orthogonal Fine-Tuning with Principal Subspace Adaptation) model.
 
     Inserts an r*r orthogonal (or scaled) transformation R between low-rank A and B:
-    ΔW = B @ (R-I) @ A. Use init_psoft_weights="psoft_init" to initialize A/B from SVD and freeze them,
+    ΔW = B @ (R-I) @ A. Use ab_svd_init="psoft_init" to initialize A/B from SVD and freeze them,
     training only R (and optional magnitude vectors).
 
     Args:
         model: The model to adapt.
-        config: PSOFTConfig.
+        config: PsoftConfig.
         adapter_name: Adapter name, default "default".
         low_cpu_mem_usage: Create empty adapter weights on meta device.
     """
 
     prefix: str = "psoft_"
-    tuner_layer_cls = PSOFTLayer
+    tuner_layer_cls = PsoftLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_PSOFT_TARGET_MODULES_MAPPING
 
     def _create_and_replace(
         self,
-        peft_config: PSOFTConfig,
+        peft_config: PsoftConfig,
         adapter_name: str,
         target: nn.Module,
         target_name: str,
@@ -63,7 +63,7 @@ class PSOFTModel(BaseTuner):
             "parameter_name": parameter_name,
         }
 
-        if isinstance(target, PSOFTLayer):
+        if isinstance(target, PsoftLayer):
             target.update_layer(adapter_name, config=peft_config, **kwargs)
             return
 
@@ -72,27 +72,10 @@ class PSOFTModel(BaseTuner):
 
         if adapter_name not in self.active_adapters:
             new_module.requires_grad_(False)
-
         self._replace_module(parent, target_name, new_module, target)
 
-    def _replace_module(self, parent: nn.Module, child_name: str, new_module: nn.Module, child: nn.Module) -> None:
-        setattr(parent, child_name, new_module)
-
-        # if child wraps base_layer, unwrap
-        if hasattr(child, "base_layer"):
-            child = child.base_layer
-
-        # minimal: move adapter params to child's weight device
-        if hasattr(child, "weight"):
-            w = child.weight
-        else:
-            w = next(child.parameters())
-        for name, module in new_module.named_modules():
-            if self.prefix in name and any(p.device.type != "meta" for p in module.parameters(recurse=True)):
-                module.to(w.device)
-
     @staticmethod
-    def _create_new_module(psoft_config: PSOFTConfig, adapter_name: str, target: nn.Module, **kwargs) -> nn.Module:
+    def _create_new_module(psoft_config: PsoftConfig, adapter_name: str, target: nn.Module, **kwargs) -> nn.Module:
         new_module = dispatch_default(target, adapter_name, config=psoft_config, **kwargs)
         if new_module is None:
             raise ValueError(

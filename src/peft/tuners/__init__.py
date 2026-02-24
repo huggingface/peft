@@ -51,7 +51,7 @@ from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparamet
 from .poly import PolyConfig, PolyModel
 from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
 from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
-from .psoft import PSOFTConfig, PSOFTModel
+from .psoft import PsoftConfig, PsoftModel
 from .pvera import PveraConfig, PveraModel
 from .randlora import RandLoraConfig, RandLoraModel
 from .road import RoadConfig, RoadModel
@@ -110,8 +110,8 @@ __all__ = [
     "OFTModel",
     "OSFConfig",
     "OSFModel",
-    "PSOFTConfig",
-    "PSOFTModel",
+    "PsoftConfig",
+    "PsoftModel",
     "PolyConfig",
     "PolyModel",
     "PrefixEncoder",

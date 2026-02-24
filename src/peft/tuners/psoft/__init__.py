@@ -14,11 +14,11 @@
 
 from peft.utils import register_peft_method
 
-from .config import PSOFTConfig
-from .layer import Linear, OrthLayer, PSOFTLayer
-from .model import PSOFTModel
+from .config import PsoftConfig
+from .layer import Linear, PsoftLayer
+from .model import PsoftModel
 
 
-__all__ = ["Linear", "OrthLayer", "PSOFTConfig", "PSOFTLayer", "PSOFTModel"]
+__all__ = ["Linear", "PsoftConfig", "PsoftLayer", "PsoftModel"]
 
-register_peft_method(name="psoft", config_cls=PSOFTConfig, model_cls=PSOFTModel, prefix="psoft_")
+register_peft_method(name="psoft", config_cls=PsoftConfig, model_cls=PsoftModel, prefix="psoft_")

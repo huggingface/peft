@@ -31,7 +31,7 @@ from peft import (
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
-    PSOFTConfig,
+    PsoftConfig,
     RoadConfig,
     ShiraConfig,
     VBLoRAConfig,
@@ -224,7 +224,7 @@ ALL_CONFIGS = [
         },
     ),
     (
-        PSOFTConfig,
+        PsoftConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
             "r": 4,

@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import re
 import warnings
 from typing import Any, Optional
 
@@ -25,8 +24,9 @@ from torch import svd_lowrank
 from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 from peft.utils.integrations import gather_params_ctx
 from peft.utils.other import transpose
+from peft.tuners._buffer_dict import BufferDict
 
-from .config import PSOFTConfig
+from .config import PsoftConfig
 
 
 class OrthLayer(nn.Module):
@@ -41,7 +41,7 @@ class OrthLayer(nn.Module):
         orth: bool = True,
         mag_b: bool = True,
         mag_a: bool = True,
-        use_cayley_neumann: bool = True,
+        use_cayley_neumann: bool = False,
         num_cayley_neumann_terms: int = 5,
         cayley_neumann_eps: Optional[float] = None,
     ):
@@ -125,6 +125,7 @@ class OrthLayer(nn.Module):
             Q = Q * (eps / (norm + 1e-12))
         return Q
 
+    # R = (I+Q)(I-Q)^(-1)
     def get_matrix(self) -> torch.Tensor:
         # non-orth case
         if not self.orth:
@@ -165,7 +166,7 @@ class OrthLayer(nn.Module):
                     Q_power = Q_power @ Q
                     R.add_(Q_power)
         else:
-            R = torch.linalg.solve(id_mat + Q, id_mat - Q, left=False)
+            R = torch.linalg.solve(id_mat - Q, id_mat + Q, left=False) # R = (I+Q)(I-Q)^(-1)
 
         if self.mag_b and self.vector_b is not None:
             R = self.vector_b[:, None] * R
@@ -177,8 +178,18 @@ class OrthLayer(nn.Module):
 
         return R
 
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            f"size={self.size}, orth={self.orth}, "
+            f"use_cayley_neumann={self.use_cayley_neumann}, "
+            f"num_cayley_neumann_terms={int(self.num_cayley_neumann_terms)}, "
+            f"cayley_neumann_eps={self.cayley_neumann_eps}, "
+            f"mag_a={self.mag_a}, mag_b={self.mag_b}"
+            f")"
+        )
 
-class PSOFTLayer(BaseTunerLayer):
+class PsoftLayer(BaseTunerLayer):
     adapter_layer_names: tuple[str, ...] = ("psoft_R",)
     other_param_names: tuple[str, ...] = (
         "r",
@@ -187,7 +198,7 @@ class PSOFTLayer(BaseTunerLayer):
         "psoft_dropout",
         "psoft_svd",
         "psoft_svd_lowrank_niter",
-        "init_psoft_weights",
+        "ab_svd_init",
     )
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
@@ -201,14 +212,14 @@ class PSOFTLayer(BaseTunerLayer):
         self.psoft_dropout = nn.ModuleDict({})
         self.psoft_svd: dict[str, str] = {}
         self.psoft_svd_lowrank_niter: dict[str, int] = {}
-        self.init_psoft_weights: dict[str, Optional[str]] = {}
+        self.ab_svd_init: dict[str, Optional[str]] = {}
 
         # per-adapter trainable module
         self.psoft_R = nn.ModuleDict({})
 
         # per-adapter cache state
-        self._psoft_cache_built: dict[str, bool] = {}
-        self._psoft_cache_names: dict[str, tuple[str, str]] = {}  # adapter -> (A_buf_name, B_buf_name)
+        self._psoft_A_cache = BufferDict(persistent=False)
+        self._psoft_B_cache = BufferDict(persistent=False)
         self._psoft_meta_warned: set[str] = set()
 
         self.merged_adapters: list[str] = []
@@ -222,63 +233,20 @@ class PSOFTLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-    @staticmethod
-    def _sanitize_adapter_name(adapter_name: str) -> str:
-        return re.sub(r"[^0-9a-zA-Z_]", "_", adapter_name)
-
-    def _get_cache_buffers(self, adapter_name: str) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
-        if adapter_name not in self._psoft_cache_names:
+    def _get_psoft_ab_cache_buffers(self, adapter_name: str):
+        if adapter_name not in self._psoft_A_cache or adapter_name not in self._psoft_B_cache:
             return None, None
-        a_name, b_name = self._psoft_cache_names[adapter_name]
-        return getattr(self, a_name, None), getattr(self, b_name, None)
+        return self._psoft_A_cache[adapter_name], self._psoft_B_cache[adapter_name]
 
-    def _set_cache_buffers(self, adapter_name: str, A: torch.Tensor, B: torch.Tensor) -> None:
-        safe = self._sanitize_adapter_name(adapter_name)
-        a_name = f"_psoft_A_cache_{safe}"
-        b_name = f"_psoft_B_cache_{safe}"
+    def _set_psoft_ab_cache_buffers(self, adapter_name: str, A: torch.Tensor, B: torch.Tensor) -> None:
+        self._psoft_A_cache[adapter_name] = A
+        self._psoft_B_cache[adapter_name] = B
 
-        if adapter_name not in self._psoft_cache_names:
-            self.register_buffer(a_name, A, persistent=False)
-            self.register_buffer(b_name, B, persistent=False)
-            self._psoft_cache_names[adapter_name] = (a_name, b_name)
-        else:
-            setattr(self, a_name, A)
-            setattr(self, b_name, B)
+    def update_layer(self, adapter_name: str, config: PsoftConfig, **kwargs: Any) -> None:   
 
-    def _ensure_psoft_cache(self, adapter_name: str, *, allow_skip_on_meta: bool, caller: str) -> bool:
-        if self._psoft_cache_built.get(adapter_name, False):
-            return True
+        ab_svd_init = config.ab_svd_init
+        init_weights = config.init_weights
 
-        init_type = self.init_psoft_weights.get(adapter_name, None)
-        if not isinstance(init_type, str):
-            raise RuntimeError(
-                f"PSOFT cache not built for adapter {adapter_name!r} and `init_psoft_weights` is not set "
-                f"(caller={caller})."
-            )
-
-        base_w = self.get_base_layer().weight
-        if getattr(base_w, "is_meta", False):
-            if allow_skip_on_meta:
-                # warn once per adapter to avoid spamming
-                if adapter_name not in self._psoft_meta_warned:
-                    warnings.warn(
-                        f"PSOFT cache for adapter {adapter_name!r} is not built because base weights are on meta "
-                        f"device (caller={caller}). Adapter update will be skipped until weights are materialized.",
-                        UserWarning,
-                    )
-                    self._psoft_meta_warned.add(adapter_name)
-                return False
-            raise RuntimeError(
-                f"PSOFT cache for adapter {adapter_name!r} cannot be built because base weights are on meta device "
-                f"(caller={caller}). Materialize the model weights first."
-            )
-
-        with gather_params_ctx(base_w):
-            self._build_cache_once(adapter_name=adapter_name, init_type=init_type)
-        return True
-
-
-    def update_layer(self, adapter_name: str, config: PSOFTConfig, **kwargs: Any) -> None:
         r = int(config.r)
 
         self.fan_in_fan_out = config.fan_in_fan_out
@@ -291,7 +259,7 @@ class PSOFTLayer(BaseTunerLayer):
             nn.Dropout(p=config.psoft_dropout) if config.psoft_dropout > 0.0 else nn.Identity()
         )
 
-        self.init_psoft_weights[adapter_name] = config.init_psoft_weights
+        self.ab_svd_init[adapter_name] = config.ab_svd_init
         self.psoft_svd[adapter_name] = config.psoft_svd
         self.psoft_svd_lowrank_niter[adapter_name] = config.psoft_svd_lowrank_niter
 
@@ -305,23 +273,19 @@ class PSOFTLayer(BaseTunerLayer):
             cayley_neumann_eps=config.cayley_neumann_eps,
         )
 
-        do_init = getattr(config, "init_weights", True)
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.psoft_R[adapter_name].reset_parameters(init_weights=do_init)
+        self.psoft_R[adapter_name].reset_parameters(init_weights=init_weights)
         self.psoft_R[adapter_name].requires_grad_(True)
 
-        # Try to build A/B cache eagerly; OK to skip if base weights are still meta.
-        self._ensure_psoft_cache(adapter_name, allow_skip_on_meta=True, caller="update_layer")
-        
+        with gather_params_ctx(self.get_base_layer().weight):
+            self._build_psoft_ab_cache_buffers(adapter_name, ab_svd_init)
+
         self.set_adapter([adapter_name])
 
     # Adapted from the asymmetric SVD used in PiSSA
     # (PEFT implementation: https://github.com/huggingface/peft/blob/main/src/peft/tuners/lora/layer.py) #L316
-    def _build_cache_once(self, adapter_name: str, init_type: str) -> None:
-        if self._psoft_cache_built.get(adapter_name, False):
-            return
-
-        with torch.inference_mode(False), torch.no_grad():
+    def _build_psoft_ab_cache_buffers(self, adapter_name: str, init_type: str) -> None:
+        with torch.no_grad():
             base = self.get_base_layer()
             weight = base.weight
             dtype = weight.dtype
@@ -349,13 +313,12 @@ class PSOFTLayer(BaseTunerLayer):
                 A = torch.diag(s_sqrt) @ Uhr  # (r, in)
                 B = Vr @ torch.diag(s_sqrt)  # (out, r)
             else:
-                raise ValueError(f"Unknown init_psoft_weights: {init_type}")
+                raise ValueError(f"Unknown ab_svd_init: {init_type}")
 
             A = A.contiguous().detach()
             B = B.contiguous().detach()
 
-            self._set_cache_buffers(adapter_name, A, B)
-            self._psoft_cache_built[adapter_name] = True
+            self._set_psoft_ab_cache_buffers(adapter_name, A, B)
 
     def _compute_svd_factors(self, weight: torch.Tensor, r: int, *, svd_mode: str, niter: int):
         # weight: (out, in) fp32
@@ -374,16 +337,16 @@ class PSOFTLayer(BaseTunerLayer):
         return Vr, Sr, Uhr
 
 
-class Linear(nn.Module, PSOFTLayer):
+class Linear(nn.Module, PsoftLayer):
     def __init__(
         self,
         base_layer: nn.Module,
         adapter_name: str,
-        config: PSOFTConfig,
+        config: PsoftConfig,
         **kwargs: Any,
     ) -> None:
         super().__init__()
-        PSOFTLayer.__init__(self, base_layer, **kwargs)
+        PsoftLayer.__init__(self, base_layer, **kwargs)
 
         self.fan_in_fan_out = config.fan_in_fan_out
         self._active_adapter = adapter_name
@@ -400,9 +363,7 @@ class Linear(nn.Module, PSOFTLayer):
         if adapter_name not in self.psoft_R:
             raise KeyError(f"Adapter {adapter_name} not found in PSOFT layer.")
 
-        self._ensure_psoft_cache(adapter_name, allow_skip_on_meta=False, caller="get_delta_weight")
-
-        A, B = self._get_cache_buffers(adapter_name)
+        A, B = self._get_psoft_ab_cache_buffers(adapter_name)
         base_w = self.get_base_layer().weight
         device = base_w.device
         out_dtype = base_w.dtype
@@ -455,6 +416,14 @@ class Linear(nn.Module, PSOFTLayer):
 
             self.merged_adapters.append(active_adapter)
 
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        # Conversion to LoRA is only supported if the adapter exists
+        # and its A/B cache buffers are available.
+        if adapter_name not in self.psoft_R:
+            return False
+        A, B = self._get_psoft_ab_cache_buffers(adapter_name)
+        return A is not None and B is not None
+
     def unmerge(self) -> None:
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.", UserWarning)
@@ -476,38 +445,37 @@ class Linear(nn.Module, PSOFTLayer):
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            return self.base_layer(x, *args, **kwargs)
+            result = self.base_layer(x, *args, **kwargs)
+        elif self.merged:
+            result = self.base_layer(x, *args, **kwargs)
+        else:
+            result = self.base_layer(x, *args, **kwargs)
+            torch_result_dtype = result.dtype
 
-        if self.merged:
-            return self.base_layer(x, *args, **kwargs)
+            psoft_keys = self.psoft_R.keys()
+            for active_adapter in self.active_adapters:
+                if active_adapter not in psoft_keys:
+                    continue
 
-        result = self.base_layer(x, *args, **kwargs)
-        torch_result_dtype = result.dtype
+                A, B = self._get_psoft_ab_cache_buffers(active_adapter)
 
-        psoft_keys = self.psoft_R.keys()
-        for active_adapter in self.active_adapters:
-            if active_adapter not in psoft_keys:
-                continue
+                dropout = self.psoft_dropout[active_adapter]
+                scaling = self.scaling[active_adapter]
+                R_layer = self.psoft_R[active_adapter]
 
-            self._ensure_psoft_cache(active_adapter, allow_skip_on_meta=False, caller="forward")
+                x_cast = self._cast_input_dtype(x, A.dtype)
+                x_d = dropout(x_cast)
 
-            A, B = self._get_cache_buffers(active_adapter)
+                A_c = A.to(device=x_d.device, dtype=x_d.dtype)
+                B_c = B.to(device=x_d.device, dtype=x_d.dtype)
 
-            dropout = self.psoft_dropout[active_adapter]
-            scaling = self.scaling[active_adapter]
-            R_layer = self.psoft_R[active_adapter]
+                xa = x_d @ A_c.t()
+                xr = R_layer(xa)
 
-            x_cast = self._cast_input_dtype(x, A.dtype)
-            x_d = dropout(x_cast)
-
-            A_c = A.to(device=x_d.device, dtype=x_d.dtype)
-            B_c = B.to(device=x_d.device, dtype=x_d.dtype)
-
-            xa = x_d @ A_c.t()
-            xr = R_layer(xa)
-
-            delta_y = (xr - xa) @ B_c.t()
-            result = result + (delta_y * scaling).to(torch_result_dtype)
+                delta_y = (xr - xa) @ B_c.t()
+                result = result + (delta_y * scaling)
+                
+            result = result.to(torch_result_dtype)
 
         return result
 
@@ -518,7 +486,7 @@ class Linear(nn.Module, PSOFTLayer):
 def dispatch_default(
     target: nn.Module,
     adapter_name: str,
-    config: PSOFTConfig,
+    config: PsoftConfig,
     parameter_name: Optional[str] = None,
     **kwargs,
 ) -> Optional[nn.Module]:

@@ -59,18 +59,18 @@ After applying PSOFT:
 ```python
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from peft import PSOFTConfig, get_peft_model
+from peft import PsoftConfig, get_peft_model
 
 # Load base model
 model_id = "facebook/opt-125m"
 model = AutoModelForCausalLM.from_pretrained(model_id)
 
 # Configure PSOFT
-config = PSOFTConfig(
+config = PsoftConfig(
     r=32,                                   # the dimension of trainable matrix R, 
     psoft_alpha=32,                         # scaling factor (typically set to r in PSOFT),
     target_modules=["q_proj", "v_proj"],    # target attention projection layers
-    init_psoft_weights="psoft_init",        # principal subspace initialization
+    ab_svd_init="psoft_init",        # principal subspace initialization
     psoft_svd="full",                       # SVD method
     psoft_orth=True,                        # enable orthogonal R (Cayley parameterization)
     psoft_mag_a=True,                       # enable tunable vector alpha
@@ -104,12 +104,12 @@ optimizer.zero_grad(set_to_none=True)
 (PSOFT-SO: PSOFT with strict orthogonality)
 
 ```python
-config = PSOFTConfig(psoft_orth=True,psoft_mag_a=False,psoft_mag_b=False)
+config = PsoftConfig(psoft_orth=True,psoft_mag_a=False,psoft_mag_b=False)
 ```
 
 (PSOFT-RO: PSOFT with relaxed orthogonality)
 ```python
-config = PSOFTConfig(psoft_orth=True,psoft_mag_a=True,psoft_mag_b=True)
+config = PsoftConfig(psoft_orth=True,psoft_mag_a=True,psoft_mag_b=True)
 ```
 
 ### Best Practices
@@ -120,10 +120,10 @@ config = PSOFTConfig(psoft_orth=True,psoft_mag_a=True,psoft_mag_b=True)
 5. **Cayley–Neumann Approximation**: When the rank is large, enabling the Cayley–Neumann approximation can significantly improve computational efficiency, while the benefit is less pronounced for small ranks. In practice, a small number of Neumann series terms (typically `5`) usually provides a good balance between accuracy and efficiency.
 
 
-## PSOFTConfig
+## PsoftConfig
 
-[[autodoc]] tuners.psoft.config.PSOFTConfig
+[[autodoc]] tuners.psoft.config.PsoftConfig
 
-## PSOFTModel
+## PsoftModel
 
-[[autodoc]] tuners.psoft.model.PSOFTModel
+[[autodoc]] tuners.psoft.model.PsoftModel
