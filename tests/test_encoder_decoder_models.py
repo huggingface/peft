@@ -20,7 +20,6 @@ from transformers import AutoModelForSeq2SeqLM, AutoModelForTokenClassification
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
-    BoneConfig,
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
@@ -34,6 +33,7 @@ from peft import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    PveraConfig,
     RoadConfig,
     ShiraConfig,
     TaskType,
@@ -67,14 +67,6 @@ ALL_CONFIGS = [
         BOFTConfig,
         {
             "target_modules": None,
-            "task_type": "SEQ_2_SEQ_LM",
-        },
-    ),
-    (
-        BoneConfig,
-        {
-            "target_modules": None,
-            "r": 2,
             "task_type": "SEQ_2_SEQ_LM",
         },
     ),
@@ -213,6 +205,14 @@ ALL_CONFIGS = [
             "d_initial": 0.1,
             "save_projection": True,
             "bias": "none",
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        PveraConfig,
+        {
+            "r": 8,
+            "pvera_dropout": 0.05,
             "task_type": "SEQ_2_SEQ_LM",
         },
     ),

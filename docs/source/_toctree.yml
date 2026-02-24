@@ -116,6 +116,8 @@
       title: Layernorm tuning
     - local: package_reference/vera
       title: VeRA
+    - local: package_reference/pvera
+      title: PVeRA
     - local: package_reference/fourierft
       title: FourierFT
     - local: package_reference/gralora
@@ -126,8 +128,6 @@
       title: HRA
     - local: package_reference/cpt
       title: CPT
-    - local: package_reference/bone
-      title: Bone
     - local: package_reference/trainable_tokens
       title: Trainable Tokens
     - local: package_reference/randlora

@@ -32,7 +32,6 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
-    BoneConfig,
     C3AConfig,
     CartridgeConfig,
     CPTConfig,
@@ -50,6 +49,7 @@ from peft import (
     PromptEncoderConfig,
     PromptTuningConfig,
     PromptTuningInit,
+    PveraConfig,
     RoadConfig,
     ShiraConfig,
     TaskType,
@@ -99,14 +99,6 @@ ALL_CONFIGS = [
         {
             "task_type": "CAUSAL_LM",
             "target_modules": None,
-        },
-    ),
-    (
-        BoneConfig,
-        {
-            "task_type": "CAUSAL_LM",
-            "target_modules": None,
-            "r": 2,
         },
     ),
     (
@@ -301,6 +293,14 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PveraConfig,
+        {
+            "r": 8,
+            "pvera_dropout": 0.05,
+            "task_type": "CAUSAL_LM",
+        },
+    ),
+    (
         C3AConfig,
         {
             "task_type": "CAUSAL_LM",
@@ -328,7 +328,6 @@ ALL_CONFIGS = [
 def _skip_if_not_conv1d_supported(model_id, config_cls):
     if "GPT2LMHeadModel" in model_id and config_cls in [
         BOFTConfig,
-        BoneConfig,
         HRAConfig,
         OFTConfig,
         OSFConfig,
@@ -338,22 +337,7 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         MissConfig,
         DeloraConfig,
     ]:
-        pytest.skip("Skipping BOFT/HRA/OFT/Bone/Road/SHiRA/C3A/MiSS/OSF/DeLoRA for GPT2LMHeadModel")
-
-
-def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
-    if "GPT2LMHeadModel" in model_id and config_cls in [
-        AdaLoraConfig,
-        BOFTConfig,
-        HRAConfig,
-        OFTConfig,
-        BoneConfig,
-        C3AConfig,
-        RoadConfig,
-        MissConfig,
-        DeloraConfig,
-    ]:
-        pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone/MiSS/DeLoRA for GPT2LMHeadModel")
+        pytest.skip("Skipping BOFT/HRA/OFT/Road/SHiRA/C3A/MiSS/OSF/DeLoRA for GPT2LMHeadModel")
 
 
 def _skip_alora_no_activation(config_cls, config_kwargs):
@@ -662,7 +646,6 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_unload_adapter(self, model_id, config_cls, config_kwargs):
-        _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls)
         _skip_if_not_conv1d_supported(model_id, config_cls)
         _skip_alora_no_activation(config_cls, config_kwargs)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
