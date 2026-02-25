@@ -405,7 +405,7 @@ The tables below summarize expected behavior.
 | Yes                     | `True`                | `modules_to_save=["embed_tokens"]` or `["lm_head"]` | Wrap tied layers and keep wrappers tied                      |
 | No                      | `False`               | `modules_to_save=["embed_tokens", "lm_head"]`       | Treat as separate                                            |
 | No                      | `True`                | `modules_to_save=["embed_tokens", "lm_head"]`       | Warn, then treat as separate                                 |
-| Yes                     | `False`               | `modules_to_save=["embed_tokens", "lm_head"]`       | Treat as separate                                            |
+| Yes                     | `False`               | `modules_to_save=["embed_tokens", "lm_head"]`       | Warn, then treat as separate                                            |
 | Yes                     | `True`                | `modules_to_save=["embed_tokens", "lm_head"]`       | Keep `ModulesToSaveWrapper`s tied                            |
 
 #### `target_modules`
@@ -418,7 +418,7 @@ The tables below summarize expected behavior.
 | Yes                     | `True`                | `target_modules=["embed_tokens"]` or `["lm_head"]` | Keep LoRA adapters tied                    |
 | No                      | `False`               | `target_modules=["embed_tokens", "lm_head"]`       | Treat as separate                          |
 | No                      | `True`                | `target_modules=["embed_tokens", "lm_head"]`       | Warn, then treat as separate               |
-| Yes                     | `False`               | `target_modules=["embed_tokens", "lm_head"]`       | Treat as separate                          |
+| Yes                     | `False`               | `target_modules=["embed_tokens", "lm_head"]`       | Warn, then treat as separate                          |
 | Yes                     | `True`                | `target_modules=["embed_tokens", "lm_head"]`       | Keep LoRA adapters tied                    |
 
 #### `trainable_token_indices`
