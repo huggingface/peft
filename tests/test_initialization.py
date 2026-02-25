@@ -53,8 +53,8 @@ from peft import (
     PeftModelForTokenClassification,
     PeftWarning,
     PrefixTuningConfig,
-    PsoftConfig,
     PromptTuningConfig,
+    PsoftConfig,
     RoadConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -2254,11 +2254,12 @@ class TestGraLoRAInitialization:
         with pytest.raises(ValueError, match=re.escape(msg)):
             get_peft_model(model, config)
 
+
 class TestPsoftInitialization:
     """Basic sanity tests for the PSOFT tuner."""
 
     torch_device = infer_device()
-    
+
     def get_model(self, bias=True):
         class MLP(nn.Module):
             def __init__(self, bias=True):
@@ -2329,6 +2330,7 @@ class TestPsoftInitialization:
                 use_cayley_neumann=True,
                 cayley_neumann_eps=bad_eps,
             )
+
 
 class TestNoInfiniteRecursionDeepspeed:
     # see #1892 for details

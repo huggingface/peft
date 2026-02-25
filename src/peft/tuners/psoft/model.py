@@ -29,9 +29,9 @@ class PsoftModel(BaseTuner):
     """
     PSOFT (Efficient Orthogonal Fine-Tuning with Principal Subspace Adaptation) model.
 
-    Inserts an r*r orthogonal (or scaled) transformation R between low-rank A and B:
-    ΔW = B @ (R-I) @ A. Use ab_svd_init="psoft_init" to initialize A/B from SVD and freeze them,
-    training only R (and optional magnitude vectors).
+    Inserts an r*r orthogonal (or scaled) transformation R between low-rank A and B: ΔW = B @ (R-I) @ A. Use
+    ab_svd_init="psoft_init" to initialize A/B from SVD and freeze them, training only R (and optional magnitude
+    vectors).
 
     Args:
         model: The model to adapt.

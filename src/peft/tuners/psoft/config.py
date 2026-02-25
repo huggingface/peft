@@ -27,16 +27,16 @@ class PsoftConfig(PeftConfig):
     """
     Configuration for PSOFT (Efficient Orthogonal Fine-Tuning with Principal Subspace Adaptation).
 
-    PSOFT inserts an r*r orthogonal transformation R between low-rank matrices A and B,
-    so the low-rank update is ΔW = B @ (R-I) @ A. Only R (and optional tunable vectors) are trained;
-    A and B are initialized with psoft_init (SVD-based, row-orthogonal A) and frozen.
+    PSOFT inserts an r*r orthogonal transformation R between low-rank matrices A and B, so the low-rank update is ΔW =
+    B @ (R-I) @ A. Only R (and optional tunable vectors) are trained; A and B are initialized with psoft_init
+    (SVD-based, row-orthogonal A) and frozen.
 
     Args:
         r (`int`):
-            Defaults to 32. PSOFT rank (r) controls the adapter capacity through an r*r transformation R.
-            Smaller ranks 32-128 are typically sufficient for simple tasks, More complex tasks may benefit from 64-256,
-            increasing expressiveness at the cost of additional parameters and computation.
-            See the paper for empirically validated settings: https://openreview.net/forum?id=FSHrinMArK.
+            Defaults to 32. PSOFT rank (r) controls the adapter capacity through an r*r transformation R. Smaller ranks
+            32-128 are typically sufficient for simple tasks, More complex tasks may benefit from 64-256, increasing
+            expressiveness at the cost of additional parameters and computation. See the paper for empirically
+            validated settings: https://openreview.net/forum?id=FSHrinMArK.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
@@ -56,42 +56,36 @@ class PsoftConfig(PeftConfig):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
             `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
         ab_svd_init (`Literal["psoft_init", "pissa_init"]`):
-            Defaults to 'psoft_init'.
-            Initialization strategy for A and B used to construct the principal subspace in PSOFT.
-            'psoft_init': SVD-based initialization with row-orthogonal A, ensuring strict orthogonality (PSOFT).
+            Defaults to 'psoft_init'. Initialization strategy for A and B used to construct the principal subspace in
+            PSOFT. 'psoft_init': SVD-based initialization with row-orthogonal A, ensuring strict orthogonality (PSOFT).
             'pissa_init': SVD-based initialization with symmetric A and B (standard PiSSA).
         psoft_svd (`Literal["full", "lowrank"]`):
-            Defaults to 'full'.
-            SVD backend for initialization: 'full' uses torch.linalg.svd; 'lowrank' uses torch.svd_lowrank.
+            Defaults to 'full'. SVD backend for initialization: 'full' uses torch.linalg.svd; 'lowrank' uses
+            torch.svd_lowrank.
         psoft_svd_lowrank_niter (`int`):
-            Only used when psoft_svd='lowrank'.
-            Defaults to 10. Number of power iterations used by torch.svd_lowrank when psoft_svd='lowrank'.
+            Only used when psoft_svd='lowrank'. Defaults to 10. Number of power iterations used by torch.svd_lowrank
+            when psoft_svd='lowrank'.
         psoft_orth (`bool`):
-            Defaults to 'True'.
-            If True, constrains R to be orthogonal via Cayley parameterization, preserving the geometric relationships
-            among column of the pre-trained weight vectors.
-            If False, R is a free matrix without orthogonality constraints.
+            Defaults to 'True'. If True, constrains R to be orthogonal via Cayley parameterization, preserving the
+            geometric relationships among column of the pre-trained weight vectors. If False, R is a free matrix
+            without orthogonality constraints.
         psoft_mag_b (`bool`):
-            Defaults to 'True'.
-            If True, learns a diagonal scaling vector on the 'output' side of R. Commonly paired with psoft_mag_a
-            to increase task adaptability, with slight distortion to the pre-trained geometry.
+            Defaults to 'True'. If True, learns a diagonal scaling vector on the 'output' side of R. Commonly paired
+            with psoft_mag_a to increase task adaptability, with slight distortion to the pre-trained geometry.
         psoft_mag_a (`bool`):
-            Defaults to 'True'.
-            If True, learns a diagonal scaling vector on the 'input' side of R. Commonly paired with psoft_mag_b
-            to increase task adaptability, with slight distortion to the pre-trained geometry.
+            Defaults to 'True'. If True, learns a diagonal scaling vector on the 'input' side of R. Commonly paired
+            with psoft_mag_b to increase task adaptability, with slight distortion to the pre-trained geometry.
         use_cayley_neumann (`bool`):
-            Defaults to 'False'.
-            Whether to use the Cayley-Neumann formulation of PSOFT or not. Set to True to improve computational
-            efficiency but comes at costs of bigger approximation error for orthogonality.
+            Defaults to 'False'. Whether to use the Cayley-Neumann formulation of PSOFT or not. Set to True to improve
+            computational efficiency but comes at costs of bigger approximation error for orthogonality.
         num_cayley_neumann_terms (`int`):
-            Defaults to 5. Only used when use_cayley_neumann=True.
-            Number of Cayley-Neumann terms to use. Higher number results in less approximation error for orthogonality.
+            Defaults to 5. Only used when use_cayley_neumann=True. Number of Cayley-Neumann terms to use. Higher number
+            results in less approximation error for orthogonality.
         cayley_neumann_eps (`optional[float]`):
-            Defaults to 'None'. Only used when use_cayley_neumann=True.
-            Optional Frobenius-norm bound for the generator matrix Q in the Cayley-Neumann approximation.
-            If None (default), no rescaling is applied.
-            If set to a value in (0, 1) (e.g., 0.9), Q is rescaled whenever ||Q||_F exceeds the threshold
-            to improve numerical stability. See https://spherelab.ai/oftv2/ for details.
+            Defaults to 'None'. Only used when use_cayley_neumann=True. Optional Frobenius-norm bound for the generator
+            matrix Q in the Cayley-Neumann approximation. If None (default), no rescaling is applied. If set to a value
+            in (0, 1) (e.g., 0.9), Q is rescaled whenever ||Q||_F exceeds the threshold to improve numerical stability.
+            See https://spherelab.ai/oftv2/ for details.
         init_weights (`bool`):
             Defaults to 'True'. Whether to initialize the weights of the PSOFT layers with their default
             initialization. Don't change this setting, except if you know exactly what you're doing.

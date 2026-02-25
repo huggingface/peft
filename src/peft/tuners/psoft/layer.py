@@ -30,8 +30,7 @@ from .config import PsoftConfig
 
 class OrthLayer(nn.Module):
     """
-    r*r orthogonal transformation R used in PSOFT between A and B.
-    Forward: output = input @ R.T
+    r*r orthogonal transformation R used in PSOFT between A and B. Forward: output = input @ R.T
     """
 
     def __init__(
@@ -353,8 +352,7 @@ class Linear(nn.Module, PsoftLayer):
 
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         """
-        ΔW = scaling * B (R - id_mat) A
-        Returns in base weight layout (respecting fan_in_fan_out).
+        ΔW = scaling * B (R - id_mat) A Returns in base weight layout (respecting fan_in_fan_out).
         """
         if adapter_name not in self.psoft_R:
             raise KeyError(f"Adapter {adapter_name} not found in PSOFT layer.")
