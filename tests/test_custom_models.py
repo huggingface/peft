@@ -632,7 +632,7 @@ TEST_CASES = [
         "Embedding + transformers Conv1D 1 TinyLoRA",
         "EmbConv1D",
         TinyLoraConfig,
-        {"target_modules": ["conv1d"], "r": 2, "u": 16},
+        {"target_modules": ["conv1d"], "r": 2, "u": 16, "init_v_bound": 0.5},
     ),
     #############
     #########
