@@ -387,6 +387,64 @@ To give a bit of an indication how much VRAM can be saved, a rudimentary compari
 | VRAM      |        15,562 MB |   15,581MB |     ~16,500MB    |
 | Influence |         6 tokens | all tokens |       all tokens |
 
+### Weight tying
+
+Many causal LMs use **weight tying**, where two or more weights share the same underlying parameters. In the most common case, the input embedding weights (`embed_tokens`) and output projection weights (`lm_head`) share the same tensor. This is because it reduces parameters and usually preserves model quality.
+
+It's not always obvious how PEFT deals with these tied weights when they are targeted for fine-tuning. For LoRA, the `ensure_weight_tying` on the [`LoraConfig`] controls whether PEFT should explicitly keep adapter-side updates tied for those layers. In practice, this can affect `modules_to_save`, `target_modules`, and `trainable_token_indices`. Note that this logic partially relies on convention when it comes to naming the layers (`"embed_tokens"`, `"lm_head"`) and proper working cannot be guaranteed if those conventions are not used.
+
+The tables below summarize expected behavior.
+
+#### `modules_to_save`
+
+| Base model weights tied | `ensure_weight_tying` | `LoraConfig` shape                                  | Behavior                                                     |
+|-------------------------|-----------------------|-----------------------------------------------------|--------------------------------------------------------------|
+| No                      | `False`               | `modules_to_save=["embed_tokens"]` or `["lm_head"]` | Add `ModulesToSaveWrapper` on selected layer only            |
+| No                      | `True`                | `modules_to_save=["embed_tokens"]` or `["lm_head"]` | Warn, then add `ModulesToSaveWrapper` on selected layer only |
+| Yes                     | `False`               | `modules_to_save=["embed_tokens"]` or `["lm_head"]` | Treat as separate                                            |
+| Yes                     | `True`                | `modules_to_save=["embed_tokens"]` or `["lm_head"]` | Wrap tied layers and keep wrappers tied                      |
+| No                      | `False`               | `modules_to_save=["embed_tokens", "lm_head"]`       | Treat as separate                                            |
+| No                      | `True`                | `modules_to_save=["embed_tokens", "lm_head"]`       | Warn, then treat as separate                                 |
+| Yes                     | `False`               | `modules_to_save=["embed_tokens", "lm_head"]`       | Treat as separate                                            |
+| Yes                     | `True`                | `modules_to_save=["embed_tokens", "lm_head"]`       | Keep `ModulesToSaveWrapper`s tied                            |
+
+#### `target_modules`
+
+| Base model weights tied | `ensure_weight_tying` | `LoraConfig` shape                                 | Behavior                                   |
+|-------------------------|-----------------------|----------------------------------------------------|--------------------------------------------|
+| No                      | `False`               | `target_modules=["embed_tokens"]` or `["lm_head"]` | Add LoRA on selected layer only            |
+| No                      | `True`                | `target_modules=["embed_tokens"]` or `["lm_head"]` | Warn, then add LoRA on selected layer only |
+| Yes                     | `False`               | `target_modules=["embed_tokens"]` or `["lm_head"]` | Treat as separate                          |
+| Yes                     | `True`                | `target_modules=["embed_tokens"]` or `["lm_head"]` | Keep LoRA adapters tied                    |
+| No                      | `False`               | `target_modules=["embed_tokens", "lm_head"]`       | Treat as separate                          |
+| No                      | `True`                | `target_modules=["embed_tokens", "lm_head"]`       | Warn, then treat as separate               |
+| Yes                     | `False`               | `target_modules=["embed_tokens", "lm_head"]`       | Treat as separate                          |
+| Yes                     | `True`                | `target_modules=["embed_tokens", "lm_head"]`       | Keep LoRA adapters tied                    |
+
+#### `trainable_token_indices`
+
+For trainable tokens, we have the additional complication that even if the LM head and embeddings are tied, as a user I may want to fine-tune *different* tokens on them. In the example table below, we thus differentiate between fine-tuning the same and fine-tuning different tokens.
+
+| Base model weights tied | `ensure_weight_tying` | `LoraConfig` shape                                                    | Behavior                                       |
+|-------------------------|-----------------------|-----------------------------------------------------------------------|------------------------------------------------|
+| No                      | `False`               | `trainable_token_indices=[1, 2, 3]`                                   | Trainable tokens on embeddings only            |
+| No                      | `True`                | `trainable_token_indices=[1, 2, 3]`                                   | Warn, then trainable tokens on embeddings only |
+| Yes                     | `False`               | `trainable_token_indices=[1, 2, 3]`                                   | Tied trainable tokens                          |
+| Yes                     | `True`                | `trainable_token_indices=[1, 2, 3]`                                   | Tied trainable tokens                          |
+| No                      | `False`               | `trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [1, 2]}` | Treat as separate                              |
+| No                      | `True`                | `trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [1, 2]}` | Warn, then treat as separate                   |
+| Yes                     | `False`               | `trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [1, 2]}` | Tied trainable tokens                          |
+| Yes                     | `True`                | `trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [1, 2]}` | Tied trainable tokens                          |
+| No                      | `False`               | `trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [3, 4]}` | Treat as separate                              |
+| No                      | `True`                | `trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [3, 4]}` | Warn, then treat as separate                   |
+| Yes                     | `False`               | `trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [3, 4]}` | Treat as separate                              |
+| Yes                     | `True`                | `trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [3, 4]}` | Error                                          |
+
+For users, this means:
+
+- In general, if you want to fine-tune weights that are tied and want to keep them tied, pass `ensure_weight_tying=True`.
+- If your base model's weights are untied, `ensure_weight_tying=True` cannot force tying and only warns.
+- For `trainable_token_indices`, tied layers must use the same token indices when `ensure_weight_tying=True`.
 
 ## Optimizers
 
