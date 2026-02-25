@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import copy
+import warnings
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -24,6 +25,8 @@ from transformers import (
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
     LlavaForConditionalGeneration,
+    OPTConfig,
+    OPTForCausalLM,
 )
 
 from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model
@@ -633,3 +636,62 @@ class TestGetModuleNamesTiedWithEmbedding:
             modules = peft_model._get_module_names_tied_with_embedding()
 
             assert expected == modules
+
+
+class TestUnloadCleanup:
+    """Test that unload() and merge_and_unload() properly clean up peft_config from the model.
+
+    See https://github.com/huggingface/peft/issues/3025
+    """
+
+    @staticmethod
+    def _create_model():
+        config = OPTConfig(
+            hidden_size=32,
+            num_hidden_layers=2,
+            num_attention_heads=2,
+            ffn_dim=64,
+            vocab_size=100,
+            max_position_embeddings=64,
+        )
+        return OPTForCausalLM(config)
+
+    def test_unload_removes_peft_config(self):
+        """After unload(), the base model should not have a peft_config attribute."""
+        model = self._create_model()
+        config = LoraConfig(init_lora_weights=False)
+        peft_model = get_peft_model(model, config)
+
+        # peft_config should exist on the base model after wrapping
+        base_model = peft_model.get_base_model()
+        assert hasattr(base_model, "peft_config")
+
+        model = peft_model.unload()
+        assert not hasattr(model, "peft_config")
+
+    def test_merge_and_unload_removes_peft_config(self):
+        """After merge_and_unload(), the base model should not have a peft_config attribute."""
+        model = self._create_model()
+        config = LoraConfig(init_lora_weights=False)
+        peft_model = get_peft_model(model, config)
+
+        model = peft_model.merge_and_unload()
+        assert not hasattr(model, "peft_config")
+
+    def test_unload_then_rewrap_no_warning(self):
+        """After unload(), calling get_peft_model() again should not emit warnings."""
+
+        model = self._create_model()
+        config = LoraConfig(init_lora_weights=False)
+        peft_model = get_peft_model(model, config)
+        model = peft_model.unload()
+
+        # Re-wrapping after unload should work cleanly without warnings
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+            peft_model = get_peft_model(model, LoraConfig(init_lora_weights=False))
+
+        peft_warnings = [
+            w for w in caught_warnings if "peft_config" in str(w.message) or "second time" in str(w.message)
+        ]
+        assert len(peft_warnings) == 0, f"Unexpected PEFT warnings after unload: {peft_warnings}"
