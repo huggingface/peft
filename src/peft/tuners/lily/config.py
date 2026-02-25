@@ -35,13 +35,11 @@ class LilyConfig(PeftConfig):
             trade-off.
         stride_A (`int`):
             The number of consecutive layers that share one A adapter. For example, if `stride_A=4`, every 4 adjacent
-            layers share the same A adapter, resulting in `total_layers / stride_A` distinct A adapters in total. This
-            is more user-friendly than specifying the number of A adapters directly, as it does not require you to know
-            the total number of layers beforehand. The A adapter compresses the input into a low-rank representation of
-            size `r`. For best results, `stride_A` should evenly divide the total number of layers in your model.
-            Suggested values: `2`, `3`, or `4` (i.e. sharing every 2, 3, or 4 layers). Keeping `stride_A` large (fewer
-            distinct A adapters) and increasing `r` instead leads to better performance than the opposite trade-off
-            (small `stride_A`, small `r`). Setting `stride_A=1` means every layer has its own A adapter.
+            layers share the same A adapter, resulting in `total_layers / stride_A` distinct A adapters in total. The A
+            adapter compresses the input into a low-rank representation of size `r`. `stride_A` should be no less than
+            1. Suggested values: `2`, `3`, or `4` (i.e. sharing every 2, 3, or 4 layers). Keeping `stride_A` large
+            (fewer distinct A adapters) and increasing `r` instead leads to better performance than the opposite
+            trade-off (small `stride_A`, small `r`). Setting `stride_A=1` means every layer has its own A adapter.
         num_B (`int`):
             The number of shared B adapters. Unlike A adapters (which are grouped by layer), all B adapters are shared
             globally across every layer. For each forward pass, a router computes a weighted combination of all `num_B`
@@ -103,10 +101,9 @@ class LilyConfig(PeftConfig):
             "help": (
                 "The number of consecutive layers that share one A adapter. For example, if `stride_A=4`, "
                 "every 4 adjacent layers share the same A adapter, resulting in `total_layers / stride_A` "
-                "distinct A adapters in total. This is more user-friendly than specifying the number of A "
-                "adapters directly, as it does not require you to know the total number of layers beforehand. "
+                "distinct A adapters in total."
                 "The A adapter compresses the input into a low-rank representation of size `r`. "
-                "For best results, `stride_A` should evenly divide the total number of layers in your model. "
+                "`stride_A` should be no less than 1."
                 "Suggested values: `2`, `3`, or `4` (i.e. sharing every 2, 3, or 4 layers). "
                 "Keeping `stride_A` large (fewer distinct A adapters) and increasing `r` instead leads to "
                 "better performance than the opposite trade-off (small `stride_A`, small `r`). "
