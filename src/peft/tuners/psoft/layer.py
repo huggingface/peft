@@ -18,13 +18,12 @@ import warnings
 from typing import Any, Optional
 
 import torch
-import torch.nn as nn
-from torch import svd_lowrank
+from torch import nn, svd_lowrank
 
+from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 from peft.utils.integrations import gather_params_ctx
 from peft.utils.other import transpose
-from peft.tuners._buffer_dict import BufferDict
 
 from .config import PsoftConfig
 
@@ -106,16 +105,14 @@ class OrthLayer(nn.Module):
         else:
             compute_dtype = input.dtype
 
-        out = (input.to(compute_dtype) @ R.to(compute_dtype).t()).to(input.dtype)
-        return out
+        return (input.to(compute_dtype) @ R.to(compute_dtype).t()).to(input.dtype)
 
     # Adapted from the Cayley/Neumann-based orthogonal parametrization used in OFT v2
     # (PEFT implementation: https://github.com/huggingface/peft/blob/main/src/peft/tuners/oft/layer.py) #L104
     def _skew_symmetric(self) -> torch.Tensor:
         Q = torch.zeros((self.size, self.size), device=self.weight.device, dtype=self.weight.dtype)
         Q = Q.index_put((self.rows, self.cols), self.weight)
-        Q = Q - Q.transpose(0, 1)
-        return Q
+        return Q - Q.transpose(0, 1)
 
     # Adapted from the Cayley/Neumann-based orthogonal parametrization used in OFT v2
     # (PEFT implementation: https://github.com/huggingface/peft/blob/main/src/peft/tuners/oft/layer.py) #L160
@@ -166,7 +163,7 @@ class OrthLayer(nn.Module):
                     Q_power = Q_power @ Q
                     R.add_(Q_power)
         else:
-            R = torch.linalg.solve(id_mat - Q, id_mat + Q, left=False) # R = (I+Q)(I-Q)^(-1)
+            R = torch.linalg.solve(id_mat - Q, id_mat + Q, left=False)  # R = (I+Q)(I-Q)^(-1)
 
         if self.mag_b and self.vector_b is not None:
             R = self.vector_b[:, None] * R
@@ -188,6 +185,7 @@ class OrthLayer(nn.Module):
             f"mag_a={self.mag_a}, mag_b={self.mag_b}"
             f")"
         )
+
 
 class PsoftLayer(BaseTunerLayer):
     adapter_layer_names: tuple[str, ...] = ("psoft_R",)
@@ -241,7 +239,7 @@ class PsoftLayer(BaseTunerLayer):
         self._psoft_A_cache[adapter_name] = A
         self._psoft_B_cache[adapter_name] = B
 
-    def update_layer(self, adapter_name: str, config: PsoftConfig, **kwargs: Any) -> None:   
+    def update_layer(self, adapter_name: str, config: PsoftConfig, **kwargs: Any) -> None:
         ab_svd_init = config.ab_svd_init
         init_weights = config.init_weights
 
@@ -469,7 +467,7 @@ class Linear(nn.Module, PsoftLayer):
 
                 delta_y = (xr - xa) @ B_c.t()
                 result = result + (delta_y * scaling)
-                
+
             result = result.to(torch_result_dtype)
 
         return result

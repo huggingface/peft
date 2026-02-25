@@ -14,13 +14,13 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
 
-import warnings
 
 @dataclass
 class PsoftConfig(PeftConfig):
@@ -63,37 +63,37 @@ class PsoftConfig(PeftConfig):
         psoft_svd (`Literal["full", "lowrank"]`):
             Defaults to 'full'.
             SVD backend for initialization: 'full' uses torch.linalg.svd; 'lowrank' uses torch.svd_lowrank.
-        psoft_svd_lowrank_niter (`int`): 
+        psoft_svd_lowrank_niter (`int`):
             Only used when psoft_svd='lowrank'.
             Defaults to 10. Number of power iterations used by torch.svd_lowrank when psoft_svd='lowrank'.
         psoft_orth (`bool`):
             Defaults to 'True'.
             If True, constrains R to be orthogonal via Cayley parameterization, preserving the geometric relationships
-            among column of the pre-trained weight vectors. 
+            among column of the pre-trained weight vectors.
             If False, R is a free matrix without orthogonality constraints.
         psoft_mag_b (`bool`):
             Defaults to 'True'.
-            If True, learns a diagonal scaling vector on the 'output' side of R. Commonly paired with psoft_mag_a 
+            If True, learns a diagonal scaling vector on the 'output' side of R. Commonly paired with psoft_mag_a
             to increase task adaptability, with slight distortion to the pre-trained geometry.
         psoft_mag_a (`bool`):
             Defaults to 'True'.
             If True, learns a diagonal scaling vector on the 'input' side of R. Commonly paired with psoft_mag_b
             to increase task adaptability, with slight distortion to the pre-trained geometry.
-        use_cayley_neumann (`bool`): 
+        use_cayley_neumann (`bool`):
             Defaults to 'False'.
-            Whether to use the Cayley-Neumann formulation of PSOFT or not. Set to True to improve computational 
+            Whether to use the Cayley-Neumann formulation of PSOFT or not. Set to True to improve computational
             efficiency but comes at costs of bigger approximation error for orthogonality.
-        num_cayley_neumann_terms (`int`): 
+        num_cayley_neumann_terms (`int`):
             Defaults to 5. Only used when use_cayley_neumann=True.
             Number of Cayley-Neumann terms to use. Higher number results in less approximation error for orthogonality.
         cayley_neumann_eps (`optional[float]`):
             Defaults to 'None'. Only used when use_cayley_neumann=True.
             Optional Frobenius-norm bound for the generator matrix Q in the Cayley-Neumann approximation.
-            If None (default), no rescaling is applied. 
+            If None (default), no rescaling is applied.
             If set to a value in (0, 1) (e.g., 0.9), Q is rescaled whenever ||Q||_F exceeds the threshold
             to improve numerical stability. See https://spherelab.ai/oftv2/ for details.
-        init_weights (`bool`): 
-            Defaults to 'True'. Whether to initialize the weights of the PSOFT layers with their default 
+        init_weights (`bool`):
+            Defaults to 'True'. Whether to initialize the weights of the PSOFT layers with their default
             initialization. Don't change this setting, except if you know exactly what you're doing.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
@@ -103,7 +103,7 @@ class PsoftConfig(PeftConfig):
             layer at this index.
         layers_pattern (`Optional[Union[List[str], str]]`):
             The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
-            `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.    
+            `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
     """
 
     r: int = field(
@@ -136,8 +136,12 @@ class PsoftConfig(PeftConfig):
         default=None,
         metadata={"help": "List of module names or regex expression of the module names to exclude from PSOFT. "},
     )
-    psoft_alpha: int = field(default=32, metadata={"help": "It controls PSOFT scaling factor. Same semantics as LoRA alpha. "})
-    psoft_dropout: float = field(default=0.0, metadata={"help": "Dropout for PSOFT path. Same semantics as LoRA dropout. "})
+    psoft_alpha: int = field(
+        default=32, metadata={"help": "It controls PSOFT scaling factor. Same semantics as LoRA alpha. "}
+    )
+    psoft_dropout: float = field(
+        default=0.0, metadata={"help": "Dropout for PSOFT path. Same semantics as LoRA dropout. "}
+    )
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out). "},
@@ -221,7 +225,7 @@ class PsoftConfig(PeftConfig):
                 "List of modules apart from PSOFT layers to be set as trainable and saved in the final checkpoint. "
                 "For example, in Sequence Classification or Token Classification tasks, "
                 "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved. "
-           )
+            )
         },
     )
     init_weights: bool = field(
@@ -280,16 +284,12 @@ class PsoftConfig(PeftConfig):
 
         allowed_inits = {"psoft_init", "pissa_init"}
         if self.ab_svd_init not in allowed_inits:
-            raise ValueError(
-                f"`ab_svd_init` must be one of {sorted(allowed_inits)}; got {self.ab_svd_init!r}."
-            )
+            raise ValueError(f"`ab_svd_init` must be one of {sorted(allowed_inits)}; got {self.ab_svd_init!r}.")
 
         allowed_svd_backends = {"full", "lowrank"}
         if self.psoft_svd not in allowed_svd_backends:
-            raise ValueError(
-                f"`psoft_svd` must be one of {sorted(allowed_svd_backends)}; got {self.psoft_svd!r}."
-            )
-        
+            raise ValueError(f"`psoft_svd` must be one of {sorted(allowed_svd_backends)}; got {self.psoft_svd!r}.")
+
         DEFAULT_LOW_RANK_NITER = self.__dataclass_fields__["psoft_svd_lowrank_niter"].default
         if self.psoft_svd != "lowrank" and self.psoft_svd_lowrank_niter != DEFAULT_LOW_RANK_NITER:
             warnings.warn(
@@ -306,9 +306,7 @@ class PsoftConfig(PeftConfig):
                     f"`num_cayley_neumann_terms` must be a positive integer; got {self.num_cayley_neumann_terms}."
                 )
             if self.cayley_neumann_eps is not None and not (0.0 < self.cayley_neumann_eps < 1.0):
-                raise ValueError(
-                    f"`cayley_neumann_eps` must be in (0, 1) when set; got {self.cayley_neumann_eps}."
-                )
+                raise ValueError(f"`cayley_neumann_eps` must be in (0, 1) when set; got {self.cayley_neumann_eps}.")
         else:
             if self.num_cayley_neumann_terms != DEFAULT_NUM_CAYLEY_NEUMANN_TERMS:
                 warnings.warn(
