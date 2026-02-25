@@ -180,7 +180,7 @@ class OrthLayer(nn.Module):
 
     def __repr__(self) -> str:
         return (
-            f"{self.__class__.__name__}("
+            f"psoft.{self.__class__.__name__}("
             f"size={self.size}, orth={self.orth}, "
             f"use_cayley_neumann={self.use_cayley_neumann}, "
             f"num_cayley_neumann_terms={int(self.num_cayley_neumann_terms)}, "
@@ -220,7 +220,6 @@ class PsoftLayer(BaseTunerLayer):
         # per-adapter cache state
         self._psoft_A_cache = BufferDict(persistent=False)
         self._psoft_B_cache = BufferDict(persistent=False)
-        self._psoft_meta_warned: set[str] = set()
 
         self.merged_adapters: list[str] = []
         self._disable_adapters = False
@@ -243,7 +242,6 @@ class PsoftLayer(BaseTunerLayer):
         self._psoft_B_cache[adapter_name] = B
 
     def update_layer(self, adapter_name: str, config: PsoftConfig, **kwargs: Any) -> None:   
-
         ab_svd_init = config.ab_svd_init
         init_weights = config.init_weights
 
@@ -417,10 +415,7 @@ class Linear(nn.Module, PsoftLayer):
             self.merged_adapters.append(active_adapter)
 
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
-        # Conversion to LoRA is only supported if the adapter exists
-        # and its A/B cache buffers are available.
-        if adapter_name not in self.psoft_R:
-            return False
+        # Conversion to LoRA is supported if A/B cache buffers are available.
         A, B = self._get_psoft_ab_cache_buffers(adapter_name)
         return A is not None and B is not None
 
