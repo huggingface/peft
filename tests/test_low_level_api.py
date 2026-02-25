@@ -394,6 +394,7 @@ class TestInjectAdapterFromStateDict:
             for key in sd_before.keys():
                 assert sd_before[key].shape == sd_after[key].shape
 
+    @pytest.mark.skipif(platform.system() != "Linux", reason="Run torch.compile tests only on Linux")
     @pytest.mark.parametrize("compile_initial_model", [False, True])
     def test_inject_from_state_dict_compiled_model(self, compile_initial_model):
         # If we directly inject the adapter into the model from a `state_dict`, if the model is compiled, the
