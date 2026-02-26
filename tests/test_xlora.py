@@ -364,32 +364,33 @@ class TestXlora:
         model_id = "peft-internal-testing/opt-125m"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
-            model.config.use_cache = False
+            # note: exit the caching context to allow download of the LoRA adapters below
+        model.config.use_cache = False
 
-            adapters = [
-                "peft-internal-testing/opt-125m-dummy-lora",
-                "peft-internal-testing/opt-125m-dummy-lora",
-            ]
-            adapters = {str(i): file_name for i, file_name in enumerate(adapters)}
+        adapters = [
+            "peft-internal-testing/opt-125m-dummy-lora",
+            "peft-internal-testing/opt-125m-dummy-lora",
+        ]
+        adapters = {str(i): file_name for i, file_name in enumerate(adapters)}
 
-            peft_config = XLoraConfig(
-                task_type=TaskType.CAUSAL_LM,
-                peft_type=PeftType.XLORA,
-                hidden_size=model.config.hidden_size,
-                adapters=adapters,
-                xlora_depth=8,
-                xlora_size=2048,
-                layerwise_scalings=True,
-                xlora_dropout_p=0.2,
-            )
-            model = get_peft_model(model, peft_config)
+        peft_config = XLoraConfig(
+            task_type=TaskType.CAUSAL_LM,
+            peft_type=PeftType.XLORA,
+            hidden_size=model.config.hidden_size,
+            adapters=adapters,
+            xlora_depth=8,
+            xlora_size=2048,
+            layerwise_scalings=True,
+            xlora_dropout_p=0.2,
+        )
+        model = get_peft_model(model, peft_config)
 
-            downloaded = huggingface_hub.hf_hub_download(repo_id=adapters["0"], filename="adapter_model.safetensors")
-            sd = load_file(downloaded)
-            w0 = model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A["0"].weight
-            w1 = sd["base_model.model.model.decoder.layers.0.self_attn.q_proj.lora_A.weight"]
+        downloaded = huggingface_hub.hf_hub_download(repo_id=adapters["0"], filename="adapter_model.safetensors")
+        sd = load_file(downloaded)
+        w0 = model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A["0"].weight
+        w1 = sd["base_model.model.model.decoder.layers.0.self_attn.q_proj.lora_A.weight"]
 
-            assert torch.allclose(w0, w1)
+        assert torch.allclose(w0, w1)
 
     def test_scalings_storage(self, tokenizer, model):
         model.enable_scalings_logging()
