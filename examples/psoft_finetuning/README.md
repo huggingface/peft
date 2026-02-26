@@ -48,7 +48,7 @@ peft_model.save_pretrained("psoft-opt-125m")
 5. **Cayley–Neumann Approximation**: When the rank is large, enabling the Cayley–Neumann approximation can significantly improve computational efficiency, while the benefit is less pronounced for small ranks. In practice, a small number of Neumann series terms (typically `5`) usually provides a good balance between accuracy and efficiency.
 
 ```shell
-python examples/psoft_finetuning/psoft_finetuning.py \
+python psoft_finetuning.py \
   --base_model_name_or_path meta-llama/Llama-3.2-3B \
   --output_dir ./outputs/psoft-llama3.2-3b-imdb \
   --data_path imdb \

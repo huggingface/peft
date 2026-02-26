@@ -14,7 +14,7 @@
 
 import os
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import Optional
 
 import torch
 from datasets import load_dataset
@@ -38,7 +38,7 @@ class ScriptArguments(SFTConfig):
     # --- PSOFT ---
     r: int = field(default=32, metadata={"help": "Rank (r): dimension of trainable R."})
     psoft_alpha: int = field(default=32, metadata={"help": "Scaling factor (typically set to r)."})
-    target_modules: List[str] = field(
+    target_modules: list[str] = field(
         default_factory=lambda: ["q_proj", "v_proj"],
         metadata={"help": "Target module names, e.g. ['q_proj','k_proj','v_proj','o_proj', ...]."},
     )
@@ -72,7 +72,7 @@ class ScriptArguments(SFTConfig):
     # --- data ---
     data_path: str = field(default="imdb", metadata={"help": "Dataset name/path for training."})
     dataset_split: str = field(default="train[:1%]", metadata={"help": "Dataset split, e.g. 'train[:1%]'."})
-    dataset_field: Optional[List[str]] = field(
+    dataset_field: Optional[list[str]] = field(
         default=None,
         metadata={
             "help": (
@@ -96,11 +96,12 @@ def _dtype_from_bits(bits: str) -> torch.dtype:
 
 
 def main():
-    if script_args.base_model_name_or_path is None:
-        raise ValueError("--base_model_name_or_path is required.")
     parser = HfArgumentParser(ScriptArguments)
     script_args = parser.parse_args_into_dataclasses()[0]
     print(script_args)
+
+    if script_args.base_model_name_or_path is None:
+        raise ValueError("--base_model_name_or_path is required.")
 
     # PSOFT does NOT support quantized layers (nf4/int8/etc.).
     # We only allow fp16/bf16/fp32 here to avoid accidental quantized loading.
@@ -120,20 +121,20 @@ def main():
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
     # Build PSOFT config
-    psoft_kwargs = dict(
-        r=script_args.r,
-        psoft_alpha=script_args.psoft_alpha,
-        target_modules=script_args.target_modules,
-        ab_svd_init=script_args.ab_svd_init,
-        psoft_svd=script_args.psoft_svd,
-        psoft_orth=script_args.psoft_orth,
-        psoft_mag_a=script_args.psoft_mag_a,
-        psoft_mag_b=script_args.psoft_mag_b,
-        use_cayley_neumann=script_args.use_cayley_neumann,
-        num_cayley_neumann_terms=script_args.num_cayley_neumann_terms,
-        cayley_neumann_eps=script_args.cayley_neumann_eps,
-        task_type="CAUSAL_LM",
-    )
+    psoft_kwargs = {
+        "r": script_args.r,
+        "psoft_alpha": script_args.psoft_alpha,
+        "target_modules": script_args.target_modules,
+        "ab_svd_init": script_args.ab_svd_init,
+        "psoft_svd": script_args.psoft_svd,
+        "psoft_orth": script_args.psoft_orth,
+        "psoft_mag_a": script_args.psoft_mag_a,
+        "psoft_mag_b": script_args.psoft_mag_b,
+        "use_cayley_neumann": script_args.use_cayley_neumann,
+        "num_cayley_neumann_terms": script_args.num_cayley_neumann_terms,
+        "cayley_neumann_eps": script_args.cayley_neumann_eps,
+        "task_type": "CAUSAL_LM",
+    }
     # Only pass lowrank_niter when user sets it (and typically when psoft_svd='lowrank')
     if script_args.psoft_svd_lowrank_niter is not None:
         psoft_kwargs["psoft_svd_lowrank_niter"] = script_args.psoft_svd_lowrank_niter
