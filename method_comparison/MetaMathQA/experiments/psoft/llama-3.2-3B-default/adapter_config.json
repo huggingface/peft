@@ -1,8 +1,8 @@
 {
   "auto_mapping": null,
   "base_model_name_or_path": null,
-  "r": 128,
-  "psoft_alpha": 128,
+  "r": 256,
+  "psoft_alpha": 256,
   "psoft_dropout": 0.0,
   "exclude_modules": null,
   "fan_in_fan_out": false,
