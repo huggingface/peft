@@ -51,7 +51,16 @@ def is_gptqmodel_available():
         version_gptqmodel = packaging.version.parse(importlib_metadata.version("gptqmodel"))
         if GPTQMODEL_MINIMUM_VERSION <= version_gptqmodel:
             if is_optimum_available():
-                version_optimum = packaging.version.parse(importlib_metadata.version("optimum"))
+                try:
+                    version_optimum = packaging.version.parse(importlib_metadata.version("optimum"))
+                except importlib_metadata.PackageNotFoundError:
+                    # Same idea as in diffusers:
+                    # https://github.com/huggingface/diffusers/blob/9f06a0d1a4a998ac6a463c5be728c892f95320a8/src/diffusers/utils/import_utils.py#L351-L357
+                    # It's not clear under what circumstances `importlib_metadata.version("optimum")` can raise an error
+                    # even though `importlib.util.find_spec("optimum") is not None` but it has been observed, so adding
+                    # this for precaution. If we cannot detect it, we just optimistically assume it's high enough.
+                    return True
+
                 if OPTIMUM_MINIMUM_VERSION <= version_optimum:
                     return True
                 else:
