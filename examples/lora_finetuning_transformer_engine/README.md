@@ -7,7 +7,7 @@ This example demonstrates LoRA fine-tuning for Transformer Engine ESM2 token cla
 Install Python dependencies:
 
 ```bash
-pip install -r examples/lora_finetuning_te/requirements.txt
+pip install -r examples/lora_finetuning_transformer_engine/requirements.txt
 ```
 
 **Transformer Engine** must be installed separately and must match the system CUDA toolkit version.
@@ -27,7 +27,7 @@ Optional: authenticate with Hugging Face if your environment requires access tok
 ## Run
 
 ```bash
-python examples/lora_finetuning_te/lora_finetuning_te.py \
+python examples/lora_finetuning_transformer_engine/lora_finetuning_te.py \
   --base_model nvidia/esm2_t6_8M_UR50D \
   --output_dir ./esm2_lora_output \
   --num_train_samples 256 \
@@ -35,11 +35,15 @@ python examples/lora_finetuning_te/lora_finetuning_te.py \
   --num_epochs 1
 ```
 
+> **Note:** The default ESM2 models on Hugging Face Hub ship custom modeling code.
+> You must pass `--trust_remote_code` to allow loading that code.
+
 ## Customize
 
 ```bash
-python examples/lora_finetuning_te/lora_finetuning_te.py \
+python examples/lora_finetuning_transformer_engine/lora_finetuning_te.py \
   --base_model nvidia/esm2_t6_8M_UR50D \
+  --trust_remote_code \
   --output_dir ./esm2_lora_output \
   --max_length 256 \
   --batch_size 4 \

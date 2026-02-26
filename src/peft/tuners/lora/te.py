@@ -28,7 +28,7 @@ if is_te_available():
     import transformer_engine as te
 
 
-class TELoRA(torch.nn.Module, LoraLayer):
+class TeLinear(torch.nn.Module, LoraLayer):
     def __init__(
         self,
         base_layer,
@@ -105,6 +105,6 @@ def dispatch_transformer_engine(
     if is_te_available() and isinstance(
         target_base_layer, (te.pytorch.LayerNormLinear, te.pytorch.LayerNormMLP, te.pytorch.Linear)
     ):
-        new_module = TELoRA(target, adapter_name, config=config, **kwargs)
+        new_module = TeLinear(target, adapter_name, config=config, **kwargs)
 
     return new_module

@@ -69,6 +69,12 @@ def parse_args():
     parser.add_argument("--lora_r", type=int, default=8, help="LoRA rank")
     parser.add_argument("--lora_alpha", type=int, default=16, help="LoRA alpha")
     parser.add_argument("--lora_dropout", type=float, default=0.05, help="LoRA dropout")
+    parser.add_argument(
+        "--trust_remote_code",
+        action="store_true",
+        default=False,
+        help="Allow loading model code from the Hub. Required for models like nvidia/esm2_*.",
+    )
 
     return parser.parse_args()
 
@@ -176,14 +182,20 @@ def main():
     args = parse_args()
     set_seed(args.seed)
 
+    if not args.trust_remote_code and "esm2" in args.base_model.lower():
+        raise ValueError(
+            f"Model '{args.base_model}' requires remote code execution. "
+            "Re-run with --trust_remote_code to confirm you trust this model's code."
+        )
+
     os.makedirs(args.output_dir, exist_ok=True)
     use_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
     model_dtype = torch.bfloat16 if use_bf16 else torch.float32
 
     print(f"Loading tokenizer and model from: {args.base_model}")
-    tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=args.trust_remote_code)
 
-    config = AutoConfig.from_pretrained(args.base_model, trust_remote_code=True)
+    config = AutoConfig.from_pretrained(args.base_model, trust_remote_code=args.trust_remote_code)
     config.num_labels = 3
     config.id2label = SS3_ID2LABEL
     config.label2id = SS3_LABEL2ID
@@ -191,7 +203,7 @@ def main():
     model = AutoModelForTokenClassification.from_pretrained(
         args.base_model,
         config=config,
-        trust_remote_code=True,
+        trust_remote_code=args.trust_remote_code,
         dtype=model_dtype,
     )
 

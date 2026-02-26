@@ -38,8 +38,10 @@ from torch.distributed import init_process_group
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.utils.data import DataLoader
 from transformers import (
+    AutoConfig,
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
+    AutoModelForTokenClassification,
     AutoTokenizer,
     BitsAndBytesConfig,
     DataCollatorForLanguageModeling,
@@ -78,7 +80,7 @@ from peft import (
     replace_lora_weights_loftq,
     set_peft_model_state_dict,
 )
-from peft.import_utils import is_diffusers_available, is_transformers_ge_v5, is_xpu_available
+from peft.import_utils import is_diffusers_available, is_te_available, is_transformers_ge_v5, is_xpu_available
 from peft.tuners import boft
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
@@ -5838,3 +5840,89 @@ class TestDtypeAutocastBnb:
             peft_type=peft_type,
             tmp_path=tmp_path,
         )
+
+
+if is_te_available():
+    from peft.tuners.lora.te import TeLinear
+
+
+@pytest.mark.skipif(not is_te_available(), reason="transformer_engine is not available")
+class TestTransformerEngine:
+    """Tests for LoRA with TransformerEngine layers."""
+
+    model_id = "nvidia/esm2_t6_8M_UR50D"
+
+    @pytest.fixture
+    def config(self):
+        return AutoConfig.from_pretrained(self.model_id, trust_remote_code=True)
+
+    @pytest.fixture
+    def esm2_model(self, config):
+        return AutoModelForTokenClassification.from_pretrained(
+            self.model_id, config=config, trust_remote_code=True, dtype="bfloat16"
+        )
+
+    @pytest.fixture
+    def tokenizer(self):
+        return AutoTokenizer.from_pretrained(self.model_id)
+
+    @pytest.fixture
+    def tokenized_inputs(self, tokenizer):
+        sequence = "MNEAAK"
+        return tokenizer(sequence, return_tensors="pt")
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_te_lora_wraps_te_linear_and_keeps_forward_working(self, config, esm2_model):
+        cfg = LoraConfig(target_modules=["layernorm_qkv"], r=2, lora_alpha=8)
+
+        lora_model = get_peft_model(esm2_model, cfg)
+        lora_model = lora_model.to("cuda")
+
+        wrapped_layernorm_qkv = lora_model.base_model.model.esm.encoder.layers[0].self_attention.layernorm_qkv
+
+        assert isinstance(wrapped_layernorm_qkv, TeLinear)
+        assert "default" in wrapped_layernorm_qkv.lora_A and "default" in wrapped_layernorm_qkv.lora_B
+        assert wrapped_layernorm_qkv.get_base_layer().weight.requires_grad is False
+        assert wrapped_layernorm_qkv.lora_A["default"].weight.requires_grad is True
+        assert wrapped_layernorm_qkv.lora_B["default"].weight.requires_grad is True
+
+        tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+        sequence = "MNEAAK"
+        inputs = tokenizer(sequence, return_tensors="pt")
+
+        inputs = {k: v.to(next(lora_model.parameters()).device) for k, v in inputs.items()}
+        out = lora_model(**inputs)
+        assert out.logits.shape == (1, len(sequence) + 2, config.num_labels)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_te_lora_forward_matches_base_before_backward(self, esm2_model, tokenized_inputs):
+        dummy_model = deepcopy(esm2_model).to("cuda")
+        cfg = LoraConfig(target_modules=["layernorm_qkv"], r=4, lora_alpha=8)
+        lora_model = get_peft_model(esm2_model, cfg).to("cuda")
+
+        inputs = {k: v.to(next(lora_model.parameters()).device) for k, v in tokenized_inputs.items()}
+        lora_model.eval()
+        dummy_model.eval()
+        with torch.no_grad():
+            lora_result = lora_model(**inputs).logits
+            dummy_result = dummy_model(**inputs).logits
+
+        assert torch.allclose(lora_result, dummy_result, rtol=1e-3, atol=1e-3)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_te_lora_backward(self, esm2_model, tokenized_inputs):
+        cfg = LoraConfig(target_modules=["layernorm_qkv"], r=4, lora_alpha=8)
+        lora_model = get_peft_model(esm2_model, cfg).to("cuda")
+
+        optimizer = torch.optim.AdamW(lora_model.parameters())
+        loss_fn = torch.nn.CrossEntropyLoss()
+        inputs = {k: v.to(next(lora_model.parameters()).device) for k, v in tokenized_inputs.items()}
+        logits = lora_model(**inputs).logits
+        labels = torch.randint(logits.shape[-1], logits.shape[:-1], device=logits.device)
+        loss = loss_fn(logits.view(-1, logits.size(-1)), labels.view(-1))
+        assert torch.isfinite(loss), f"Loss is not finite: {loss.item()}"
+        loss.backward()
+        optimizer.step()
