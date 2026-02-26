@@ -591,8 +591,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         # 1. Remove VB-LoRA vector bank, since it's a shared parameter set via the VBLoRAModel
         # 2. Remove the prompt encoder, as it does not need to be part of the checkpoint
+        # 3. Remove the UniLoRA indices and scale-related keys, because they can be regenerated from the seed.
         missing_keys = [
-            k for k in load_result.missing_keys if "vblora_vector_bank" not in k and "prompt_encoder" not in k
+            k for k in load_result.missing_keys
+            if (
+                ("vblora_vector_bank" not in k and
+                "prompt_encoder" not in k) and
+                ("unilora_" not in k)
+            )
         ]
         if missing_keys:
             # Let's warn here since (in contrast to load_adapter) we don't return the load result, so it could be quite

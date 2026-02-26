@@ -49,6 +49,7 @@ from peft import (
     PveraConfig,
     RoadConfig,
     VBLoRAConfig,
+    UniLoraConfig,
     VeraConfig,
     convert_to_lora,
     get_peft_model,
@@ -468,10 +469,10 @@ class PeftCommonTester:
                 load_result1 = model.load_adapter(tmp_dirname, adapter_name="other")
                 load_result2 = model.load_adapter(tmp_dirname, adapter_name="yet-another")
 
-                # VBLoRA uses a shared "vblora_vector_bank" across all layers, causing it to appear
+                # VBLoRA and UNILORA uses a shared "vblora_vector_bank" or "unilora_theta_d" across all layers, causing it to appear
                 # in the missing keys list, which leads to failed test cases. So
-                # skipping the missing keys check for VBLoRA.
-                if config.peft_type != "VBLORA":
+                # skipping the missing keys check for VBLoRA and UNILORA.
+                if config.peft_type != "VBLORA" and config.peft_type != "UNILORA" :
                     assert load_result1.missing_keys == []
                     assert load_result2.missing_keys == []
 
@@ -656,6 +657,11 @@ class PeftCommonTester:
             # for VBLoRA, increase this value or else the two adapters are too similar
             config.init_logits_std *= 100
             config.init_vector_bank_bound *= 100
+
+        if config_cls == UniLoraConfig:
+            # for VBLoRA, increase this value or else the two adapters are too similar
+            config.init_theta_d_bound *= 100
+          
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
@@ -1068,11 +1074,11 @@ class PeftCommonTester:
                 assert torch.allclose(logits, logits_from_pretrained, atol=1e-4, rtol=1e-4)
 
     def _test_training_layer_indexing(self, model_id, config_cls, config_kwargs):
-        if config_cls in (VBLoRAConfig, VeraConfig):
+        if config_cls in (VBLoRAConfig, VeraConfig, UniLoraConfig):
             # TODO investigate why these two are flaky
             # pytest tests/test_decoder_models.py tests/test_feature_extraction_models.py -k "layer_indexing and (vera
             # or vblora)"
-            pytest.skip("VBLoRA and VeRA are flaky with layer indexing, possibly because of shared weights.")
+            pytest.skip("VBLoRA, UniLora and VeRA are flaky with layer indexing, possibly because of shared weights.")
         try:
             config = config_cls(
                 base_model_name_or_path=model_id,

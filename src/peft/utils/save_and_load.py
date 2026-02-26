@@ -19,6 +19,7 @@ import re
 import warnings
 from collections import namedtuple
 from typing import Optional
+import copy
 
 import huggingface_hub
 import torch
@@ -183,6 +184,10 @@ def get_peft_model_state_dict(
                     to_return[f"{name}.shira_indices.{k}"] = (
                         v.to(torch.float32) if platform.system() == "Windows" else v
                     )
+    elif config.peft_type == PeftType.UNILORA:
+        to_return = {}
+        to_return["base_model.unilora_theta_d." + adapter_name] = state_dict["base_model.unilora_theta_d." + adapter_name]
+      
 
     elif config.peft_type == PeftType.VERA:
         vera_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
@@ -211,7 +216,13 @@ def get_peft_model_state_dict(
             to_return["base_model.pvera_A." + adapter_name] = state_dict["base_model.pvera_A." + adapter_name]
             to_return["base_model.pvera_B." + adapter_name] = state_dict["base_model.pvera_B." + adapter_name]
     elif config.peft_type == PeftType.XLORA:
-        to_return = {k: state_dict[k] for k in state_dict if "internal_xlora_classifier" in k}
+        to_return = {k: state_dict[k] for k in state_dict if "internal_xlora_classifier" in k}     
+    elif config.peft_type == PeftType.UNILORA:
+        to_return = {}
+        to_return = {k: state_dict[k] for k in state_dict if "unilora_scales" in k or "unilora_indices" in k}
+        to_return["base_model.unilora_theta_d." + adapter_name] = state_dict[
+            "base_model.unilora_theta_d." + adapter_name
+        ]
     elif config.peft_type == PeftType.VBLORA:
         to_return = {}
         # choose the most efficient dtype for indices
@@ -461,19 +472,33 @@ def set_peft_model_state_dict(
             # Not every module has a 1:1 mapping. ModulesToSaveWrapper, for example, removes the
             # `modules_to_save.{adapter_name}.` prefix. This prefix must be restored when loading the model from the
             # saved state dict which is why we fetch a load key map from the wrapper.
-            key_map = module.adapter_state_dict_load_map(adapter_name)
+            key_map = module.adapter_state_dict_load_map(adapter_name) 
+
             if name.startswith("_fsdp_wrapped_module."):
                 # If FSDP is used, the state_dict is from the unwrapped model, which will result in a key mismatch if we
                 # don't remove the FSDP-specific prefix
                 name = name.removeprefix("_fsdp_wrapped_module.")
-            for k in key_map:
-                lookup_key = f"{name}.{k}"
-                store_key = f"{name}.{key_map[k]}"
+            
+            if config.peft_type != PeftType.UNILORA:
+                for k in key_map:
+                    lookup_key = f"{name}.{k}"
+                    store_key = f"{name}.{key_map[k]}"
 
-                state_dict[store_key] = peft_model_state_dict[lookup_key]
+                    state_dict[store_key] = peft_model_state_dict[lookup_key]
 
-                # delete the old key from the previous `state_dict = peft_model_state_dict` statement.
-                del state_dict[lookup_key]
+                    # delete the old key from the previous `state_dict = peft_model_state_dict` statement.
+                    del state_dict[lookup_key]
+            else:
+                 for k in key_map:
+                    lookup_key = f"{name}.{k}"
+                    store_key = f"{name}.{key_map[k]}"
+
+                    if  lookup_key in   peft_model_state_dict.keys(): 
+                        state_dict[store_key] = peft_model_state_dict[lookup_key]
+
+                        # delete the old key from the previous `state_dict = peft_model_state_dict` statement.
+                        del state_dict[lookup_key]
+
 
     if config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT:
         peft_model_state_dict = state_dict
