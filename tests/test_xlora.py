@@ -364,6 +364,7 @@ class TestXlora:
         model_id = "peft-internal-testing/opt-125m"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
+            # note: exit the caching context to allow download of the LoRA adapters below
         model.config.use_cache = False
 
         adapters = [
