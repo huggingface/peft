@@ -40,13 +40,7 @@ trainer.train()
 peft_model.save_pretrained("psoft-opt-125m")
 ```
 
-## Best Practices
-1. **Rank Choice**: Smaller ranks (e.g., `32–128`) are suitable for simpler tasks, while larger ranks (e.g., `64–256`) provide greater expressiveness for more complex tasks at the cost of increased parameters and computation.
-2. **Scaling Factor**: The scaling factor is typically set to $r$ in PSOFT.
-3. **Learning Rate**: Use standard learning rates (e.g., `1e-4` to `5e-3`) for stable training.
-4. **SVD Initialization**: The `lowrank` option is more memory- and compute-efficient than `full`, making it more suitable for large models.
-5. **Cayley–Neumann Approximation**: When the rank is large, enabling the Cayley–Neumann approximation can significantly improve computational efficiency, while the benefit is less pronounced for small ranks. In practice, a small number of Neumann series terms (typically `5`) usually provides a good balance between accuracy and efficiency.
-
+## Further examples on LLaMA-3.2-3B 
 ```shell
 python psoft_finetuning.py \
   --base_model_name_or_path meta-llama/Llama-3.2-3B \
@@ -63,6 +57,13 @@ python psoft_finetuning.py \
   --psoft_alpha 128 \
   --target_modules q_proj v_proj
 ```
+
+## Best Practices
+1. **Rank Choice**: Smaller ranks (e.g., `32–128`) are suitable for simpler tasks, while larger ranks (e.g., `64–256`) provide greater expressiveness for more complex tasks at the cost of increased parameters and computation.
+2. **Scaling Factor**: The scaling factor is typically set to $r$ in PSOFT.
+3. **Learning Rate**: Use standard learning rates (e.g., `1e-4` to `5e-3`) for stable training.
+4. **SVD Initialization**: The `lowrank` option is more memory- and compute-efficient than `full`, making it more suitable for large models.
+5. **Cayley–Neumann Approximation**: When the rank is large, enabling the Cayley–Neumann approximation can significantly improve computational efficiency, while the benefit is less pronounced for small ranks. In practice, a small number of Neumann series terms (typically `5`) usually provides a good balance between accuracy and efficiency.
 
 ## Citation
 ```
