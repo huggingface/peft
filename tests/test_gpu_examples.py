@@ -78,7 +78,7 @@ from peft import (
     replace_lora_weights_loftq,
     set_peft_model_state_dict,
 )
-from peft.import_utils import is_diffusers_available, is_transformers_ge_v5, is_xpu_available
+from peft.import_utils import is_diffusers_available, is_te_available, is_transformers_ge_v5, is_xpu_available
 from peft.tuners import boft
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
@@ -5838,3 +5838,117 @@ class TestDtypeAutocastBnb:
             peft_type=peft_type,
             tmp_path=tmp_path,
         )
+
+
+if is_te_available():
+    import transformer_engine as te
+
+    from peft.tuners.lora.te import TeLinear
+
+
+def _replace_with_te_linear(model, target_module_names):
+    """Replace nn.Linear modules whose short name is in target_module_names with te.pytorch.Linear.
+
+    Weights and biases are copied from the original module.  The replacement is
+    done *in-place* (via ``setattr`` on the parent module).
+    """
+    replacements = []
+    for name, module in model.named_modules():
+        short_name = name.rsplit(".", 1)[-1] if "." in name else name
+        if short_name in target_module_names and isinstance(module, torch.nn.Linear):
+            replacements.append((name, short_name, module))
+
+    for name, short_name, module in replacements:
+        parent_name = name.rsplit(".", 1)[0] if "." in name else ""
+        parent = model.get_submodule(parent_name) if parent_name else model
+
+        te_linear = te.pytorch.Linear(
+            module.in_features,
+            module.out_features,
+            bias=module.bias is not None,
+            params_dtype=module.weight.dtype,
+            device=module.weight.device,
+        )
+        with torch.no_grad():
+            te_linear.weight.copy_(module.weight)
+            if module.bias is not None:
+                te_linear.bias.copy_(module.bias)
+
+        setattr(parent, short_name, te_linear)
+
+
+@pytest.mark.skipif(not is_te_available(), reason="transformer_engine is not available")
+class TestTransformerEngine:
+    """Tests for LoRA with TransformerEngine layers.
+
+    Uses a standard OPT model with selected nn.Linear layers manually replaced
+    by te.pytorch.Linear.
+    """
+
+    model_id = "facebook/opt-125m"
+    te_target_modules = ["q_proj", "v_proj"]
+
+    @pytest.fixture
+    def model_with_te_layers(self):
+        model = AutoModelForCausalLM.from_pretrained(self.model_id, torch_dtype=torch.bfloat16)
+        _replace_with_te_linear(model, self.te_target_modules)
+        return model
+
+    @pytest.fixture
+    def tokenizer(self):
+        return AutoTokenizer.from_pretrained(self.model_id)
+
+    @pytest.fixture
+    def tokenized_inputs(self, tokenizer):
+        return tokenizer("Hello world", return_tensors="pt")
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_te_lora_wraps_te_linear_and_keeps_forward_working(self, model_with_te_layers, tokenized_inputs):
+        cfg = LoraConfig(target_modules=self.te_target_modules, r=2, lora_alpha=8)
+        lora_model = get_peft_model(model_with_te_layers, cfg).to("cuda")
+
+        wrapped_q_proj = lora_model.base_model.model.model.decoder.layers[0].self_attn.q_proj
+
+        assert isinstance(wrapped_q_proj, TeLinear)
+        assert "default" in wrapped_q_proj.lora_A and "default" in wrapped_q_proj.lora_B
+        assert wrapped_q_proj.get_base_layer().weight.requires_grad is False
+        assert wrapped_q_proj.lora_A["default"].weight.requires_grad is True
+        assert wrapped_q_proj.lora_B["default"].weight.requires_grad is True
+
+        inputs = {k: v.to("cuda") for k, v in tokenized_inputs.items()}
+        out = lora_model(**inputs)
+        assert out.logits.ndim == 3
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_te_lora_forward_matches_base_before_backward(self, model_with_te_layers, tokenized_inputs):
+        base_model = deepcopy(model_with_te_layers).to("cuda")
+        cfg = LoraConfig(target_modules=self.te_target_modules, r=4, lora_alpha=8)
+        lora_model = get_peft_model(model_with_te_layers, cfg).to("cuda")
+
+        inputs = {k: v.to("cuda") for k, v in tokenized_inputs.items()}
+        lora_model.eval()
+        base_model.eval()
+        with torch.no_grad():
+            lora_result = lora_model(**inputs).logits
+            base_result = base_model(**inputs).logits
+
+        assert torch.allclose(lora_result, base_result, rtol=1e-3, atol=1e-3)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_te_lora_backward(self, model_with_te_layers, tokenized_inputs):
+        cfg = LoraConfig(target_modules=self.te_target_modules, r=4, lora_alpha=8)
+        lora_model = get_peft_model(model_with_te_layers, cfg).to("cuda")
+
+        optimizer = torch.optim.AdamW(lora_model.parameters())
+        loss_fn = torch.nn.CrossEntropyLoss()
+        inputs = {k: v.to("cuda") for k, v in tokenized_inputs.items()}
+        logits = lora_model(**inputs).logits
+        shift_logits = logits[:, :-1, :].contiguous()
+        shift_labels = inputs["input_ids"][:, 1:].contiguous()
+        loss = loss_fn(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+        assert torch.isfinite(loss), f"Loss is not finite: {loss.item()}"
+        loss.backward()
+        optimizer.step()

@@ -159,3 +159,8 @@ def is_xpu_available(check_device=False):
 @lru_cache
 def is_diffusers_available():
     return importlib.util.find_spec("diffusers") is not None
+
+
+@lru_cache
+def is_te_available():
+    return importlib.util.find_spec("transformer_engine") is not None
