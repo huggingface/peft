@@ -125,7 +125,7 @@ class OrthLayer(nn.Module):
     def get_matrix(self) -> torch.Tensor:
         cast_to_fp32 = False
         orig_dtype = None
-        
+
         if not self.orth:
             R = self.weight
         else:
@@ -159,7 +159,7 @@ class OrthLayer(nn.Module):
             else:
                 R = torch.linalg.solve(id_mat - Q, id_mat + Q, left=False)
 
-        # Apply scaling vectors to R 
+        # Apply scaling vectors to R
         if self.vector_b is not None:
             R = self.vector_b[:, None] * R
         if self.vector_a is not None:
