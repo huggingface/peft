@@ -4,17 +4,48 @@ This example demonstrates LoRA fine-tuning for Transformer Engine ESM2 token cla
 
 ## Setup
 
-Install Python dependencies:
+Choose one of the two options below.
+
+### Option A: Docker (recommended)
+
+Build a self-contained image based on the publicly available NVIDIA PyTorch container
+(`nvcr.io/nvidia/pytorch:26.01-py3`), which already ships CUDA, cuDNN, and Transformer Engine:
 
 ```bash
+docker build -t lora-te examples/lora_finetuning_transformer_engine
+```
+
+Run the training inside the container:
+
+```bash
+docker run --gpus all --rm lora-te \
+  python lora_finetuning_te.py \
+    --base_model nvidia/esm2_t6_8M_UR50D \
+    --output_dir ./esm2_lora_output \
+    --num_train_samples 256 \
+    --num_eval_samples 64 \
+    --num_epochs 1
+```
+
+Or start an interactive session to experiment:
+
+```bash
+docker run --gpus all --rm -it lora-te bash
+```
+
+### Option B: Virtual environment
+
+Create and activate a virtual environment, then install the Python dependencies:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -r examples/lora_finetuning_transformer_engine/requirements.txt
 ```
 
 **Transformer Engine** must be installed separately and must match the system CUDA toolkit version.
 See the [TE installation guide](https://docs.nvidia.com/deeplearning/transformer-engine/user-guide/installation.html)
-or use the system-provided package (e.g., from the BioNeMo devcontainer).
-
-Optional: authenticate with Hugging Face if your environment requires access tokens for model download.
+for details.
 
 ## What this example does
 

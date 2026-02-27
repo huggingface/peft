@@ -29,6 +29,15 @@ if is_te_available():
 
 
 class TeLinear(torch.nn.Module, LoraLayer):
+    """LoRA layer for TransformerEngine linear modules.
+
+    Supports ``te.pytorch.Linear``, ``te.pytorch.LayerNormLinear``, and
+    ``te.pytorch.LayerNormMLP`` as base layers.
+
+    Note:
+        Adapter weight merging (``merge`` / ``unmerge``) is **not supported** yet.
+    """
+
     def __init__(
         self,
         base_layer,
@@ -52,18 +61,30 @@ class TeLinear(torch.nn.Module, LoraLayer):
             config=config,
         )
 
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+        """Not supported yet for TransformerEngine layers.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support merge yet.")
+
+    def unmerge(self) -> None:
+        """Not supported yet for TransformerEngine layers.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support unmerge yet.")
+
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
 
         if self.disable_adapters:
-            if self.merged:
-                self.unmerge()
             result = self.base_layer(x, *args, **kwargs)
         elif adapter_names is not None:
             raise ValueError(f"{self.__class__.__name__} does not support mixed_batch_forward yet.")
-        elif self.merged:
-            result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
             torch_result_dtype = result.dtype
