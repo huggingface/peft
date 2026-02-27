@@ -1486,34 +1486,30 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self.eval()
         return load_result
 
-    def set_adapter(self, adapter_name: str) -> None:
+    def set_adapter(self, adapter_name: str, inference_mode: bool = False) -> None:
         """
         Sets the active adapter.
 
         Only one adapter can be active at a time.
 
-        Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True). If this is
-        not desired, use the following code.
-
-        ```py
-        >>> for name, param in model_peft.named_parameters():
-        ...     if ...:  # some check on name (ex. if 'lora' in name)
-        ...         param.requires_grad = False
-        ```
+        Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True) unless
+        inference_mode is True.
 
         Args:
             adapter_name (`str`):
                 The name of the adapter to be set as active. The adapter must be loaded first.
+            inference_mode (`bool`, optional):
+                Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
         if adapter_name not in self.peft_config:
             raise ValueError(f"Adapter {adapter_name} not found.")
         self.active_adapter = adapter_name
         if not self.peft_config[adapter_name].is_prompt_learning:
             # _set_adapter does not need to be called, since it's called through the BaseTuner class.
-            self.base_model.set_adapter(adapter_name)
+            self.base_model.set_adapter(adapter_name, inference_mode=inference_mode)
         else:
             # handle auxiliary modules
-            _set_adapter(self, adapter_name)
+            _set_adapter(self, adapter_name, inference_mode=inference_mode)
 
     def set_requires_grad(self, adapter_names: str | Sequence[str], requires_grad: bool = True) -> None:
         """

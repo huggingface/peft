@@ -3999,6 +3999,101 @@ class TestRequiresGrad:
             "base_model.model.lin0.lora_B.adapter1.weight",
         )
 
+    def test_requires_grad_follows_inference_mode_modules_to_save(self):
+        # check that passing inference_mode to set_adapter has the intended effect with LoRA and modules_to_save
+        config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.modules_to_save.default.weight",
+            "base_model.model.lin1.modules_to_save.default.bias",
+            "base_model.model.lin0.lora_A.default.weight",
+            "base_model.model.lin0.lora_B.default.weight",
+        )
+
+        # inference mode false (default)
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default", inference_mode=False)
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.modules_to_save.default.weight",
+            "base_model.model.lin1.modules_to_save.default.bias",
+            "base_model.model.lin0.lora_A.default.weight",
+            "base_model.model.lin0.lora_B.default.weight",
+        )
+
+        # set config1 as active, should lead to adapter1 requiring grad
+        peft_model.set_adapter("adapter1", inference_mode=False)
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.modules_to_save.adapter1.weight",
+            "base_model.model.lin1.modules_to_save.adapter1.bias",
+            "base_model.model.lin0.lora_A.adapter1.weight",
+            "base_model.model.lin0.lora_B.adapter1.weight",
+        )
+
+        # inference mode true
+
+        # set config0 as active but in inference mode, should result in no module requiring grad
+        peft_model.set_adapter("default", inference_mode=True)
+        self.check_requires_grad(peft_model)
+
+        # set config1 as active but in inference mode, should result in no module requiring grad
+        peft_model.set_adapter("adapter1", inference_mode=True)
+        self.check_requires_grad(peft_model)
+
+    def test_requires_grad_follows_inference_mode_trainable_token_indices(self):
+        # check that passing inference_mode to set_adapter has the intended effect with LoRA and trainable tokens
+        config0 = LoraConfig(target_modules=["conv1d"], trainable_token_indices={"emb": [0, 1, 2]})
+        peft_model = get_peft_model(ModelEmbConv1D(), config0)
+
+        config1 = LoraConfig(target_modules=["lin0"], trainable_token_indices={"emb": [0, 1, 2]})
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.emb.token_adapter.trainable_tokens_delta.default",
+            "base_model.model.conv1d.lora_A.default.weight",
+            "base_model.model.conv1d.lora_B.default.weight",
+        )
+
+        # inference mode false (default)
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default", inference_mode=False)
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.emb.token_adapter.trainable_tokens_delta.default",
+            "base_model.model.conv1d.lora_A.default.weight",
+            "base_model.model.conv1d.lora_B.default.weight",
+        )
+
+        # set config1 as active, should lead to adapter1 requiring grad
+        peft_model.set_adapter("adapter1", inference_mode=False)
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.emb.token_adapter.trainable_tokens_delta.adapter1",
+            "base_model.model.lin0.lora_A.adapter1.weight",
+            "base_model.model.lin0.lora_B.adapter1.weight",
+        )
+
+        # inference mode true
+
+        # set config0 as active but in inference mode, should result in no module requiring grad
+        peft_model.set_adapter("default", inference_mode=True)
+        self.check_requires_grad(peft_model)
+
+        # set config1 as active but in inference mode, should result in no module requiring grad
+        peft_model.set_adapter("adapter1", inference_mode=True)
+        self.check_requires_grad(peft_model)
+
     def test_requires_grad_lora_different_targets(self):
         # test two different LoRA adapters that target different modules
         config0 = LoraConfig(target_modules=["lin0"])
