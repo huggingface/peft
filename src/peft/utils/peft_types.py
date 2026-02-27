@@ -30,6 +30,7 @@ class PeftType(str, enum.Enum):
     BOFT = "BOFT"
     ADAPTION_PROMPT = "ADAPTION_PROMPT"
     IA3 = "IA3"
+    LILY = "LILY"
     LOHA = "LOHA"
     LOKR = "LOKR"
     OFT = "OFT"

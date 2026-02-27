@@ -36,6 +36,7 @@ from peft import (
     CPTConfig,
     GraloraConfig,
     IA3Config,
+    LilyConfig,
     LNTuningConfig,
     LoHaConfig,
     LoKrConfig,
@@ -82,6 +83,8 @@ def _skip_if_merging_not_supported(model_id, config_cls, config_kwargs):
     if model_id.startswith("Conv2dGroups") and (config_cls == LoraConfig):
         # note: right now, only LoRA supports groups>1, if other PEFT methods add support, they might also need to skip
         pytest.skip("Merging conv layers with groups>1 and LoRA is not supported.")
+    if issubclass(config_cls, LilyConfig):
+        pytest.skip("Lily does not support merging adapters, skipping this test.")
 
 
 def _skip_if_adding_weighted_adapters_not_supported(config):

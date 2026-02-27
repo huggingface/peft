@@ -26,6 +26,7 @@ from peft import (
     GraloraConfig,
     HRAConfig,
     IA3Config,
+    LilyConfig,
     LoraConfig,
     MissConfig,
     OFTConfig,
@@ -114,6 +115,16 @@ ALL_CONFIGS = [
         {
             "target_modules": None,
             "feedforward_modules": None,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        LilyConfig,
+        {
+            "target_modules": None,
+            "r": 8,
+            "stride_A": 1,
+            "num_B": 2,
             "task_type": "SEQ_2_SEQ_LM",
         },
     ),

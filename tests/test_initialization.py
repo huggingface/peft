@@ -40,6 +40,7 @@ from peft import (
     EvaConfig,
     GraloraConfig,
     IA3Config,
+    LilyConfig,
     LoftQConfig,
     LoKrConfig,
     LoraConfig,
@@ -3706,6 +3707,237 @@ class TestEvaInitialization:
         ):
             LoraConfig(init_lora_weights=True, eva_config=EvaConfig())
 
+class TestLilyInitialization:
+    """Tests for Lily adapter initialization and parameter sharing.
+
+    The model uses a two-level structure: self.blocks is a ModuleList of
+    simple Block wrappers, each containing two Linears named "lin0" and "lin1".
+    This way all target Linear layers of the same name share the same suffix,
+    which is required for _post_injection_hook to group them and apply
+    A/B sharing correctly. Sharing should only happen within layers of the
+    same name (e.g. lin0 with lin0, lin1 with lin1), never across different
+    layer names.
+    """
+
+    torch_device = infer_device()
+
+    def get_model(self, num_layers=6):
+        """MLP with `num_layers` Block modules, each containing two Linear layers
+        named 'lin0' and 'lin1'."""
+
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(32, 32, bias=False)
+                self.lin1 = nn.Linear(32, 32, bias=False)
+
+            def forward(self, x):
+                return self.lin1(self.lin0(x))
+
+        class MLP(nn.Module):
+            def __init__(self, num_layers):
+                super().__init__()
+                self.blocks = nn.ModuleList([Block() for _ in range(num_layers)])
+
+            def forward(self, x):
+                for block in self.blocks:
+                    x = block(x)
+                return x
+
+        return MLP(num_layers).to(self.torch_device).eval()
+
+    def _get_lily_layers(self, model, adapter_name="default"):
+        """Return all LilyLayer modules in traversal order."""
+        from peft.tuners.lily.layer import LilyLayer
+
+        return [m for _, m in model.named_modules() if isinstance(m, LilyLayer) and adapter_name in m.lily_A]
+
+    def _get_lily_layers_by_suffix(self, model, suffix, adapter_name="default"):
+        """Return all LilyLayer modules whose key ends with `suffix`, in traversal order."""
+        from peft.tuners.lily.layer import LilyLayer
+
+        return [
+            m
+            for key, m in model.named_modules()
+            if isinstance(m, LilyLayer) and adapter_name in m.lily_A and key.endswith(suffix)
+        ]
+
+    @pytest.mark.parametrize("suffix", ["lin0", "lin1"])
+    def test_stride_A_1_no_A_sharing(self, suffix):
+        """With stride_A=1, every layer should have a distinct A adapter."""
+        num_layers = 4
+        model = self.get_model(num_layers=num_layers)
+        config = LilyConfig(
+            target_modules=["lin0", "lin1"],
+            r=8,
+            stride_A=1,
+            num_B=2,
+        )
+        model = get_peft_model(model, config)
+
+        layers = self._get_lily_layers_by_suffix(model, suffix)
+        assert len(layers) == num_layers
+
+        A_ptrs = [layer.lily_A["default"].weight.data_ptr() for layer in layers]
+        assert len(set(A_ptrs)) == num_layers, (
+            f"With stride_A=1, all A adapters for {suffix} should be distinct"
+        )
+
+    @pytest.mark.parametrize("suffix", ["lin0", "lin1"])
+    def test_stride_A_equals_num_layers_all_share_one_A(self, suffix):
+        """With stride_A >= num_layers, all layers should share the same single A adapter."""
+        num_layers = 4
+        model = self.get_model(num_layers=num_layers)
+        config = LilyConfig(
+            target_modules=["lin0", "lin1"],
+            r=8,
+            stride_A=num_layers,
+            num_B=2,
+        )
+        model = get_peft_model(model, config)
+
+        layers = self._get_lily_layers_by_suffix(model, suffix)
+        assert len(layers) == num_layers
+
+        A_ptrs = [layer.lily_A["default"].weight.data_ptr() for layer in layers]
+        assert len(set(A_ptrs)) == 1, (
+            f"With stride_A=num_layers, all {suffix} layers should share the same A"
+        )
+
+    @pytest.mark.parametrize("suffix", ["lin0", "lin1"])
+    def test_stride_A_partial_sharing(self, suffix):
+        """With stride_A=2 and 6 layers, there should be 3 distinct A adapters per layer name."""
+        num_layers = 6
+        stride_A = 2
+        model = self.get_model(num_layers=num_layers)
+        config = LilyConfig(
+            target_modules=["lin0", "lin1"],
+            r=8,
+            stride_A=stride_A,
+            num_B=2,
+        )
+        model = get_peft_model(model, config)
+
+        layers = self._get_lily_layers_by_suffix(model, suffix)
+        assert len(layers) == num_layers
+
+        A_ptrs = [layer.lily_A["default"].weight.data_ptr() for layer in layers]
+        num_distinct_A = len(set(A_ptrs))
+        expected = num_layers // stride_A
+        assert num_distinct_A == expected, (
+            f"Expected {expected} distinct A adapters for {suffix} with stride_A={stride_A}, got {num_distinct_A}"
+        )
+
+        for block_start in range(0, num_layers, stride_A):
+            block = layers[block_start : block_start + stride_A]
+            block_A_ptrs = {layer.lily_A["default"].weight.data_ptr() for layer in block}
+            assert len(block_A_ptrs) == 1, (
+                f"Layers in {suffix} block starting at {block_start} should share one A"
+            )
+
+    @pytest.mark.parametrize("suffix", ["lin0", "lin1"])
+    def test_stride_A_greater_than_num_layers(self, suffix):
+        """With stride_A > num_layers, all layers should still share one A."""
+        num_layers = 3
+        model = self.get_model(num_layers=num_layers)
+        config = LilyConfig(
+            target_modules=["lin0", "lin1"],
+            r=8,
+            stride_A=100,
+            num_B=2,
+        )
+        model = get_peft_model(model, config)
+
+        layers = self._get_lily_layers_by_suffix(model, suffix)
+        assert len(layers) == num_layers
+
+        A_ptrs = [layer.lily_A["default"].weight.data_ptr() for layer in layers]
+        assert len(set(A_ptrs)) == 1, (
+            f"stride_A > num_layers should still result in a single shared A for {suffix}"
+        )
+
+    @pytest.mark.parametrize("stride_A", [1, 2, 3, 6])
+    @pytest.mark.parametrize("suffix", ["lin0", "lin1"])
+    def test_B_always_shared_across_all_layers(self, suffix, stride_A):
+        """All layers should always share the same B adapter object, regardless of stride_A."""
+        num_layers = 6
+        model = self.get_model(num_layers=num_layers)
+        config = LilyConfig(
+            target_modules=["lin0", "lin1"],
+            r=8,
+            stride_A=stride_A,
+            num_B=2,
+        )
+        model = get_peft_model(model, config)
+
+        layers = self._get_lily_layers_by_suffix(model, suffix)
+        assert len(layers) == num_layers
+
+        B_ptrs = [layer.lily_B["default"].weight.data_ptr() for layer in layers]
+        assert len(set(B_ptrs)) == 1, (
+            f"All {suffix} layers should share one B adapter (stride_A={stride_A}), "
+            f"got {len(set(B_ptrs))} distinct"
+        )
+
+    @pytest.mark.parametrize("suffix", ["lin0", "lin1"])
+    def test_stride_A_non_divisible_num_layers(self, suffix):
+        """With stride_A=4 and 6 layers, there should be ceil(6/4)=2 distinct A adapters per layer name."""
+        num_layers = 6
+        stride_A = 4
+        model = self.get_model(num_layers=num_layers)
+        config = LilyConfig(
+            target_modules=["lin0", "lin1"],
+            r=8,
+            stride_A=stride_A,
+            num_B=2,
+        )
+        model = get_peft_model(model, config)
+
+        layers = self._get_lily_layers_by_suffix(model, suffix)
+        assert len(layers) == num_layers
+
+        A_ptrs = [layer.lily_A["default"].weight.data_ptr() for layer in layers]
+        expected = math.ceil(num_layers / stride_A)
+        assert len(set(A_ptrs)) == expected, (
+            f"Expected {expected} distinct A adapters for {suffix} with stride_A={stride_A}, "
+            f"num_layers={num_layers}"
+        )
+
+        first_block_A_ptrs = {layers[i].lily_A["default"].weight.data_ptr() for i in range(4)}
+        second_block_A_ptrs = {layers[i].lily_A["default"].weight.data_ptr() for i in range(4, 6)}
+        assert len(first_block_A_ptrs) == 1
+        assert len(second_block_A_ptrs) == 1
+        assert first_block_A_ptrs != second_block_A_ptrs
+
+    def test_no_sharing_across_different_layer_names(self):
+        """A and B adapters should never be shared between lin0 and lin1 layers."""
+        num_layers = 6
+        stride_A = 2
+        model = self.get_model(num_layers=num_layers)
+        config = LilyConfig(
+            target_modules=["lin0", "lin1"],
+            r=8,
+            stride_A=stride_A,
+            num_B=2,
+        )
+        model = get_peft_model(model, config)
+
+        lin0_layers = self._get_lily_layers_by_suffix(model, "lin0")
+        lin1_layers = self._get_lily_layers_by_suffix(model, "lin1")
+        assert len(lin0_layers) == num_layers
+        assert len(lin1_layers) == num_layers
+
+        lin0_A_ptrs = {layer.lily_A["default"].weight.data_ptr() for layer in lin0_layers}
+        lin1_A_ptrs = {layer.lily_A["default"].weight.data_ptr() for layer in lin1_layers}
+        assert lin0_A_ptrs.isdisjoint(lin1_A_ptrs), (
+            "A adapters should not be shared between lin0 and lin1 layers"
+        )
+
+        lin0_B_ptrs = {layer.lily_B["default"].weight.data_ptr() for layer in lin0_layers}
+        lin1_B_ptrs = {layer.lily_B["default"].weight.data_ptr() for layer in lin1_layers}
+        assert lin0_B_ptrs.isdisjoint(lin1_B_ptrs), (
+            "B adapters should not be shared between lin0 and lin1 layers"
+        )
 
 @pytest.mark.skipif(
     platform.system() != "Linux", reason="Out of the box, torch.compile does not work on Windows or MacOS"

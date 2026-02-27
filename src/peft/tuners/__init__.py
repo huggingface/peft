@@ -23,6 +23,7 @@ from .fourierft import FourierFTConfig, FourierFTModel
 from .gralora import GraloraConfig, GraloraModel
 from .hra import HRAConfig, HRAModel
 from .ia3 import IA3Config, IA3Model
+from .lily import LilyConfig, LilyModel
 from .ln_tuning import LNTuningConfig, LNTuningModel
 from .loha import LoHaConfig, LoHaModel
 from .lokr import LoKrConfig, LoKrModel
@@ -89,6 +90,8 @@ __all__ = [
     "HRAModel",
     "IA3Config",
     "IA3Model",
+    "LilyConfig",
+    "LilyModel",
     "LNTuningConfig",
     "LNTuningModel",
     "LoHaConfig",
