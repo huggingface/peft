@@ -113,7 +113,7 @@ def main():
     # Load base model
     model = AutoModelForCausalLM.from_pretrained(
         script_args.base_model_name_or_path,
-        torch_dtype=torch_dtype,
+        dtype=torch_dtype,
         device_map="auto",
     )
     tokenizer = AutoTokenizer.from_pretrained(script_args.base_model_name_or_path)

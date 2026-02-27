@@ -123,50 +123,46 @@ class OrthLayer(nn.Module):
 
     # R = (I+Q)(I-Q)^(-1)
     def get_matrix(self) -> torch.Tensor:
-        # non-orth case
+        cast_to_fp32 = False
+        orig_dtype = None
+        
         if not self.orth:
             R = self.weight
-            if self.mag_b and self.vector_b is not None:
-                R = self.vector_b[:, None] * R
-            if self.mag_a and self.vector_a is not None:
-                R = R * self.vector_a[None, :]
-            return R
-
-        Q = self._skew_symmetric()
-        orig_dtype = Q.dtype
-        cast_to_fp32 = (Q.device.type == "cpu") and (orig_dtype in (torch.float16, torch.bfloat16))
-        if cast_to_fp32:
-            Q = Q.float()
-
-        id_mat = torch.eye(self.size, device=Q.device, dtype=Q.dtype)
-
-        # Adapted from the Cayley/Neumann-based orthogonal parametrization used in OFT v2
-        # (PEFT implementation: https://github.com/huggingface/peft/blob/main/src/peft/tuners/oft/layer.py) #L135
-        if self.use_cayley_neumann:
-            if self.cayley_neumann_eps is not None:
-                Q = self._project_Q(Q, eps=self.cayley_neumann_eps)
-            t = int(self.num_cayley_neumann_terms)
-
-            R = id_mat.clone()
-            if t > 1:
-                R.add_(Q, alpha=2.0)
-                if t > 2:
-                    Q_squared = Q @ Q
-                    R.add_(Q_squared, alpha=2.0)
-
-                    Q_power = Q_squared
-                    for _ in range(3, t - 1):
-                        Q_power = Q_power @ Q
-                        R.add_(Q_power, alpha=2.0)
-
-                    Q_power = Q_power @ Q
-                    R.add_(Q_power)
         else:
-            R = torch.linalg.solve(id_mat - Q, id_mat + Q, left=False)  # R = (I+Q)(I-Q)^(-1)
+            Q = self._skew_symmetric()
+            orig_dtype = Q.dtype
+            cast_to_fp32 = (Q.device.type == "cpu") and (orig_dtype in (torch.float16, torch.bfloat16))
+            if cast_to_fp32:
+                Q = Q.float()
 
-        if self.mag_b and self.vector_b is not None:
+            id_mat = torch.eye(self.size, device=Q.device, dtype=Q.dtype)
+
+            if self.use_cayley_neumann:
+                if self.cayley_neumann_eps is not None:
+                    Q = self._project_Q(Q, eps=self.cayley_neumann_eps)
+                t = int(self.num_cayley_neumann_terms)
+
+                R = id_mat.clone()
+                if t > 1:
+                    R.add_(Q, alpha=2.0)
+                    if t > 2:
+                        Q_squared = Q @ Q
+                        R.add_(Q_squared, alpha=2.0)
+
+                        Q_power = Q_squared
+                        for _ in range(3, t - 1):
+                            Q_power = Q_power @ Q
+                            R.add_(Q_power, alpha=2.0)
+
+                        Q_power = Q_power @ Q
+                        R.add_(Q_power)
+            else:
+                R = torch.linalg.solve(id_mat - Q, id_mat + Q, left=False)
+
+        # Apply scaling vectors to R 
+        if self.vector_b is not None:
             R = self.vector_b[:, None] * R
-        if self.mag_a and self.vector_a is not None:
+        if self.vector_a is not None:
             R = R * self.vector_a[None, :]
 
         if cast_to_fp32:
@@ -230,8 +226,6 @@ class PsoftLayer(BaseTunerLayer):
         self.out_features = out_features
 
     def _get_psoft_ab_cache_buffers(self, adapter_name: str):
-        if adapter_name not in self._psoft_A_cache or adapter_name not in self._psoft_B_cache:
-            return None, None
         return self._psoft_A_cache[adapter_name], self._psoft_B_cache[adapter_name]
 
     def _set_psoft_ab_cache_buffers(self, adapter_name: str, A: torch.Tensor, B: torch.Tensor) -> None:
@@ -354,8 +348,6 @@ class Linear(nn.Module, PsoftLayer):
         """
         ΔW = scaling * B (R - id_mat) A Returns in base weight layout (respecting fan_in_fan_out).
         """
-        if adapter_name not in self.psoft_R:
-            raise KeyError(f"Adapter {adapter_name} not found in PSOFT layer.")
 
         A, B = self._get_psoft_ab_cache_buffers(adapter_name)
         base_w = self.get_base_layer().weight
@@ -411,9 +403,7 @@ class Linear(nn.Module, PsoftLayer):
             self.merged_adapters.append(active_adapter)
 
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
-        # Conversion to LoRA is supported if A/B cache buffers are available.
-        A, B = self._get_psoft_ab_cache_buffers(adapter_name)
-        return A is not None and B is not None
+        return True
 
     def unmerge(self) -> None:
         if not self.merged:
@@ -478,7 +468,6 @@ def dispatch_default(
     target: nn.Module,
     adapter_name: str,
     config: PsoftConfig,
-    parameter_name: Optional[str] = None,
     **kwargs,
 ) -> Optional[nn.Module]:
     new_module = None
@@ -487,9 +476,6 @@ def dispatch_default(
         target_base_layer = target.get_base_layer()
     else:
         target_base_layer = target
-
-    if parameter_name is not None:
-        return None
 
     if isinstance(target_base_layer, torch.nn.Linear):
         if config.fan_in_fan_out:
