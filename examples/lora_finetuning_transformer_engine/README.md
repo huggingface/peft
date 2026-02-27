@@ -1,6 +1,6 @@
 # Transformer Engine ESM2 LoRA Fine-Tuning
 
-This example demonstrates LoRA fine-tuning for Transformer Engine ESM2 token classification. It uses a synthetic dataset generated at runtime.
+This example demonstrates LoRA fine-tuning for Transformer Engine ESM2 token classification.
 
 ## Setup
 
@@ -52,8 +52,8 @@ for details.
 - Loads a Transformer Engine ESM2 model for token classification
 - Applies LoRA adapters via PEFT
 - Generates random protein-like sequences
-- Assigns synthetic SS3 labels (`H`, `E`, `C`) with a simple residue rule
-- Trains/evaluates with `Trainer` (no explicit DDP setup)
+- Assigns randomly generated secondary structure labels (`H`, `E`, `C`)
+- Trains/evaluates with `Trainer`
 
 ## Run
 
@@ -82,6 +82,28 @@ python examples/lora_finetuning_transformer_engine/lora_finetuning_te.py \
   --lora_r 16 \
   --lora_alpha 32 \
   --lora_dropout 0.1
+```
+
+## Dataset
+
+By default the script generates a **synthetic dataset** at runtime — random protein-like sequences
+with randomly generated secondary structure labels (`H`, `E`, `C`). This is useful for quick sanity checks and testing.
+
+For a more realistic evaluation, you can use the **Porter6** secondary-structure dataset.
+A download-and-convert script is available in the BioNeMo repository:
+
+[prepare_porter6_dataset.py](https://github.com/NVIDIA/bionemo-framework/blob/bd72d882bca458d9438e05661c41163949713d1f/bionemo-recipes/recipes/esm2_peft_te/data/prepare_porter6_dataset.py)
+
+Run it to produce train and validation parquet files, then pass them to the training script
+with `--train_parquet` and `--val_parquet`:
+
+```bash
+python examples/lora_finetuning_transformer_engine/lora_finetuning_te.py \
+  --base_model nvidia/esm2_t6_8M_UR50D \
+  --train_parquet porter6_train_dataset_55k.parquet \
+  --val_parquet porter6_val_dataset_2024_692.parquet \
+  --output_dir ./esm2_lora_output \
+  --num_epochs 3
 ```
 
 ## Outputs

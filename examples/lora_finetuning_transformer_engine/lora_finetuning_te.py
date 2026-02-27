@@ -20,6 +20,7 @@ import argparse
 import random
 
 import numpy as np
+import pandas as pd
 import torch
 from datasets import Dataset
 from transformers import (
@@ -75,8 +76,26 @@ def parse_args():
         default=False,
         help="Allow loading model code from the Hub. Required for models like nvidia/esm2_*.",
     )
+    parser.add_argument(
+        "--train_parquet",
+        type=str,
+        default=None,
+        help="Path to a training parquet file with Sequence and Secondary_structure columns. "
+        "When provided, the synthetic dataset is not generated.",
+    )
+    parser.add_argument(
+        "--val_parquet",
+        type=str,
+        default=None,
+        help="Path to a validation parquet file with the same schema as --train_parquet.",
+    )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    if bool(args.train_parquet) != bool(args.val_parquet):
+        parser.error("--train_parquet and --val_parquet must both be provided or both omitted.")
+
+    return args
 
 
 def set_seed(seed: int):
@@ -88,19 +107,6 @@ def set_seed(seed: int):
         torch.cuda.manual_seed_all(seed)
 
 
-def residue_to_ss3_label(residue: str) -> int:
-    """
-    Map a residue to a synthetic SS3 class.
-
-    This is intentionally simplistic for demonstration only.
-    """
-    if residue in HELIX_AA:
-        return SS3_LABEL2ID["H"]
-    if residue in BETA_AA:
-        return SS3_LABEL2ID["E"]
-    return SS3_LABEL2ID["C"]
-
-
 def build_synthetic_sequences(num_samples: int, min_len: int, max_len: int):
     """Generate random amino-acid sequences."""
     sequences = []
@@ -110,13 +116,18 @@ def build_synthetic_sequences(num_samples: int, min_len: int, max_len: int):
     return sequences
 
 
-def tokenize_and_align_labels(examples, tokenizer, max_length: int):
-    """Tokenize protein sequences and align per-token labels."""
+def ss_char_to_label(char: str) -> int:
+    """Map a single secondary structure character to a label id (H/E/C)."""
+    return SS3_LABEL2ID.get(char, SS3_LABEL2ID["C"])
+
+
+def tokenize_and_align_labels(sequences, label_strings, tokenizer, max_length: int):
+    """Tokenize protein sequences and align per-residue label strings to token positions."""
     batch_input_ids = []
     batch_attention_mask = []
     batch_labels = []
 
-    for sequence in examples["sequence"]:
+    for sequence, label_str in zip(sequences, label_strings):
         encoded = tokenizer(
             sequence,
             truncation=True,
@@ -127,9 +138,9 @@ def tokenize_and_align_labels(examples, tokenizer, max_length: int):
         attention_mask = encoded["attention_mask"]
 
         labels = [-100] * len(input_ids)
-        usable_len = min(len(sequence), len(input_ids) - 2)
+        usable_len = min(len(sequence), len(label_str), len(input_ids) - 2)
         for idx in range(usable_len):
-            labels[idx + 1] = residue_to_ss3_label(sequence[idx])
+            labels[idx + 1] = ss_char_to_label(label_str[idx])
 
         batch_input_ids.append(input_ids)
         batch_attention_mask.append(attention_mask)
@@ -142,6 +153,24 @@ def tokenize_and_align_labels(examples, tokenizer, max_length: int):
     }
 
 
+def load_parquet_dataset(train_path: str, val_path: str, tokenizer, max_length: int):
+    """Load train/val parquet files and return tokenized Datasets."""
+    train_df = pd.read_parquet(train_path)
+    val_df = pd.read_parquet(val_path)
+
+    train_dataset = Dataset.from_pandas(train_df).map(
+        lambda ex: tokenize_and_align_labels(ex["Sequence"], ex["Secondary_structure"], tokenizer, max_length),
+        batched=True,
+        remove_columns=train_df.columns.tolist(),
+    )
+    val_dataset = Dataset.from_pandas(val_df).map(
+        lambda ex: tokenize_and_align_labels(ex["Sequence"], ex["Secondary_structure"], tokenizer, max_length),
+        batched=True,
+        remove_columns=val_df.columns.tolist(),
+    )
+    return train_dataset, val_dataset
+
+
 def compute_metrics(eval_pred):
     """Compute token accuracy while ignoring -100 labels."""
     logits, labels = eval_pred
@@ -151,6 +180,20 @@ def compute_metrics(eval_pred):
     total_tokens = mask.sum()
     accuracy = float(correct.sum() / total_tokens) if total_tokens > 0 else 0.0
     return {"token_accuracy": accuracy}
+
+
+def residue_to_ss_char(aa: str) -> str:
+    """Map an amino acid to a synthetic secondary structure character (H/E/C)."""
+    if aa in HELIX_AA:
+        return "H"
+    if aa in BETA_AA:
+        return "E"
+    return "C"
+
+
+def sequence_to_synthetic_labels(sequence: str) -> str:
+    """Derive a synthetic per-residue label string from an amino acid sequence."""
+    return "".join(residue_to_ss_char(aa) for aa in sequence)
 
 
 def make_synthetic_dataset(
@@ -165,15 +208,18 @@ def make_synthetic_dataset(
     train_sequences = build_synthetic_sequences(num_train_samples, min_seq_len, max_seq_len)
     eval_sequences = build_synthetic_sequences(num_eval_samples, min_seq_len, max_seq_len)
 
-    train_dataset = Dataset.from_dict({"sequence": train_sequences}).map(
-        lambda examples: tokenize_and_align_labels(examples, tokenizer=tokenizer, max_length=max_length),
+    train_labels = [sequence_to_synthetic_labels(s) for s in train_sequences]
+    eval_labels = [sequence_to_synthetic_labels(s) for s in eval_sequences]
+
+    train_dataset = Dataset.from_dict({"sequence": train_sequences, "labels_str": train_labels}).map(
+        lambda ex: tokenize_and_align_labels(ex["sequence"], ex["labels_str"], tokenizer, max_length),
         batched=True,
-        remove_columns=["sequence"],
+        remove_columns=["sequence", "labels_str"],
     )
-    eval_dataset = Dataset.from_dict({"sequence": eval_sequences}).map(
-        lambda examples: tokenize_and_align_labels(examples, tokenizer=tokenizer, max_length=max_length),
+    eval_dataset = Dataset.from_dict({"sequence": eval_sequences, "labels_str": eval_labels}).map(
+        lambda ex: tokenize_and_align_labels(ex["sequence"], ex["labels_str"], tokenizer, max_length),
         batched=True,
-        remove_columns=["sequence"],
+        remove_columns=["sequence", "labels_str"],
     )
     return train_dataset, eval_dataset
 
@@ -219,15 +265,24 @@ def main():
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
-    print("Building synthetic dataset...")
-    train_dataset, eval_dataset = make_synthetic_dataset(
-        tokenizer=tokenizer,
-        num_train_samples=args.num_train_samples,
-        num_eval_samples=args.num_eval_samples,
-        min_seq_len=args.min_seq_len,
-        max_seq_len=args.max_seq_len,
-        max_length=args.max_length,
-    )
+    if args.train_parquet and args.val_parquet:
+        print(f"Loading parquet datasets: train={args.train_parquet}, val={args.val_parquet}")
+        train_dataset, eval_dataset = load_parquet_dataset(
+            train_path=args.train_parquet,
+            val_path=args.val_parquet,
+            tokenizer=tokenizer,
+            max_length=args.max_length,
+        )
+    else:
+        print("Building synthetic dataset...")
+        train_dataset, eval_dataset = make_synthetic_dataset(
+            tokenizer=tokenizer,
+            num_train_samples=args.num_train_samples,
+            num_eval_samples=args.num_eval_samples,
+            min_seq_len=args.min_seq_len,
+            max_seq_len=args.max_seq_len,
+            max_length=args.max_length,
+        )
 
     data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
 

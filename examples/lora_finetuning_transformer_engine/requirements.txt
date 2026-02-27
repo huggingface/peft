@@ -4,6 +4,8 @@ datasets
 peft
 accelerate
 numpy
+pandas
+pyarrow
 safetensors
 # transformer-engine must match the system CUDA toolkit version.
 # Install it separately or use the system-provided package.
