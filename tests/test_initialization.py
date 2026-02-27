@@ -1714,10 +1714,6 @@ class TestAdaLoraInitialization:
         config = AdaLoraConfig(target_modules=["linear", "embed", "conv2d"], total_step=1)
         assert config.target_modules == {"linear", "embed", "conv2d"}
 
-    def test_adalora_use_dora_raises(self):
-        with pytest.raises(ValueError, match="ADALORA does not support DoRA"):
-            AdaLoraConfig(use_dora=True, total_step=1)
-
     def test_adalora_loftq_config_raises(self):
         with pytest.raises(ValueError, match="ADALORA does not support LOFTQ"):
             AdaLoraConfig(init_lora_weights="loftq", loftq_config={"loftq": "config"}, total_step=1)
