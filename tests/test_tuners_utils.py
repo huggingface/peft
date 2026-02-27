@@ -1205,7 +1205,7 @@ class TestModelAndLayerStatus:
         model_status = large_model.get_model_status()
         model_status = large_model.get_model_status()
         assert model_status.adapter_model_type == "LoraModel"
-        assert model_status.peft_types == {"default": "LORA", "other": "LORA"}
+        assert model_status.peft_types == {"default": "LORA"}
         assert model_status.num_adapter_layers == 2
         assert model_status.trainable_params == 2 * (8 * 10 + 10 * 8)
 
@@ -1217,7 +1217,7 @@ class TestModelAndLayerStatus:
         large_model = get_peft_model(large_model, config)
         model_status = large_model.get_model_status()
         assert model_status.adapter_model_type == "LoraModel"
-        assert model_status.peft_types == {"default": "LORA", "other": "LORA"}
+        assert model_status.peft_types == {"default": "LORA"}
         assert model_status.num_adapter_layers == 2
         assert model_status.trainable_params == 2 * (8 * 10 + 10 * 8)
 
