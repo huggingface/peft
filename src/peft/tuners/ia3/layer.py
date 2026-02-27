@@ -22,6 +22,8 @@ from transformers.pytorch_utils import Conv1D
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils import transpose
 
+from .config import IA3Config
+
 
 class IA3Layer(BaseTunerLayer):
     # All names of layers that may contain adapter weights
@@ -51,7 +53,10 @@ class IA3Layer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-    def update_layer(self, adapter_name, init_ia3_weights, inference_mode: bool = False, **kwargs):
+    def update_layer(self, adapter_name: str, config: IA3Config, **kwargs):
+        init_ia3_weights = config.init_ia3_weights
+        inference_mode = config.inference_mode
+
         # This code works for linear layers, override for other layer types
         # Actual trainable parameters
         if self.is_feedforward:
@@ -76,18 +81,17 @@ class Linear(nn.Module, IA3Layer):
         self,
         base_layer: nn.Module,
         adapter_name: str,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+        config: IA3Config,
         is_feedforward: bool = False,  # Set to True if the layer is treated as a feedforward layer
         is_target_conv_1d_layer: bool = False,  # whether target module is a conv1d layer. useful while unloading later
-        init_ia3_weights: bool = True,  # whether to initialize IA3 weights
         **kwargs,
     ) -> None:
         super().__init__()
         IA3Layer.__init__(self, base_layer, is_feedforward=is_feedforward)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, init_ia3_weights)
+        self.update_layer(adapter_name, config=config)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -189,20 +193,22 @@ class _ConvNd(nn.Module, IA3Layer):
         self,
         base_layer: nn.Module,
         adapter_name: str,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+        config: IA3Config,
         is_feedforward: bool = False,  # Set to True if the layer is treated as a feedforward layer
-        init_ia3_weights: bool = True,
         **kwargs,
     ) -> None:
         super().__init__()
         IA3Layer.__init__(self, base_layer, is_feedforward=is_feedforward)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
         self._active_adapter = adapter_name
         self._kernel_dim = base_layer.weight.dim()
 
-        self.update_layer(adapter_name, init_ia3_weights)
+        self.update_layer(adapter_name, config=config)
 
-    def update_layer(self, adapter_name, init_ia3_weights, inference_mode: bool = False, **kwargs):
+    def update_layer(self, adapter_name: str, config: IA3Config, **kwargs):
+        init_ia3_weights = config.init_ia3_weights
+        inference_mode = config.inference_mode
+
         # Actual trainable parameters
         num_features = self.in_features if self.is_feedforward else self.out_features
         weights_size = (1, num_features) + (1,) * (self._kernel_dim - 2)

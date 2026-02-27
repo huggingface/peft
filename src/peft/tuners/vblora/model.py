@@ -102,11 +102,7 @@ class VBLoRAModel(BaseTuner):
                 adapter_name=adapter_name,
                 vblora_vector_bank=self.vblora_vector_bank,
                 r=vblora_config.r,
-                topk=vblora_config.topk,
-                num_vectors=vblora_config.num_vectors,
-                vector_length=vblora_config.vector_length,
-                vblora_dropout=vblora_config.vblora_dropout,
-                init_logits_std=vblora_config.init_logits_std,
+                config=vblora_config,
             )
         else:
             new_module = self._create_new_module(
@@ -129,19 +125,19 @@ class VBLoRAModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            if kwargs["fan_in_fan_out"]:
+            if vblora_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
-                kwargs["fan_in_fan_out"] = vblora_config.fan_in_fan_out = False
+                vblora_config.fan_in_fan_out = False
         elif isinstance(target_base_layer, Conv1D):
             kwargs["is_target_conv_1d_layer"] = True
-            if not kwargs["fan_in_fan_out"]:
+            if not vblora_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
-                kwargs["fan_in_fan_out"] = vblora_config.fan_in_fan_out = True
+                vblora_config.fan_in_fan_out = True
         else:
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
@@ -151,12 +147,8 @@ class VBLoRAModel(BaseTuner):
             base_layer=target,
             vblora_vector_bank=vblora_vector_bank,
             adapter_name=adapter_name,
+            config=vblora_config,
             r=vblora_config.r,
-            num_vectors=vblora_config.num_vectors,
-            vector_length=vblora_config.vector_length,
-            topk=vblora_config.topk,
-            vblora_dropout=vblora_config.vblora_dropout,
-            init_logits_std=vblora_config.init_logits_std,
             **kwargs,
         )
 

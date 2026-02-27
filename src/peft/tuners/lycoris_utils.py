@@ -250,9 +250,9 @@ class LycorisTuner(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, (torch.nn.Conv2d, torch.nn.Conv1d)):
-            new_module = new_module_cls(target, adapter_name=adapter_name, **kwargs)
+            new_module = new_module_cls(target, adapter_name=adapter_name, config=config, **kwargs)
         elif isinstance(target_base_layer, torch.nn.Linear):
-            new_module = new_module_cls(target, adapter_name=adapter_name, **kwargs)
+            new_module = new_module_cls(target, adapter_name=adapter_name, config=config, **kwargs)
         else:
             supported_modules = ", ".join(layer.__name__ for layer in cls.layers_mapping.keys())
             raise ValueError(

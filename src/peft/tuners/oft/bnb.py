@@ -23,6 +23,7 @@ from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.integrations import dequantize_bnb_weight
 
+from .config import OFTConfig
 from .layer import OFTLayer
 
 
@@ -34,15 +35,8 @@ if is_bnb_available():
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
+            config: OFTConfig,
             r: int = 8,
-            oft_block_size: int = 0,
-            module_dropout: float = 0.0,
-            init_weights: bool = True,
-            coft: bool = False,
-            eps: float = 6e-5,
-            block_share: bool = False,
-            use_cayley_neumann: bool = False,
-            num_cayley_neumann_terms: int = 5,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -53,14 +47,7 @@ if is_bnb_available():
             self.update_layer(
                 adapter_name,
                 r,
-                oft_block_size=oft_block_size,
-                module_dropout=module_dropout,
-                coft=coft,
-                eps=eps,
-                block_share=block_share,
-                init_weights=init_weights,
-                use_cayley_neumann=use_cayley_neumann,
-                num_cayley_neumann_terms=num_cayley_neumann_terms,
+                config=config,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -213,15 +200,8 @@ if is_bnb_4bit_available():
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
+            config: OFTConfig,
             r: int = 8,
-            oft_block_size: int = 0,
-            module_dropout: float = 0.0,
-            coft: bool = False,
-            eps: float = 6e-5,
-            block_share: bool = False,
-            init_weights: bool = True,
-            use_cayley_neumann: bool = False,
-            num_cayley_neumann_terms: int = 5,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -232,14 +212,7 @@ if is_bnb_4bit_available():
             self.update_layer(
                 adapter_name,
                 r,
-                oft_block_size=oft_block_size,
-                module_dropout=module_dropout,
-                coft=coft,
-                eps=eps,
-                block_share=block_share,
-                init_weights=init_weights,
-                use_cayley_neumann=use_cayley_neumann,
-                num_cayley_neumann_terms=num_cayley_neumann_terms,
+                config=config,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:

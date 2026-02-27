@@ -55,14 +55,7 @@ class RoadModel(BaseTuner):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
-        # Regexp matching - Find key which matches current target_name in patterns provided
-        variant = road_config.variant
-        group_size = road_config.group_size
-
         kwargs = {
-            "variant": variant,
-            "group_size": group_size,
-            "init_weights": road_config.init_weights,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -77,9 +70,7 @@ class RoadModel(BaseTuner):
         if isinstance(target, RoadLayer):
             target.update_layer(
                 adapter_name,
-                variant,
-                group_size,
-                init_weights=road_config.init_weights,
+                config=road_config,
             )
         else:
             device_map = get_device_map(self.model)

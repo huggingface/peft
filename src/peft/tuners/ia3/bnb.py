@@ -18,6 +18,7 @@ import torch
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 
+from .config import IA3Config
 from .layer import IA3Layer
 
 
@@ -29,8 +30,8 @@ if is_bnb_available():
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
+            config: IA3Config,
             is_feedforward: bool,
-            init_ia3_weights: bool = True,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -39,7 +40,7 @@ if is_bnb_available():
             # Freezing the pre-trained weight matrix
             self.get_base_layer().weight.requires_grad = False
             self._active_adapter = adapter_name
-            self.update_layer(adapter_name, init_ia3_weights)
+            self.update_layer(adapter_name, config=config)
 
         def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
             # note: no check for self.merged because merging is not supported (yet)
@@ -81,8 +82,8 @@ if is_bnb_4bit_available():
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
+            config: IA3Config,
             is_feedforward: bool,
-            init_ia3_weights: bool = True,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -91,7 +92,7 @@ if is_bnb_4bit_available():
             # Freezing the pre-trained weight matrix
             self.get_base_layer().weight.requires_grad = False
             self._active_adapter = adapter_name
-            self.update_layer(adapter_name, init_ia3_weights)
+            self.update_layer(adapter_name, config=config)
 
         def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
             # note: no check for self.merged because merging is not supported (yet)

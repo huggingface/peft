@@ -91,11 +91,8 @@ class MissModel(BaseTuner):
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "r": miss_config.r,
-            "mini_r": miss_config.mini_r,
-            "miss_dropout": miss_config.miss_dropout,
-            "init_weights": miss_config.init_weights,
+            "bias": bias,
         }
-        kwargs["bias"] = bias
 
         # If it is not a MissLayer, create a new module, else update it with new adapters
         if not isinstance(target, MissLayer):
@@ -107,10 +104,8 @@ class MissModel(BaseTuner):
         else:
             target.update_layer(
                 adapter_name,
-                r=miss_config.r,
-                init_weights=miss_config.init_weights,
-                miss_dropout=miss_config.miss_dropout,
-                mini_r=miss_config.mini_r,
+                config=miss_config,
+                **kwargs,
             )
 
     @staticmethod
@@ -121,7 +116,7 @@ class MissModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            new_module = MissLinear(target, adapter_name, **kwargs)
+            new_module = MissLinear(target, adapter_name, config=miss_config, **kwargs)
         else:
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only `torch.nn.Linear` is supported."

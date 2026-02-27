@@ -189,7 +189,7 @@ class AdaLoraModel(LoraModel):
             )
             new_module = SVDLinear4bit(target, adapter_name, config=lora_config, **fourbit_kwargs)
         elif QuantLinear is not None and isinstance(target, QuantLinear):
-            new_module = SVDQuantLinear(target, adapter_name, **kwargs)
+            new_module = SVDQuantLinear(target, adapter_name, config=lora_config, **kwargs)
         else:
             if isinstance(target_base_layer, torch.nn.Linear):
                 if lora_config.fan_in_fan_out:

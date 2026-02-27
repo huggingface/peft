@@ -22,6 +22,8 @@ import torch.nn.functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
+from .config import ShiraConfig
+
 
 class ShiraLayer(BaseTunerLayer):
     # List all names of layers that may contain trainable adapter weights
@@ -56,10 +58,12 @@ class ShiraLayer(BaseTunerLayer):
         adapter_name,
         mask,
         r,
-        init_weights: bool = True,
+        config: ShiraConfig,
         inference_mode: bool = False,
         **kwargs,
     ):
+        init_weights = config.init_weights
+
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         self.r[adapter_name] = r
@@ -116,19 +120,18 @@ class Linear(nn.Module, ShiraLayer):
         base_layer,
         mask,
         adapter_name: str,
+        config: ShiraConfig,
         r: int = 0,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stored weight like (fan_in, fan_out)
-        init_weights: bool = True,
         **kwargs,
     ) -> None:
         super().__init__()
         ShiraLayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
         if self.base_layer is not self.get_base_layer():
             raise ValueError("SHiRA does not support nested base layers")
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, mask, r, init_weights=init_weights)
+        self.update_layer(adapter_name, mask, r, config=config)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """

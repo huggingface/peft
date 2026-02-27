@@ -22,6 +22,7 @@ import torch
 from peft.import_utils import is_hqq_available
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
+from .config import OFTConfig
 from .layer import OFTLayer
 
 
@@ -34,15 +35,8 @@ if is_hqq_available():
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
+            config: OFTConfig,
             r: int = 8,
-            oft_block_size: int = 0,
-            module_dropout: float = 0.0,
-            init_weights: bool = True,
-            coft: bool = False,
-            eps: float = 6e-5,
-            block_share: bool = False,
-            use_cayley_neumann: bool = False,
-            num_cayley_neumann_terms: int = 5,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -53,14 +47,7 @@ if is_hqq_available():
             self.update_layer(
                 adapter_name,
                 r,
-                oft_block_size=oft_block_size,
-                module_dropout=module_dropout,
-                init_weights=init_weights,
-                coft=coft,
-                eps=eps,
-                block_share=block_share,
-                use_cayley_neumann=use_cayley_neumann,
-                num_cayley_neumann_terms=num_cayley_neumann_terms,
+                config=config,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:

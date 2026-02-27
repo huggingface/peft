@@ -112,36 +112,18 @@ class WaveFTModel(BaseTuner):
             target_name_key = get_pattern_key(pattern_keys, current_key)
             n_frequency = waveft_config.n_frequency_pattern.get(target_name_key, waveft_config.n_frequency)
 
-        # Determine wavelet_family
-        wavelet_family = None
-        if "wavelet_family" in optional_kwargs:
-            wavelet_family = optional_kwargs["wavelet_family"]
-        if wavelet_family is None:
-            wavelet_family = waveft_config.wavelet_family
-
-        scaling = waveft_config.scaling
-        random_loc_seed = waveft_config.random_loc_seed
         bias = hasattr(target, "bias") and target.bias is not None
         # Prepare kwargs for module creation/update
         kwargs = {
             "n_frequency": n_frequency,
-            "scaling": scaling,
-            "fan_in_fan_out": waveft_config.fan_in_fan_out,
-            "init_weights": waveft_config.init_weights,
-            "random_loc_seed": waveft_config.random_loc_seed,
-            "wavelet_family": wavelet_family,  # Use determined wavelet family
+            "bias": bias,
         }
-        kwargs["bias"] = bias
 
         if isinstance(target, WaveFTLayer):
             target.update_layer(
                 adapter_name,
                 n_frequency,
-                scaling,
-                waveft_config.init_weights,
-                random_loc_seed,
-                wavelet_family=wavelet_family,  # Pass determined wavelet family
-                use_idwt=waveft_config.use_idwt,
+                config=waveft_config,
             )
         else:
             new_module = self._create_new_module(waveft_config, adapter_name, target, **kwargs)
@@ -157,28 +139,26 @@ class WaveFTModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            if kwargs["fan_in_fan_out"]:
+            if waveft_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
-                kwargs["fan_in_fan_out"] = waveft_config.fan_in_fan_out = False
+                waveft_config.fan_in_fan_out = False
         elif isinstance(target_base_layer, Conv1D):
             kwargs["is_target_conv_1d_layer"] = True
-            if not kwargs["fan_in_fan_out"]:
+            if not waveft_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
-                kwargs["fan_in_fan_out"] = waveft_config.fan_in_fan_out = True
+                waveft_config.fan_in_fan_out = True
         else:
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`."
             )
 
-        kwargs["wavelet_family"] = waveft_config.wavelet_family
-        kwargs["use_idwt"] = waveft_config.use_idwt
-        new_module = WaveFTLinear(target, adapter_name, **kwargs)
+        new_module = WaveFTLinear(target, adapter_name, config=waveft_config, **kwargs)
 
         return new_module
 

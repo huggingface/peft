@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -408,14 +408,7 @@ class OFTLayer(BaseTunerLayer):
         self,
         adapter_name,
         r,
-        oft_block_size,
-        module_dropout,
-        coft,
-        eps,
-        block_share,
-        init_weights,
-        use_cayley_neumann,
-        num_cayley_neumann_terms,
+        config: OFTConfig,
         inference_mode: bool = False,
         **kwargs,
     ):
@@ -436,6 +429,15 @@ class OFTLayer(BaseTunerLayer):
             block_share (`bool`): Whether to share the OFT parameters between blocks or not.
             init_weights (`bool`): Whether to initialize weights.
         """
+        oft_block_size = config.oft_block_size
+        module_dropout = config.module_dropout
+        coft = config.coft
+        eps = config.eps
+        block_share = config.block_share
+        init_weights = config.init_weights
+        use_cayley_neumann = config.use_cayley_neumann
+        num_cayley_neumann_terms = config.num_cayley_neumann_terms
+
         # Initialize the MultiplicativeDropoutLayer for module_dropout > 0.0.
         if module_dropout > 0.0:
             oft_dropout_layer = MultiplicativeDropoutLayer(p=module_dropout)
@@ -530,16 +532,9 @@ class Linear(nn.Module, OFTLayer):
         self,
         base_layer,
         adapter_name: str,
+        config: OFTConfig,
         r: int = 8,
-        oft_block_size: int = 0,
-        module_dropout: float = 0.0,
-        coft: bool = False,
-        eps: float = 6e-5,
-        block_share: bool = False,
-        use_cayley_neumann: bool = False,
-        num_cayley_neumann_terms: int = 5,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-        init_weights: Union[bool, str] = True,
         is_target_conv_1d_layer: bool = False,
         **kwargs,
     ) -> None:
@@ -552,14 +547,7 @@ class Linear(nn.Module, OFTLayer):
         self.update_layer(
             adapter_name,
             r,
-            oft_block_size=oft_block_size,
-            module_dropout=module_dropout,
-            coft=coft,
-            eps=eps,
-            block_share=block_share,
-            init_weights=init_weights,
-            use_cayley_neumann=use_cayley_neumann,
-            num_cayley_neumann_terms=num_cayley_neumann_terms,
+            config=config,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
@@ -682,16 +670,9 @@ class Conv2d(nn.Module, OFTLayer):
         self,
         base_layer: nn.Module,
         adapter_name: str,
+        config: OFTConfig,
         r: int = 8,
-        oft_block_size: int = 0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-        module_dropout: float = 0.0,
-        coft: bool = False,
-        eps: float = 6e-5,
-        block_share: bool = False,
-        init_weights: Union[bool, str] = True,
-        use_cayley_neumann: bool = False,
-        num_cayley_neumann_terms: int = 5,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -704,34 +685,29 @@ class Conv2d(nn.Module, OFTLayer):
         self.update_layer(
             adapter_name,
             r,
-            oft_block_size=oft_block_size,
-            module_dropout=module_dropout,
-            coft=coft,
-            eps=eps,
-            block_share=block_share,
-            init_weights=init_weights,
-            use_cayley_neumann=use_cayley_neumann,
-            num_cayley_neumann_terms=num_cayley_neumann_terms,
+            config=config,
         )
 
     def update_layer(
         self,
         adapter_name,
         r,
-        oft_block_size,
-        module_dropout,
-        coft,
-        eps,
-        block_share,
-        init_weights,
-        use_cayley_neumann,
-        num_cayley_neumann_terms,
+        config: OFTConfig,
         inference_mode: bool = False,
         **kwargs,
     ):
         """
         Update the conv2d layer with trainable OFT weights.
         """
+        oft_block_size = config.oft_block_size
+        module_dropout = config.module_dropout
+        coft = config.coft
+        eps = config.eps
+        block_share = config.block_share
+        init_weights = config.init_weights
+        use_cayley_neumann = config.use_cayley_neumann
+        num_cayley_neumann_terms = config.num_cayley_neumann_terms
+
         # Initialize the MultiplicativeDropoutLayer for module_dropout > 0.0.
         if module_dropout > 0.0:
             oft_dropout_layer = MultiplicativeDropoutLayer(p=module_dropout)
@@ -937,7 +913,7 @@ def dispatch_default(
         target_base_layer = target
 
     if isinstance(target_base_layer, torch.nn.Conv2d):
-        new_module = Conv2d(target, adapter_name, **kwargs)
+        new_module = Conv2d(target, adapter_name, config=oft_config, **kwargs)
     elif isinstance(target_base_layer, torch.nn.Linear):
         if kwargs["fan_in_fan_out"]:
             warnings.warn(
@@ -945,6 +921,6 @@ def dispatch_default(
                 "Setting fan_in_fan_out to False."
             )
             kwargs["fan_in_fan_out"] = oft_config.fan_in_fan_out = False
-        new_module = Linear(target, adapter_name, **kwargs)
+        new_module = Linear(target, adapter_name, config=oft_config, **kwargs)
 
     return new_module
