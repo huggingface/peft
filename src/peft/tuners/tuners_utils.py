@@ -1787,7 +1787,10 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
             # TODO: It's still unclear how empty layers_pattern (None, [], or "") should behave
             # For now, empty layers_pattern means any layer pattern is ok
             if layers_pattern is None or len(layers_pattern) == 0:
-                layer_index = re.match(r".*\.[^.]*\.(\d+)\.", key)
+                # Use non-greedy .*? to match the FIRST digit group, not the last
+                # This prevents MoE expert indices from being matched instead of layer indices
+                # e.g., for "model.layers.1.mlp.experts.0.up_proj", we want to match "1" not "0"
+                layer_index = re.match(r".*?\.[^.]*\.(\d+)\.", key)
             else:
                 layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
                 for pattern in layers_pattern:
