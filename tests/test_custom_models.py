@@ -2212,7 +2212,14 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_only_params_are_updated(self, test_name, model_id, config_cls, config_kwargs):
         # An explicit test that when using an adapter on a custom model, only the adapter parameters are updated during
         # training
-        X = self.prepare_inputs_for_testing()
+        if issubclass(config_cls, AdamssConfig):
+            # AdaMSS initializes B=0 which blocks gradient flow to A parameters.
+            config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+            # Use random float inputs to avoid ReLU dead zones that block gradient to specific subspaces.
+            X = {"X": torch.randn(9, 10, device=self.torch_device)}
+        else:
+            X = self.prepare_inputs_for_testing()
+
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -2249,13 +2256,6 @@ class TestPeftCustomModel(PeftCommonTester):
             param_after = params_after[name]
             if (model.prefix in name) or ("modules_to_save" in name) or ("token_adapter.trainable_tokens" in name):
                 # target_modules, modules_to_save and modules of `NewTokensWrapper` _are_ updated
-                # Special case for AdaMSS: use a higher LR to overcome B=0 init issue
-                # With B=0, dL/dA = (dL/dy) * B^T = 0, so we need enough LR for B to change
-                # significantly and then for A to get non-trivial gradients
-                if issubclass(config_cls, AdamssConfig) and ("adamss_A" in name or "adamss_B" in name):
-                    # With lr=1.0, B gets updated in step 1, and A gets gradients in step 2+
-                    # but individual A params may remain close to zero with atol=tol
-                    continue  # A/B are verified by other tests (merge/unmerge, forward output)
                 assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
             else:
                 assert torch.allclose(param_before, param_after, atol=tol, rtol=tol)

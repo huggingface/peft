@@ -379,6 +379,7 @@ def main():
         seed=args.seed,
         report_to="none",
         remove_unused_columns=False,  # Required for set_transform compatibility
+        label_names=["labels"],  # Explicitly tell Trainer where labels are (PEFT hides model signature)
     )
 
     # Create custom optimizer with different LR for head

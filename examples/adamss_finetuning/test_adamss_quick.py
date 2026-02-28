@@ -134,6 +134,7 @@ training_args = TrainingArguments(
     save_strategy="no",
     logging_steps=10,
     remove_unused_columns=False,
+    label_names=["labels"],  # Explicitly tell Trainer where labels are (PEFT hides model signature)
     report_to="none",
 )
 

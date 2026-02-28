@@ -75,12 +75,11 @@ class AdamssAsaCallback(TrainerCallback):
     ):
         """Called after optimizer.step() – delegates to model.update_and_allocate()."""
         model = kwargs.get("model")
-        if model is None:
-            return control
+        if model is not None:
+            # Resolve to the AdamssModel (works for both PeftModel and raw base_model)
+            base_model = getattr(model, "base_model", model)
+            if hasattr(base_model, "update_and_allocate"):
+                base_model.update_and_allocate(state.global_step)
 
-        # Resolve to the AdamssModel (works for both PeftModel and raw base_model)
-        base_model = getattr(model, "base_model", model)
-        if hasattr(base_model, "update_and_allocate"):
-            base_model.update_and_allocate(state.global_step)
+        return super().on_optimizer_step(args=args, state=state, control=control)
 
-        return control

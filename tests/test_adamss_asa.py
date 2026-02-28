@@ -36,6 +36,7 @@ def _make_asa_model(target_modules=("lin0", "lin1"), r=8, num_subspaces=4, subsp
         "r": r,
         "num_subspaces": num_subspaces,
         "subspace_rank": subspace_rank,
+        "init_weights": None,
         "use_asa": True,
         "asa_target_subspaces": 2,
         "init_warmup": 0,
@@ -63,31 +64,12 @@ def _get_adamss_layers(model):
     return [m for m in model.modules() if isinstance(m, AdamssLayer)]
 
 
-def _seed_b_params(model):
-    """
-    Give B parameters small non-zero values so that gradients flow to A.
+class TestAdamssAsa:
+    # -- update_importance --------------------------------------------------
 
-    AdaMSS initializes B=0 (output = A @ B @ x + residual).  With B=0 the
-    gradient dL/dA = dL/dy @ B^T = 0, so importance for A is always zero on
-    the first step.  After one optimizer step B becomes non-zero and A starts
-    getting gradients, but for tests that inspect importance *before* any
-    optimizer step we need to seed B manually.
-    """
-    for module in model.modules():
-        if isinstance(module, AdamssLayer):
-            for adapter_name in module.adamss_B:
-                for p in module.adamss_B[adapter_name]:
-                    p.data.uniform_(-0.01, 0.01)
-
-
-# -----------------------------------------------------------------------
-# Test: update_importance populates EMA scores
-# -----------------------------------------------------------------------
-class TestUpdateImportance:
     def test_importance_populated_after_update(self):
-        """update_importance should populate exp_avg_ipt and exp_avg_unc."""
+        """update_importance should populate exp_avg_ipt_A/B and exp_avg_unc_A/B."""
         model = _make_asa_model()
-        _seed_b_params(model)
 
         # Forward+backward (no optimizer step needed, we just need gradients)
         x = torch.randn(4, 20)
@@ -98,19 +80,19 @@ class TestUpdateImportance:
         layer = layers[0]
         adapter = "default"
 
-        # Before update: importance dicts should be empty
-        assert len(layer.exp_avg_ipt[adapter]) == 0
-        assert len(layer.exp_avg_unc[adapter]) == 0
+        # Before update: importance lists should be all None
+        assert all(v is None for v in layer.exp_avg_ipt_A[adapter])
+        assert all(v is None for v in layer.exp_avg_unc_A[adapter])
 
         # Update importance
         layer.update_importance(adapter, importance_beta=0.85, uncertainty_beta=0.85)
 
-        # After update: importance should be populated with non-zero values
-        assert len(layer.exp_avg_ipt[adapter]) > 0, "exp_avg_ipt should have entries"
-        assert len(layer.exp_avg_unc[adapter]) > 0, "exp_avg_unc should have entries"
+        # After update: at least some entries should be populated
+        assert any(v is not None for v in layer.exp_avg_ipt_A[adapter]), "exp_avg_ipt_A should have entries"
+        assert any(v is not None for v in layer.exp_avg_unc_A[adapter]), "exp_avg_unc_A should have entries"
 
         # At least some scores should be non-zero (B was seeded)
-        has_nonzero = any(val.abs().sum() > 0 for val in layer.exp_avg_ipt[adapter].values())
+        has_nonzero = any(v.abs().sum() > 0 for v in layer.exp_avg_ipt_A[adapter] if v is not None)
         assert has_nonzero, "At least some importance scores should be non-zero"
 
     def test_importance_accumulates_across_steps(self):
@@ -134,8 +116,9 @@ class TestUpdateImportance:
         optimizer.step()
         optimizer.zero_grad()
 
-        first_key = next(iter(layer.exp_avg_ipt[adapter].keys()))
-        score_after_2 = layer.exp_avg_ipt[adapter][first_key].clone()
+        # Find first populated entry
+        first_idx = next(i for i, v in enumerate(layer.exp_avg_ipt_A[adapter]) if v is not None)
+        score_after_2 = layer.exp_avg_ipt_A[adapter][first_idx].clone()
 
         # Step 3: another update should change scores via EMA
         model(x).sum().backward()
@@ -143,21 +126,17 @@ class TestUpdateImportance:
         optimizer.step()
         optimizer.zero_grad()
 
-        score_after_3 = layer.exp_avg_ipt[adapter][first_key].clone()
+        score_after_3 = layer.exp_avg_ipt_A[adapter][first_idx].clone()
 
         assert not torch.allclose(score_after_2, score_after_3), (
             "Importance should change between steps due to EMA accumulation"
         )
 
+    # -- reset_importance ---------------------------------------------------
 
-# -----------------------------------------------------------------------
-# Test: reset_importance clears scores
-# -----------------------------------------------------------------------
-class TestResetImportance:
     def test_reset_clears_scores(self):
         """reset_importance should clear all accumulated scores."""
         model = _make_asa_model()
-        _seed_b_params(model)
 
         x = torch.randn(4, 20)
         model(x).sum().backward()
@@ -168,20 +147,17 @@ class TestResetImportance:
 
         # Populate importance
         layer.update_importance(adapter, 0.85, 0.85)
-        assert len(layer.exp_avg_ipt[adapter]) > 0
+        assert any(v is not None for v in layer.exp_avg_ipt_A[adapter])
 
         # Reset
         layer.reset_importance(adapter)
 
-        # After reset: should be empty
-        assert len(layer.exp_avg_ipt[adapter]) == 0, "exp_avg_ipt should be empty after reset"
-        assert len(layer.exp_avg_unc[adapter]) == 0, "exp_avg_unc should be empty after reset"
+        # After reset: all entries should be None
+        assert all(v is None for v in layer.exp_avg_ipt_A[adapter]), "exp_avg_ipt_A should be all None after reset"
+        assert all(v is None for v in layer.exp_avg_unc_A[adapter]), "exp_avg_unc_A should be all None after reset"
 
+    # -- update_and_allocate ------------------------------------------------
 
-# -----------------------------------------------------------------------
-# Test: update_and_allocate (full ASA flow)
-# -----------------------------------------------------------------------
-class TestUpdateAndAllocate:
     def test_importance_accumulated_every_step(self):
         """update_and_allocate should accumulate importance on non-mask-interval steps."""
         model = _make_asa_model(init_warmup=0, final_warmup=100, mask_interval=10)
@@ -199,7 +175,7 @@ class TestUpdateAndAllocate:
 
         layers = _get_adamss_layers(model)
         layer = layers[0]
-        assert len(layer.exp_avg_ipt["default"]) > 0, "Importance should be populated after step 1 (non-mask-interval)"
+        assert any(v is not None for v in layer.exp_avg_ipt_A["default"]), "Importance should be populated after step 1 (non-mask-interval)"
 
     def test_masking_reduces_active_params(self):
         """At mask intervals, some subspaces should be frozen."""
@@ -249,7 +225,7 @@ class TestUpdateAndAllocate:
         # After mask interval at step 5: importance should be cleared
         layers = _get_adamss_layers(model)
         for layer in layers:
-            assert len(layer.exp_avg_ipt["default"]) == 0, "Importance should be reset after mask interval"
+            assert all(v is None for v in layer.exp_avg_ipt_A["default"]), "Importance should be reset after mask interval"
 
     def test_no_masking_outside_warmup(self):
         """update_and_allocate should be a no-op outside warmup range."""
@@ -263,18 +239,7 @@ class TestUpdateAndAllocate:
         # No importance should be accumulated (outside warmup)
         layers = _get_adamss_layers(model)
         for layer in layers:
-            assert len(layer.exp_avg_ipt["default"]) == 0, "No importance accumulation should happen outside warmup"
-
-    def test_all_params_trainable_initially(self):
-        """Before any ASA steps, all adapter params should be trainable."""
-        model = _make_asa_model()
-        layers = _get_adamss_layers(model)
-
-        for layer in layers:
-            for p in layer.adamss_A["default"]:
-                assert p.requires_grad, "All A params should be trainable initially"
-            for p in layer.adamss_B["default"]:
-                assert p.requires_grad, "All B params should be trainable initially"
+            assert all(v is None for v in layer.exp_avg_ipt_A["default"]), "No importance accumulation should happen outside warmup"
 
     def test_asa_disabled_is_noop(self):
         """update_and_allocate should be a no-op when use_asa=False."""

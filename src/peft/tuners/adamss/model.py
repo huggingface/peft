@@ -190,9 +190,6 @@ class AdamssModel(BaseTuner):
                 optimizer.zero_grad()
         """
         for adapter_name in self.active_adapters:
-            if adapter_name not in self.peft_config:
-                continue
-
             config = self.peft_config[adapter_name]
             if not config.use_asa:
                 continue
@@ -201,7 +198,7 @@ class AdamssModel(BaseTuner):
 
             # --- collect ASA layers once ---
             asa_layers = [
-                m for m in self.model.modules() if isinstance(m, AdamssLayer) and adapter_name in m.exp_avg_ipt
+                m for m in self.model.modules() if isinstance(m, AdamssLayer) and adapter_name in m.exp_avg_ipt_A
             ]
             if not asa_layers:
                 continue
@@ -263,14 +260,15 @@ class AdamssModel(BaseTuner):
         subspace_scores: list[tuple] = []
         for module in asa_layers:
             n_subspaces = module.num_subspaces.get(adapter_name, 0)
-            exp_ipt = module.exp_avg_ipt[adapter_name]
-            exp_unc = module.exp_avg_unc[adapter_name]
+            ipt_A = module.exp_avg_ipt_A[adapter_name]
+            ipt_B = module.exp_avg_ipt_B[adapter_name]
+            unc_A = module.exp_avg_unc_A[adapter_name]
+            unc_B = module.exp_avg_unc_B[adapter_name]
 
             for i in range(n_subspaces):
-                key_A, key_B = f"A_{i}", f"B_{i}"
-                if key_A not in exp_ipt or key_B not in exp_ipt:
+                if ipt_A[i] is None or ipt_B[i] is None:
                     continue
-                score = (exp_ipt[key_A] * exp_unc[key_A]).mean() + (exp_ipt[key_B] * exp_unc[key_B]).mean()
+                score = (ipt_A[i] * unc_A[i]).mean() + (ipt_B[i] * unc_B[i]).mean()
                 subspace_scores.append((module, i, score))
 
         if not subspace_scores:

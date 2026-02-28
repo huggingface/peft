@@ -312,6 +312,8 @@ def main():
         logging_steps=100,
         seed=args.seed,
         report_to="none",
+        remove_unused_columns=False,  # PEFT wraps forward(*args, **kwargs)
+        label_names=["labels"],  # Explicitly tell Trainer where labels are
     )
 
     # Custom optimizer with different LR for head

@@ -264,6 +264,8 @@ def main():
         logging_strategy="steps",
         seed=adamss_args.seed,
         report_to="none",
+        remove_unused_columns=False,  # PEFT wraps forward(*args, **kwargs)
+        label_names=["labels"],  # Explicitly tell Trainer where labels are
     )
 
     # Configure AdaMSS with ASA parameters stored in config
