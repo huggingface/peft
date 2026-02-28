@@ -49,6 +49,7 @@ from peft import (
     PromptEncoderConfig,
     PromptTuningConfig,
     PromptTuningInit,
+    PsoftConfig,
     PveraConfig,
     RoadConfig,
     ShiraConfig,
@@ -330,6 +331,14 @@ ALL_CONFIGS = [
             "task_type": "CAUSAL_LM",
         },
     ),
+    (
+        PsoftConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "r": 4,
+            "psoft_alpha": 4,
+        },
+    ),
 ]
 
 
@@ -344,8 +353,9 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         C3AConfig,
         MissConfig,
         DeloraConfig,
+        PsoftConfig,
     ]:
-        pytest.skip("Skipping BOFT/HRA/OFT/Road/SHiRA/C3A/MiSS/OSF/DeLoRA for GPT2LMHeadModel")
+        pytest.skip("Skipping BOFT/HRA/OFT/Road/SHiRA/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel")
 
 
 def _skip_alora_no_activation(config_cls, config_kwargs):

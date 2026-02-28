@@ -31,6 +31,7 @@ from peft import (
     PromptEncoderConfig,
     PromptTuningConfig,
     PromptTuningInit,
+    PsoftConfig,
     RoadConfig,
     ShiraConfig,
     TinyLoraConfig,
@@ -166,6 +167,15 @@ ALL_CONFIGS = [
         {
             "task_type": "SEQ_CLS",
             "num_virtual_tokens": 10,
+        },
+    ),
+    (
+        PsoftConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "r": 32,
+            "psoft_alpha": 32,
+            "target_modules": None,
         },
     ),
     (

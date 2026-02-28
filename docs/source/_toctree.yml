@@ -102,6 +102,8 @@
       title: OFT
     - local: package_reference/boft
       title: BOFT
+    - local: package_reference/psoft
+      title: PSOFT
     - local: package_reference/poly
       title: Polytropon
     - local: package_reference/p_tuning

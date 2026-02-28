@@ -585,6 +585,7 @@ class PeftCommonTester:
 
             # check that PEFT layers are completely removed
             assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
+            assert not hasattr(model, "peft_config")
             logits_merged_unloaded = model(**dummy_input)[0]
 
             conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
@@ -1442,6 +1443,7 @@ class PeftCommonTester:
 
             # check that PEFT layers are completely removed
             assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
+            assert not hasattr(model, "peft_config")
             assert not torch.allclose(logits_with_adapter, logits_unload, atol=1e-10, rtol=1e-10)
             assert torch.allclose(logits_transformers, logits_unload, atol=1e-4, rtol=1e-4)
             assert num_params_base == num_params_unloaded
