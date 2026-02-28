@@ -55,6 +55,7 @@ from peft import (
     RoadConfig,
     ShiraConfig,
     TaskType,
+    TinyLoraConfig,
     TrainableTokensConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -609,6 +610,32 @@ TEST_CASES = [
         VeraConfig,
         {"target_modules": ["conv1d"]},
     ),
+    ############
+    # TinyLoRA #
+    ############
+    ("Vanilla MLP 1 TinyLoRA", "MLP", TinyLoraConfig, {"target_modules": "lin0", "r": 2, "u": 16}),
+    ("Vanilla MLP 2 TinyLoRA", "MLP", TinyLoraConfig, {"target_modules": ["lin0"], "r": 2, "u": 16}),
+    ("Vanilla MLP 3 TinyLoRA", "MLP", TinyLoraConfig, {"target_modules": ["lin1"], "r": 2, "u": 16}),
+    ("Vanilla MLP 4 TinyLoRA", "MLP", TinyLoraConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "u": 32}),
+    (
+        "Vanilla MLP 5 TinyLoRA",
+        "MLP",
+        TinyLoraConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2, "u": 16},
+    ),
+    (
+        "Vanilla MLP TinyLoRA weight_tying",
+        "MLP",
+        TinyLoraConfig,
+        {"target_modules": ["lin0", "lin1"], "r": 2, "u": 8, "weight_tying": 1.0},
+    ),
+    (
+        "Embedding + transformers Conv1D 1 TinyLoRA",
+        "EmbConv1D",
+        TinyLoraConfig,
+        {"target_modules": ["conv1d"], "r": 2, "u": 16, "init_v_bound": 0.5},
+    ),
+    #############
     #########
     # PVERA #
     #########
@@ -2292,6 +2319,9 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, VBLoRAConfig):
             # initialize `vblora_vector_bank` so it can be trained
             model._init_vblora_vector_bank(config, "default")
+        if issubclass(config_cls, TinyLoraConfig):
+            # Re-initialize tinylora_v so it can be trained
+            model.base_model._init_tinylora_v(config, "default")
         model.train()
         # EmbConv1D is slow to learn for some reason
         lr = 0.01 if model_id != "EmbConv1D" else 1.0
@@ -2362,6 +2392,9 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, VBLoRAConfig):
             # initialize `vblora_vector_bank` so it can be trained
             model._init_vblora_vector_bank(config, "default")
+        if issubclass(config_cls, TinyLoraConfig):
+            # Re-initialize tinylora_v so it can be trained
+            model.base_model._init_tinylora_v(config, "default")
         model.train()
         if isinstance(config_cls, LNTuningConfig):
             # LayerNorm tuning is slow to learn

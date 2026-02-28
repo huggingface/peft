@@ -34,6 +34,7 @@ from peft import (
     PsoftConfig,
     RoadConfig,
     ShiraConfig,
+    TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -205,6 +206,13 @@ ALL_CONFIGS = [
             "d_initial": 0.1,
             "save_projection": True,
             "bias": "none",
+        },
+    ),
+    (
+        TinyLoraConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
         },
     ),
     (

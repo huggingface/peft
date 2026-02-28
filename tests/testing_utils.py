@@ -28,6 +28,7 @@ from peft import (
     LNTuningConfig,
     LoraConfig,
     PromptLearningConfig,
+    TinyLoraConfig,
     VBLoRAConfig,
 )
 from peft.import_utils import (
@@ -306,6 +307,8 @@ def set_init_weights_false(config_cls, kwargs):
         kwargs["init_lora_weights"] = False
     elif config_cls == IA3Config:
         kwargs["init_ia3_weights"] = False
+    elif config_cls == TinyLoraConfig:
+        kwargs["init_weights"] = "uniform"
     else:
         kwargs["init_weights"] = False
     return kwargs
