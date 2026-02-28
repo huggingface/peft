@@ -48,6 +48,8 @@ from .peft_model import (
 from .tuners import (
     AdaLoraConfig,
     AdaLoraModel,
+    AdamssConfig,
+    AdamssModel,
     AdaptionPromptConfig,
     AdaptionPromptModel,
     ArrowConfig,
@@ -157,6 +159,8 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
     "AdaLoraConfig",
     "AdaLoraModel",
+    "AdamssConfig",
+    "AdamssModel",
     "AdaptionPromptConfig",
     "AdaptionPromptModel",
     "ArrowConfig",

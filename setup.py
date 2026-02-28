@@ -37,6 +37,7 @@ extras["test"] = extras["dev"] + [
     "datasets",
     "diffusers",
     "scipy",
+    "scikit-learn",
     "protobuf",
     "sentencepiece",
 ]
