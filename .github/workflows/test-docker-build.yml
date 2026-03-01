@@ -21,7 +21,7 @@ jobs:
           persist-credentials: false
       - name: Get changed files
         id: changed-files
-        uses: tj-actions/changed-files@35dace0375d89e25e78db5f0a44127b61f4e5c20 #v42
+        uses: tj-actions/changed-files@05f9457d921137103bb9687b6b571075f75a65f2 #v42
         with:
           files: docker/*/Dockerfile
           json: "true"
