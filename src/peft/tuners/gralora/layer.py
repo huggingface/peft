@@ -23,6 +23,8 @@ from transformers.pytorch_utils import Conv1D
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils.other import transpose
 
+from .config import GraloraConfig
+
 
 class GraloraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weight
@@ -63,15 +65,17 @@ class GraloraLayer(BaseTunerLayer):
 
     def update_layer(
         self,
-        adapter_name,
-        module_name,
-        r,
-        alpha,
-        gralora_dropout,
-        gralora_k: int = 2,
-        hybrid_r: int = 0,
-        init_weights: bool = True,
+        adapter_name: str,
+        module_name: str,
+        r: int,
+        config: GraloraConfig,
     ):
+        alpha = config.alpha
+        gralora_dropout = config.gralora_dropout
+        gralora_k = config.gralora_k
+        hybrid_r = config.hybrid_r
+        init_weights = config.init_weights
+
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         elif hybrid_r < 0:
@@ -160,22 +164,17 @@ class Linear(nn.Linear, GraloraLayer):
         base_layer,
         adapter_name: str,
         module_name,
+        config: GraloraConfig,
         r: int = 0,
-        alpha: int = 1,
-        gralora_dropout: float = 0.0,
-        gralora_k: int = 2,
-        hybrid_r: int = 0,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-        init_weights: bool = True,
         **kwargs,
     ) -> None:
         # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__, which should always be called
         super(nn.Linear, self).__init__()
         GraloraLayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, module_name, r, alpha, gralora_dropout, gralora_k, hybrid_r, init_weights)
+        self.update_layer(adapter_name, module_name, r, config=config)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """

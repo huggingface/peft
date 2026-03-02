@@ -19,22 +19,16 @@ from peft.import_utils import is_gptqmodel_available
 from peft.tuners.oft.layer import OFTLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 
+from .config import OFTConfig
+
 
 class AwqOFTLinear(torch.nn.Module, OFTLayer):
     def __init__(
         self,
         base_layer,
-        adapter_name,
+        adapter_name: str,
+        config: OFTConfig,
         r: int = 0,
-        oft_block_size: int = 32,
-        module_dropout: float = 0.0,
-        coft: bool = False,
-        eps: float = 6e-5,
-        block_share: bool = False,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-        init_weights: bool = True,
-        use_cayley_neumann: bool = False,
-        num_cayley_neumann_terms: int = 5,
         **kwargs,
     ):
         super().__init__()
@@ -48,14 +42,7 @@ class AwqOFTLinear(torch.nn.Module, OFTLayer):
         self.update_layer(
             adapter_name,
             r,
-            oft_block_size=oft_block_size,
-            module_dropout=module_dropout,
-            coft=coft,
-            eps=eps,
-            block_share=block_share,
-            init_weights=init_weights,
-            use_cayley_neumann=use_cayley_neumann,
-            num_cayley_neumann_terms=num_cayley_neumann_terms,
+            config=config,
         )
 
     def forward(self, x: torch.Tensor):
