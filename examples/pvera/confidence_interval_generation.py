@@ -13,7 +13,7 @@ from peft import PeftModel, PveraConfig, get_peft_model
 
 
 # load the dataset
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
 dataset = load_dataset("beans", split="train").with_format("torch")
 transform = Compose((Resize((224, 224)), Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))))
 num_classes = dataset.features["labels"].num_classes
