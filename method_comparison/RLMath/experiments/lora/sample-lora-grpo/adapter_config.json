@@ -8,7 +8,7 @@
   "lora_dropout": 0.0,
   "modules_to_save": null,
   "peft_type": "LORA",
-  "r": 16,
+  "r": 32,
   "target_modules": [
     "q_proj",
     "k_proj",
