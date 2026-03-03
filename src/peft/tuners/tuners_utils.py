@@ -174,7 +174,11 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
             out_features, in_features = module.weight.to_local().shape
         else:
             in_features, out_features = module.in_features, module.out_features
-    elif isinstance(module, nn.Conv1d) or isinstance(module, nn.Conv2d) or isinstance(module, nn.Conv3d):
+    elif isinstance(module, nn.Conv1d):
+        in_features, out_features = module.in_channels, module.out_channels
+    elif isinstance(module, nn.Conv2d):
+        in_features, out_features = module.in_channels, module.out_channels
+    elif isinstance(module, nn.Conv3d):
         in_features, out_features = module.in_channels, module.out_channels
     elif isinstance(module, nn.Embedding):
         in_features, out_features = module.num_embeddings, module.embedding_dim
@@ -337,6 +341,7 @@ class BaseTuner(nn.Module, ABC):
             adapter_name (`str`):
                 The adapter name.
         """
+        pass
 
     def _post_injection_hook(self, model: nn.Module, config: PeftConfig, adapter_name: str) -> None:
         r"""
@@ -351,6 +356,7 @@ class BaseTuner(nn.Module, ABC):
             adapter_name (`str`):
                 The adapter name.
         """
+        pass
 
     def _prepare_adapter_config(self, peft_config: PeftConfig, model_config: dict) -> PeftConfig:
         r"""
@@ -392,6 +398,7 @@ class BaseTuner(nn.Module, ABC):
             model (`nn.Module`):
                 The model that is going to be adapted.
         """
+        pass
 
     @staticmethod
     def _check_tied_module_exists(peft_config: PeftConfig, key: str) -> bool | re.Match[str] | None:
@@ -1770,9 +1777,9 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
         if isinstance(config.exclude_modules, str):
             if re.fullmatch(config.exclude_modules, key):
                 return _ExcludedModule()
-        elif key in config.exclude_modules or any(
-            key.endswith(f".{exclude_key}") for exclude_key in config.exclude_modules
-        ):
+        elif key in config.exclude_modules:
+            return _ExcludedModule()
+        elif any(key.endswith(f".{exclude_key}") for exclude_key in config.exclude_modules):
             return _ExcludedModule()
 
     # Adapters should never match on modules to save modules as it is a guarantee for conflicts of behavior
