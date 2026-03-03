@@ -5,7 +5,6 @@
 from typing import Any
 
 from datasets import Dataset, concatenate_datasets, get_dataset_config_names, load_dataset
-
 from reward import extract_gsm_answer, extract_math_answer
 
 
@@ -83,7 +82,11 @@ def load_rl_datasets(
 
     valid_size = min(eval_subset_size, len(test) // 2 if len(test) > 1 else len(test))
     valid = test.select(range(valid_size)) if valid_size > 0 else test
-    heldout = test.select(range(valid_size, min(valid_size + eval_subset_size, len(test)))) if len(test) > valid_size else test
+    heldout = (
+        test.select(range(valid_size, min(valid_size + eval_subset_size, len(test))))
+        if len(test) > valid_size
+        else test
+    )
 
     train = train.map(lambda x: _prepare_row(x, dataset_name), remove_columns=train.column_names)
     valid = valid.map(lambda x: _prepare_row(x, dataset_name), remove_columns=valid.column_names)
