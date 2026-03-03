@@ -109,8 +109,10 @@ def save_result(result: dict[str, Any], out_dir: str, experiment_name: str) -> s
     os.makedirs(out_dir, exist_ok=True)
     out_name = experiment_name.replace("/", "--") + ".json"
     out_path = os.path.join(out_dir, out_name)
-    with open(out_path, "w") as f:
+    tmp_path = out_path + ".tmp"
+    with open(tmp_path, "w") as f:
         json.dump(result, f, indent=2)
+    os.replace(tmp_path, out_path)
     return out_path
 
 
@@ -153,10 +155,13 @@ def build_base_result(experiment_name: str, cfg: RLTrainConfig, peft_cfg: dict[s
         },
         "train_info": {
             "status": "running",
+            "phase": "init",
+            "train_completed": False,
             "train_time": None,
             "file_size": None,
             "num_trainable_params": None,
             "metrics": [],
+            "last_update_at": now_iso(),
         },
         "rl_eval_info": {},
         "meta_info": {
