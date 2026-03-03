@@ -1,0 +1,17 @@
+{
+  "base_model_name_or_path": "meta-llama/Llama-3.2-3B",
+  "inference_mode": false,
+  "peft_type": "IA3",
+  "task_type": "CAUSAL_LM",
+  "target_modules": [
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "down_proj"
+  ],
+  "feedforward_modules": [
+    "down_proj"
+  ],
+  "fan_in_fan_out": false,
+  "init_ia3_weights": true
+}
