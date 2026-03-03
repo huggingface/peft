@@ -56,6 +56,17 @@ class RLTrainConfig:
     dataset_config: str | None
     dataset_train_split: str
     dataset_test_split: str
+    top_k: int = 0
+    min_p: float | None = None
+    repetition_penalty: float = 1.0
+    mask_truncated_completions: bool = False
+    max_grad_norm: float = 1.0
+    gradient_checkpointing: bool = False
+    disable_dropout: bool = False
+    generation_batch_size: int | None = None
+    num_iterations: int = 1
+    epsilon_high: float | None = None
+    delta: float | None = None
 
 
 def load_train_config(exp_dir: str) -> RLTrainConfig:
