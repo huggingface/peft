@@ -197,13 +197,3 @@ class VBLoRAModel(BaseTuner):
         else:
             vblora_params = vector_bank_params + logits_params
         return vblora_params, other_params
-
-    def print_savable_parameters(self) -> None:
-        r"""
-        Prints the number of savable VB-LoRA parameters and total savable parameters.
-        """
-        vblora_params, other_params = self.get_nb_savable_parameters()
-        print(
-            f"VB-LoRA params to-be-saved (float32-equivalent): {vblora_params:,d} "
-            f"|| total params to-be-saved: {(vblora_params + other_params):,d}"
-        )
