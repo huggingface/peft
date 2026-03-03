@@ -16,7 +16,6 @@ import math
 import warnings
 from typing import Any, Optional
 
-import einops
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -171,7 +170,7 @@ class Linear(nn.Module, LilyLayer):
             lily_B = self.lily_B[active_adapter]
             router = self.lily_router[active_adapter]
             num_B = self.num_B[active_adapter]
-            B = einops.rearrange(lily_B.weight, "(e i) o -> e i o", e=num_B)
+            B = lily_B.weight.reshape(num_B, -1, lily_B.weight.shape[1])
             scaling = self.scaling[active_adapter]
             x = self._cast_input_dtype(x, lily_A.weight.dtype)
             hidden = lily_A(x)
