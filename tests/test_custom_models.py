@@ -2848,9 +2848,8 @@ class TestPeftCustomModel(PeftCommonTester):
         assert {module.disable_adapters for module in tuner_modules} == {True, False}
         # check that we get a warning with irregular states
         msg = "The model contains some adapter layers that are enabled and others that are disabled"
-        with pytest.warns(UserWarning, match=msg):
-            with model.disable_adapter():
-                pass
+        with pytest.warns(UserWarning, match=msg), model.disable_adapter():
+            pass
 
         # when encountering irregular adapters, we enable all adapters at the end of the context
         assert all(not module.disable_adapters for module in tuner_modules)

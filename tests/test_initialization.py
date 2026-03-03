@@ -5346,7 +5346,7 @@ class TestWeightTying:
         embed_np = dict(model.base_model.model.model.embed_tokens.named_parameters())
         lm_head_np = dict(model.base_model.model.lm_head.named_parameters())
 
-        for k in embed_np.keys():
+        for k in embed_np:
             assert torch.allclose(embed_np[k], lm_head_np[k])
             assert embed_np[k].data_ptr() == lm_head_np[k].data_ptr()
 
@@ -5406,7 +5406,7 @@ class TestWeightTying:
         embed_np = dict(model.base_model.model.model.embed_tokens.named_parameters())
         lm_head_np = dict(model.base_model.model.lm_head.named_parameters())
 
-        for k in embed_np.keys():
+        for k in embed_np:
             assert torch.allclose(embed_np[k], lm_head_np[k])
             assert embed_np[k] is lm_head_np[k]
 
@@ -5581,7 +5581,7 @@ class TestWeightTying:
         shared_np = dict(model.base_model.model.model.shared.named_parameters())
         lm_head_np = dict(model.base_model.model.lm_head.named_parameters())
 
-        for k in shared_np.keys():
+        for k in shared_np:
             assert torch.allclose(shared_np[k], lm_head_np[k])
             assert shared_np[k].data_ptr() == lm_head_np[k].data_ptr()
 

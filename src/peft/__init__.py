@@ -191,6 +191,8 @@ __all__ = [
     "IA3Model",
     "LNTuningConfig",
     "LNTuningModel",
+    "LilyConfig",
+    "LilyModel",
     "LoHaConfig",
     "LoHaModel",
     "LoKrConfig",
