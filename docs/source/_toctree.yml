@@ -146,6 +146,8 @@
       title: WaveFT
     - local: package_reference/delora
       title: DeLoRA
+    - local: package_reference/tinylora
+      title: TinyLoRA
 
     title: Adapters
   - sections:
