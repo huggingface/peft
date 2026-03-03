@@ -3707,16 +3707,14 @@ class TestEvaInitialization:
         ):
             LoraConfig(init_lora_weights=True, eva_config=EvaConfig())
 
+
 class TestLilyInitialization:
     """Tests for Lily adapter initialization and parameter sharing.
 
-    The model uses a two-level structure: self.blocks is a ModuleList of
-    simple Block wrappers, each containing two Linears named "lin0" and "lin1".
-    This way all target Linear layers of the same name share the same suffix,
-    which is required for _post_injection_hook to group them and apply
-    A/B sharing correctly. Sharing should only happen within layers of the
-    same name (e.g. lin0 with lin0, lin1 with lin1), never across different
-    layer names.
+    The model uses a two-level structure: self.blocks is a ModuleList of simple Block wrappers, each containing two
+    Linears named "lin0" and "lin1". This way all target Linear layers of the same name share the same suffix, which is
+    required for _post_injection_hook to group them and apply A/B sharing correctly. Sharing should only happen within
+    layers of the same name (e.g. lin0 with lin0, lin1 with lin1), never across different layer names.
     """
 
     torch_device = infer_device()
@@ -3779,9 +3777,7 @@ class TestLilyInitialization:
         assert len(layers) == num_layers
 
         A_ptrs = [layer.lily_A["default"].weight.data_ptr() for layer in layers]
-        assert len(set(A_ptrs)) == num_layers, (
-            f"With stride_A=1, all A adapters for {suffix} should be distinct"
-        )
+        assert len(set(A_ptrs)) == num_layers, f"With stride_A=1, all A adapters for {suffix} should be distinct"
 
     @pytest.mark.parametrize("suffix", ["lin0", "lin1"])
     def test_stride_A_equals_num_layers_all_share_one_A(self, suffix):
@@ -3800,9 +3796,7 @@ class TestLilyInitialization:
         assert len(layers) == num_layers
 
         A_ptrs = [layer.lily_A["default"].weight.data_ptr() for layer in layers]
-        assert len(set(A_ptrs)) == 1, (
-            f"With stride_A=num_layers, all {suffix} layers should share the same A"
-        )
+        assert len(set(A_ptrs)) == 1, f"With stride_A=num_layers, all {suffix} layers should share the same A"
 
     @pytest.mark.parametrize("suffix", ["lin0", "lin1"])
     def test_stride_A_partial_sharing(self, suffix):
@@ -3831,9 +3825,7 @@ class TestLilyInitialization:
         for block_start in range(0, num_layers, stride_A):
             block = layers[block_start : block_start + stride_A]
             block_A_ptrs = {layer.lily_A["default"].weight.data_ptr() for layer in block}
-            assert len(block_A_ptrs) == 1, (
-                f"Layers in {suffix} block starting at {block_start} should share one A"
-            )
+            assert len(block_A_ptrs) == 1, f"Layers in {suffix} block starting at {block_start} should share one A"
 
     @pytest.mark.parametrize("suffix", ["lin0", "lin1"])
     def test_stride_A_greater_than_num_layers(self, suffix):
@@ -3852,9 +3844,7 @@ class TestLilyInitialization:
         assert len(layers) == num_layers
 
         A_ptrs = [layer.lily_A["default"].weight.data_ptr() for layer in layers]
-        assert len(set(A_ptrs)) == 1, (
-            f"stride_A > num_layers should still result in a single shared A for {suffix}"
-        )
+        assert len(set(A_ptrs)) == 1, f"stride_A > num_layers should still result in a single shared A for {suffix}"
 
     @pytest.mark.parametrize("stride_A", [1, 2, 3, 6])
     @pytest.mark.parametrize("suffix", ["lin0", "lin1"])
@@ -3875,8 +3865,7 @@ class TestLilyInitialization:
 
         B_ptrs = [layer.lily_B["default"].weight.data_ptr() for layer in layers]
         assert len(set(B_ptrs)) == 1, (
-            f"All {suffix} layers should share one B adapter (stride_A={stride_A}), "
-            f"got {len(set(B_ptrs))} distinct"
+            f"All {suffix} layers should share one B adapter (stride_A={stride_A}), got {len(set(B_ptrs))} distinct"
         )
 
     @pytest.mark.parametrize("suffix", ["lin0", "lin1"])
@@ -3899,8 +3888,7 @@ class TestLilyInitialization:
         A_ptrs = [layer.lily_A["default"].weight.data_ptr() for layer in layers]
         expected = math.ceil(num_layers / stride_A)
         assert len(set(A_ptrs)) == expected, (
-            f"Expected {expected} distinct A adapters for {suffix} with stride_A={stride_A}, "
-            f"num_layers={num_layers}"
+            f"Expected {expected} distinct A adapters for {suffix} with stride_A={stride_A}, num_layers={num_layers}"
         )
 
         first_block_A_ptrs = {layers[i].lily_A["default"].weight.data_ptr() for i in range(4)}
@@ -3929,15 +3917,12 @@ class TestLilyInitialization:
 
         lin0_A_ptrs = {layer.lily_A["default"].weight.data_ptr() for layer in lin0_layers}
         lin1_A_ptrs = {layer.lily_A["default"].weight.data_ptr() for layer in lin1_layers}
-        assert lin0_A_ptrs.isdisjoint(lin1_A_ptrs), (
-            "A adapters should not be shared between lin0 and lin1 layers"
-        )
+        assert lin0_A_ptrs.isdisjoint(lin1_A_ptrs), "A adapters should not be shared between lin0 and lin1 layers"
 
         lin0_B_ptrs = {layer.lily_B["default"].weight.data_ptr() for layer in lin0_layers}
         lin1_B_ptrs = {layer.lily_B["default"].weight.data_ptr() for layer in lin1_layers}
-        assert lin0_B_ptrs.isdisjoint(lin1_B_ptrs), (
-            "B adapters should not be shared between lin0 and lin1 layers"
-        )
+        assert lin0_B_ptrs.isdisjoint(lin1_B_ptrs), "B adapters should not be shared between lin0 and lin1 layers"
+
 
 @pytest.mark.skipif(
     platform.system() != "Linux", reason="Out of the box, torch.compile does not work on Windows or MacOS"

@@ -1770,7 +1770,9 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
         if isinstance(config.exclude_modules, str):
             if re.fullmatch(config.exclude_modules, key):
                 return _ExcludedModule()
-        elif key in config.exclude_modules or any(key.endswith(f".{exclude_key}") for exclude_key in config.exclude_modules):
+        elif key in config.exclude_modules or any(
+            key.endswith(f".{exclude_key}") for exclude_key in config.exclude_modules
+        ):
             return _ExcludedModule()
 
     # Adapters should never match on modules to save modules as it is a guarantee for conflicts of behavior

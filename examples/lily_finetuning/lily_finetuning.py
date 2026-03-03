@@ -150,20 +150,14 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default="auto", help="Device to use for training")
     parser.add_argument("--lily_r", type=int, default=32, help="Lily rank")
     parser.add_argument(
-        "--lily_scaling", type=float, default=2.0,
-        help="Lily scaling factor applied to adapter output"
+        "--lily_scaling", type=float, default=2.0, help="Lily scaling factor applied to adapter output"
     )
     parser.add_argument(
-        "--lily_stride_A", type=int, default=4,
-        help="Number of consecutive layers sharing one A adapter"
+        "--lily_stride_A", type=int, default=4, help="Number of consecutive layers sharing one A adapter"
     )
+    parser.add_argument("--lily_num_B", type=int, default=7, help="Number of shared B adapters (must be >= 2)")
     parser.add_argument(
-        "--lily_num_B", type=int, default=7,
-        help="Number of shared B adapters (must be >= 2)"
-    )
-    parser.add_argument(
-        "--lily_target_modules", type=str, default=None,
-        help="Comma-separated list of target modules for Lily"
+        "--lily_target_modules", type=str, default=None, help="Comma-separated list of target modules for Lily"
     )
     parser.add_argument(
         "--hub_model_id",
