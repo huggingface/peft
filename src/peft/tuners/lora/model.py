@@ -255,6 +255,29 @@ class LoraModel(BaseTuner):
                 target_name=current_key,
                 config=lora_config,
             )
+            if hasattr(parent, "_hf_tp_plan") and parent._hf_tp_plan is not None:
+                from transformers.integrations.tensor_parallel import (
+                    ALL_PARALLEL_STYLES,
+                    ColwiseParallel,
+                    RowwiseParallel,
+                    add_tensor_parallel_hooks_to_module,
+                )
+
+                tp_plan = parent._hf_tp_plan
+                tp_layer = ALL_PARALLEL_STYLES[tp_plan]
+                print("Adding hooks!")
+                if isinstance(tp_layer, ColwiseParallel):
+                    # def add_tensor_parallel_hooks_to_module(
+                    #     model, module, tp_plan, layer_name, current_module_plan, device_mesh, parameter_name=None
+                    # ):
+                    add_tensor_parallel_hooks_to_module(
+                        self.model, target.lora_B[adapter_name], tp_plan, "test", tp_plan, tp_layer.device_mesh
+                    )
+                elif isinstance(tp_layer, RowwiseParallel):
+                    add_tensor_parallel_hooks_to_module(
+                        self.model, target.lora_A[adapter_name], tp_plan, "test", tp_plan, tp_layer.device_mesh
+                    )
+
         else:
             if isinstance(target, ParamWrapper) and (parameter_name == target.parameter_name):
                 raise ValueError(
