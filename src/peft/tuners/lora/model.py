@@ -55,6 +55,7 @@ from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .inc import dispatch_inc
 from .layer import Conv2d, LoraLayer, ParamWrapper, dispatch_default
+from .te import dispatch_transformer_engine
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
 
@@ -342,6 +343,7 @@ class LoraModel(BaseTuner):
                 dispatch_inc,
                 dispatch_torchao,
                 dispatch_megatron,
+                dispatch_transformer_engine,
                 dispatch_default,
             ]
         )
