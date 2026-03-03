@@ -40,6 +40,10 @@ class LilyConfig(PeftConfig):
             1. Suggested values: `2`, `3`, or `4` (i.e. sharing every 2, 3, or 4 layers). Keeping `stride_A` large
             (fewer distinct A adapters) and increasing `r` instead leads to better performance than the opposite
             trade-off (small `stride_A`, small `r`). Setting `stride_A=1` means every layer has its own A adapter.
+            NOTE: the A sharing happens within each target (layers with the same target suffix). For example, if your
+            target_modules are `['q_proj', 'v_proj']` and you set `stride_A=2`, then every 2 adjacent q_proj layers
+            will share an A adapter, and every 2 adjacent v_proj layers will share another A adapter, but the q_proj
+            and v_proj layers will not share A adapters with each other since they have different suffixes.
         num_B (`int`):
             The number of shared B adapters. Unlike A adapters (which are grouped by layer), all B adapters are shared
             globally across every layer. For each forward pass, a router computes a weighted combination of all `num_B`
@@ -48,7 +52,11 @@ class LilyConfig(PeftConfig):
             order as `total_layers / stride_A`. Suggested values: `total_layers / 2`, `total_layers / 3`, or
             `total_layers / 4`. Similar to `stride_A`, prefer smaller `num_B` with larger `r` over larger `num_B` with
             smaller `r`. NOTE: to train the router, you need at least 2 B adapters (i.e. `num_B >= 2`), since the
-            router learns to compute a weighted combination of the B adapters.
+            router learns to compute a weighted combination of the B adapters. NOTE: the B sharing happens within each
+            target (layers with the same target suffix). For example, if your target_modules are `['q_proj', 'v_proj']`
+            and you set `num_B=4`, then there will be 4 B adapters shared across all q_proj layers, and another 4 B
+            adapters shared across all v_proj layers, but the q_proj and v_proj layers will not share B adapters with
+            each other since they have different suffixes.
         target_modules (`Union[List[str], str]`, *optional*):
             The names of the modules to apply Lily to. Can be a list of module name strings (e.g. `['q_proj',
             'v_proj']`) or a regex pattern (e.g. `'.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'`). If not
@@ -108,6 +116,10 @@ class LilyConfig(PeftConfig):
                 "Keeping `stride_A` large (fewer distinct A adapters) and increasing `r` instead leads to "
                 "better performance than the opposite trade-off (small `stride_A`, small `r`). "
                 "Setting `stride_A=1` means every layer has its own A adapter."
+                "Note: A sharing happens within each target module type independently. For example, if "
+                "`target_modules=['q_proj', 'v_proj']` and `stride_A=2`, then every 2 adjacent `q_proj` "
+                "layers share one A adapter and every 2 adjacent `v_proj` layers share another A adapter, "
+                "but `q_proj` and `v_proj` layers never share A adapters with each other."
             )
         },
     )
@@ -125,6 +137,10 @@ class LilyConfig(PeftConfig):
                 "with larger `r` over larger `num_B` with smaller `r`. "
                 "NOTE: to train the router, you need at least 2 B adapters (i.e. `num_B >= 2`), since the "
                 "router learns to compute a weighted combination of the B adapters."
+                "Note: B sharing happens within each target module type independently. For example, if "
+                "`target_modules=['q_proj', 'v_proj']` and `num_B=4`, then there will be 4 B adapters "
+                "shared across all `q_proj` layers and another 4 B adapters shared across all `v_proj` "
+                "layers, but `q_proj` and `v_proj` layers never share B adapters with each other."
             )
         },
     )
