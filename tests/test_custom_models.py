@@ -2213,7 +2213,6 @@ class TestPeftCustomModel(PeftCommonTester):
             or issubclass(config_cls, VBLoRAConfig)
             or issubclass(config_cls, LilyConfig)
         ):
-            print("Using a lower learning rate for this test case to avoid NaN losses")
             # this high learning rate was found through testing to be necessary to avoid flakiness
             lr = 100
         elif "mha" in model_id.lower():
