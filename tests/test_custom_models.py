@@ -2208,7 +2208,12 @@ class TestPeftCustomModel(PeftCommonTester):
 
         model.train()
         lr = 0.5
-        if (config_kwargs.get("use_dora") and model_id == "EmbConv1D") or issubclass(config_cls, VBLoRAConfig) or issubclass(config_cls, LilyConfig):
+        if (
+            (config_kwargs.get("use_dora") and model_id == "EmbConv1D")
+            or issubclass(config_cls, VBLoRAConfig)
+            or issubclass(config_cls, LilyConfig)
+        ):
+            print("Using a lower learning rate for this test case to avoid NaN losses")
             # this high learning rate was found through testing to be necessary to avoid flakiness
             lr = 100
         elif "mha" in model_id.lower():
