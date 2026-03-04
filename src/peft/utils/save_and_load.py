@@ -25,6 +25,11 @@ import torch
 from huggingface_hub import file_exists, hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
+from transformers.integrations.tensor_parallel import (
+    ALL_PARALLEL_STYLES,
+    ColwiseParallel,
+    RowwiseParallel,
+)
 from transformers.utils import http_user_agent
 
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
@@ -579,6 +584,27 @@ def set_peft_model_state_dict(
                 return k
 
             peft_model_state_dict = {renamed_dora_weights(k): v for k, v in peft_model_state_dict.items()}
+
+            if torch.distributed.is_available() and torch.distributed.is_initialized():
+                from ..tuners.lora.layer import LoraLayer  # lazy import to avoid circular import
+
+                for name, module in model.named_modules():
+                    if not isinstance(module, LoraLayer):
+                        continue
+                    base_layer = module.get_base_layer()
+                    device = base_layer.weight.device
+                    dtype = base_layer.weight.dtype
+                    tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+                    if tp_plan is None:
+                        continue
+                    tp_layer = ALL_PARALLEL_STYLES[tp_plan]
+                    if isinstance(tp_layer, ColwiseParallel):
+                        key = f"{name}.lora_B.{adapter_name}.weight"
+                        state_dict[key] = tp_layer.shard_tensor(state_dict[key], device=device, dtype=dtype)
+                    elif isinstance(tp_layer, RowwiseParallel):
+                        key = f"{name}.lora_A.{adapter_name}.weight"
+                        state_dict[key] = tp_layer.shard_tensor(state_dict[key], device=device, dtype=dtype)
+
         elif config.peft_type == PeftType.OFT:
             if any(".oft_r." in key for key in peft_model_state_dict):
                 raise ValueError(
