@@ -18,6 +18,14 @@ from functools import lru_cache
 
 import packaging.version
 import torch
+import transformers
+
+
+is_transformers_ge_v5 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.0.0.dev0")
+
+is_transformers_ge_v5_1_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.1.0")
+
+is_transformers_le_4_53 = packaging.version.parse(transformers.__version__) < packaging.version.parse("4.54.0.dev0")
 
 
 @lru_cache
@@ -151,3 +159,8 @@ def is_xpu_available(check_device=False):
 @lru_cache
 def is_diffusers_available():
     return importlib.util.find_spec("diffusers") is not None
+
+
+@lru_cache
+def is_te_available():
+    return importlib.util.find_spec("transformer_engine") is not None

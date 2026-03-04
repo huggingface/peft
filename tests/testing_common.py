@@ -46,6 +46,7 @@ from peft import (
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
+    PveraConfig,
     RoadConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -56,6 +57,7 @@ from peft import (
     prepare_model_for_kbit_training,
     set_peft_model_state_dict,
 )
+from peft.import_utils import is_transformers_ge_v5
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -65,7 +67,6 @@ from peft.utils import (
     TrainableTokensWrapper,
     _get_submodules,
     infer_device,
-    is_transformers_ge_v5,
 )
 
 from .testing_utils import get_state_dict, hub_online_once
@@ -584,6 +585,7 @@ class PeftCommonTester:
 
             # check that PEFT layers are completely removed
             assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
+            assert not hasattr(model, "peft_config")
             logits_merged_unloaded = model(**dummy_input)[0]
 
             conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
@@ -774,6 +776,8 @@ class PeftCommonTester:
             conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
             if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
                 atol, rtol = 1e-3, 1e-3
+            elif issubclass(config_cls, PveraConfig):
+                atol, rtol = 1e-5, 1e-5
 
             # check that the logits are the same after unloading
             assert torch.allclose(logits_peft, logits_unloaded, atol=atol, rtol=rtol)
@@ -1089,7 +1093,6 @@ class PeftCommonTester:
 
             # check if `training` works
             output = model(**inputs)[0]
-            logits = output[0]
 
             loss = output.sum()
             loss.backward()
@@ -1105,6 +1108,9 @@ class PeftCommonTester:
                     assert param.grad is None
 
             with tempfile.TemporaryDirectory() as tmp_dirname:
+                model.eval()
+                logits = model(**inputs)[0][0]
+
                 model.save_pretrained(tmp_dirname)
 
                 model_from_pretrained = self.transformers_class.from_pretrained(model_id)
@@ -1437,6 +1443,7 @@ class PeftCommonTester:
 
             # check that PEFT layers are completely removed
             assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
+            assert not hasattr(model, "peft_config")
             assert not torch.allclose(logits_with_adapter, logits_unload, atol=1e-10, rtol=1e-10)
             assert torch.allclose(logits_transformers, logits_unload, atol=1e-4, rtol=1e-4)
             assert num_params_base == num_params_unloaded

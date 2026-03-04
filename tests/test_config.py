@@ -24,7 +24,6 @@ from peft import (
     AdaLoraConfig,
     AdaptionPromptConfig,
     BOFTConfig,
-    BoneConfig,
     C3AConfig,
     CartridgeConfig,
     CPTConfig,
@@ -47,6 +46,7 @@ from peft import (
     PromptEncoder,
     PromptEncoderConfig,
     PromptTuningConfig,
+    PsoftConfig,
     RoadConfig,
     ShiraConfig,
     TaskType,
@@ -64,7 +64,6 @@ ALL_CONFIG_CLASSES = (
     (AdaLoraConfig, {"total_step": 1}),
     (AdaptionPromptConfig, {}),
     (BOFTConfig, {}),
-    (BoneConfig, {}),
     (C3AConfig, {}),
     (FourierFTConfig, {}),
     (GraloraConfig, {}),
@@ -82,6 +81,7 @@ ALL_CONFIG_CLASSES = (
     (PrefixTuningConfig, {}),
     (PromptEncoderConfig, {}),
     (PromptTuningConfig, {}),
+    (PsoftConfig, {}),
     (RoadConfig, {}),
     (ShiraConfig, {}),
     (TrainableTokensConfig, {}),
@@ -421,10 +421,6 @@ class TestPeftConfig:
         config_from_pretrained = config_class.from_pretrained(tmp_path)
 
         expected_num_warnings = 1
-        # TODO: remove once Bone is removed in v0.19.0
-        if config_class == BoneConfig:
-            expected_num_warnings = 2  # Bone has 1 more warning about it being deprecated
-
         assert len(recwarn) == expected_num_warnings
         assert recwarn.list[-1].message.args[0].startswith(msg)
         assert "foo" not in config_from_pretrained.to_dict()
@@ -456,10 +452,6 @@ class TestPeftConfig:
         config_from_pretrained = PeftConfig.from_pretrained(tmp_path)  # <== use PeftConfig here
 
         expected_num_warnings = 1
-        # TODO: remove once Bone is removed in v0.19.0
-        if config_class == BoneConfig:
-            expected_num_warnings = 2  # Bone has 1 more warning about it being deprecated
-
         assert len(recwarn) == expected_num_warnings
         assert recwarn.list[-1].message.args[0].startswith(msg)
         assert "foo" not in config_from_pretrained.to_dict()

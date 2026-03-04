@@ -15,7 +15,6 @@
 from .adalora import AdaLoraConfig, AdaLoraModel
 from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
 from .boft import BOFTConfig, BOFTModel
-from .bone import BoneConfig, BoneModel
 from .c3a import C3AConfig, C3AModel
 from .cartridge import CartridgeConfig, CartridgeEncoder
 from .cpt import CPTConfig, CPTEmbedding
@@ -52,6 +51,8 @@ from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparamet
 from .poly import PolyConfig, PolyModel
 from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
 from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
+from .psoft import PsoftConfig, PsoftModel
+from .pvera import PveraConfig, PveraModel
 from .randlora import RandLoraConfig, RandLoraModel
 from .road import RoadConfig, RoadModel
 from .shira import ShiraConfig, ShiraModel
@@ -71,8 +72,6 @@ __all__ = [
     "BOFTConfig",
     "BOFTModel",
     "BdLoraConfig",
-    "BoneConfig",
-    "BoneModel",
     "C3AConfig",
     "C3AModel",
     "CPTConfig",
@@ -121,6 +120,10 @@ __all__ = [
     "PromptEncoderReparameterizationType",
     "PromptTuningConfig",
     "PromptTuningInit",
+    "PsoftConfig",
+    "PsoftModel",
+    "PveraConfig",
+    "PveraModel",
     "RandLoraConfig",
     "RandLoraModel",
     "RoadConfig",
