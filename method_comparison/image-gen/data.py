@@ -1,4 +1,4 @@
-# Copyright 2025-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -87,7 +87,7 @@ def get_train_valid_test_datasets(*, train_config, print_fn=print):
     indices = np.arange(len(ds))
     np.random.shuffle(indices)
 
-    idx_train = indices[: train_size]
+    idx_train = indices[:train_size]
     idx_valid = indices[train_size : train_size + train_config.valid_size]
     idx_test = indices[
         train_size + train_config.valid_size : train_size + train_config.valid_size + train_config.test_size
@@ -117,7 +117,6 @@ def get_train_valid_test_datasets(*, train_config, print_fn=print):
             T.Normalize([0.5], [0.5]),
         ]
     )
-
 
     train_dataset = DreamBoothTrainDataset(
         images=train_images,

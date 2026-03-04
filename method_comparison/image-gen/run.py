@@ -1,4 +1,4 @@
-# Copyright 2025-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -31,8 +31,6 @@ from typing import Any, Optional
 
 import torch
 from diffusers.training_utils import compute_density_for_timestep_sampling, compute_loss_weighting_for_sd3
-from peft import PeftConfig
-from peft.utils import CONFIG_NAME, infer_device
 from torch.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -51,13 +49,16 @@ from utils import (
     get_peft_branch,
     get_pipeline,
     get_sample_image_save_dir,
-    get_train_config,
     get_torch_dtype,
+    get_train_config,
     init_accelerator,
     log_results,
     validate_experiment_path,
 )
+
 from data import collate_fn, get_train_valid_test_datasets
+from peft import PeftConfig
+from peft.utils import CONFIG_NAME, infer_device
 
 
 ACCELERATOR_EMPTY_CACHE_SCHEDULE = 25
@@ -258,7 +259,9 @@ def train(
             indices = (u * noise_scheduler_copy.config.num_train_timesteps).long()
             timesteps = noise_scheduler_copy.timesteps[indices].to(device=latents.device)
             # Add noise according to flow matching. zt = (1 - texp) * x + texp * z1
-            sigmas = get_sigmas(timesteps, noise_scheduler_copy, n_dim=latents.ndim, dtype=latents.dtype).to(device_type)
+            sigmas = get_sigmas(timesteps, noise_scheduler_copy, n_dim=latents.ndim, dtype=latents.dtype).to(
+                device_type
+            )
             noisy_latents = (1.0 - sigmas) * latents + sigmas * noise
             # [B, C, H, W] -> [B, H*W, C]
             packed_noisy_latents = pipeline._pack_latents(noisy_latents)
@@ -317,15 +320,21 @@ def train(
             accelerator_memory_allocated_log.append(
                 torch_accelerator_module.memory_allocated() - accelerator_memory_init
             )
-            accelerator_memory_reserved_log.append(torch_accelerator_module.memory_reserved() - accelerator_memory_init)
+            accelerator_memory_reserved_log.append(
+                torch_accelerator_module.memory_reserved() - accelerator_memory_init
+            )
             toc = time.perf_counter()
             durations.append(toc - tic)
 
             if step % train_config.eval_steps == 0:
                 tic_eval = time.perf_counter()
                 loss_avg = sum(losses[-train_config.eval_steps :]) / train_config.eval_steps
-                memory_allocated_avg = sum(accelerator_memory_allocated_log[-train_config.eval_steps :]) / train_config.eval_steps
-                memory_reserved_avg = sum(accelerator_memory_reserved_log[-train_config.eval_steps :]) / train_config.eval_steps
+                memory_allocated_avg = (
+                    sum(accelerator_memory_allocated_log[-train_config.eval_steps :]) / train_config.eval_steps
+                )
+                memory_reserved_avg = (
+                    sum(accelerator_memory_reserved_log[-train_config.eval_steps :]) / train_config.eval_steps
+                )
                 dur_train = sum(durations[-train_config.eval_steps :])
 
                 transformer.eval()
@@ -481,7 +490,9 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
     if peft_branch == "main":
         print_verbose("===== This experiment is categorized as a MAIN run because the PEFT branch is 'main' ======")
     else:
-        print_verbose(f"===== This experiment is categorized as a TEST run because the PEFT branch is '{peft_branch}' ======")
+        print_verbose(
+            f"===== This experiment is categorized as a TEST run because the PEFT branch is '{peft_branch}' ======"
+        )
 
     peft_config: Optional[PeftConfig] = None
     if os.path.exists(os.path.join(path_experiment, CONFIG_NAME)):
