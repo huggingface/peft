@@ -33,6 +33,7 @@ from peft import (
     PromptLearningConfig,
     PromptTuningConfig,
     PsoftConfig,
+    PeanutConfig,
     RoadConfig,
     ShiraConfig,
     VBLoRAConfig,
@@ -176,6 +177,17 @@ ALL_CONFIGS = [
         {
             "task_type": "FEATURE_EXTRACTION",
             "num_virtual_tokens": 10,
+        },
+    ),
+    (
+        PeanutConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "r": 8,
+            "depth": 4,
+            "act_fn": "relu",
+            "scaling": 1.0,
         },
     ),
     (

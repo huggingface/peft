@@ -53,6 +53,7 @@ from peft import (
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
     PeftWarning,
+    PeanutConfig,
     PrefixTuningConfig,
     PromptTuningConfig,
     PsoftConfig,
@@ -2332,6 +2333,56 @@ class TestPsoftInitialization:
                 use_cayley_neumann=True,
                 cayley_neumann_eps=bad_eps,
             )
+
+
+class TestPeanutInitialization:
+    """Basic sanity tests for the PEANuT tuner."""
+
+    torch_device = infer_device()
+
+    def get_model(self, bias=True):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 30, bias=bias)
+                self.lin1 = nn.Linear(30, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP(bias=bias).to(self.torch_device).eval()
+
+    def test_peanut_depth2_parameter_shapes(self):
+        model = self.get_model()
+        out_f = model.lin0.out_features
+        r = 6
+
+        cfg = PeanutConfig(target_modules=["lin0"], r=r, depth=2, act_fn="relu", init_weights=True)
+        model = get_peft_model(model, cfg)
+
+        layer = model.lin0
+        A = layer.peanut_A["default"]
+        B = layer.peanut_B["default"]
+
+        assert tuple(A.weight.shape) == (r, out_f)
+        assert tuple(B.weight.shape) == (out_f, r)
+        assert layer.res_num["default"] == 0
+
+    def test_peanut_depth4_residual_layers_are_created(self):
+        model = self.get_model()
+        r = 4
+
+        cfg = PeanutConfig(target_modules=["lin0"], r=r, depth=4, act_fn="relu", init_weights=True)
+        model = get_peft_model(model, cfg)
+
+        layer = model.lin0
+        assert layer.res_num["default"] == 1
+        assert hasattr(layer, "peanut_encoder_0")
+        assert hasattr(layer, "peanut_decoder_0")
+        assert tuple(layer.peanut_encoder_0["default"].weight.shape) == (r, r)
+        assert tuple(layer.peanut_decoder_0["default"].weight.shape) == (r, r)
 
 
 class TestNoInfiniteRecursionDeepspeed:

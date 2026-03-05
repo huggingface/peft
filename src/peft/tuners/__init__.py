@@ -54,6 +54,7 @@ from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
 from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
 from .psoft import PsoftConfig, PsoftModel
 from .pvera import PveraConfig, PveraModel
+from .peanut import PeanutConfig, PeanutModel
 from .randlora import RandLoraConfig, RandLoraModel
 from .road import RoadConfig, RoadModel
 from .shira import ShiraConfig, ShiraModel
@@ -127,6 +128,8 @@ __all__ = [
     "PsoftModel",
     "PveraConfig",
     "PveraModel",
+    "PeanutConfig",
+    "PeanutModel",
     "RandLoraConfig",
     "RandLoraModel",
     "RoadConfig",

@@ -52,6 +52,7 @@ from peft import (
     PeftWarning,
     PsoftConfig,
     PveraConfig,
+    PeanutConfig,
     RandLoraConfig,
     RoadConfig,
     ShiraConfig,
@@ -1007,6 +1008,17 @@ TEST_CASES = [
         LilyConfig,
         {"target_modules": ["lin0"], "r": 4, "stride_A": 1, "num_B": 2},
     ),
+    ##########
+    # Peanut #
+    ##########
+    ("Vanilla MLP 1 Peanut", "MLP", PeanutConfig, {"target_modules": "lin0", "r": 2, "depth": 2, "act_fn": "relu"}),
+    ("Vanilla MLP 2 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin0"], "r": 2, "depth": 2, "act_fn": "relu"}),
+    ("Vanilla MLP 3 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin1"], "r": 2, "depth": 2, "act_fn": "relu"}),
+    ("Vanilla MLP 4 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "depth": 2, "act_fn": "relu"}),
+    ("Vanilla MLP 5 Peanut", "MLP", PeanutConfig, {"target_modules": "lin0", "r": 2, "depth": 4, "act_fn": "relu"}),
+    ("Vanilla MLP 6 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin0"], "r": 2, "depth": 4, "act_fn": "relu"}),
+    ("Vanilla MLP 7 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin1"], "r": 2, "depth": 4, "act_fn": "relu"}),
+    ("Vanilla MLP 8 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "depth": 4, "act_fn": "relu"}),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 
@@ -1326,6 +1338,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         LilyConfig,
         {"target_modules": ["lin0"], "r": 2, "stride_A": 1, "num_B": 2, "init_weights": False},
         {"target_modules": ["lin1"], "r": 2, "stride_A": 1, "num_B": 2, "init_weights": False},
+    ),
+    (
+        "Peanut Same",
+        "peanut",
+        PeanutConfig,
+        {"target_modules": ["lin0"], "r": 2, "depth": 4, "act_fn": "relu", "init_weights": False},
+        {"target_modules": ["lin0"], "r": 2, "depth": 4, "act_fn": "relu", "init_weights": False},
+    ),
+    (
+        "Peanut Different",
+        "peanut",
+        PeanutConfig,
+        {"target_modules": ["lin0"], "r": 2, "depth": 4, "act_fn": "relu", "init_weights": False},
+        {"target_modules": ["lin1"], "r": 2, "depth": 4, "act_fn": "relu", "init_weights": False},
     ),
 ]
 
