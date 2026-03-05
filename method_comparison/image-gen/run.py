@@ -30,13 +30,14 @@ from functools import partial
 from typing import Any, Optional
 
 import torch
-from diffusers.training_utils import compute_density_for_timestep_sampling, compute_loss_weighting_for_sd3
+from diffusers.training_utils import compute_density_for_timestep_sampling, compute_loss_weighting_for_sd3, offload_models
 from torch.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import set_seed
 from utils import (
     FILE_NAME_TRAIN_PARAMS,
+    TrainConfig,
     TrainResult,
     TrainStatus,
     get_artifact_stem,
@@ -92,15 +93,21 @@ class DummyGradScaler:
         pass
 
 
-def _encode_prompts(pipeline, prompts, max_sequence_length: int, text_encoder_out_layers: list[int]):
-    encoded = pipeline.encode_prompt(
-        prompt=prompts,
-        max_sequence_length=max_sequence_length,
-        text_encoder_out_layers=text_encoder_out_layers,
-    )
-    if not isinstance(encoded, tuple) or len(encoded) < 2:
-        raise RuntimeError("Unexpected return value from Flux2KleinPipeline.encode_prompt")
-    return encoded[0], encoded[1]
+def precompute_prompt_caches(
+    pipeline, prompts: list[str], device_type: str, train_config: TrainConfig
+) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+    prompt_embeds_cache = []
+    text_ids_cache = []
+    with torch.no_grad(), offload_models(pipeline.text_encoder, device=device_type, offload=True):
+        for prompt in prompts:
+            prompt_embeds, text_ids = pipeline.encode_prompt(
+                prompt=prompt,
+                max_sequence_length=train_config.max_sequence_length,
+                text_encoder_out_layers=train_config.text_encoder_out_layers,
+            )
+            prompt_embeds_cache.append(prompt_embeds)
+            text_ids_cache.append(text_ids)
+    return prompt_embeds_cache, text_ids_cache
 
 
 @torch.inference_mode()
@@ -159,7 +166,7 @@ def evaluate(
 def train(
     *,
     pipeline,
-    train_config,
+    train_config: TrainConfig,
     accelerator_memory_init: int,
     is_adalora: bool,
     print_verbose: Callable[..., None],
@@ -215,13 +222,18 @@ def train(
         f"trainable: {100 * num_trainable_params / num_params:.4f}%"
     )
 
-    latents_bn_mean = vae.bn.running_mean.view(1, -1, 1, 1)
-    latents_bn_std = torch.sqrt(vae.bn.running_var.view(1, -1, 1, 1) + vae.config.batch_norm_eps)
-
     status = TrainStatus.FAILED
     tic_train = time.perf_counter()
     eval_time = 0.0
     error_msg = ""
+
+    # pre-compute, since they don't change during training and we can keep the text encoder and VAE offloaded
+    prompt_embeds_cache, text_ids_cache = precompute_prompt_caches(
+        pipeline, train_dataset.prompts, device_type, train_config=train_config
+    )
+    pixel_values = [train_dataset[i]["pixel_values"] for i in range(len(train_dataset.images))]
+    latents_bn_mean = vae.bn.running_mean.view(1, -1, 1, 1).to(device_type)
+    latents_bn_std = torch.sqrt(vae.bn.running_var.view(1, -1, 1, 1) + vae.config.batch_norm_eps).to(device_type)
 
     try:
         pbar = tqdm(range(1, train_config.max_steps + 1))
@@ -234,17 +246,21 @@ def train(
                 batch = next(train_iterator)
 
             pixel_values = batch["pixel_values"].to(dtype=get_torch_dtype(train_config.dtype))
-            prompts = batch["prompts"]
-            current_batch_size = pixel_values.shape[0]
-            total_samples += current_batch_size
-
-            with torch.no_grad():
+            with torch.no_grad(), offload_models(vae, device=device_type, offload=True):
                 pixel_values = pixel_values.to(vae.device)
                 latents = vae.encode(pixel_values).latent_dist.mode()
                 latents = pipeline._patchify_latents(latents)
                 latents = (latents - latents_bn_mean) / latents_bn_std
                 # note: vae is on CPU
                 latents = latents.to(device_type)
+
+            # FIXME clean up this whole mess with dataset
+            current_batch_size = latents.shape[0]
+            indices = range(total_samples, total_samples + current_batch_size)
+            prompt_embeds = torch.concat([prompt_embeds_cache[i % len(train_dataset.prompts)] for i in indices])
+            text_ids = torch.concat([text_ids_cache[i % len(train_dataset.prompts)] for i in indices])
+
+            total_samples += current_batch_size
 
             model_input_ids = pipeline._prepare_latent_ids(latents).to(latents.device)
             noise = torch.randn_like(latents)
@@ -265,15 +281,6 @@ def train(
             noisy_latents = (1.0 - sigmas) * latents + sigmas * noise
             # [B, C, H, W] -> [B, H*W, C]
             packed_noisy_latents = pipeline._pack_latents(noisy_latents)
-
-            prompt_embeds, text_ids = _encode_prompts(
-                pipeline,
-                prompts,
-                max_sequence_length=train_config.max_sequence_length,
-                text_encoder_out_layers=train_config.text_encoder_out_layers,
-            )
-            prompt_embeds = prompt_embeds.to(latents.device)
-            text_ids = text_ids.to(latents.device)
 
             # handle guidance
             if transformer.config.guidance_embeds:
@@ -314,8 +321,8 @@ def train(
             if is_adalora:
                 transformer.base_model.update_and_allocate(step)
 
-            losses.append(loss.item())
-            pbar.set_postfix({"loss": loss.item()})
+            losses.append(loss)
+            # FIXME pbar.set_postfix({"loss": loss.item()})  # supposedly loss.item() costs 17% of whole train loop
 
             accelerator_memory_allocated_log.append(
                 torch_accelerator_module.memory_allocated() - accelerator_memory_init
@@ -329,6 +336,7 @@ def train(
             if step % train_config.eval_steps == 0:
                 tic_eval = time.perf_counter()
                 loss_avg = sum(losses[-train_config.eval_steps :]) / train_config.eval_steps
+                loss_avg = loss_avg.item()
                 memory_allocated_avg = (
                     sum(accelerator_memory_allocated_log[-train_config.eval_steps :]) / train_config.eval_steps
                 )
@@ -410,7 +418,7 @@ def train(
             {
                 "step": step,
                 "test dino_similarity": test_similarity,
-                "train loss": sum(losses[-train_config.eval_steps :]) / train_config.eval_steps,
+                "train loss": (sum(losses[-train_config.eval_steps :]) / train_config.eval_steps).item(),
                 "train samples": total_samples,
             }
         )

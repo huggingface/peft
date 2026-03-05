@@ -1,9 +1,9 @@
 {
   "model_id": "black-forest-labs/FLUX.2-klein-base-4B",
-  "dataset_id": "diffusers/cat_toy_example",
+  "dataset_id": "diffusers/dog-example",
   "dataset_split": "train",
   "dtype": "bfloat16",
-  "resolution": 512,
+  "resolution": 1024,
   "batch_size": 1,
   "batch_size_eval": 1,
   "repeats": 100,
@@ -17,17 +17,10 @@
     "lr": 0.0001,
     "weight_decay": 0.0001
   },
-  "lr_scheduler": "cosine",
+  "lr_scheduler": null,
   "use_amp": false,
   "autocast_adapter_dtype": true,
-  "instance_prompts": [
-    "a close up photo of sks lying on the ground",
-    "a close up photo of sks standing on the ground",
-    "a close up photo of sks on top of a cluttered table",
-    "a close up photo of sks on a table with a book in the background",
-    "a photo of sks on a sofa",
-    "a photo of sks on top of a cluttered table"
-  ],
+  "instance_prompts": "a photo of sks dog",
   "image_column": "image",
   "valid_size": 1,
   "test_size": 1,
@@ -42,10 +35,8 @@
   "dino_model_id": "facebook/dinov2-base",
   "dino_image_size": 224,
   "sample_image_prompts": [
-    "a close up photo of sks on a kitchen scale",
-    "a close up photo of sks inside a glass bowl on a wooden desk",
-    "a photo of sks resting on a window sill in morning light",
-    "a close up photo of sks peeking out from behind a sofa cushion",
-    "a photo of sks on the moon"
+    "a photo of sks dog",
+    "a photo of sks dog",
+    "a photo of sks dog"
   ]
 }

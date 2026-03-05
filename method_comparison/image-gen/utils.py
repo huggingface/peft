@@ -81,7 +81,7 @@ class TrainConfig:
     lr_scheduler: Optional[Literal["cosine"]]
     use_amp: bool
     autocast_adapter_dtype: bool
-    instance_prompts: list[str]
+    instance_prompts: str | list[str]
     image_column: str
     valid_size: int
     test_size: int

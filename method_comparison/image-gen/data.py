@@ -19,11 +19,14 @@ import torch
 import torchvision.transforms as T
 from datasets import load_dataset
 from PIL import Image
+from PIL.ImageOps import exif_transpose
 from torch.utils.data import Dataset
 from transformers import AutoImageProcessor
 
 
 class DreamBoothTrainDataset(Dataset):
+    # FIXME: We can probably get rid fo the whole dataset class, because for train, we precompute everything, and for
+    # valid/test, we use raw data. Also, if we get rid of random flips, we can precompute the latents
     def __init__(
         self,
         images: list[Image.Image],
@@ -31,6 +34,8 @@ class DreamBoothTrainDataset(Dataset):
         repeats: int,
         transforms: AutoImageProcessor | None,
     ):
+        if len(images) != len(prompts):
+            raise ValueError(f"Got {len(images)} images and {len(prompts)} prompts, should be the same")
         self.images = images
         self.prompts = prompts
         self.repeats = repeats
@@ -42,6 +47,7 @@ class DreamBoothTrainDataset(Dataset):
     def __getitem__(self, idx):
         index = idx % len(self.images)
         image = self.images[index]
+        image = exif_transpose(image)
         prompt = self.prompts[index]
 
         if self.transforms is None:
@@ -70,11 +76,16 @@ def get_train_valid_test_datasets(*, train_config, print_fn=print):
 
     if image_column not in ds.column_names:
         raise ValueError(f"Column '{image_column}' not found in dataset {train_config.dataset_id}: {ds.column_names}")
-    if len(ds) != len(train_config.instance_prompts):
-        raise ValueError(
-            f"Need 1 instance prompt per sample image, found {len(train_config.instance_prompts)} and "
-            f"{len(ds)} instead."
-        )
+
+    if isinstance(train_config.instance_prompts, str):
+        prompts = [train_config.instance_prompts] * len(ds)
+    else:
+        prompts = train_config.instance_prompts
+        if len(ds) != len(prompts):
+            raise ValueError(
+                f"Need 1 instance prompt per sample image, found {len(prompts)} and "
+                f"{len(ds)} instead."
+            )
 
     train_size = len(ds) - train_config.valid_size - train_config.test_size
     if train_size < 1:
@@ -101,17 +112,16 @@ def get_train_valid_test_datasets(*, train_config, print_fn=print):
     valid_images = [_to_rgb(img) for img in ds_valid[image_column]]
     test_images = [_to_rgb(img) for img in ds_test[image_column]]
 
-    train_prompts = [train_config.instance_prompts[i] for i in idx_train]
-    valid_prompts = [train_config.instance_prompts[i] for i in idx_valid]
-    test_prompts = [train_config.instance_prompts[i] for i in idx_test]
+    train_prompts = [prompts[i] for i in idx_train]
+    valid_prompts = [prompts[i] for i in idx_valid]
+    test_prompts = [prompts[i] for i in idx_test]
 
-    # FIXME
-    random_crop = False
+    # TODO let's get rid of flips
     random_flip = False
+    size = train_config.resolution, train_config.resolution  # hard-code square
     train_augmentations = T.Compose(
         [
-            T.Resize(train_config.resolution, interpolation=T.InterpolationMode.BILINEAR),
-            T.RandomCrop(train_config.resolution) if random_crop else T.CenterCrop(train_config.resolution),
+            T.Resize(size, interpolation=T.InterpolationMode.BILINEAR),
             T.RandomHorizontalFlip(p=0.5) if random_flip else T.Lambda(lambda image: image),
             T.ToTensor(),
             T.Normalize([0.5], [0.5]),
