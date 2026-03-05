@@ -3,12 +3,12 @@
   "dataset_id": "diffusers/dog-example",
   "dataset_split": "train",
   "dtype": "bfloat16",
-  "resolution": 1024,
-  "batch_size": 1,
+  "resolution": 512,
+  "batch_size": 2,
   "batch_size_eval": 1,
-  "repeats": 100,
+  "repeats": 1000,
   "max_steps": 500,
-  "eval_steps": 25,
+  "eval_steps": 50,
   "compile": false,
   "seed": 0,
   "grad_norm_clip": 1.0,
@@ -36,7 +36,7 @@
   "dino_image_size": 224,
   "sample_image_prompts": [
     "a photo of sks dog",
-    "a photo of sks dog",
-    "a photo of sks dog"
+    "a color drawing of sks dog",
+    "a photo of sks dog diving under water"
   ]
 }
