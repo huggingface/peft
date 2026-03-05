@@ -30,9 +30,12 @@ from functools import partial
 from typing import Any, Optional
 
 import torch
-from diffusers.training_utils import compute_density_for_timestep_sampling, compute_loss_weighting_for_sd3, offload_models
+from diffusers.training_utils import (
+    compute_density_for_timestep_sampling,
+    compute_loss_weighting_for_sd3,
+    offload_models,
+)
 from torch.amp import GradScaler, autocast
-from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import set_seed
 from utils import (
@@ -57,7 +60,7 @@ from utils import (
     validate_experiment_path,
 )
 
-from data import collate_fn, get_train_valid_test_datasets
+from data import get_train_valid_test_datasets
 from peft import PeftConfig
 from peft.utils import CONFIG_NAME, infer_device
 
@@ -95,7 +98,7 @@ class DummyGradScaler:
 
 def precompute_prompt_caches(
     pipeline, prompts: list[str], device_type: str, train_config: TrainConfig
-) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     prompt_embeds_cache = []
     text_ids_cache = []
     with torch.no_grad(), offload_models(pipeline.text_encoder, device=device_type, offload=True):
@@ -107,7 +110,32 @@ def precompute_prompt_caches(
             )
             prompt_embeds_cache.append(prompt_embeds)
             text_ids_cache.append(text_ids)
-    return prompt_embeds_cache, text_ids_cache
+    return torch.cat(prompt_embeds_cache, dim=0).to(device_type), torch.cat(text_ids_cache, dim=0).to(device_type)
+
+
+def precompute_latent_cache(
+    *,
+    pipeline,
+    vae,
+    pixel_values: list[torch.Tensor],
+    train_config: TrainConfig,
+    device_type: str,
+) -> torch.Tensor:
+    latents_cache = []
+    latents_bn_mean = vae.bn.running_mean.view(1, -1, 1, 1)
+    latents_bn_std = torch.sqrt(vae.bn.running_var.view(1, -1, 1, 1) + vae.config.batch_norm_eps)
+    with torch.no_grad(), offload_models(vae, device=device_type, offload=True):
+        latents_bn_mean = latents_bn_mean.to(vae.device)
+        latents_bn_std = latents_bn_std.to(vae.device)
+        for i in range(0, len(pixel_values), train_config.batch_size):
+            pixel_values_batch = torch.stack(pixel_values[i : i + train_config.batch_size]).to(
+                device=vae.device, dtype=get_torch_dtype(train_config.dtype)
+            )
+            latents = vae.encode(pixel_values_batch).latent_dist.mode()
+            latents = pipeline._patchify_latents(latents)
+            latents = (latents - latents_bn_mean) / latents_bn_std
+            latents_cache.append(latents.to(device_type))
+    return torch.cat(latents_cache, dim=0)
 
 
 @torch.inference_mode()
@@ -117,48 +145,36 @@ def evaluate(
     ds_eval,
     processor,
     dino_model,
-    batch_size_eval: int,
-    num_inference_steps: int,
-    guidance_scale: float,
-    resolution: int,
-    max_sequence_length: int,
-    text_encoder_out_layers: list[int],
-    seed: int,
+    config: TrainConfig,
 ) -> float:
     generated_images = []
     reference_images = []
+    batch_size = config.batch_size_eval
 
-    # temporarily move components to accelerator
-    vae_device = pipeline.vae.device
-    te_device = pipeline.text_encoder.device
-    pipeline.vae.to(pipeline.transformer.device)
-    pipeline.text_encoder.to(pipeline.transformer.device)
+    with offload_models(pipeline.text_encoder, pipeline.vae, device=pipeline.transformer.device, offload=True):
+        seed = config.seed + 10_000  # don't use the same seed
+        for i in range(0, len(ds_eval), batch_size):
+            sliced = [ds_eval[j] for j in range(i, min(i + batch_size, len(ds_eval)))]
+            prompts = [sample["prompt"] for sample in sliced]
+            generator = torch.Generator(device=pipeline.transformer.device).manual_seed(seed + i)
+            outputs = pipeline(
+                prompt=prompts,
+                num_inference_steps=config.num_inference_steps,
+                guidance_scale=config.guidance_scale,
+                height=config.resolution,  # hard-code square
+                width=config.resolution,
+                max_sequence_length=config.max_sequence_length,
+                text_encoder_out_layers=config.text_encoder_out_layers,
+                generator=generator,
+                output_type="pil",
+            )
+            generated_images.extend(outputs.images)
+            reference_images.extend([sample["raw_image"] for sample in sliced])
+            if i + batch_size >= len(ds_eval):
+                break
 
-    for i in range(0, len(ds_eval), batch_size_eval):
-        sliced = [ds_eval[j] for j in range(i, min(i + batch_size_eval, len(ds_eval)))]
-        prompts = [sample["prompt"] for sample in sliced]
-        generator = torch.Generator(device=pipeline.transformer.device).manual_seed(seed + i)
-        outputs = pipeline(
-            prompt=prompts,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale,
-            height=resolution,
-            width=resolution,
-            max_sequence_length=max_sequence_length,
-            text_encoder_out_layers=text_encoder_out_layers,
-            generator=generator,
-            output_type="pil",
-        )
-        generated_images.extend(outputs.images)
-        reference_images.extend([sample["raw_image"] for sample in sliced])
-        if i + batch_size_eval >= len(ds_eval):
-            break
-
-    pipeline.vae.to(vae_device)
-    pipeline.text_encoder.to(te_device)
-
-    generated_embeddings = get_dino_embeddings(generated_images, processor, dino_model, batch_size=batch_size_eval)
-    reference_embeddings = get_dino_embeddings(reference_images, processor, dino_model, batch_size=batch_size_eval)
+    generated_embeddings = get_dino_embeddings(generated_images, processor, dino_model, batch_size=batch_size)
+    reference_embeddings = get_dino_embeddings(reference_images, processor, dino_model, batch_size=batch_size)
     cosine_sim = (generated_embeddings * reference_embeddings).sum(dim=-1)
     return cosine_sim.mean().item()
 
@@ -181,14 +197,12 @@ def train(
     train_dataset, valid_dataset, test_dataset = get_train_valid_test_datasets(
         train_config=train_config, print_fn=print_verbose
     )
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=train_config.batch_size,
-        shuffle=True,
-        drop_last=True,
-        collate_fn=collate_fn,
-    )
-    train_iterator = iter(train_loader)
+    train_size_base = len(train_dataset["prompts"])
+    train_indices = torch.cat([torch.randperm(train_size_base) for _ in range(train_dataset["repeats"])])
+    if train_config.max_steps > len(train_indices):
+        raise ValueError(
+            f"max_steps is too high ({train_config.max_steps}), there are only {len(train_indices)} training samples"
+        )
 
     processor, dino_model = get_dino_encoder(train_config.dino_model_id, train_config.dino_image_size)
 
@@ -229,37 +243,28 @@ def train(
 
     # pre-compute, since they don't change during training and we can keep the text encoder and VAE offloaded
     prompt_embeds_cache, text_ids_cache = precompute_prompt_caches(
-        pipeline, train_dataset.prompts, device_type, train_config=train_config
+        pipeline, train_dataset["prompts"], device_type, train_config=train_config
     )
-    pixel_values = [train_dataset[i]["pixel_values"] for i in range(len(train_dataset.images))]
-    latents_bn_mean = vae.bn.running_mean.view(1, -1, 1, 1).to(device_type)
-    latents_bn_std = torch.sqrt(vae.bn.running_var.view(1, -1, 1, 1) + vae.config.batch_norm_eps).to(device_type)
+    latents_cache = precompute_latent_cache(
+        pipeline=pipeline,
+        vae=vae,
+        pixel_values=train_dataset["pixel_values"],
+        train_config=train_config,
+        device_type=device_type,
+    )
 
     try:
         pbar = tqdm(range(1, train_config.max_steps + 1))
         for step in pbar:
             tic = time.perf_counter()
-            try:
-                batch = next(train_iterator)
-            except StopIteration:
-                train_iterator = iter(train_loader)
-                batch = next(train_iterator)
+            i_start = (step - 1) * train_config.batch_size
+            i_stop = min(step * train_config.batch_size, len(train_indices))
+            batch_indices = train_indices[i_start:i_stop].to(device=latents_cache.device, dtype=torch.long)
+            latents = latents_cache.index_select(0, batch_indices)
+            prompt_embeds = prompt_embeds_cache.index_select(0, batch_indices)
+            text_ids = text_ids_cache.index_select(0, batch_indices)
 
-            pixel_values = batch["pixel_values"].to(dtype=get_torch_dtype(train_config.dtype))
-            with torch.no_grad(), offload_models(vae, device=device_type, offload=True):
-                pixel_values = pixel_values.to(vae.device)
-                latents = vae.encode(pixel_values).latent_dist.mode()
-                latents = pipeline._patchify_latents(latents)
-                latents = (latents - latents_bn_mean) / latents_bn_std
-                # note: vae is on CPU
-                latents = latents.to(device_type)
-
-            # FIXME clean up this whole mess with dataset
             current_batch_size = latents.shape[0]
-            indices = range(total_samples, total_samples + current_batch_size)
-            prompt_embeds = torch.concat([prompt_embeds_cache[i % len(train_dataset.prompts)] for i in indices])
-            text_ids = torch.concat([text_ids_cache[i % len(train_dataset.prompts)] for i in indices])
-
             total_samples += current_batch_size
 
             model_input_ids = pipeline._prepare_latent_ids(latents).to(latents.device)
@@ -352,13 +357,7 @@ def train(
                     ds_eval=valid_dataset,
                     processor=processor,
                     dino_model=dino_model,
-                    batch_size_eval=train_config.batch_size_eval,
-                    num_inference_steps=train_config.num_inference_steps,
-                    guidance_scale=train_config.guidance_scale,
-                    resolution=train_config.resolution,
-                    max_sequence_length=train_config.max_sequence_length,
-                    text_encoder_out_layers=train_config.text_encoder_out_layers,
-                    seed=train_config.seed,
+                    config=train_config,
                 )
                 transformer.train()
 
@@ -405,13 +404,7 @@ def train(
             ds_eval=test_dataset,
             processor=processor,
             dino_model=dino_model,
-            batch_size_eval=train_config.batch_size_eval,
-            num_inference_steps=train_config.num_inference_steps,
-            guidance_scale=train_config.guidance_scale,
-            resolution=train_config.resolution,
-            max_sequence_length=train_config.max_sequence_length,
-            text_encoder_out_layers=train_config.text_encoder_out_layers,
-            seed=train_config.seed + 10_000,
+            config=train_config,
         )
 
         metrics.append(

@@ -15,59 +15,28 @@
 """Data handling for the image generation benchmark."""
 
 import numpy as np
-import torch
 import torchvision.transforms as T
 from datasets import load_dataset
 from PIL import Image
 from PIL.ImageOps import exif_transpose
-from torch.utils.data import Dataset
-from transformers import AutoImageProcessor
-
-
-class DreamBoothTrainDataset(Dataset):
-    # FIXME: We can probably get rid fo the whole dataset class, because for train, we precompute everything, and for
-    # valid/test, we use raw data. Also, if we get rid of random flips, we can precompute the latents
-    def __init__(
-        self,
-        images: list[Image.Image],
-        prompts: list[str],
-        repeats: int,
-        transforms: AutoImageProcessor | None,
-    ):
-        if len(images) != len(prompts):
-            raise ValueError(f"Got {len(images)} images and {len(prompts)} prompts, should be the same")
-        self.images = images
-        self.prompts = prompts
-        self.repeats = repeats
-        self.transforms = transforms
-
-    def __len__(self):
-        return len(self.images) * self.repeats
-
-    def __getitem__(self, idx):
-        index = idx % len(self.images)
-        image = self.images[index]
-        image = exif_transpose(image)
-        prompt = self.prompts[index]
-
-        if self.transforms is None:
-            # for valid/test, rely on Dino image processor
-            return {
-                "raw_image": image,
-                "prompt": prompt,
-            }
-
-        output = self.transforms(image)
-        return {
-            "pixel_values": output,
-            "prompt": prompt,
-        }
 
 
 def _to_rgb(image) -> Image.Image:
     if isinstance(image, Image.Image):
         return image.convert("RGB")
     return Image.fromarray(image).convert("RGB")
+
+
+def _build_train_pixel_values(images: list[Image.Image], resolution: int):
+    size = resolution, resolution  # hard-code square
+    train_augmentations = T.Compose(
+        [
+            T.Resize(size, interpolation=T.InterpolationMode.BILINEAR),
+            T.ToTensor(),
+            T.Normalize([0.5], [0.5]),
+        ]
+    )
+    return [train_augmentations(exif_transpose(image)) for image in images]
 
 
 def get_train_valid_test_datasets(*, train_config, print_fn=print):
@@ -82,10 +51,7 @@ def get_train_valid_test_datasets(*, train_config, print_fn=print):
     else:
         prompts = train_config.instance_prompts
         if len(ds) != len(prompts):
-            raise ValueError(
-                f"Need 1 instance prompt per sample image, found {len(prompts)} and "
-                f"{len(ds)} instead."
-            )
+            raise ValueError(f"Need 1 instance prompt per sample image, found {len(prompts)} and {len(ds)} instead.")
 
     train_size = len(ds) - train_config.valid_size - train_config.test_size
     if train_size < 1:
@@ -116,50 +82,22 @@ def get_train_valid_test_datasets(*, train_config, print_fn=print):
     valid_prompts = [prompts[i] for i in idx_valid]
     test_prompts = [prompts[i] for i in idx_test]
 
-    # TODO let's get rid of flips
-    random_flip = False
-    size = train_config.resolution, train_config.resolution  # hard-code square
-    train_augmentations = T.Compose(
-        [
-            T.Resize(size, interpolation=T.InterpolationMode.BILINEAR),
-            T.RandomHorizontalFlip(p=0.5) if random_flip else T.Lambda(lambda image: image),
-            T.ToTensor(),
-            T.Normalize([0.5], [0.5]),
-        ]
-    )
-
-    train_dataset = DreamBoothTrainDataset(
-        images=train_images,
-        prompts=train_prompts,
-        repeats=train_config.repeats,
-        transforms=train_augmentations,
-    )
-    valid_dataset = DreamBoothTrainDataset(
-        images=valid_images,
-        prompts=valid_prompts,
-        repeats=1,
-        transforms=None,
-    )
-    test_dataset = DreamBoothTrainDataset(
-        images=test_images,
-        prompts=test_prompts,
-        repeats=1,
-        transforms=None,
-    )
+    train_dataset = {
+        "pixel_values": _build_train_pixel_values(train_images, train_config.resolution),
+        "prompts": train_prompts,
+        "repeats": train_config.repeats,
+    }
+    valid_dataset = [
+        {"raw_image": exif_transpose(image), "prompt": prompt} for image, prompt in zip(valid_images, valid_prompts)
+    ]
+    test_dataset = [
+        {"raw_image": exif_transpose(image), "prompt": prompt} for image, prompt in zip(test_images, test_prompts)
+    ]
 
     print_fn(f"Dataset: {train_config.dataset_id}")
     print_fn(f"Raw rows: {len(ds)}")
-    print_fn(f"Train rows: {len(train_dataset)}")
+    print_fn(f"Train rows: {len(train_dataset['prompts']) * train_dataset['repeats']}")
     print_fn(f"Valid rows: {len(valid_dataset)}")
     print_fn(f"Test rows: {len(test_dataset)}")
 
     return train_dataset, valid_dataset, test_dataset
-
-
-def collate_fn(samples):
-    pixel_values = torch.stack([sample["pixel_values"] for sample in samples])
-    prompts = [sample["prompt"] for sample in samples]
-    return {
-        "pixel_values": pixel_values,
-        "prompts": prompts,
-    }
