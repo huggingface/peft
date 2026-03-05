@@ -354,7 +354,6 @@ def train(
                 dur_train = sum(durations[-train_config.eval_steps :])
 
                 transformer.eval()
-                valid_similarity = 555
                 valid_similarity = evaluate(
                     pipeline=pipeline,
                     ds_eval=valid_dataset,
@@ -402,6 +401,7 @@ def train(
 
         print_verbose(f"Training finished after {train_config.max_steps} steps, evaluation on test set follows.")
         transformer.eval()
+        # TODO: run multiple times, average test similarity
         test_similarity = evaluate(
             pipeline=pipeline,
             ds_eval=test_dataset,
