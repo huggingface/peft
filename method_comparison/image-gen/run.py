@@ -152,7 +152,7 @@ def evaluate(
     batch_size = config.batch_size_eval
 
     with offload_models(pipeline.text_encoder, pipeline.vae, device=pipeline.transformer.device, offload=True):
-        seed = config.seed + 10_000  # don't use the same seed
+        seed = config.seed + 100_000  # don't use the same seed
         for i in range(0, len(ds_eval), batch_size):
             sliced = [ds_eval[j] for j in range(i, min(i + batch_size, len(ds_eval)))]
             prompts = [sample["prompt"] for sample in sliced]
@@ -194,11 +194,15 @@ def train(
     metrics = []
     total_samples = 0
 
+    device_type = infer_device()
     train_dataset, valid_dataset, test_dataset = get_train_valid_test_datasets(
         train_config=train_config, print_fn=print_verbose
     )
     train_size_base = len(train_dataset["prompts"])
-    train_indices = torch.cat([torch.randperm(train_size_base) for _ in range(train_dataset["repeats"])])
+    gen = torch.Generator(device=device_type).manual_seed(train_config.seed)
+    train_indices = torch.cat(
+        [torch.randperm(train_size_base, generator=gen, device=device_type) for _ in range(train_dataset["repeats"])]
+    )
     if train_config.max_steps > len(train_indices):
         raise ValueError(
             f"max_steps is too high ({train_config.max_steps}), there are only {len(train_indices)} training samples"
@@ -206,7 +210,6 @@ def train(
 
     processor, dino_model = get_dino_encoder(train_config.dino_model_id, train_config.dino_image_size)
 
-    device_type = infer_device()
     torch_accelerator_module = getattr(torch, device_type, torch.cuda)
     if train_config.use_amp:
         grad_scaler: GradScaler | DummyGradScaler = GradScaler(device=device_type)
@@ -268,7 +271,7 @@ def train(
             total_samples += current_batch_size
 
             model_input_ids = pipeline._prepare_latent_ids(latents).to(latents.device)
-            noise = torch.randn_like(latents)
+            noise = torch.randn_like(latents, generator=gen)
 
             u = compute_density_for_timestep_sampling(
                 weighting_scheme=train_config.weighting_scheme,
@@ -327,7 +330,7 @@ def train(
                 transformer.base_model.update_and_allocate(step)
 
             losses.append(loss)
-            # FIXME pbar.set_postfix({"loss": loss.item()})  # supposedly loss.item() costs 17% of whole train loop
+            pbar.set_postfix({"loss": loss.item()})
 
             accelerator_memory_allocated_log.append(
                 torch_accelerator_module.memory_allocated() - accelerator_memory_init
