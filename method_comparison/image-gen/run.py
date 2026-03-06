@@ -146,37 +146,42 @@ def evaluate(
     processor,
     dino_model,
     config: TrainConfig,
+    num_repeats: int = 1,
 ) -> float:
-    generated_images = []
-    reference_images = []
-    batch_size = config.batch_size_eval
-
     with offload_models(pipeline.text_encoder, pipeline.vae, device=pipeline.transformer.device, offload=True):
-        seed = config.seed + 100_000  # don't use the same seed
-        for i in range(0, len(ds_eval), batch_size):
-            sliced = [ds_eval[j] for j in range(i, min(i + batch_size, len(ds_eval)))]
-            prompts = [sample["prompt"] for sample in sliced]
-            generator = torch.Generator(device=pipeline.transformer.device).manual_seed(seed + i)
-            outputs = pipeline(
-                prompt=prompts,
-                num_inference_steps=config.num_inference_steps,
-                guidance_scale=config.guidance_scale,
-                height=config.resolution,  # hard-code square
-                width=config.resolution,
-                max_sequence_length=config.max_sequence_length,
-                text_encoder_out_layers=config.text_encoder_out_layers,
-                generator=generator,
-                output_type="pil",
-            )
-            generated_images.extend(outputs.images)
-            reference_images.extend([sample["raw_image"] for sample in sliced])
-            if i + batch_size >= len(ds_eval):
-                break
+        seed = config.seed + 100_000  # don't use the same seed as in training just to be sure
+        generator = torch.Generator(device=pipeline.transformer.device).manual_seed(seed)
+        cosine_sim_scores = []
+        for _ in range(num_repeats):
+            generated_images = []
+            reference_images = []
+            batch_size = config.batch_size_eval
 
-    generated_embeddings = get_dino_embeddings(generated_images, processor, dino_model, batch_size=batch_size)
-    reference_embeddings = get_dino_embeddings(reference_images, processor, dino_model, batch_size=batch_size)
-    cosine_sim = (generated_embeddings * reference_embeddings).sum(dim=-1)
-    return cosine_sim.mean().item()
+            for i in range(0, len(ds_eval), batch_size):
+                sliced = [ds_eval[j] for j in range(i, min(i + batch_size, len(ds_eval)))]
+                prompts = [sample["prompt"] for sample in sliced]
+                outputs = pipeline(
+                    prompt=prompts,
+                    num_inference_steps=config.num_inference_steps,
+                    guidance_scale=config.guidance_scale,
+                    height=config.resolution,  # hard-code square
+                    width=config.resolution,
+                    max_sequence_length=config.max_sequence_length,
+                    text_encoder_out_layers=config.text_encoder_out_layers,
+                    generator=generator,
+                    output_type="pil",
+                )
+                generated_images.extend(outputs.images)
+                reference_images.extend([sample["raw_image"] for sample in sliced])
+                if i + batch_size >= len(ds_eval):
+                    break
+
+            generated_embeddings = get_dino_embeddings(generated_images, processor, dino_model, batch_size=batch_size)
+            reference_embeddings = get_dino_embeddings(reference_images, processor, dino_model, batch_size=batch_size)
+            cosine_sim = (generated_embeddings * reference_embeddings).sum(dim=-1)
+            cosine_sim_scores.append(cosine_sim.mean().item())
+        mean_sim = sum(cosine_sim_scores) / num_repeats
+    return mean_sim
 
 
 def train(
@@ -401,13 +406,13 @@ def train(
 
         print_verbose(f"Training finished after {train_config.max_steps} steps, evaluation on test set follows.")
         transformer.eval()
-        # TODO: run multiple times, average test similarity
         test_similarity = evaluate(
             pipeline=pipeline,
             ds_eval=test_dataset,
             processor=processor,
             dino_model=dino_model,
             config=train_config,
+            num_repeats=10,
         )
 
         metrics.append(
