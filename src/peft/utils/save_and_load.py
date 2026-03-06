@@ -594,16 +594,32 @@ def set_peft_model_state_dict(
                     base_layer = module.get_base_layer()
                     device = base_layer.weight.device
                     dtype = base_layer.weight.dtype
+
                     tp_plan = getattr(base_layer, "_hf_tp_plan", None)
-                    if tp_plan is None:
+                    device_mesh = getattr(base_layer, "_hf_device_mesh", None)
+
+                    if tp_plan is None or device_mesh is None:
                         continue
+
+                    # We create and initialize the TensorParallelLayer on the fly,
+                    # and we set the `empty_param` attribute depending on the proper
+                    # state dict key to shard
                     tp_layer = ALL_PARALLEL_STYLES[tp_plan]
+                    tp_layer.device_mesh = device_mesh
+                    tp_layer.rank = device_mesh.get_local_rank()
+
                     if isinstance(tp_layer, ColwiseParallel):
                         key = f"{name}.lora_B.{adapter_name}.weight"
-                        state_dict[key] = tp_layer.shard_tensor(state_dict[key], device=device, dtype=dtype)
+                        tp_layer.empty_param = peft_model_state_dict[key]
+                        peft_model_state_dict[key] = tp_layer.shard_tensor(
+                            peft_model_state_dict[key], device=device, dtype=dtype
+                        )
                     elif isinstance(tp_layer, RowwiseParallel):
                         key = f"{name}.lora_A.{adapter_name}.weight"
-                        state_dict[key] = tp_layer.shard_tensor(state_dict[key], device=device, dtype=dtype)
+                        tp_layer.empty_param = peft_model_state_dict[key]
+                        peft_model_state_dict[key] = tp_layer.shard_tensor(
+                            peft_model_state_dict[key], device=device, dtype=dtype
+                        )
 
         elif config.peft_type == PeftType.OFT:
             if any(".oft_r." in key for key in peft_model_state_dict):
