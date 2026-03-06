@@ -283,4 +283,6 @@ __all__ = [
 if is_transformers_ge_v5:
     from peft.utils.integrations import convert_peft_config_for_transformers
 
-    __all__.append("convert_peft_config_for_transformers")
+    __all__ += ["convert_peft_config_for_transformers"]
+
+__all__ = sorted(__all__)
