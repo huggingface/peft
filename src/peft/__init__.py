@@ -14,6 +14,8 @@
 
 __version__ = "0.18.2.dev0"
 
+import transformers
+
 from .auto import (
     MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
     AutoPeftModel,
@@ -25,6 +27,7 @@ from .auto import (
     AutoPeftModelForTokenClassification,
 )
 from .config import PeftConfig, PromptLearningConfig
+from .import_utils import is_transformers_ge_v5
 from .mapping import (
     PEFT_TYPE_TO_CONFIG_MAPPING,
     PEFT_TYPE_TO_MIXED_MODEL_MAPPING,
@@ -278,3 +281,10 @@ __all__ = [
     "set_peft_model_state_dict",
     "shift_tokens_right",
 ]
+
+if is_transformers_ge_v5 and hasattr(transformers.integrations.peft, "apply_peft_weight_mapping_to_state_dict"):
+    from peft.utils.integrations import convert_peft_config_for_transformers
+
+    __all__ += ["convert_peft_config_for_transformers"]
+
+__all__ = sorted(__all__)
