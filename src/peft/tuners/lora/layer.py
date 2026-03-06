@@ -2026,7 +2026,7 @@ class ParamWrapper(nn.Module, LoraLayer):
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
         if self.get_param().ndim == 3:
-            # TODO
+            # In and out are swapped for 3 dim MoE layers
             self.swap_in_out_features = config.param_wrapper_swap_in_out_features
         else:
             self.swap_in_out_features = False

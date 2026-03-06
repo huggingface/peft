@@ -293,15 +293,23 @@ def skip_init_on_device(func):
 
 
 if is_transformers_ge_v5:
-    from transformers.conversion_mapping import get_checkpoint_conversion_mapping
+    # TODO: remove conditional when transformers < 5.0 is no longer supported
+    from transformers.conversion_mapping import get_checkpoint_conversion_mapping, get_model_conversion_mapping
     from transformers.integrations.peft import (
         _MODEL_TO_CONVERSION_PATTERN,
         _MOE_FUSED_TARGETS,
         _MOE_TARGET_MODULE_MAPPING,
+        apply_peft_weight_mapping_to_state_dict,
+        build_peft_weight_mapping,
     )
 
     def _convert_peft_config_moe(peft_config, model_type: str):
-        # TODO for PEFT 0.19.0, we will probably include this in PEFT and can use the function from there
+        """
+        Convert the PEFT config of MoE models whose architecture changed from transformers v4 to v5
+
+        Since the model architecture changed, the targets have to updated accordingly. Moreover, when weights are
+        fused, it requires updating the rank and alpha values of those parameters.
+        """
         base_model_type = _MODEL_TO_CONVERSION_PATTERN.get(model_type, None)
         if base_model_type is None:
             return peft_config
@@ -348,6 +356,8 @@ if is_transformers_ge_v5:
                 )
 
             if len(present_targets) == len(required_old_targets) and len(required_old_targets) > 1:
+                # TODO: if there is already a rank or alpha pattern for this module, we should update that instead, but
+                # it's not trivial to detect a match here
                 peft_config.rank_pattern[rf".*\.{re.escape(new_name)}"] = peft_config.r * len(required_old_targets)
                 # Preserve per-branch LoRA scaling after fusion.
                 # Example: w1 + w3 => r doubles, so alpha must also double to keep alpha/r unchanged.
@@ -361,7 +371,11 @@ if is_transformers_ge_v5:
         return peft_config
 
     def convert_peft_config_for_transformers(peft_config, model: torch.nn.Module, conversions: list[Any] | None):
-        # TODO document this properly
+        """
+        Convert the PEFT config of models whose architecture changed from transformers v4 to v5.
+
+        For most models, this requires no changes, this mostly affects some MoE models like Mixtral.
+        """
         # If, for any reason, we cannot apply conversion, we just return the PEFT config as is.
         from peft import PeftType  # avoid circular import
 
@@ -381,6 +395,66 @@ if is_transformers_ge_v5:
             peft_config = _convert_peft_config_moe(peft_config, model_type)
 
         return peft_config
+
+    def _convert_to_peft_serialized_keys(
+        state_dict: dict[str, torch.Tensor],
+        adapter_name: str,
+        base_prefix: str = "base_model.model.",
+    ) -> dict[str, torch.Tensor]:
+        converted = {}
+        adapter_suffix = f".{adapter_name}"
+
+        for key, value in state_dict.items():
+            # Return PEFT-serialized keys (prefixed), not model state_dict keys.
+            if not key.startswith("base_model."):
+                key = f"{base_prefix}{key}"
+
+            # For module-backed params: ...lora_A.<adapter>.weight -> ...lora_A.weight
+            # For parameter-backed entries: ...<something>.<adapter> -> ...<something>
+            if key.endswith(adapter_suffix):
+                key = key.removesuffix(adapter_suffix)
+            else:
+                key_no_suffix, dot, suffix = key.rpartition(".")
+                if dot and key_no_suffix.endswith(adapter_suffix):
+                    key_no_suffix = key_no_suffix.removesuffix(adapter_suffix)
+                    key = f"{key_no_suffix}.{suffix}"
+            converted[key] = value
+
+        return converted
+
+    def convert_peft_adapter_state_dict_for_transformers(
+        model: torch.nn.Module,
+        peft_config,
+        adapter_state_dict: dict[str, torch.Tensor],
+        adapter_name: str = "default",
+    ) -> dict[str, torch.Tensor]:
+        """Convert a PEFT adapter state dict to match a transformers v5 weight conversion.
+
+        This function is intended for callers (e.g. `PeftModel.load_adapter`) that need transformers' conversion logic
+        without going through `transformer_model.load_adapter`.
+
+        Args:
+            model:
+                Base model on which the adapter will be loaded.
+            peft_config:
+                Adapter config.
+            adapter_state_dict:
+                Adapter weights as loaded from disk.
+            adapter_name:
+                Adapter name used for conversion of internal target patterns.
+
+        Returns:
+            The converted state dict.
+        """
+        weight_conversions = get_model_conversion_mapping(model)
+        peft_weight_mapping = build_peft_weight_mapping(weight_conversions, adapter_name, peft_config=peft_config)
+
+        if not peft_weight_mapping:
+            return adapter_state_dict
+
+        converted_state_dict = apply_peft_weight_mapping_to_state_dict(model, adapter_state_dict, peft_weight_mapping)
+        converted_state_dict = _convert_to_peft_serialized_keys(converted_state_dict, adapter_name=adapter_name)
+        return converted_state_dict
 
 #######
 # END #
