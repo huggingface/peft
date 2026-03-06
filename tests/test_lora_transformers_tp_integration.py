@@ -183,7 +183,7 @@ def _is_tp_available():
 
 
 @unittest.skipUnless(_is_tp_available(), "transformers TP integration not available")
-class TestLoraAndTransformersTPIntegration(unittest.TestCase):
+class TestLoraTP(unittest.TestCase):
     def _spawn(self, fn, *extra_args, port_offset=0):
         port = _BASE_PORT + port_offset
         mp.spawn(fn, args=(WORLD_SIZE, port) + extra_args, nprocs=WORLD_SIZE, join=True)
