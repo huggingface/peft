@@ -292,7 +292,7 @@ def skip_init_on_device(func):
 ##################################
 
 
-if is_transformers_ge_v5:
+if is_transformers_ge_v5 and hasattr(transformers.integrations.peft, "apply_peft_weight_mapping_to_state_dict"):
     # TODO: remove conditional when transformers < 5.0 is no longer supported
     from transformers.conversion_mapping import get_checkpoint_conversion_mapping, get_model_conversion_mapping
     from transformers.integrations.peft import (

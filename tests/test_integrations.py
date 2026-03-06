@@ -14,10 +14,12 @@
 
 import pytest
 import torch
+import transformers
 from torch import nn
 from transformers import AutoModelForCausalLM
 
 from peft import LoraConfig, PeftModel, get_peft_model
+from peft.import_utils import is_transformers_ge_v5
 from peft.tuners import lora
 from peft.utils import infer_device
 from peft.utils.integrations import init_empty_weights, skip_init_on_device
@@ -104,6 +106,10 @@ class TestInitEmptyWeights:
         assert all(p.device == expected for p in mlp1.parameters())
 
 
+@pytest.mark.skipif(
+    not (is_transformers_ge_v5 and hasattr(transformers.integrations.peft, "apply_peft_weight_mapping_to_state_dict")),
+    reason="Requires the right transformers version",
+)
 class TestTransformersV5:
     """Unit tests intended to test proper working of PEFT with Transformers v5"""
 
