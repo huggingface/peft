@@ -280,6 +280,8 @@ class LoraLayer(BaseTunerLayer):
 
         # Always synchronize non-sharded LoRA weights across TP ranks, regardless of
         # init_lora_weights, since each rank initializes weights independently.
+        # We could skip some broadcast, for instance when the lora weights are initialized to zero,
+        # but this is a minor optimization and would add extra complexity to the code.
         if torch.distributed.is_available() and torch.distributed.is_initialized():
             base_layer = self.get_base_layer()
             tp_plan = getattr(base_layer, "_hf_tp_plan", None)

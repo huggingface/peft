@@ -247,7 +247,6 @@ class LoraModel(BaseTuner):
 
         # if the target is a ParamWrapper, we nest it to allow targeting multiple nn.Parameter on the same module
         wrap_target_param = isinstance(target, ParamWrapper) and (adapter_name in target.lora_A)
-
         if isinstance(target, LoraLayer) and not isinstance(target, AdaLoraLayer) and not wrap_target_param:
             target.update_layer(
                 adapter_name,
