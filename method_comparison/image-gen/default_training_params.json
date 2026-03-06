@@ -1,0 +1,42 @@
+{
+  "model_id": "black-forest-labs/FLUX.2-klein-base-4B",
+  "dataset_id": "diffusers/dog-example",
+  "dataset_split": "train",
+  "dtype": "bfloat16",
+  "resolution": 512,
+  "batch_size": 2,
+  "batch_size_eval": 1,
+  "repeats": 1000,
+  "max_steps": 500,
+  "eval_steps": 50,
+  "compile": false,
+  "seed": 0,
+  "grad_norm_clip": 1.0,
+  "optimizer_type": "AdamW",
+  "optimizer_kwargs": {
+    "lr": 0.0001,
+    "weight_decay": 0.0001
+  },
+  "lr_scheduler": null,
+  "use_amp": false,
+  "autocast_adapter_dtype": true,
+  "instance_prompts": "a photo of sks dog",
+  "image_column": "image",
+  "valid_size": 1,
+  "test_size": 1,
+  "num_inference_steps": 20,
+  "guidance_scale": 3.5,
+  "max_sequence_length": 512,
+  "text_encoder_out_layers": [10, 20, 30],
+  "weighting_scheme": "none",
+  "logit_mean": 0.0,
+  "logit_std": 1.0,
+  "mode_scale": 1.29,
+  "dino_model_id": "facebook/dinov2-base",
+  "dino_image_size": 224,
+  "sample_image_prompts": [
+    "a photo of sks dog",
+    "a color drawing of sks dog",
+    "a photo of sks dog diving under water"
+  ]
+}
