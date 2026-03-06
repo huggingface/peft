@@ -1,0 +1,6 @@
+trl
+datasets
+numpy
+tqdm
+bitsandbytes
+psutil
