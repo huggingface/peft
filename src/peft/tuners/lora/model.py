@@ -271,34 +271,31 @@ class LoraModel(BaseTuner):
             module_to_hook = new_module
 
         # If the module has a tp_plan, we add hooks to the LoRA layers to make sure they respect the plan
-        tp_plan = getattr(module_to_hook.get_base_layer(), "_hf_tp_plan", None)
+        base_layer = module_to_hook.get_base_layer()
+        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+        device_mesh = getattr(base_layer, "_hf_device_mesh", None)
         if tp_plan is not None:
             from transformers.integrations.tensor_parallel import (
-                ALL_PARALLEL_STYLES,
-                ColwiseParallel,
-                RowwiseParallel,
                 add_tensor_parallel_hooks_to_module,
             )
 
-            tp_layer = ALL_PARALLEL_STYLES[tp_plan]
-
-            if isinstance(tp_layer, ColwiseParallel):
+            if tp_plan == "colwise":
                 add_tensor_parallel_hooks_to_module(
                     self.model,
                     module_to_hook.lora_B[adapter_name],
                     tp_plan,
                     "",  # TODO: determine the proper layer name
                     tp_plan,
-                    tp_layer.device_mesh,
+                    device_mesh,
                 )
-            elif isinstance(tp_layer, RowwiseParallel):
+            elif tp_plan == "rowwise":
                 add_tensor_parallel_hooks_to_module(
                     self.model,
                     module_to_hook.lora_A[adapter_name],
                     tp_plan,
                     "",  # TODO: determine the proper layer name
                     tp_plan,
-                    tp_layer.device_mesh,
+                    device_mesh,
                 )
 
     def _replace_module(self, parent, child_name, new_module, child):
