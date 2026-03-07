@@ -106,8 +106,7 @@ def _test_training(rank, world_size, port):
 
 def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
     """
-    Test that loading from a checkpoint correctly handles the sharding of LoRA weights
-    according to the TP plan.
+    Test that loading from a checkpoint correctly handles the sharding of LoRA weights according to the TP plan.
     """
     _setup_dist(rank, world_size, port)
 
