@@ -196,6 +196,14 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     elif hasattr(module, "input_size") and hasattr(module, "output_size"):
         # Megatron ColumnParallelLinear,RowParallelLinear
         in_features, out_features = module.input_size, module.output_size
+    elif module.__class__.__name__ == "Linear" or module.__class__.__name__ == "LayerNormLinear":
+        # TransformerEngine
+        in_features, out_features = module.in_features, module.out_features
+    elif module.__class__.__name__ == "LayerNormMLP":
+        # TransformerEngine
+        ln_weight = module.layer_norm_weight
+        ln_size = ln_weight.shape[0]
+        in_features, out_features = ln_size, ln_size
     elif hasattr(module, "codebooks") and module.__class__.__name__ == "QuantizedLinear":
         # AQLM QuantLinear
         in_features, out_features = module.in_features, module.out_features
@@ -305,6 +313,8 @@ class BaseTuner(nn.Module, ABC):
         if peft_config != PeftType.XLORA or peft_config[adapter_name] != PeftType.XLORA:
             self.inject_adapter(self.model, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage, state_dict=state_dict)
 
+        self._post_injection_hook(self.model, self.peft_config[adapter_name], adapter_name)
+
         # Copy the peft_config in the injected model.
         self.model.peft_config = self.peft_config
 
@@ -322,6 +332,21 @@ class BaseTuner(nn.Module, ABC):
         r"""
         A hook to be called before the adapter is injected into the model. This method can be overridden by child
         classes to perform any pre-injection operations.
+
+        Args:
+            model (`nn.Module`):
+                The model to be adapted.
+            config (`PeftConfig`):
+                The adapter config.
+            adapter_name (`str`):
+                The adapter name.
+        """
+        pass
+
+    def _post_injection_hook(self, model: nn.Module, config: PeftConfig, adapter_name: str) -> None:
+        r"""
+        A hook to be called after the adapter is injected into the model. This method can be overridden by child
+        classes to perform any post-injection operations.
 
         Args:
             model (`nn.Module`):

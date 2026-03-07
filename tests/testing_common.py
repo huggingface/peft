@@ -36,6 +36,7 @@ from peft import (
     CPTConfig,
     GraloraConfig,
     IA3Config,
+    LilyConfig,
     LNTuningConfig,
     LoHaConfig,
     LoKrConfig,
@@ -82,6 +83,8 @@ def _skip_if_merging_not_supported(model_id, config_cls, config_kwargs):
     if model_id.startswith("Conv2dGroups") and (config_cls == LoraConfig):
         # note: right now, only LoRA supports groups>1, if other PEFT methods add support, they might also need to skip
         pytest.skip("Merging conv layers with groups>1 and LoRA is not supported.")
+    if issubclass(config_cls, LilyConfig):
+        pytest.skip("Lily does not support merging adapters, skipping this test.")
 
 
 def _skip_if_adding_weighted_adapters_not_supported(config):
@@ -813,10 +816,9 @@ class PeftCommonTester:
         dummy_input = self.prepare_inputs_for_testing()
         # ensure that we have at least 3 samples for this test
         dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
-        with torch.inference_mode():
-            with model.disable_adapter():
-                output_base = model(**dummy_input)[0]
-                logits_base = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
+        with torch.inference_mode(), model.disable_adapter():
+            output_base = model(**dummy_input)[0]
+            logits_base = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
 
         model.set_adapter("adapter0")
         with torch.inference_mode():
@@ -890,9 +892,8 @@ class PeftCommonTester:
             # ensure that we have at least 3 samples for this test
             dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
             gen_kwargs = {**dummy_input, "max_length": 20, "num_beams": 10, "early_stopping": True}
-            with torch.inference_mode():
-                with model.disable_adapter():
-                    gen_base = model.generate(**gen_kwargs)
+            with torch.inference_mode(), model.disable_adapter():
+                gen_base = model.generate(**gen_kwargs)
 
             model.set_adapter("adapter0")
             with torch.inference_mode():
@@ -1757,9 +1758,8 @@ class PeftCommonTester:
 
             # output with DISABLED ADAPTER
             if isinstance(peft_model, StableDiffusionPipeline):
-                with peft_model.unet.disable_adapter():
-                    with peft_model.text_encoder.disable_adapter():
-                        output_peft_disabled = get_output(peft_model)
+                with peft_model.unet.disable_adapter(), peft_model.text_encoder.disable_adapter():
+                    output_peft_disabled = get_output(peft_model)
                 # for SD, very rarely, a pixel can differ
                 assert (output_before != output_peft_disabled).float().mean() < 1e-4
             else:
