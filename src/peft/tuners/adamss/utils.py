@@ -77,7 +77,7 @@ def clustering_Z(VT, num_subspaces, iternum):
     # Note: We do NOT normalize row vectors here to match the original adamss_pkg behavior.
     # Although normalization is generally recommended for cosine-similarity-like clustering,
     # the reference implementation clusters raw singular vectors.
-    vt = VT.cpu().numpy().astype("float32")
+    vt = VT.detach().cpu().numpy().astype("float32")
 
     # Auto-clamp num_subspaces to available samples (output dimensions)
     # Cannot cluster n samples into more than n clusters

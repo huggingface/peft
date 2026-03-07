@@ -35,7 +35,7 @@ class AdamssLayer(BaseTunerLayer):
     # All names of layers that may contain adapter weights (trainable or frozen)
     # Use ModuleDict for proper state_dict key format that PEFT's save/load can handle
     # Only include trainable parameter containers here (not buffers)
-    # adamss_resW and adamss_newB are buffers (frozen), not trainable parameters
+    # adamss_newB is a buffer (frozen), not a trainable parameter
     adapter_layer_names = ("adamss_A", "adamss_B")
     # other_param_names specifies additional non-tensor metadata
     other_param_names = (
@@ -55,8 +55,7 @@ class AdamssLayer(BaseTunerLayer):
         # Use ModuleDict containing ParameterList for proper state_dict keys (e.g., adamss_A.default.0)
         self.adamss_A = nn.ModuleDict({})  # Will contain ParameterList per adapter
         self.adamss_B = nn.ModuleDict({})  # Will contain ParameterList per adapter
-        # Use BufferDict for frozen weights (keys like adamss_resW.default)
-        self.adamss_resW = BufferDict(persistent=True)
+        # Use BufferDict for frozen projection matrix (keys like adamss_newB.default)
         self.adamss_newB = BufferDict(persistent=True)
         self.num_subspaces = {}
         self.train_subspace_index = {}
@@ -69,10 +68,6 @@ class AdamssLayer(BaseTunerLayer):
         self.exp_avg_unc_B = {}
         self._disable_adapters = False
         self.merged_adapters = []
-
-        # Mark base layer parameters as not trainable
-        for param in self.base_layer.parameters():
-            param.requires_grad = False
 
     def reset_importance(self, adapter_name: str) -> None:
         """
@@ -93,8 +88,10 @@ class AdamssLayer(BaseTunerLayer):
         self, adapter_name: str, importance_beta: float = 0.85, uncertainty_beta: float = 0.85
     ) -> None:
         """
-        Update importance scores using current gradients (called explicitly by AdamssAsaCallback).
-        Matches adamss_pkg behavior of using accumulated gradients.
+        Update importance scores using current gradients.
+
+        Called by [`AdamssModel.update_and_allocate`] (which is in turn called by
+        [`AdamssAsaCallback`] when using HuggingFace `Trainer`).
 
         Args:
             adapter_name: Name of the adapter to update importance for.
@@ -200,9 +197,7 @@ class AdamssLayer(BaseTunerLayer):
         self.train_subspace_index[adapter_name] = train_subspace_index
         self.seg_result[adapter_name] = seg_result
 
-        # Store residual weight and projection matrix in BufferDict (frozen, device-aware)
-        # BufferDict handles registration, keys like 'adamss_resW.{adapter_name}' match expected pattern
-        self.adamss_resW[adapter_name] = weight_with_bias.detach().to(dtype)
+        # Store projection matrix in BufferDict (frozen, device-aware)
         self.adamss_newB[adapter_name] = VVT[0, 0, :, :].detach().to(dtype)
 
         # Use user-specified subspace_rank
@@ -360,22 +355,21 @@ class Linear(nn.Module, AdamssLayer):
         """Handle shape mismatches that arise when loading checkpoints.
 
         AdaMSS B parameter shapes depend on KMeans clustering of the weight
-        matrix.  Because KMeans is non-deterministic, loading a checkpoint into
-        a freshly-initialised model can produce different segment sizes,
-        causing shape mismatches.  This override detects mismatches and
-        replaces placeholder parameters with correctly-shaped tensors before
-        the default ``load_state_dict`` logic runs.
+        matrix.  KMeans uses a fixed `random_state` so results should be
+        deterministic, but this override acts as a safety net in case sklearn
+        changes clustering behaviour across versions.  It detects shape
+        mismatches and replaces placeholder parameters with correctly-shaped
+        tensors before the default `load_state_dict` logic runs.
         """
         for key, value in state_dict.items():
             if not key.startswith(prefix):
                 continue
             local_key = key[len(prefix):]
-            # Walk dot-separated path to reach the attribute
             parts = local_key.split(".")
             try:
-                target = self
-                for part in parts[:-1]:
-                    target = getattr(target, part) if not part.isdigit() else target[int(part)]
+                # Use get_submodule for the parent path
+                parent_path = ".".join(parts[:-1])
+                target = self.get_submodule(parent_path) if parent_path else self
                 last = parts[-1]
                 if last.isdigit():
                     current = target[int(last)]
@@ -401,82 +395,68 @@ class Linear(nn.Module, AdamssLayer):
         """
         previous_dtype = x.dtype
 
-        if self._disable_adapters or not self._active_adapter:
-            # When adapters are disabled, we need to handle the case where
-            # the adapter was merged - in that case, base_layer.weight contains
-            # the merged weights and we need to use original weights instead.
+        if self._disable_adapters:
             if self.merged:
-                # Save merged adapters list before unmerge (unmerge clears it)
-                adapters_to_remerge = list(self.merged_adapters)
-                # Temporarily unmerge to get original behavior
                 self.unmerge()
-                result = self.base_layer(x, *args, **kwargs)
-                # Re-merge after the forward pass
-                self.merge(adapter_names=adapters_to_remerge)
-            else:
-                result = self.base_layer(x, *args, **kwargs)
+            result = self.base_layer(x, *args, **kwargs)
+        elif self.merged:
+            # Adapter weights are already merged into base_layer.weight,
+            # so just call base_layer directly (no adapter delta needed).
+            result = self.base_layer(x, *args, **kwargs)
         else:
             # Cast input to layer dtype
             x = x.to(self.dtype)
 
-            # Add bias column if needed
-            # Handle different input shapes: (batch, features) or (batch, seq, features)
-            if x.dim() == 2:
-                ones = torch.ones(x.shape[0], 1, device=x.device, dtype=self.dtype)
-            else:  # x.dim() == 3 or more
-                ones = torch.ones(*x.shape[:-1], 1, device=x.device, dtype=self.dtype)
-            newx = torch.cat((x, ones), dim=-1)
-
-            # resW is the frozen original weight — identical for all adapters,
-            # just need any valid adapter key to retrieve it from the BufferDict.
-            first_active_adapter = None
-            for adapter in self.active_adapters:
-                if adapter in self.adamss_A:
-                    first_active_adapter = adapter
-                    break
-
-            if first_active_adapter is None:
-                result = self.base_layer(x, *args, **kwargs)
+            # Add bias column only when the base layer has a bias
+            # (update_layer concatenates bias into newB only when bias is not None)
+            if self.get_base_layer().bias is not None:
+                if x.dim() == 2:
+                    ones = torch.ones(x.shape[0], 1, device=x.device, dtype=self.dtype)
+                else:  # x.dim() == 3 or more
+                    ones = torch.ones(*x.shape[:-1], 1, device=x.device, dtype=self.dtype)
+                newx = torch.cat((x, ones), dim=-1)
             else:
-                # Compute base output from residual weight (frozen original weight)
-                result = F.linear(newx, self.adamss_resW[first_active_adapter].to(self.dtype))
+                newx = x
 
-                # Iterate over all active adapters and add their deltas
-                for active_adapter in self.active_adapters:
-                    if active_adapter not in self.adamss_A:
-                        continue
+            # Base output from the frozen original weight
+            result = self.base_layer(x, *args, **kwargs)
 
-                    # Project input into low-rank space
-                    projected = F.linear(newx, self.adamss_newB[active_adapter].to(self.dtype))  # (..., r)
+            # Iterate over all active adapters and add their deltas
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.adamss_A:
+                    continue
 
-                    # Apply A and B transformations per subspace
-                    # TODO: if all subspaces have equal output dimensions, this loop could
-                    # be replaced with a batched matmul/einsum for better performance.
-                    # Currently B_i shapes vary per subspace (clustering-dependent), so we loop.
-                    subspace_chunks = []
-                    for i in range(self.num_subspaces[active_adapter]):
-                        A_i = self.adamss_A[active_adapter][i].to(self.dtype)  # (ri, r)
-                        B_i = self.adamss_B[active_adapter][i].to(self.dtype)  # (seg_len_i, ri)
-                        subspace_out = F.linear(projected, A_i)  # (..., ri)
-                        subspace_out = F.linear(subspace_out, B_i)  # (..., seg_len_i)
-                        subspace_chunks.append(subspace_out)
+                # Project input into low-rank space
+                projected = F.linear(newx, self.adamss_newB[active_adapter].to(self.dtype))  # (..., r)
 
-                    # Concatenate subspace results and scatter to output dimension order
-                    adapter_delta = torch.cat(subspace_chunks, dim=-1)
-                    scatter_index_tensor = self.scatter_index[active_adapter].to(adapter_delta.device)
+                # Apply A and B transformations per subspace
+                # TODO: if all subspaces have equal output dimensions, this loop could
+                # be replaced with a batched matmul/einsum for better performance.
+                # Currently B_i shapes vary per subspace (clustering-dependent), so we loop.
+                subspace_chunks = []
+                for i in range(self.num_subspaces[active_adapter]):
+                    A_i = self.adamss_A[active_adapter][i].to(self.dtype)  # (ri, r)
+                    B_i = self.adamss_B[active_adapter][i].to(self.dtype)  # (seg_len_i, ri)
+                    subspace_out = F.linear(projected, A_i)  # (..., ri)
+                    subspace_out = F.linear(subspace_out, B_i)  # (..., seg_len_i)
+                    subspace_chunks.append(subspace_out)
 
-                    if adapter_delta.dim() == 2:
-                        index = scatter_index_tensor.unsqueeze(0).expand(adapter_delta.shape[0], -1)
-                        adapter_delta = torch.zeros(
-                            adapter_delta.shape[0], result.shape[-1], device=adapter_delta.device, dtype=adapter_delta.dtype
-                        ).scatter(1, index, adapter_delta)
-                    else:
-                        index = scatter_index_tensor.unsqueeze(0).unsqueeze(0).expand(*adapter_delta.shape[:-1], -1)
-                        adapter_delta = torch.zeros(
-                            *adapter_delta.shape[:-1], result.shape[-1], device=adapter_delta.device, dtype=adapter_delta.dtype
-                        ).scatter(-1, index, adapter_delta)
+                # Concatenate subspace results and scatter to output dimension order
+                adapter_delta = torch.cat(subspace_chunks, dim=-1)
+                scatter_index_tensor = self.scatter_index[active_adapter].to(adapter_delta.device)
 
-                    result = result + adapter_delta
+                if adapter_delta.dim() == 2:
+                    index = scatter_index_tensor.unsqueeze(0).expand(adapter_delta.shape[0], -1)
+                    adapter_delta = torch.zeros(
+                        adapter_delta.shape[0], result.shape[-1], device=adapter_delta.device, dtype=adapter_delta.dtype
+                    ).scatter(1, index, adapter_delta)
+                else:
+                    index = scatter_index_tensor.unsqueeze(0).unsqueeze(0).expand(*adapter_delta.shape[:-1], -1)
+                    adapter_delta = torch.zeros(
+                        *adapter_delta.shape[:-1], result.shape[-1], device=adapter_delta.device, dtype=adapter_delta.dtype
+                    ).scatter(-1, index, adapter_delta)
+
+                result = result + adapter_delta
 
         # Cast back to original dtype
         return result.to(previous_dtype)
@@ -619,10 +599,13 @@ class Linear(nn.Module, AdamssLayer):
             scatter_idx = self.scatter_index[adapter_name].to(delta_weight.device)
             delta_weight[scatter_idx] = combined
 
-        # Extract just the weight portion (excluding the bias column)
-        # delta_weight[:, :-1] is the weight delta
-        # delta_weight[:, -1] is the bias delta
-        output_tensor = delta_weight[:, :-1]  # Shape: (out_features, in_features)
+        # Extract just the weight portion
+        if self.get_base_layer().bias is not None:
+            # delta_weight[:, :-1] is the weight delta (exclude bias column)
+            output_tensor = delta_weight[:, :-1]  # Shape: (out_features, in_features)
+        else:
+            # No bias column to strip
+            output_tensor = delta_weight  # Shape: (out_features, in_features)
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -674,7 +657,11 @@ class Linear(nn.Module, AdamssLayer):
             delta_weight[scatter_idx] = combined
 
         # Extract the bias portion (last column)
-        output_tensor = delta_weight[:, -1]  # Shape: (out_features,)
+        if self.get_base_layer().bias is None:
+            # No bias — return zeros
+            output_tensor = torch.zeros(base_weight.shape[0], device=device, dtype=compute_dtype)
+        else:
+            output_tensor = delta_weight[:, -1]  # Shape: (out_features,)
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)

@@ -337,6 +337,7 @@ class AdamssConfig(PeftConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
+        super().__post_init__()
 
         # Normalize init_weights: convert False to None for backward compatibility
         if self.init_weights is False:

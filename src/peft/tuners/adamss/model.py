@@ -219,10 +219,6 @@ class AdamssModel(BaseTuner):
                 for module in asa_layers:
                     module.reset_importance(adapter_name)
 
-    # ------------------------------------------------------------------
-    # ASA helpers
-    # ------------------------------------------------------------------
-
     def _schedule_threshold(self, step: int, config) -> Optional[int]:
         """Calculate current target subspaces based on warmup schedule."""
         total = self._asa_total_subspaces.get(next(iter(self.active_adapters), "default"), 0)

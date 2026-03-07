@@ -15,16 +15,18 @@
 """
 ASA (Adaptive Subspace Allocation) Callback for HuggingFace Trainer.
 
-This is a thin wrapper around ``AdamssModel.update_and_allocate()``.  All ASA
+This is a thin wrapper around [`AdamssModel.update_and_allocate`].  All ASA
 logic (importance accumulation, global top-K masking, importance reset) lives
-in :meth:`AdamssModel.update_and_allocate` so that users with custom training
+in [`AdamssModel.update_and_allocate`] so that users with custom training
 loops can call it directly without needing this callback.
 
 Important:
     To avoid circular imports between peft and transformers, this callback is NOT
-    exported from the top-level ``peft`` package. Import it directly::
+    exported from the top-level `peft` package. Import it directly:
 
-        from peft.tuners.adamss.asa_callback import AdamssAsaCallback
+    ```python
+    from peft.tuners.adamss.asa_callback import AdamssAsaCallback
+    ```
 """
 
 
@@ -35,35 +37,37 @@ class AdamssAsaCallback(TrainerCallback):
     """
     Trainer callback for Adaptive Subspace Allocation (ASA).
 
-    This callback delegates to :meth:`AdamssModel.update_and_allocate` on every
-    optimizer step so that ASA "just works" with HuggingFace ``Trainer``.
+    This callback delegates to [`AdamssModel.update_and_allocate`] on every
+    optimizer step so that ASA "just works" with HuggingFace `Trainer`.
 
-    All ASA parameters (``asa_target_subspaces``, ``init_warmup``, ``final_warmup``,
-    ``mask_interval``, etc.) are read from the :class:`AdamssConfig` that was used
+    All ASA parameters (`asa_target_subspaces`, `init_warmup`, `final_warmup`,
+    `mask_interval`, etc.) are read from the [`AdamssConfig`] that was used
     to create the model – there is nothing to configure on the callback itself.
 
     For custom training loops **without** Trainer, call
-    ``model.base_model.update_and_allocate(global_step)`` directly instead.
+    `model.base_model.update_and_allocate(global_step)` directly instead.
 
-    Example::
+    Example:
 
-        from peft import AdamssConfig, get_peft_model
-        from peft.tuners.adamss.asa_callback import AdamssAsaCallback
-        from transformers import Trainer
+    ```python
+    from peft import AdamssConfig, get_peft_model
+    from peft.tuners.adamss.asa_callback import AdamssAsaCallback
+    from transformers import Trainer
 
-        config = AdamssConfig(
-            r=100, num_subspaces=10, subspace_rank=3,
-            use_asa=True, asa_target_subspaces=5,
-            init_warmup=50, final_warmup=1000, mask_interval=100,
-        )
-        model = get_peft_model(base_model, config)
+    config = AdamssConfig(
+        r=100, num_subspaces=10, subspace_rank=3,
+        use_asa=True, asa_target_subspaces=5,
+        init_warmup=50, final_warmup=1000, mask_interval=100,
+    )
+    model = get_peft_model(base_model, config)
 
-        trainer = Trainer(
-            model=model,
-            callbacks=[AdamssAsaCallback()],
-            ...,
-        )
-        trainer.train()
+    trainer = Trainer(
+        model=model,
+        callbacks=[AdamssAsaCallback()],
+        ...,
+    )
+    trainer.train()
+    ```
     """
 
     def on_optimizer_step(
