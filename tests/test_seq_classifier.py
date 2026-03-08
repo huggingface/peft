@@ -18,13 +18,13 @@ from transformers import AutoModelForSequenceClassification
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
-    BoneConfig,
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
     GraloraConfig,
     HRAConfig,
     IA3Config,
+    LilyConfig,
     LoraConfig,
     MissConfig,
     OFTConfig,
@@ -32,6 +32,7 @@ from peft import (
     PromptEncoderConfig,
     PromptTuningConfig,
     PromptTuningInit,
+    PsoftConfig,
     RoadConfig,
     ShiraConfig,
     VBLoRAConfig,
@@ -67,14 +68,6 @@ ALL_CONFIGS = [
         {
             "task_type": "SEQ_CLS",
             "target_modules": None,
-        },
-    ),
-    (
-        BoneConfig,
-        {
-            "task_type": "SEQ_CLS",
-            "target_modules": None,
-            "r": 2,
         },
     ),
     (
@@ -121,6 +114,16 @@ ALL_CONFIGS = [
             "task_type": "SEQ_CLS",
             "target_modules": None,
             "feedforward_modules": None,
+        },
+    ),
+    (
+        LilyConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "r": 8,
+            "stride_A": 1,
+            "num_B": 2,
         },
     ),
     (
@@ -174,6 +177,15 @@ ALL_CONFIGS = [
         {
             "task_type": "SEQ_CLS",
             "num_virtual_tokens": 10,
+        },
+    ),
+    (
+        PsoftConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "r": 32,
+            "psoft_alpha": 32,
+            "target_modules": None,
         },
     ),
     (

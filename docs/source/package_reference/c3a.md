@@ -20,19 +20,19 @@ rendered properly in your Markdown viewer.
 
 Note that you should use a much larger learning rate (LR) for C3A than for other methods. For example, a LR of 1e-1 for C3A is a good starting point. Besides, a much smaller weight decay should be used. You can refer to the `method_comparison` folder for more details.
 
-For the `block_size`, it affects tunable parameters and performance. To start with, you can choose a $\mathrm{gcd}(d_1,d_2)$ near $\frac{\sqrt{d_1\times d_2}}{r}$, where $r$ is the rank for LoRA you would use for this task.
+For the `block_size`, it affects tunable parameters and performance. To start with, you can choose a $\mathrm{gcd}(d_1,d_2)$ near $\frac{\sqrt{d_1 \times d_2}}{r}$, where $r$ is the rank for LoRA you would use for this task.
 
 C3A currently has the following constraints:
 
 - Only `nn.Linear` layers are supported.
 - Quantized layers are not supported.
-- The block size should be a common divisor of both the input and output sizes of target layers. 
+- The block size should be a common divisor of both the input and output sizes of target layers.
 
 If these constraints don't work for your use case, consider other methods instead.
 
 The abstract from the paper is:
 
-> Low-Rank Adaptation (LoRA) has gained popularity for fine-tuning large foundation models, leveraging low-rank matrices $\mathbf{A}$ and $\mathbf{B}$ to represent weight changes (i.e., $\Delta \mathbf{W} = \mathbf{B} \mathbf{A}$). This method reduces trainable parameters and mitigates heavy memory consumption associated with full delta matrices by sequentially multiplying $\mathbf{A}$ and $\mathbf{B}$ with the activation. Despite its success, the intrinsic low-rank characteristic may limit its performance. Although several variants have been proposed to address this issue, they often overlook the crucial computational and memory efficiency brought by LoRA. In this paper, we propose Circular Convolution Adaptation (C3A), which not only achieves high-rank adaptation with enhanced performance but also excels in both computational power and memory utilization. Extensive experiments demonstrate that C3A consistently outperforms LoRA and its variants across various fine-tuning tasks. 
+> Low-Rank Adaptation (LoRA) has gained popularity for fine-tuning large foundation models, leveraging low-rank matrices $\mathbf{A}$ and $\mathbf{B}$ to represent weight changes (i.e., $\Delta \mathbf{W} = \mathbf{B} \mathbf{A}$). This method reduces trainable parameters and mitigates heavy memory consumption associated with full delta matrices by sequentially multiplying $\mathbf{A}$ and $\mathbf{B}$ with the activation. Despite its success, the intrinsic low-rank characteristic may limit its performance. Although several variants have been proposed to address this issue, they often overlook the crucial computational and memory efficiency brought by LoRA. In this paper, we propose Circular Convolution Adaptation (C3A), which not only achieves high-rank adaptation with enhanced performance but also excels in both computational power and memory utilization. Extensive experiments demonstrate that C3A consistently outperforms LoRA and its variants across various fine-tuning tasks.
 
 ## C3AConfig
 

@@ -549,7 +549,10 @@ class TestOpt(RegressionTester):
 
     def load_base_model(self):
         self.fix_seed()
-        return AutoModelForCausalLM.from_pretrained("facebook/opt-350m").to(self.torch_device)
+        # Note: Since transformers v5, the default dtype for opt has changed from float32 to float16. This causes the
+        # regression test to fail. Therefore, ensure that a float32 model is being used.
+        dtype = torch.float32
+        return AutoModelForCausalLM.from_pretrained("facebook/opt-350m", dtype=dtype).to(self.torch_device)
 
     def test_lora(self):
         base_model = self.load_base_model()
@@ -667,7 +670,13 @@ class TestOpt4bitBnb(RegressionTester):
             init_lora_weights=False,
         )
         model = get_peft_model(base_model, config)
-        self.assert_results_equal_or_store(model, LORA_4BIT_FOLDER)
+        # NVIDIA A100 requires a lower tol to pass the test.
+        old_tol = self.tol
+        self.tol = 3e-2
+        try:
+            self.assert_results_equal_or_store(model, LORA_4BIT_FOLDER)
+        finally:
+            self.tol = old_tol
 
     def test_adalora(self):
         # TODO

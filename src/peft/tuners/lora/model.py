@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import operator
+import re
 import warnings
 from contextlib import contextmanager
 from dataclasses import replace
@@ -30,6 +31,8 @@ from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
+    find_parameter_name_by_module,
+    get_device_map,
     replicate_layers,
 )
 from peft.utils import (
@@ -52,6 +55,7 @@ from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .inc import dispatch_inc
 from .layer import Conv2d, LoraLayer, ParamWrapper, dispatch_default
+from .te import dispatch_transformer_engine
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
 
@@ -202,26 +206,26 @@ class LoraModel(BaseTuner):
         r = lora_config.rank_pattern.get(r_key, lora_config.r)
         alpha = lora_config.alpha_pattern.get(alpha_key, lora_config.lora_alpha)
 
+        # Checks if the target is marked as a tied layer
+        # If true, we add the reference to lora adapters of embedding layer in `tied_adapter`
+        is_tied = target_name in (getattr(lora_config, "target_modules_to_tie", []) or [])
+        tied_adapter = {}
+        if is_tied:
+            tied_module = self.model.get_input_embeddings()
+            emb_A = tied_module.lora_embedding_A[adapter_name]
+            emb_B = tied_module.lora_embedding_B[adapter_name]
+
+            tied_adapter = {"lora_A": emb_B.t(), "lora_B": emb_A.t()}
+
         kwargs = {
             "r": r,
             "lora_alpha": alpha,
-            "lora_dropout": lora_config.lora_dropout,
-            "fan_in_fan_out": lora_config.fan_in_fan_out,
-            "init_lora_weights": lora_config.init_lora_weights,
-            "use_rslora": lora_config.use_rslora,
-            "use_dora": lora_config.use_dora,
-            "use_alora": lora_config.alora_invocation_tokens is not None,
-            "use_qalora": lora_config.use_qalora,
-            "qalora_group_size": lora_config.qalora_group_size,
-            "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
-            "lora_bias": lora_config.lora_bias,
-            "arrow_config": lora_config.arrow_config,
-            "lora_ga_config": lora_config.lora_ga_config,
-            "use_bdlora": lora_config.use_bdlora,
             "target_name": current_key,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
+            "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
             "parameter_name": parameter_name,
+            "tied_adapter": tied_adapter,
         }
 
         # for torchao merging, we need the get_apply_tensor_subclass from the quantization config
@@ -248,16 +252,8 @@ class LoraModel(BaseTuner):
                 adapter_name,
                 r,
                 lora_alpha=alpha,
-                lora_dropout=lora_config.lora_dropout,
-                init_lora_weights=lora_config.init_lora_weights,
-                use_rslora=lora_config.use_rslora,
-                use_dora=lora_config.use_dora,
-                lora_bias=lora_config.lora_bias,
-                arrow_config=lora_config.arrow_config,
-                lora_ga_config=lora_config.lora_ga_config,
-                use_bdlora=lora_config.use_bdlora,
-                inference_mode=lora_config.inference_mode,
                 target_name=current_key,
+                config=lora_config,
             )
         else:
             if isinstance(target, ParamWrapper) and (parameter_name == target.parameter_name):
@@ -265,7 +261,7 @@ class LoraModel(BaseTuner):
                     "Trying to target the same nn.Parameter twice, this should not happen. Please open an issue on the "
                     "PEFT repo: https://github.com/huggingface/peft/issues"
                 )
-            device_map = self.model.hf_device_map if hasattr(self.model, "hf_device_map") else None
+            device_map = get_device_map(self.model)
             new_module = self._create_new_module(lora_config, adapter_name, target, device_map=device_map, **kwargs)
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
@@ -309,7 +305,7 @@ class LoraModel(BaseTuner):
         if lora_config._custom_modules:
             # Experimental custom LoRA module support. Allows users to pass a custom mapping for unsupported layer
             # types by impelementing their own LoRA layers.
-            def dynamic_dispatch_func(target, adapter_name, lora_config, **kwargs):
+            def dynamic_dispatch_func(target, adapter_name, config, **kwargs):
                 new_module = None
 
                 if isinstance(target, BaseTunerLayer):
@@ -317,9 +313,9 @@ class LoraModel(BaseTuner):
                 else:
                     target_base_layer = target
 
-                for key, custom_cls in lora_config._custom_modules.items():
+                for key, custom_cls in config._custom_modules.items():
                     if isinstance(target_base_layer, key):
-                        new_module = custom_cls(target, adapter_name, **kwargs)
+                        new_module = custom_cls(target, adapter_name, config=config, **kwargs)
                         break
 
                 return new_module
@@ -347,13 +343,14 @@ class LoraModel(BaseTuner):
                 dispatch_inc,
                 dispatch_torchao,
                 dispatch_megatron,
+                dispatch_transformer_engine,
                 dispatch_default,
             ]
         )
 
         new_module = None
         for dispatcher in dispatchers:
-            new_module = dispatcher(target, adapter_name, lora_config=lora_config, **kwargs)
+            new_module = dispatcher(target, adapter_name, config=lora_config, **kwargs)
             if new_module is not None:  # first match wins
                 break
 
@@ -878,8 +875,80 @@ class LoraModel(BaseTuner):
 
         return tensors_lora
 
-    def _add_modules_to_tie(self, peft_config, tied_weight_keys):
-        modules_to_save = set(getattr(peft_config, "modules_to_save", []) or [])
-        missing_keys = set(tied_weight_keys) - modules_to_save
+    def _add_modules_to_save_to_tie(self, peft_config: LoraConfig, tied_weight_keys: list[str]):
+        """
+        Add embedding layer to `modules_to_save` and remove rest of the tied layers from `module_to_save`. Maintain a
+        separate set for layers to be tied in `peft_config.tied_weights_keys`.
 
-        peft_config.modules_to_tie = missing_keys
+        Args:
+            peft_config (LoraConfig) -- The configuration of the Lora model.
+            tied_weight_keys (list[str]) -- Contains the layers tied to the embedding layer.
+        """
+        tied_weight_keys = set(tied_weight_keys)
+        peft_config.modules_to_tie = tied_weight_keys
+
+        modules_to_save = getattr(peft_config, "modules_to_save", []) or []
+        embed_layer_name = find_parameter_name_by_module(self.model, self.model.get_input_embeddings())
+
+        # the layer may already be included but we assume that adding the same module twice is not a problem
+        if embed_layer_name not in modules_to_save:
+            modules_to_save.append(embed_layer_name)
+
+        # Iterate over `tied_weight_keys` which are
+        # fully qualified keys and remove matching keys from
+        # `modules_to_save`. It will only remove first encounter
+        # in `module_to_save`, which should be safe, because `tied_weight_keys`
+        # is a unique set of keys. These keys are removed because all the
+        # tied keys are handled in a separate flow
+        # outside of the usual `modules_to_save` flow
+        # See: peft.utils.other.set_additional_trainable_modules for details
+        for key in tied_weight_keys:
+            for m in modules_to_save:
+                if re.match(rf"(^|.*\.){m}($|\..*)", key):
+                    modules_to_save.remove(m)
+                    break
+
+        peft_config.modules_to_save = modules_to_save
+
+    def _add_targets_to_tie(self, peft_config: LoraConfig, tied_weight_keys: list[str]):
+        """
+        Add embedding layer to `target_modules` and remove rest of the tied layers from `target_modules`. Maintain a
+        separate set for layers to be tied in `peft_config.target_modules_to_tie`
+
+        Args:
+            peft_config (LoraConfig) -- The configuration of the Lora model.
+            tied_weight_keys (list[str]) -- Contains the layers tied to the embedding layer.
+        """
+        tied_weight_keys = set(tied_weight_keys)
+        peft_config.target_modules_to_tie = tied_weight_keys
+
+        raw_target_modules = getattr(peft_config, "target_modules", None)
+
+        embed_layer_name = find_parameter_name_by_module(self.model, self.model.get_input_embeddings())
+
+        if isinstance(raw_target_modules, str):
+            # The way weight tying is handled for adapters, we always want to add
+            # lora adapters to the input embedding layer (embed_tokens)
+            # instead of output embedding layer.
+            raw_target_modules = rf"(?:{raw_target_modules}|^{re.escape(embed_layer_name)}$)"
+            peft_config.target_modules = raw_target_modules
+            return
+
+        target_modules = set(raw_target_modules or [])
+        target_modules.add(embed_layer_name)
+
+        # Iterate over `tied_weight_keys` which are
+        # fully qualified keys and remove matching keys from
+        # `target_modules`. It will only remove first encounter
+        # in `target_modules`, which should be safe, because `tied_weight_keys`
+        # is a unique set of keys. These keys are removed because all the
+        # tied keys are handled in a separate flow
+        # outside of the usual `target_modules` flow
+        # See: peft.tuners.tuners_utils.BaseTuner.inject_adapter for details
+        for key in tied_weight_keys:
+            for m in target_modules:
+                if re.match(rf"(^|.*\.){m}($|\..*)", key):
+                    target_modules.remove(m)
+                    break
+
+        peft_config.target_modules = target_modules
