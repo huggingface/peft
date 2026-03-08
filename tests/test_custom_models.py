@@ -48,11 +48,11 @@ from peft import (
     MissConfig,
     OFTConfig,
     OSFConfig,
+    PeanutConfig,
     PeftModel,
     PeftWarning,
     PsoftConfig,
     PveraConfig,
-    PeanutConfig,
     RandLoraConfig,
     RoadConfig,
     ShiraConfig,
@@ -1014,11 +1014,21 @@ TEST_CASES = [
     ("Vanilla MLP 1 Peanut", "MLP", PeanutConfig, {"target_modules": "lin0", "r": 2, "depth": 2, "act_fn": "relu"}),
     ("Vanilla MLP 2 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin0"], "r": 2, "depth": 2, "act_fn": "relu"}),
     ("Vanilla MLP 3 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin1"], "r": 2, "depth": 2, "act_fn": "relu"}),
-    ("Vanilla MLP 4 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "depth": 2, "act_fn": "relu"}),
+    (
+        "Vanilla MLP 4 Peanut",
+        "MLP",
+        PeanutConfig,
+        {"target_modules": ["lin0", "lin1"], "r": 2, "depth": 2, "act_fn": "relu"},
+    ),
     ("Vanilla MLP 5 Peanut", "MLP", PeanutConfig, {"target_modules": "lin0", "r": 2, "depth": 4, "act_fn": "relu"}),
     ("Vanilla MLP 6 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin0"], "r": 2, "depth": 4, "act_fn": "relu"}),
     ("Vanilla MLP 7 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin1"], "r": 2, "depth": 4, "act_fn": "relu"}),
-    ("Vanilla MLP 8 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "depth": 4, "act_fn": "relu"}),
+    (
+        "Vanilla MLP 8 Peanut",
+        "MLP",
+        PeanutConfig,
+        {"target_modules": ["lin0", "lin1"], "r": 2, "depth": 4, "act_fn": "relu"},
+    ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 

@@ -29,8 +29,8 @@ class PeanutConfig(PeftConfig):
 
     Args:
         r (`int`):
-            PEANuT rank. This is the hidden dimension used by the adapters. Similar to LoRA rank, larger `r`
-            increases adapter capacity and trainable parameters.
+            PEANuT rank. This is the hidden dimension used by the adapters. Similar to LoRA rank, larger `r` increases
+            adapter capacity and trainable parameters.
         depth (`int`):
             Total number of adapter transforms in PEANuT, counting the mandatory input projection `A` and output
             projection `B`. Therefore, `depth` must be at least 2. Additional intermediate adapters are inserted
@@ -54,8 +54,8 @@ class PeanutConfig(PeftConfig):
             List of modules apart from PEANuT layers to be set as trainable and saved in the final checkpoint.
         exclude_modules (`Union[List[str], str]`, *optional*):
             The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
-            When passing a list of strings, either an exact match will be performed or it is checked if the name of
-            the module ends with any of the passed strings.
+            When passing a list of strings, either an exact match will be performed or it is checked if the name of the
+            module ends with any of the passed strings.
         layers_to_transform (`Union[list[int], int]`, *optional*):
             The layer indexes to transform. If this argument is specified, PEFT will transform only the layer indexes
             that are specified in this list. If a single integer is passed, PEFT will transform only the layer at this
@@ -72,8 +72,9 @@ class PeanutConfig(PeftConfig):
             Initializing `B` to zero makes the adapter start as an exact no-op.
 
     Notes:
-        PEANuT uses a weight-aware pathway, where the delta weight is conditioned on the base weight. The `A` adapter is applied over the base weight's output dimension, so
-        `A` has shape `(out_dim -> r)` rather than the usual `(in_dim -> r)` used by LoRA-like methods.
+        PEANuT uses a weight-aware pathway, where the delta weight is conditioned on the base weight. The `A` adapter
+        is applied over the base weight's output dimension, so `A` has shape `(out_dim -> r)` rather than the usual
+        `(in_dim -> r)` used by LoRA-like methods.
     """
 
     r: int = field(

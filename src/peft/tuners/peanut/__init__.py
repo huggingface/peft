@@ -19,7 +19,7 @@ from .layer import Linear, PeanutLayer
 from .model import PeanutModel
 
 
-__all__ = ["PeanutConfig", "PeanutLayer", "PeanutModel", "Linear"]
+__all__ = ["Linear", "PeanutConfig", "PeanutLayer", "PeanutModel"]
 
 if "PEANUT" in PeftType.__members__:
     register_peft_method(

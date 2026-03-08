@@ -61,9 +61,8 @@ class PeanutLayer(BaseTunerLayer):
         self.out_features = out_features
 
     def _ensure_residual_layer_dicts(self, num_residual_pairs: int) -> None:
-
         adapter_layer_names = list(self.adapter_layer_names)
-        
+
         for i in range(num_residual_pairs):
             encoder_name = f"peanut_encoder_{i}"
             decoder_name = f"peanut_decoder_{i}"
@@ -230,11 +229,11 @@ class Linear(nn.Module, PeanutLayer):
 
             delta_weight = self._cached_delta_weights.pop(active_adapter, None)
             if delta_weight is None:
-                raise ValueError(
-                    f"Cached delta weight for adapter '{active_adapter}' is missing; cannot unmerge."
-                )
+                raise ValueError(f"Cached delta weight for adapter '{active_adapter}' is missing; cannot unmerge.")
 
-            base_layer.weight.data.sub_(delta_weight.to(dtype=base_layer.weight.dtype, device=base_layer.weight.device))
+            base_layer.weight.data.sub_(
+                delta_weight.to(dtype=base_layer.weight.dtype, device=base_layer.weight.device)
+            )
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         if self.disable_adapters:
