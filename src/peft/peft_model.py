@@ -1641,6 +1641,30 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         return self.base_model.supports_lora_conversion()
 
+    def _get_adapter_state_dict_key_prefixes(self) -> set[str]:
+        """Collect state dict key prefixes for adapter parameters by inspecting modules.
+
+        Instead of relying on string-based prefix matching from PEFT_TYPE_TO_PREFIX_MAPPING, this method inspects the
+        module tree to identify adapter-specific parameters. This is needed for weight sharing type of adpters (e.g.,
+        VeRA, VB-LoRA)
+        """
+        adapter_key_prefixes: set[str] = set()
+        for module_name, module in self.base_model.model.named_modules():
+            if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
+                for attr_name in module.adapter_layer_names + module.other_param_names:
+                    prefix = f"{module_name}.{attr_name}" if module_name else attr_name
+                    adapter_key_prefixes.add(prefix)
+        return adapter_key_prefixes
+
+    @staticmethod
+    def _peft_key_to_original_key(key: str) -> str:
+        """Transform a PEFT state dict key to its original base model key"""
+        while ".base_layer." in key:
+            key = key.replace(".base_layer.", ".", 1)
+        while ".original_module." in key:
+            key = key.replace(".original_module.", ".", 1)
+        return key
+
     def get_base_model_state_dict(self) -> dict[str, torch.Tensor]:
         """
         Returns the state dict of the base model with the original model keys.
@@ -1676,38 +1700,18 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # Get state dict from the underlying model
         state_dict = self.base_model.model.state_dict()
 
-        # Collect all adapter prefixes to identify adapter-specific parameters
-        adapter_prefixes: set[str] = set()
-        for config in self.peft_config.values():
-            prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(config.peft_type)
-            if prefix:
-                adapter_prefixes.add(prefix)
+        # Collect adapter key prefixes by inspecting actual modules
+        adapter_key_prefixes = self._get_adapter_state_dict_key_prefixes()
 
         result: dict[str, torch.Tensor] = {}
 
         for key, value in state_dict.items():
-            # skip adapter specific params such as .lora_A, .lora_B
-            is_adapter_param = False
-            for prefix in adapter_prefixes:
-                if f".{prefix}" in key or key.startswith(prefix):
-                    is_adapter_param = True
-                    break
-
-            if is_adapter_param:
-                continue
-
-            # skip adapter-specific copies in modules_to_save
-            if ".modules_to_save." in key or ".trainable_tokens_" in key:
+            # skip adapter specific params (e.g. lora_A, vera_lambda_b, modules_to_save)
+            if any(key == pfx or key.startswith(pfx + ".") for pfx in adapter_key_prefixes):
                 continue
 
             # Transform keys to original format by removing PEFT-specific infixes
-            new_key = key
-            while ".base_layer." in new_key:
-                new_key = new_key.replace(".base_layer.", ".", 1)
-            while ".original_module." in new_key:
-                new_key = new_key.replace(".original_module.", ".", 1)
-
-            result[new_key] = value
+            result[self._peft_key_to_original_key(key)] = value
 
         return result
 
@@ -1719,25 +1723,23 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         Sets the base model's state dict using original model keys.
 
-        This method takes a state dict with original model key names (without PEFT
-        modifications) and loads it into the base model, automatically handling
-        the key transformations required by PEFT (such as adding `.base_layer.`
+        This method takes a state dict with original model key names (without PEFT modifications) and loads it into the
+        base model, automatically handling the key transformations required by PEFT (such as adding `.base_layer.`
         infixes for tuner layers).
 
-        This is the counterpart to `get_base_model_state_dict` and is useful for
-        scenarios like loading base model weights after FSDP wrapping.
+        This is the counterpart to `get_base_model_state_dict` and is useful for scenarios like loading base model
+        weights after FSDP wrapping.
 
         Args:
             state_dict (`dict[str, torch.Tensor]`):
                 The state dict with original model keys to load.
             strict (`bool`, *optional*, defaults to `True`):
-                Whether to strictly enforce that the keys in `state_dict` match
-                the keys expected by the base model. If `True`, raises a
-                `RuntimeError` if there are missing or unexpected keys.
+                Whether to strictly enforce that the keys in `state_dict` match the keys expected by the base model. If
+                `True`, raises a `RuntimeError` if there are missing or unexpected keys.
 
         Returns:
-            `NamedTuple` with `missing_keys` and `unexpected_keys` fields
-            (using original key names), similar to `torch.nn.Module.load_state_dict`.
+            `NamedTuple` with `missing_keys` and `unexpected_keys` fields (using original key names), similar to
+            `torch.nn.Module.load_state_dict`.
 
         Raises:
             RuntimeError: If `strict=True` and there are missing or unexpected keys.
@@ -1765,34 +1767,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         current_state_dict = self.base_model.model.state_dict()
 
-        adapter_prefixes: set[str] = set()
-        for config in self.peft_config.values():
-            prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(config.peft_type)
-            if prefix:
-                adapter_prefixes.add(prefix)
+        # Collect adapter key prefixes by inspecting actual modules
+        adapter_key_prefixes = self._get_adapter_state_dict_key_prefixes()
 
         original_to_peft_key: dict[str, str] = {}
 
         for peft_key in current_state_dict.keys():
-            is_adapter_param = False
-            for prefix in adapter_prefixes:
-                if f".{prefix}" in peft_key or peft_key.startswith(prefix):
-                    is_adapter_param = True
-                    break
-
-            if is_adapter_param:
+            # skip adapter specific params
+            if any(peft_key == pfx or peft_key.startswith(pfx + ".") for pfx in adapter_key_prefixes):
                 continue
 
-            if ".modules_to_save." in peft_key or ".trainable_tokens_" in peft_key:
-                continue
-
-            original_key = peft_key
-            while ".base_layer." in original_key:
-                original_key = original_key.replace(".base_layer.", ".", 1)
-            while ".original_module." in original_key:
-                original_key = original_key.replace(".original_module.", ".", 1)
-
-            original_to_peft_key[original_key] = peft_key
+            original_to_peft_key[self._peft_key_to_original_key(peft_key)] = peft_key
 
         peft_state_dict: dict[str, torch.Tensor] = {}
         unexpected_keys: list[str] = []

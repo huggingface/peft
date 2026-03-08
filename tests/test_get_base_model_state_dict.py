@@ -26,6 +26,9 @@ from peft import (
     PrefixTuningConfig,
     PromptTuningConfig,
     TaskType,
+    TrainableTokensConfig,
+    VBLoRAConfig,
+    VeraConfig,
     get_peft_model,
 )
 from peft.utils import infer_device
@@ -46,6 +49,8 @@ def get_peft_configs():
         ("ia3", IA3Config(target_modules=["q_proj", "v_proj", "fc1"], feedforward_modules=["fc1"])),
         ("oft", OFTConfig(oft_block_size=4, target_modules=["q_proj", "v_proj"])),
         ("boft", BOFTConfig(boft_block_size=4, target_modules=["q_proj", "v_proj"])),
+        ("vera", VeraConfig(r=4, target_modules=["q_proj", "v_proj"])),
+        ("vblora", VBLoRAConfig(r=4, target_modules=["q_proj", "v_proj"], num_vectors=50, vector_length=2)),
     ]
 
 
@@ -319,17 +324,9 @@ def test_get_base_model_state_dict_filters_trainable_tokens():
 
     base_model_keys = set(base_model.state_dict().keys())
 
-    lora_config = LoraConfig(r=4, lora_alpha=2, target_modules="all-linear")
-    peft_model = get_peft_model(base_model, lora_config)
+    config = TrainableTokensConfig(token_indices=[0, 1, 2])
+    peft_model = get_peft_model(base_model, config)
 
-    peft_state_dict = dict(peft_model.base_model.model.state_dict())
-
-    # add fake trainable_tokens entries
-    peft_state_dict["model.embed_tokens.trainable_tokens_default"] = torch.zeros(10, 128)
-    peft_state_dict["model.embed_tokens.trainable_tokens_other"] = torch.zeros(10, 128)
-
-    original_method = peft_model.base_model.model.state_dict
-    peft_model.base_model.model.state_dict = lambda: peft_state_dict
     result = peft_model.get_base_model_state_dict()
     for key in result.keys():
         assert "trainable_tokens" not in key
@@ -344,15 +341,8 @@ def test_set_base_model_state_dict_with_trainable_tokens():
 
     original_state_dict = {k: v.clone() for k, v in base_model.state_dict().items()}
 
-    lora_config = LoraConfig(r=4, lora_alpha=2, target_modules="all-linear")
-    peft_model = get_peft_model(base_model, lora_config)
-
-    peft_state_dict = dict(peft_model.base_model.model.state_dict())
-
-    peft_state_dict["model.embed_tokens.trainable_tokens_default"] = torch.zeros(10, 128)
-
-    original_method = peft_model.base_model.model.state_dict
-    peft_model.base_model.model.state_dict = lambda: peft_state_dict
+    config = TrainableTokensConfig(token_indices=[0, 1, 2])
+    peft_model = get_peft_model(base_model, config)
 
     result = peft_model.set_base_model_state_dict(original_state_dict)
     assert len(result.missing_keys) == 0
