@@ -1812,7 +1812,12 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
             # TODO: It's still unclear how empty layers_pattern (None, [], or "") should behave
             # For now, empty layers_pattern means any layer pattern is ok
             if layers_pattern is None or len(layers_pattern) == 0:
-                layer_index = re.match(r".*\.[^.]*\.(\d+)\.", key)
+                # Use a non-greedy `.*?` so the regex captures the *first* numeric segment in the key
+                # (i.e. the transformer layer index) rather than a later numeric segment such as an
+                # MoE expert index.  For example, in `model.layers.1.mlp.experts.0.up_proj` the
+                # greedy `.*` would backtrack and capture `0` (the expert index), whereas `.*?` stops
+                # at the first match and correctly captures `1` (the layer index).
+                layer_index = re.match(r".*?\.[^.]*\.(\d+)\.", key)
             else:
                 layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
                 for pattern in layers_pattern:
