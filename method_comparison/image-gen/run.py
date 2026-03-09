@@ -449,7 +449,7 @@ def train(
             processor=processor,
             dino_model=dino_model,
             config=train_config,
-            num_repeats=10,
+            num_repeats=3,
         )
         test_drift = measure_drift(pipeline=pipeline, processor=processor, dino_model=dino_model, config=train_config)
         metrics.append(

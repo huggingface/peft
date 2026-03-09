@@ -43,13 +43,12 @@ def get_train_valid_test_datasets(*, train_config, print_fn=print):
     ds = load_dataset(train_config.dataset_id, split=train_config.dataset_split)
     image_column = train_config.image_column
 
-    if image_column not in ds.column_names:
-        raise ValueError(f"Column '{image_column}' not found in dataset {train_config.dataset_id}: {ds.column_names}")
+    train_size = len(ds) - train_config.valid_size - train_config.test_size
 
-    if isinstance(train_config.instance_prompts, str):
-        prompts = [train_config.instance_prompts] * len(ds)
+    prompts = train_config.instance_prompts
+    if isinstance(prompts, str):
+        prompts = [prompts] * len(ds)
     else:
-        prompts = train_config.instance_prompts
         if len(ds) != len(prompts):
             raise ValueError(f"Need 1 instance prompt per sample image, found {len(prompts)} and {len(ds)} instead.")
 
