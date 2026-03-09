@@ -38,5 +38,17 @@
     "a photo of sks dog",
     "a color drawing of sks dog",
     "a photo of sks dog diving under water"
+  ],
+  "drift_image_prompts": [
+    "a photo of dog",
+    "a color drawing of dog",
+    "a photo of dog diving under water",
+    "dog looks into a mirror",
+    "a photo of dog next to a tree",
+    "the Mona Lisa but she looks angry",
+    "a cat holding a sign that says hello world",
+    "a photo of the Eiffel tower at night",
+    "an astronaut riding a horse",
+    "3d design concept of a chair that looks like an avocado"
   ]
 }

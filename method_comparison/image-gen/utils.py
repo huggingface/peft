@@ -96,6 +96,7 @@ class TrainConfig:
     dino_model_id: str
     dino_image_size: int
     sample_image_prompts: list[str]
+    drift_image_prompts: list[str]
 
     def __post_init__(self) -> None:
         if self.dtype not in ["float32", "float16", "bfloat16"]:

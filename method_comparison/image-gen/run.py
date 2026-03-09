@@ -138,6 +138,21 @@ def precompute_latent_cache(
     return torch.cat(latents_cache, dim=0)
 
 
+def _generate_images(pipeline, *, generator, prompts: list[str], config: TrainConfig):
+    outputs = pipeline(
+        prompt=prompts,
+        num_inference_steps=config.num_inference_steps,
+        guidance_scale=config.guidance_scale,
+        height=config.resolution,  # hard-code square
+        width=config.resolution,
+        max_sequence_length=config.max_sequence_length,
+        text_encoder_out_layers=config.text_encoder_out_layers,
+        generator=generator,
+        output_type="pil",
+    )
+    return outputs
+
+
 @torch.inference_mode()
 def evaluate(
     *,
@@ -160,17 +175,7 @@ def evaluate(
             for i in range(0, len(ds_eval), batch_size):
                 sliced = [ds_eval[j] for j in range(i, min(i + batch_size, len(ds_eval)))]
                 prompts = [sample["prompt"] for sample in sliced]
-                outputs = pipeline(
-                    prompt=prompts,
-                    num_inference_steps=config.num_inference_steps,
-                    guidance_scale=config.guidance_scale,
-                    height=config.resolution,  # hard-code square
-                    width=config.resolution,
-                    max_sequence_length=config.max_sequence_length,
-                    text_encoder_out_layers=config.text_encoder_out_layers,
-                    generator=generator,
-                    output_type="pil",
-                )
+                outputs = _generate_images(pipeline, generator=generator, prompts=prompts, config=config)
                 generated_images.extend(outputs.images)
                 reference_images.extend([sample["raw_image"] for sample in sliced])
                 if i + batch_size >= len(ds_eval):
@@ -182,6 +187,38 @@ def evaluate(
             cosine_sim_scores.append(cosine_sim.mean().item())
         mean_sim = sum(cosine_sim_scores) / num_repeats
     return mean_sim
+
+
+@torch.inference_mode
+def measure_drift(*, pipeline, processor, dino_model, config: TrainConfig) -> float:
+    batch_size = config.batch_size_eval
+    prompts = config.drift_image_prompts
+    with offload_models(pipeline.text_encoder, pipeline.vae, device=pipeline.transformer.device, offload=True):
+        # without adapter
+        seed = config.seed + 100_000_000  # don't use the same seed as in training or eval just to be sure
+        generator = torch.Generator(device=pipeline.transformer.device).manual_seed(seed)
+        generated_base = []
+        with pipeline.transformer.disable_adapter():
+            for i in range(0, len(prompts), batch_size):
+                prompt_batch = prompts[i * batch_size : (i + 1) * batch_size]
+                outputs = _generate_images(pipeline, generator=generator, prompts=prompt_batch, config=config)
+                generated_base.extend(outputs.images)
+
+        # with adapter
+        seed = config.seed + 100_000_000  # don't use the same seed as in training or eval just to be sure
+        generator = torch.Generator(device=pipeline.transformer.device).manual_seed(seed)
+        generated_adapter = []
+        for i in range(0, len(prompts), batch_size):
+            prompt_batch = prompts[i * batch_size : (i + 1) * batch_size]
+            outputs = _generate_images(pipeline, generator=generator, prompts=prompt_batch, config=config)
+            generated_adapter.extend(outputs.images)
+
+    # calculate drift
+    generated_embeddings = get_dino_embeddings(generated_adapter, processor, dino_model, batch_size=batch_size)
+    reference_embeddings = get_dino_embeddings(generated_base, processor, dino_model, batch_size=batch_size)
+    cosine_sim = (generated_embeddings * reference_embeddings).sum(dim=-1)
+    drift = 1 - cosine_sim.mean().item()
+    return drift
 
 
 def train(
@@ -414,16 +451,18 @@ def train(
             config=train_config,
             num_repeats=10,
         )
-
+        test_drift = measure_drift(pipeline=pipeline, processor=processor, dino_model=dino_model, config=train_config)
         metrics.append(
             {
                 "step": step,
                 "test dino_similarity": test_similarity,
+                "drift": test_drift,
                 "train loss": (sum(losses[-train_config.eval_steps :]) / train_config.eval_steps).item(),
                 "train samples": total_samples,
             }
         )
         print_verbose(f"Test DINOv2 similarity: {test_similarity:.4f}")
+        print_verbose(f"Test drift:             {test_drift:.4f}")
 
     except KeyboardInterrupt:
         print_verbose("canceled training")
