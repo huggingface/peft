@@ -34,6 +34,8 @@ from transformers.core_model_loading import (
     rename_source_key,
 )
 
+from peft import PeftType
+
 
 def _block_diag_3d(tensors: list[torch.Tensor]) -> torch.Tensor:
     if len(tensors) < 2:
@@ -333,9 +335,9 @@ _MOE_FUSED_TARGETS: dict[str, dict[str, set[str]]] = {
 }
 
 
-def _convert_peft_config_moe(peft_config, model_type: str):
+def _convert_peft_config_moe(peft_config, model_type: str) -> None:
     """
-    Convert the PEFT config of MoE models whose architecture changed from transformers v4 to v5
+    In-place convert the PEFT config of MoE models whose architecture changed from transformers v4 to v5.
 
     Since the model architecture changed, the targets have to updated accordingly. Moreover, when weights are fused, it
     requires updating the rank and alpha values of those parameters.
@@ -398,34 +400,29 @@ def _convert_peft_config_moe(peft_config, model_type: str):
     peft_config.target_parameters = new_target_parameters
     peft_config.target_modules = remaining_target_modules
 
-    return peft_config
 
-
-def convert_peft_config_for_transformers(peft_config, model: torch.nn.Module, conversions: list[Any] | None):
+def convert_peft_config_for_transformers(peft_config, model: torch.nn.Module, conversions: list[Any] | None) -> None:
     """
     Convert the PEFT config of models whose architecture changed from transformers v4 to v5.
 
     For most models, this requires no changes, this mostly affects some MoE models like Mixtral.
+
+    The conversion should be in-place to ensure that all references to this config stay up-to-date.
     """
     # If, for any reason, we cannot apply conversion, we just return the PEFT config as is.
-    from peft import PeftType  # avoid circular import
-
     if peft_config.peft_type != PeftType.LORA:
         # weight conversion is currently only supported for LoRA
-        return peft_config
+        return
     if not hasattr(model, "config"):
         # not a transformer model
-        return peft_config
+        return
     if not hasattr(model.config, "model_type"):
         # not a transformer model
-        return peft_config
+        return
 
-    peft_config = copy.deepcopy(peft_config)  # don't mutate the original config
     model_type = getattr(model.config, "model_type", None)
     if get_checkpoint_conversion_mapping(model_type) is not None:
-        peft_config = _convert_peft_config_moe(peft_config, model_type)
-
-    return peft_config
+        _convert_peft_config_moe(peft_config, model_type)
 
 
 def _convert_to_peft_serialized_keys(
@@ -479,45 +476,52 @@ def convert_peft_adapter_state_dict_for_transformers(
     Returns:
         The converted state dict.
     """
-    weight_conversions = get_model_conversion_mapping(model)
-    peft_weight_mapping = build_peft_weight_mapping(weight_conversions, adapter_name, peft_config=peft_config)
-
-    if not peft_weight_mapping:
+    if peft_config.peft_type != PeftType.LORA:
+        # weight conversion is currently only supported for LoRA
         return adapter_state_dict
 
-    converted_state_dict = apply_peft_weight_mapping_to_state_dict(model, adapter_state_dict, peft_weight_mapping)
-    converted_state_dict = _convert_to_peft_serialized_keys(converted_state_dict, adapter_name=adapter_name)
-    return converted_state_dict
+    if not hasattr(model, "config") or not hasattr(model.config, "model_type"):
+        # not a transformers-like model
+        return adapter_state_dict
 
+    model_type = getattr(model.config, "model_type", None)
+    if get_checkpoint_conversion_mapping(model_type) is None:
+        # no architecture-level conversion registered for this model
+        return adapter_state_dict
 
-def apply_peft_weight_mapping_to_state_dict(
-    model: torch.nn.Module,
-    state_dict: dict[str, torch.Tensor],
-    weight_mapping: list[WeightConverter | WeightRenaming],
-) -> dict[str, torch.Tensor]:
-    """
-    Function that exposes the weight conversion to the state dict. This is required to be called within PEFT to apply
-    weight conversion there without having to duplicate the whole weight conversion logic.
-    """
-    renamings = [entry for entry in weight_mapping if isinstance(entry, WeightRenaming)]
-    converters = [entry for entry in weight_mapping if isinstance(entry, WeightConverter)]
+    weight_conversions = get_model_conversion_mapping(model)
+    peft_weight_conversions = build_peft_weight_mapping(
+        weight_conversions, adapter_name=adapter_name, peft_config=peft_config
+    )
+    if not peft_weight_conversions:
+        return adapter_state_dict
+
+    # Keep non-LoRA entries untouched (e.g. modules_to_save / auxiliary wrappers).
+    # This avoids interfering with PEFT's later wrapper-specific key remapping.
+    lora_like_state_dict = {}
+    passthrough_state_dict = {}
+    for key, value in adapter_state_dict.items():
+        if ".lora_" in key:
+            lora_like_state_dict[key] = value
+        else:
+            passthrough_state_dict[key] = value
+
+    if not lora_like_state_dict:
+        return adapter_state_dict
+
+    renamings = [entry for entry in peft_weight_conversions if isinstance(entry, WeightRenaming)]
+    converters = [entry for entry in peft_weight_conversions if isinstance(entry, WeightConverter)]
     pattern_to_converter = {k: converter for converter in converters for k in converter.source_patterns}
 
     param_name_to_load: dict[str, WeightRenaming | WeightConverter] = {}
 
-    # 1) Rebuild the same "collect by target key + source pattern" structure used by core model loading.
-    # We need this because some conversions are many-to-one (e.g. w1/w3 -> gate_up_proj) and must see all inputs.
-    for original_key, tensor in sorted(state_dict.items(), key=lambda kv: dot_natural_key(kv[0])):
-        renamed_key, source_pattern = rename_source_key(
-            original_key,
-            renamings,
-            converters,
-            prefix=None,
-            meta_state_dict=None,
-        )
+    # Mirror transformers.core_model_loading flow: stable ordering + same rename logic.
+    # https://github.com/huggingface/transformers/blob/1bd97f246318456c1b87cf8ef8dc043ec1a53fff/src/transformers/core_model_loading.py#L997
+    state_items = sorted(lora_like_state_dict.items(), key=lambda kv: dot_natural_key(kv[0]))
+    for original_key, tensor in state_items:
+        renamed_key, source_pattern = rename_source_key(original_key, renamings, converters)
 
         if source_pattern is not None:
-            # Each destination key needs its own converter instance because converters keep internal collected state.
             new_converter = copy.deepcopy(pattern_to_converter[source_pattern])
             mapping = param_name_to_load.setdefault(renamed_key, new_converter)
         else:
@@ -526,17 +530,35 @@ def apply_peft_weight_mapping_to_state_dict(
 
         mapping.add_tensor(renamed_key, original_key, source_pattern, tensor)
 
-    converted_state_dict = {}
-    # 2) Materialize conversion ops (merge/concat/block-diag/permute/...) and emit final tensors.
+    converted_lora_model_keys: dict[str, torch.Tensor] = {}
+    consumed_source_keys: set[str] = set()
+
     for first_param_name, mapping in param_name_to_load.items():
-        realized_value = mapping.convert(
+        realized_values = mapping.convert(
             first_param_name,
             model=model,
             config=model.config,
             hf_quantizer=None,
             loading_info=None,
         )
-        for target_name, param in realized_value.items():
-            converted_state_dict[target_name] = param[0] if isinstance(param, list) else param
 
-    return converted_state_dict
+        for source_keys in mapping.layer_targets.values():
+            consumed_source_keys.update(source_keys)
+
+        for target_name, param in realized_values.items():
+            converted_lora_model_keys[target_name] = param[0] if isinstance(param, list) else param
+
+    # Keep untouched LoRA keys, then overwrite with converted results.
+    for key in consumed_source_keys:
+        lora_like_state_dict.pop(key, None)
+    lora_like_state_dict.update(converted_lora_model_keys)
+
+    # Return PEFT-serialized keys (remove adapter-name insertion and keep base_model prefixing behavior).
+    converted_lora_serialized = _convert_to_peft_serialized_keys(
+        lora_like_state_dict, adapter_name=adapter_name, base_prefix="base_model.model."
+    )
+
+    out = {}
+    out.update(passthrough_state_dict)
+    out.update(converted_lora_serialized)
+    return out

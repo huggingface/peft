@@ -770,7 +770,7 @@ class BaseTuner(nn.Module, ABC):
             )
 
             weight_conversions = get_model_conversion_mapping(model)
-            self.peft_config[adapter_name] = convert_peft_config_for_transformers(
+            convert_peft_config_for_transformers(
                 self.peft_config[adapter_name],
                 model=model,
                 conversions=weight_conversions,
