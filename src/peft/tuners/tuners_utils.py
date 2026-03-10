@@ -757,7 +757,8 @@ class BaseTuner(nn.Module, ABC):
         ###################################
         # PREPARATION OF MODEL AND CONFIG #
         ###################################
-        if is_transformers_ge_v5:
+        is_transformers_like_model = hasattr(getattr(model, "config", None), "model_type")
+        if is_transformers_ge_v5 and is_transformers_like_model:
             # TODO remove once transformers < v5.0 is no longer supported
             # For Transformers v5, some architectures were changed compared to v4, e.g. the MoE layers of Mixtral. To
             # still make it possible to load adapters trained with v4, we have to update the PEFT config so that the

@@ -454,7 +454,8 @@ def set_peft_model_state_dict(
     config = model.peft_config[adapter_name]
     state_dict = peft_model_state_dict
 
-    if is_transformers_ge_v5:
+    is_like_transformers_model = hasattr(getattr(model, "config", None), "model_type")
+    if is_transformers_ge_v5 and is_like_transformers_model:
         # apply transformers v5 weight conversion to the state_dict, if necessary
         from peft.utils.transformers_weight_conversion import convert_peft_adapter_state_dict_for_transformers
 
