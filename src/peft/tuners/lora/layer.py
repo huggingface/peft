@@ -19,6 +19,7 @@ from contextlib import contextmanager
 from typing import Any, Optional, Union
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import svd_lowrank
@@ -282,17 +283,17 @@ class LoraLayer(BaseTunerLayer):
         # init_lora_weights, since each rank initializes weights independently.
         # We could skip some broadcast, for instance when the lora weights are initialized to zero,
         # but this is a minor optimization and would add extra complexity to the code.
-        if torch.distributed.is_available() and torch.distributed.is_initialized():
+        if dist.is_available() and dist.is_initialized():
             base_layer = self.get_base_layer()
             tp_plan = getattr(base_layer, "_hf_tp_plan", None)
             device_mesh = getattr(base_layer, "_hf_device_mesh", None)
             if device_mesh is not None and tp_plan in ("colwise", "rowwise"):
                 pg = device_mesh.get_group()
-                src = torch.distributed.get_global_rank(pg, 0)
+                src = dist.get_global_rank(pg, 0)
                 if tp_plan == "colwise" and adapter_name in self.lora_A:
-                    torch.distributed.broadcast(self.lora_A[adapter_name].weight.data, src=src, group=pg)
+                    dist.broadcast(self.lora_A[adapter_name].weight.data, src=src, group=pg)
                 elif tp_plan == "rowwise" and adapter_name in self.lora_B:
-                    torch.distributed.broadcast(self.lora_B[adapter_name].weight.data, src=src, group=pg)
+                    dist.broadcast(self.lora_B[adapter_name].weight.data, src=src, group=pg)
 
     def olora_init(self, adapter_name):
         base_layer = self.get_base_layer()
