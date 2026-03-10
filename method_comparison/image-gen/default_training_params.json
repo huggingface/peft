@@ -7,14 +7,14 @@
   "batch_size": 2,
   "batch_size_eval": 1,
   "repeats": 1000,
-  "max_steps": 1000,
+  "max_steps": 2000,
   "eval_steps": 100,
   "compile": false,
   "seed": 0,
   "grad_norm_clip": 1.0,
   "optimizer_type": "AdamW",
   "optimizer_kwargs": {
-    "lr": 0.0003,
+    "lr": 0.0001,
     "weight_decay": 0.0001
   },
   "lr_scheduler": null,
