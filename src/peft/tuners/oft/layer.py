@@ -919,15 +919,15 @@ class Conv2d(nn.Module, OFTLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
-        device = self.oft_embedding_R[adapter].weight.device
-        dtype = self.oft_embedding_R[adapter].weight.dtype
+        device = self.oft_R[adapter].weight.device
+        dtype = self.oft_R[adapter].weight.dtype
 
         # In case users wants to merge the adapter weights that are in
         # (b)float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
         # (b)float16 because some CPUs have slow bf16/fp16 matmuls.
         cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
-        oft_R_module = self.oft_embedding_R[adapter]
+        oft_R_module = self.oft_R[adapter]
 
         if cast_to_fp32:
             # Temporarily work in fp32 for faster CPU matmul
