@@ -313,7 +313,7 @@ class OFTLayer(BaseTunerLayer):
     """
 
     # All names of layers that may contain (trainable) adapter weights
-    adapter_layer_names: tuple[str, ...] = ("oft_R",)
+    adapter_layer_names: tuple[str, ...] = ("oft_R", "oft_embedding_R")
     # All names of other parameters that may contain adapter-related parameters
     other_param_names: tuple[str, ...] = ("r", "oft_block_size", "oft_dropout")
 
@@ -1120,7 +1120,7 @@ class Embedding(nn.Module, OFTLayer):
         orig_dtype = base_layer.weight.dtype
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
-            if active_adapter in self.oft_R.keys():
+            if active_adapter in self.oft_embedding_R.keys():
                 oft_mat = self.get_delta_weight(active_adapter)
 
                 previous_dtype = oft_mat.dtype
