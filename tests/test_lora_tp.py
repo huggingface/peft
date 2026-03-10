@@ -235,7 +235,7 @@ def _test_training_overfit(rank, world_size, port):
 
     assert loss_reduction_ratio >= TEST_OVERFIT_LOSS_REDUCTION_THRESHOLD, (
         f"Expected loss to decrease by at least {TEST_OVERFIT_LOSS_REDUCTION_THRESHOLD * 100:.0f}%, "
-        f"got {loss_reduction:.1f}%",
+        f"got {loss_reduction:.1f}%"
     )
     logger.info(
         f"{Colors.GREEN}✓ Loss decreased by more than {TEST_OVERFIT_LOSS_REDUCTION_THRESHOLD * 100:.0f}%{Colors.RESET}"
@@ -245,16 +245,15 @@ def _test_training_overfit(rank, world_size, port):
     grad_norm_reduction_ratio = (initial_grad_norm - final_grad_norm) / initial_grad_norm
     assert grad_norm_reduction_ratio >= TEST_OVERFIT_GRAD_NORM_REDUCTION_THRESHOLD, (
         f"Expected grad_norm to decrease by at least {TEST_OVERFIT_GRAD_NORM_REDUCTION_THRESHOLD * 100:.0f}%, "
-        f"got {grad_norm_reduction:.1f}%",
+        f"got {grad_norm_reduction:.1f}%"
     )
     logger.info(
         f"{Colors.GREEN}✓ Grad norm decreased by more than {TEST_OVERFIT_GRAD_NORM_REDUCTION_THRESHOLD * 100:.0f}%{Colors.RESET}"
     )
 
-    # Assert generation matches (if applicable)
-    if generation_matches is not None:
-        assert generation_matches, "Expected model to generate the training sequence after overfitting"
-        logger.info(f"{Colors.GREEN}✓ Generated sequence matches training sequence{Colors.RESET}")
+    # Assert generation matches
+    assert generation_matches, "Expected model to generate the training sequence after overfitting"
+    logger.info(f"{Colors.GREEN}✓ Generated sequence matches training sequence{Colors.RESET}")
 
 
 def _test_lora_weight_synchronization(rank, world_size, port):
