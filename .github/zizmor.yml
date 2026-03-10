@@ -20,5 +20,5 @@ rules:
       - nightly-bnb.yml:30:7
       - nightly-bnb.yml:155:7
       - nightly.yml:27:7
-      - nightly.yml:77:7
+      - nightly.yml:95:7
       - torch_compile_tests.yml:32:7

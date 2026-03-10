@@ -40,6 +40,7 @@ from peft import (
     EvaConfig,
     GraloraConfig,
     IA3Config,
+    LilyConfig,
     LoftQConfig,
     LoKrConfig,
     LoraConfig,
@@ -54,6 +55,7 @@ from peft import (
     PeftWarning,
     PrefixTuningConfig,
     PromptTuningConfig,
+    PsoftConfig,
     RoadConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -65,6 +67,7 @@ from peft import (
     set_peft_model_state_dict,
 )
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
+from peft.tuners.lokr.layer import LoKrLayer
 from peft.tuners.lora.config import CordaConfig
 from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
@@ -2254,6 +2257,83 @@ class TestGraLoRAInitialization:
             get_peft_model(model, config)
 
 
+class TestPsoftInitialization:
+    """Basic sanity tests for the PSOFT tuner."""
+
+    torch_device = infer_device()
+
+    def get_model(self, bias=True):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 30, bias=bias)
+                self.lin1 = nn.Linear(30, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP(bias=bias).to(self.torch_device).eval()
+
+    def test_psoft_svd_lowrank_niter_warns_when_backend_not_lowrank_and_user_changes_value(self):
+        default_niter = PsoftConfig.__dataclass_fields__["psoft_svd_lowrank_niter"].default
+
+        msg = re.escape("`psoft_svd_lowrank_niter` is only used when `psoft_svd='lowrank'`.")
+        with pytest.warns(UserWarning, match=msg):
+            _ = PsoftConfig(
+                target_modules=["lin0"],
+                psoft_svd="full",
+                psoft_svd_lowrank_niter=default_niter + 1,
+            )
+
+    def test_psoft_svd_lowrank_niter_no_warning_when_backend_not_lowrank_and_value_is_default(self, recwarn):
+        default_niter = PsoftConfig.__dataclass_fields__["psoft_svd_lowrank_niter"].default
+        _ = PsoftConfig(
+            target_modules=["lin0"],
+            psoft_svd="full",
+            psoft_svd_lowrank_niter=default_niter,
+        )
+        assert len(recwarn) == 0
+
+    def test_cayley_neumann_terms_warns_when_use_cayley_neumann_false_and_user_changes_terms(self):
+        default_terms = PsoftConfig.__dataclass_fields__["num_cayley_neumann_terms"].default
+
+        msg = re.escape("`num_cayley_neumann_terms` is only used when `use_cayley_neumann=True`.")
+        with pytest.warns(UserWarning, match=msg):
+            _ = PsoftConfig(
+                target_modules=["lin0"],
+                use_cayley_neumann=False,
+                num_cayley_neumann_terms=default_terms + 1,
+            )
+
+    def test_cayley_neumann_eps_warns_when_use_cayley_neumann_false_and_eps_is_set(self):
+        msg = re.escape("`cayley_neumann_eps` is only used when `use_cayley_neumann=True`.")
+        with pytest.warns(UserWarning, match=msg):
+            _ = PsoftConfig(
+                target_modules=["lin0"],
+                use_cayley_neumann=False,
+                cayley_neumann_eps=0.9,
+            )
+
+    def test_cayley_neumann_terms_raises_when_use_cayley_neumann_true_and_terms_non_positive(self):
+        with pytest.raises(ValueError, match=re.escape("`num_cayley_neumann_terms` must be a positive integer")):
+            _ = PsoftConfig(
+                target_modules=["lin0"],
+                use_cayley_neumann=True,
+                num_cayley_neumann_terms=0,
+            )
+
+    @pytest.mark.parametrize("bad_eps", [-0.1, 0.0, 1.0, 1.1])
+    def test_cayley_neumann_eps_raises_when_use_cayley_neumann_true_and_eps_out_of_range(self, bad_eps):
+        with pytest.raises(ValueError, match=re.escape("`cayley_neumann_eps` must be in (0, 1)")):
+            _ = PsoftConfig(
+                target_modules=["lin0"],
+                use_cayley_neumann=True,
+                cayley_neumann_eps=bad_eps,
+            )
+
+
 class TestNoInfiniteRecursionDeepspeed:
     # see #1892 for details
     classes = [
@@ -3363,13 +3443,13 @@ class TestEvaInitialization:
     # for caching purposes:
     _dataset = load_dataset_english_quotes()["train"]
 
-    @pytest.fixture
+    @pytest.fixture(scope="class")
     def tokenizer(self):
         tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2")
         tokenizer.pad_token = tokenizer.eos_token
         return tokenizer
 
-    @pytest.fixture
+    @pytest.fixture(scope="class")
     def dataset(self, tokenizer):
         # concatenate examples
         examples = []
@@ -3391,9 +3471,11 @@ class TestEvaInitialization:
 
     @pytest.fixture
     def model(self):
-        model = AutoModelForCausalLM.from_pretrained("openai-community/gpt2")
-        model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
-        return model.to(self.DEVICE)
+        model_id = "openai-community/gpt2"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
+            yield model.to(self.DEVICE)
 
     @pytest.fixture
     def peft_config(self):
@@ -3624,6 +3706,222 @@ class TestEvaInitialization:
             UserWarning, match="`eva_config` specified but will be ignored when `init_lora_weights` is not 'eva'."
         ):
             LoraConfig(init_lora_weights=True, eva_config=EvaConfig())
+
+
+class TestLilyInitialization:
+    """Tests for Lily adapter initialization and parameter sharing.
+
+    The model uses a two-level structure: self.blocks is a ModuleList of simple Block wrappers, each containing two
+    Linears named "lin0" and "lin1". This way all target Linear layers of the same name share the same suffix, which is
+    required for _post_injection_hook to group them and apply A/B sharing correctly. Sharing should only happen within
+    layers of the same name (e.g. lin0 with lin0, lin1 with lin1), never across different layer names.
+    """
+
+    torch_device = infer_device()
+
+    def get_model(self, num_layers=6):
+        """MLP with `num_layers` Block modules, each containing two Linear layers
+        named 'lin0' and 'lin1'."""
+
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(32, 32, bias=False)
+                self.lin1 = nn.Linear(32, 32, bias=False)
+
+            def forward(self, x):
+                return self.lin1(self.lin0(x))
+
+        class MLP(nn.Module):
+            def __init__(self, num_layers):
+                super().__init__()
+                self.blocks = nn.ModuleList([Block() for _ in range(num_layers)])
+
+            def forward(self, x):
+                for block in self.blocks:
+                    x = block(x)
+                return x
+
+        return MLP(num_layers).to(self.torch_device).eval()
+
+    def _get_lily_layers(self, model, adapter_name="default"):
+        """Return all LilyLayer modules in traversal order."""
+        from peft.tuners.lily.layer import LilyLayer
+
+        return [m for _, m in model.named_modules() if isinstance(m, LilyLayer) and adapter_name in m.lily_A]
+
+    def _get_lily_layers_by_suffix(self, model, suffix, adapter_name="default"):
+        """Return all LilyLayer modules whose key ends with `suffix`, in traversal order."""
+        from peft.tuners.lily.layer import LilyLayer
+
+        return [
+            m
+            for key, m in model.named_modules()
+            if isinstance(m, LilyLayer) and adapter_name in m.lily_A and key.endswith(suffix)
+        ]
+
+    @pytest.mark.parametrize("suffix", ["lin0", "lin1"])
+    def test_stride_A_1_no_A_sharing(self, suffix):
+        """With stride_A=1, every layer should have a distinct A adapter."""
+        num_layers = 4
+        model = self.get_model(num_layers=num_layers)
+        config = LilyConfig(
+            target_modules=["lin0", "lin1"],
+            r=8,
+            stride_A=1,
+            num_B=2,
+        )
+        model = get_peft_model(model, config)
+
+        layers = self._get_lily_layers_by_suffix(model, suffix)
+        assert len(layers) == num_layers
+
+        A_ptrs = [layer.lily_A["default"].weight.data_ptr() for layer in layers]
+        assert len(set(A_ptrs)) == num_layers, f"With stride_A=1, all A adapters for {suffix} should be distinct"
+
+    @pytest.mark.parametrize("suffix", ["lin0", "lin1"])
+    def test_stride_A_equals_num_layers_all_share_one_A(self, suffix):
+        """With stride_A >= num_layers, all layers should share the same single A adapter."""
+        num_layers = 4
+        model = self.get_model(num_layers=num_layers)
+        config = LilyConfig(
+            target_modules=["lin0", "lin1"],
+            r=8,
+            stride_A=num_layers,
+            num_B=2,
+        )
+        model = get_peft_model(model, config)
+
+        layers = self._get_lily_layers_by_suffix(model, suffix)
+        assert len(layers) == num_layers
+
+        A_ptrs = [layer.lily_A["default"].weight.data_ptr() for layer in layers]
+        assert len(set(A_ptrs)) == 1, f"With stride_A=num_layers, all {suffix} layers should share the same A"
+
+    @pytest.mark.parametrize("suffix", ["lin0", "lin1"])
+    def test_stride_A_partial_sharing(self, suffix):
+        """With stride_A=2 and 6 layers, there should be 3 distinct A adapters per layer name."""
+        num_layers = 6
+        stride_A = 2
+        model = self.get_model(num_layers=num_layers)
+        config = LilyConfig(
+            target_modules=["lin0", "lin1"],
+            r=8,
+            stride_A=stride_A,
+            num_B=2,
+        )
+        model = get_peft_model(model, config)
+
+        layers = self._get_lily_layers_by_suffix(model, suffix)
+        assert len(layers) == num_layers
+
+        A_ptrs = [layer.lily_A["default"].weight.data_ptr() for layer in layers]
+        num_distinct_A = len(set(A_ptrs))
+        expected = num_layers // stride_A
+        assert num_distinct_A == expected, (
+            f"Expected {expected} distinct A adapters for {suffix} with stride_A={stride_A}, got {num_distinct_A}"
+        )
+
+        for block_start in range(0, num_layers, stride_A):
+            block = layers[block_start : block_start + stride_A]
+            block_A_ptrs = {layer.lily_A["default"].weight.data_ptr() for layer in block}
+            assert len(block_A_ptrs) == 1, f"Layers in {suffix} block starting at {block_start} should share one A"
+
+    @pytest.mark.parametrize("suffix", ["lin0", "lin1"])
+    def test_stride_A_greater_than_num_layers(self, suffix):
+        """With stride_A > num_layers, all layers should still share one A."""
+        num_layers = 3
+        model = self.get_model(num_layers=num_layers)
+        config = LilyConfig(
+            target_modules=["lin0", "lin1"],
+            r=8,
+            stride_A=100,
+            num_B=2,
+        )
+        model = get_peft_model(model, config)
+
+        layers = self._get_lily_layers_by_suffix(model, suffix)
+        assert len(layers) == num_layers
+
+        A_ptrs = [layer.lily_A["default"].weight.data_ptr() for layer in layers]
+        assert len(set(A_ptrs)) == 1, f"stride_A > num_layers should still result in a single shared A for {suffix}"
+
+    @pytest.mark.parametrize("stride_A", [1, 2, 3, 6])
+    @pytest.mark.parametrize("suffix", ["lin0", "lin1"])
+    def test_B_always_shared_across_all_layers(self, suffix, stride_A):
+        """All layers should always share the same B adapter object, regardless of stride_A."""
+        num_layers = 6
+        model = self.get_model(num_layers=num_layers)
+        config = LilyConfig(
+            target_modules=["lin0", "lin1"],
+            r=8,
+            stride_A=stride_A,
+            num_B=2,
+        )
+        model = get_peft_model(model, config)
+
+        layers = self._get_lily_layers_by_suffix(model, suffix)
+        assert len(layers) == num_layers
+
+        B_ptrs = [layer.lily_B["default"].weight.data_ptr() for layer in layers]
+        assert len(set(B_ptrs)) == 1, (
+            f"All {suffix} layers should share one B adapter (stride_A={stride_A}), got {len(set(B_ptrs))} distinct"
+        )
+
+    @pytest.mark.parametrize("suffix", ["lin0", "lin1"])
+    def test_stride_A_non_divisible_num_layers(self, suffix):
+        """With stride_A=4 and 6 layers, there should be ceil(6/4)=2 distinct A adapters per layer name."""
+        num_layers = 6
+        stride_A = 4
+        model = self.get_model(num_layers=num_layers)
+        config = LilyConfig(
+            target_modules=["lin0", "lin1"],
+            r=8,
+            stride_A=stride_A,
+            num_B=2,
+        )
+        model = get_peft_model(model, config)
+
+        layers = self._get_lily_layers_by_suffix(model, suffix)
+        assert len(layers) == num_layers
+
+        A_ptrs = [layer.lily_A["default"].weight.data_ptr() for layer in layers]
+        expected = math.ceil(num_layers / stride_A)
+        assert len(set(A_ptrs)) == expected, (
+            f"Expected {expected} distinct A adapters for {suffix} with stride_A={stride_A}, num_layers={num_layers}"
+        )
+
+        first_block_A_ptrs = {layers[i].lily_A["default"].weight.data_ptr() for i in range(4)}
+        second_block_A_ptrs = {layers[i].lily_A["default"].weight.data_ptr() for i in range(4, 6)}
+        assert len(first_block_A_ptrs) == 1
+        assert len(second_block_A_ptrs) == 1
+        assert first_block_A_ptrs != second_block_A_ptrs
+
+    def test_no_sharing_across_different_layer_names(self):
+        """A and B adapters should never be shared between lin0 and lin1 layers."""
+        num_layers = 6
+        stride_A = 2
+        model = self.get_model(num_layers=num_layers)
+        config = LilyConfig(
+            target_modules=["lin0", "lin1"],
+            r=8,
+            stride_A=stride_A,
+            num_B=2,
+        )
+        model = get_peft_model(model, config)
+
+        lin0_layers = self._get_lily_layers_by_suffix(model, "lin0")
+        lin1_layers = self._get_lily_layers_by_suffix(model, "lin1")
+        assert len(lin0_layers) == num_layers
+        assert len(lin1_layers) == num_layers
+
+        lin0_A_ptrs = {layer.lily_A["default"].weight.data_ptr() for layer in lin0_layers}
+        lin1_A_ptrs = {layer.lily_A["default"].weight.data_ptr() for layer in lin1_layers}
+        assert lin0_A_ptrs.isdisjoint(lin1_A_ptrs), "A adapters should not be shared between lin0 and lin1 layers"
+
+        lin0_B_ptrs = {layer.lily_B["default"].weight.data_ptr() for layer in lin0_layers}
+        lin1_B_ptrs = {layer.lily_B["default"].weight.data_ptr() for layer in lin1_layers}
+        assert lin0_B_ptrs.isdisjoint(lin1_B_ptrs), "B adapters should not be shared between lin0 and lin1 layers"
 
 
 @pytest.mark.skipif(
@@ -4968,7 +5266,50 @@ class TestWeightTying:
 
         return CausalLM().eval().to(self.torch_device)
 
-    def test_weight_tying_tied_model_lora(self):
+    def get_seq2seq_lm_model(self, tie_weights=True):
+        # Mimicking a encoder-decoder LM with shared embeddings
+        class Seq2SeqStack(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embed_tokens = nn.Embedding(1000, 1000)
+                self.linear = nn.Linear(1000, 1000, bias=False)
+
+        class MySeq2SeqModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.shared = nn.Embedding(1000, 1000)
+                self.encoder = Seq2SeqStack()
+                self.decoder = Seq2SeqStack()
+
+        class Seq2SeqLM(nn.Module):
+            if tie_weights:
+                _tied_weights_keys = {
+                    "model.encoder.embed_tokens.weight": "model.shared.weight",
+                    "model.decoder.embed_tokens.weight": "model.shared.weight",
+                    "lm_head.weight": "model.shared.weight",
+                }
+
+            def __init__(self):
+                super().__init__()
+                self.model = MySeq2SeqModule()
+                self.config = {"tie_word_embeddings": tie_weights}
+                self.lm_head = nn.Linear(1000, 1000, bias=False)
+
+                if tie_weights:
+                    self.model.encoder.embed_tokens.weight = self.model.shared.weight
+                    self.model.decoder.embed_tokens.weight = self.model.shared.weight
+                    self.lm_head.weight = self.model.shared.weight
+
+            def prepare_inputs_for_generation(self):
+                return
+
+            def get_input_embeddings(self):
+                return self.model.shared
+
+        return Seq2SeqLM().eval().to(self.torch_device)
+
+    @pytest.mark.parametrize("modules_to_save", [["lm_head"], ["embed_tokens"], ["lm_head", "embed_tokens"]])
+    def test_weight_tying_tied_model_lora(self, modules_to_save):
         # If weight tying is enabled and `embed_tokens`
         # is passed as a `modules_to_save`, it needs to be ensured
         # that lm_head is tied to the adapter added to `embed_tokens`
@@ -4976,61 +5317,62 @@ class TestWeightTying:
         model = self.get_lm_model()
 
         embed_token_config = LoraConfig(
-            modules_to_save=["embed_tokens"],
+            modules_to_save=modules_to_save,
             target_modules=["linear"],
             ensure_weight_tying=True,
         )
 
         model = get_peft_model(model, embed_token_config)
 
-        assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper), (
-            "Embed tokens is not added in Modules to Save"
-        )
-        assert type(model.base_model.model.model.embed_tokens) is type(model.base_model.model.lm_head), (
-            "Embed tokens and LM head types are not same"
-        )
+        assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper)
+        assert isinstance(model.base_model.model.lm_head, ModulesToSaveWrapper)
 
         # Validating that all model parameters are same
         embed_np = dict(model.base_model.model.model.embed_tokens.named_parameters())
         lm_head_np = dict(model.base_model.model.lm_head.named_parameters())
 
-        for k in embed_np.keys():
+        for k in embed_np:
             assert torch.allclose(embed_np[k], lm_head_np[k])
-            assert embed_np[k] is lm_head_np[k]
+            assert embed_np[k].data_ptr() == lm_head_np[k].data_ptr()
 
-    def test_weight_tying_non_tied_model_lora(self):
-        model = self.get_lm_model(tie_weights=False)
+    @pytest.mark.parametrize(
+        "modules_to_save,tie_weights",
+        [
+            (["lm_head"], True),
+            (["lm_head"], False),
+            (["embed_tokens"], True),
+            (["embed_tokens"], False),
+            (["embed_tokens", "lm_head"], True),
+            (["embed_tokens", "lm_head"], False),
+        ],
+    )
+    def test_alt_weight_tying_tied_model_lora(self, modules_to_save, tie_weights):
+        model = self.get_lm_model(tie_weights=tie_weights)
         embed_token_config = LoraConfig(
-            modules_to_save=["embed_tokens"],
+            modules_to_save=modules_to_save,
             target_modules=["linear"],
-            ensure_weight_tying=True,
+            ensure_weight_tying=not tie_weights,
         )
-        with pytest.warns(UserWarning, match="no tied modules were found in the model"):
+
+        if tie_weights:
+            wrn_msg = "`ensure_weight_tying` is not set to True"
+        else:
+            wrn_msg = "no tied modules were found in the model"
+
+        with pytest.warns(UserWarning, match=wrn_msg):
             model = get_peft_model(model, embed_token_config)
 
-        assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper), (
-            "Embed tokens is not added in Modules to Save"
-        )
-        assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear), (
-            "LM head is not of type nn.linear"
-        )
-
-    def test_not_weight_tying_tied_model_lora(self):
-        model = self.get_lm_model()
-        embed_token_config = LoraConfig(
-            modules_to_save=["embed_tokens"],
-            target_modules=["linear"],
-            ensure_weight_tying=False,
-        )
-        with pytest.warns(UserWarning, match="`ensure_weight_tying` is not set to True"):
-            model = get_peft_model(model, embed_token_config)
-
-        assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper), (
-            "Embed tokens is not added in Modules to Save"
-        )
-        assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear), (
-            "LM head is not of type nn.linear"
-        )
+        if modules_to_save == ["embed_tokens"]:
+            assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper)
+            assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
+        elif modules_to_save == ["lm_head"]:
+            assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
+            assert isinstance(model.base_model.model.lm_head, ModulesToSaveWrapper)
+        elif modules_to_save == ["embed_tokens", "lm_head"]:
+            assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper)
+            assert isinstance(model.base_model.model.lm_head, ModulesToSaveWrapper)
+        else:
+            raise NotImplementedError("Layer type {layer} is not supported for this test")
 
     def test_weight_tying_tied_model_no_embed_lora(self):
         model = self.get_lm_model()
@@ -5039,7 +5381,7 @@ class TestWeightTying:
             ensure_weight_tying=True,
         )
 
-        with pytest.warns(UserWarning, match="no tied modules are added in `modules_to_save`"):
+        with pytest.warns(UserWarning, match="no tied modules are added"):
             model = get_peft_model(model, embed_token_config)
 
         assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
@@ -5049,7 +5391,7 @@ class TestWeightTying:
         embed_np = dict(model.base_model.model.model.embed_tokens.named_parameters())
         lm_head_np = dict(model.base_model.model.lm_head.named_parameters())
 
-        for k in embed_np.keys():
+        for k in embed_np:
             assert torch.allclose(embed_np[k], lm_head_np[k])
             assert embed_np[k] is lm_head_np[k]
 
@@ -5064,6 +5406,210 @@ class TestWeightTying:
         assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper), (
             "Embed tokens is not added in Modules to Save"
         )
-        assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear), (
-            "LM head is not of type nn.linear"
+        assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
+
+    @pytest.mark.parametrize("target_modules", [["lm_head"], ["embed_tokens"], ["lm_head", "embed_tokens"]])
+    def test_weight_tying_tied_model_target_modules_lora(self, target_modules):
+        # Same as `test_weight_tying_tied_model_lora` but the tied module is passed
+        # in `target_modules` instead of `modules_to_save`.
+        model = self.get_lm_model()
+
+        embed_token_config = LoraConfig(
+            target_modules=["linear"] + target_modules,
+            ensure_weight_tying=True,
         )
+
+        model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.embed_tokens, LoraLayer)
+        assert isinstance(model.base_model.model.lm_head, LoraLayer)
+
+        # Since embed_tokens and lm_head weights are transpose of each other
+        # lm_head lora_A == embed_tokens lora_B
+        adapter_name = "default"
+
+        embed_lora_A = model.base_model.model.model.embed_tokens.lora_embedding_A[adapter_name]
+        embed_lora_B = model.base_model.model.model.embed_tokens.lora_embedding_B[adapter_name]
+
+        lm_lora_A = model.base_model.model.lm_head.lora_A[adapter_name].weight
+        lm_lora_B = model.base_model.model.lm_head.lora_B[adapter_name].weight
+
+        assert torch.allclose(embed_lora_A, lm_lora_B.T)
+        assert torch.allclose(embed_lora_B, lm_lora_A.T)
+        assert embed_lora_A.data_ptr() == lm_lora_B.data_ptr()
+        assert embed_lora_B.data_ptr() == lm_lora_A.data_ptr()
+
+    @pytest.mark.parametrize("target_modules", [".*embed_tokens$", ".*lm_head$", ".*(embed_tokens|lm_head)$"])
+    def test_weight_tying_tied_model_target_modules_str_lora(self, target_modules):
+        # Same as `test_weight_tying_tied_model_target_modules_lora` but the tied module
+        # are passed as str
+        model = self.get_lm_model()
+
+        embed_token_config = LoraConfig(
+            target_modules=target_modules,
+            ensure_weight_tying=True,
+        )
+
+        model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.embed_tokens, LoraLayer)
+        assert isinstance(model.base_model.model.lm_head, LoraLayer)
+
+        # Since embed_tokens and lm_head weights are transpose of each other
+        # lm_head lora_A == embed_tokens lora_B
+        adapter_name = "default"
+
+        embed_lora_A = model.base_model.model.model.embed_tokens.lora_embedding_A[adapter_name]
+        embed_lora_B = model.base_model.model.model.embed_tokens.lora_embedding_B[adapter_name]
+
+        lm_lora_A = model.base_model.model.lm_head.lora_A[adapter_name].weight
+        lm_lora_B = model.base_model.model.lm_head.lora_B[adapter_name].weight
+
+        assert torch.allclose(embed_lora_A, lm_lora_B.T)
+        assert torch.allclose(embed_lora_B, lm_lora_A.T)
+        assert embed_lora_A.data_ptr() == lm_lora_B.data_ptr()
+        assert embed_lora_B.data_ptr() == lm_lora_A.data_ptr()
+
+    @pytest.mark.parametrize("target_modules", ["all-linear"])
+    def test_weight_tying_tied_model_target_modules_all_linear_lora(self, target_modules):
+        # Passing just the all-linear as target_modules
+        model = self.get_lm_model()
+
+        embed_token_config = LoraConfig(
+            target_modules=target_modules,
+            ensure_weight_tying=True,
+        )
+
+        model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.linear, LoraLayer)
+        assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
+
+    @pytest.mark.parametrize(
+        "target_modules,tie_weights",
+        [
+            (["lm_head"], True),
+            (["lm_head"], False),
+            (["embed_tokens"], True),
+            (["embed_tokens"], False),
+            (["embed_tokens", "lm_head"], True),
+            (["embed_tokens", "lm_head"], False),
+        ],
+    )
+    def test_alt_weight_tying_tied_model_target_modules_lora(self, target_modules, tie_weights):
+        # When model weights are not tied, ensure a warning is raised even if
+        # the tied module name is present in `target_modules`.
+        model = self.get_lm_model(tie_weights=tie_weights)
+        embed_token_config = LoraConfig(
+            target_modules=["linear"] + target_modules,
+            ensure_weight_tying=not tie_weights,
+        )
+
+        if tie_weights:
+            wrn_msg = "`ensure_weight_tying` is not set to True"
+        else:
+            wrn_msg = "no tied modules were found in the model"
+
+        with pytest.warns(UserWarning, match=wrn_msg):
+            model = get_peft_model(model, embed_token_config)
+
+        if target_modules == ["embed_tokens"]:
+            assert isinstance(model.base_model.model.model.embed_tokens, LoraLayer)
+            assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
+        elif target_modules == ["lm_head"]:
+            assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
+            assert isinstance(model.base_model.model.lm_head, LoraLayer)
+        elif target_modules == ["embed_tokens", "lm_head"]:
+            assert isinstance(model.base_model.model.model.embed_tokens, LoraLayer)
+            assert isinstance(model.base_model.model.lm_head, LoraLayer)
+
+            adapter_name = "default"
+
+            embed_lora_A = model.base_model.model.model.embed_tokens.lora_embedding_A[adapter_name]
+            embed_lora_B = model.base_model.model.model.embed_tokens.lora_embedding_B[adapter_name]
+
+            lm_lora_A = model.base_model.model.lm_head.lora_A[adapter_name].weight
+            lm_lora_B = model.base_model.model.lm_head.lora_B[adapter_name].weight
+
+            assert embed_lora_A.data_ptr() != lm_lora_B.data_ptr()
+            assert embed_lora_B.data_ptr() != lm_lora_A.data_ptr()
+        else:
+            raise NotImplementedError("Layer type {layer} is not supported for this test")
+
+    def test_weight_tying_tied_model_target_modules_lokr(self):
+        model = self.get_lm_model()
+
+        embed_token_config = LoKrConfig(target_modules=["linear", "lm_head"])
+
+        with pytest.warns(UserWarning, match="no implementation exists to tie the adapters"):
+            model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
+        assert isinstance(model.base_model.model.lm_head, LoKrLayer)
+
+    @pytest.mark.parametrize("modules_to_save", [["lm_head"], ["embed_tokens"], ["lm_head", "embed_tokens"]])
+    def test_weight_tying_enc_dec_modules_to_save_lora(self, modules_to_save):
+        model = self.get_seq2seq_lm_model()
+        embed_token_config = LoraConfig(
+            modules_to_save=modules_to_save,
+            target_modules=["linear"],
+            ensure_weight_tying=True,
+        )
+
+        model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.shared, ModulesToSaveWrapper)
+        assert isinstance(model.base_model.model.model.encoder.embed_tokens, ModulesToSaveWrapper)
+        assert isinstance(model.base_model.model.model.decoder.embed_tokens, ModulesToSaveWrapper)
+        assert isinstance(model.base_model.model.lm_head, ModulesToSaveWrapper)
+
+        shared_np = dict(model.base_model.model.model.shared.named_parameters())
+        lm_head_np = dict(model.base_model.model.lm_head.named_parameters())
+
+        for k in shared_np:
+            assert torch.allclose(shared_np[k], lm_head_np[k])
+            assert shared_np[k].data_ptr() == lm_head_np[k].data_ptr()
+
+    @pytest.mark.parametrize("target_modules", [["lm_head"], ["embed_tokens"], ["lm_head", "embed_tokens"]])
+    def test_weight_tying_enc_dec_target_modules_lora(self, target_modules):
+        model = self.get_seq2seq_lm_model()
+        embed_token_config = LoraConfig(
+            target_modules=["linear"] + target_modules,
+            ensure_weight_tying=True,
+        )
+
+        model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.shared, LoraLayer)
+        assert isinstance(model.base_model.model.model.encoder.embed_tokens, LoraLayer)
+        assert isinstance(model.base_model.model.model.decoder.embed_tokens, LoraLayer)
+        assert isinstance(model.base_model.model.lm_head, LoraLayer)
+
+        adapter_name = "default"
+
+        shared_lora_A = model.base_model.model.model.shared.lora_embedding_A[adapter_name]
+        shared_lora_B = model.base_model.model.model.shared.lora_embedding_B[adapter_name]
+
+        lm_lora_A = model.base_model.model.lm_head.lora_A[adapter_name].weight
+        lm_lora_B = model.base_model.model.lm_head.lora_B[adapter_name].weight
+
+        assert torch.allclose(shared_lora_A, lm_lora_B.T)
+        assert torch.allclose(shared_lora_B, lm_lora_A.T)
+        assert shared_lora_A.data_ptr() == lm_lora_B.data_ptr()
+        assert shared_lora_B.data_ptr() == lm_lora_A.data_ptr()
+
+    @pytest.mark.parametrize("target_modules", [["linear"], ["encoder.linear"], ["decoder.linear"]])
+    def test_weight_tying_enc_dec_no_tied_module_targeted_warns(self, target_modules):
+        model = self.get_seq2seq_lm_model()
+        embed_token_config = LoraConfig(
+            target_modules=target_modules,
+            ensure_weight_tying=True,
+        )
+
+        with pytest.warns(UserWarning, match="no tied modules are added"):
+            model = get_peft_model(model, embed_token_config)
+
+        assert isinstance(model.base_model.model.model.shared, torch.nn.modules.sparse.Embedding)
+        assert isinstance(model.base_model.model.model.encoder.embed_tokens, torch.nn.modules.sparse.Embedding)
+        assert isinstance(model.base_model.model.model.decoder.embed_tokens, torch.nn.modules.sparse.Embedding)
+        assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)

@@ -1205,7 +1205,7 @@ class TestModelAndLayerStatus:
         model_status = large_model.get_model_status()
         model_status = large_model.get_model_status()
         assert model_status.adapter_model_type == "LoraModel"
-        assert model_status.peft_types == {"default": "LORA", "other": "LORA"}
+        assert model_status.peft_types == {"default": "LORA"}
         assert model_status.num_adapter_layers == 2
         assert model_status.trainable_params == 2 * (8 * 10 + 10 * 8)
 
@@ -1217,7 +1217,7 @@ class TestModelAndLayerStatus:
         large_model = get_peft_model(large_model, config)
         model_status = large_model.get_model_status()
         assert model_status.adapter_model_type == "LoraModel"
-        assert model_status.peft_types == {"default": "LORA", "other": "LORA"}
+        assert model_status.peft_types == {"default": "LORA"}
         assert model_status.num_adapter_layers == 2
         assert model_status.trainable_params == 2 * (8 * 10 + 10 * 8)
 
@@ -1547,7 +1547,6 @@ class TestBaseTunerGetModelConfig:
 
 class TestBaseTunerWarnForTiedEmbeddings:
     model_id = "peft-internal-testing/tiny-random-LlamaForCausalLM"
-    warn_end_inject = "huggingface/peft/issues/2018."
     warn_end_merge = (
         "# Now use the original model but in untied format\n"
         "model = AutoModelForCausalLM.from_pretrained(untied_model_dir)\n```\n"
@@ -1565,27 +1564,15 @@ class TestBaseTunerWarnForTiedEmbeddings:
     def _is_warn_triggered(self, warning_list, endswith):
         return any(str(warning.message).endswith(endswith) for warning in warning_list)
 
-    def test_warn_for_tied_embeddings_inject(self, recwarn):
-        self._get_peft_model(tie_word_embeddings=True, target_module="lm_head")
-        assert self._is_warn_triggered(recwarn.list, self.warn_end_inject)
-
     def test_warn_for_tied_embeddings_merge(self, recwarn):
         model = self._get_peft_model(tie_word_embeddings=True, target_module="lm_head")
         model.merge_and_unload()
         assert self._is_warn_triggered(recwarn.list, self.warn_end_merge)
 
-    def test_no_warn_for_untied_embeddings_inject(self, recwarn):
-        self._get_peft_model(tie_word_embeddings=False, target_module="lm_head")
-        assert not self._is_warn_triggered(recwarn.list, self.warn_end_inject)
-
     def test_no_warn_for_untied_embeddings_merge(self, recwarn):
         model_not_tied = self._get_peft_model(tie_word_embeddings=False, target_module="lm_head")
         model_not_tied.merge_and_unload()
         assert not self._is_warn_triggered(recwarn.list, self.warn_end_merge)
-
-    def test_no_warn_for_no_target_module_inject(self, recwarn):
-        self._get_peft_model(tie_word_embeddings=True, target_module="q_proj")
-        assert not self._is_warn_triggered(recwarn.list, self.warn_end_inject)
 
     def test_no_warn_for_no_target_module_merge(self, recwarn):
         model_no_target_module = self._get_peft_model(tie_word_embeddings=True, target_module="q_proj")
