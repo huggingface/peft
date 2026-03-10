@@ -72,7 +72,7 @@ _torch_supports_dtensor = version.parse(torch.__version__) >= version.parse("2.5
 _torch_supports_distributed = _torch_supports_dtensor and torch.distributed.is_available()
 
 
-if is_transformers_ge_v5 and hasattr(transformers.integrations.peft, "apply_peft_weight_mapping_to_state_dict"):
+if is_transformers_ge_v5:
     from peft.utils.integrations import convert_peft_config_for_transformers
 
 
@@ -762,15 +762,13 @@ class BaseTuner(nn.Module, ABC):
         ###################################
         # PREPARATION OF MODEL AND CONFIG #
         ###################################
-        if is_transformers_ge_v5 and hasattr(
-            transformers.integrations.peft, "apply_peft_weight_mapping_to_state_dict"
-        ):
+        if is_transformers_ge_v5:
             # TODO remove once transformers < v5.0 is no longer supported
             # For Transformers v5, some architectures were changed compared to v4, e.g. the MoE layers of Mixtral. To
             # still make it possible to load adapters trained with v4, we have to update the PEFT config so that the
             # right layers are targeted. Call this first and overwrite the peft_config to be sure that changes are
             # applied.
-            from transformers.conversion_mapping import get_model_conversion_mapping
+            from peft.utils.integrations import get_model_conversion_mapping
 
             weight_conversions = get_model_conversion_mapping(model)
             self.peft_config[adapter_name] = convert_peft_config_for_transformers(

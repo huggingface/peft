@@ -292,16 +292,38 @@ def skip_init_on_device(func):
 ##################################
 
 
-if is_transformers_ge_v5 and hasattr(transformers.integrations.peft, "apply_peft_weight_mapping_to_state_dict"):
+if is_transformers_ge_v5:
     # TODO: remove conditional when transformers < 5.0 is no longer supported
-    from transformers.conversion_mapping import get_checkpoint_conversion_mapping, get_model_conversion_mapping
-    from transformers.integrations.peft import (
-        _MODEL_TO_CONVERSION_PATTERN,
-        _MOE_FUSED_TARGETS,
-        _MOE_TARGET_MODULE_MAPPING,
-        apply_peft_weight_mapping_to_state_dict,
-        build_peft_weight_mapping,
-    )
+    from transformers.conversion_mapping import _MODEL_TO_CONVERSION_PATTERN, get_checkpoint_conversion_mapping, get_model_conversion_mapping
+    from transformers.core_model_loading import WeightConverter, WeightRenaming, dot_natural_key, rename_source_key
+    from .transformers_weight_conversion import build_peft_weight_mapping
+ 
+    # The main reason we have to explicit this is because the conversion mapping
+    # has the full layer name, while the config do not. We coould regex match but
+    # this is more explicit and less error prone.
+    # Note: this is used in PEFT, changing it requires coordiation.
+    _MOE_TARGET_MODULE_MAPPING: dict[str, dict[str, str]] = {
+        "mixtral": {
+            "gate": "gate.weight",
+            "w1": "gate_up_proj",
+            "w3": "gate_up_proj",
+            "w2": "down_proj",
+        },
+        "qwen2_moe": {
+            "gate": "gate.weight",
+            "gate_proj": "gate_up_proj",
+            "up_proj": "gate_up_proj",
+            "down_proj": "down_proj",
+        },
+    }
+
+    # Note: this is used in PEFT, changing it requires coordiation.
+    _MOE_FUSED_TARGETS: dict[str, dict[str, set[str]]] = {
+        # use lists for dict values to ensure stable order
+        "mixtral": {"gate_up_proj": ["w1", "w3"]},
+        "qwen2_moe": {"gate_up_proj": ["gate_proj", "up_proj"]},
+    }
+
 
     def _convert_peft_config_moe(peft_config, model_type: str):
         """
@@ -455,6 +477,60 @@ if is_transformers_ge_v5 and hasattr(transformers.integrations.peft, "apply_peft
         converted_state_dict = apply_peft_weight_mapping_to_state_dict(model, adapter_state_dict, peft_weight_mapping)
         converted_state_dict = _convert_to_peft_serialized_keys(converted_state_dict, adapter_name=adapter_name)
         return converted_state_dict
+
+
+    # TODO remove once PEFT < 0.19 no longer supported
+    def apply_peft_weight_mapping_to_state_dict(
+        model: torch.nn.Module,
+        state_dict: dict[str, torch.Tensor],
+        weight_mapping: list[WeightConverter | WeightRenaming],
+    ) -> dict[str, torch.Tensor]:
+        """
+        Function that exposes the weight conversion to the state dict. This is required to be called within PEFT to apply
+        weight conversion there without having to duplicate the whole weight conversion logic.
+        """
+        renamings = [entry for entry in weight_mapping if isinstance(entry, WeightRenaming)]
+        converters = [entry for entry in weight_mapping if isinstance(entry, WeightConverter)]
+        pattern_to_converter = {k: converter for converter in converters for k in converter.source_patterns}
+
+        param_name_to_load: dict[str, WeightRenaming | WeightConverter] = {}
+
+        # 1) Rebuild the same "collect by target key + source pattern" structure used by core model loading.
+        # We need this because some conversions are many-to-one (e.g. w1/w3 -> gate_up_proj) and must see all inputs.
+        for original_key, tensor in sorted(state_dict.items(), key=lambda kv: dot_natural_key(kv[0])):
+            renamed_key, source_pattern = rename_source_key(
+                original_key,
+                renamings,
+                converters,
+                prefix=None,
+                meta_state_dict=None,
+            )
+
+            if source_pattern is not None:
+                # Each destination key needs its own converter instance because converters keep internal collected state.
+                new_converter = copy.deepcopy(pattern_to_converter[source_pattern])
+                mapping = param_name_to_load.setdefault(renamed_key, new_converter)
+            else:
+                mapping = param_name_to_load.setdefault(renamed_key, WeightRenaming(original_key, renamed_key))
+                source_pattern = original_key
+
+            mapping.add_tensor(renamed_key, original_key, source_pattern, tensor)
+
+        converted_state_dict = {}
+        # 2) Materialize conversion ops (merge/concat/block-diag/permute/...) and emit final tensors.
+        for first_param_name, mapping in param_name_to_load.items():
+            realized_value = mapping.convert(
+                first_param_name,
+                model=model,
+                config=model.config,
+                hf_quantizer=None,
+                loading_info=None,
+            )
+            for target_name, param in realized_value.items():
+                converted_state_dict[target_name] = param[0] if isinstance(param, list) else param
+
+        return converted_state_dict
+
 
 #######
 # END #

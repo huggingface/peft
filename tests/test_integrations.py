@@ -106,10 +106,7 @@ class TestInitEmptyWeights:
         assert all(p.device == expected for p in mlp1.parameters())
 
 
-@pytest.mark.skipif(
-    not (is_transformers_ge_v5 and hasattr(transformers.integrations.peft, "apply_peft_weight_mapping_to_state_dict")),
-    reason="Requires the right transformers version",
-)
+@pytest.mark.skipif(not is_transformers_ge_v5, reason="Requires the right transformers version")
 class TestTransformersV5:
     """Unit tests intended to test proper working of PEFT with Transformers v5"""
 
