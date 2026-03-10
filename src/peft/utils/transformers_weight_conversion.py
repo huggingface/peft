@@ -241,6 +241,9 @@ def build_peft_weight_mapping(
                     elif isinstance(op, MergeModulelist):
                         peft_weight_operations.append(op)
 
+                if not peft_weight_operations:
+                    continue
+
                 # TODO: this assumption may not hold for models != mixtral
                 # For source, we capture the original weights + the lora weights
                 new_source_patterns = []
@@ -279,6 +282,9 @@ def build_peft_weight_mapping(
                             peft_weight_operations.append(PermuteDims(dims=(2, 0, 1)))
                             peft_weight_operations.append(FlattenDims(dims=(0, 1)))
                             peft_weight_operations.append(Transpose(dim0=0, dim1=1))
+
+                if not peft_weight_operations:
+                    continue
 
                 # TODO: this assumption may not hold for models != mixtral
                 # For source, we capture the original weights + the lora weights
