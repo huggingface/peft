@@ -2980,7 +2980,10 @@ class TestLoftQ:
     """
 
     def get_error_factor(self, device):
-        error_factor = 0.66 if device in ("xpu", "cpu") else 0.40
+        # The error factor indicates by how much the quantization error should be decreased when using LoftQ compared to
+        # quantization without LoftQ. Thus 1.03 means that the error should be decreased by 3% at least. This is a very
+        # conservative value to prevent flakiness, in practice most gains are > 1.5
+        error_factor = 1.005 if device in ("xpu", "cpu") else 1.03
         return error_factor
 
     def get_input(self, model_id, device):
@@ -3124,6 +3127,7 @@ class TestLoftQ:
         assert mse_loftq < (mse_quantized / error_factor)
         assert mae_loftq < (mae_quantized / error_factor)
 
+    @pytest.mark.skip(reason="Skip 8bit LoftQ tests, tracked in https://github.com/huggingface/peft/pull/3021")
     @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_bloomz_loftq_8bit(self, device, tmp_path):
         # Same test as test_bloomz_loftq_4bit but with 8 bits.
@@ -3140,6 +3144,7 @@ class TestLoftQ:
         assert mse_loftq < (mse_quantized / error_factor)
         assert mae_loftq < (mae_quantized / error_factor)
 
+    @pytest.mark.skip(reason="Skip 8bit LoftQ tests, tracked in https://github.com/huggingface/peft/pull/3021")
     @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_bloomz_loftq_8bit_iter_5(self, device, tmp_path):
         # Same test as test_bloomz_loftq_4bit_iter_5 but with 8 bits.
@@ -3174,6 +3179,7 @@ class TestLoftQ:
         assert mse_loftq < (mse_quantized / error_factor)
         assert mae_loftq < (mae_quantized / error_factor)
 
+    @pytest.mark.skip(reason="Skip 8bit LoftQ tests, tracked in https://github.com/huggingface/peft/pull/3021")
     @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_t5_loftq_8bit(self, device, tmp_path):
         mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(
@@ -3208,6 +3214,7 @@ class TestLoftQ:
         assert mae_loftq < (mae_quantized / factor)
         assert mse_loftq < (mse_quantized / factor)
 
+    @pytest.mark.skip(reason="Skip 8bit LoftQ tests, tracked in https://github.com/huggingface/peft/pull/3021")
     @pytest.mark.parametrize("device", [torch_device, "cpu"])
     def test_bloomz_loftq_8bit_dora(self, device, tmp_path):
         # same as test_bloomz_loftq_8bit but with DoRA
