@@ -14,7 +14,6 @@
 
 import pytest
 import torch
-import transformers
 from torch import nn
 from transformers import AutoModelForCausalLM
 

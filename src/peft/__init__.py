@@ -149,7 +149,6 @@ from .utils import (
     set_peft_model_state_dict,
     shift_tokens_right,
 )
-from .utils.integrations import convert_peft_config_for_transformers
 
 
 __all__ = [
@@ -258,7 +257,6 @@ __all__ = [
     "bloom_model_postprocess_past_key_value",
     "cast_mixed_precision_params",
     "compose_cartridge_adapters",
-    "convert_peft_config_for_transformers",
     "convert_to_lora",
     "create_arrow_model",
     "get_eva_state_dict",

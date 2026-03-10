@@ -13,10 +13,16 @@
 # limitations under the License.
 
 # NOTE: don't import from this module unless transformers v5+ is used
+import copy
 import re
+from typing import Any
 
 import torch
-
+from transformers.conversion_mapping import (
+    _MODEL_TO_CONVERSION_PATTERN,
+    get_checkpoint_conversion_mapping,
+    get_model_conversion_mapping,
+)
 from transformers.core_model_loading import (
     Concatenate,
     ConversionOps,
@@ -24,6 +30,8 @@ from transformers.core_model_loading import (
     Transpose,
     WeightConverter,
     WeightRenaming,
+    dot_natural_key,
+    rename_source_key,
 )
 
 
@@ -53,16 +61,21 @@ class PeftConcatenate(Concatenate):
 
     To illustrate:
 
-    Before
+    Before:
+
     W0' = W0 + A0 @ B0
+
     W1' = W1 + A1 @ B1
 
-    After
+    After:
+
     W01' = W01 + A01 @ B01_bd
-        where
-        A01 = [A0, A1]
-        B01_bd = [[B0,  0],
-                  [0,  B1]]
+
+    where:
+
+    A01 = [A0, A1]
+
+    B01_bd = [[B0, 0], [0, B1]]
 
     This class is responsible for merging LoRA B in this block-diagonal fashion. Assuming that we fuse N weights, it
     should look like this:
@@ -291,3 +304,239 @@ def build_peft_weight_mapping(
                 new_weight_conversions.append(new_conversion)
 
     return new_weight_conversions
+
+
+# The main reason we have to explicit this is because the conversion mapping
+# has the full layer name, while the config do not. We coould regex match but
+# this is more explicit and less error prone.
+# Note: this is used in PEFT, changing it requires coordiation.
+_MOE_TARGET_MODULE_MAPPING: dict[str, dict[str, str]] = {
+    "mixtral": {
+        "gate": "gate.weight",
+        "w1": "gate_up_proj",
+        "w3": "gate_up_proj",
+        "w2": "down_proj",
+    },
+    "qwen2_moe": {
+        "gate": "gate.weight",
+        "gate_proj": "gate_up_proj",
+        "up_proj": "gate_up_proj",
+        "down_proj": "down_proj",
+    },
+}
+
+# Note: this is used in PEFT, changing it requires coordiation.
+_MOE_FUSED_TARGETS: dict[str, dict[str, set[str]]] = {
+    # use lists for dict values to ensure stable order
+    "mixtral": {"gate_up_proj": ["w1", "w3"]},
+    "qwen2_moe": {"gate_up_proj": ["gate_proj", "up_proj"]},
+}
+
+
+def _convert_peft_config_moe(peft_config, model_type: str):
+    """
+    Convert the PEFT config of MoE models whose architecture changed from transformers v4 to v5
+
+    Since the model architecture changed, the targets have to updated accordingly. Moreover, when weights are fused, it
+    requires updating the rank and alpha values of those parameters.
+    """
+    base_model_type = _MODEL_TO_CONVERSION_PATTERN.get(model_type, None)
+    if base_model_type is None:
+        return peft_config
+
+    target_module_mapping = _MOE_TARGET_MODULE_MAPPING[base_model_type]
+    fused_targets = _MOE_FUSED_TARGETS.get(base_model_type, {})
+
+    peft_config.target_parameters = set(peft_config.target_parameters or [])
+    peft_config.target_modules = set(peft_config.target_modules or [])
+    if not hasattr(peft_config, "rank_pattern") or peft_config.rank_pattern is None:
+        peft_config.rank_pattern = {}
+    if not hasattr(peft_config, "alpha_pattern") or peft_config.alpha_pattern is None:
+        peft_config.alpha_pattern = {}
+
+    new_target_parameters = peft_config.target_parameters.copy()
+    remaining_target_modules = set()
+    matched_targets: dict[str, set[str]] = {new_name: set() for new_name in fused_targets}
+
+    for target in peft_config.target_modules:
+        mapped_new_name = None
+        mapped_old_name = None
+        for old_name, new_name in target_module_mapping.items():
+            if (target == old_name) or target.endswith(f".{old_name}"):
+                mapped_new_name = new_name
+                mapped_old_name = old_name
+                break
+
+        if mapped_new_name is None:
+            remaining_target_modules.add(target)
+            continue
+
+        new_target_parameters.add(mapped_new_name)
+        if mapped_new_name in fused_targets and mapped_old_name is not None:
+            matched_targets.setdefault(mapped_new_name, set()).add(mapped_old_name)
+
+    for new_name, required_old_targets in fused_targets.items():
+        present_targets = matched_targets.get(new_name, set())
+        if 0 < len(present_targets) < len(required_old_targets):
+            missing = ", ".join(sorted(required_old_targets - present_targets))
+            present = ", ".join(sorted(present_targets))
+            raise ValueError(
+                f"Cannot convert PEFT target(s) {present} without also targeting {missing} because they are fused "
+                f"into {new_name}."
+            )
+
+        if len(present_targets) == len(required_old_targets) and len(required_old_targets) > 1:
+            # TODO: if there is already a rank or alpha pattern for this module, we should update that instead, but
+            # it's not trivial to detect a match here
+            peft_config.rank_pattern[rf".*\.{re.escape(new_name)}"] = peft_config.r * len(required_old_targets)
+            # Preserve per-branch LoRA scaling after fusion.
+            # Example: w1 + w3 => r doubles, so alpha must also double to keep alpha/r unchanged.
+            peft_config.alpha_pattern[rf".*\.{re.escape(new_name)}"] = peft_config.lora_alpha * len(
+                required_old_targets
+            )
+
+    peft_config.target_parameters = new_target_parameters
+    peft_config.target_modules = remaining_target_modules
+
+    return peft_config
+
+
+def convert_peft_config_for_transformers(peft_config, model: torch.nn.Module, conversions: list[Any] | None):
+    """
+    Convert the PEFT config of models whose architecture changed from transformers v4 to v5.
+
+    For most models, this requires no changes, this mostly affects some MoE models like Mixtral.
+    """
+    # If, for any reason, we cannot apply conversion, we just return the PEFT config as is.
+    from peft import PeftType  # avoid circular import
+
+    if peft_config.peft_type != PeftType.LORA:
+        # weight conversion is currently only supported for LoRA
+        return peft_config
+    if not hasattr(model, "config"):
+        # not a transformer model
+        return peft_config
+    if not hasattr(model.config, "model_type"):
+        # not a transformer model
+        return peft_config
+
+    peft_config = copy.deepcopy(peft_config)  # don't mutate the original config
+    model_type = getattr(model.config, "model_type", None)
+    if get_checkpoint_conversion_mapping(model_type) is not None:
+        peft_config = _convert_peft_config_moe(peft_config, model_type)
+
+    return peft_config
+
+
+def _convert_to_peft_serialized_keys(
+    state_dict: dict[str, torch.Tensor],
+    adapter_name: str,
+    base_prefix: str = "base_model.model.",
+) -> dict[str, torch.Tensor]:
+    converted = {}
+    adapter_suffix = f".{adapter_name}"
+
+    for key, value in state_dict.items():
+        # Return PEFT-serialized keys (prefixed), not model state_dict keys.
+        if not key.startswith("base_model."):
+            key = f"{base_prefix}{key}"
+
+        # For module-backed params: ...lora_A.<adapter>.weight -> ...lora_A.weight
+        # For parameter-backed entries: ...<something>.<adapter> -> ...<something>
+        if key.endswith(adapter_suffix):
+            key = key.removesuffix(adapter_suffix)
+        else:
+            key_no_suffix, dot, suffix = key.rpartition(".")
+            if dot and key_no_suffix.endswith(adapter_suffix):
+                key_no_suffix = key_no_suffix.removesuffix(adapter_suffix)
+                key = f"{key_no_suffix}.{suffix}"
+        converted[key] = value
+
+    return converted
+
+
+def convert_peft_adapter_state_dict_for_transformers(
+    model: torch.nn.Module,
+    peft_config,
+    adapter_state_dict: dict[str, torch.Tensor],
+    adapter_name: str = "default",
+) -> dict[str, torch.Tensor]:
+    """Convert a PEFT adapter state dict to match a transformers v5 weight conversion.
+
+    This function is intended for callers (e.g. `PeftModel.load_adapter`) that need transformers' conversion logic
+    without going through `transformer_model.load_adapter`.
+
+    Args:
+        model:
+            Base model on which the adapter will be loaded.
+        peft_config:
+            Adapter config.
+        adapter_state_dict:
+            Adapter weights as loaded from disk.
+        adapter_name:
+            Adapter name used for conversion of internal target patterns.
+
+    Returns:
+        The converted state dict.
+    """
+    weight_conversions = get_model_conversion_mapping(model)
+    peft_weight_mapping = build_peft_weight_mapping(weight_conversions, adapter_name, peft_config=peft_config)
+
+    if not peft_weight_mapping:
+        return adapter_state_dict
+
+    converted_state_dict = apply_peft_weight_mapping_to_state_dict(model, adapter_state_dict, peft_weight_mapping)
+    converted_state_dict = _convert_to_peft_serialized_keys(converted_state_dict, adapter_name=adapter_name)
+    return converted_state_dict
+
+
+def apply_peft_weight_mapping_to_state_dict(
+    model: torch.nn.Module,
+    state_dict: dict[str, torch.Tensor],
+    weight_mapping: list[WeightConverter | WeightRenaming],
+) -> dict[str, torch.Tensor]:
+    """
+    Function that exposes the weight conversion to the state dict. This is required to be called within PEFT to apply
+    weight conversion there without having to duplicate the whole weight conversion logic.
+    """
+    renamings = [entry for entry in weight_mapping if isinstance(entry, WeightRenaming)]
+    converters = [entry for entry in weight_mapping if isinstance(entry, WeightConverter)]
+    pattern_to_converter = {k: converter for converter in converters for k in converter.source_patterns}
+
+    param_name_to_load: dict[str, WeightRenaming | WeightConverter] = {}
+
+    # 1) Rebuild the same "collect by target key + source pattern" structure used by core model loading.
+    # We need this because some conversions are many-to-one (e.g. w1/w3 -> gate_up_proj) and must see all inputs.
+    for original_key, tensor in sorted(state_dict.items(), key=lambda kv: dot_natural_key(kv[0])):
+        renamed_key, source_pattern = rename_source_key(
+            original_key,
+            renamings,
+            converters,
+            prefix=None,
+            meta_state_dict=None,
+        )
+
+        if source_pattern is not None:
+            # Each destination key needs its own converter instance because converters keep internal collected state.
+            new_converter = copy.deepcopy(pattern_to_converter[source_pattern])
+            mapping = param_name_to_load.setdefault(renamed_key, new_converter)
+        else:
+            mapping = param_name_to_load.setdefault(renamed_key, WeightRenaming(original_key, renamed_key))
+            source_pattern = original_key
+
+        mapping.add_tensor(renamed_key, original_key, source_pattern, tensor)
+
+    converted_state_dict = {}
+    # 2) Materialize conversion ops (merge/concat/block-diag/permute/...) and emit final tensors.
+    for first_param_name, mapping in param_name_to_load.items():
+        realized_value = mapping.convert(
+            first_param_name,
+            model=model,
+            config=model.config,
+            hf_quantizer=None,
+            loading_info=None,
+        )
+        for target_name, param in realized_value.items():
+            converted_state_dict[target_name] = param[0] if isinstance(param, list) else param
+
+    return converted_state_dict

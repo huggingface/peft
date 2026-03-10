@@ -22,7 +22,6 @@ from typing import Optional
 
 import huggingface_hub
 import torch
-import transformers
 from huggingface_hub import file_exists, hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
@@ -457,7 +456,7 @@ def set_peft_model_state_dict(
 
     if is_transformers_ge_v5:
         # apply transformers v5 weight conversion to the state_dict, if necessary
-        from peft.utils.integrations import convert_peft_adapter_state_dict_for_transformers
+        from peft.utils.transformers_weight_conversion import convert_peft_adapter_state_dict_for_transformers
 
         state_dict = convert_peft_adapter_state_dict_for_transformers(
             model=model,
