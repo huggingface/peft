@@ -448,7 +448,12 @@ TEST_CASES = [
             "use_cayley_neumann": False,
         },
     ),
-    ("Embedding + transformers Conv1D 1 OFT", "EmbConv1D", OFTConfig, {"r": 1, "oft_block_size": 0, "target_modules": ["emb"]}),
+    (
+        "Embedding + transformers Conv1D 1 OFT",
+        "EmbConv1D",
+        OFTConfig,
+        {"r": 1, "oft_block_size": 0, "target_modules": ["emb"]},
+    ),
     (
         "Embedding + transformers Conv1D 2 OFT",
         "EmbConv1D",
