@@ -200,9 +200,6 @@ class LoraModel(BaseTuner):
                     "one LoRA adapter per model with `target_parameters` is allowed."
                 )
             model_type = getattr(getattr(self.model, "config", None), "model_type", None)
-            if model_type == "mixtral":
-                # TODO: always do this or only for some models??
-                lora_config.param_wrapper_swap_in_out_features = True
 
         # Regexp matching - Find key which matches current target_name in patterns provided
         r_key = get_pattern_key(lora_config.rank_pattern.keys(), current_key)

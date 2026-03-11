@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import re
+
 import packaging.version
 import pytest
 import torch
@@ -19,7 +21,7 @@ import transformers
 from torch import nn
 from transformers import AutoModelForCausalLM
 
-from peft import LoraConfig, PeftModel, get_peft_model
+from peft import LoraConfig, PeftConfig, PeftModel, get_peft_model
 from peft.tuners import lora
 from peft.utils import infer_device
 from peft.utils.integrations import init_empty_weights, skip_init_on_device
@@ -244,3 +246,47 @@ class TestTransformersV5:
         # sanity check
         expected_num_lora_layers = 12  # 2 layers with 6 lora layers each
         assert num_lora_layers == expected_num_lora_layers
+
+    def test_qwen_v4_lora_weight_conversion_peft_model_from_pretrained(self):
+        # Load a PEFT adapter trained with transformers v4 on Qwen3 MoE, which now has converted weights (MoE), using
+        # PeftModel.from_pretrained
+        inputs = torch.arange(10).view(1, -1).to(device=self.torch_device)
+        expected_logits = torch.Tensor(
+            [
+                [0.3644, -0.7487, -0.3190],
+                [0.2413, -0.8686, -0.5683],
+                [0.0333, -0.8790, -0.6361],
+            ],
+        ).to(device=self.torch_device)
+        model_id = "hf-internal-testing/tiny-qwen3-moe"
+        lora_id = "peft-internal-testing/qwen3-moe-pre-v5-lora"
+
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+
+        # test PeftModel.from_pretrained
+        model = PeftModel.from_pretrained(model, lora_id)
+        with torch.inference_mode():
+            output = model(inputs).logits
+
+        # a little bit of deviation but that's fine
+        atol, rtol = 1e-3, 1e-4
+        assert torch.allclose(output[0, :3, :3], expected_logits, atol=atol, rtol=rtol)
+
+    def test_mixtral_v4_lora_no_swap_in_out_features_raises(self):
+        # When the user deactivates swapping in and out features, there should be a shape mismatch
+        inputs = torch.arange(10).view(1, -1).to(device=self.torch_device)
+        model_id = "hf-internal-testing/Mixtral-tiny"
+        lora_id = "peft-internal-testing/mixtral-pre-v5-lora"
+
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+
+        config = PeftConfig.from_pretrained(lora_id)
+        # sanity check
+        assert config.param_wrapper_swap_in_out_features is True
+        config.param_wrapper_swap_in_out_features = False
+
+        msg = re.escape("Error(s) in loading state_dict for PeftModel")
+        with pytest.raises(RuntimeError, match=msg):
+            PeftModel.from_pretrained(model, lora_id, config=config)
