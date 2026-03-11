@@ -13,6 +13,7 @@
 # limitations under the License.
 import tempfile
 
+import pytest
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -25,6 +26,7 @@ from peft import (
     AutoPeftModelForSequenceClassification,
     AutoPeftModelForTokenClassification,
     LoraConfig,
+    PeftConfig,
     PeftModel,
     PeftModelForCausalLM,
     PeftModelForFeatureExtraction,
@@ -223,3 +225,29 @@ class TestPeftAutoModel:
         # > size mismatch for base_model.model.lm_head.modules_to_save.default.weight: copying a param with shape
         # torch.Size([151936, 896]) from checkpoint, the shape in current model is torch.Size([151646, 896]).
         AutoPeftModelForCausalLM.from_pretrained(tmp_path)
+
+    @pytest.mark.parametrize(
+        "auto_class, model_id",
+        [
+            (AutoPeftModelForCausalLM, "peft-internal-testing/tiny-OPTForCausalLM-lora"),
+            (AutoPeftModelForSeq2SeqLM, "peft-internal-testing/tiny_T5ForSeq2SeqLM-lora"),
+            (AutoPeftModelForSequenceClassification, "peft-internal-testing/tiny_OPTForSequenceClassification-lora"),
+            (AutoPeftModelForTokenClassification, "peft-internal-testing/tiny_GPT2ForTokenClassification-lora"),
+            (AutoPeftModelForQuestionAnswering, "peft-internal-testing/tiny_OPTForQuestionAnswering-lora"),
+            (AutoPeftModelForFeatureExtraction, "peft-internal-testing/tiny_OPTForFeatureExtraction-lora"),
+            (AutoPeftModel, "peft-internal-testing/tiny_WhisperForConditionalGeneration-lora"),
+        ],
+    )
+    def test_import_allow_list_prevents_arbitrary_imports(self, auto_class, model_id, tmp_path):
+        with hub_online_once(model_id):
+            model = auto_class.from_pretrained(model_id)
+        model.save_pretrained(tmp_path)
+
+        config = PeftConfig.from_pretrained(tmp_path)
+        config.auto_mapping = {"parent_library": "os", "base_model_class": "system"}
+        config.task_type = None
+        config.save_pretrained(tmp_path)
+
+        with pytest.raises(ValueError) as e:
+            model = auto_class.from_pretrained(tmp_path)
+        assert "which is not in the import allowlist" in str(e)
