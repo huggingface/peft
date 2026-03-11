@@ -873,7 +873,7 @@ class LoraConfig(PeftConfig):
             warnings.warn(msg)
 
         self._custom_modules: Optional[dict[type[nn.Module], type[nn.Module]]] = None
-        # TODO document
+        # Flag if the in and out features for MoE weights (ParamWrapper) should be swapped
         self.param_wrapper_swap_in_out_features = False
 
     def _register_custom_module(self, mapping: dict[type[nn.Module], type[nn.Module]]) -> None:
