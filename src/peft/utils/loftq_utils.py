@@ -205,7 +205,7 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
         raise ValueError("bitsandbytes is not available, please install it to use LoftQ.")
 
     if num_bits not in [4, 8]:
-        raise ValueError("Only support nf4 and int8 quantization is supported")
+        raise ValueError("Only nf4 and int8 quantization is supported")
     if num_iter <= 0:
         raise ValueError("Number of iterations must be greater than 0")
 
