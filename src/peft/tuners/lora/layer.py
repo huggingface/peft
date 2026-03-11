@@ -291,8 +291,12 @@ class LoraLayer(BaseTunerLayer):
                 pg = device_mesh.get_group()
                 src = dist.get_global_rank(pg, 0)
                 if tp_plan == "colwise" and adapter_name in self.lora_A:
+                    # The adapter weights need to be on device for broadcasting
+                    self._move_adapter_to_device_of_base_layer(adapter_name)
                     dist.broadcast(self.lora_A[adapter_name].weight.data, src=src, group=pg)
                 elif tp_plan == "rowwise" and adapter_name in self.lora_B:
+                    # The adapter weights need to be on device for broadcasting
+                    self._move_adapter_to_device_of_base_layer(adapter_name)
                     dist.broadcast(self.lora_B[adapter_name].weight.data, src=src, group=pg)
 
     def olora_init(self, adapter_name):
