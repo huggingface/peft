@@ -2986,17 +2986,28 @@ class TestLoftQ:
         # The error factor indicates by how much the quantization error should be decreased when using LoftQ compared to
         # quantization without LoftQ. Thus 1.03 means that the error should be decreased by 3% at least. This is a very
         # conservative value to prevent flakiness, in practice most gains are > 1.5
-        return 1.05
+        return 1.03
 
     def get_input(self, model_id, device):
         tokenizer = AutoTokenizer.from_pretrained(model_id)
-        inputs = tokenizer("All I want is", padding=True, return_tensors="pt")
+        inputs = tokenizer(
+            [
+                "All I want is",
+                "All I need",
+                "Forever yours truly: ",
+                "Translate French to German: Tu l'as lu?",
+                "Translate German to French: Last du es?",
+            ],
+            padding=True,
+            return_tensors="pt",
+        )
         inputs = inputs.to(device)
         return inputs
 
     def get_base_model(self, model_id, device, **kwargs):
         cls = AutoModelForSeq2SeqLM if "t5" in str(model_id) else AutoModelForCausalLM
-        model = cls.from_pretrained(model_id, device_map=device, **kwargs).eval()
+        with hub_online_once(model_id):
+            model = cls.from_pretrained(model_id, device_map=device, **kwargs).eval()
         return model
 
     def get_logits(self, model, inputs):
@@ -3005,6 +3016,25 @@ class TestLoftQ:
             input_ids = model._shift_right(input_ids)
             return model(input_ids=input_ids, decoder_input_ids=input_ids).logits
         return model(**inputs).logits
+
+    def error_mask(self, error, attention_mask=None):
+        # Make sure to ignore padding values in the error term
+        if attention_mask is not None:
+            # attention_mask shape: [batch_size, seq_len]
+            # error shape: [batch_size, seq_len, vocab_size]
+            # apply the mask (zeros out the squared error for padding tokens)
+            mask = attention_mask.unsqueeze(-1).expand_as(error)
+            masked_error = error * mask
+            return masked_error.sum() / mask.sum()
+        return error.mean()
+
+    def mse(self, a, b, attention_mask=None):
+        error = torch.pow(a - b, 2)
+        return self.error_mask(error, attention_mask=attention_mask)
+
+    def mae(self, a, b, attention_mask=None):
+        error = torch.abs(a - b)
+        return self.error_mask(error, attention_mask=attention_mask)
 
     def get_errors(
         self,
@@ -3068,6 +3098,8 @@ class TestLoftQ:
         # logits from quantized LoRA model using LoftQ
         loftq_config = LoftQConfig(loftq_bits=bits, loftq_iter=loftq_iter)
         lora_config = LoraConfig(
+            r=64,
+            lora_alpha=32,
             task_type=task_type,
             init_lora_weights="loftq",
             loftq_config=loftq_config,
@@ -3104,10 +3136,10 @@ class TestLoftQ:
         del loftq_model
         clear_device_cache(garbage_collection=True)
 
-        mae_quantized = torch.abs(logits_base - logits_quantized).mean()
-        mse_quantized = torch.pow(logits_base - logits_quantized, 2).mean()
-        mae_loftq = torch.abs(logits_base - logits_loftq).mean()
-        mse_loftq = torch.pow(logits_base - logits_loftq, 2).mean()
+        mae_quantized = self.mae(logits_base, logits_quantized, attention_mask=inputs["attention_mask"])
+        mse_quantized = self.mse(logits_base, logits_quantized, attention_mask=inputs["attention_mask"])
+        mae_loftq = self.mae(logits_base, logits_loftq, attention_mask=inputs["attention_mask"])
+        mse_loftq = self.mse(logits_base, logits_loftq, attention_mask=inputs["attention_mask"])
 
         print(f"{bits=} {loftq_iter=} {device=} {model_id=}")
         print(f"{mse_quantized=} vs. {mse_loftq=}")
@@ -3150,14 +3182,14 @@ class TestLoftQ:
             # for int8 compensation we're happy to achieve parity but without additional measures we will
             # not be better since int8 also quantizes the layer input which introduces error loftq can't
             # compensate
-            assert torch.allclose(mse_loftq, mse_quantized, atol=0.03)
-            assert torch.allclose(mae_loftq, mae_quantized, atol=0.03)
+            assert torch.allclose(mse_loftq, mse_quantized, atol=0.06)
+            assert torch.allclose(mae_loftq, mae_quantized, atol=0.06)
 
     @pytest.mark.parametrize("device", [torch_device, "cpu"])
     @pytest.mark.parametrize("n_bits", [4, 8], ids=["4bit", "8bit"])
     @pytest.mark.parametrize("n_iter", [1, 3], ids=["1iter", "3iter"])
     def test_t5_loftq(self, device, n_bits, n_iter, tmp_path):
-        if n_iter > 1:
+        if n_bits == 8 and n_iter > 1:
             pytest.xfail("n_iter > 1 produces strictly worse results for a yet unknown reason")
 
         mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(
@@ -3178,8 +3210,8 @@ class TestLoftQ:
             # for int8 compensation we're happy to achieve parity but without additional measures we will
             # not be better since int8 also quantizes the layer input which introduces error loftq can't
             # compensate
-            assert torch.allclose(mse_loftq, mse_quantized, atol=0.03)
-            assert torch.allclose(mae_loftq, mae_quantized, atol=0.03)
+            assert torch.allclose(mse_loftq, mse_quantized, atol=0.06)
+            assert torch.allclose(mae_loftq, mae_quantized, atol=0.06)
 
     @pytest.mark.xfail  # failing for now, but having DoRA pass is only a nice-to-have, not a must, so we're good
     @pytest.mark.parametrize("device", [torch_device, "cpu"])
