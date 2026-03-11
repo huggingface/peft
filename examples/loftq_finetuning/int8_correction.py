@@ -1,7 +1,8 @@
+#!/usr/bin/env python
 """
 Script to show-case how to offset quantization error with LoRA / LoftQ
 when dealing with quantizations that both quantize weights and activations.
-This is the case for bnb int8, for example but also other quantizations
+This is the case for bnb int8, for example, but also other quantizations
 such as BitNet do this.
 
 The math for how this works is explained in MyLinear8bitLt.forward and
@@ -27,8 +28,24 @@ Note: Some rudimentary testing showed that the LoftQ mitigation is still
 more effective than tuning threshold values but YMMV.
 
 Note: LoftQ is not doing the heavy lifting in this script's case. The error
-between LoftQ and zeroed LoRA is only about two percent points. This effect is
-probably dependent on the quantization strength.
+between LoftQ and zeroed LoRA is only about two percent points (check this
+yourself by using the `--no-loftq` flag). This effect is probably dependent
+on the quantization strength.
+
+Examples of experiments you can do:
+
+- check the difference between applying no-op LoRA and LoftQ initialized
+  LoRA by running the following two commands:
+    * ./int8_correction.py --no-mitigation
+    * ./int8_correction.py --no-mitigation --no-loftq
+
+- check the effect of the mitigation vs. the static compenstation by LoftQ:
+    * ./int8_correction.py
+    * ./int8_correction.py --no-loftq
+
+- check the rank contribution for LoftQ:
+    * for r in 8 16 32 64 128; do ./int8_correction.py --rank $i --no-mitigation; done
+
 """
 
 import argparse
@@ -134,6 +151,9 @@ parser.add_argument(
     "--no-loftq", action="store_true", default=False, help="Disable LoftQ initialization (LoRA no-op init instead)"
 )
 parser.add_argument(
+    "--no-mitigation", action="store_true", default=False, help="Disable activation quantization mitigiation"
+)
+parser.add_argument(
     "--model",
     choices=["t5-small", "t5-base", "t5-large", "facebook/opt-125m"],
     default="t5-base",
@@ -225,9 +245,11 @@ with TemporaryDirectory() as tmp_path:
     loftq_model.save_pretrained(tmp_path / "loftq_model")
 
     lora_config = LoraConfig.from_pretrained(tmp_path / "loftq_model")
+    model_id = args.model
 
-    custom_module_mapping = {bnb.nn.Linear8bitLt: MyLinear8bitLt}
-    lora_config._register_custom_module(custom_module_mapping)
+    if not args.no_mitigation:
+        custom_module_mapping = {bnb.nn.Linear8bitLt: MyLinear8bitLt}
+        lora_config._register_custom_module(custom_module_mapping)
 
     base_model = get_model(model_id, quantization_config=qconf, dtype=torch.float32, device_map=device)
     loftq_model = PeftModel.from_pretrained(
@@ -247,4 +269,4 @@ mse_qref = mse(ref_logits, qref_logits)
 print(f"{model_id=}{device=}")
 print(f"{mse_qref=}, {mse_loftq=}")
 assert mse_loftq < (mse_qref / 1.05), f"{mse_loftq} >= {mse_qref / 1.05}"
-print(f"relative improvement: {(mse_qref - mse_loftq) / mse_qref * 100:.2f}%")
+print(f"relative reduction of error: {(mse_qref - mse_loftq) / mse_qref * 100:.2f}%")
