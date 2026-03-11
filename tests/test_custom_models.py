@@ -40,6 +40,7 @@ from peft import (
     GraloraConfig,
     HRAConfig,
     IA3Config,
+    LilyConfig,
     LNTuningConfig,
     LoHaConfig,
     LoKrConfig,
@@ -446,6 +447,18 @@ TEST_CASES = [
             "block_share": True,
             "use_cayley_neumann": False,
         },
+    ),
+    (
+        "Embedding + transformers Conv1D 1 OFT",
+        "EmbConv1D",
+        OFTConfig,
+        {"r": 1, "oft_block_size": 0, "target_modules": ["emb"]},
+    ),
+    (
+        "Embedding + transformers Conv1D 2 OFT",
+        "EmbConv1D",
+        OFTConfig,
+        {"r": 1, "oft_block_size": 0, "target_modules": ["emb"], "block_share": True},
     ),
     ("Conv2d 1 OFT", "Conv2d", OFTConfig, {"r": 5, "oft_block_size": 0, "target_modules": ["conv2d"]}),
     ("Conv2d 3 OFT", "Conv2d", OFTConfig, {"r": 5, "oft_block_size": 0, "target_modules": ["conv2d"], "coft": True}),
@@ -993,6 +1006,19 @@ TEST_CASES = [
         PsoftConfig,
         {"target_modules": ["lin0"], "r": 4, "psoft_alpha": 4, "ab_svd_init": "pissa_init"},
     ),
+    ########
+    # Lily  #
+    ########
+    ("Vanilla MLP 1 Lily", "MLP", LilyConfig, {"target_modules": "lin0", "r": 2, "stride_A": 1, "num_B": 2}),
+    ("Vanilla MLP 2 Lily", "MLP", LilyConfig, {"target_modules": ["lin0"], "r": 2, "stride_A": 1, "num_B": 2}),
+    ("Vanilla MLP 3 Lily", "MLP", LilyConfig, {"target_modules": ["lin1"], "r": 2, "stride_A": 1, "num_B": 2}),
+    ("Vanilla MLP 4 Lily", "MLP", LilyConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "stride_A": 1, "num_B": 2}),
+    (
+        "Vanilla MLP 5 Lily",
+        "MLP",
+        LilyConfig,
+        {"target_modules": ["lin0"], "r": 4, "stride_A": 1, "num_B": 2},
+    ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 
@@ -1298,6 +1324,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         PsoftConfig,
         {"target_modules": ["lin0"], "r": 2, "psoft_alpha": 2, "init_weights": False},
         {"target_modules": ["lin1"], "r": 2, "psoft_alpha": 2, "init_weights": False},
+    ),
+    (
+        "Lily Same",
+        "lily",
+        LilyConfig,
+        {"target_modules": ["lin0"], "r": 2, "stride_A": 1, "num_B": 2, "init_weights": False},
+        {"target_modules": ["lin0"], "r": 2, "stride_A": 1, "num_B": 2, "init_weights": False},
+    ),
+    (
+        "Lily Different",
+        "lily",
+        LilyConfig,
+        {"target_modules": ["lin0"], "r": 2, "stride_A": 1, "num_B": 2, "init_weights": False},
+        {"target_modules": ["lin1"], "r": 2, "stride_A": 1, "num_B": 2, "init_weights": False},
     ),
 ]
 
@@ -2180,7 +2220,11 @@ class TestPeftCustomModel(PeftCommonTester):
 
         model.train()
         lr = 0.5
-        if (config_kwargs.get("use_dora") and model_id == "EmbConv1D") or issubclass(config_cls, VBLoRAConfig):
+        if (
+            (config_kwargs.get("use_dora") and model_id == "EmbConv1D")
+            or issubclass(config_cls, VBLoRAConfig)
+            or issubclass(config_cls, LilyConfig)
+        ):
             # this high learning rate was found through testing to be necessary to avoid flakiness
             lr = 100
         elif "mha" in model_id.lower():
@@ -2820,9 +2864,8 @@ class TestPeftCustomModel(PeftCommonTester):
         assert {module.disable_adapters for module in tuner_modules} == {True, False}
         # check that we get a warning with irregular states
         msg = "The model contains some adapter layers that are enabled and others that are disabled"
-        with pytest.warns(UserWarning, match=msg):
-            with model.disable_adapter():
-                pass
+        with pytest.warns(UserWarning, match=msg), model.disable_adapter():
+            pass
 
         # when encountering irregular adapters, we enable all adapters at the end of the context
         assert all(not module.disable_adapters for module in tuner_modules)
@@ -3837,6 +3880,7 @@ class TestMultipleActiveAdapters:
     def test_multiple_active_adapters_merge_and_unmerge(
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
+        _skip_if_merging_not_supported(test_name, config_cls, config_kwargs_1)
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
 
         torch.manual_seed(0)
@@ -3872,6 +3916,7 @@ class TestMultipleActiveAdapters:
         "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
     )
     def test_merge_layers_multi(self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2):
+        _skip_if_merging_not_supported(test_name, config_cls, config_kwargs_1)
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
 
         torch.manual_seed(0)
@@ -4070,6 +4115,101 @@ class TestRequiresGrad:
             "base_model.model.lin0.lora_A.adapter1.weight",
             "base_model.model.lin0.lora_B.adapter1.weight",
         )
+
+    def test_requires_grad_follows_inference_mode_modules_to_save(self):
+        # check that passing inference_mode to set_adapter has the intended effect with LoRA and modules_to_save
+        config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.modules_to_save.default.weight",
+            "base_model.model.lin1.modules_to_save.default.bias",
+            "base_model.model.lin0.lora_A.default.weight",
+            "base_model.model.lin0.lora_B.default.weight",
+        )
+
+        # inference mode false (default)
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default", inference_mode=False)
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.modules_to_save.default.weight",
+            "base_model.model.lin1.modules_to_save.default.bias",
+            "base_model.model.lin0.lora_A.default.weight",
+            "base_model.model.lin0.lora_B.default.weight",
+        )
+
+        # set config1 as active, should lead to adapter1 requiring grad
+        peft_model.set_adapter("adapter1", inference_mode=False)
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.modules_to_save.adapter1.weight",
+            "base_model.model.lin1.modules_to_save.adapter1.bias",
+            "base_model.model.lin0.lora_A.adapter1.weight",
+            "base_model.model.lin0.lora_B.adapter1.weight",
+        )
+
+        # inference mode true
+
+        # set config0 as active but in inference mode, should result in no module requiring grad
+        peft_model.set_adapter("default", inference_mode=True)
+        self.check_requires_grad(peft_model)
+
+        # set config1 as active but in inference mode, should result in no module requiring grad
+        peft_model.set_adapter("adapter1", inference_mode=True)
+        self.check_requires_grad(peft_model)
+
+    def test_requires_grad_follows_inference_mode_trainable_token_indices(self):
+        # check that passing inference_mode to set_adapter has the intended effect with LoRA and trainable tokens
+        config0 = LoraConfig(target_modules=["conv1d"], trainable_token_indices={"emb": [0, 1, 2]})
+        peft_model = get_peft_model(ModelEmbConv1D(), config0)
+
+        config1 = LoraConfig(target_modules=["lin0"], trainable_token_indices={"emb": [0, 1, 2]})
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.emb.token_adapter.trainable_tokens_delta.default",
+            "base_model.model.conv1d.lora_A.default.weight",
+            "base_model.model.conv1d.lora_B.default.weight",
+        )
+
+        # inference mode false (default)
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default", inference_mode=False)
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.emb.token_adapter.trainable_tokens_delta.default",
+            "base_model.model.conv1d.lora_A.default.weight",
+            "base_model.model.conv1d.lora_B.default.weight",
+        )
+
+        # set config1 as active, should lead to adapter1 requiring grad
+        peft_model.set_adapter("adapter1", inference_mode=False)
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.emb.token_adapter.trainable_tokens_delta.adapter1",
+            "base_model.model.lin0.lora_A.adapter1.weight",
+            "base_model.model.lin0.lora_B.adapter1.weight",
+        )
+
+        # inference mode true
+
+        # set config0 as active but in inference mode, should result in no module requiring grad
+        peft_model.set_adapter("default", inference_mode=True)
+        self.check_requires_grad(peft_model)
+
+        # set config1 as active but in inference mode, should result in no module requiring grad
+        peft_model.set_adapter("adapter1", inference_mode=True)
+        self.check_requires_grad(peft_model)
 
     def test_requires_grad_lora_different_targets(self):
         # test two different LoRA adapters that target different modules
