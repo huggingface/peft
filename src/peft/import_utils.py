@@ -164,3 +164,13 @@ def is_diffusers_available():
 @lru_cache
 def is_te_available():
     return importlib.util.find_spec("transformer_engine") is not None
+
+
+@lru_cache
+def is_te_pytorch_available():
+    if not is_te_available():
+        return False
+
+    import transformer_engine
+
+    return hasattr(transformer_engine, "pytorch")
