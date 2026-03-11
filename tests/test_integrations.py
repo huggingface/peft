@@ -107,7 +107,7 @@ class TestInitEmptyWeights:
 
 
 @pytest.mark.skipif(
-    packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.4.0"),
+    packaging.version.parse(transformers.__version__) < packaging.version.parse("5.4.0"),
     reason="PEFT weight conversion is fixed in transformers 5.4.0",
 )
 class TestTransformersV5:
