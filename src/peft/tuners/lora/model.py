@@ -305,6 +305,10 @@ class LoraModel(BaseTuner):
                     device_mesh,
                 )
             elif tp_plan == "embedding_rowwise":
+                # LoRA embeddings are a bit special, there is no new module but just weights.
+                # To use the TP hooks machinery, we need to create a fake module that has the weights as attrributes 
+                # (used by the hooks), make the hooks use this fake module, and then add the hooks to the original 
+                # `_embed` method acting as the forward pass lora_embedding_A.
                 tp_layer = ALL_PARALLEL_STYLES[tp_plan]
                 mod = SimpleNamespace()
                 mod.weight = lora_module.lora_embedding_A[adapter_name]
