@@ -3141,10 +3141,6 @@ class TestLoftQ:
         mae_loftq = self.mae(logits_base, logits_loftq, attention_mask=inputs["attention_mask"])
         mse_loftq = self.mse(logits_base, logits_loftq, attention_mask=inputs["attention_mask"])
 
-        print(f"{bits=} {loftq_iter=} {device=} {model_id=}")
-        print(f"{mse_quantized=} vs. {mse_loftq=}")
-        print(f"{mae_quantized=} vs. {mae_loftq=}")
-
         return mae_quantized, mse_quantized, mae_loftq, mse_loftq
 
     @pytest.mark.parametrize("device", [torch_device, "cpu"])
