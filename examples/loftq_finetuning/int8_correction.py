@@ -210,8 +210,16 @@ def get_logits(model, inputs):
         return model(**inputs, labels=inputs["input_ids"]).logits
 
 
-def mse(a, b):
-    return torch.pow(a - b, 2).mean().item()
+def mse(a, b, attention_mask=None):
+    squared_error = torch.pow(a - b, 2)
+    if attention_mask is not None:
+        # attention_mask shape: [batch_size, seq_len]
+        # squared_error shape: [batch_size, seq_len, vocab_size]
+        # apply the mask (zeros out the squared error for padding tokens)
+        mask = attention_mask.unsqueeze(-1).expand_as(squared_error)
+        masked_squared_error = squared_error * mask
+        return (masked_squared_error.sum() / mask.sum()).item()
+    return squared_error.mean().item()
 
 
 def get_model(*args, **kwargs):
@@ -262,8 +270,8 @@ ref_logits = get_logits(ref_model, inputs)
 qref_logits = get_logits(qref_model, inputs)
 loftq_logits = get_logits(loftq_model, inputs)
 
-mse_loftq = mse(ref_logits, loftq_logits)
-mse_qref = mse(ref_logits, qref_logits)
+mse_loftq = mse(ref_logits, loftq_logits, attention_mask=inputs["attention_mask"])
+mse_qref = mse(ref_logits, qref_logits, attention_mask=inputs["attention_mask"])
 
 
 print(f"{model_id=}{device=}")
