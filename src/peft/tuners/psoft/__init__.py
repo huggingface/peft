@@ -1,4 +1,4 @@
-# Copyright 2024-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,11 +14,11 @@
 
 from peft.utils import register_peft_method
 
-from .config import BoneConfig
-from .layer import BoneLayer, BoneLinear
-from .model import BoneModel
+from .config import PsoftConfig
+from .layer import Linear, PsoftLayer
+from .model import PsoftModel
 
 
-__all__ = ["BoneConfig", "BoneLayer", "BoneLinear", "BoneModel"]
+__all__ = ["Linear", "PsoftConfig", "PsoftLayer", "PsoftModel"]
 
-register_peft_method(name="bone", config_cls=BoneConfig, model_cls=BoneModel)
+register_peft_method(name="psoft", config_cls=PsoftConfig, model_cls=PsoftModel, prefix="psoft_")

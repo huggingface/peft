@@ -69,18 +69,20 @@ os.environ["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
 
 def get_generation_config(*, seq_len, generate_kwargs) -> GenerationConfig:
     # filter out None values so that we don't depend on setting correct defaults in the config
-    generation_kwargs = {k: v for k, v in generate_kwargs.items() if v is not None}
-    if ("max_length" in generation_kwargs) and ("max_new_tokens" in generation_kwargs):
+    generate_kwargs = {k: v for k, v in generate_kwargs.items() if v is not None}
+    if ("max_length" in generate_kwargs) and ("max_new_tokens" in generate_kwargs):
         # transformers does not support setting both max_length and max_new_tokens, but what we want in this case is to
         # take the smaller of the two values
-        new_max_length = min(generation_kwargs["max_new_tokens"] + seq_len, generation_kwargs["max_length"])
-        del generation_kwargs["max_new_tokens"]
-        generation_kwargs["max_length"] = new_max_length
+        new_max_length = min(generate_kwargs["max_new_tokens"] + seq_len, generate_kwargs["max_length"])
+        del generate_kwargs["max_new_tokens"]
+        generate_kwargs["max_length"] = new_max_length
     generation_config = GenerationConfig(**generate_kwargs)
     return generation_config
 
 
 def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm: bool = False) -> tuple[list[str], list[str]]:
+    generate_kwargs = generate_kwargs.copy()
+    generate_kwargs["pad_token_id"] = tokenizer.eos_token_id
     with torch.inference_mode():
         predictions = []
         responses = []
@@ -93,7 +95,7 @@ def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm: bool =
             batch = tokenizer.pad(sliced, return_tensors="pt", padding_side="left").to(model.device)
             seq_len = batch["input_ids"].shape[1]
             generation_config = get_generation_config(seq_len=seq_len, generate_kwargs=generate_kwargs)
-            outputs = model.generate(**batch, generation_config=generation_config, pad_token_id=tokenizer.eos_token_id)
+            outputs = model.generate(**batch, generation_config=generation_config)
             predictions += tokenizer.batch_decode(outputs, skip_special_tokens=True)
     return predictions, responses
 

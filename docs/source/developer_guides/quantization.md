@@ -322,6 +322,31 @@ Besides LoRA, the following PEFT methods also support quantization:
 - **AdaLoRA** (supports both bitsandbytes and GPTQ quantization)
 - **(IA)³** (supports bitsandbytes quantization)
 
+## Transformer Engine (TE) LoRA
+
+PEFT supports LoRA adapters on top of [NVIDIA Transformer Engine](https://docs.nvidia.com/deeplearning/transformer-engine/) layers (`te.pytorch.Linear`, `te.pytorch.LayerNormLinear`, and `te.pytorch.LayerNormMLP`). TE layers use FP8 and fused kernels to accelerate transformer training, and attaching LoRA adapters lets you parameter-efficiently fine-tune TE-accelerated models.
+
+```python
+from peft import LoraConfig, get_peft_model
+
+config = LoraConfig(
+    r=8,
+    lora_alpha=16,
+    target_modules=["q_proj", "v_proj"],
+    task_type="TOKEN_CLS",
+)
+model = get_peft_model(te_model, config)
+```
+
+When Transformer Engine is installed, PEFT automatically dispatches matching layers to the `TeLinear` adapter — no extra configuration is needed.
+
+### Caveats
+
+- `merge()` and `unmerge()` are not yet supported for TE layers.
+- DoRA is not supported with TE layers.
+
+A complete ESM2 token-classification example is available under `examples/lora_finetuning_transformer_engine/`.
+
 ## Next steps
 
 If you're interested in learning more about quantization, the following may be helpful:
