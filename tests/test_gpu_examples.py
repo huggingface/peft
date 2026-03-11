@@ -2986,7 +2986,7 @@ class TestLoftQ:
         # The error factor indicates by how much the quantization error should be decreased when using LoftQ compared to
         # quantization without LoftQ. Thus 1.03 means that the error should be decreased by 3% at least. This is a very
         # conservative value to prevent flakiness, in practice most gains are > 1.5
-        return 1.05 if device in ("xpu", "cpu") else 1.05
+        return 1.05
 
     def get_input(self, model_id, device):
         tokenizer = AutoTokenizer.from_pretrained(model_id)
