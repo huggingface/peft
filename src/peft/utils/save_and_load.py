@@ -593,6 +593,7 @@ def set_peft_model_state_dict(
                 from transformers.integrations.tensor_parallel import (
                     ALL_PARALLEL_STYLES,
                     ColwiseParallel,
+                    EmbeddingParallel,
                     RowwiseParallel,
                 )
 
@@ -624,6 +625,10 @@ def set_peft_model_state_dict(
                         key = f"{name}.lora_B.{adapter_name}.weight"
                     elif isinstance(tp_layer, RowwiseParallel):
                         key = f"{name}.lora_A.{adapter_name}.weight"
+                    elif isinstance(tp_layer, EmbeddingParallel):
+                        key = f"{name}.lora_embedding_A.{adapter_name}"
+                    else:
+                        raise ValueError(f"Unknown tensor parallel plan {tp_plan} for {module.__class__.__name__}.")
                     tp_layer.empty_param = peft_model_state_dict[key]
                     peft_model_state_dict[key] = tp_layer.shard_tensor(
                         peft_model_state_dict[key], device=device, dtype=dtype
