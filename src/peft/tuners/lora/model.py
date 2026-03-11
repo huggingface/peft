@@ -13,7 +13,6 @@
 # limitations under the License.
 from __future__ import annotations
 
-import functools
 import math
 import operator
 import re
@@ -323,14 +322,11 @@ class LoraModel(BaseTuner):
 
                 original_embed = lora_module._embed
 
-                @functools.wraps(original_embed)
-                def wrapper(self, input, weight):
+                def wrapper(input, weight):
                     masked_input = input_fn((input,))
-                    outputs = original_embed(masked_input, weight)
-                    outputs = output_fn(outputs)
-                    return outputs
+                    return output_fn(original_embed(masked_input, weight))
 
-                lora_module._embed = wrapper.__get__(lora_module, type(lora_module))
+                lora_module._embed = wrapper
             else:
                 raise RuntimeError(f"Cannot create LoRA adapters for a base layer following this TP plan: {tp_plan}")
 
