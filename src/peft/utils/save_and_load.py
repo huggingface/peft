@@ -28,6 +28,7 @@ from safetensors.torch import load_file as safe_load_file
 from transformers.integrations.tensor_parallel import (
     ALL_PARALLEL_STYLES,
     ColwiseParallel,
+    EmbeddingParallel,
     RowwiseParallel,
 )
 from transformers.utils import http_user_agent
@@ -620,6 +621,14 @@ def set_peft_model_state_dict(
                         peft_model_state_dict[key] = tp_layer.shard_tensor(
                             peft_model_state_dict[key], device=device, dtype=dtype
                         )
+                    elif isinstance(tp_layer, EmbeddingParallel):
+                        key = f"{name}.lora_embedding_A.{adapter_name}"
+                        tp_layer.empty_param = peft_model_state_dict[key]
+                        peft_model_state_dict[key] = tp_layer.shard_tensor(
+                            peft_model_state_dict[key], device=device, dtype=dtype
+                        )
+                    else:
+                        raise ValueError(f"Unknown tensor parallel plan {tp_plan} for {module.__class__.__name__}.")
 
         elif config.peft_type == PeftType.OFT:
             if any(".oft_r." in key for key in peft_model_state_dict):
