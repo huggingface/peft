@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import warnings
 from collections.abc import Callable
 from typing import Optional, Union
 
@@ -33,9 +34,17 @@ from transformers.utils.hub import get_checkpoint_shard_files
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_xpu_available
 
 
+# TODO for PEFT 0.20, remove NFQuantizer in favor of bnb 4bit quantization.
 class NFQuantizer:
     def __init__(self, num_bits=2, device="cuda", method="normal", block_size=64, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+        warnings.warn(
+            "NFQuantizer is deprecated and is going to be removed in PEFT 0.20. Consider using "
+            "alternative quantization libraries for nf{2,4,8} quantization.",
+            category=DeprecationWarning,
+        )
+
         self.num_bits = num_bits
         self.device = device
         self.method = method
@@ -195,8 +204,8 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
     else:
         raise ValueError("bitsandbytes is not available, please install it to use LoftQ.")
 
-    if num_bits not in [2, 4, 8]:
-        raise ValueError("Only support 2, 4, 8 bits quantization")
+    if num_bits not in [4, 8]:
+        raise ValueError("Only nf4 and int8 quantization is supported")
     if num_iter <= 0:
         raise ValueError("Number of iterations must be greater than 0")
 
@@ -206,9 +215,14 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
     logging.info(
         f"Weight: ({out_feature}, {in_feature}) | Rank: {reduced_rank} | Num Iter: {num_iter} | Num Bits: {num_bits}"
     )
-    if not is_bnb_4bit_available() or num_bits in [2, 8]:
+    if not is_bnb_4bit_available() and num_bits == 4:
+        # TODO for PEFT 0.20 remove NFQuantizer invocation and throw an exception
         quantizer = NFQuantizer(num_bits=num_bits, device=device, method="normal", block_size=64)
         compute_device = device
+        warnings.warn(
+            "Native support for nf4 is being deprecated with PEFT 0.20. Please install a recent version of bitsandbytes.",
+            category=DeprecationWarning,
+        )
     else:
         compute_device = "xpu" if is_xpu_available() else "cuda"
 
@@ -222,15 +236,23 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
                 res.to("cpu"), requires_grad=False, compress_statistics=False, quant_type="nf4"
             ).to(compute_device)
             dequantized_weight = bnb.functional.dequantize_4bit(qweight.data, qweight.quant_state)
-        else:
+        elif num_bits == 4:
             quantized_weight, max_abs, shape = quantizer.quantize_block(res)
             dequantized_weight = quantizer.dequantize_block(quantized_weight, max_abs, shape)
+        elif num_bits == 8:
+            qweight = bnb.nn.Int8Params(res.to("cpu"), requires_grad=False).to(device)
+            dequantized_weight = bnb.functional.int8_vectorwise_dequant(qweight.data, qweight.SCB).to(compute_device)
 
         res = weight - dequantized_weight
 
         # Decompose the residual by SVD
         output = _low_rank_decomposition(res, reduced_rank=reduced_rank)
         L, R, reduced_rank = output["L"], output["R"], output["reduced_rank"]
+
+        # don't prepare the residual if we're at the end
+        if i + 1 == num_iter:
+            break
+
         res = weight - torch.mm(L, R)
 
     lora_A, lora_B = R, L
