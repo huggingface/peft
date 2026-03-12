@@ -101,20 +101,15 @@ def get_peft_model_state_dict(
 
     # If model was sharded with TP, gather full tensors for saving
     base_model = model.base_model
-    prefix = "base_model." if model.active_peft_config.is_prompt_learning else "base_model.model."
     if base_model._tuner_tp_plan:
         # If the keys in the state dict start with the prefix, we need to add the prefix to the keys in the tp plan as
         # well.
+        prefix = "base_model." if model.active_peft_config.is_prompt_learning else "base_model.model."
         keys_starting_with_prefix = all(k.startswith(prefix) for k in state_dict)
-        tp_plan = {}
-        for key in base_model._tuner_tp_plan:
-            if keys_starting_with_prefix:
-                if not key.startswith(prefix):
-                    tp_plan[f"{prefix}{key}"] = base_model._tuner_tp_plan[key]
-                else:
-                    tp_plan[key] = base_model._tuner_tp_plan[key]
-            else:
-                tp_plan[key] = base_model._tuner_tp_plan[key]
+        tp_plan = {
+            (f"{prefix}{k}" if keys_starting_with_prefix and not k.startswith(prefix) else k): v
+            for k, v in base_model._tuner_tp_plan.items()
+        }
         state_dict = gather_state_dict_for_save(
             state_dict, tp_plan, base_model._tuner_device_mesh, base_model._tuner_tp_size
         )
