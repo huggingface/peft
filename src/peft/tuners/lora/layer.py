@@ -287,7 +287,12 @@ class LoraLayer(BaseTunerLayer):
             base_layer = self.get_base_layer()
             tp_plan = getattr(base_layer, "_hf_tp_plan", None)
             device_mesh = getattr(base_layer, "_hf_device_mesh", None)
-            if device_mesh is not None and tp_plan in ("colwise", "rowwise"):
+            if device_mesh is not None:
+                if tp_plan not in ["colwise", "rowwise", "embedding_rowwise"]:
+                    raise RuntimeError(
+                        f'tp_plan {tp_plan} found on the base layer. Expected one of "colwise", "rowwise", '
+                        '"embedding_rowwise". The rest is not supported.'
+                    )
                 pg = device_mesh.get_group()
                 src = dist.get_global_rank(pg, 0)
                 if tp_plan == "colwise" and adapter_name in self.lora_A:
@@ -300,7 +305,7 @@ class LoraLayer(BaseTunerLayer):
                     dist.broadcast(self.lora_B[adapter_name].weight.data, src=src, group=pg)
                 elif tp_plan == "embedding_rowwise" and adapter_name in self.lora_embedding_B:
                     self._move_adapter_to_device_of_base_layer(adapter_name)
-                    dist.broadcast(self.lora_embedding_B[adapter_name].weight.data, src=src, group=pg)
+                    dist.broadcast(self.lora_embedding_B[adapter_name].data, src=src, group=pg)
 
     def olora_init(self, adapter_name):
         base_layer = self.get_base_layer()
