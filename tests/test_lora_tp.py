@@ -367,6 +367,45 @@ def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
     assert torch.isfinite(outputs.loss), f"Loss not finite after checkpoint load: {outputs.loss}"
 
 
+def _test_save_unsharded_weights(rank, world_size, port, tmp_dir_reference, tmp_dir_tp):
+    """
+    Test that saving a TP PEFT model produces fully unsharded weights identical to the original non-TP weights.
+
+    Flow:
+      1. Rank 0: create a plain (non-TP) PEFT model, save it as the reference.
+      2. All ranks: load the TP base model, load the reference PEFT weights (shards on load), then save again.
+      3. Rank 0: compare the re-saved state dict against the original reference — they must match exactly.
+    """
+    if rank == 0:
+        plain_model = AutoModelForCausalLM.from_pretrained(MODEL_ID)
+        lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
+        plain_model = get_peft_model(plain_model, lora_config)
+        plain_model.save_pretrained(tmp_dir_reference)
+
+    dist.barrier()
+
+    # All ranks: load with TP, shard the reference weights on the fly, then save
+    tp_base = AutoModelForCausalLM.from_pretrained(MODEL_ID, tp_plan=TP_PLAN)
+    tp_model = PeftModel.from_pretrained(tp_base, tmp_dir_reference)
+    tp_model.save_pretrained(tmp_dir_tp)
+
+    dist.barrier()
+
+    if rank == 0:
+        from safetensors.torch import load_file
+
+        reference_sd = load_file(f"{tmp_dir_reference}/adapter_model.safetensors")
+        saved_sd = load_file(f"{tmp_dir_tp}/adapter_model.safetensors")
+
+        assert set(reference_sd.keys()) == set(saved_sd.keys()), (
+            f"State dict keys differ.\n  reference: {sorted(reference_sd.keys())}\n  saved: {sorted(saved_sd.keys())}"
+        )
+        for key in reference_sd:
+            assert torch.allclose(reference_sd[key], saved_sd[key], atol=1e-6), (
+                f"Weight mismatch for '{key}': max diff = {(reference_sd[key] - saved_sd[key]).abs().max()}"
+            )
+
+
 def _test_multiple_adapters(rank, world_size, port):
     """Two LoRA adapters coexist on a TP model and can be switched between."""
     model = AutoModelForCausalLM.from_pretrained(MODEL_ID, tp_plan=TP_PLAN)
@@ -409,6 +448,10 @@ class TestLoraTP(unittest.TestCase):
     def test_from_checkpoint(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             self._spawn(_test_load_from_checkpoint, tmp_dir, port_offset=1)
+
+    def test_save_unsharded_weights(self):
+        with tempfile.TemporaryDirectory() as tmp_dir_reference, tempfile.TemporaryDirectory() as tmp_dir_tp:
+            self._spawn(_test_save_unsharded_weights, tmp_dir_reference, tmp_dir_tp, port_offset=3)
 
     def test_multiple_adapters(self):
         self._spawn(_test_multiple_adapters, port_offset=2)
