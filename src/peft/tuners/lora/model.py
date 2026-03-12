@@ -13,6 +13,8 @@
 # limitations under the License.
 from __future__ import annotations
 
+import copy
+import logging
 import math
 import operator
 import re
@@ -59,6 +61,9 @@ from .layer import Conv2d, LoraLayer, ParamWrapper, dispatch_default
 from .te import dispatch_transformer_engine
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
+
+
+logger = logging.getLogger(__name__)
 
 
 def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
@@ -305,12 +310,12 @@ class LoraModel(BaseTuner):
                 )
             elif tp_plan == "embedding_rowwise":
                 # LoRA embeddings are a bit special, there is no new module but just weights.
-                # To use the TP hooks machinery, we need to create a fake module that has the weights as attrributes
+                # To use the TP hooks machinery, we need to create a fake module that has the weights as attributes
                 # (used by the hooks), make the hooks use this fake module, and then add the hooks to the original
                 # `_embed` method acting as the forward pass lora_embedding_A.
-                tp_layer = ALL_PARALLEL_STYLES[tp_plan]
+                tp_layer = copy.deepcopy(ALL_PARALLEL_STYLES[tp_plan])
                 mod = SimpleNamespace()
-                mod.weight = lora_module.lora_embedding_A[adapter_name]
+                mod.weight = lora_module.lora_embedding_A[adapter_name].T  # lora_embedding_A shape is (r, vocab_size)
 
                 def input_fn(inputs):
                     return tp_layer._prepare_input_fn(mod, inputs, device_mesh)
@@ -326,7 +331,10 @@ class LoraModel(BaseTuner):
 
                 lora_module._embed = wrapper
             else:
-                raise RuntimeError(f"Cannot create LoRA adapters for a base layer following this TP plan: {tp_plan}")
+                logger.warning(
+                    f'TP plan "{tp_plan}" on the base layer is not supported for LoRA. '
+                    "LoRA adapters will be created without tensor parallel hooks."
+                )
 
     def _replace_module(self, parent, child_name, new_module, child):
         # override in LoraModel to handle quantized weights properly
