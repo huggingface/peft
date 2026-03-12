@@ -13,6 +13,7 @@
 # limitations under the License.
 from __future__ import annotations
 
+import logging
 import math
 import warnings
 from contextlib import contextmanager
@@ -41,6 +42,8 @@ from .config import LoraConfig
 
 
 VARIANT_KWARG_KEYS = ["alora_offsets"]
+
+logger = logging.getLogger(__name__)
 
 
 class LoraVariant:
@@ -289,9 +292,10 @@ class LoraLayer(BaseTunerLayer):
             device_mesh = getattr(base_layer, "_hf_device_mesh", None)
             if device_mesh is not None:
                 if tp_plan not in ["colwise", "rowwise", "embedding_rowwise"]:
-                    raise RuntimeError(
-                        f'tp_plan {tp_plan} found on the base layer. Expected one of "colwise", "rowwise", '
-                        '"embedding_rowwise". The rest is not supported.'
+                    logger.warning(
+                        f'tp_plan "{tp_plan}" found on the base layer is not supported for LoRA weight '
+                        'synchronization. Expected one of "colwise", "rowwise", "embedding_rowwise". '
+                        "LoRA weights may not be synchronized across ranks."
                     )
                 pg = device_mesh.get_group()
                 src = dist.get_global_rank(pg, 0)

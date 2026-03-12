@@ -13,6 +13,7 @@
 # limitations under the License.
 from __future__ import annotations
 
+import copy
 import os
 import platform
 import re
@@ -617,7 +618,7 @@ def set_peft_model_state_dict(
                     # state dict key to shard.
                     # This attribute is used by the sharding logic for shape reference,
                     # it must be of the same shape as the parameter to shard.
-                    tp_layer = ALL_PARALLEL_STYLES[tp_plan]
+                    tp_layer = copy.deepcopy(ALL_PARALLEL_STYLES[tp_plan])
                     tp_layer.device_mesh = device_mesh
                     tp_layer.rank = device_mesh.get_local_rank()
 
