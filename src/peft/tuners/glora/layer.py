@@ -84,12 +84,12 @@ class GLoraLayer(nn.Module):
             return nn.Parameter(torch.zeros(out_feature, rank)), nn.Parameter(torch.zeros(rank, in_feature))
         return nn.Parameter(torch.zeros(*shape)), nn.Parameter(torch.zeros(1, 1))
 
-    def set_adapter(self, adapter_name_or_list, **kwargs):
+    def set_adapter(self, adapter_names: str | list[str], inference_mode: bool = False) -> None:
         # inference_mode (gradient freezing) is handled at the model level via _freeze_adapter
-        if isinstance(adapter_name_or_list, str):
-            self.active_adapters = [adapter_name_or_list]
+        if isinstance(adapter_names, str):
+            self.active_adapters = [adapter_names]
         else:
-            self.active_adapters = list(adapter_name_or_list)
+            self.active_adapters = list(adapter_names)
 
     def delete_adapter(self, adapter_name):
         for d in [

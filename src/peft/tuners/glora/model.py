@@ -187,14 +187,14 @@ class GLoraModel(BaseTuner):
             ]
         return peft_config
 
-    def set_adapter(self, adapter_name_or_list, **kwargs):
-        if self.active_adapter == adapter_name_or_list:
+    def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
+        if self.active_adapter == adapter_name:
             return
 
         for module in self.model.modules():
             if isinstance(module, GLoraLayer):
-                module.set_adapter(adapter_name_or_list, **kwargs)
-        self.active_adapter = adapter_name_or_list
+                module.set_adapter(adapter_name, inference_mode=inference_mode)
+        self.active_adapter = adapter_name
 
     def enable_adapter_layers(self):
         for module in self.model.modules():
