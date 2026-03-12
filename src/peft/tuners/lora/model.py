@@ -286,7 +286,7 @@ class LoraModel(BaseTuner):
 
         # If the module has a tp_plan, we add hooks to the LoRA layers to make sure they respect the plan
         if tp_plan is not None:
-            _SUPPORTED_TP_PLANS = ("colwise", "rowwise", "embedding_rowwise", "embedding_colwise")
+            _SUPPORTED_TP_PLANS = ("colwise", "rowwise", "embedding_rowwise")
 
             if tp_plan not in _SUPPORTED_TP_PLANS:
                 logger.warning(
@@ -319,7 +319,7 @@ class LoraModel(BaseTuner):
                         tp_plan,
                         device_mesh,
                     )
-                elif tp_plan == "embedding_rowwise":
+                else:  # embedding_rowwise
                     tp_plan_keys.append(f"{generic_key}.base_layer.weight")
                     tp_plan_keys.append(f"{generic_key}.lora_embedding_A.{adapter_name}")
                     tp_plans.append(tp_plan)
@@ -350,8 +350,6 @@ class LoraModel(BaseTuner):
                         return output_fn(original_embed(masked_input, weight))
 
                     lora_module._embed = wrapper
-                else:  # embedding_colwise
-                    raise NotImplementedError(f"TP plan {tp_plan} is not implemented for LoRA yet.")
 
                 for tp_plan_key, tp_plan in zip(tp_plan_keys, tp_plans):
                     if tp_plan_key not in self._tuner_tp_plan:
