@@ -328,20 +328,17 @@ class LoraModel(BaseTuner):
                     # to embedding_colwise so that the gathering happens on the correct dimension at save time.
                     tp_plans.append("embedding_colwise")
 
-                for tp_plan_key, tp_plan in zip(tp_plan_keys, tp_plans):
-                    if tp_plan_key not in self._tuner_tp_plan:
-                        self._tuner_tp_plan[tp_plan_key] = tp_plan
-                    elif self._tuner_tp_plan[tp_plan_key] != tp_plan:
-                        logger.warning(
-                            f"Found conflicting TP plans for {tp_plan_key}: {self._tuner_tp_plan[tp_plan_key]} vs "
-                            f"{tp_plan}."
-                        )
+                for key, plan in zip(tp_plan_keys, tp_plans):
+                    if key not in self._tuner_tp_plan:
+                        self._tuner_tp_plan[key] = plan
+                    elif self._tuner_tp_plan[key] != plan:
+                        logger.warning(f"Found conflicting TP plans for {key}: {self._tuner_tp_plan[key]} vs {plan}.")
 
                 if self._tuner_device_mesh is None:
                     self._tuner_device_mesh = device_mesh
                 elif self._tuner_device_mesh != device_mesh:
                     logger.warning(
-                        f"Found conflicting device meshes for {tp_plan_key}: {self._tuner_device_mesh} vs "
+                        f"Found conflicting device meshes for {current_key}: {self._tuner_device_mesh} vs "
                         f"{device_mesh}. "
                     )
 
@@ -350,7 +347,7 @@ class LoraModel(BaseTuner):
                     self._tuner_tp_size = tp_size
                 elif self._tuner_tp_size != tp_size:
                     logger.warning(
-                        f"Found conflicting TP sizes for {tp_plan_key}: {self._tuner_tp_size} vs {tp_size}. "
+                        f"Found conflicting TP sizes for {current_key}: {self._tuner_tp_size} vs {tp_size}. "
                     )
 
     def _replace_module(self, parent, child_name, new_module, child):
