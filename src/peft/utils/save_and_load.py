@@ -31,6 +31,7 @@ from transformers.integrations.tensor_parallel import (
     ColwiseParallel,
     EmbeddingParallel,
     RowwiseParallel,
+    gather_state_dict_for_save,
 )
 from transformers.utils import http_user_agent
 
@@ -97,6 +98,26 @@ def get_peft_model_state_dict(
     config = model.peft_config[adapter_name]
     if state_dict is None:
         state_dict = model.state_dict()
+
+    # If model was sharded with TP, gather full tensors for saving
+    base_model = model.base_model
+    prefix = "base_model." if model.active_peft_config.is_prompt_learning else "base_model.model."
+    if base_model._tuner_tp_plan:
+        # If the keys in the state dict start with the prefix, we need to add the prefix to the keys in the tp plan as
+        # well.
+        keys_starting_with_prefix = all(k.startswith(prefix) for k in state_dict)
+        tp_plan = {}
+        for key in base_model._tuner_tp_plan:
+            if keys_starting_with_prefix:
+                if not key.startswith(prefix):
+                    tp_plan[f"{prefix}{key}"] = base_model._tuner_tp_plan[key]
+                else:
+                    tp_plan[key] = base_model._tuner_tp_plan[key]
+            else:
+                tp_plan[key] = base_model._tuner_tp_plan[key]
+        state_dict = gather_state_dict_for_save(
+            state_dict, tp_plan, base_model._tuner_device_mesh, base_model._tuner_tp_size
+        )
 
     # TUNER SPECIFIC CODE
     if config.peft_type in (PeftType.LORA, PeftType.ADALORA):
