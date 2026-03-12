@@ -13,12 +13,6 @@
 # limitations under the License.
 from __future__ import annotations
 
-<<<<<<< HEAD
-=======
-import copy
-import logging
-import functools
->>>>>>> 55ee555 (feat: add hook for lora.Embedding)
 import math
 import operator
 import re
@@ -294,8 +288,8 @@ class LoraModel(BaseTuner):
             from transformers.integrations.tensor_parallel import (
                 add_tensor_parallel_hooks_to_module,
             )
+            _SUPPORTED_TP_PLANS = ("colwise", "rowwise", "embedding_rowwise")
 
-            _SUPPORTED_TP_PLANS = ("colwise", "rowwise", "embedding_rowwise", "embedding_colwise")
             if tp_plan not in _SUPPORTED_TP_PLANS:
                 warnings.warn(
                     f'TP plan "{tp_plan}" on the base layer is not supported for LoRA. '
@@ -325,14 +319,14 @@ class LoraModel(BaseTuner):
                         device_mesh,
                     )
                 elif tp_plan == "embedding_rowwise":
-                        tp_plan_keys.append(f"{generic_key}.base_layer.weight")
-                        tp_plan_keys.append(f"{generic_key}.lora_embedding_A.{adapter_name}")
-                        tp_plans.append(tp_plan)
-                        # Because lora_embedding_A is transposed compared to nn.Embedding, we set the TP plan
-                        # to embedding_colwise so that the gathering happens on the correct dimension at save time.
-                        tp_plans.append("embedding_colwise")
-
-                        # TP hooks are  handled in the `_embed` method in lora/layer.py where they are explicitely called.
+                    # TP hooks are  handled in the `_embed` method in lora/layer.py where they are explicitely called.
+                    # Here we simply register the TP plans.
+                    tp_plan_keys.append(f"{generic_key}.base_layer.weight")
+                    tp_plan_keys.append(f"{generic_key}.lora_embedding_A.{adapter_name}")
+                    tp_plans.append(tp_plan)
+                    # Because lora_embedding_A is transposed compared to nn.Embedding, we set the TP plan
+                    # to embedding_colwise so that the gathering happens on the correct dimension at save time.
+                    tp_plans.append("embedding_colwise")
 
                 for tp_plan_key, tp_plan in zip(tp_plan_keys, tp_plans):
                     if tp_plan_key not in self._tuner_tp_plan:
