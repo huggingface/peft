@@ -84,18 +84,12 @@ class GLoraLayer(nn.Module):
             return nn.Parameter(torch.zeros(out_feature, rank)), nn.Parameter(torch.zeros(rank, in_feature))
         return nn.Parameter(torch.zeros(*shape)), nn.Parameter(torch.zeros(1, 1))
 
-    def set_adapter(self, adapter_name_or_list, inference_mode: Optional[bool] = None, **kwargs):
-        # Accepts inference_mode and other kwargs for PEFT compatibility
-        # If inference_mode is set, enable/disable adapters accordingly
+    def set_adapter(self, adapter_name_or_list, **kwargs):
+        # inference_mode (gradient freezing) is handled at the model level via _freeze_adapter
         if isinstance(adapter_name_or_list, str):
             self.active_adapters = [adapter_name_or_list]
         else:
             self.active_adapters = list(adapter_name_or_list)
-        if inference_mode is not None:
-            if inference_mode:
-                self.disable_adapters()
-            else:
-                self.enable_adapters()
 
     def delete_adapter(self, adapter_name):
         for d in [
@@ -155,24 +149,26 @@ class GLoraLayer(nn.Module):
             )
             D = self.prepare_path(path_config["D"], self.glora_D[adapter_name], device=device, dtype=dtype)
             E = self.prepare_path(path_config["E"], self.glora_E[adapter_name], device=device, dtype=dtype)
+            # Clone before any in-place modification so subsequent uses of w0/b0
+            # always refer to the original (pre-merge) values.
+            w0 = weight.data.clone()
+            b0 = bias.data.clone() if bias is not None else None
             if safe_merge:
-                orig_weight = weight.clone()
-                orig_bias = bias.clone() if bias is not None else None
-                merged_weight = orig_weight + orig_weight * A + B
+                merged_weight = w0 + w0 * A + B
                 if not torch.isfinite(merged_weight).all():
                     raise ValueError(f"NaNs detected in merged weights for adapter {adapter_name}")
                 self.weight.data = merged_weight
                 if bias is not None:
-                    merged_bias = orig_bias + orig_bias * D + E + torch.matmul(weight, C).squeeze(-1)
+                    merged_bias = b0 + b0 * D + E + torch.matmul(w0, C).squeeze(-1)
                     if not torch.isfinite(merged_bias).all():
                         raise ValueError(f"NaNs detected in merged bias for adapter {adapter_name}")
                     self.bias.data = merged_bias
             else:
-                self.weight.data += (weight * A) + B
+                self.weight.data += (w0 * A) + B
                 if bias is not None:
-                    self.bias.data += (bias * D) + E + torch.matmul(weight, C).squeeze(-1)
+                    self.bias.data += (b0 * D) + E + torch.matmul(w0, C).squeeze(-1)
                 elif E.numel() > 0 or C.numel() > 0:
-                    new_bias_val = E + torch.matmul(weight, C).squeeze(-1)
+                    new_bias_val = E + torch.matmul(w0, C).squeeze(-1)
                     if not torch.all(new_bias_val == 0):
                         self.bias = nn.Parameter(new_bias_val)
             self.merged_adapters.append(adapter_name)
@@ -202,9 +198,16 @@ class GLoraLayer(nn.Module):
             )
             D = self.prepare_path(path_config["D"], self.glora_D[adapter_name], device=device, dtype=dtype)
             E = self.prepare_path(path_config["E"], self.glora_E[adapter_name], device=device, dtype=dtype)
-            self.weight.data -= (weight * A) + B
+            # Clone before any modification so the exact pre-unmerge values
+            # are available when computing the bias inverse below.
+            w_merged = weight.data.clone()
+            b_merged = bias.data.clone() if bias is not None else None
+            # Exact inverse of W_merged = W₀*(1+A) + B  →  W₀ = (W_merged - B) / (1+A)
+            w0 = (w_merged - B) / (1.0 + A)
+            self.weight.data = w0
             if bias is not None:
-                self.bias.data -= (bias * D) + E + torch.matmul(weight, C).squeeze(-1)
+                # Exact inverse of b_merged = b₀*(1+D) + E + W₀@C  →  b₀ = (b_merged - E - W₀@C) / (1+D)
+                self.bias.data = (b_merged - E - torch.matmul(w0, C).squeeze(-1)) / (1.0 + D)
             self.merged_adapters.remove(adapter_name)
 
     def forward(self, x: torch.Tensor, adapter_names: Optional[list[str]] = None) -> torch.Tensor:
@@ -295,7 +298,10 @@ class GLoraLayer(nn.Module):
             result = F.linear(x, weight_eff, bias=bias_eff)
         return result
 
-    def prepare_path(self, config: str, Xd: nn.Parameter, Xu: Optional[nn.Parameter] = None, device=None, dtype=None):
+    def prepare_path(
+        self, config: str | object, Xd: nn.Parameter, Xu: Optional[nn.Parameter] = None, device=None, dtype=None
+    ):
+        config = str(config)  # ty linting
         device = device or Xd.device
         dtype = dtype or Xd.dtype
         if Xu is not None:

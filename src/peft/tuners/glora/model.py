@@ -6,6 +6,7 @@ from typing import Any, Optional, Union
 import torch.nn as nn
 from tqdm import tqdm
 
+from peft.tuners.glora.layer import GLoraLayer
 from peft.tuners.tuners_utils import BaseTuner
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_GLORA_TARGET_MODULES_MAPPING,
@@ -191,7 +192,7 @@ class GLoraModel(BaseTuner):
             return
 
         for module in self.model.modules():
-            if hasattr(module, "set_adapter"):
+            if isinstance(module, GLoraLayer):
                 module.set_adapter(adapter_name_or_list, **kwargs)
         self.active_adapter = adapter_name_or_list
 

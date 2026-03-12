@@ -1,6 +1,7 @@
 import gc
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
@@ -25,18 +26,17 @@ class SimpleTransformer(torch.nn.Module):
                 torch.nn.TransformerEncoderLayer(
                     d_model=hidden_size,
                     nhead=num_heads,
-                    dim_feedforward=hidden_size * 2,  # Simple FFN
+                    dim_feedforward=hidden_size * 2,
                     batch_first=True,
                 )
                 for _ in range(num_layers)
             ]
         )
-        self.linear = torch.nn.Linear(hidden_size, hidden_size)  # A targetable linear layer
+        self.linear = torch.nn.Linear(hidden_size, hidden_size)
         self.lm_head = torch.nn.Linear(hidden_size, vocab_size)
 
-        # Add a config attribute similar to HF models for _prepare_glora_config
         class SimpleConfig(dict):
-            model_type = "simple_transformer"  # Needs a mapping in constants.py or explicit target_modules
+            model_type = "simple_transformer"
 
             def __init__(self):
                 super().__init__()
@@ -48,9 +48,8 @@ class SimpleTransformer(torch.nn.Module):
         x = self.embedding(input_ids)
         for layer in self.layers:
             x = layer(x)
-        x = self.linear(x)  # Pass through the targetable linear layer
-        logits = self.lm_head(x)
-        return logits
+        logits = self.lm_head(self.linear(x))
+        return SimpleNamespace(logits=logits)
 
     def prepare_inputs_for_generation(self, input_ids, **kwargs):
         return {"input_ids": input_ids}
@@ -60,7 +59,7 @@ class DummyTokenizer:
     pad_token = 0
     eos_token = 0
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, text, return_tensors=None, **kwargs):
         return {"input_ids": torch.randint(0, 100, (2, 5))}
 
     def batch_decode(self, *args, **kwargs):
@@ -69,14 +68,18 @@ class DummyTokenizer:
 
 class GLORATester(unittest.TestCase):
     def setUp(self):
-        self.model_id = "HuggingFaceM4/tiny-random-Llama-3"
+        self.model_id = "HuggingFaceM4/tiny-random-Llama3ForCausalLM"
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
             self.base_model = AutoModelForCausalLM.from_pretrained(self.model_id)
+            self.target_modules = ["q_proj", "v_proj", "o_proj", "down_proj", "up_proj", "gate_proj"]
+            self.make_base_model = lambda: AutoModelForCausalLM.from_pretrained(self.model_id)
         except Exception:
             print("Failed to load HF tiny model, using SimpleTransformer for tests.")
             self.base_model = SimpleTransformer()
             self.tokenizer = DummyTokenizer()
+            self.target_modules = ["linear", "lm_head"]
+            self.make_base_model = SimpleTransformer
 
     def tearDown(self):
         gc.collect()
@@ -84,55 +87,30 @@ class GLORATester(unittest.TestCase):
             torch.cuda.empty_cache()
             gc.collect()
 
-    def _get_target_modules(self):
-        if isinstance(self.base_model, SimpleTransformer):
-            return ["linear", "lm_head"]
-        else:
-            return [
-                "q_proj",
-                "v_proj",
-                "o_proj",
-                "down_proj",
-                "up_proj",
-                "gate_proj",
-            ]
+    def _make_dummy_input(self, prompt="This is a test prompt"):
+        return self.tokenizer(prompt, return_tensors="pt")["input_ids"]
 
     def test_glora_model_creation_and_forward(self):
-        target_modules = self._get_target_modules()
-        glora_config = GLoraConfig(r=4, target_modules=target_modules, task_type=TaskType.CAUSAL_LM)
+        glora_config = GLoraConfig(r=4, target_modules=self.target_modules, task_type=TaskType.CAUSAL_LM)
         peft_model = get_peft_model(self.base_model, glora_config)
         assert isinstance(peft_model, PeftModel)
         assert hasattr(peft_model, "base_model")
 
-        if hasattr(self.tokenizer, "pad_token") and getattr(self.tokenizer, "pad_token", None) is None:
-            self.tokenizer.pad_token = getattr(self.tokenizer, "eos_token", 0)
-
-        if isinstance(self.base_model, SimpleTransformer):
-            dummy_input = torch.randint(0, 100, (2, 10))
-        else:
-            dummy_input = self.tokenizer("This is a test prompt", return_tensors="pt")["input_ids"]
-
         peft_model.eval()
-
+        dummy_input = self._make_dummy_input()
         with torch.no_grad():
             output_peft = peft_model(dummy_input)
             output_base = self.base_model(dummy_input)
-        assert output_peft.shape == output_base.shape
+        assert output_peft.logits.shape == output_base.logits.shape
 
     def test_save_and_load_glora_adapter(self):
-        target_modules = self._get_target_modules()
-        glora_config = GLoraConfig(r=4, target_modules=target_modules, task_type=TaskType.CAUSAL_LM)
+        glora_config = GLoraConfig(r=4, target_modules=self.target_modules, task_type=TaskType.CAUSAL_LM)
         peft_model = get_peft_model(self.base_model, glora_config)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
             peft_model.save_pretrained(tmp_dirname, safe_serialization=False)
-            if isinstance(self.base_model, SimpleTransformer):
-                loaded_base_model = SimpleTransformer()
-            else:
-                loaded_base_model = AutoModelForCausalLM.from_pretrained(self.model_id)
-            loaded_peft_model = PeftModel.from_pretrained(loaded_base_model, tmp_dirname, is_trainable=True)
+            loaded_peft_model = PeftModel.from_pretrained(self.make_base_model(), tmp_dirname, is_trainable=True)
             assert isinstance(loaded_peft_model, PeftModel)
-            # Compare GLORA parameters
             original_glora_params = {
                 k: v for k, v in peft_model.named_parameters() if "glora_" in k and v.requires_grad
             }
@@ -144,44 +122,42 @@ class GLORATester(unittest.TestCase):
                 assert torch.allclose(v_orig, v_load)
 
     def test_merge_and_unload_glora(self):
-        target_modules = self._get_target_modules()
-        glora_config = GLoraConfig(r=4, target_modules=target_modules, task_type=TaskType.CAUSAL_LM)
+        glora_config = GLoraConfig(r=4, target_modules=self.target_modules, task_type=TaskType.CAUSAL_LM)
         peft_model = get_peft_model(self.base_model, glora_config)
 
-        # Store original weights for comparison
-        target_layer_name = (
-            glora_config.target_modules[0] if isinstance(glora_config.target_modules, list) else "linear"
-        )
-        module_ptr = peft_model.model
-        for part in target_layer_name.split("."):
-            module_ptr = getattr(module_ptr, part)
-        if isinstance(module_ptr, GLoraLinear):
-            original_weight = module_ptr.weight.data.clone()
-            # Initialize with non-zero values so merge has an effect
-            adapter_name = (
-                glora_config.target_modules[0] if isinstance(glora_config.target_modules, list) else "linear"
-            )
-            if "default" in module_ptr.glora_Au:
-                torch.nn.init.normal_(module_ptr.glora_Au["default"])
-                torch.nn.init.normal_(module_ptr.glora_Bd["default"])
-                torch.nn.init.normal_(module_ptr.glora_E["default"])
-        else:
+        target_layer_name = self.target_modules[0]
+        module_ptr = None
+        module_path = None
+        for name, module in peft_model.model.named_modules():
+            if name.split(".")[-1] == target_layer_name and isinstance(module, GLoraLinear):
+                module_ptr = module
+                module_path = name
+                break
+        if not isinstance(module_ptr, GLoraLinear):
             self.skipTest(f"Target module {target_layer_name} is not a GLoraLinear layer after PEFT application.")
+        assert isinstance(module_ptr, GLoraLinear)
+
+        original_weight = module_ptr.weight.data.clone()
+        if "default" in module_ptr.glora_Au:
+            torch.nn.init.normal_(module_ptr.glora_Au["default"])
+            torch.nn.init.normal_(module_ptr.glora_Bd["default"])
+            torch.nn.init.normal_(module_ptr.glora_E["default"])
+
         merged_model = peft_model.merge_and_unload()
         assert hasattr(merged_model, "forward")
-        merged_weight_module_ptr = merged_model
-        for part in target_layer_name.split("."):
-            merged_weight_module_ptr = getattr(merged_weight_module_ptr, part)
-        merged_weight = merged_weight_module_ptr.weight.data
-        assert not torch.allclose(original_weight, merged_weight)
+        merged_weight_module_ptr = next(
+            (m for n, m in merged_model.named_modules() if n == module_path), None
+        )
+        assert merged_weight_module_ptr is not None, f"Could not find module at path '{module_path}' after merge"
+        assert not torch.allclose(original_weight, merged_weight_module_ptr.weight.data)
 
-        if isinstance(self.base_model, SimpleTransformer):
-            dummy_input = torch.randint(0, 100, (2, 10))
-        else:
-            dummy_input = self.tokenizer("This is a test prompt after merging", return_tensors="pt")["input_ids"]
+        dummy_input = self._make_dummy_input("This is a test prompt after merging")
+        peft_model.eval()
+        merged_model.eval()
         with torch.no_grad():
-            merged_model.eval()
-            _ = merged_model(dummy_input)
+            out_peft = peft_model(dummy_input)
+            out_merged = merged_model(dummy_input)
+        assert torch.allclose(out_peft.logits, out_merged.logits, atol=0.0001)
 
     @unittest.skipIf(
         not torch.cuda.is_available()
