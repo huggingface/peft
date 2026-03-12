@@ -61,7 +61,7 @@ set_peft_model_state_dict(lora_model, state_dict)
 
 ### Dynamic LoRA rank
 
-In the examples above, we used a fixed LoRA rank for conversion. However, it is conceivable that some layers don't require a high rank to be accurately converted, while other layers require a higher rank. To accomodate this, PEFT offers the option to pass a float between 0 and 1 as the `rank` argument. Let's say you pass `rank=0.5`. This means that for each layer, the rank for the LoRA adapter is chosen such that the LoRA adapter explains 50% of the variance in weight introduced by original adapter. In more technical terms, under the hood we perform a [Singular Value Decomposition](https://en.wikipedia.org/wiki/Singular_value_decomposition) on the weight contribution of the adapter and then take the top singular values that, when normalized, sum up to the passed value.
+In the examples above, we used a fixed LoRA rank for conversion. However, it is conceivable that some layers don't require a high rank to be accurately converted, while other layers require a higher rank. To accommodate this, PEFT offers the option to pass a float between 0 and 1 as the `rank` argument. Let's say you pass `rank=0.5`. This means that for each layer, the rank for the LoRA adapter is chosen such that the LoRA adapter explains 50% of the variance in weight introduced by original adapter. In more technical terms, under the hood we perform a [Singular Value Decomposition](https://en.wikipedia.org/wiki/Singular_value_decomposition) on the weight contribution of the adapter and then take the top singular values that, when normalized, sum up to the passed value.
 
 ```python
 # set a dynamic rank by passing a float
