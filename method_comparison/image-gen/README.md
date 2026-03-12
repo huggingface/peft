@@ -12,11 +12,11 @@ This benchmark mirrors the structure of [`method_comparison/MetaMathQA`](https:/
 ## Setup choices
 
 - Base model: [`black-forest-labs/FLUX.2-klein-base-4B`](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4B)
-- Dataset (default): [`diffusers/cat_toy_example`](https://huggingface.co/datasets/diffusers/cat_toy_example)
+- Dataset (default): [`cat pillow`](https://huggingface.co/datasets/peft-internal-testing/cat-image-dataset)
 
 ## Running
 
-Create an experiment under `experiments/<peft-method>/<experiment-name>/`.
+Create an experiment under `experiments/<peft-method>/<experiment-name>/` or use one of the experiments there.
 
 Each experiment directory may contain:
 
@@ -72,6 +72,6 @@ Python 3.12+ is required.
 
 ## TODO
 
-- basic performance sanity check
-- some profiling
-- upload images somehwere
+- Add further experiments (more PEFT methods) and explore better hyper-parameters.
+- Test images are already created but they're not uploaded anywhere.
+- The method comparison Gradio app needs to be updated to show the results.

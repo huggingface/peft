@@ -7,7 +7,7 @@
   "batch_size": 2,
   "batch_size_eval": 1,
   "repeats": 1000,
-  "max_steps": 2000,
+  "max_steps": 750,
   "eval_steps": 100,
   "compile": false,
   "seed": 0,
@@ -59,7 +59,9 @@
   "sample_image_prompts": [
     "a photo of sks cat",
     "a color drawing of sks cat",
-    "sks cat sitting in a bathtub"
+    "sks cat at the beach",
+    "a photo of sks dog",
+    "a photo of an orange cat"
   ],
   "drift_image_prompts": [
     "a photo of cat",

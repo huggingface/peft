@@ -486,7 +486,7 @@ def train(
         status=status,
         train_time=train_time,
         accelerator_memory_reserved_log=accelerator_memory_reserved_log,
-        losses=losses,
+        losses=[loss.item() for loss in losses],
         metrics=metrics,
         error_msg=error_msg,
         num_trainable_params=num_trainable_params,

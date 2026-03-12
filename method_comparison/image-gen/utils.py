@@ -63,6 +63,45 @@ WARMUP_STEP_RATIO = 0.1
 
 @dataclass
 class TrainConfig:
+    """All configuration parameters associated with training the model
+
+    Args:
+        model_id: The model identifier, should not be changed
+        dataset_id: The dataset identifier, should not be changed
+        dataset_split: The dataset split to use, should not be changed
+        dtype: The data type to use for the model
+        resolution: The image resolution
+        batch_size: The batch size for training
+        batch_size_eval: The batch size for eval/test
+        repeats: The number of repeats for the dataset (if there are more steps than train samples)
+        max_steps: The maximum number of steps to train
+        eval_steps: The number of steps between evaluations
+        compile: Whether to compile the model
+        seed: The random seed
+        grad_norm_clip: The gradient norm clipping value (set to 0 to skip)
+        optimizer_type: The name of a torch optimizer (e.g. AdamW) or a PEFT method ("lora+", "lora-fa")
+        optimizer_kwargs: The optimizer keyword arguments (lr etc.)
+        lr_scheduler: The learning rate scheduler (currently only None or 'cosine' are supported)
+        use_amp: Whether to use automatic mixed precision
+        autocast_adapter_dtype: Whether to cast adapter dtype to float32, same argument as in PEFT
+        instance_prompts: The prompt(s) used for training instances
+        image_column: The column name for images in the dataset
+        valid_size: The validation set size
+        test_size: The test set size
+        num_inference_steps: The number of inference steps for image generation
+        guidance_scale: The guidance scale for image generation
+        max_sequence_length: The maximum sequence length for the text encoder
+        text_encoder_out_layers: The output layers of the text encoder to use
+        weighting_scheme: The weighting scheme for the loss
+        logit_mean: The logit mean for logit_normal weighting
+        logit_std: The logit std for logit_normal weighting
+        mode_scale: The mode scale for mode weighting
+        dino_model_id: The DINO model identifier for evaluation
+        dino_image_size: The image size for the DINO model
+        sample_image_prompts: The prompts used for generating sample images, should not be changed
+        drift_image_prompts: The prompts used for measuring drift, should not be changed
+    """
+
     model_id: str
     dataset_id: str
     dataset_split: str
