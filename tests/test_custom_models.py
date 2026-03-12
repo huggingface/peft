@@ -1023,23 +1023,23 @@ TEST_CASES = [
     ##########
     # Peanut #
     ##########
-    ("Vanilla MLP 1 Peanut", "MLP", PeanutConfig, {"target_modules": "lin0", "r": 2, "depth": 2, "act_fn": "relu"}),
-    ("Vanilla MLP 2 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin0"], "r": 2, "depth": 2, "act_fn": "relu"}),
-    ("Vanilla MLP 3 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin1"], "r": 2, "depth": 2, "act_fn": "relu"}),
+    ("Vanilla MLP 1 Peanut", "MLP", PeanutConfig, {"target_modules": "lin0", "r": 2, "depth": 0, "act_fn": "relu"}),
+    ("Vanilla MLP 2 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin0"], "r": 2, "depth": 0, "act_fn": "relu"}),
+    ("Vanilla MLP 3 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin1"], "r": 2, "depth": 0, "act_fn": "relu"}),
     (
         "Vanilla MLP 4 Peanut",
         "MLP",
         PeanutConfig,
-        {"target_modules": ["lin0", "lin1"], "r": 2, "depth": 2, "act_fn": "relu"},
+        {"target_modules": ["lin0", "lin1"], "r": 2, "depth": 0, "act_fn": "relu"},
     ),
-    ("Vanilla MLP 5 Peanut", "MLP", PeanutConfig, {"target_modules": "lin0", "r": 2, "depth": 4, "act_fn": "relu"}),
-    ("Vanilla MLP 6 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin0"], "r": 2, "depth": 4, "act_fn": "relu"}),
-    ("Vanilla MLP 7 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin1"], "r": 2, "depth": 4, "act_fn": "relu"}),
+    ("Vanilla MLP 5 Peanut", "MLP", PeanutConfig, {"target_modules": "lin0", "r": 2, "depth": 1, "act_fn": "relu"}),
+    ("Vanilla MLP 6 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin0"], "r": 2, "depth": 1, "act_fn": "relu"}),
+    ("Vanilla MLP 7 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin1"], "r": 2, "depth": 1, "act_fn": "relu"}),
     (
         "Vanilla MLP 8 Peanut",
         "MLP",
         PeanutConfig,
-        {"target_modules": ["lin0", "lin1"], "r": 2, "depth": 4, "act_fn": "relu"},
+        {"target_modules": ["lin0", "lin1"], "r": 2, "depth": 1, "act_fn": "relu"},
     ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
@@ -1365,15 +1365,15 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         "Peanut Same",
         "peanut",
         PeanutConfig,
-        {"target_modules": ["lin0"], "r": 2, "depth": 4, "act_fn": "relu", "init_weights": False},
-        {"target_modules": ["lin0"], "r": 2, "depth": 4, "act_fn": "relu", "init_weights": False},
+        {"target_modules": ["lin0"], "r": 2, "depth": 1, "act_fn": "relu", "init_weights": False},
+        {"target_modules": ["lin0"], "r": 2, "depth": 1, "act_fn": "relu", "init_weights": False},
     ),
     (
         "Peanut Different",
         "peanut",
         PeanutConfig,
-        {"target_modules": ["lin0"], "r": 2, "depth": 4, "act_fn": "relu", "init_weights": False},
-        {"target_modules": ["lin1"], "r": 2, "depth": 4, "act_fn": "relu", "init_weights": False},
+        {"target_modules": ["lin0"], "r": 2, "depth": 1, "act_fn": "relu", "init_weights": False},
+        {"target_modules": ["lin1"], "r": 2, "depth": 1, "act_fn": "relu", "init_weights": False},
     ),
 ]
 

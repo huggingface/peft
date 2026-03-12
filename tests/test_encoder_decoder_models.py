@@ -233,7 +233,7 @@ ALL_CONFIGS = [
         PeanutConfig,
         {
             "r": 4,
-            "depth": 4,
+            "depth": 1,
             "scaling": 1.0,
             "act_fn": "relu",
             "target_modules": None,

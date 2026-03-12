@@ -154,7 +154,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--peanut_depth",
         type=int,
-        default=2,
+        default=0,
         help="Total number of PEANuT transforms including A and B (must be even and >= 2)",
     )
     parser.add_argument(

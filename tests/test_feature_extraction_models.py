@@ -185,7 +185,7 @@ ALL_CONFIGS = [
             "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
             "r": 8,
-            "depth": 4,
+            "depth": 1,
             "act_fn": "relu",
             "scaling": 1.0,
         },

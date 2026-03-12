@@ -2354,12 +2354,12 @@ class TestPeanutInitialization:
 
         return MLP(bias=bias).to(self.torch_device).eval()
 
-    def test_peanut_depth2_parameter_shapes(self):
+    def test_peanut_depth0_parameter_shapes(self):
         model = self.get_model()
         out_f = model.lin0.out_features
         r = 6
 
-        cfg = PeanutConfig(target_modules=["lin0"], r=r, depth=2, act_fn="relu", init_weights=True)
+        cfg = PeanutConfig(target_modules=["lin0"], r=r, depth=0, act_fn="relu", init_weights=True)
         model = get_peft_model(model, cfg)
 
         layer = model.lin0
@@ -2370,11 +2370,11 @@ class TestPeanutInitialization:
         assert tuple(B.weight.shape) == (out_f, r)
         assert layer.res_num["default"] == 0
 
-    def test_peanut_depth4_residual_layers_are_created(self):
+    def test_peanut_depth1_residual_layers_are_created(self):
         model = self.get_model()
         r = 4
 
-        cfg = PeanutConfig(target_modules=["lin0"], r=r, depth=4, act_fn="relu", init_weights=True)
+        cfg = PeanutConfig(target_modules=["lin0"], r=r, depth=1, act_fn="relu", init_weights=True)
         model = get_peft_model(model, cfg)
 
         layer = model.lin0

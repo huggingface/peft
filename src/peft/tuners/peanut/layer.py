@@ -91,17 +91,15 @@ class PeanutLayer(BaseTunerLayer):
     ):
         self.r[adapter_name] = r
         self.depth[adapter_name] = depth
-        self.res_num[adapter_name] = (depth - 2) // 2
+        self.res_num[adapter_name] = depth
         self.scaling[adapter_name] = scaling
         self.act_fn[adapter_name] = act_fn
 
         self.peanut_A[adapter_name] = nn.Linear(self.out_features, r, bias=False)
 
-        num_intermediate_layers = depth - 2
-        num_residual_pairs = num_intermediate_layers // 2
-        self._ensure_residual_layer_dicts(num_residual_pairs)
+        self._ensure_residual_layer_dicts(depth)
 
-        for i in range(num_residual_pairs):
+        for i in range(depth):
             getattr(self, f"peanut_encoder_{i}")[adapter_name] = nn.Linear(r, r, bias=False)
             getattr(self, f"peanut_decoder_{i}")[adapter_name] = nn.Linear(r, r, bias=False)
 
@@ -133,7 +131,7 @@ class Linear(nn.Module, PeanutLayer):
         base_layer,
         adapter_name: str,
         r: int = 32,
-        depth: int = 2,
+        depth: int = 0,
         scaling: float = 1.0,
         act_fn: str = "relu",
         init_weights: bool = True,
@@ -196,10 +194,10 @@ class Linear(nn.Module, PeanutLayer):
             if active_adapter not in self.peanut_A:
                 continue
 
-            delta_weight = self._compute_delta_weight(active_adapter, merge_base_weight)
-            delta_weight = delta_weight.detach().to(dtype=base_layer.weight.dtype, device=base_layer.weight.device)
-
             with torch.no_grad():
+                delta_weight = self._compute_delta_weight(active_adapter, merge_base_weight)
+                delta_weight = delta_weight.to(dtype=base_layer.weight.dtype, device=base_layer.weight.device)
+
                 if safe_merge:
                     orig_weights = base_layer.weight.data.clone()
                     orig_weights = orig_weights + delta_weight
@@ -239,26 +237,23 @@ class Linear(nn.Module, PeanutLayer):
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            return self.base_layer(x, *args, **kwargs)
+            result = self.base_layer(x, *args, **kwargs)
+        elif self.merged:
+            result = self.base_layer(x, *args, **kwargs)
+        else:
+            result = self.base_layer(x, *args, **kwargs)
 
-        if self.merged:
-            return self.base_layer(x, *args, **kwargs)
+            if self.active_adapters:
+                torch_result_dtype = result.dtype
 
-        result = self.base_layer(x, *args, **kwargs)
+                for active_adapter in self.active_adapters:
+                    if active_adapter not in self.peanut_A:
+                        continue
 
-        if not self.active_adapters:
-            return result
-
-        torch_result_dtype = result.dtype
-
-        for active_adapter in self.active_adapters:
-            if active_adapter not in self.peanut_A:
-                continue
-
-            delta_weight = self.get_delta_weight(active_adapter)
-            x_cast = self._cast_input_dtype(x, delta_weight.dtype)
-            delta = torch.matmul(x_cast, delta_weight.transpose(0, 1))
-            result = result + delta.to(torch_result_dtype)
+                    delta_weight = self.get_delta_weight(active_adapter)
+                    x_cast = self._cast_input_dtype(x, delta_weight.dtype)
+                    delta = torch.matmul(x_cast, delta_weight.transpose(0, 1))
+                    result = result + delta.to(torch_result_dtype)
 
         return result
 

@@ -193,7 +193,7 @@ ALL_CONFIGS = [
         PeanutConfig,
         {
             "r": 8,
-            "depth": 4,
+            "depth": 1,
             "act_fn": "relu",
             "task_type": "SEQ_CLS",
             "target_modules": None,

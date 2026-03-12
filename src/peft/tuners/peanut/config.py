@@ -32,14 +32,14 @@ class PeanutConfig(PeftConfig):
             PEANuT rank. This is the hidden dimension used by the adapters. Similar to LoRA rank, larger `r` increases
             adapter capacity and trainable parameters.
         depth (`int`):
-            Total number of adapter transforms in PEANuT, counting the mandatory input projection `A` and output
-            projection `B`. Therefore, `depth` must be at least 2. Additional intermediate adapters are inserted
-            between `A` and `B` and must appear in encoder/decoder pairs to support residual connections, so `depth`
-            must also be even.
+            Number of hidden adapter layers per encoder/decoder side in PEANuT. The input projection `A` and output
+            projection `B` are always present in addition to these hidden layers. Therefore, `depth` must be a
+            non-negative integer.
 
-            - `depth=2`: only `A` and `B` (no intermediate residual blocks).
-            - `depth=4`: `A`, one encoder, one decoder, `B`.
-            - `depth=6`: `A`, two encoders, two decoders, `B`, etc.
+            - `depth=0`: `A`, `B`.
+            - `depth=1`: `A`, one encoder, one decoder, `B`.
+            - `depth=2`: `A`, two encoders, two decoders, `B`.
+            - `depth=3`: `A`, three encoders, three decoders, `B`, etc.
         act_fn (`str`):
             Non-linear activation applied in the PEANuT network. This corresponds to `non_linear` in the vanilla
             PyTorch implementation. Default is `"relu"`. Any activation key available in
@@ -87,12 +87,11 @@ class PeanutConfig(PeftConfig):
         },
     )
     depth: int = field(
-        default=2,
+        default=0,
         metadata={
             "help": (
-                "Total number of adapter transforms in PEANuT, counting mandatory `A` and `B`. "
-                "`depth` must be at least 2 and must be even. Additional intermediate adapters are inserted "
-                "between `A` and `B` as encoder/decoder pairs with residual connections."
+                "Number of hidden adapter layers per encoder/decoder side in PEANuT. The input projection `A` and "
+                "output projection `B` are added automatically, so `depth` must be a non-negative integer."
             )
         },
     )
@@ -187,9 +186,7 @@ class PeanutConfig(PeftConfig):
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified.")
         if self.r <= 0:
             raise ValueError("`r` must be a positive integer.")
-        if self.depth < 2:
-            raise ValueError("`depth` must be at least 2 (A and B are mandatory).")
-        if self.depth % 2 != 0:
-            raise ValueError("`depth` must be even so intermediate adapters can form encoder/decoder pairs.")
+        if self.depth < 0:
+            raise ValueError("`depth` can only be a non-negative integer.")
         if self.act_fn not in ACT2FN:
             raise ValueError(f"Unsupported `act_fn`: {self.act_fn}. Must be one of {sorted(ACT2FN.keys())}.")

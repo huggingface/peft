@@ -2,7 +2,7 @@
   "act_fn": "relu",
   "auto_mapping": null,
   "base_model_name_or_path": null,
-  "depth": 2,
+  "depth": 0,
   "exclude_modules": null,
   "inference_mode": false,
   "init_weights": true,
@@ -11,9 +11,9 @@
   "modules_to_save": null,
   "peft_type": "PEANUT",
   "peft_version": "0.18.2.dev0@UNKNOWN",
-  "r": 32,
+  "r": 1,
   "revision": null,
-  "scaling": 2.0,
+  "scaling": 32.0,
   "target_modules": [
     "q_proj",
     "v_proj"

@@ -7,7 +7,7 @@ PEANuT is built on three key ideas:
 
 - **Weight-aware adaptation**: `Delta W` is produced by transforming the base weight using `A`, `B`, and optional intermediate layers. Because PEANuT applies `A` on the output dimension of the base weight, `A` has shape `(out_features, r)` instead of LoRA's typical `(in_features, r)`. When `in_features > out_features`, PEANuT can use fewer parameters than LoRA at the same rank.
 - **Non-linearity inside the tweaker**: PEANuT inserts activation functions in the neural tweaker (default: `relu`) to increase expressiveness.
-- **Depth capacity increase**: Besides mandatory `A` and `B`, PEANuT can insert intermediate `r x r` layers in residual encoder/decoder pairs, enabling larger effective capacity with relatively small parameter overhead.
+- **Depth capacity increase**: Besides mandatory `A` and `B`, PEANuT can insert intermediate `r x r` layers in residual encoder/decoder pairs. Here, `depth` counts the number of residual pairs, so `depth=0` means only `A` and `B`.
 
 ## Quick start
 
@@ -63,9 +63,9 @@ peft_model = PeftModel.from_pretrained(model, "peanut-llama-3.2-3b")
 ## Additional Notes
 
 - `r` controls the hidden rank of the neural tweaker. Larger `r` increases capacity and trainable parameters.
-- `depth` controls total transforms including `A` and `B`. It must be even and at least `2`.
-- `depth=2` means only `A` and `B`.
-- `depth=4` adds one encoder/decoder residual pair between `A` and `B`.
+- `depth` controls the number of intermediate encoder/decoder residual pairs. It must be a non-negative integer.
+- `depth=0` means only `A` and `B`.
+- `depth=1` adds one encoder/decoder residual pair between `A` and `B`.
 - Larger depths add more `r x r` residual pairs.
 - `act_fn` controls the non-linearity inside PEANuT and defaults to `relu`.
 - `scaling` is a direct scalar multiplier on the adapter output before it is added to the frozen base layer output.
