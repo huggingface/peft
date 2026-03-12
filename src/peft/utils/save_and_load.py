@@ -622,11 +622,23 @@ def set_peft_model_state_dict(
                             peft_model_state_dict[key], device=device, dtype=dtype
                         )
                     elif isinstance(tp_layer, EmbeddingParallel):
+                        # The state dict can contain the original base embedding weights if `save_embedding_layers` is
+                        # set to `True` and the embedding layer is targeted. In that case, we need to shard those
+                        # weights as well.
+                        embedding_key = f"{name}.base_layer.weight"
+                        if embedding_key in peft_model_state_dict:
+                            tp_layer.empty_param = peft_model_state_dict[embedding_key]
+                            peft_model_state_dict[embedding_key] = tp_layer.shard_tensor(
+                                peft_model_state_dict[embedding_key], device=device, dtype=dtype
+                            )
                         key = f"{name}.lora_embedding_A.{adapter_name}"
-                        tp_layer.empty_param = peft_model_state_dict[key]
-                        peft_model_state_dict[key] = tp_layer.shard_tensor(
-                            peft_model_state_dict[key], device=device, dtype=dtype
-                        )
+                        # We transpose the lora_embedding_A weights because they are of shape (rank, num_embeddings) in
+                        # the state dict
+                        weight = peft_model_state_dict[key].T
+                        tp_layer.empty_param = weight
+                        sharded = tp_layer.shard_tensor(weight, device=device, dtype=dtype)
+                        # We transpose back because LoraEmbedding expects the weights to be of shape (rank, num_embeddings)
+                        peft_model_state_dict[key] = sharded.T
                     else:
                         raise ValueError(f"Unknown tensor parallel plan {tp_plan} for {module.__class__.__name__}.")
 
