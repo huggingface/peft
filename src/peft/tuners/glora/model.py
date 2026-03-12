@@ -217,7 +217,9 @@ class GLoraModel(BaseTuner):
         if self.active_adapter == adapter_name:
             self.active_adapter = next(iter(self.peft_config.keys()), None)
 
-    def merge_and_unload(self, progressbar: bool = False, adapter_names: Optional[list[str]] = None):
+    def merge_and_unload(
+        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
+    ):
         """
         This method merges the GLora layers into the base model.
         """
@@ -238,7 +240,7 @@ class GLoraModel(BaseTuner):
                     continue
                 # Merge all or specified adapters
                 merge_adapters = adapter_names if adapter_names is not None else target.active_adapters
-                target.merge(adapter_names=merge_adapters)
+                target.merge(safe_merge=safe_merge, adapter_names=merge_adapters)
                 new_module = nn.Linear(target.in_features, target.out_features, bias=(target.bias is not None))
                 new_module.weight.data = target.weight.data.clone()  # Get merged weight
                 if target.bias is not None:
