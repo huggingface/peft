@@ -1,0 +1,6 @@
+trl
+datasets
+vllm
+safetensors
+pylatexenc
+sympy
