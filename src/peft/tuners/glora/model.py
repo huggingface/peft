@@ -5,7 +5,7 @@ from typing import Any, Optional, Union
 import torch.nn as nn
 from tqdm import tqdm
 
-from peft import PeftConfig
+from peft.config import PeftConfig
 from peft.tuners.glora.layer import GLoraLayer
 from peft.tuners.tuners_utils import BaseTuner
 from peft.utils import (
