@@ -148,6 +148,8 @@
       title: DeLoRA
     - local: package_reference/tinylora
       title: TinyLoRA
+    - local: package_reference/lily
+      title: Lily
 
     title: Adapters
   - sections:
