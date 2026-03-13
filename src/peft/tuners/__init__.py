@@ -57,6 +57,7 @@ from .pvera import PveraConfig, PveraModel
 from .randlora import RandLoraConfig, RandLoraModel
 from .road import RoadConfig, RoadModel
 from .shira import ShiraConfig, ShiraModel
+from .tinylora import TinyLoraConfig, TinyLoraModel
 from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
 from .vblora import VBLoRAConfig, VBLoRAModel
 from .vera import VeraConfig, VeraModel
@@ -133,6 +134,8 @@ __all__ = [
     "RoadModel",
     "ShiraConfig",
     "ShiraModel",
+    "TinyLoraConfig",
+    "TinyLoraModel",
     "TrainableTokensConfig",
     "TrainableTokensModel",
     "VBLoRAConfig",
