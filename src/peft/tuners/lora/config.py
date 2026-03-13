@@ -459,6 +459,11 @@ class LoraConfig(PeftConfig):
             Whether to tie weights or not after peft initialization. This will ensure that the adapters added to the
             tied layers are also tied. This is only applicable for layers passed via `modules_to_save` and
             `target_modules`.
+        param_wrapper_swap_in_out_features (`bool`, *optional)
+            Flag if the in and out features for targeted MoE (mixture of experts) parameters should be swapped. This is
+            only relevant if you target 3-dim parameters with `target_parameters` for LoRA adaptation. By default, the
+            order is (experts, out_features, in_features), i.e the order of in and out features indeed needs to be
+            swapped. If this is not desired for the model you're using, set this value to `False`.
 
     """
 
@@ -767,6 +772,18 @@ class LoraConfig(PeftConfig):
                 "This will ensure that the adapters added to the tied layers "
                 "are also tied. This is only applicable for layers passed via "
                 "`modules_to_save`, `target_modules` and `trainable_token_indices`."
+            )
+        },
+    )
+    param_wrapper_swap_in_out_features: bool = field(
+        default=True,
+        metadata={
+            "help": (
+                "Flag if the in and out features for targeted MoE (mixture of experts) parameters should be swapped. "
+                "This is only relevant if you target 3-dim parameters with `target_parameters` for LoRA adaptation. "
+                "By default, the order is (experts, out_features, in_features), i.e the order of in and out features "
+                "indeed needs to be swapped. If this is not desired for the model you're using, set this value to "
+                "`False`."
             )
         },
     )

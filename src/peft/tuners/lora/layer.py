@@ -2018,11 +2018,19 @@ class ParamWrapper(nn.Module, LoraLayer):
         r: int = 0,
         lora_alpha: int = 1,
         is_target_conv_1d_layer: bool = False,
+        # For some transformers models, the order of in_features and out_features is swapped
+        swap_in_out_features: bool = False,
         **kwargs,
     ) -> None:
         self.parameter_name = parameter_name
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
+        if self.get_param().ndim == 3:
+            # In and out are swapped for 3 dim MoE layers
+            self.swap_in_out_features = config.param_wrapper_swap_in_out_features
+        else:
+            self.swap_in_out_features = False
+        self._did_swap_in_out_features = False  # ensure we swap only once
 
         if config.lora_dropout:
             # It's not possible to factor out x from lora_B(lora_A(dropout(x))), so dropout can't be correctly
@@ -2084,6 +2092,9 @@ class ParamWrapper(nn.Module, LoraLayer):
         lora_variant = self.resolve_lora_variant(config=config)
         if lora_variant is not None:
             raise ValueError(f"lora.{self.__class__.__name__} does not work with LoRA variants like DoRA.")
+
+        if self.swap_in_out_features and not self._did_swap_in_out_features:
+            self.in_features, self.out_features = self.out_features, self.in_features
 
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
@@ -2170,6 +2181,7 @@ class ParamWrapper(nn.Module, LoraLayer):
 
     def get_delta_weight(self, adapter_name, *args, **kwargs):
         if self.num_experts == 1:
+            # could actually be a normal layer or experts stacked block-diagonally, acting like a single layer
             delta_weight = Linear.get_delta_weight(self, adapter_name, *args, **kwargs)
         else:
             weight_A = self.lora_A[adapter_name].weight
@@ -2179,7 +2191,10 @@ class ParamWrapper(nn.Module, LoraLayer):
             # shape: out_features x rank x experts
             weight_B = weight_B.reshape(weight_B.shape[0], -1, self.num_experts)
             # fan_in_fan_out must be False, so no transpose call here
-            delta_weight = torch.einsum("o r e, e r i -> e i o", weight_B, weight_A) * self.scaling[adapter_name]
+            if not self.swap_in_out_features:
+                delta_weight = torch.einsum("o r e, e r i -> e i o", weight_B, weight_A) * self.scaling[adapter_name]
+            else:
+                delta_weight = torch.einsum("o r e, e r i -> e o i", weight_B, weight_A) * self.scaling[adapter_name]
 
         base_layer = self.get_base_layer()
         param = self.get_param()
