@@ -255,6 +255,9 @@ class LoraModel(BaseTuner):
                 target_name=current_key,
                 config=lora_config,
             )
+
+            base_layer = target.get_base_layer()
+            lora_module = target
         else:
             if isinstance(target, ParamWrapper) and (parameter_name == target.parameter_name):
                 raise ValueError(
@@ -267,6 +270,37 @@ class LoraModel(BaseTuner):
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
+
+            base_layer = target
+            lora_module = new_module
+
+        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+        device_mesh = getattr(base_layer, "_hf_device_mesh", None)
+
+        # If the module has a tp_plan, we add hooks to the LoRA layers to make sure they respect the plan
+        if tp_plan is not None:
+            from transformers.integrations.tensor_parallel import (
+                add_tensor_parallel_hooks_to_module,
+            )
+
+            if tp_plan == "colwise":
+                add_tensor_parallel_hooks_to_module(
+                    self.model,
+                    lora_module.lora_B[adapter_name],
+                    tp_plan,
+                    f"{current_key}.lora_B.{adapter_name}",
+                    tp_plan,
+                    device_mesh,
+                )
+            elif tp_plan == "rowwise":
+                add_tensor_parallel_hooks_to_module(
+                    self.model,
+                    lora_module.lora_A[adapter_name],
+                    tp_plan,
+                    f"{current_key}.lora_A.{adapter_name}",
+                    tp_plan,
+                    device_mesh,
+                )
 
     def _replace_module(self, parent, child_name, new_module, child):
         # override in LoraModel to handle quantized weights properly
