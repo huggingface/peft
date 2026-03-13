@@ -97,9 +97,3 @@ parameters may not receive gradients on every step. The current workaround fills
 missing gradients with zeros, but this causes importance scores to be zero for
 those parameters, leading AdaLoRA to prune all ranks — effectively producing a
 base model at eval time. This needs further investigation.
-
-### PEFT AdaLoRA bug fix
-
-`resize_modules_by_rank_pattern` in `src/peft/tuners/adalora/model.py` called
-`update_layer` with the old 5-argument signature instead of the current 4-argument
-signature (passing a config object). This was fixed on this branch.
