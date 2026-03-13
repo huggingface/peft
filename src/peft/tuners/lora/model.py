@@ -13,6 +13,8 @@
 # limitations under the License.
 from __future__ import annotations
 
+import copy
+import logging
 import math
 import operator
 import re
@@ -20,12 +22,14 @@ import warnings
 from contextlib import contextmanager
 from dataclasses import replace
 from functools import partial, reduce
+from types import SimpleNamespace
 from typing import Literal, Optional
 
 import packaging.version
 import torch
 import transformers
 from torch import nn
+from transformers.integrations.tensor_parallel import ALL_PARALLEL_STYLES, add_tensor_parallel_hooks_to_module
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import (
@@ -58,6 +62,9 @@ from .layer import Conv2d, LoraLayer, ParamWrapper, dispatch_default
 from .te import dispatch_transformer_engine
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
+
+
+logger = logging.getLogger(__name__)
 
 
 def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
@@ -255,6 +262,9 @@ class LoraModel(BaseTuner):
                 target_name=current_key,
                 config=lora_config,
             )
+
+            base_layer = target.get_base_layer()
+            lora_module = target
         else:
             if isinstance(target, ParamWrapper) and (parameter_name == target.parameter_name):
                 raise ValueError(
@@ -267,6 +277,101 @@ class LoraModel(BaseTuner):
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
+
+            base_layer = target
+            lora_module = new_module
+
+        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+        device_mesh = getattr(base_layer, "_hf_device_mesh", None)
+
+        # If the module has a tp_plan, we add hooks to the LoRA layers to make sure they respect the plan
+        if tp_plan is not None:
+            _SUPPORTED_TP_PLANS = ("colwise", "rowwise", "embedding_rowwise")
+
+            if tp_plan not in _SUPPORTED_TP_PLANS:
+                logger.warning(
+                    f'TP plan "{tp_plan}" on the base layer is not supported for LoRA. '
+                    "LoRA adapters will be created without tensor parallel hooks."
+                )
+            else:
+                tp_plan_keys = []
+                tp_plans = []
+                generic_key = re.sub(r"\d+", "*", current_key)
+                if tp_plan == "colwise":
+                    tp_plan_keys.append(f"{generic_key}.lora_B.{adapter_name}.weight")
+                    tp_plans.append(tp_plan)
+                    add_tensor_parallel_hooks_to_module(
+                        self.model,
+                        lora_module.lora_B[adapter_name],
+                        tp_plan,
+                        f"{current_key}.lora_B.{adapter_name}",
+                        tp_plan,
+                        device_mesh,
+                    )
+                elif tp_plan == "rowwise":
+                    tp_plan_keys.append(f"{generic_key}.lora_A.{adapter_name}.weight")
+                    tp_plans.append(tp_plan)
+                    add_tensor_parallel_hooks_to_module(
+                        self.model,
+                        lora_module.lora_A[adapter_name],
+                        tp_plan,
+                        f"{current_key}.lora_A.{adapter_name}",
+                        tp_plan,
+                        device_mesh,
+                    )
+                else:  # embedding_rowwise
+                    tp_plan_keys.append(f"{generic_key}.base_layer.weight")
+                    tp_plan_keys.append(f"{generic_key}.lora_embedding_A.{adapter_name}")
+                    tp_plans.append(tp_plan)
+                    # Because lora_embedding_A is transposed compared to nn.Embedding, we set the TP plan
+                    # to embedding_colwise so that the gathering happens on the correct dimension at save time.
+                    tp_plans.append("embedding_colwise")
+
+                    # LoRA embeddings are a bit special, there is no new module but just weights.
+                    # To use the TP hooks machinery, we need to create a fake module that has the weights as attributes
+                    # (used by the hooks), make the hooks use this fake module, and then add the hooks to the original
+                    # `_embed` method acting as the forward pass lora_embedding_A.
+                    tp_layer = copy.deepcopy(ALL_PARALLEL_STYLES[tp_plan])
+                    mod = SimpleNamespace()
+                    mod.weight = lora_module.lora_embedding_A[
+                        adapter_name
+                    ].T  # lora_embedding_A shape is (r, vocab_size)
+
+                    def input_fn(inputs):
+                        return tp_layer._prepare_input_fn(mod, inputs, device_mesh)
+
+                    def output_fn(outputs):
+                        return tp_layer._prepare_output_fn(mod, outputs, device_mesh)
+
+                    original_embed = lora_module._embed
+
+                    def wrapper(input, weight):
+                        masked_input = input_fn((input,))
+                        return output_fn(original_embed(masked_input, weight))
+
+                    lora_module._embed = wrapper
+
+                for key, plan in zip(tp_plan_keys, tp_plans):
+                    if key not in self._tuner_tp_plan:
+                        self._tuner_tp_plan[key] = plan
+                    elif self._tuner_tp_plan[key] != plan:
+                        logger.warning(f"Found conflicting TP plans for {key}: {self._tuner_tp_plan[key]} vs {plan}.")
+
+                if self._tuner_device_mesh is None:
+                    self._tuner_device_mesh = device_mesh
+                elif self._tuner_device_mesh != device_mesh:
+                    logger.warning(
+                        f"Found conflicting device meshes for {current_key}: {self._tuner_device_mesh} vs "
+                        f"{device_mesh}. "
+                    )
+
+                tp_size = self.model._tp_size
+                if self._tuner_tp_size is None:
+                    self._tuner_tp_size = tp_size
+                elif self._tuner_tp_size != tp_size:
+                    logger.warning(
+                        f"Found conflicting TP sizes for {current_key}: {self._tuner_tp_size} vs {tp_size}. "
+                    )
 
     def _replace_module(self, parent, child_name, new_module, child):
         # override in LoraModel to handle quantized weights properly
