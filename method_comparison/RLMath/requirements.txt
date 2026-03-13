@@ -1,6 +1,6 @@
 trl
 datasets
-numpy
-tqdm
-bitsandbytes
-psutil
+vllm
+safetensors
+pylatexenc
+sympy

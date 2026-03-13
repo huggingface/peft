@@ -14,7 +14,7 @@ from typing import Any
 
 import torch
 from data import load_rl_datasets
-from reward import compute_binary_reward, cookbook_style_math_reward, extract_gsm_answer
+from reward import extract_boxed, math_reward_fn, safe_grade
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback, set_seed
 from trl import GRPOConfig, GRPOTrainer
 from utils import (
@@ -58,32 +58,16 @@ def load_peft_config_dict(exp_path: str) -> dict[str, Any] | None:
         return json.load(f)
 
 
-def load_peft_config(exp_path: str) -> PeftConfig | None:
+def load_peft_config(exp_path: str, total_step: int | None = None) -> PeftConfig | None:
     adapter_path = os.path.join(exp_path, "adapter_config.json")
     if not os.path.exists(adapter_path):
         return None
-    return PeftConfig.from_pretrained(exp_path)
-
-
-def make_reward_func():
-    def reward_fn(completions, ground_truth, task, **kwargs):
-        rewards = []
-        for completion, gt, task_name in zip(completions, ground_truth, task):
-            text = completion
-            if isinstance(completion, list) and completion and isinstance(completion[0], dict):
-                text = completion[0].get("content", "")
-            if not isinstance(text, str):
-                text = str(text)
-
-            if task_name == "math":
-                rewards.append(cookbook_style_math_reward(text, gt))
-                continue
-            else:
-                pred = extract_gsm_answer(text)
-            rewards.append(compute_binary_reward(pred, gt))
-        return rewards
-
-    return reward_fn
+    with open(adapter_path) as f:
+        cfg_dict = json.load(f)
+    # AdaLoRA requires total_step to schedule rank pruning
+    if cfg_dict.get("peft_type", "").upper() == "ADALORA" and total_step is not None:
+        cfg_dict.setdefault("total_step", total_step)
+    return PeftConfig.from_peft_type(**cfg_dict)
 
 
 @torch.no_grad()
@@ -93,9 +77,9 @@ def evaluate_pass_at_1(
     tokenizer: AutoTokenizer,
     dataset,
     max_completion_length: int,
-) -> tuple[float, float]:
+) -> float:
     correct = 0
-    rewards = 0.0
+    total = 0
 
     for row in dataset:
         inputs = tokenizer(row["prompt"], return_tensors="pt").to(model.device)
@@ -107,19 +91,15 @@ def evaluate_pass_at_1(
         )
         completion = tokenizer.decode(outputs[0][inputs["input_ids"].shape[-1] :], skip_special_tokens=True)
 
-        if row["task"] == "math":
-            reward = cookbook_style_math_reward(completion, row["ground_truth"])
-            rewards += reward
-            correct += int(reward == 1.0)
-            continue
-        else:
-            pred = extract_gsm_answer(completion)
-            reward = compute_binary_reward(pred, row["ground_truth"])
-            rewards += reward
-            correct += int(reward == 1.0)
+        try:
+            pred = extract_boxed(completion)
+            is_correct = safe_grade(pred, row["ground_truth"])
+        except ValueError:
+            is_correct = False
+        correct += int(is_correct)
+        total += 1
 
-    denom = max(len(dataset), 1)
-    return correct / denom, rewards / denom
+    return correct / max(total, 1)
 
 
 class RLResultCallback(TrainerCallback):
@@ -171,6 +151,12 @@ class RLResultCallback(TrainerCallback):
             return control
         base_model = getattr(model, "base_model", None)
         if base_model is not None and hasattr(base_model, "update_and_allocate"):
+            # AdaLoRA's update_ipt requires gradients on all lora params.
+            # In GRPO some params may lack gradients; fill with zeros so
+            # the importance calculation can proceed.
+            for p in model.parameters():
+                if p.requires_grad and p.grad is None:
+                    p.grad = torch.zeros_like(p)
             base_model.update_and_allocate(state.global_step)
         return control
 
@@ -181,6 +167,48 @@ def _resolve_torch_dtype(dtype_name: str):
     return None
 
 
+def _remap_adapter_keys(checkpoint_dir: str) -> None:
+    """Fix adapter key names for composite architectures (e.g. Qwen3.5).
+
+    When a model has `model.language_model.layers` instead of `model.layers`,
+    GRPOTrainer saves LoRA/AdaLoRA keys with the `language_model.` prefix, but
+    PeftModel.from_pretrained expects them without it.  This rewrites the
+    safetensors file and adapter_config.json in-place so loading works correctly.
+    """
+    import safetensors.torch as st
+
+    # Remap safetensors weights
+    adapter_path = os.path.join(checkpoint_dir, "adapter_model.safetensors")
+    if not os.path.exists(adapter_path):
+        return
+
+    tensors = st.load_file(adapter_path)
+    needs_remap = any("language_model." in k for k in tensors)
+    if not needs_remap:
+        return
+
+    remapped = {}
+    for k, v in tensors.items():
+        new_key = k.replace(".language_model.", ".")
+        remapped[new_key] = v
+    st.save_file(remapped, adapter_path)
+
+    # Fix adapter_config.json for AdaLoRA composite architecture keys
+    config_path = os.path.join(checkpoint_dir, "adapter_config.json")
+    if os.path.exists(config_path):
+        with open(config_path) as f:
+            cfg = json.load(f)
+        changed = False
+        for field in ("rank_pattern", "lora_alpha"):
+            mapping = cfg.get(field)
+            if isinstance(mapping, dict) and any("language_model." in k for k in mapping):
+                cfg[field] = {k.replace("language_model.", ""): v for k, v in mapping.items()}
+                changed = True
+        if changed:
+            with open(config_path, "w") as f:
+                json.dump(cfg, f, indent=2)
+
+
 def _load_eval_model(
     *,
     model_id: str,
@@ -189,11 +217,18 @@ def _load_eval_model(
     dtype_name: str,
 ):
     torch_dtype = _resolve_torch_dtype(dtype_name)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     if peft_cfg is None:
-        model = AutoModelForCausalLM.from_pretrained(checkpoint_dir, torch_dtype=torch_dtype)
+        model = AutoModelForCausalLM.from_pretrained(
+            checkpoint_dir, torch_dtype=torch_dtype, device_map=device
+        )
     else:
-        base_model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch_dtype)
+        _remap_adapter_keys(checkpoint_dir)
+        base_model = AutoModelForCausalLM.from_pretrained(
+            model_id, torch_dtype=torch_dtype, device_map=device
+        )
         model = PeftModel.from_pretrained(base_model, checkpoint_dir)
+        model = model.merge_and_unload()
     model.eval()
     return model
 
@@ -204,7 +239,7 @@ def run_experiment(experiment_path: str, verbose: bool = False) -> str:
     set_seed(cfg.seed)
 
     peft_cfg_dict = load_peft_config_dict(experiment_path)
-    peft_cfg = load_peft_config(experiment_path)
+    peft_cfg = load_peft_config(experiment_path, total_step=cfg.max_steps)
 
     result = build_base_result(experiment_name, cfg, peft_cfg_dict)
     branch = result["run_info"]["peft_branch"]
@@ -227,7 +262,7 @@ def run_experiment(experiment_path: str, verbose: bool = False) -> str:
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
     try:
-        train_ds, valid_ds, test_ds = load_rl_datasets(
+        train_ds, test_ds = load_rl_datasets(
             dataset_name=cfg.dataset_name,
             dataset_config=cfg.dataset_config,
             train_split=cfg.dataset_train_split,
@@ -237,8 +272,13 @@ def run_experiment(experiment_path: str, verbose: bool = False) -> str:
             seed=cfg.seed,
         )
 
+        if verbose:
+            print(f"Dataset loaded: {len(train_ds)} train, {len(test_ds)} test")
+
         output_dir = os.path.join("checkpoints", experiment_name.replace("/", "--"))
-        grpo_args = GRPOConfig(
+
+        # Build GRPOConfig with vLLM colocate support
+        grpo_kwargs = dict(
             output_dir=output_dir,
             remove_unused_columns=False,
             max_steps=cfg.max_steps,
@@ -278,16 +318,23 @@ def run_experiment(experiment_path: str, verbose: bool = False) -> str:
             use_vllm=cfg.use_vllm,
             report_to=[],
         )
-        if cfg.dtype in {"bfloat16", "float16", "float32"}:
-            dtype = getattr(torch, cfg.dtype)
-        else:
-            dtype = "auto"
-        grpo_args.model_init_kwargs = {"dtype": dtype}
+
+        # Add vLLM-specific params when vLLM is enabled
+        if cfg.use_vllm:
+            grpo_kwargs["vllm_mode"] = cfg.vllm_mode
+            grpo_kwargs["vllm_gpu_memory_utilization"] = cfg.vllm_gpu_memory_utilization
+            grpo_kwargs["vllm_enable_sleep_mode"] = cfg.vllm_enable_sleep_mode
+            if cfg.vllm_max_model_length is not None:
+                grpo_kwargs["vllm_max_model_length"] = cfg.vllm_max_model_length
+
+        grpo_args = GRPOConfig(**grpo_kwargs)
+
+        grpo_args.model_init_kwargs = {"dtype": cfg.dtype}
 
         is_adalora = bool((peft_cfg_dict or {}).get("peft_type", "").upper() == "ADALORA")
         trainer = GRPOTrainer(
             model=cfg.model_id,
-            reward_funcs=make_reward_func(),
+            reward_funcs=math_reward_fn,
             args=grpo_args,
             train_dataset=train_ds,
             eval_dataset=None,
@@ -297,6 +344,9 @@ def run_experiment(experiment_path: str, verbose: bool = False) -> str:
 
         if verbose:
             print(f"Running GRPO for {experiment_name} on {cfg.dataset_name}...")
+            trainable = sum(p.numel() for p in trainer.model.parameters() if p.requires_grad)
+            total = sum(p.numel() for p in trainer.model.parameters())
+            print(f"Trainable params: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
 
         train_output = trainer.train()
         log_history = trainer.state.log_history
@@ -308,8 +358,6 @@ def run_experiment(experiment_path: str, verbose: bool = False) -> str:
                 "phase": "post_train",
                 "train_completed": True,
                 "train_time": train_output.metrics.get("train_runtime"),
-                "file_size": None,
-                "num_trainable_params": None,
                 "metrics": log_history,
                 "checkpoint_path": eval_ckpt_dir,
                 "last_update_at": now_iso(),
@@ -317,15 +365,19 @@ def run_experiment(experiment_path: str, verbose: bool = False) -> str:
         )
         out_path = flush_result()
 
-        # Evaluate from saved checkpoint/adapter to mirror reproducible offline eval.
+        # Evaluate: single pass on test set (subset for speed).
         result["train_info"]["phase"] = "eval"
         result["train_info"]["last_update_at"] = now_iso()
         out_path = flush_result()
+
+        if verbose:
+            print("Running post-training eval on test set...")
+
+        eval_size = min(cfg.eval_subset_size, len(test_ds))
+        eval_ds = test_ds.select(range(eval_size))
         del trainer
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        elif torch.backends.mps.is_available():
-            torch.mps.empty_cache()
 
         tokenizer = AutoTokenizer.from_pretrained(cfg.model_id)
         if tokenizer.pad_token is None:
@@ -337,16 +389,10 @@ def run_experiment(experiment_path: str, verbose: bool = False) -> str:
             peft_cfg=peft_cfg,
             dtype_name=cfg.dtype,
         )
-        test_pass_at_1, test_reward = evaluate_pass_at_1(
+        test_pass_at_1 = evaluate_pass_at_1(
             model=model,
             tokenizer=tokenizer,
-            dataset=test_ds,
-            max_completion_length=cfg.max_completion_length,
-        )
-        valid_pass_at_1, valid_reward = evaluate_pass_at_1(
-            model=model,
-            tokenizer=tokenizer,
-            dataset=valid_ds,
+            dataset=eval_ds,
             max_completion_length=cfg.max_completion_length,
         )
 
@@ -358,23 +404,19 @@ def run_experiment(experiment_path: str, verbose: bool = False) -> str:
                 "phase": "done",
                 "train_completed": True,
                 "train_time": train_output.metrics.get("train_runtime"),
-                "file_size": None,
-                "num_trainable_params": None,
                 "metrics": log_history,
                 "last_update_at": now_iso(),
             }
         )
         result["rl_eval_info"] = {
-            "valid_pass_at_1": valid_pass_at_1,
             "test_pass_at_1": test_pass_at_1,
-            "valid_reward": valid_reward,
-            "test_reward": test_reward,
             "reward_mean": last_log.get("reward"),
             "reward_std": last_log.get("reward_std"),
             "kl_mean": last_log.get("kl"),
-            "frac_reward_zero_std": last_log.get("frac_reward_zero_std"),
-            "num_eval_samples": len(test_ds),
+            "num_eval_samples": eval_size,
         }
+        if verbose:
+            print(f"Test pass@1: {test_pass_at_1:.3f} ({eval_size} samples)")
         status = "success"
 
     except KeyboardInterrupt:
@@ -386,6 +428,8 @@ def run_experiment(experiment_path: str, verbose: bool = False) -> str:
     except Exception as exc:
         status = "cancelled"
         error_msg = str(exc)
+        import traceback
+        traceback.print_exc()
     finally:
         signal.signal(signal.SIGTERM, prev_sigterm)
         total_time = time.perf_counter() - t0

@@ -47,7 +47,6 @@ class RLTrainConfig:
     use_vllm: bool
     train_subset_size: int
     eval_subset_size: int
-    eval_steps: int
     save_steps: int
     save_total_limit: int
     logging_steps: int
@@ -67,6 +66,11 @@ class RLTrainConfig:
     num_iterations: int = 1
     epsilon_high: float | None = None
     delta: float | None = None
+    # vLLM colocate parameters
+    vllm_mode: str = "colocate"
+    vllm_gpu_memory_utilization: float = 0.3
+    vllm_max_model_length: int | None = None
+    vllm_enable_sleep_mode: bool = False
 
 
 def load_train_config(exp_dir: str) -> RLTrainConfig:
@@ -129,7 +133,6 @@ def get_package_info() -> dict[str, str | None]:
         "datasets-version": v("datasets"),
         "trl-version": v("trl"),
         "torch-version": v("torch"),
-        "bitsandbytes-version": v("bitsandbytes"),
     }
 
 
@@ -158,8 +161,6 @@ def build_base_result(experiment_name: str, cfg: RLTrainConfig, peft_cfg: dict[s
             "phase": "init",
             "train_completed": False,
             "train_time": None,
-            "file_size": None,
-            "num_trainable_params": None,
             "metrics": [],
             "last_update_at": now_iso(),
         },
