@@ -25,7 +25,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 class PeanutLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
-    adapter_layer_names: tuple[str, ...] = ("peanut_A", "peanut_B")
+    adapter_layer_names: tuple[str, ...] = ("peanut_A", "peanut_B", "peanut_encoders", "peanut_decoders")
     # All names of other parameters that may contain adapter-related parameters
     other_param_names: tuple[str, ...] = ("r", "depth", "scaling", "act_fn", "res_num")
 
@@ -38,6 +38,8 @@ class PeanutLayer(BaseTunerLayer):
         self.act_fn = {}
         self.peanut_A = nn.ModuleDict({})
         self.peanut_B = nn.ModuleDict({})
+        self.peanut_encoders = nn.ModuleDict({})
+        self.peanut_decoders = nn.ModuleDict({})
         self.kwargs = kwargs
 
         self._disable_adapters = False
@@ -60,25 +62,6 @@ class PeanutLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-    def _ensure_residual_layer_dicts(self, num_residual_pairs: int) -> None:
-        adapter_layer_names = list(self.adapter_layer_names)
-
-        for i in range(num_residual_pairs):
-            encoder_name = f"peanut_encoder_{i}"
-            decoder_name = f"peanut_decoder_{i}"
-
-            if not hasattr(self, encoder_name):
-                setattr(self, encoder_name, nn.ModuleDict({}))
-            if not hasattr(self, decoder_name):
-                setattr(self, decoder_name, nn.ModuleDict({}))
-
-            if encoder_name not in adapter_layer_names:
-                adapter_layer_names.append(encoder_name)
-            if decoder_name not in adapter_layer_names:
-                adapter_layer_names.append(decoder_name)
-
-        self.adapter_layer_names = tuple(adapter_layer_names)
-
     def update_layer(
         self,
         adapter_name,
@@ -96,12 +79,8 @@ class PeanutLayer(BaseTunerLayer):
         self.act_fn[adapter_name] = act_fn
 
         self.peanut_A[adapter_name] = nn.Linear(self.out_features, r, bias=False)
-
-        self._ensure_residual_layer_dicts(depth)
-
-        for i in range(depth):
-            getattr(self, f"peanut_encoder_{i}")[adapter_name] = nn.Linear(r, r, bias=False)
-            getattr(self, f"peanut_decoder_{i}")[adapter_name] = nn.Linear(r, r, bias=False)
+        self.peanut_encoders[adapter_name] = nn.ModuleList([nn.Linear(r, r, bias=False) for _ in range(depth)])
+        self.peanut_decoders[adapter_name] = nn.ModuleList([nn.Linear(r, r, bias=False) for _ in range(depth)])
 
         self.peanut_B[adapter_name] = nn.Linear(r, self.out_features, bias=False)
 
@@ -114,9 +93,10 @@ class PeanutLayer(BaseTunerLayer):
             return
 
         nn.init.kaiming_uniform_(self.peanut_A[adapter_name].weight, a=math.sqrt(5))
-        for i in range(self.res_num[adapter_name]):
-            nn.init.kaiming_uniform_(getattr(self, f"peanut_encoder_{i}")[adapter_name].weight, a=math.sqrt(5))
-            nn.init.kaiming_uniform_(getattr(self, f"peanut_decoder_{i}")[adapter_name].weight, a=math.sqrt(5))
+        for encoder in self.peanut_encoders[adapter_name]:
+            nn.init.kaiming_uniform_(encoder.weight, a=math.sqrt(5))
+        for decoder in self.peanut_decoders[adapter_name]:
+            nn.init.kaiming_uniform_(decoder.weight, a=math.sqrt(5))
 
         if init_weights:
             nn.init.zeros_(self.peanut_B[adapter_name].weight)
@@ -160,6 +140,8 @@ class Linear(nn.Module, PeanutLayer):
         non_linear = ACT2FN[self.act_fn[adapter]]
         scaling = self.scaling[adapter]
         res_num = self.res_num[adapter]
+        peanut_encoders = self.peanut_encoders[adapter]
+        peanut_decoders = self.peanut_decoders[adapter]
 
         base_weight_t = base_weight.transpose(0, 1).to(peanut_A.weight.dtype)
         delta_w = non_linear(torch.matmul(base_weight_t, peanut_A.weight.t()))
@@ -167,11 +149,11 @@ class Linear(nn.Module, PeanutLayer):
         residuals = []
         for i in range(res_num):
             residuals.append(delta_w.clone())
-            encoder = getattr(self, f"peanut_encoder_{i}")[adapter]
+            encoder = peanut_encoders[i]
             delta_w = non_linear(encoder(delta_w))
 
         for i in range(res_num):
-            decoder = getattr(self, f"peanut_decoder_{i}")[adapter]
+            decoder = peanut_decoders[i]
             delta_w = non_linear(decoder(delta_w))
             delta_w = delta_w + residuals[res_num - 1 - i]
 

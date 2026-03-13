@@ -2379,10 +2379,12 @@ class TestPeanutInitialization:
 
         layer = model.lin0
         assert layer.res_num["default"] == 1
-        assert hasattr(layer, "peanut_encoder_0")
-        assert hasattr(layer, "peanut_decoder_0")
-        assert tuple(layer.peanut_encoder_0["default"].weight.shape) == (r, r)
-        assert tuple(layer.peanut_decoder_0["default"].weight.shape) == (r, r)
+        assert "default" in layer.peanut_encoders
+        assert "default" in layer.peanut_decoders
+        assert len(layer.peanut_encoders["default"]) == 1
+        assert len(layer.peanut_decoders["default"]) == 1
+        assert tuple(layer.peanut_encoders["default"][0].weight.shape) == (r, r)
+        assert tuple(layer.peanut_decoders["default"][0].weight.shape) == (r, r)
 
 
 class TestNoInfiniteRecursionDeepspeed:
