@@ -5,6 +5,7 @@ from typing import Any, Optional, Union
 import torch.nn as nn
 from tqdm import tqdm
 
+from peft import PeftConfig
 from peft.tuners.glora.layer import GLoraLayer
 from peft.tuners.tuners_utils import BaseTuner
 from peft.utils import (
@@ -147,17 +148,17 @@ class GLoraModel(BaseTuner):
                 f"Please check the target modules and try again."
             )
 
-    def _replace_module(self, parent_module: nn.Module, child_name: str, new_module: nn.Module, old_module: nn.Module):
-        setattr(parent_module, child_name, new_module)
+    def _replace_module(self, parent: nn.Module, child_name: str, new_module: nn.Module, child: nn.Module) -> None:
+        setattr(parent, child_name, new_module)
         # Copy weights and bias
-        if hasattr(old_module, "weight") and hasattr(new_module, "weight"):
-            new_module.weight = old_module.weight
-        if hasattr(old_module, "bias") and hasattr(new_module, "bias") and old_module.bias is not None:
-            new_module.bias = old_module.bias
+        if hasattr(child, "weight") and hasattr(new_module, "weight"):
+            new_module.weight = child.weight
+        if hasattr(child, "bias") and hasattr(new_module, "bias") and child.bias is not None:
+            new_module.bias = child.bias
         # Copy state if present
-        if getattr(old_module, "state", None) is not None:
-            new_module.state = old_module.state
-            new_module.to(old_module.weight.device)
+        if getattr(child, "state", None) is not None:
+            new_module.state = child.state
+            new_module.to(child.weight.device)
 
     def __getattr__(self, name: str):
         try:
@@ -283,10 +284,9 @@ class GLoraModel(BaseTuner):
         new_module = self._create_new_module(peft_config, adapter_name, target)
         self._replace_module(parent, target_name, new_module, target)
 
-    @staticmethod
-    def _mark_only_adapters_as_trainable(model: nn.Module):
+    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         mark_only_glora_as_trainable(model)
 
-    @staticmethod
-    def _prepare_adapter_config(peft_config, model_config):
+    def _prepare_adapter_config(self, peft_config: PeftConfig, model_config: dict) -> PeftConfig:
+        assert isinstance(peft_config, GLoraConfig) # ty linting
         return GLoraModel._prepare_peft_config(peft_config, model_config)
