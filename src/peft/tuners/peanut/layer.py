@@ -211,7 +211,11 @@ class Linear(nn.Module, PeanutLayer):
                 else:
                     base_layer.weight.data.add_(delta_weight)
 
-            self._cached_delta_weights[active_adapter] = delta_weight
+            if delta_weight.device.type != "cpu":
+                cached_delta_weight = delta_weight.detach().to("cpu")
+            else:
+                cached_delta_weight = delta_weight.detach()
+            self._cached_delta_weights[active_adapter] = cached_delta_weight
             self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
