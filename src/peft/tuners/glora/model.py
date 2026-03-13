@@ -1,4 +1,3 @@
-import re
 from dataclasses import asdict
 from enum import Enum
 from typing import Any, Optional, Union
@@ -78,7 +77,7 @@ class GLoraModel(BaseTuner):
 
         # Prepare config (resolve target_modules if needed)
         model_config_dict = self.model.config.to_dict() if hasattr(self.model.config, "to_dict") else self.model.config
-        current_config = self._prepare_glora_config(config, model_config_dict)
+        current_config = self._prepare_peft_config(config, model_config_dict)
         self.peft_config[adapter_name] = current_config
 
         # Replace or add adapters in target modules
@@ -93,14 +92,7 @@ class GLoraModel(BaseTuner):
 
         self._added_adapters.add(adapter_name)
 
-    def _check_target_module_exists(self, glora_config: GLoraConfig, key: str) -> bool:
-        if isinstance(glora_config.target_modules, str):
-            return bool(re.fullmatch(glora_config.target_modules, key))
-        elif isinstance(glora_config.target_modules, list):
-            return any(key.endswith(target_key) for target_key in glora_config.target_modules)
-        return False
-
-    def _create_new_module(self, glora_config: GLoraConfig, adapter_name: str, target: nn.Module) -> GLoraLinear:
+    def _create_new_module(self, peft_config: GLoraConfig, adapter_name: str, target: nn.Module) -> GLoraLinear:
         bias = hasattr(target, "bias") and target.bias is not None
         if not isinstance(target, nn.Linear):
             raise ValueError(
@@ -109,28 +101,28 @@ class GLoraModel(BaseTuner):
 
         in_features, out_features = target.in_features, target.out_features
         kwargs_glora = {
-            "config_A_B": glora_config.config_A_B,
-            "config_C": glora_config.config_C,
-            "config_D_E": glora_config.config_D_E,
+            "config_A_B": peft_config.config_A_B,
+            "config_C": peft_config.config_C,
+            "config_D_E": peft_config.config_D_E,
         }
         new_module = GLoraLinear(in_features, out_features, bias=bias, **kwargs_glora)
         # Add the adapter to the new module
         new_module.add_adapter(
             adapter_name,
-            glora_config.r,
-            glora_config.config_A_B,
-            glora_config.config_C,
-            glora_config.config_D_E,
+            peft_config.r,
+            peft_config.config_A_B,
+            peft_config.config_C,
+            peft_config.config_D_E,
         )
         return new_module
 
     def _find_and_replace(self, adapter_name: str):
-        glora_config = self.peft_config[adapter_name]
+        peft_config = self.peft_config[adapter_name]
         is_target_modules_in_base_model = False
         key_list = [key for key, _ in self.model.named_modules()]  # Cache keys
 
         for key in key_list:
-            if not self._check_target_module_exists(glora_config, key):
+            if not self._check_target_module_exists(peft_config, key):
                 continue
 
             is_target_modules_in_base_model = True
@@ -140,18 +132,18 @@ class GLoraModel(BaseTuner):
                 # Add adapter to existing GLoraLinear
                 target.add_adapter(
                     adapter_name,
-                    glora_config.r,
-                    glora_config.config_A_B,
-                    glora_config.config_C,
-                    glora_config.config_D_E,
+                    peft_config.r,
+                    peft_config.config_A_B,
+                    peft_config.config_C,
+                    peft_config.config_D_E,
                 )
             elif isinstance(target, nn.Linear):
-                new_module = self._create_new_module(glora_config, adapter_name, target)
+                new_module = self._create_new_module(peft_config, adapter_name, target)
                 self._replace_module(parent, target_name, new_module, target)
 
         if not is_target_modules_in_base_model:
             raise ValueError(
-                f"Target modules {glora_config.target_modules} not found in the base model. "
+                f"Target modules {peft_config.target_modules} not found in the base model. "
                 f"Please check the target modules and try again."
             )
 
@@ -176,7 +168,7 @@ class GLoraModel(BaseTuner):
             return getattr(self.model, name)
 
     @staticmethod
-    def _prepare_glora_config(peft_config: GLoraConfig, model_config: dict) -> GLoraConfig:
+    def _prepare_peft_config(peft_config: GLoraConfig, model_config: dict) -> GLoraConfig:
         if peft_config.target_modules is None:
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_GLORA_TARGET_MODULES_MAPPING:
                 raise ValueError(
@@ -297,4 +289,4 @@ class GLoraModel(BaseTuner):
 
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
-        return GLoraModel._prepare_glora_config(peft_config, model_config)
+        return GLoraModel._prepare_peft_config(peft_config, model_config)
