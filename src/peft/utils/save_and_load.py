@@ -765,15 +765,26 @@ def load_peft_weights(
 def _get_adapter_state_dict_key_prefixes(model) -> set[str]:
     """Collect state dict key prefixes for adapter parameters by inspecting the module tree.
 
-    This identifies adapter-specific parameters by checking each module's ``adapter_layer_names`` and
-    ``other_param_names`` attributes, which correctly handles weight-sharing methods (VeRA, VB-LoRA) and auxiliary
-    training wrappers (modules_to_save, trainable_tokens).
+    For ``BaseTunerLayer`` modules this uses ``adapter_layer_names`` and ``other_param_names`` to build prefixes. For
+    ``AuxiliaryTrainingWrapper`` modules it queries ``adapter_state_dict_load_map`` (the canonical source of adapter
+    keys) for each registered adapter, and falls back to ``other_param_names`` for non-saveable adapter attributes.
     """
     from peft.tuners.tuners_utils import BaseTunerLayer
 
     adapter_key_prefixes: set[str] = set()
     for module_name, module in model.base_model.model.named_modules():
-        if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
+        if isinstance(module, AuxiliaryTrainingWrapper):
+            # Use adapter_state_dict_load_map to get the actual state dict keys owned by
+            # each adapter
+            for adapter_name in module._adapters:
+                load_map = module.adapter_state_dict_load_map(adapter_name)
+                for state_dict_key in load_map.values():
+                    prefix = f"{module_name}.{state_dict_key}" if module_name else state_dict_key
+                    adapter_key_prefixes.add(prefix)
+            for attr_name in module.other_param_names:
+                prefix = f"{module_name}.{attr_name}" if module_name else attr_name
+                adapter_key_prefixes.add(prefix)
+        elif isinstance(module, BaseTunerLayer):
             for attr_name in module.adapter_layer_names + module.other_param_names:
                 prefix = f"{module_name}.{attr_name}" if module_name else attr_name
                 adapter_key_prefixes.add(prefix)
