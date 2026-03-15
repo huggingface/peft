@@ -222,9 +222,9 @@ def get_base_model(
         quant_config = BitsAndBytesConfig(load_in_8bit=True)
         kwargs["quantization_config"] = quant_config
     elif dtype == "bfloat16":
-        kwargs["dtype"] = torch.bfloat16
+        kwargs["torch_dtype"] = torch.bfloat16
     elif dtype == "float16":
-        kwargs["dtype"] = torch.float16
+        kwargs["torch_dtype"] = torch.float16
     elif dtype != "float32":
         raise ValueError(f"Invalid dtype: {dtype}")
 
@@ -345,7 +345,7 @@ def get_file_size(
     file_size = 99999999  # set a default dummy value
     if peft_config is not None:
         try:
-            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True, delete=clean) as tmp_dir:
+            with tempfile.TemporaryDirectory() as tmp_dir:
                 model.save_pretrained(tmp_dir)
                 stat = os.stat(os.path.join(tmp_dir, SAFETENSORS_WEIGHTS_NAME))
                 file_size = stat.st_size
@@ -630,10 +630,14 @@ def log_results(
     device = infer_device()
     torch_accelerator_module = getattr(torch, device, torch.cuda)
     accelerator_memory_final = torch_accelerator_module.max_memory_reserved()
-    accelerator_memory_avg = int(
-        sum(train_result.accelerator_memory_reserved_log) / len(train_result.accelerator_memory_reserved_log)
-    )
-    accelerator_memory_reserved_99th = int(np.percentile(train_result.accelerator_memory_reserved_log, 99))
+    if train_result.accelerator_memory_reserved_log:
+        accelerator_memory_avg = int(
+            sum(train_result.accelerator_memory_reserved_log) / len(train_result.accelerator_memory_reserved_log)
+        )
+        accelerator_memory_reserved_99th = int(np.percentile(train_result.accelerator_memory_reserved_log, 99))
+    else:
+        accelerator_memory_avg = 0
+        accelerator_memory_reserved_99th = 0
 
     meta_info = get_meta_info()
     if model_info is not None:
