@@ -57,15 +57,18 @@ from peft import (
     ShiraConfig,
     TaskType,
     TrainableTokensConfig,
+    MontecloraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
     get_peft_model,
+
 )
 from peft.tuners import lora
 from peft.tuners.lora.config import BdLoraConfig
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
+from peft.tuners.lora.monteclora import MontecloraSampler
 
 from .testing_common import PeftCommonTester, _skip_if_merging_not_supported
 from .testing_utils import get_state_dict, require_non_cpu, set_init_weights_false
@@ -166,6 +169,37 @@ TEST_CASES = [
         "MLP",
         LoraConfig,
         {"target_modules": ["lin0"], "target_parameters": ["lin1.weight"]},
+    ),
+    ###########
+    # MonteLoRA #
+    ###########
+    (
+        "Vanilla MLP 1 LoRA with Monteclora",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0"],
+            "monteclora_config": {"monteclora_n": 2},
+        },
+    ),
+    (
+        "Vanilla MLP 2 LoRA with Monteclora",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0", "lin1"],
+            "monteclora_config": {"monteclora_n": 2},
+        },
+    ),
+    (
+        "Vanilla MLP 3 LoRA with Monteclora",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": "lin1",
+            "lora_alpha": 32,
+            "monteclora_config": {"monteclora_n": 2},
+        },
     ),
     #######
     # IA³ #
@@ -3657,6 +3691,31 @@ class TestPeftCustomModel(PeftCommonTester):
         assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is True
         assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is True
 
+    def test_monteclora_variational_loss_computation(self):
+        config = LoraConfig(
+            r=8,
+            lora_alpha=16,
+            target_modules=["lin0", "lin1"],
+            monteclora_config={"monteclora_n": 4},
+        )
+        model = get_peft_model(MLP(), config)
+        model.train()
+
+        input_data = torch.randn(2, 10)
+        _ = model(input_data)
+
+        variational_loss = 0.0
+        sampler_count = 0
+        for module in model.modules():
+            if hasattr(module, "get_variational_loss") and module.__class__.__name__ == "MontecloraSampler":
+                kl_loss, entropy_loss = module.get_variational_loss()
+                variational_loss += kl_loss + entropy_loss
+                sampler_count += 1
+
+        assert sampler_count > 0, "No Monteclora samplers found for variational loss computation"
+        assert variational_loss > 0, "Variational loss should be positive"
+        assert not torch.isnan(variational_loss), "Variational loss contains NaN"
+
 
 class TestMultiRankAdapter:
     """Tests related to multirank LoRA adapters"""
@@ -6500,3 +6559,5 @@ class TestDynamicDispatch:
         # we should still get a warning message
         msg = "Unsupported layer type '<class 'torch.nn.modules.rnn.LSTM'>' encountered, proceed at your own risk."
         assert str(recwarn.list[-1].message) == msg
+
+

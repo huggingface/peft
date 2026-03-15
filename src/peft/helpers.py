@@ -23,6 +23,7 @@ from torch import nn
 from .peft_model import PeftConfig, PeftModel
 from .tuners.lora import LoraLayer, dora
 from .tuners.tuners_utils import BaseTunerLayer
+from .tuners.lora.monteclora import MontecloraSampler
 
 
 def update_forward_signature(model: PeftModel) -> None:
@@ -251,6 +252,91 @@ def disable_input_dtype_casting(model: nn.Module, active: bool = True):
                 module.cast_input_dtype_enabled = original_values[name]
 
 
+class MontecloraTrainerMixin:
+    """
+    Mixin class for adding Monteclora variational loss to the Trainer's compute_loss method.
+
+    This mixin can be used with any Trainer class (e.g., Trainer, SFTTrainer) to add support for Monteclora's
+    variational regularization during training.
+
+    Example:
+        ```python
+        from transformers import Trainer
+        from peft import get_peft_model, LoraConfig
+        from peft.helpers import MontecloraTrainerMixin
+        from peft.tuners.monteclora_new import MonteCLoraConfig
+
+
+        # custom trainer that supports Monteclora
+        class MontecloraTrainer(MontecloraTrainerMixin, Trainer):
+            pass
+
+
+        # Configure LoRA with Monteclora
+        monteclora_config = MonteCLoraConfig(
+            monteclora_n=8,
+            sample_scaler=1e-4,
+            kl_loss_weight=1e-5,
+        )
+        lora_config = LoraConfig(
+            r=16,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"],
+            use_monteclora=True,
+            monteclora_config=monteclora_config,
+        )
+
+        # Get PEFT model and train
+        model = get_peft_model(base_model, lora_config)
+        trainer = MontecloraTrainer(model=model, args=training_args, ...)
+        trainer.train()
+        ```
+    """
+
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        """
+        Compute loss with Monteclora variational regularization.
+
+        This method extends the standard compute_loss by adding the variational loss (KL divergence + entropy) from
+        Monteclora samplers to the task loss.
+
+        Args:
+            model: The model being trained
+            inputs: Input batch
+            return_outputs: Whether to return model outputs along with loss
+            **kwargs: Additional arguments
+
+        Returns:
+            loss or (loss, outputs) depending on return_outputs
+        """
+        # 1. Compute the standard task loss
+        if return_outputs:
+            task_loss, outputs = super().compute_loss(model, inputs, return_outputs=True, **kwargs)
+        else:
+            task_loss = super().compute_loss(model, inputs, return_outputs=False, **kwargs)
+            outputs = None
+
+        # 2. Calculate Variational Loss (KLD + Entropy) from Monteclora samplers
+        var_loss_sum = 0.0
+        num_monte_layers = 0
+
+        # Iterate through modules to find Monteclora samplers
+        for name, module in model.named_modules():
+            # Check if this is a MontecloraSampler by checking for the get_variational_loss method
+            if isinstance(module, MontecloraSampler):
+                kl_loss, entropy_loss = module.get_variational_loss()
+                var_loss_sum += kl_loss + entropy_loss
+                num_monte_layers += 1
+
+        # 3. Normalize the Variational Loss
+        normalised_loss = 0.0
+        if num_monte_layers > 0:
+            normalised_loss = var_loss_sum / num_monte_layers
+
+        # 4. Combine losses
+        total_loss = task_loss + normalised_loss
+
+        return (total_loss, outputs) if return_outputs else total_loss
 class DoraCaching:
     """Context manager to enable DoRA caching, which improves speed of DoRA inference at the expense of memory.
 

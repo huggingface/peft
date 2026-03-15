@@ -158,6 +158,7 @@ class LoraLayer(BaseTunerLayer):
         init_lora_weights = config.init_lora_weights
         use_rslora = config.use_rslora
         lora_bias = config.lora_bias
+        use_monteclora = config.monteclora_config
         inference_mode = config.inference_mode
 
         target_name = kwargs.get("target_name", "")  # preserve target_name before overwriting kwargs
@@ -766,6 +767,10 @@ class Linear(nn.Module, LoraLayer):
 
             return ArrowLinearVariant()
 
+        if config.monteclora_config is not None :
+            from peft.tuners.monteclora.variant import MontecloraLinearVariant
+
+            return MontecloraLinearVariant()
         if config.use_bdlora is not None:
             from .variants import BdLoraLinearVariant
 
