@@ -22,8 +22,8 @@ from torch import nn
 
 from .peft_model import PeftConfig, PeftModel
 from .tuners.lora import LoraLayer, dora
-from .tuners.tuners_utils import BaseTunerLayer
 from .tuners.lora.monteclora import MontecloraSampler
+from .tuners.tuners_utils import BaseTunerLayer
 
 
 def update_forward_signature(model: PeftModel) -> None:
@@ -264,7 +264,6 @@ class MontecloraTrainerMixin:
         from transformers import Trainer
         from peft import get_peft_model, LoraConfig
         from peft.helpers import MontecloraTrainerMixin
-        from peft.tuners.monteclora_new import MonteCLoraConfig
 
 
         # custom trainer that supports Monteclora
@@ -273,7 +272,7 @@ class MontecloraTrainerMixin:
 
 
         # Configure LoRA with Monteclora
-        monteclora_config = MonteCLoraConfig(
+        monteclora_config = MontecloraConfig(
             monteclora_n=8,
             sample_scaler=1e-4,
             kl_loss_weight=1e-5,
@@ -337,6 +336,8 @@ class MontecloraTrainerMixin:
         total_loss = task_loss + normalised_loss
 
         return (total_loss, outputs) if return_outputs else total_loss
+
+
 class DoraCaching:
     """Context manager to enable DoRA caching, which improves speed of DoRA inference at the expense of memory.
 

@@ -1,10 +1,9 @@
-
-
 from __future__ import annotations
 
 import torch
 from torch import nn
 from torch.distributions.wishart import Wishart
+
 
 class BufferedMontecloraSampler:
     """
@@ -63,8 +62,8 @@ class BufferedMontecloraSampler:
             sample = self.buffer[self.index]
             self.index += 1
             return sample
-        except :
-            print("Error getting sample from buffer. Returning None")
+        except Exception as e:
+            print(f"Error getting sample from buffer. Returning None: {e}")
             return None
 
     def stop(self):
@@ -222,9 +221,7 @@ class MontecloraSampler(nn.Module):
         var = self.multivariate_reparameterization(z_mvn, gaussian_var)
 
         # Calculate Weights
-        expert_weights_logits = self.dirichlet_reparameterization(
-            torch.exp(self.expert_weights_prior), z_dirichlet
-        )
+        expert_weights_logits = self.dirichlet_reparameterization(torch.exp(self.expert_weights_prior), z_dirichlet)
         expert_weights = torch.softmax(expert_weights_logits, dim=-1)
         self.expert_weights = expert_weights
 

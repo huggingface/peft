@@ -14,7 +14,7 @@ from transformers import (
 )
 
 # Assuming MonteCLoRA is available in your local installed PEFT version
-from peft import MonteCLoraConfig, TaskType, get_peft_model
+from peft import LoraConfig, MontecloraConfig, TaskType, get_peft_model
 from peft.helpers import MontecloraTrainerMixin as MonteCLoRATrainerMixin
 
 
@@ -89,16 +89,23 @@ def train_model(
 
     # --- PEFT Configuration (MonteCLoRA) ---
     # Note: Using n_samples to control Monte Carlo iterations
-    peft_config = MonteCLoraConfig(
+    monte_clora_config = MontecloraConfig(monteclora_n=n_samples)
+    peft_config = LoraConfig(
         task_type=TaskType.SEQ_CLS,
         inference_mode=False,
         r=rank,
         lora_alpha=lora_alpha,
         target_modules=target_modules.split(",") if target_modules else ["query", "value"],
-        monteclora_n=n_samples,
         bias="none",
+        monteclora_config=monte_clora_config,
     )
 
+    # {'loss': 0.6984, 'grad_norm': 1.1652556657791138, 'learning_rate': 0.00019843478260869567, 'epoch': 0.04}
+    # {'loss': 0.6794, 'grad_norm': 1.619783878326416, 'learning_rate': 0.00019669565217391306, 'epoch': 0.09}
+    # {'loss': 0.7077, 'grad_norm': 0.7201359272003174, 'learning_rate': 0.00019495652173913045, 'epoch': 0.13}
+    # {'loss': 0.6822, 'grad_norm': 2.9292023181915283, 'learning_rate': 0.00019321739130434784, 'epoch': 0.17}
+    # {'loss': 0.6673, 'grad_norm': 0.6151084899902344, 'learning_rate': 0.0001914782608695652, 'epoch': 0.22}
+    # {'loss': 0.6674, 'grad_norm': 0.7056446671485901, 'learning_rate': 0.00018973913043478262, 'epoch': 0.26}
     # Wrap model with PEFT
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()

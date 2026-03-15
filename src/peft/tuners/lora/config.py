@@ -699,7 +699,7 @@ class LoraConfig(PeftConfig):
         },
     )
 
-    monteclora_config: Optional[MontecloraConfig] = field(  # noqa: F821
+    monteclora_config: Optional[MontecloraConfig] = field(
         default=None,
         metadata={
             "help": (
@@ -792,6 +792,8 @@ class LoraConfig(PeftConfig):
     def __post_init__(self):
         super().__post_init__()
         self.peft_type = PeftType.LORA
+        if isinstance(self.monteclora_config, dict):
+            self.monteclora_config = MontecloraConfig(**self.monteclora_config)
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
@@ -847,13 +849,6 @@ class LoraConfig(PeftConfig):
             self.corda_config = CordaConfig()
         elif self.init_lora_weights != "corda" and self.corda_config is not None:
             warnings.warn("`corda_config` specified but will be ignored when `init_lora_weights` is not 'corda'.")
-
-        # Handle Monteclora configuration
-        if self.monteclora_config is not None:
-            from peft.tuners.monteclora.config import MontecloraConfig
-
-            self.monteclora_config = MontecloraConfig(**self.monteclora_config)
-
 
         if self.lora_bias:
             if self.init_lora_weights not in (True, False):
@@ -949,6 +944,7 @@ class LoraGAConfig:
     )
     stable_gamma: int = field(default=16, metadata={"help": "Gamma parameter for stable scaling"})
 
+
 @dataclass
 class MontecloraConfig:
     """
@@ -969,14 +965,14 @@ class MontecloraConfig:
             as `None` lets Monteclora choose a reasonable default. Advanced users can reduce it to save memory or
             increase it to allow a richer variational approximation.
         use_entropy (`bool`):
-            Whether to add an entropy regularization term that keeps the Monte Carlo weights from collapsing to a single
-            sample. Turn this on if you observe the sampler becoming very peaky or want stronger regularization; leave
-            it off to mimic standard LoRA more closely.
+            Whether to add an entropy regularization term that keeps the Monte Carlo weights from collapsing to a
+            single sample. Turn this on if you observe the sampler becoming very peaky or want stronger regularization;
+            leave it off to mimic standard LoRA more closely.
         dirichlet_prior (`float`):
             Concentration parameter for the Dirichlet prior over sample/expert weights. Larger values push the weights
-            towards being more uniform (stronger regularization, less sparsity), while smaller positive values encourage
-            sparser, more peaked weights. Increase if the sampler overfits; decrease (but keep > 0) if it is too
-            conservative.
+            towards being more uniform (stronger regularization, less sparsity), while smaller positive values
+            encourage sparser, more peaked weights. Increase if the sampler overfits; decrease (but keep > 0) if it is
+            too conservative.
         sample_scaler (`float`):
             Overall scaling factor for the sampled perturbations applied to the LoRA weights. Increasing this makes the
             Monte Carlo noise stronger (more regularization and exploration, but also more training instability);
@@ -984,9 +980,9 @@ class MontecloraConfig:
             disables the effect of Monteclora.
         kl_loss_weight (`float`):
             Weight of the KL-divergence term between the variational distribution and its prior. Larger values put more
-            emphasis on matching the prior (stronger regularization, potentially underfitting); smaller values rely more
-            on the data likelihood (weaker regularization, potentially overfitting). Tune this if you find Monteclora
-            over- or under-regularizing the adapter.
+            emphasis on matching the prior (stronger regularization, potentially underfitting); smaller values rely
+            more on the data likelihood (weaker regularization, potentially overfitting). Tune this if you find
+            Monteclora over- or under-regularizing the adapter.
         buffer_size (`int`):
             Size of the internal buffer used by the Monte Carlo sampler (e.g. for storing recent statistics). Larger
             values can stabilize the estimated variational parameters at the cost of additional memory; reduce this if

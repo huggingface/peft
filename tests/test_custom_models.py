@@ -46,6 +46,7 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     MissConfig,
+    MontecloraConfig,
     OFTConfig,
     OSFConfig,
     PeftModel,
@@ -57,18 +58,16 @@ from peft import (
     ShiraConfig,
     TaskType,
     TrainableTokensConfig,
-    MontecloraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
     get_peft_model,
-
 )
 from peft.tuners import lora
 from peft.tuners.lora.config import BdLoraConfig
+from peft.tuners.lora.monteclora import MontecloraSampler
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
-from peft.tuners.lora.monteclora import MontecloraSampler
 
 from .testing_common import PeftCommonTester, _skip_if_merging_not_supported
 from .testing_utils import get_state_dict, require_non_cpu, set_init_weights_false
@@ -179,7 +178,7 @@ TEST_CASES = [
         LoraConfig,
         {
             "target_modules": ["lin0"],
-            "monteclora_config": {"monteclora_n": 2},
+            "monteclora_config": MontecloraConfig(monteclora_n=2),
         },
     ),
     (
@@ -188,7 +187,7 @@ TEST_CASES = [
         LoraConfig,
         {
             "target_modules": ["lin0", "lin1"],
-            "monteclora_config": {"monteclora_n": 2},
+            "monteclora_config": MontecloraConfig(monteclora_n=2),
         },
     ),
     (
@@ -198,7 +197,7 @@ TEST_CASES = [
         {
             "target_modules": "lin1",
             "lora_alpha": 32,
-            "monteclora_config": {"monteclora_n": 2},
+            "monteclora_config": MontecloraConfig(monteclora_n=2),
         },
     ),
     #######
@@ -2252,6 +2251,8 @@ class TestPeftCustomModel(PeftCommonTester):
         model = get_peft_model(model, config)
         model_before = copy.deepcopy(model)
 
+        is_monteclora = config_kwargs.get("monteclora_config", None) is not None
+
         model.train()
         lr = 0.5
         if (
@@ -2264,6 +2265,8 @@ class TestPeftCustomModel(PeftCommonTester):
         elif "mha" in model_id.lower():
             # we get exploding gradients with MHA when learning rate is too high
             lr = 1e-3
+        elif is_monteclora:
+            lr = 1e-3
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -2272,16 +2275,26 @@ class TestPeftCustomModel(PeftCommonTester):
             optimizer.zero_grad()
             y_pred = model(**X)
             loss = y_pred.sum()
+            if is_monteclora:
+                # add variational loss
+                for name, module in model.named_modules():
+                    if isinstance(module, MontecloraSampler):
+                        kl_loss, entropy_loss = module.get_variational_loss()
+                        loss += kl_loss + entropy_loss
             loss.backward()
             optimizer.step()
 
         tol = 1e-4
+        ## higher tol for monteclora to account for randomness from sampling
         params_before = dict(model_before.named_parameters())
         params_after = dict(model.named_parameters())
         assert params_before.keys() == params_after.keys()
 
         for name, param_before in params_before.items():
             param_after = params_after[name]
+            if "monteclora" in name.lower():
+                ## skipping monteclora parameters
+                continue
             if (model.prefix in name) or ("modules_to_save" in name) or ("token_adapter.trainable_tokens" in name):
                 # target_modules, modules_to_save and modules of `NewTokensWrapper` _are_ updated
                 assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
@@ -2298,6 +2311,7 @@ class TestPeftCustomModel(PeftCommonTester):
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
+        is_monteclora = config_kwargs.get("monteclora_config", None) is not None
         model = get_peft_model(model, config)
         model.train()
 
@@ -2312,6 +2326,9 @@ class TestPeftCustomModel(PeftCommonTester):
             config_cls, PveraConfig
         ):  # needs a very small lr to not get nan in pvera_lambda_b due to high input values in this test (up to 90)
             lr = 1e-6
+
+        elif is_monteclora:
+            lr = 1e-3
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -2320,6 +2337,13 @@ class TestPeftCustomModel(PeftCommonTester):
             optimizer.zero_grad()
             y_pred = model(**X)
             loss = y_pred.sum()
+            if is_monteclora:
+                # add variational loss
+                for name, module in model.named_modules():
+                    # Check if this is a MontecloraSampler by checking for the get_variational_loss method
+                    if isinstance(module, MontecloraSampler):
+                        kl_loss, entropy_loss = module.get_variational_loss()
+                        loss += kl_loss + entropy_loss
             loss.backward()
             optimizer.step()
 
@@ -3696,7 +3720,7 @@ class TestPeftCustomModel(PeftCommonTester):
             r=8,
             lora_alpha=16,
             target_modules=["lin0", "lin1"],
-            monteclora_config={"monteclora_n": 4},
+            monteclora_config=MontecloraConfig(monteclora_n=4),
         )
         model = get_peft_model(MLP(), config)
         model.train()
@@ -6559,5 +6583,3 @@ class TestDynamicDispatch:
         # we should still get a warning message
         msg = "Unsupported layer type '<class 'torch.nn.modules.rnn.LSTM'>' encountered, proceed at your own risk."
         assert str(recwarn.list[-1].message) == msg
-
-
