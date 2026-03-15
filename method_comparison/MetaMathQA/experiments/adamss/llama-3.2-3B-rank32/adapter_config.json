@@ -1,0 +1,10 @@
+{
+  "peft_type": "ADAMSS",
+  "r": 100,
+  "num_subspaces": 32,
+  "subspace_rank": 1,
+  "target_modules": null,
+  "init_weights": "orthogonal",
+  "use_asa": false,
+  "task_type": "CAUSAL_LM"
+}

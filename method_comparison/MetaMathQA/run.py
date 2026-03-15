@@ -54,7 +54,7 @@ from utils import (
 )
 
 from data import get_train_valid_test_datasets, get_wiki_small
-from peft import AdaLoraConfig, PeftConfig
+from peft import AdaLoraConfig, AdamssConfig, PeftConfig
 from peft.utils import CONFIG_NAME, infer_device
 
 
@@ -83,6 +83,7 @@ def get_generation_config(*, seq_len, generate_kwargs) -> GenerationConfig:
 def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm: bool = False) -> tuple[list[str], list[str]]:
     generate_kwargs = generate_kwargs.copy()
     generate_kwargs["pad_token_id"] = tokenizer.eos_token_id
+    tokenizer.padding_side = "left"
     with torch.inference_mode():
         predictions = []
         responses = []
@@ -92,7 +93,7 @@ def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm: bool =
         for j in pbar:
             sliced = ds[j : j + batch_size]
             responses += sliced.pop("response")
-            batch = tokenizer.pad(sliced, return_tensors="pt", padding_side="left").to(model.device)
+            batch = tokenizer.pad(sliced, return_tensors="pt").to(model.device)
             seq_len = batch["input_ids"].shape[1]
             generation_config = get_generation_config(seq_len=seq_len, generate_kwargs=generate_kwargs)
             outputs = model.generate(**batch, generation_config=generation_config)
@@ -109,12 +110,13 @@ def calculate_mean_per_token_loss(model, tokenizer, rows: list[str], batch_size:
     surprisingly large.
 
     """
+    tokenizer.padding_side = "left"
     losses: list[float] = []
     for j in range(0, len(rows), batch_size):
         sliced = rows[j : j + batch_size]
         batch = tokenizer(sliced, truncation=True, max_length=max_length)
-        batch = tokenizer.pad(batch, return_tensors="pt", padding_side="left").to(model.device)
-        outputs = model(**batch, pad_token_id=tokenizer.eos_token_id)
+        batch = tokenizer.pad(batch, return_tensors="pt").to(model.device)
+        outputs = model(**batch)
         logits = outputs.logits
         for logit, target, mask in zip(logits, batch["input_ids"], batch["attention_mask"]):
             # calculate loss per token so that the mean is not skewed by sequence length of sample, padding from left
@@ -156,6 +158,7 @@ def train(
     lr_scheduler_arg: Optional[Literal["cosine"]],
     use_amp: bool,
     is_adalora: bool,
+    is_adamss: bool,
 ) -> TrainResult:
     accelerator_memory_allocated_log = []
     accelerator_memory_reserved_log = []
@@ -225,6 +228,7 @@ def train(
             # create the batch
             tokens_per_sample = [len(i) for i in batch["input_ids"]]
             total_tokens.append(sum(tokens_per_sample) + len(tokens_per_sample))  # add EOS token
+            tokenizer.padding_side = "right"
             batch = tokenizer.pad(batch, return_tensors="pt").to(model.device)
             actual_batch_size = len(batch["input_ids"])
             total_samples += actual_batch_size
@@ -246,7 +250,7 @@ def train(
             # train step
             optimizer.zero_grad()
             with autocast_ctx():
-                outputs = model(**batch, num_items_in_batch=num_items_in_batch)
+                outputs = model(**batch)
                 loss = outputs.loss
             grad_scaler.scale(loss).backward()
             if grad_norm_clip:
@@ -256,7 +260,7 @@ def train(
             grad_scaler.update()
             lr_scheduler.step()
 
-            if is_adalora:
+            if is_adalora or is_adamss:
                 model.base_model.update_and_allocate(step)
 
             losses.append(loss.item())
@@ -453,6 +457,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         lr_scheduler_arg=train_config.lr_scheduler,
         use_amp=train_config.use_amp,
         is_adalora=isinstance(peft_config, AdaLoraConfig),
+        is_adamss=isinstance(peft_config, AdamssConfig),
     )
 
     if train_result.status == TrainStatus.FAILED:
