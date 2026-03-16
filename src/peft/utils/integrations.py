@@ -47,6 +47,29 @@ def gather_params_ctx(param, modifier_rank: Optional[int] = 0, fwd_module: torch
     return
 
 
+@contextmanager
+def fsdp_summon_full_params_ctx(module: torch.nn.Module):
+    """
+    Context manager to gather full parameters for FSDP-wrapped modules.
+    If the module is not FSDP-wrapped, this is a no-op.
+    """
+    # Check if module is FSDP-wrapped by looking for FSDP-specific attributes
+    is_fsdp_wrapped = (
+        hasattr(module, "_is_fsdp_managed_module")
+        or module.__class__.__name__ == "FullyShardedDataParallel"
+    )
+
+    if not is_fsdp_wrapped:
+        yield
+        return
+
+    from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
+    with FSDP.summon_full_params(module):
+        yield
+    return
+
+
 def dequantize_module_weight(module: torch.nn.Module) -> torch.nn.Parameter:
     """
     Helper function to dequantize a quantized weight.

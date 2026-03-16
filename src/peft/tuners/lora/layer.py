@@ -28,6 +28,7 @@ from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 from peft.utils.integrations import (
     dequantize_module_weight,
+    fsdp_summon_full_params_ctx,
     gather_params_ctx,
     get_bnb_param_type,
     skip_init_on_device,
@@ -2169,17 +2170,20 @@ class ParamWrapper(nn.Module, LoraLayer):
         return param
 
     def get_delta_weight(self, adapter_name, *args, **kwargs):
-        if self.num_experts == 1:
-            delta_weight = Linear.get_delta_weight(self, adapter_name, *args, **kwargs)
-        else:
-            weight_A = self.lora_A[adapter_name].weight
-            weight_B = self.lora_B[adapter_name].weight
-            # shape: experts x rank x in_features
-            weight_A = weight_A.reshape(self.num_experts, -1, weight_A.shape[-1])
-            # shape: out_features x rank x experts
-            weight_B = weight_B.reshape(weight_B.shape[0], -1, self.num_experts)
-            # fan_in_fan_out must be False, so no transpose call here
-            delta_weight = torch.einsum("o r e, e r i -> e i o", weight_B, weight_A) * self.scaling[adapter_name]
+        # For MoE layers with FSDP, we need to summon full params to get the complete weight tensors
+        # since they may be sharded across GPUs
+        with fsdp_summon_full_params_ctx(self.lora_A[adapter_name]), fsdp_summon_full_params_ctx(self.lora_B[adapter_name]):
+            if self.num_experts == 1:
+                delta_weight = Linear.get_delta_weight(self, adapter_name, *args, **kwargs)
+            else:
+                weight_A = self.lora_A[adapter_name].weight
+                weight_B = self.lora_B[adapter_name].weight
+                # shape: experts x rank x in_features
+                weight_A = weight_A.reshape(self.num_experts, -1, weight_A.shape[-1])
+                # shape: out_features x rank x experts
+                weight_B = weight_B.reshape(weight_B.shape[0], -1, self.num_experts)
+                # fan_in_fan_out must be False, so no transpose call here
+                delta_weight = torch.einsum("o r e, e r i -> e i o", weight_B, weight_A) * self.scaling[adapter_name]
 
         base_layer = self.get_base_layer()
         param = self.get_param()
