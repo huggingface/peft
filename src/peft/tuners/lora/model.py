@@ -290,10 +290,10 @@ class LoraModel(BaseTuner):
 
             if tp_plan == "colwise":
                 tp_module = lora_module.lora_B[adapter_name]
-                tp_layer_name = f"{current_key}.lora_B.{adapter_name}",
-            else: # rowwise
+                tp_layer_name = (f"{current_key}.lora_B.{adapter_name}",)
+            else:  # rowwise
                 tp_module = lora_module.lora_A[adapter_name]
-                tp_layer_name = f"{current_key}.lora_A.{adapter_name}",
+                tp_layer_name = (f"{current_key}.lora_A.{adapter_name}",)
             add_tensor_parallel_hooks_to_module(
                 self.model,
                 tp_module,
