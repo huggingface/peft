@@ -25,11 +25,6 @@ import torch
 from huggingface_hub import file_exists, hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
-from transformers.integrations.tensor_parallel import (
-    ALL_PARALLEL_STYLES,
-    ColwiseParallel,
-    RowwiseParallel,
-)
 from transformers.utils import http_user_agent
 
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
@@ -586,6 +581,12 @@ def set_peft_model_state_dict(
             peft_model_state_dict = {renamed_dora_weights(k): v for k, v in peft_model_state_dict.items()}
 
             if torch.distributed.is_available() and torch.distributed.is_initialized():
+                from transformers.integrations.tensor_parallel import (
+                    ALL_PARALLEL_STYLES,
+                    ColwiseParallel,
+                    RowwiseParallel,
+                )
+
                 from ..tuners.lora.layer import LoraLayer  # lazy import to avoid circular import
 
                 for name, module in model.named_modules():
