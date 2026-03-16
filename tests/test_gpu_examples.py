@@ -4217,44 +4217,50 @@ class PeftEetqGPUTests(unittest.TestCase):
 
 @require_non_cpu
 @require_torchao
-class PeftTorchaoGPUTests(unittest.TestCase):
-    r"""
-    torchao + peft tests
-    """
-
+class TestPeftTorchao:
+    causal_lm_model_id = "peft-internal-testing/opt-125m"
     supported_quant_types = [
         "int8_weight_only",
         "int8_dynamic_activation_int8_weight",
         # int4_weight_only raises an error:
-        # RuntimeError: derivative for aten::_weight_int4pack_mm is not implemented
+        # RuntimeError: We encountered some issues during automatic conversion of the weights
         # "int4_weight_only",
     ]
 
-    def setUp(self):
-        self.causal_lm_model_id = "peft-internal-testing/opt-125m"
-        self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
-        # torchao breaks with fp16 and if a previous test uses fp16, transformers will set this env var, which affects
-        # subsequent tests, therefore the env var needs to be cleared explicitly
-        #
-        # TODO: remove this once https://github.com/huggingface/transformers/pull/39483 is merged
-        os.environ.pop("ACCELERATE_MIXED_PRECISION", None)
+    @pytest.fixture(scope="class")
+    def tokenizer(self):
+        return AutoTokenizer.from_pretrained(self.causal_lm_model_id)
 
-    def tearDown(self):
-        r"""
-        Efficient mechanism to free GPU memory after each test. Based on
-        https://github.com/huggingface/transformers/issues/21094
-        """
+    @pytest.fixture(scope="class", autouse=True)
+    def setup_teardown(self):
+        # Efficient mechanism to free GPU memory after each test. Based on
+        # https://github.com/huggingface/transformers/issues/21094
+        yield
         clear_device_cache(garbage_collection=True)
 
-    @parameterized.expand(supported_quant_types)
+    @staticmethod
+    def get_quant_type(quant_type: str):
+        from torchao.quantization import (
+            Int4WeightOnlyConfig,
+            Int8DynamicActivationInt8WeightConfig,
+            Int8WeightOnlyConfig,
+        )
+
+        return {
+            "int4_weight_only": Int4WeightOnlyConfig(),
+            "int8_weight_only": Int8WeightOnlyConfig(),
+            "int8_dynamic_activation_int8_weight": Int8DynamicActivationInt8WeightConfig(),
+        }[quant_type]
+
+    @pytest.mark.parametrize("quant_type", supported_quant_types)
     @pytest.mark.single_gpu_tests
-    def test_causal_lm_training_single_gpu_torchao(self, quant_type):
+    def test_causal_lm_training_single_gpu_torchao(self, quant_type, tokenizer):
         from transformers import TorchAoConfig
 
         device = 0
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            quantization_config = TorchAoConfig(quant_type=quant_type)
+            quantization_config = TorchAoConfig(quant_type=self.get_quant_type(quant_type))
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
             )
@@ -4271,7 +4277,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
-            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
                 model=model,
@@ -4285,7 +4291,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
                     logging_steps=1,
                     output_dir=tmp_dir,
                 ),
-                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
             )
             trainer.model.config.use_cache = False
             trainer.train()
@@ -4299,13 +4305,13 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.single_gpu_tests
-    def test_causal_lm_training_single_gpu_torchao_dora_int8_weight_only(self):
+    def test_causal_lm_training_single_gpu_torchao_dora_int8_weight_only(self, tokenizer):
         from transformers import TorchAoConfig
 
         device = 0
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            quantization_config = TorchAoConfig(quant_type="int8_weight_only")
+            quantization_config = TorchAoConfig(quant_type=self.get_quant_type("int8_weight_only"))
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
             )
@@ -4323,7 +4329,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
-            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
                 model=model,
@@ -4337,7 +4343,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
                     logging_steps=1,
                     output_dir=tmp_dir,
                 ),
-                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
             )
             trainer.model.config.use_cache = False
             trainer.train()
@@ -4356,7 +4362,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
 
         device = 0
 
-        quantization_config = TorchAoConfig(quant_type="int8_dynamic_activation_int8_weight")
+        quantization_config = TorchAoConfig(quant_type=self.get_quant_type("int8_dynamic_activation_int8_weight"))
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
         )
@@ -4385,7 +4391,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
 
         device = 0
 
-        quantization_config = TorchAoConfig(quant_type="int4_weight_only")
+        quantization_config = TorchAoConfig(quant_type=self.get_quant_type("int4_weight_only"))
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
         )
@@ -4407,10 +4413,10 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         # tested in multiple matchines
         model(inputs)
 
-    @parameterized.expand(supported_quant_types)
+    @pytest.mark.parametrize("quant_type", supported_quant_types)
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_accelerator
-    def test_causal_lm_training_multi_accelerator_torchao(self, quant_type):
+    def test_causal_lm_training_multi_accelerator_torchao(self, quant_type, tokenizer):
         from transformers import TorchAoConfig
 
         device_map = {
@@ -4435,7 +4441,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         }
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            quantization_config = TorchAoConfig(quant_type=quant_type)
+            quantization_config = TorchAoConfig(quant_type=self.get_quant_type(quant_type))
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
                 device_map=device_map,
@@ -4461,7 +4467,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
-            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
                 model=model,
@@ -4475,7 +4481,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
                     logging_steps=1,
                     output_dir=tmp_dir,
                 ),
-                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
             )
             trainer.model.config.use_cache = False
             trainer.train()
@@ -4516,7 +4522,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             "model.decoder.layers.11": 1,
             "model.decoder.final_layer_norm": 1,
         }
-        quantization_config = TorchAoConfig(quant_type="int4_weight_only")
+        quantization_config = TorchAoConfig(self.get_quant_type(quant_type="int4_weight_only"))
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
             device_map=device_map,
@@ -4554,7 +4560,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         device = 0
         dummy_input = torch.arange(10).view(-1, 1).to(device)
 
-        quantization_config = TorchAoConfig(quant_type=quant_type)
+        quantization_config = TorchAoConfig(self.get_quant_type(quant_type=quant_type))
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
         ).eval()
@@ -4607,7 +4613,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         torch.manual_seed(0)
         device = 0
 
-        quantization_config = TorchAoConfig(quant_type=quant_type)
+        quantization_config = TorchAoConfig(quant_type=self.get_quant_type(quant_type))
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
         ).eval()
