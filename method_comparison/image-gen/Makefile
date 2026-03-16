@@ -1,4 +1,4 @@
-# Makefile for running MetaMathQA experiments.
+# Makefile for listing and running the image generation experiments.
 
 # --- Configuration ---
 PYTHON := python

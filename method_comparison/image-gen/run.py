@@ -509,8 +509,10 @@ def generate_sample_images(
 ) -> None:
     target_device = pipeline.transformer.device
     with offload_models(pipeline.text_encoder, pipeline.vae, device=target_device, offload=True):
+        # don't use the same seed as in training just to be sure
+        seed = train_config.seed + 100_000
+        generator = torch.Generator(device=target_device).manual_seed(seed)
         for idx, prompt in enumerate(train_config.sample_image_prompts, start=1):
-            generator = torch.Generator(device=target_device).manual_seed(train_config.seed + 100_000 + idx)
             image_path = os.path.join(sample_image_dir, f"{file_stem}_{idx:02d}.png")
             outputs = _generate_images(pipeline, generator=generator, prompts=[prompt], config=train_config)
             outputs.images[0].save(image_path)
