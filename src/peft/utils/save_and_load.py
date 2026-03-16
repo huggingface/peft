@@ -613,16 +613,12 @@ def set_peft_model_state_dict(
 
                     if isinstance(tp_layer, ColwiseParallel):
                         key = f"{name}.lora_B.{adapter_name}.weight"
-                        tp_layer.empty_param = peft_model_state_dict[key]
-                        peft_model_state_dict[key] = tp_layer.shard_tensor(
-                            peft_model_state_dict[key], device=device, dtype=dtype
-                        )
                     elif isinstance(tp_layer, RowwiseParallel):
                         key = f"{name}.lora_A.{adapter_name}.weight"
-                        tp_layer.empty_param = peft_model_state_dict[key]
-                        peft_model_state_dict[key] = tp_layer.shard_tensor(
-                            peft_model_state_dict[key], device=device, dtype=dtype
-                        )
+                    tp_layer.empty_param = peft_model_state_dict[key]
+                    peft_model_state_dict[key] = tp_layer.shard_tensor(
+                        peft_model_state_dict[key], device=device, dtype=dtype
+                    )
 
         elif config.peft_type == PeftType.OFT:
             if any(".oft_r." in key for key in peft_model_state_dict):
