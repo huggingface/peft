@@ -37,6 +37,8 @@ jobs:
 
   tests:
     needs: check_code_quality
+    # GH Environment for extra protection: https://github.com/huggingface/peft/settings/environments
+    environment: branch-protection-main
     # dependabot updates (which don't require approval for CI to run) shouldn't trigger unit tests
     if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]') }}
     strategy:
