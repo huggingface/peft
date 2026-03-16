@@ -29,7 +29,10 @@ dataset = dataset["train"].train_test_split(test_size=0.1)
 dataset["validation"] = dataset["test"]
 del dataset["test"]
 
-classes = dataset["train"].features["label"].names
+if hasattr(dataset["train"].features["label"], "names"):
+    classes = dataset["train"].features["label"].names
+else:
+    classes = ["Bearish", "Bullish", "Neutral"]
 dataset = dataset.map(
     lambda x: {"text_label": [classes[label] for label in x["label"]]},
     batched=True,
