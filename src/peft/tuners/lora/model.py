@@ -289,23 +289,19 @@ class LoraModel(BaseTuner):
             )
 
             if tp_plan == "colwise":
-                add_tensor_parallel_hooks_to_module(
-                    self.model,
-                    lora_module.lora_B[adapter_name],
-                    tp_plan,
-                    f"{current_key}.lora_B.{adapter_name}",
-                    tp_plan,
-                    device_mesh,
-                )
-            elif tp_plan == "rowwise":
-                add_tensor_parallel_hooks_to_module(
-                    self.model,
-                    lora_module.lora_A[adapter_name],
-                    tp_plan,
-                    f"{current_key}.lora_A.{adapter_name}",
-                    tp_plan,
-                    device_mesh,
-                )
+                tp_module = lora_module.lora_B[adapter_name]
+                tp_layer_name = f"{current_key}.lora_B.{adapter_name}",
+            else: # rowwise
+                tp_module = lora_module.lora_A[adapter_name]
+                tp_layer_name = f"{current_key}.lora_A.{adapter_name}",
+            add_tensor_parallel_hooks_to_module(
+                self.model,
+                tp_module,
+                tp_plan,
+                tp_layer_name,
+                tp_plan,
+                device_mesh,
+            )
 
     def _replace_module(self, parent, child_name, new_module, child):
         # override in LoraModel to handle quantized weights properly
