@@ -19,7 +19,6 @@ Run with:
     torchrun --nproc_per_node=2 tests/training/lora_tp.py --model_id <model_id>
 """
 
-import argparse
 import logging
 import sys
 import time
@@ -32,6 +31,8 @@ from transformers.testing_utils import ColoredFormatter, Colors
 from peft import LoraConfig, get_peft_model
 
 
+TINY_MODEL_ID = "amazingvince/zephyr-smol_llama-100m-sft-full"
+TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
 STEPS = 20
 BATCH_SIZE = 4
 LEARNING_RATE = 1e-3
@@ -202,13 +203,4 @@ def main(model_id: str, target_modules: list[str]):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model_id", type=str, required=True)
-    parser.add_argument(
-        "--target_modules",
-        type=str,
-        nargs="+",
-        default=["q_proj", "k_proj", "v_proj", "o_proj"],
-    )
-    args = parser.parse_args()
-    main(args.model_id, args.target_modules)
+    main(TINY_MODEL_ID, TARGET_MODULES)

@@ -6105,7 +6105,7 @@ def _test_multiple_adapters(rank, world_size, port):
             assert torch.isfinite(outputs.loss), f"Loss not finite with adapter '{adapter_name}': {outputs.loss}"
 
 
-@pytest.mark.skipf(not _is_tp_available(), reason="transformers TP integration not available")
+@pytest.mark.skipif(not _is_tp_available(), reason="transformers TP integration not available")
 class TestLoraTensorParallel:
     def _spawn(self, fn, *extra_args, port_offset=0):
         port = _BASE_PORT + port_offset
