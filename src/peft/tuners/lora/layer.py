@@ -2172,7 +2172,7 @@ class ParamWrapper(nn.Module, LoraLayer):
     def get_delta_weight(self, adapter_name, *args, **kwargs):
         # For MoE layers with FSDP, we need to summon full params to get the complete weight tensors
         # since they may be sharded across GPUs
-        with fsdp_summon_full_params_ctx(self.lora_A[adapter_name]), fsdp_summon_full_params_ctx(self.lora_B[adapter_name]):
+        with fsdp_summon_full_params_ctx(self.lora_A[adapter_name], self.lora_B[adapter_name]):
             if self.num_experts == 1:
                 delta_weight = Linear.get_delta_weight(self, adapter_name, *args, **kwargs)
             else:
