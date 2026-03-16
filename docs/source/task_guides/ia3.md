@@ -25,17 +25,18 @@ This guide will show you how to train a sequence-to-sequence model with IA3 to *
 
 ## Dataset
 
-You'll use the sentences_allagree subset of the [financial_phrasebank](https://huggingface.co/datasets/financial_phrasebank) dataset. This subset contains financial news with 100% annotator agreement on the sentiment label. Take a look at the [dataset viewer](https://huggingface.co/datasets/financial_phrasebank/viewer/sentences_allagree) for a better idea of the data and sentences you'll be working with.
+You'll use the [twitter-financial-news-sentiment](https://huggingface.co/datasets/zeroshot/twitter-financial-news-sentiment) dataset. This dataset contains financial news with sentiment labels. Take a look at the [dataset viewer](https://huggingface.co/datasets/zeroshot/twitter-financial-news-sentiment/viewer) for a better idea of the data and sentences you'll be working with.
 
-Load the dataset with the [`~datasets.load_dataset`] function. This subset of the dataset only contains a train split, so use the [`~datasets.train_test_split`] function to create a train and validation split. Create a new `text_label` column so it is easier to understand what the `label` values `0`, `1`, and `2` mean.
+Load the dataset with the [`~datasets.load_dataset`] function. This dataset contains train and validation splits. Create a new `text_label` column so it is easier to understand what the `label` values `0`, `1`, and `2` mean.
 
 ```py
 from datasets import load_dataset
 
-ds = load_dataset("financial_phrasebank", "sentences_allagree")
-ds = ds["train"].train_test_split(test_size=0.1)
-ds["validation"] = ds["test"]
-del ds["test"]
+ds = load_dataset("zeroshot/twitter-financial-news-sentiment")
+# The dataset has train and validation splits already
+if "validation" not in ds:
+    ds = ds["train"].train_test_split(test_size=0.1)
+    ds["validation"] = ds.pop("test")
 
 classes = ds["train"].features["label"].names
 ds = ds.map(
@@ -45,7 +46,7 @@ ds = ds.map(
 )
 
 ds["train"][0]
-{'sentence': 'It will be operated by Nokia , and supported by its Nokia NetAct network and service management system .',
+{'text': 'It will be operated by Nokia , and supported by its Nokia NetAct network and service management system .',
  'label': 1,
  'text_label': 'neutral'}
 ```
@@ -59,7 +60,7 @@ Load a tokenizer and create a preprocessing function that:
 ```py
 from transformers import AutoTokenizer
 
-text_column = "sentence"
+text_column = "text"
 label_column = "text_label"
 max_length = 128
 
@@ -223,6 +224,8 @@ inputs = tokenizer(ds["validation"][text_column][i], return_tensors="pt")
 print(ds["validation"][text_column][i])
 "The robust growth was the result of the inclusion of clothing chain Lindex in the Group in December 2007 ."
 ```
+
+Note that the dataset has been updated from `financial_phrasebank` to `zeroshot/twitter-financial-news-sentiment` as the former relied on a deprecated loading script format. The `text_column` has been updated from `"sentence"` to `"text"` to match the new dataset's column name.
 
 Call the [`~transformers.GenerationMixin.generate`] method to generate the predicted sentiment label.
 
