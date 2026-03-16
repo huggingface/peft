@@ -148,7 +148,7 @@ class Linear(nn.Module, PeanutLayer):
 
         residuals = []
         for i in range(res_num):
-            residuals.append(delta_w.clone())
+            residuals.append(delta_w)
             encoder = peanut_encoders[i]
             delta_w = non_linear(encoder(delta_w))
 

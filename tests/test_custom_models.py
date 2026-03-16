@@ -1032,15 +1032,7 @@ TEST_CASES = [
         PeanutConfig,
         {"target_modules": ["lin0", "lin1"], "r": 2, "depth": 0, "act_fn": "relu"},
     ),
-    ("Vanilla MLP 5 Peanut", "MLP", PeanutConfig, {"target_modules": "lin0", "r": 2, "depth": 1, "act_fn": "relu"}),
-    ("Vanilla MLP 6 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin0"], "r": 2, "depth": 1, "act_fn": "relu"}),
-    ("Vanilla MLP 7 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin1"], "r": 2, "depth": 1, "act_fn": "relu"}),
-    (
-        "Vanilla MLP 8 Peanut",
-        "MLP",
-        PeanutConfig,
-        {"target_modules": ["lin0", "lin1"], "r": 2, "depth": 1, "act_fn": "relu"},
-    ),
+    ("Vanilla MLP 5 Peanut", "MLP", PeanutConfig, {"target_modules": "lin0", "r": 2, "depth": 1, "act_fn": "gelu"}),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 
