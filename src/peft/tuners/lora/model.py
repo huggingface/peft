@@ -27,7 +27,7 @@ import torch
 import transformers
 from torch import nn
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_transformers_ge_v5_4_0
 from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
@@ -279,6 +279,11 @@ class LoraModel(BaseTuner):
 
         # If the module has a tp_plan, we add hooks to the LoRA layers to make sure they respect the plan
         if tp_plan is not None:
+            if not is_transformers_ge_v5_4_0:
+                raise RuntimeError(
+                    "The base model is tensor-parallel sharded but the installed version of Transformers does not "
+                    "support LoRA with Tensor Parallelism. Please upgrade to transformers >= 5.4.0."
+                )
             from transformers.integrations.tensor_parallel import (
                 add_tensor_parallel_hooks_to_module,
             )
