@@ -10,6 +10,8 @@ rules:
       # There is no obvious benefit so we leave it as it is.
       - build_docker_images.yml:39:9
       - build_docker_images.yml:74:9
+  secrets-outside-env:
+    ignore:
       # Zizmor warns about HF_TOKEN being used there but the token is not exposed to external users:
       # > With the exception of GITHUB_TOKEN, secrets are not passed to the runner when a workflow is triggered from a forked repository.
       # https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets#using-secrets-in-a-workflow
