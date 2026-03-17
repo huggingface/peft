@@ -3471,8 +3471,8 @@ class TestCordaInitialization:
 class TestEvaInitialization:
     """Tests for the EVA (Explained Variance Adaptation) initialization method.
 
-    Only tests the config validation, as running EVA can be slow (see test_gpu_examples::TestEvaInitialization for more
-    thorough tests)
+    Only tests the config validation, as running EVA can be slow (see test_gpu_examples::TestEvaInitializationGPU for
+    more thorough tests)
 
     """
 

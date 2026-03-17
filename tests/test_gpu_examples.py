@@ -5020,7 +5020,6 @@ class TestEvaInitializationGPU:
     LORA_DIM = 8
     LORA_ALPHA = 1
     DEVICE = infer_device()
-    _dataset = load_dataset_english_quotes()["train"]
 
     @pytest.fixture
     def tokenizer(self):
@@ -5033,7 +5032,8 @@ class TestEvaInitializationGPU:
         # concatenate examples
         examples = []
         example = ""
-        for data in self._dataset:
+        ds = load_dataset_english_quotes()["train"]  # cached
+        for data in ds:
             if len(example) >= self.MAX_LENGTH:
                 examples.append(example)
                 example = ""
@@ -5054,7 +5054,7 @@ class TestEvaInitializationGPU:
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
             model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
-            yield model.to(self.DEVICE)
+            return model.to(self.DEVICE)
 
     @pytest.fixture
     def model_bnb(self):
@@ -5068,7 +5068,7 @@ class TestEvaInitializationGPU:
             )
             model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
             model = prepare_model_for_kbit_training(model)
-            yield model
+            return model
 
     @pytest.fixture
     def model_fixture(self, request):
