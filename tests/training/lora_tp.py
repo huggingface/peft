@@ -19,6 +19,7 @@ Run with:
     torchrun --nproc_per_node=2 tests/training/lora_tp.py --model_id <model_id>
 """
 
+import argparse
 import logging
 import sys
 import time
@@ -29,6 +30,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
 from transformers.testing_utils import ColoredFormatter, Colors
 
 from peft import LoraConfig, get_peft_model
+from peft.import_utils import is_transformers_ge_v5_4_0
 
 
 TINY_MODEL_ID = "amazingvince/zephyr-smol_llama-100m-sft-full"
@@ -79,12 +81,16 @@ def main(model_id: str, target_modules: list[str]):
     model = AutoModelForCausalLM.from_pretrained(model_id, tp_plan="auto")
     config = model.config
 
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    model = model.to(device)
+
     lora_config = LoraConfig(r=4, target_modules=target_modules)
     model = get_peft_model(model, lora_config)
     model.train()
 
     sample_input = tokenizer("Paris is the most beautiful city in the world.", return_tensors="pt")
-    batch = {k: v.repeat(BATCH_SIZE, 1) for k, v in sample_input.items()}
+    batch = {k: v.repeat(BATCH_SIZE, 1).to(device) for k, v in sample_input.items()}
     batch["labels"] = batch["input_ids"].clone()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=0.0, betas=(0.9, 0.999))
@@ -149,6 +155,7 @@ def main(model_id: str, target_modules: list[str]):
     model.eval()
     expected_tokens = batch["input_ids"][0].tolist()
     prompt_ids = torch.tensor([[expected_tokens[0]]], dtype=torch.long)
+    prompt_ids = prompt_ids.to(device)
     num_tokens_to_generate = len(expected_tokens) - 1
 
     logger.info(f"Prompt: {tokenizer.decode([expected_tokens[0]])}")
@@ -203,4 +210,19 @@ def main(model_id: str, target_modules: list[str]):
 
 
 if __name__ == "__main__":
-    main(TINY_MODEL_ID, TARGET_MODULES)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model_id", type=str, required=False, default=TINY_MODEL_ID)
+    parser.add_argument(
+        "--target_modules",
+        type=str,
+        nargs="+",
+        required=False,
+        default=TARGET_MODULES,
+        help="List of target modules for LoRA adaptation",
+    )
+    parser.add_argument("--report-log", type=str, required=False, default=None)
+    args = parser.parse_args()
+    if not is_transformers_ge_v5_4_0:
+        print("This test requires transformers v5.4.0 or higher")
+    else:
+        main(model_id=args.model_id, target_modules=args.target_modules)

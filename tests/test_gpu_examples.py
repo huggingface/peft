@@ -82,7 +82,13 @@ from peft import (
     replace_lora_weights_loftq,
     set_peft_model_state_dict,
 )
-from peft.import_utils import is_diffusers_available, is_te_available, is_transformers_ge_v5, is_xpu_available
+from peft.import_utils import (
+    is_diffusers_available,
+    is_te_available,
+    is_transformers_ge_v5,
+    is_transformers_ge_v5_4_0,
+    is_xpu_available,
+)
 from peft.tuners import boft
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -5966,15 +5972,6 @@ TINY_MODEL_ID = "amazingvince/zephyr-smol_llama-100m-sft-full"
 TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
 
 
-def _is_tp_available():
-    try:
-        import transformers.integrations.tensor_parallel  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
-
-
 def _find_free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
@@ -5987,6 +5984,9 @@ _BASE_PORT = _find_free_port()
 def _setup_dist(rank, world_size, port):
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = str(port)
+    os.environ["LOCAL_RANK"] = str(rank)
+    os.environ["RANK"] = str(rank)
+    os.environ["WORLD_SIZE"] = str(rank)
     dist.init_process_group(backend="gloo", rank=rank, world_size=world_size)
 
 
@@ -6010,8 +6010,13 @@ def _test_lora_weight_synchronization(rank, world_size, port):
     lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
     model = get_peft_model(model, lora_config)
 
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    model.to(device)
+
     tokenizer = AutoTokenizer.from_pretrained(TINY_MODEL_ID)
     inputs = tokenizer("Paris is the most beautiful city in the world.", return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
 
     model.train()
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
@@ -6057,7 +6062,11 @@ def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
 
     dist.barrier()
 
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+
     tp_base = AutoModelForCausalLM.from_pretrained(MODEL_ID, tp_plan="auto")
+    tp_base.to(device)
     tp_model = PeftModel.from_pretrained(tp_base, tmp_dir)
 
     for name, module in tp_model.named_modules():
@@ -6082,6 +6091,7 @@ def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
     inputs = tokenizer("The capital of France is Paris.", return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
     tp_model.eval()
     with torch.no_grad():
         outputs = tp_model(**inputs, labels=inputs["input_ids"])
@@ -6090,13 +6100,18 @@ def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
 
 def _test_multiple_adapters(rank, world_size, port):
     """Two LoRA adapters coexist on a TP model and can be switched between."""
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
     model = AutoModelForCausalLM.from_pretrained(MODEL_ID, tp_plan="auto")
+    model.to(device)
+
     for adapter_name in ["adapter_a", "adapter_b"]:
         lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
         model = get_peft_model(model, lora_config, adapter_name=adapter_name)
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
     inputs = tokenizer("What is the capital of France?", return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
     model.eval()
     with torch.no_grad():
         for adapter_name in ["adapter_a", "adapter_b"]:
@@ -6105,19 +6120,27 @@ def _test_multiple_adapters(rank, world_size, port):
             assert torch.isfinite(outputs.loss), f"Loss not finite with adapter '{adapter_name}': {outputs.loss}"
 
 
-@pytest.mark.skipif(not _is_tp_available(), reason="transformers TP integration not available")
+@pytest.mark.skipif(
+    not is_transformers_ge_v5_4_0, reason="transformers TP integration supported for transformers >= 5.4.0"
+)
 class TestLoraTensorParallel:
     def _spawn(self, fn, *extra_args, port_offset=0):
         port = _BASE_PORT + port_offset
         wrapped_fn = partial(_test_function_wrapper, fn)
         mp.spawn(wrapped_fn, args=(WORLD_SIZE, port) + extra_args, nprocs=WORLD_SIZE, join=True)
 
+    @require_torch_gpu
+    @pytest.mark.multi_gpu_tests
     def test_lora_weight_synchronization(self):
         self._spawn(_test_lora_weight_synchronization, port_offset=0)
 
+    @require_torch_gpu
+    @pytest.mark.multi_gpu_tests
     def test_from_checkpoint(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             self._spawn(_test_load_from_checkpoint, tmp_dir, port_offset=1)
 
+    @require_torch_gpu
+    @pytest.mark.multi_gpu_tests
     def test_multiple_adapters(self):
         self._spawn(_test_multiple_adapters, port_offset=2)
