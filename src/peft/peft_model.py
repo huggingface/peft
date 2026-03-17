@@ -1054,12 +1054,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         try:
             if peft_config.is_prompt_learning:
                 self.peft_config[adapter_name] = peft_config
-                if hasattr(self.config, "to_dict"):
-                    dict_config = self.config.to_dict()
-                else:
-                    dict_config = self.config
-
-                peft_config = _prepare_prompt_learning_config(peft_config, dict_config)
+                peft_config = _prepare_prompt_learning_config(peft_config, self.config)
                 self._setup_prompt_encoder(adapter_name)
                 set_additional_trainable_modules(
                     model=self.base_model,

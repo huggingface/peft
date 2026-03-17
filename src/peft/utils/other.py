@@ -1102,12 +1102,21 @@ def _set_adapter(model, adapter_name: str | list[str], inference_mode: bool = Fa
 
 
 def _prepare_prompt_learning_config(peft_config, model_config):
+    orig_model_config = model_config
+    if hasattr(model_config, "to_dict"):
+        model_config = model_config.to_dict()
+    else:
+        model_config = model_config
+
     # In case of VLM we focus on the language model portion of the model.
     if "text_config" in model_config:
         model_config = model_config["text_config"]
 
     if peft_config.num_layers is None:
-        if "num_hidden_layers" in model_config:
+        if hasattr(orig_model_config, "num_hidden_layers"):
+            # dict entry was removed in https://github.com/huggingface/transformers/pull/41250
+            num_layers = orig_model_config.num_hidden_layers
+        elif "num_hidden_layers" in model_config:
             num_layers = model_config["num_hidden_layers"]
         elif "num_layers" in model_config:
             num_layers = model_config["num_layers"]
