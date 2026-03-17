@@ -70,6 +70,7 @@ from peft import (
     TaskType,
     VeraConfig,
     create_arrow_model,
+    get_eva_state_dict,
     get_peft_model,
     get_peft_model_state_dict,
     initialize_lora_eva_weights,
@@ -80,6 +81,7 @@ from peft import (
 )
 from peft.import_utils import is_diffusers_available, is_te_available, is_transformers_ge_v5, is_xpu_available
 from peft.tuners import boft
+from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
@@ -4997,8 +4999,18 @@ class TestLowCpuMemUsageDifferentDevices:
         assert {p.device.type for p in model.parameters()} == {self.device, "meta"}
 
 
+@pytest.mark.single_gpu_tests
+@require_non_cpu
 class TestEvaInitializationGPU:
-    """GPU tests for the Eva initialization method."""
+    """GPU tests for the Eva initialization method.
+
+    This test suite verifies:
+    1. Consistency of initialization across different seeds
+    2. Proper error handling for invalid inputs
+    3. Compatibility with different model architectures
+    4. Reproducibility of results
+    5. Proper handling of edge cases
+    """
 
     # Constants for test configuration
     COSINE_SIMILARITY_THRESHOLD = 0.75
@@ -5008,6 +5020,7 @@ class TestEvaInitializationGPU:
     LORA_DIM = 8
     LORA_ALPHA = 1
     DEVICE = infer_device()
+    _dataset = load_dataset_english_quotes()["train"]
 
     @pytest.fixture
     def tokenizer(self):
@@ -5017,11 +5030,10 @@ class TestEvaInitializationGPU:
 
     @pytest.fixture
     def dataset(self, tokenizer):
-        dataset = load_dataset_english_quotes()["train"]
         # concatenate examples
         examples = []
         example = ""
-        for data in dataset:
+        for data in self._dataset:
             if len(example) >= self.MAX_LENGTH:
                 examples.append(example)
                 example = ""
@@ -5038,21 +5050,25 @@ class TestEvaInitializationGPU:
 
     @pytest.fixture
     def model(self):
-        model = AutoModelForCausalLM.from_pretrained("openai-community/gpt2")
-        model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
-        return model.to(self.DEVICE)
+        model_id = "openai-community/gpt2"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
+            yield model.to(self.DEVICE)
 
     @pytest.fixture
     def model_bnb(self):
-        bnb_config = BitsAndBytesConfig(load_in_4bit=True)
-        model = AutoModelForCausalLM.from_pretrained(
-            "openai-community/gpt2",
-            quantization_config=bnb_config,
-            attn_implementation="eager",  # gpt2 doesnt support flash attention
-        )
-        model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
-        model = prepare_model_for_kbit_training(model)
-        return model
+        model_id = "openai-community/gpt2"
+        with hub_online_once(model_id):
+            bnb_config = BitsAndBytesConfig(load_in_4bit=True)
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                quantization_config=bnb_config,
+                attn_implementation="eager",  # gpt2 doesnt support flash attention
+            )
+            model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
+            model = prepare_model_for_kbit_training(model)
+            yield model
 
     @pytest.fixture
     def model_fixture(self, request):
@@ -5075,36 +5091,47 @@ class TestEvaInitializationGPU:
     def collate_fn(examples):
         return {k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()}
 
-    @require_non_cpu
+    def get_dataloader(self, dataset):
+        return DataLoader(
+            dataset,
+            batch_size=self.BATCH_SIZE,
+            collate_fn=self.collate_fn,
+            shuffle=False,
+        )
+
     @require_bitsandbytes
-    @pytest.mark.single_gpu_tests
+    @pytest.mark.parametrize(
+        "eva_config",
+        [
+            EvaConfig(rho=2, tau=0.99),
+            EvaConfig(rho=1, tau=0.9),
+            EvaConfig(rho=1, whiten=True, tau=0.9),
+            EvaConfig(rho=1.0001, tau=0.9),
+        ],
+    )
     @pytest.mark.parametrize("model_fixture", ["model", "model_bnb"], indirect=True)
-    def test_eva_initialization_consistency(self, model_fixture, dataset, peft_config):
-        """Test that the state dict returned by get_eva_state_dict loaded correctly and is consistent across different seeds based
-        on the cosine similarity of the svd components."""
+    def test_eva_initialization_consistency(self, model_fixture, dataset, peft_config, eva_config):
+        """Test that the state dict returned by get_eva_state_dict loaded correctly and is consistent across different
+        seeds based on the cosine similarity of the svd components.
+
+        """
+        peft_config = deepcopy(peft_config)
+        peft_config.eva_config = eva_config
         state_dicts = []
         for seed in range(self.NUM_SEEDS):
             shuffled_dataset = dataset.shuffle(seed=seed)
-            dataloader = DataLoader(
-                shuffled_dataset,
-                batch_size=self.BATCH_SIZE,
-                collate_fn=lambda examples: {
-                    k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()
-                },
-                shuffle=False,
-            )
-            peft_model = get_peft_model(deepcopy(model_fixture), peft_config)
-            initialize_lora_eva_weights(peft_model, dataloader)
-            state_dicts.append(
-                {k: v.cpu() for k, v in peft_model.state_dict().items() if "lora_A.default.weight" in k}
-            )
+            dataloader = self.get_dataloader(shuffled_dataset)
+            sd = get_eva_state_dict(deepcopy(model_fixture), dataloader, peft_config, show_progress_bar=False)
+            state_dicts.append(sd)
 
         cos_sims = defaultdict(list)
         for i, j in itertools.combinations(range(self.NUM_SEEDS), 2):
             for k, v1 in state_dicts[i].items():
                 v2 = state_dicts[j][k]
                 min_size = min(v1.size(0), v2.size(0))
-                cos_sims[k].extend(torch.cosine_similarity(v1[:min_size], v2[:min_size], dim=1).abs().tolist())
+                cos_sims[k].extend(
+                    torch.cosine_similarity(v1[:min_size].abs(), v2[:min_size].abs(), dim=1).abs().tolist()
+                )
 
         mean_cosine_similarities = {k: torch.tensor(v).mean() for k, v in cos_sims.items()}
         for layer_name, mean_cosine_similarity in mean_cosine_similarities.items():
@@ -5112,6 +5139,138 @@ class TestEvaInitializationGPU:
                 f"Mean absolute cosine similarity {mean_cosine_similarity:.4f} "
                 f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
             )
+
+    @pytest.mark.parametrize(
+        "prepare_layer_inputs_keys, expected_outcome",
+        [
+            (None, "success"),
+            (["transformer.h.0.attn.c_attn"], "success"),
+            (
+                ["transformer.h.0.attn.c_attn", "transformer.h.1.attn.c_attn", "transformer.h.2.attn.c_attn"],
+                "value_error",
+            ),
+        ],
+    )
+    def test_eva_state_dict_prepare_inputs_mapping(
+        self, model, dataset, peft_config, prepare_layer_inputs_keys, expected_outcome
+    ):
+        """
+        Tests for cases where prepare_layer_inputs_fn is a mapping. Checks that if not all target modules are present,
+        the prepare_layer_inputs_fn for the remaining modules is set to None. Also checks that if more keys than target
+        modules are present, a ValueError is raised.
+        """
+
+        def fn(x, *args):
+            return x[0].view(-1, x[0].size(-1))
+
+        if prepare_layer_inputs_keys is None:
+            prepare_layer_inputs_fn = fn
+        else:
+            prepare_layer_inputs_fn = {k: fn for k in prepare_layer_inputs_keys}
+
+        shuffled_dataset = dataset.shuffle(seed=0)
+        dataloader = self.get_dataloader(shuffled_dataset)
+        modified_peft_config = deepcopy(peft_config)
+        modified_peft_config.eva_config.tau = 0  # converge immediately
+        if expected_outcome == "success":
+            sd = get_eva_state_dict(
+                model,
+                dataloader,
+                modified_peft_config,
+                prepare_model_inputs_fn=None,
+                prepare_layer_inputs_fn=prepare_layer_inputs_fn,
+            )
+            assert len(sd) == 2
+            assert "transformer.h.0.attn.c_attn" in sd
+            assert "transformer.h.1.attn.c_attn" in sd
+        else:
+            with pytest.raises(
+                ValueError, match="prepare_layer_inputs_fn is a mapping but the following module names were not found"
+            ):
+                get_eva_state_dict(
+                    model,
+                    dataloader,
+                    modified_peft_config,
+                    prepare_model_inputs_fn=None,
+                    prepare_layer_inputs_fn=prepare_layer_inputs_fn,
+                )
+
+    @pytest.mark.parametrize(
+        "eva_config",
+        [EvaConfig(rho=2, adjust_scaling_factors=True)],
+    )
+    def test_eva_state_dict_adjust_scaling_factors(self, model, dataset, peft_config, eva_config):
+        """
+        Tests that the scaling factors are adjusted so that all LoRA gradients have the same scale regardless of their
+        rank.
+        """
+        modified_peft_config = deepcopy(peft_config)
+        modified_peft_config.eva_config = eva_config
+        dataloader = self.get_dataloader(dataset)
+        peft_model = get_peft_model(deepcopy(model), modified_peft_config)
+        scaling_factors_before = {}
+        for n, m in peft_model.named_modules():
+            if isinstance(m, LoraLayer):
+                scaling_factors_before[n] = m.scaling["default"]
+        initialize_lora_eva_weights(peft_model, dataloader)
+        for n, m in peft_model.named_modules():
+            if isinstance(m, LoraLayer):
+                assert m.scaling["default"] == scaling_factors_before[n]
+
+    @pytest.mark.parametrize("has_rank_zero", [True, False])
+    def test_load_eva_state_dict(self, model, dataset, peft_config, tmp_path, has_rank_zero):
+        """
+        Tests that the `eva_state_dict` argument in `initialize_lora_eva_weights` can be used to initialize a model
+        with EVA weights and that the initialized model can be saved and loaded correctly.
+        """
+        dataloader = self.get_dataloader(dataset)
+        peft_model = get_peft_model(deepcopy(model), peft_config)
+        sd = get_eva_state_dict(peft_model, dataloader)
+        if has_rank_zero:
+            k = "base_model.model.transformer.h.0.attn.c_attn"
+            sd[k] = sd[k][:0]
+        initialize_lora_eva_weights(peft_model, eva_state_dict=sd)
+        if has_rank_zero:
+            assert not isinstance(peft_model.model.transformer.h[0].attn.c_attn, LoraLayer)
+        else:
+            assert isinstance(peft_model.model.transformer.h[0].attn.c_attn, LoraLayer)
+        peft_model.save_pretrained(tmp_path)
+        peft_model = PeftModel.from_pretrained(model, tmp_path, torch_device=self.DEVICE, low_cpu_mem_usage=True)
+        peft_model(**{k: v.to(self.DEVICE) for k, v in next(iter(dataloader)).items()})
+
+    def test_missing_eva_inits(self, model, dataset, peft_config):
+        """
+        Tests that a warning is raised when some adapter modules were not initialized with EVA weights.
+        """
+        modified_peft_config = deepcopy(peft_config)
+        modified_peft_config.target_modules = ["wte"]
+        dataloader = self.get_dataloader(dataset)
+        peft_model = get_peft_model(deepcopy(model), modified_peft_config)
+        msg = (
+            "the following layers were initialized with init_lora_weights=True because they were not found in the eva "
+            "state_dict:*"
+        )
+        with pytest.warns(UserWarning, match=msg):
+            initialize_lora_eva_weights(peft_model, dataloader)
+
+    def test_load_eva_model(self, model, dataset, peft_config, tmp_path):
+        """
+        Tests that a model initialized with EVA weights can be loaded correctly.
+        """
+        dataloader = self.get_dataloader(dataset)
+        peft_model = get_peft_model(deepcopy(model), peft_config)
+        initialize_lora_eva_weights(peft_model, dataloader)
+        peft_model.save_pretrained(tmp_path)
+        peft_model = PeftModel.from_pretrained(model, tmp_path, torch_device=self.DEVICE, low_cpu_mem_usage=True)
+        peft_model(**{k: v.to(self.DEVICE) for k, v in next(iter(dataloader)).items()})
+
+    def test_eva_initialization_with_invalid_dataloader(self, model, peft_config):
+        """Test that appropriate error is raised when dataloader is empty."""
+        empty_dataset = Dataset.from_dict({"text": []})
+        dataloader = self.get_dataloader(empty_dataset)
+
+        with pytest.raises(ValueError, match="dataloader is empty"):
+            get_eva_state_dict(model, dataloader, peft_config)
 
 
 class TestALoRAInferenceGPU:
