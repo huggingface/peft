@@ -69,3 +69,4 @@ tests_training:
 	accelerate launch --config_file tests/training/fsdp_config.yaml tests/training/training.py $(if $(IS_GITHUB_CI),--report-log "training_fsdp.log",)
 	accelerate launch --config_file tests/training/fsdp_config.yaml tests/training/training.py --quant 4bit $(if $(IS_GITHUB_CI),--report-log "training_fsdp_4bit.log",)
 	accelerate launch --config_file tests/training/fsdp_config.yaml tests/training/adapters.py $(if $(IS_GITHUB_CI),--report-log "training_fsdp_adapters.log",)
+	accelerate launch --config_file tests/training/tp_config.yaml tests/training/lora_tp.py

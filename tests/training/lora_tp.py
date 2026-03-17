@@ -220,7 +220,6 @@ if __name__ == "__main__":
         default=TARGET_MODULES,
         help="List of target modules for LoRA adaptation",
     )
-    parser.add_argument("--report-log", type=str, required=False, default=None)
     args = parser.parse_args()
     if not is_transformers_ge_v5_4_0:
         print("This test requires transformers v5.4.0 or higher")
