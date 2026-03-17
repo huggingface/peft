@@ -150,6 +150,8 @@
       title: DeLoRA
     - local: package_reference/lily
       title: Lily
+    - local: package_reference/peanut
+      title: PEANuT
 
     title: Adapters
   - sections:
