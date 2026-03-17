@@ -6120,27 +6120,23 @@ def _test_multiple_adapters(rank, world_size, port):
             assert torch.isfinite(outputs.loss), f"Loss not finite with adapter '{adapter_name}': {outputs.loss}"
 
 
+@require_torch_gpu
 @pytest.mark.skipif(
     not is_transformers_ge_v5_4_0, reason="transformers TP integration supported for transformers >= 5.4.0"
 )
+@pytest.mark.multi_gpu_tests
 class TestLoraTensorParallel:
     def _spawn(self, fn, *extra_args, port_offset=0):
         port = _BASE_PORT + port_offset
         wrapped_fn = partial(_test_function_wrapper, fn)
         mp.spawn(wrapped_fn, args=(WORLD_SIZE, port) + extra_args, nprocs=WORLD_SIZE, join=True)
 
-    @require_torch_gpu
-    @pytest.mark.multi_gpu_tests
     def test_lora_weight_synchronization(self):
         self._spawn(_test_lora_weight_synchronization, port_offset=0)
 
-    @require_torch_gpu
-    @pytest.mark.multi_gpu_tests
     def test_from_checkpoint(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             self._spawn(_test_load_from_checkpoint, tmp_dir, port_offset=1)
 
-    @require_torch_gpu
-    @pytest.mark.multi_gpu_tests
     def test_multiple_adapters(self):
         self._spawn(_test_multiple_adapters, port_offset=2)
