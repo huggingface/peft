@@ -347,6 +347,15 @@ def get_peft_model_state_dict(
             # nothing to do
             return key
 
+        if config.peft_type == PeftType.PEANUT:
+            # PEANuT stores residual blocks as ModuleDict[adapter] -> ModuleList.
+            # Their keys look like `...peanut_encoders.<adapter>.0.weight` (and similarly for decoders),
+            # where adapter_name is not in the second-to-last position.
+            for container in ("peanut_encoders", "peanut_decoders"):
+                marker = f".{container}.{adapter_name}."
+                if marker in key:
+                    return key.replace(marker, f".{container}.")
+
         if key.endswith(f".{adapter_name}"):
             # comes from an nn.Parameter, so no .weight suffix, the adapter name is directly at the end
             return key.removesuffix(f".{adapter_name}")
