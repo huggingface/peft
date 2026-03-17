@@ -73,9 +73,8 @@ class AdamssLayer(BaseTunerLayer):
         """
         Clear stored importance stats for an adapter.
 
-        Called after each masking interval to restart EMA accumulation for the
-        next importance scoring window. Without the reset the scores from early
-        training steps would dominate later masking decisions.
+        Called after each masking interval to restart EMA accumulation for the next importance scoring window. Without
+        the reset the scores from early training steps would dominate later masking decisions.
         """
         if adapter_name in self.exp_avg_ipt_A:
             n = len(self.exp_avg_ipt_A[adapter_name])
@@ -90,8 +89,8 @@ class AdamssLayer(BaseTunerLayer):
         """
         Update importance scores using current gradients.
 
-        Called by [`AdamssModel.update_and_allocate`] (which is in turn called by
-        [`AdamssAsaCallback`] when using HuggingFace `Trainer`).
+        Called by [`AdamssModel.update_and_allocate`] (which is in turn called by [`AdamssAsaCallback`] when using
+        HuggingFace `Trainer`).
 
         Args:
             adapter_name: Name of the adapter to update importance for.
@@ -132,7 +131,6 @@ class AdamssLayer(BaseTunerLayer):
                     # Then update importance
                     ipt_list[i].mul_(importance_beta).add_(ipt, alpha=1 - importance_beta)
 
-
     def update_layer(
         self,
         adapter_name: str,
@@ -149,8 +147,8 @@ class AdamssLayer(BaseTunerLayer):
         """
         Update layer with Adamss adapter.
 
-        This method initializes the Adamss decomposition for the weight matrix
-        using SVD, clustering, and QR initialization.
+        This method initializes the Adamss decomposition for the weight matrix using SVD, clustering, and QR
+        initialization.
         """
 
         # Get the base weight info
@@ -354,17 +352,15 @@ class Linear(nn.Module, AdamssLayer):
     ):
         """Handle shape mismatches that arise when loading checkpoints.
 
-        AdaMSS B parameter shapes depend on KMeans clustering of the weight
-        matrix.  KMeans uses a fixed `random_state` so results should be
-        deterministic, but this override acts as a safety net in case sklearn
-        changes clustering behaviour across versions.  It detects shape
-        mismatches and replaces placeholder parameters with correctly-shaped
-        tensors before the default `load_state_dict` logic runs.
+        AdaMSS B parameter shapes depend on KMeans clustering of the weight matrix. KMeans uses a fixed `random_state`
+        so results should be deterministic, but this override acts as a safety net in case sklearn changes clustering
+        behaviour across versions. It detects shape mismatches and replaces placeholder parameters with
+        correctly-shaped tensors before the default `load_state_dict` logic runs.
         """
         for key, value in state_dict.items():
             if not key.startswith(prefix):
                 continue
-            local_key = key[len(prefix):]
+            local_key = key[len(prefix) :]
             parts = local_key.split(".")
             try:
                 # Use get_submodule for the parent path
@@ -448,12 +444,18 @@ class Linear(nn.Module, AdamssLayer):
                 if adapter_delta.dim() == 2:
                     index = scatter_index_tensor.unsqueeze(0).expand(adapter_delta.shape[0], -1)
                     adapter_delta = torch.zeros(
-                        adapter_delta.shape[0], result.shape[-1], device=adapter_delta.device, dtype=adapter_delta.dtype
+                        adapter_delta.shape[0],
+                        result.shape[-1],
+                        device=adapter_delta.device,
+                        dtype=adapter_delta.dtype,
                     ).scatter(1, index, adapter_delta)
                 else:
                     index = scatter_index_tensor.unsqueeze(0).unsqueeze(0).expand(*adapter_delta.shape[:-1], -1)
                     adapter_delta = torch.zeros(
-                        *adapter_delta.shape[:-1], result.shape[-1], device=adapter_delta.device, dtype=adapter_delta.dtype
+                        *adapter_delta.shape[:-1],
+                        result.shape[-1],
+                        device=adapter_delta.device,
+                        dtype=adapter_delta.dtype,
                     ).scatter(-1, index, adapter_delta)
 
                 result = result + adapter_delta
@@ -548,8 +550,7 @@ class Linear(nn.Module, AdamssLayer):
         Since resW = original_weight_with_bias, the delta is just the adapter path:
             delta = scatter(B @ A @ newB)
 
-        We extract the weight portion (excluding bias column) as the delta to add
-        to the base layer's weight.
+        We extract the weight portion (excluding bias column) as the delta to add to the base layer's weight.
 
         Args:
             adapter_name (str): The name of the adapter for which the delta weight should be computed.

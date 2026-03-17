@@ -26,8 +26,7 @@ def slice_pca(tensor, r, device, dtype=torch.float32):
         dtype: data type
 
     Returns:
-        VVT: Right singular vectors (B, C, r, W)
-        UU: Left singular vectors (B, C, H, r)
+        VVT: Right singular vectors (B, C, r, W) UU: Left singular vectors (B, C, H, r)
     """
     tensor = tensor.to(device)
     B, C, H, W = tensor.shape
@@ -58,12 +57,11 @@ def clustering_Z(VT, num_subspaces, iternum):
         iternum: Maximum iterations for K-Means
 
     Returns:
-        cluster_idx: Cluster assignments as a ``torch.LongTensor``
-        effective_num_subspaces: Actual number of subspaces used (``int``)
+        cluster_idx: Cluster assignments as a ``torch.LongTensor`` effective_num_subspaces: Actual number of subspaces
+        used (``int``)
 
     Note:
-        This function requires scikit-learn to be installed. Install it with:
-        pip install scikit-learn
+        This function requires scikit-learn to be installed. Install it with: pip install scikit-learn
     """
     # Local import with helpful error message
     try:
@@ -100,8 +98,8 @@ def seg_locations(index):
 
     Returns:
         location: Dict mapping cluster id to ``torch.LongTensor`` of row indices.
-            Clusters are ordered by their smallest index so that KMeans label
-            permutations do not affect downstream ordering.
+            Clusters are ordered by their smallest index so that KMeans label permutations do not affect downstream
+            ordering.
     """
     K = int(index.max().item()) + 1
     location = {}

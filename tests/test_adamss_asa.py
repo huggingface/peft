@@ -175,7 +175,9 @@ class TestAdamssAsa:
 
         layers = _get_adamss_layers(model)
         layer = layers[0]
-        assert any(v is not None for v in layer.exp_avg_ipt_A["default"]), "Importance should be populated after step 1 (non-mask-interval)"
+        assert any(v is not None for v in layer.exp_avg_ipt_A["default"]), (
+            "Importance should be populated after step 1 (non-mask-interval)"
+        )
 
     def test_masking_reduces_active_params(self):
         """At mask intervals, some subspaces should be frozen."""
@@ -225,7 +227,9 @@ class TestAdamssAsa:
         # After mask interval at step 5: importance should be cleared
         layers = _get_adamss_layers(model)
         for layer in layers:
-            assert all(v is None for v in layer.exp_avg_ipt_A["default"]), "Importance should be reset after mask interval"
+            assert all(v is None for v in layer.exp_avg_ipt_A["default"]), (
+                "Importance should be reset after mask interval"
+            )
 
     def test_no_masking_outside_warmup(self):
         """update_and_allocate should be a no-op outside warmup range."""
@@ -239,7 +243,9 @@ class TestAdamssAsa:
         # No importance should be accumulated (outside warmup)
         layers = _get_adamss_layers(model)
         for layer in layers:
-            assert all(v is None for v in layer.exp_avg_ipt_A["default"]), "No importance accumulation should happen outside warmup"
+            assert all(v is None for v in layer.exp_avg_ipt_A["default"]), (
+                "No importance accumulation should happen outside warmup"
+            )
 
     def test_asa_disabled_is_noop(self):
         """update_and_allocate should be a no-op when use_asa=False."""

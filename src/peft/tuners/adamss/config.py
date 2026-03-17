@@ -26,122 +26,108 @@ class AdamssConfig(PeftConfig):
     """
     Configuration class for Adamss (Adaptive Multi-Subspaces) method.
 
-    AdaMSS is a parameter-efficient fine-tuning method that decomposes weight matrices
-    using SVD and clusters the decomposed space into multiple trainable subspaces.
-    It learns low-rank updates within these subspaces while keeping the original weights frozen.
+    AdaMSS is a parameter-efficient fine-tuning method that decomposes weight matrices using SVD and clusters the
+    decomposed space into multiple trainable subspaces. It learns low-rank updates within these subspaces while keeping
+    the original weights frozen.
 
     Args:
         r (`int`):
-            Total rank for SVD decomposition (denoted as R in the paper). This determines
-            how many singular vectors are used to represent the weight matrix before clustering.
-            Higher values capture more information from the original weights but require more
-            computation and memory. Lower values provide stronger regularization.
+            Total rank for SVD decomposition (denoted as R in the paper). This determines how many singular vectors are
+            used to represent the weight matrix before clustering. Higher values capture more information from the
+            original weights but require more computation and memory. Lower values provide stronger regularization.
             Typical values range from 50 to 500. Default is 100.
 
         num_subspaces (`int`):
-            Number of subspaces (K) to cluster the SVD-decomposed space into. Each subspace
-            learns independent low-rank updates. Increasing this value allows finer-grained
-            adaptation but increases the number of trainable parameters proportionally.
-            When using ASA (Adaptive Subspace Allocation), this determines the initial number
-            of subspaces before pruning. Typical values range from 3 to 10. Default is 5.
+            Number of subspaces (K) to cluster the SVD-decomposed space into. Each subspace learns independent low-rank
+            updates. Increasing this value allows finer-grained adaptation but increases the number of trainable
+            parameters proportionally. When using ASA (Adaptive Subspace Allocation), this determines the initial
+            number of subspaces before pruning. Typical values range from 3 to 10. Default is 5.
 
         subspace_rank (`int`):
-            The rank (r_i) for each trainable subspace. This controls the capacity of each
-            subspace to learn adaptations. Higher values increase expressiveness but also
-            increase trainable parameters. Total trainable parameters scale as
-            O(num_subspaces * subspace_rank * (in_dim + out_dim) / num_subspaces).
-            For most tasks, values of 1-4 work well. Default is 1.
+            The rank (r_i) for each trainable subspace. This controls the capacity of each subspace to learn
+            adaptations. Higher values increase expressiveness but also increase trainable parameters. Total trainable
+            parameters scale as O(num_subspaces * subspace_rank * (in_dim + out_dim) / num_subspaces). For most tasks,
+            values of 1-4 work well. Default is 1.
 
         target_modules (`Optional[Union[list[str], str]]`):
-            The names of the modules to apply AdaMSS to. If specified, only these modules
-            will be adapted. Can be a list of exact module names or a regex expression.
-            For example, `['q_proj', 'v_proj']` for attention layers, or
-            `'.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'` for regex matching.
+            The names of the modules to apply AdaMSS to. If specified, only these modules will be adapted. Can be a
+            list of exact module names or a regex expression. For example, `['q_proj', 'v_proj']` for attention layers,
+            or `'.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'` for regex matching.
 
         modules_to_save (`Optional[list[str]]`):
-            List of modules apart from AdaMSS layers to be set as trainable and saved in
-            the final checkpoint. These modules will be fully fine-tuned (not just low-rank).
-            Required for randomly initialized heads like `classifier` or `score` in
-            classification tasks.
+            List of modules apart from AdaMSS layers to be set as trainable and saved in the final checkpoint. These
+            modules will be fully fine-tuned (not just low-rank). Required for randomly initialized heads like
+            `classifier` or `score` in classification tasks.
 
         init_weights (`Literal["orthogonal"]`):
-            Initialization method for AdaMSS trainable weights. Currently only "orthogonal"
-            is supported, which uses orthogonal initialization for the B matrices (output
-            projection). The A matrices are initialized to zero to ensure the model starts
-            from the pretrained weights. Set to None to skip initialization when loading
-            from a checkpoint. Default is "orthogonal".
+            Initialization method for AdaMSS trainable weights. Currently only "orthogonal" is supported, which uses
+            orthogonal initialization for the B matrices (output projection). The A matrices are initialized to zero to
+            ensure the model starts from the pretrained weights. Set to None to skip initialization when loading from a
+            checkpoint. Default is "orthogonal".
 
         layers_to_transform (`Optional[Union[list[int], int]]`):
-            Specific layer indices to apply AdaMSS to. If specified, only these layers
-            will be adapted, useful for experimenting with which layers benefit most from
-            adaptation. Can be a single integer or a list of integers.
+            Specific layer indices to apply AdaMSS to. If specified, only these layers will be adapted, useful for
+            experimenting with which layers benefit most from adaptation. Can be a single integer or a list of
+            integers.
 
         layers_pattern (`Optional[Union[list[str], str]]`):
-            Pattern to match layer names when `layers_to_transform` is specified. Used to
-            extract layer indices from module names that don't follow the common pattern.
+            Pattern to match layer names when `layers_to_transform` is specified. Used to extract layer indices from
+            module names that don't follow the common pattern.
 
         use_asa (`bool`):
-            Whether to enable Adaptive Subspace Allocation (ASA). When enabled, ASA
-            dynamically prunes less important subspaces during training based on gradient
-            information, reducing the effective number of parameters while maintaining
-            performance. Requires integration with a training callback. Default is False.
+            Whether to enable Adaptive Subspace Allocation (ASA). When enabled, ASA dynamically prunes less important
+            subspaces during training based on gradient information, reducing the effective number of parameters while
+            maintaining performance. Requires integration with a training callback. Default is False.
 
         asa_target_subspaces (`int`):
-            Target total number of active subspaces across all layers when ASA is enabled.
-            ASA will progressively prune subspaces until this target is reached. Lower
-            values result in more aggressive pruning and fewer trainable parameters.
-            Should be less than `num_subspaces * num_target_modules`. Typical values
-            range from 20 to 100 depending on model size. Default is 50.
+            Target total number of active subspaces across all layers when ASA is enabled. ASA will progressively prune
+            subspaces until this target is reached. Lower values result in more aggressive pruning and fewer trainable
+            parameters. Should be less than `num_subspaces * num_target_modules`. Typical values range from 20 to 100
+            depending on model size. Default is 50.
 
         init_warmup (`int`):
-            Number of training steps to wait before starting ASA pruning. During warmup,
-            all subspaces remain active to allow importance scores to stabilize. Higher
-            values give more time for accurate importance estimation but delay pruning.
-            Typical values range from 50 to 200. Default is 50.
+            Number of training steps to wait before starting ASA pruning. During warmup, all subspaces remain active to
+            allow importance scores to stabilize. Higher values give more time for accurate importance estimation but
+            delay pruning. Typical values range from 50 to 200. Default is 50.
 
         final_warmup (`int`):
-            Training step at which ASA completes pruning and reaches `asa_target_subspaces`
-            active subspaces. The pruning is distributed between `init_warmup` and
-            `final_warmup`. Should be set based on total training steps; typically 1/3
-            to 1/2 of total training steps. Default is 1000.
+            Training step at which ASA completes pruning and reaches `asa_target_subspaces` active subspaces. The
+            pruning is distributed between `init_warmup` and `final_warmup`. Should be set based on total training
+            steps; typically 1/3 to 1/2 of total training steps. Default is 1000.
 
         mask_interval (`int`):
-            Number of training steps between ASA mask updates. Lower values allow more
-            frequent adaptation but increase overhead. Higher values provide more stable
-            importance estimates between updates. Typical values range from 50 to 200.
-            Default is 100.
+            Number of training steps between ASA mask updates. Lower values allow more frequent adaptation but increase
+            overhead. Higher values provide more stable importance estimates between updates. Typical values range from
+            50 to 200. Default is 100.
 
         asa_importance_beta (`float`):
-            Exponential moving average (EMA) coefficient for smoothing subspace importance
-            scores. Higher values (closer to 1.0) give more weight to historical importance,
-            providing stability. Lower values make importance more responsive to recent
-            gradients. Typical values range from 0.8 to 0.95. Default is 0.85.
+            Exponential moving average (EMA) coefficient for smoothing subspace importance scores. Higher values
+            (closer to 1.0) give more weight to historical importance, providing stability. Lower values make
+            importance more responsive to recent gradients. Typical values range from 0.8 to 0.95. Default is 0.85.
 
         asa_uncertainty_beta (`float`):
-            EMA coefficient for smoothing importance uncertainty estimates. Controls how
-            quickly uncertainty adapts to gradient variance. Similar to asa_importance_beta,
-            higher values provide more stable estimates. Typical values range from 0.8 to 0.95.
-            Default is 0.85.
+            EMA coefficient for smoothing importance uncertainty estimates. Controls how quickly uncertainty adapts to
+            gradient variance. Similar to asa_importance_beta, higher values provide more stable estimates. Typical
+            values range from 0.8 to 0.95. Default is 0.85.
 
         asa_schedule_exponent (`float`):
-            Schedule exponent controlling the decay rate from total subspaces to
-            `asa_target_subspaces` during ASA warmup. Higher values result in faster initial
-            pruning (more aggressive early reduction), while lower values provide a more
-            gradual, linear-like decay. The formula is:
-            current_active_subspaces = asa_target_subspaces + (asa_total_subspaces - asa_target_subspaces) * (progress ** exponent).
-            Typical values range from 1.0 (linear) to 5.0 (aggressive). Default is 3.0.
+            Schedule exponent controlling the decay rate from total subspaces to `asa_target_subspaces` during ASA
+            warmup. Higher values result in faster initial pruning (more aggressive early reduction), while lower
+            values provide a more gradual, linear-like decay. The formula is: current_active_subspaces =
+            asa_target_subspaces + (asa_total_subspaces - asa_target_subspaces) * (progress ** exponent). Typical
+            values range from 1.0 (linear) to 5.0 (aggressive). Default is 3.0.
 
         use_dynamic_rank (`bool`):
-            Whether to dynamically determine subspace ranks based on singular value magnitudes.
-            When True, each subspace's rank is determined by counting singular values above
-            a threshold, allowing different subspaces to have different effective ranks.
-            When False, all subspaces use the fixed `subspace_rank`. Default is False.
+            Whether to dynamically determine subspace ranks based on singular value magnitudes. When True, each
+            subspace's rank is determined by counting singular values above a threshold, allowing different subspaces
+            to have different effective ranks. When False, all subspaces use the fixed `subspace_rank`. Default is
+            False.
 
         svd_threshold (`float`):
-            Threshold ratio for dynamic rank selection, only used when `use_dynamic_rank=True`.
-            A singular value is considered significant if it exceeds `threshold * max_singular_value`.
-            Higher values result in lower effective ranks (more aggressive truncation).
-            Typical values range from 0.05 to 0.2. Default is 0.1 (10% of max).
+            Threshold ratio for dynamic rank selection, only used when `use_dynamic_rank=True`. A singular value is
+            considered significant if it exceeds `threshold * max_singular_value`. Higher values result in lower
+            effective ranks (more aggressive truncation). Typical values range from 0.05 to 0.2. Default is 0.1 (10% of
+            max).
     """
 
     r: int = field(

@@ -32,8 +32,8 @@ class AdamssModel(BaseTuner):
     """
     Creates Adamss (Adaptive Multi-Subspaces) model from a pretrained model.
 
-    The method decomposes weight matrices using SVD and clusters the decomposed space
-    into multiple trainable subspaces for parameter-efficient fine-tuning.
+    The method decomposes weight matrices using SVD and clusters the decomposed space into multiple trainable subspaces
+    for parameter-efficient fine-tuning.
 
     Args:
         model (`torch.nn.Module`): The model to be adapted.
@@ -67,7 +67,9 @@ class AdamssModel(BaseTuner):
     tuner_layer_cls = (AdamssLayer,)
     target_module_mapping = TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING
 
-    def __init__(self, model, config, adapter_name, low_cpu_mem_usage: bool = False, state_dict: Optional[dict] = None) -> None:
+    def __init__(
+        self, model, config, adapter_name, low_cpu_mem_usage: bool = False, state_dict: Optional[dict] = None
+    ) -> None:
         # Initialize ASA tracking before BaseTuner injects adapters so attribute exists.
         self._asa_total_subspaces = {}
         super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage, state_dict=state_dict)
@@ -167,15 +169,14 @@ class AdamssModel(BaseTuner):
         """
         Update importance scores and apply ASA masking (if enabled).
 
-        This method should be called in **every** training step after ``loss.backward()``
-        and before ``optimizer.zero_grad()`` when ASA is enabled.  Internally it:
+        This method should be called in **every** training step after ``loss.backward()`` and before
+        ``optimizer.zero_grad()`` when ASA is enabled. Internally it:
 
         1. Accumulates importance scores via EMA every step during the warmup period.
         2. At mask intervals, applies global top-K masking and resets importance.
 
-        This is the single entry point for ASA – using the :class:`AdamssAsaCallback`
-        with HuggingFace ``Trainer`` simply delegates to this method.  For custom
-        training loops, call this directly instead of the callback.
+        This is the single entry point for ASA – using the :class:`AdamssAsaCallback` with HuggingFace ``Trainer``
+        simply delegates to this method. For custom training loops, call this directly instead of the callback.
 
         Args:
             global_step (`int`): The current training step.
@@ -183,10 +184,7 @@ class AdamssModel(BaseTuner):
         Example::
 
             for step, batch in enumerate(dataloader):
-                loss = model(**batch).loss
-                loss.backward()
-                optimizer.step()
-                model.base_model.update_and_allocate(step)
+                loss = model(**batch).loss loss.backward() optimizer.step() model.base_model.update_and_allocate(step)
                 optimizer.zero_grad()
         """
         for adapter_name in self.active_adapters:
@@ -249,8 +247,8 @@ class AdamssModel(BaseTuner):
         """
         Apply **global** top-K masking across all layers.
 
-        Collects importance scores from every subspace in every layer, ranks them
-        globally, and keeps only the top ``target_subspaces`` active.
+        Collects importance scores from every subspace in every layer, ranks them globally, and keeps only the top
+        ``target_subspaces`` active.
         """
         # 1. Collect (module, subspace_idx, score) for every subspace
         subspace_scores: list[tuple] = []
