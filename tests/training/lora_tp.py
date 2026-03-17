@@ -33,7 +33,7 @@ from peft import LoraConfig, get_peft_model
 from peft.import_utils import is_transformers_ge_v5_4_0
 
 
-TINY_MODEL_ID = "amazingvince/zephyr-smol_llama-100m-sft-full"
+TINY_MODEL_ID = "peft-internal-testing/zephyr-smol_llama-100m-sft-full"
 TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
 STEPS = 20
 BATCH_SIZE = 4
