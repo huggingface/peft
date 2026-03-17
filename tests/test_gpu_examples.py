@@ -5968,7 +5968,7 @@ class TestTransformerEngine:
 
 WORLD_SIZE = 2
 MODEL_ID = "Qwen/Qwen3-0.6B"
-TINY_MODEL_ID = "amazingvince/zephyr-smol_llama-100m-sft-full"
+TINY_MODEL_ID = "peft-internal-testing/zephyr-smol_llama-100m-sft-full"
 TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
 
 
