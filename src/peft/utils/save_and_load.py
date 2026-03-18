@@ -95,6 +95,8 @@ def get_peft_model_state_dict(
     # If model was sharded with TP, gather full tensors for saving
     base_model = model.base_model
     if base_model._tuner_tp_plan:
+        from transformers.integrations.tensor_parallel import gather_state_dict_for_save
+
         # If the keys in the state dict start with the prefix, we need to add the prefix to the keys in the tp plan as
         # well.
         prefix = "base_model." if model.active_peft_config.is_prompt_learning else "base_model.model."
