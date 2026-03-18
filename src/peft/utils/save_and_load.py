@@ -13,6 +13,7 @@
 # limitations under the License.
 from __future__ import annotations
 
+import copy
 import os
 import platform
 import re
@@ -90,6 +91,23 @@ def get_peft_model_state_dict(
     config = model.peft_config[adapter_name]
     if state_dict is None:
         state_dict = model.state_dict()
+
+    # If model was sharded with TP, gather full tensors for saving
+    base_model = model.base_model
+    if base_model._tuner_tp_plan:
+        from transformers.integrations.tensor_parallel import gather_state_dict_for_save
+
+        # If the keys in the state dict start with the prefix, we need to add the prefix to the keys in the tp plan as
+        # well.
+        prefix = "base_model." if model.active_peft_config.is_prompt_learning else "base_model.model."
+        keys_starting_with_prefix = all(k.startswith(prefix) for k in state_dict)
+        tp_plan = {
+            (f"{prefix}{k}" if keys_starting_with_prefix and not k.startswith(prefix) else k): v
+            for k, v in base_model._tuner_tp_plan.items()
+        }
+        state_dict = gather_state_dict_for_save(
+            state_dict, tp_plan, base_model._tuner_device_mesh, base_model._tuner_tp_size
+        )
 
     # TUNER SPECIFIC CODE
     if config.peft_type in (PeftType.LORA, PeftType.ADALORA):
@@ -593,6 +611,7 @@ def set_peft_model_state_dict(
                 from transformers.integrations.tensor_parallel import (
                     ALL_PARALLEL_STYLES,
                     ColwiseParallel,
+                    EmbeddingParallel,
                     RowwiseParallel,
                 )
 
@@ -616,18 +635,45 @@ def set_peft_model_state_dict(
                     # state dict key to shard.
                     # This attribute is used by the sharding logic for shape reference,
                     # it must be of the same shape as the parameter to shard.
-                    tp_layer = ALL_PARALLEL_STYLES[tp_plan]
+                    tp_layer = copy.deepcopy(ALL_PARALLEL_STYLES[tp_plan])
                     tp_layer.device_mesh = device_mesh
                     tp_layer.rank = device_mesh.get_local_rank()
 
+                    weight = None
+                    sharded = None
                     if isinstance(tp_layer, ColwiseParallel):
                         key = f"{name}.lora_B.{adapter_name}.weight"
                     elif isinstance(tp_layer, RowwiseParallel):
                         key = f"{name}.lora_A.{adapter_name}.weight"
-                    tp_layer.empty_param = peft_model_state_dict[key]
-                    peft_model_state_dict[key] = tp_layer.shard_tensor(
-                        peft_model_state_dict[key], device=device, dtype=dtype
-                    )
+                    elif isinstance(tp_layer, EmbeddingParallel):
+                        # The state dict can contain the original base embedding weights if `save_embedding_layers` is
+                        # set to `True` and the embedding layer is targeted. In that case, we need to shard those
+                        # weights as well.
+                        embedding_key = f"{name}.base_layer.weight"
+                        if embedding_key in peft_model_state_dict:
+                            tp_layer.empty_param = peft_model_state_dict[embedding_key]
+                            peft_model_state_dict[embedding_key] = tp_layer.shard_tensor(
+                                peft_model_state_dict[embedding_key], device=device, dtype=dtype
+                            )
+                        key = f"{name}.lora_embedding_A.{adapter_name}"
+                        # We transpose the lora_embedding_A weights because they are of shape (rank, num_embeddings) in
+                        # the state dict
+                        weight = peft_model_state_dict[key].T
+                        tp_layer.empty_param = weight
+                        sharded = tp_layer.shard_tensor(weight, device=device, dtype=dtype)
+                        # We transpose back because LoraEmbedding expects the weights to be of shape (rank, num_embeddings)
+                        sharded = sharded.T
+                    else:
+                        raise ValueError(f"Unknown tensor parallel plan {tp_plan} for {module.__class__.__name__}.")
+
+                    if weight is None:
+                        weight = peft_model_state_dict[key]
+                    if sharded is None:
+                        tp_layer.empty_param = weight
+                        sharded = tp_layer.shard_tensor(weight, device=device, dtype=dtype)
+
+                    tp_layer.empty_param = weight
+                    peft_model_state_dict[key] = sharded
 
         elif config.peft_type == PeftType.OFT:
             if any(".oft_r." in key for key in peft_model_state_dict):

@@ -56,7 +56,6 @@ import bitsandbytes as bnb
 import torch
 from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer, BitsAndBytesConfig
 
-import peft
 import peft.tuners.lora.bnb
 from peft import LoftQConfig, LoraConfig, PeftModel, TaskType, get_peft_model
 
