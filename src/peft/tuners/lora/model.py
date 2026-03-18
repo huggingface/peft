@@ -307,25 +307,21 @@ class LoraModel(BaseTuner):
                 tp_plan_keys = []
                 tp_plans = []
                 generic_key = re.sub(r"\d+", "*", current_key)
-                if tp_plan == "colwise":
-                    tp_plan_keys.append(f"{generic_key}.lora_B.{adapter_name}.weight")
+                if tp_plan in ["colwise", "rowwise"]:
+                    if tp_plan == "colwise":
+                        tp_module = lora_module.lora_B[adapter_name]
+                        tp_layer_name = (f"{current_key}.lora_B.{adapter_name}",)
+                        tp_plan_keys.append(f"{generic_key}.lora_B.{adapter_name}.weight")
+                    else:  # rowwise
+                        tp_module = lora_module.lora_A[adapter_name]
+                        tp_layer_name = (f"{current_key}.lora_A.{adapter_name}",)
+                        tp_plan_keys.append(f"{generic_key}.lora_A.{adapter_name}.weight")
                     tp_plans.append(tp_plan)
                     add_tensor_parallel_hooks_to_module(
                         self.model,
-                        lora_module.lora_B[adapter_name],
+                        tp_module,
                         tp_plan,
-                        f"{current_key}.lora_B.{adapter_name}",
-                        tp_plan,
-                        device_mesh,
-                    )
-                elif tp_plan == "rowwise":
-                    tp_plan_keys.append(f"{generic_key}.lora_A.{adapter_name}.weight")
-                    tp_plans.append(tp_plan)
-                    add_tensor_parallel_hooks_to_module(
-                        self.model,
-                        lora_module.lora_A[adapter_name],
-                        tp_plan,
-                        f"{current_key}.lora_A.{adapter_name}",
+                        tp_layer_name,
                         tp_plan,
                         device_mesh,
                     )
