@@ -13,6 +13,8 @@
 # limitations under the License.
 from __future__ import annotations
 
+import copy
+import logging
 import math
 import operator
 import re
@@ -26,7 +28,6 @@ import packaging.version
 import torch
 import transformers
 from torch import nn
-from transformers.integrations.tensor_parallel import ALL_PARALLEL_STYLES, add_tensor_parallel_hooks_to_module
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_transformers_ge_v5_4_0
 from peft.tuners.tuners_utils import (
@@ -288,6 +289,7 @@ class LoraModel(BaseTuner):
             from transformers.integrations.tensor_parallel import (
                 add_tensor_parallel_hooks_to_module,
             )
+
             _SUPPORTED_TP_PLANS = ("colwise", "rowwise", "embedding_rowwise")
 
             if tp_plan not in _SUPPORTED_TP_PLANS:
