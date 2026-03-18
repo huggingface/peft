@@ -657,7 +657,6 @@ def set_peft_model_state_dict(
                     tp_layer.empty_param = weight
                     peft_model_state_dict[key] = sharded
 
-
         elif config.peft_type == PeftType.OFT:
             if any(".oft_r." in key for key in peft_model_state_dict):
                 raise ValueError(
