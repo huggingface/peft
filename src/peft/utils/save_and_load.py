@@ -652,6 +652,7 @@ def set_peft_model_state_dict(
                     if weight is None:
                         weight = peft_model_state_dict[key]
                     if sharded is None:
+                        tp_layer.empty_param = weight
                         sharded = tp_layer.shard_tensor(weight, device=device, dtype=dtype)
 
                     tp_layer.empty_param = weight
