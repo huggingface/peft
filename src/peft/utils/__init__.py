@@ -69,7 +69,13 @@ from .other import (
     transpose,
 )
 from .peft_types import PeftType, TaskType, register_peft_method
-from .save_and_load import get_peft_model_state_dict, load_peft_weights, set_peft_model_state_dict
+from .save_and_load import (
+    get_base_model_state_dict,
+    get_peft_model_state_dict,
+    load_peft_weights,
+    set_base_model_state_dict,
+    set_peft_model_state_dict,
+)
 from .warning import PeftWarning
 
 
@@ -121,6 +127,7 @@ __all__ = [
     "_set_trainable",
     "bloom_model_postprocess_past_key_value",
     "cast_mixed_precision_params",
+    "get_base_model_state_dict",
     "get_gptqmodel_quant_linear",
     "get_peft_model_state_dict",
     "get_quantization_config",
@@ -132,6 +139,7 @@ __all__ = [
     "register_peft_method",
     "replace_lora_weights_loftq",
     "set_additional_trainable_modules",
+    "set_base_model_state_dict",
     "set_peft_model_state_dict",
     "shift_tokens_right",
     "transpose",

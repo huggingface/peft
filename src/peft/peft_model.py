@@ -59,11 +59,13 @@ from .utils import (
     _prepare_prompt_learning_config,
     _set_adapter,
     _set_trainable,
+    get_base_model_state_dict,
     get_peft_model_state_dict,
     id_tensor_storage,
     infer_device,
     load_peft_weights,
     map_cache_to_layer_device_map,
+    set_base_model_state_dict,
     set_peft_model_state_dict,
     shift_tokens_right,
 )
@@ -1640,6 +1642,81 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             return False
 
         return self.base_model.supports_lora_conversion()
+
+    def get_base_model_state_dict(self) -> dict[str, torch.Tensor]:
+        """
+        Returns the state dict of the base model with the original model keys.
+
+        This method extracts the base model's parameters, removing PEFT-specific key modifications and filtering out
+        adapter-specific parameters (like LoRA matrices).
+
+        This is useful when you need to access or save the base model's weights with their original key names.
+
+        Returns:
+            `dict[str, torch.Tensor]`:
+                The base model's state dict with original keys (without PEFT modifications).
+
+        Example:
+            ```python
+            >>> from transformers import AutoModelForCausalLM
+            >>> from peft import get_peft_model, LoraConfig
+
+            >>> base_model = AutoModelForCausalLM.from_pretrained("gpt2")
+            >>> original_keys = set(base_model.state_dict().keys())
+
+            >>> peft_model = get_peft_model(base_model, LoraConfig(target_modules=["c_attn"]))
+            >>> base_state_dict = peft_model.get_base_model_state_dict()
+
+            >>> # The keys match the original model
+            >>> assert set(base_state_dict.keys()) == original_keys
+            ```
+        """
+        return get_base_model_state_dict(self)
+
+    def set_base_model_state_dict(
+        self,
+        state_dict: dict[str, torch.Tensor],
+        strict: bool = True,
+    ):
+        """
+        Sets the base model's state dict using original model keys.
+
+        This method takes a state dict with original model key names (without PEFT modifications) and loads it into the
+        base model, automatically handling the key transformations required by PEFT (such as adding `.base_layer.`
+        infixes for tuner layers).
+
+        This is the counterpart to `get_base_model_state_dict` and is useful for scenarios like loading base model
+        weights after FSDP wrapping.
+
+        Args:
+            state_dict (`dict[str, torch.Tensor]`):
+                The state dict with original model keys to load.
+            strict (`bool`, *optional*, defaults to `True`):
+                Whether to strictly enforce that the keys in `state_dict` match the keys expected by the base model. If
+                `True`, raises a `RuntimeError` if there are missing or unexpected keys.
+
+        Returns:
+            `NamedTuple` with `missing_keys` and `unexpected_keys` fields (using original key names), similar to
+            `torch.nn.Module.load_state_dict`.
+
+        Raises:
+            RuntimeError: If `strict=True` and there are missing or unexpected keys.
+
+        Example:
+            ```python
+            >>> from transformers import AutoModelForCausalLM
+            >>> from peft import get_peft_model, LoraConfig
+            >>> import torch
+
+            >>> base_model = AutoModelForCausalLM.from_pretrained("gpt2")
+            >>> base_weights = base_model.state_dict()
+            >>> peft_model = get_peft_model(base_model, LoraConfig(target_modules=["c_attn"]))
+
+            >>> # Restore original base model weights on the peft wrapped model
+            >>> result = peft_model.set_base_model_state_dict(base_weights)
+            ```
+        """
+        return set_base_model_state_dict(self, state_dict, strict=strict)
 
 
 class PeftModelForSequenceClassification(PeftModel):

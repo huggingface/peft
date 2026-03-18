@@ -444,6 +444,11 @@ class TestEncoderDecoderModels(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_disable_adapter(model_id, config_cls, config_kwargs)
 
+    @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_get_base_model_state_dict(self, model_id, config_cls, config_kwargs):
+        self._test_get_base_model_state_dict(model_id, config_cls, config_kwargs.copy())
+
     def test_active_adapters_prompt_learning(self):
         model = AutoModelForSeq2SeqLM.from_pretrained(
             "peft-internal-testing/tiny-random-BartForConditionalGeneration"
