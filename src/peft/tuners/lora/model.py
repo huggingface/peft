@@ -302,14 +302,13 @@ class LoraModel(BaseTuner):
                 if tp_plan in ["colwise", "rowwise"]:
                     if tp_plan == "colwise":
                         tp_plan_keys.append(f"{generic_key}.lora_B.{adapter_name}.weight")
-                        tp_plans.append(tp_plan)
                         tp_module = lora_module.lora_B[adapter_name]
                         tp_layer_name = (f"{current_key}.lora_B.{adapter_name}",)
                     else:  # rowwise
                         tp_plan_keys.append(f"{generic_key}.lora_A.{adapter_name}.weight")
-                        tp_plans.append(tp_plan)
                         tp_module = lora_module.lora_A[adapter_name]
                         tp_layer_name = (f"{current_key}.lora_A.{adapter_name}",)
+                    tp_plans.append(tp_plan)
                     add_tensor_parallel_hooks_to_module(
                         self.model,
                         tp_module,
@@ -318,7 +317,7 @@ class LoraModel(BaseTuner):
                         tp_plan,
                         device_mesh,
                     )
-                elif tp_plan == "embedding_rowwise":
+                else:  # embedding_rowwise
                     # TP hooks are  handled in the `_embed` method in lora/layer.py where they are explicitely called.
                     # Here we simply register the TP plans.
                     tp_plan_keys.append(f"{generic_key}.base_layer.weight")
