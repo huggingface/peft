@@ -595,7 +595,7 @@ class LoraModel(BaseTuner):
             "dare_linear",
             "dare_ties_svd",
             "dare_linear_svd",
-            "magnintude_prune",
+            "magnitude_prune",
             "magnitude_prune_svd",
         ] = "svd",
         svd_rank: int | None = None,
@@ -756,7 +756,7 @@ class LoraModel(BaseTuner):
 
         # if no valid adapter, nothing to do
         if len(valid_adapters) == 0:
-            raise ValueError("No matching LoRAs found. Please raise an issue on Github.")
+            raise ValueError("No matching LoRAs found. Please raise an issue on GitHub.")
         # get_delta_weight applies the scaling, no need to handle it explicitly
         delta_weight = [target.get_delta_weight(adapter) for adapter in valid_adapters]
         valid_weights = torch.tensor(valid_weights).to(delta_weight[0].device)

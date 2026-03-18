@@ -3330,15 +3330,25 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize(
         "combination_type, min_corr, max_mse",
         [
-            ("svd", 0.9, 1.0),  # SVD has low error
-            ("cat", 0.9, 0.1),  # cat has very low error
-            ("linear", 0.6, 300.0),  # linear has relatively high error
+            # note: SVD and cat are 'precise', the others are approximation
+            ("svd", 0.99, 0.01),
+            ("cat", 0.99, 0.01),
+            ("linear", 0.6, 1.0),
+            ("ties", 0.4, 1.0),
+            ("ties_svd", 0.8, 1.0),
+            ("dare_ties", 0.1, 1.0),
+            ("dare_ties_svd", 0.55, 1.0),
+            ("dare_linear", 0.2, 1.0),
+            ("dare_linear_svd", 0.6, 1.0),
+            ("magnitude_prune", 0.55, 1.0),
+            ("magnitude_prune_svd", 0.9, 0.1),
         ],
     )
     def test_add_weighted_adapter_with_different_scaling(self, weights, combination_type, min_corr, max_mse):
         # Check that the actually merged weights correspond to what their theoretical value should be. Note that each
-        # method is an approximation so we can never expect equality. Note that the `dare` and `magnitude_prune` methods
-        # give very bad results here with default settings, so they are not being tested.
+        # method is an approximation so we can never expect exact equality. We thus test for correlation and MSE as a
+        # proxy. The acceptance criteria are empirically determined and thus serve more as a regression test than
+        # actually proving that the merging method works.
         torch.manual_seed(42)
         model = MLP()
 
@@ -3358,9 +3368,6 @@ class TestPeftCustomModel(PeftCommonTester):
 
         model = get_peft_model(model, config1, adapter_name="adapter1")
         model.add_adapter("adapter2", config2)
-
-        # Linear combination of multiple adapters is a rough approximation (cross terms in B@A), so we only
-        # check that the forward pass works and the adapter is usable.
         model.add_weighted_adapter(
             adapters=["adapter1", "adapter2"],
             weights=weights,
@@ -3383,7 +3390,7 @@ class TestPeftCustomModel(PeftCommonTester):
                 dw_merged = module.get_delta_weight("merged")
                 expected = weights[0] * dw1 + weights[1] * dw2
                 corr = torch.corrcoef(torch.stack((dw_merged.flatten(), expected.flatten())))
-                mse = ((dw_merged - expected) ** 2).sum()
+                mse = ((dw_merged - expected) ** 2).mean()
                 assert corr[0, 1] > min_corr
                 assert mse < max_mse
 
