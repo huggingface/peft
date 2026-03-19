@@ -1,0 +1,5 @@
+{
+  "model_id": "Qwen/Qwen3.5-4B",
+  "learning_rate": 1e-5,
+  "save_checkpoint": true
+}
