@@ -249,3 +249,10 @@ class Linear(nn.Linear, VBLoRALayer):
                 result = result + F.linear(F.linear(dropout(x), A), B)
         result = result.to(previous_dtype)
         return result
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        return True
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "vblora." + rep

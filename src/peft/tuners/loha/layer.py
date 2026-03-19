@@ -272,6 +272,9 @@ class Linear(LoHaLayer):
         # don't add bias here, because the bias is already included in the output of the base_layer
         return F.linear(input, delta_weight)
 
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        return True
+
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "loha." + rep

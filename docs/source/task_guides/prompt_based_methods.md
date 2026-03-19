@@ -241,17 +241,14 @@ for epoch in range(num_epochs):
 
     model.eval()
     eval_loss = 0
-    eval_preds = []
+
     for step, batch in enumerate(tqdm(eval_dataloader)):
         batch = {k: v.to(device) for k, v in batch.items()}
         with torch.no_grad():
             outputs = model(**batch)
         loss = outputs.loss
         eval_loss += loss.detach().float()
-        eval_preds.extend(
-            tokenizer.batch_decode(torch.argmax(outputs.logits, -1).detach().cpu().numpy(), skip_special_tokens=True)
-        )
-
+    
     eval_epoch_loss = eval_loss / len(eval_dataloader)
     eval_ppl = torch.exp(eval_epoch_loss)
     train_epoch_loss = total_loss / len(train_dataloader)

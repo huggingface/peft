@@ -21,7 +21,7 @@ from types import MethodType
 from torch import nn
 
 from .peft_model import PeftConfig, PeftModel
-from .tuners.lora import LoraLayer
+from .tuners.lora import LoraLayer, dora
 from .tuners.tuners_utils import BaseTunerLayer
 
 
@@ -249,3 +249,47 @@ def disable_input_dtype_casting(model: nn.Module, active: bool = True):
                 continue
             if name in original_values:
                 module.cast_input_dtype_enabled = original_values[name]
+
+
+class DoraCaching:
+    """Context manager to enable DoRA caching, which improves speed of DoRA inference at the expense of memory.
+
+    With active caching, the materialized LoRA weight (B @ A) and the weight norm (base weight + LoRA weight) are
+    cached.
+
+    Even within the caching context, if the model is in training mode, caching is disabled. When the model switches to
+    training mode, the cache will be cleared.
+
+    Example:
+
+        ```py
+        >>> from peft.helpers import enable_dora_scaling
+
+        >>> model.eval()  # put in eval model for caching to work
+
+        >>> with DoraCaching():  # use as a context manager
+        ...     output = model(inputs)
+
+        >>> dora_caching = DoraCaching()
+        >>> dora_caching(enabled=True)  # permanently enable caching
+        >>> output = model(inputs)
+        >>> dora_caching(enabled=False)  # permanently disable caching
+        >>> output = model(inputs)
+        ```
+
+    """
+
+    def __init__(self, enabled: bool = True) -> None:
+        self.enabled = enabled
+        self.prev_value = None
+
+    def __enter__(self):
+        self.prev_value = dora.ENABLE_DORA_CACHING
+        dora.ENABLE_DORA_CACHING = self.enabled
+
+    def __exit__(self, type, value, traceback):
+        dora.ENABLE_DORA_CACHING = self.prev_value
+        self.prev_value = None
+
+    def __call__(self, enabled: bool = True):
+        dora.ENABLE_DORA_CACHING = enabled

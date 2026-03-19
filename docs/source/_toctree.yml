@@ -102,18 +102,24 @@
       title: OFT
     - local: package_reference/boft
       title: BOFT
+    - local: package_reference/psoft
+      title: PSOFT
     - local: package_reference/poly
       title: Polytropon
     - local: package_reference/p_tuning
       title: P-tuning
     - local: package_reference/prefix_tuning
       title: Prefix tuning
+    - local: package_reference/cartridges
+      title: Cartridges
     - local: package_reference/prompt_tuning
       title: Prompt tuning
     - local: package_reference/layernorm_tuning
       title: Layernorm tuning
     - local: package_reference/vera
       title: VeRA
+    - local: package_reference/pvera
+      title: PVeRA
     - local: package_reference/fourierft
       title: FourierFT
     - local: package_reference/gralora
@@ -126,8 +132,6 @@
       title: HRA
     - local: package_reference/cpt
       title: CPT
-    - local: package_reference/bone
-      title: Bone
     - local: package_reference/trainable_tokens
       title: Trainable Tokens
     - local: package_reference/randlora
@@ -144,6 +148,10 @@
       title: WaveFT
     - local: package_reference/delora
       title: DeLoRA
+    - local: package_reference/lily
+      title: Lily
+    - local: package_reference/peanut
+      title: PEANuT
 
     title: Adapters
   - sections:
@@ -155,5 +163,7 @@
       title: Hotswapping adapters
     - local: package_reference/functional
       title: Functions for PEFT integration
+    - local: package_reference/lora_conversion
+      title: Converting non-LoRA adapters to LoRA
     title: Utilities
   title: API reference

@@ -34,7 +34,9 @@ from peft import (
     AdaLoraConfig,
     BOFTConfig,
     CPTConfig,
+    GraloraConfig,
     IA3Config,
+    LilyConfig,
     LNTuningConfig,
     LoHaConfig,
     LoKrConfig,
@@ -45,14 +47,18 @@ from peft import (
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
+    PveraConfig,
     RoadConfig,
     VBLoRAConfig,
     VeraConfig,
+    convert_to_lora,
     get_peft_model,
     get_peft_model_state_dict,
     inject_adapter_in_model,
     prepare_model_for_kbit_training,
+    set_peft_model_state_dict,
 )
+from peft.import_utils import is_transformers_ge_v5
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -62,7 +68,6 @@ from peft.utils import (
     TrainableTokensWrapper,
     _get_submodules,
     infer_device,
-    is_transformers_ge_v5,
 )
 
 from .testing_utils import get_state_dict, hub_online_once
@@ -78,6 +83,8 @@ def _skip_if_merging_not_supported(model_id, config_cls, config_kwargs):
     if model_id.startswith("Conv2dGroups") and (config_cls == LoraConfig):
         # note: right now, only LoRA supports groups>1, if other PEFT methods add support, they might also need to skip
         pytest.skip("Merging conv layers with groups>1 and LoRA is not supported.")
+    if issubclass(config_cls, LilyConfig):
+        pytest.skip("Lily does not support merging adapters, skipping this test.")
 
 
 def _skip_if_adding_weighted_adapters_not_supported(config):
@@ -289,17 +296,6 @@ class PeftCommonTester:
                 assert "meta" in {p.device.type for p in model.parameters()}
 
     def _test_save_pretrained(self, model_id, config_cls, config_kwargs, safe_serialization=True):
-        # ensure that the weights are randomly initialized
-        if issubclass(config_cls, LoraConfig):
-            config_kwargs = config_kwargs.copy()
-            config_kwargs["init_lora_weights"] = False
-        if issubclass(config_cls, IA3Config):
-            config_kwargs = config_kwargs.copy()
-            config_kwargs["init_ia3_weights"] = False
-        if hasattr(config_cls, "init_weights"):
-            config_kwargs = config_kwargs.copy()
-            config_kwargs["init_weights"] = False
-
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
             config = config_cls(
@@ -359,16 +355,6 @@ class PeftCommonTester:
         if issubclass(config_cls, AdaLoraConfig):
             # AdaLora does not support adding more than 1 adapter
             pytest.skip(f"Test not applicable for {config_cls}")
-
-        # ensure that the weights are randomly initialized
-        if issubclass(config_cls, LoraConfig):
-            config_kwargs = config_kwargs.copy()
-            config_kwargs["init_lora_weights"] = False
-        elif issubclass(config_cls, IA3Config):
-            config_kwargs = config_kwargs.copy()
-            config_kwargs["init_ia3_weights"] = False
-        elif hasattr(config_cls, "init_weights"):
-            config_kwargs["init_weights"] = False
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
@@ -602,6 +588,7 @@ class PeftCommonTester:
 
             # check that PEFT layers are completely removed
             assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
+            assert not hasattr(model, "peft_config")
             logits_merged_unloaded = model(**dummy_input)[0]
 
             conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
@@ -609,6 +596,9 @@ class PeftCommonTester:
             atol, rtol = 1e-4, 1e-4
             if self.torch_device in ["mlu"]:
                 atol, rtol = 1e-3, 1e-3  # MLU
+            if model_id == "trl-internal-testing/tiny-GptOssForCausalLM":
+                # this tolerance issue with the target_parameters test only occurrs on CI with transformers v5
+                atol, rtol = 1e-3, 1e-3
             if config.peft_type in ("ADALORA", "OFT"):
                 # these methods require a bit higher tolerance
                 atol, rtol = 1e-2, 1e-2
@@ -789,6 +779,8 @@ class PeftCommonTester:
             conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
             if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
                 atol, rtol = 1e-3, 1e-3
+            elif issubclass(config_cls, PveraConfig):
+                atol, rtol = 1e-5, 1e-5
 
             # check that the logits are the same after unloading
             assert torch.allclose(logits_peft, logits_unloaded, atol=atol, rtol=rtol)
@@ -824,10 +816,9 @@ class PeftCommonTester:
         dummy_input = self.prepare_inputs_for_testing()
         # ensure that we have at least 3 samples for this test
         dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
-        with torch.inference_mode():
-            with model.disable_adapter():
-                output_base = model(**dummy_input)[0]
-                logits_base = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
+        with torch.inference_mode(), model.disable_adapter():
+            output_base = model(**dummy_input)[0]
+            logits_base = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
 
         model.set_adapter("adapter0")
         with torch.inference_mode():
@@ -901,9 +892,8 @@ class PeftCommonTester:
             # ensure that we have at least 3 samples for this test
             dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
             gen_kwargs = {**dummy_input, "max_length": 20, "num_beams": 10, "early_stopping": True}
-            with torch.inference_mode():
-                with model.disable_adapter():
-                    gen_base = model.generate(**gen_kwargs)
+            with torch.inference_mode(), model.disable_adapter():
+                gen_base = model.generate(**gen_kwargs)
 
             model.set_adapter("adapter0")
             with torch.inference_mode():
@@ -1104,7 +1094,6 @@ class PeftCommonTester:
 
             # check if `training` works
             output = model(**inputs)[0]
-            logits = output[0]
 
             loss = output.sum()
             loss.backward()
@@ -1120,6 +1109,9 @@ class PeftCommonTester:
                     assert param.grad is None
 
             with tempfile.TemporaryDirectory() as tmp_dirname:
+                model.eval()
+                logits = model(**inputs)[0][0]
+
                 model.save_pretrained(tmp_dirname)
 
                 model_from_pretrained = self.transformers_class.from_pretrained(model_id)
@@ -1452,6 +1444,7 @@ class PeftCommonTester:
 
             # check that PEFT layers are completely removed
             assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
+            assert not hasattr(model, "peft_config")
             assert not torch.allclose(logits_with_adapter, logits_unload, atol=1e-10, rtol=1e-10)
             assert torch.allclose(logits_transformers, logits_unload, atol=1e-4, rtol=1e-4)
             assert num_params_base == num_params_unloaded
@@ -1765,9 +1758,8 @@ class PeftCommonTester:
 
             # output with DISABLED ADAPTER
             if isinstance(peft_model, StableDiffusionPipeline):
-                with peft_model.unet.disable_adapter():
-                    with peft_model.text_encoder.disable_adapter():
-                        output_peft_disabled = get_output(peft_model)
+                with peft_model.unet.disable_adapter(), peft_model.text_encoder.disable_adapter():
+                    output_peft_disabled = get_output(peft_model)
                 # for SD, very rarely, a pixel can differ
                 assert (output_before != output_peft_disabled).float().mean() < 1e-4
             else:
@@ -1827,3 +1819,58 @@ class PeftCommonTester:
             inputs_embeds = model.get_input_embeddings()(dummy_input["input_ids"])
             # just check that no error is raised
             model.forward(inputs_embeds=inputs_embeds)
+
+    def _test_lora_conversion(self, model_id, config_cls, config_kwargs):
+        # This is a simple test that converting a non-LoRA adapter to LoRA works. If the model doesn't support
+        # conversion, the test is skipped. For detailed tests of this functionality, check test_lora_conversion.py,
+        # which provides depper tests. The purpose of this test is only provide a broad check across PEFT methods.
+        torch.manual_seed(0)
+        if "qwen2" in model_id:  # dummy qwen2 has very small weights
+            rank = 4
+        else:
+            rank = 8
+
+        if config_cls == GraloraConfig:
+            # GraLoRA exhibits higher conversion error
+            max_mse = 1.0
+        else:
+            # relatively high upper limit for MSE since we have to work with a low LoRA rank for dummy models
+            max_mse = 0.5
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            config = config_cls(
+                base_model_name_or_path=model_id,
+                **config_kwargs,
+            )
+            model = get_peft_model(model, config).eval()
+
+            if not model.supports_lora_conversion():
+                return
+            if ("OPT" in model_id) and ("fc1" in config.target_modules):
+                # the fc1 and fc2 layers in OPT have size (16, 4), thus choose smaller rank
+                rank = 4
+
+            X = self.prepare_inputs_for_testing()
+            with torch.no_grad():
+                with model.disable_adapter():
+                    output_base = model(**X, output_hidden_states=True)
+                output_before = model(**X, output_hidden_states=True)
+
+            # create the converted lora adapter
+            lora_config, state_dict = convert_to_lora(model, rank=rank)
+            del model
+
+            # load the converted LoRA model
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            model = get_peft_model(model, lora_config).eval()
+            load_result = set_peft_model_state_dict(model, state_dict)
+            assert not load_result.unexpected_keys
+
+            with torch.no_grad():
+                output_after = model(**X, output_hidden_states=True)
+
+            diff1 = output_before.hidden_states[-1] - output_base.hidden_states[-1]
+            diff2 = output_after.hidden_states[-1] - output_base.hidden_states[-1]
+            mse = torch.nn.functional.mse_loss(diff1, diff2).item()
+            assert mse < max_mse, f"LoRA conversion MSE too high, {mse:.4f}, only {max_mse:.1f} allowed"

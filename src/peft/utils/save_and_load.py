@@ -17,6 +17,7 @@ import os
 import platform
 import re
 import warnings
+from collections import namedtuple
 from typing import Optional
 
 import huggingface_hub
@@ -196,6 +197,19 @@ def get_peft_model_state_dict(
                 )
             to_return["base_model.vera_A." + adapter_name] = state_dict["base_model.vera_A." + adapter_name]
             to_return["base_model.vera_B." + adapter_name] = state_dict["base_model.vera_B." + adapter_name]
+    elif config.peft_type == PeftType.PVERA:
+        vera_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
+        to_return = {k: state_dict[k] for k in state_dict if vera_prefix in k}
+        if config.save_projection:
+            # TODO: adding pvera_A and pvera_B to `self.get_base_layer` would
+            # make name to match here difficult to predict.
+            if f"base_model.pvera_A.{adapter_name}" not in state_dict:
+                raise ValueError(
+                    "Model was initialised to not save pvera_A and pvera_B but config now specifies to save projection!"
+                    + " Set `config.save_projection` to `False`."
+                )
+            to_return["base_model.pvera_A." + adapter_name] = state_dict["base_model.pvera_A." + adapter_name]
+            to_return["base_model.pvera_B." + adapter_name] = state_dict["base_model.pvera_B." + adapter_name]
     elif config.peft_type == PeftType.XLORA:
         to_return = {k: state_dict[k] for k in state_dict if "internal_xlora_classifier" in k}
     elif config.peft_type == PeftType.VBLORA:
@@ -333,6 +347,15 @@ def get_peft_model_state_dict(
             # nothing to do
             return key
 
+        if config.peft_type == PeftType.PEANUT:
+            # PEANuT stores residual blocks as ModuleDict[adapter] -> ModuleList.
+            # Their keys look like `...peanut_encoders.<adapter>.0.weight` (and similarly for decoders),
+            # where adapter_name is not in the second-to-last position.
+            for container in ("peanut_encoders", "peanut_decoders"):
+                marker = f".{container}.{adapter_name}."
+                if marker in key:
+                    return key.replace(marker, f".{container}.")
+
         if key.endswith(f".{adapter_name}"):
             # comes from an nn.Parameter, so no .weight suffix, the adapter name is directly at the end
             return key.removesuffix(f".{adapter_name}")
@@ -408,7 +431,7 @@ def set_peft_model_state_dict(
     adapter_name="default",
     ignore_mismatched_sizes: bool = False,
     low_cpu_mem_usage: bool = False,
-) -> None:
+) -> namedtuple:
     """
     Set the state dict of the PEFT model.
 
@@ -430,6 +453,10 @@ def set_peft_model_state_dict(
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             This argument must be `True` if the `model` was loaded with adapter weights on the meta device, e.g. after
             calling `inject_adapter_in_model` with `low_cpu_mem_usage=True`. Otherwise, leave it as `False`.
+
+    Returns:
+        load_result (`_IncompatibleKeys`)
+            A named tuple with `missing_keys` and `unexpected_keys` fields.
 
     """
     config = model.peft_config[adapter_name]
@@ -533,6 +560,23 @@ def set_peft_model_state_dict(
                     " PRNG initialisation to restore these projections using `config.projection_prng_key`, which may"
                     " not be accurate on all system configurations."
                 )
+        elif config.peft_type == PeftType.PVERA:
+            if config.save_projection and "base_model.pvera_A" not in peft_model_state_dict:
+                raise ValueError(
+                    "Specified to load pvera_A and pvera_B from state dictionary however they were not present!"
+                )
+            elif not config.save_projection and "base_model.pvera_A" in peft_model_state_dict:
+                warnings.warn(
+                    "Specified to not load pvera_A and pvera_B from state dictionary however they are present in state"
+                    " dictionary! Consider using them to ensure checkpoint loading is correct on all platforms using"
+                    " `peft_config.save_projection = True`"
+                )
+            elif not config.save_projection:  # and no vera_A in state dictionary
+                warnings.warn(
+                    "Specified to not load pvera_A and pvera_B from state dictionary. This means we will be relying on"
+                    " PRNG initialisation to restore these projections using `config.projection_prng_key`, which may"
+                    " not be accurate on all system configurations."
+                )
         elif config.peft_type == PeftType.LORA:
             # Here we take care of a refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a
             # ModuleDict with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer.
@@ -544,6 +588,47 @@ def set_peft_model_state_dict(
                 return k
 
             peft_model_state_dict = {renamed_dora_weights(k): v for k, v in peft_model_state_dict.items()}
+
+            if torch.distributed.is_available() and torch.distributed.is_initialized():
+                from transformers.integrations.tensor_parallel import (
+                    ALL_PARALLEL_STYLES,
+                    ColwiseParallel,
+                    RowwiseParallel,
+                )
+
+                from ..tuners.lora.layer import LoraLayer  # lazy import to avoid circular import
+
+                for name, module in model.named_modules():
+                    if not isinstance(module, LoraLayer):
+                        continue
+                    base_layer = module.get_base_layer()
+                    device = base_layer.weight.device
+                    dtype = base_layer.weight.dtype
+
+                    tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+                    device_mesh = getattr(base_layer, "_hf_device_mesh", None)
+
+                    if tp_plan is None or device_mesh is None:
+                        continue
+
+                    # We create and initialize the TensorParallelLayer on the fly,
+                    # and we set the `empty_param` attribute depending on the proper
+                    # state dict key to shard.
+                    # This attribute is used by the sharding logic for shape reference,
+                    # it must be of the same shape as the parameter to shard.
+                    tp_layer = ALL_PARALLEL_STYLES[tp_plan]
+                    tp_layer.device_mesh = device_mesh
+                    tp_layer.rank = device_mesh.get_local_rank()
+
+                    if isinstance(tp_layer, ColwiseParallel):
+                        key = f"{name}.lora_B.{adapter_name}.weight"
+                    elif isinstance(tp_layer, RowwiseParallel):
+                        key = f"{name}.lora_A.{adapter_name}.weight"
+                    tp_layer.empty_param = peft_model_state_dict[key]
+                    peft_model_state_dict[key] = tp_layer.shard_tensor(
+                        peft_model_state_dict[key], device=device, dtype=dtype
+                    )
+
         elif config.peft_type == PeftType.OFT:
             if any(".oft_r." in key for key in peft_model_state_dict):
                 raise ValueError(
@@ -565,9 +650,12 @@ def set_peft_model_state_dict(
         load_result = model.load_state_dict(peft_model_state_dict, strict=False)
 
     if config.is_prompt_learning:
-        model.prompt_encoder[adapter_name].embedding.load_state_dict(
-            {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
-        )
+        if config.peft_type == PeftType.CARTRIDGE:
+            model.prompt_encoder[adapter_name].load_prompt_embeddings(peft_model_state_dict["prompt_embeddings"])
+        else:
+            model.prompt_encoder[adapter_name].embedding.load_state_dict(
+                {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
+            )
 
     if config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
         model.prompt_encoder[adapter_name].load_state_dict(peft_model_state_dict, strict=False)

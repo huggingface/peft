@@ -18,20 +18,22 @@ from transformers import AutoModelForSequenceClassification
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
-    BoneConfig,
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
     GraloraConfig,
     HRAConfig,
     IA3Config,
+    LilyConfig,
     LoraConfig,
     MissConfig,
     OFTConfig,
+    PeanutConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
     PromptTuningInit,
+    PsoftConfig,
     RoadConfig,
     ShiraConfig,
     VBLoRAConfig,
@@ -42,7 +44,7 @@ from peft import (
 from peft.utils.other import ModulesToSaveWrapper
 
 from .testing_common import PeftCommonTester
-from .testing_utils import hub_online_once
+from .testing_utils import hub_online_once, set_init_weights_false
 
 
 # Note: models from peft-internal-testing are just the safetensors versions of hf-internal-testing
@@ -67,14 +69,6 @@ ALL_CONFIGS = [
         {
             "task_type": "SEQ_CLS",
             "target_modules": None,
-        },
-    ),
-    (
-        BoneConfig,
-        {
-            "task_type": "SEQ_CLS",
-            "target_modules": None,
-            "r": 2,
         },
     ),
     (
@@ -121,6 +115,16 @@ ALL_CONFIGS = [
             "task_type": "SEQ_CLS",
             "target_modules": None,
             "feedforward_modules": None,
+        },
+    ),
+    (
+        LilyConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "r": 8,
+            "stride_A": 1,
+            "num_B": 2,
         },
     ),
     (
@@ -174,6 +178,25 @@ ALL_CONFIGS = [
         {
             "task_type": "SEQ_CLS",
             "num_virtual_tokens": 10,
+        },
+    ),
+    (
+        PsoftConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "r": 32,
+            "psoft_alpha": 32,
+            "target_modules": None,
+        },
+    ),
+    (
+        PeanutConfig,
+        {
+            "r": 8,
+            "depth": 1,
+            "act_fn": "relu",
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
         },
     ),
     (
@@ -277,21 +300,25 @@ class TestSequenceClassificationModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained(self, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_pickle(self, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs.copy(), safe_serialization=False)
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters_pickle(self, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained_selected_adapters(
             model_id, config_cls, config_kwargs.copy(), safe_serialization=False
         )

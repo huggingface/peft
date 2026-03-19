@@ -15,8 +15,8 @@
 from .adalora import AdaLoraConfig, AdaLoraModel
 from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
 from .boft import BOFTConfig, BOFTModel
-from .bone import BoneConfig, BoneModel
 from .c3a import C3AConfig, C3AModel
+from .cartridge import CartridgeConfig, CartridgeEncoder
 from .cpt import CPTConfig, CPTEmbedding
 from .delora import DeloraConfig, DeloraModel
 from .fourierft import FourierFTConfig, FourierFTModel
@@ -27,6 +27,7 @@ from .hira import (
 )
 from .hra import HRAConfig, HRAModel
 from .ia3 import IA3Config, IA3Model
+from .lily import LilyConfig, LilyModel
 from .ln_tuning import LNTuningConfig, LNTuningModel
 from .loha import LoHaConfig, LoHaModel
 from .lokr import LoKrConfig, LoKrModel
@@ -36,11 +37,15 @@ from .lora import (
     EvaConfig,
     LoftQConfig,
     LoraConfig,
+    LoraGAConfig,
     LoraModel,
     LoraRuntimeConfig,
+    convert_to_lora,
     create_arrow_model,
     get_eva_state_dict,
     initialize_lora_eva_weights,
+    preprocess_loraga,
+    save_as_lora,
 )
 from .miss import MissConfig, MissModel
 from .mixed import MixedModel
@@ -48,9 +53,12 @@ from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTu
 from .oft import OFTConfig, OFTModel
 from .osf import OSFConfig, OSFModel
 from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparameterizationType
+from .peanut import PeanutConfig, PeanutModel
 from .poly import PolyConfig, PolyModel
 from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
 from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
+from .psoft import PsoftConfig, PsoftModel
+from .pvera import PveraConfig, PveraModel
 from .randlora import RandLoraConfig, RandLoraModel
 from .road import RoadConfig, RoadModel
 from .shira import ShiraConfig, ShiraModel
@@ -70,12 +78,12 @@ __all__ = [
     "BOFTConfig",
     "BOFTModel",
     "BdLoraConfig",
-    "BoneConfig",
-    "BoneModel",
     "C3AConfig",
     "C3AModel",
     "CPTConfig",
     "CPTEmbedding",
+    "CartridgeConfig",
+    "CartridgeEncoder",
     "DeloraConfig",
     "DeloraModel",
     "EvaConfig",
@@ -91,12 +99,15 @@ __all__ = [
     "IA3Model",
     "LNTuningConfig",
     "LNTuningModel",
+    "LilyConfig",
+    "LilyModel",
     "LoHaConfig",
     "LoHaModel",
     "LoKrConfig",
     "LoKrModel",
     "LoftQConfig",
     "LoraConfig",
+    "LoraGAConfig",
     "LoraModel",
     "LoraRuntimeConfig",
     "MissConfig",
@@ -109,6 +120,8 @@ __all__ = [
     "OFTModel",
     "OSFConfig",
     "OSFModel",
+    "PeanutConfig",
+    "PeanutModel",
     "PolyConfig",
     "PolyModel",
     "PrefixEncoder",
@@ -119,6 +132,10 @@ __all__ = [
     "PromptEncoderReparameterizationType",
     "PromptTuningConfig",
     "PromptTuningInit",
+    "PsoftConfig",
+    "PsoftModel",
+    "PveraConfig",
+    "PveraModel",
     "RandLoraConfig",
     "RandLoraModel",
     "RoadConfig",
@@ -135,7 +152,10 @@ __all__ = [
     "WaveFTModel",
     "XLoraConfig",
     "XLoraModel",
+    "convert_to_lora",
     "create_arrow_model",
     "get_eva_state_dict",
     "initialize_lora_eva_weights",
+    "preprocess_loraga",
+    "save_as_lora",
 ]

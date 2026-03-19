@@ -13,6 +13,8 @@
 # limitations under the License.
 
 from copy import deepcopy
+from functools import wraps
+from typing import Any, Optional
 
 import torch
 import torch.nn.functional as F
@@ -22,17 +24,79 @@ from peft.utils.integrations import dequantize_module_weight, gather_params_ctx
 from peft.utils.other import transpose
 
 
+ENABLE_DORA_CACHING = False
+"""Whether to enable DoRA caching, which makes it faster at inference but requires more memory"""
+
+
+def cache_decorator(cache_key: str):
+    """Caching decorator for DoRA
+
+    Caching is only enabled if ENABLE_DORA_CACHING is set to True (default: False), when in eval mode, and when the
+    adapter_name is passed (e.g. not during layer initialization).
+
+    """
+
+    def cache_value(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            # if adapter_name is not passed, no caching
+            adapter_name = kwargs.get("adapter_name")
+            if (not ENABLE_DORA_CACHING) or self.training or (adapter_name is None):
+                self._cache_clear()
+                return func(self, *args, **kwargs)
+
+            cache_key_adapter = f"{cache_key}-{adapter_name}"
+            output = self._cache_get(cache_key_adapter, None)
+            if output is not None:
+                return output
+
+            output = func(self, *args, **kwargs)
+            self._cache_store(cache_key_adapter, output)
+            return output
+
+        return wrapper
+
+    return cache_value
+
+
 class DoraLinearLayer(nn.Module):
     def __init__(self, fan_in_fan_out):
         super().__init__()
         self.fan_in_fan_out = fan_in_fan_out
+        self._dora_cache: dict[str, Any] = {}  # small ad hoc cache; values are not part of the state_dict
 
-    def get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
+    def _cache_store(self, key: str, value: Any) -> None:
+        # cache intermediate values, e.g. weight norm of DoRA
+        self._dora_cache[key] = value
+
+    def _cache_get(self, key: str, default: Optional[Any]) -> Optional[Any]:
+        # retrieve from ad hoc cache
+        return self._dora_cache.get(key, default)
+
+    def _cache_clear(self) -> None:
+        self._dora_cache.clear()
+
+    def train(self, mode: bool = True):
+        if mode:
+            self._cache_clear()
+        super().train(mode=mode)
+        return self
+
+    @cache_decorator("weight-norm")
+    def get_weight_norm(self, weight, lora_weight, scaling, adapter_name: Optional[str] = None) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
         weight = transpose(weight, self.fan_in_fan_out)
         weight = weight + scaling * lora_weight
         weight_norm = torch.linalg.norm(weight, dim=1).to(weight.dtype)
         return weight_norm
+
+    @cache_decorator("lora-weight")
+    def get_lora_weight(self, lora_A, lora_B, adapter_name: Optional[str] = None):
+        # Don't use `lora_weight = lora_B.weight @ lora_A.weight` because this causes errors with FSDP. Instead,
+        # calculate the same but using forward.
+        x_eye = torch.eye(lora_A.weight.shape[1], device=lora_A.weight.device, dtype=lora_A.weight.dtype)
+        lora_weight = lora_B(lora_A(x_eye)).T
+        return lora_weight
 
     def update_layer(self, *, base_layer, lora_A, lora_B, scaling, place_on_cpu=False) -> None:
         # temporarily convert fp16 to fp32, as fp16 can cause trouble on CPU with PyTorch < 2.2
@@ -57,26 +121,28 @@ class DoraLinearLayer(nn.Module):
 
             if dtype_is_fp16:
                 lora_weight = lora_weight.half()
-            weight_norm = self.get_weight_norm(weight.to(lora_A.device), lora_weight, scaling)
+            weight_norm = self.get_weight_norm(
+                weight=weight.to(lora_A.device), lora_weight=lora_weight, scaling=scaling
+            )
 
         if place_on_cpu:
             weight_norm = weight_norm.to("cpu")
         self.weight = nn.Parameter(weight_norm, requires_grad=True)
 
-    def forward(self, x, *, lora_A, lora_B, scaling, base_layer, base_result=None):
+    def forward(self, x, *, lora_A, lora_B, scaling, base_layer, base_result=None, adapter_name="default"):
         """
         For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
         output.
         """
-        # Don't use `lora_weight = lora_B.weight @ lora_A.weight` because this causes errors with FSDP. Instead,
-        # calculate the same but using forward.
-        x_eye = torch.eye(lora_A.weight.shape[1], device=lora_A.weight.device, dtype=x.dtype)
-        lora_weight = lora_B(lora_A(x_eye)).T
+        lora_weight = self.get_lora_weight(lora_A=lora_A, lora_B=lora_B, adapter_name=adapter_name)
+        lora_weight = lora_weight.to(x.dtype)
 
         magnitude = self.weight
         weight = dequantize_module_weight(base_layer)
         weight = weight.to(x.dtype)
-        weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
+        weight_norm = self.get_weight_norm(
+            weight=weight, lora_weight=lora_weight.detach(), scaling=scaling, adapter_name=adapter_name
+        )
         # see section 4.3 of DoRA (https://huggingface.co/papers/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
         # Eq. (5) as a constant, thereby detaching it from the gradient
@@ -97,7 +163,6 @@ class DoraLinearLayer(nn.Module):
             base_result = F.linear(x, transpose(weight, self.fan_in_fan_out))
 
         result_dora = (mag_norm_scale - 1) * base_result + mag_norm_scale * lora_result * scaling
-
         return result_dora
 
     def __repr__(self) -> str:
@@ -106,15 +171,21 @@ class DoraLinearLayer(nn.Module):
 
 
 class DoraEmbeddingLayer(DoraLinearLayer):
-    def forward(self, x, *, lora_A, lora_B, scaling, base_layer, embed_fn):
+    @cache_decorator("lora-weight")
+    def get_lora_weight(self, lora_A, lora_B, adapter_name: Optional[str] = None):
+        return (lora_A @ lora_B).T
+
+    def forward(self, x, *, lora_A, lora_B, scaling, base_layer, embed_fn, adapter_name="default"):
         """
         For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
         output.
         """
-        lora_weight = (lora_A @ lora_B).T
+        lora_weight = self.get_lora_weight(lora_A=lora_A, lora_B=lora_B, adapter_name=adapter_name)
         magnitude = self.weight
         weight = base_layer.weight
-        weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
+        weight_norm = self.get_weight_norm(
+            weight=weight, lora_weight=lora_weight.detach(), scaling=scaling, adapter_name=adapter_name
+        )
         # see section 4.3 of DoRA (https://huggingface.co/papers/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
         # Eq. (5) as a constant, thereby detaching it from the gradient
@@ -132,7 +203,8 @@ class DoraEmbeddingLayer(DoraLinearLayer):
 
 
 class _DoraConvNdLayer(DoraLinearLayer):
-    def get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
+    @cache_decorator("weight-norm")
+    def get_weight_norm(self, weight, lora_weight, scaling, adapter_name: Optional[str] = None) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
         weight = weight + scaling * lora_weight
         # the following is needed to have compatibility with the 4/5D weight tensors of Conv2D/3D
@@ -140,17 +212,29 @@ class _DoraConvNdLayer(DoraLinearLayer):
         weight_norm = weight.norm(p=2, dim=dim, keepdim=True).transpose(1, 0)
         return weight_norm
 
-    def forward(self, x, *, lora_A, lora_B, scaling, base_layer, base_result=None):
+    @cache_decorator("lora-weight")
+    def get_lora_weight(self, lora_A, lora_B, adapter_name: Optional[str] = None) -> torch.Tensor:
+        # Don't use `lora_weight = lora_B.weight @ lora_A.weight` because this causes errors with FSDP. Instead,
+        # calculate the same but using forward.
+        r = lora_A.weight.shape[0]
+        lora_weight = torch.mm(lora_B.weight.view([-1, r]), lora_A.weight.view([r, -1]))
+        return lora_weight
+
+    def forward(
+        self, x, *, lora_A, lora_B, scaling, base_layer, base_result=None, adapter_name: str = "default"
+    ) -> torch.Tensor:
         """
         For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
         output.
         """
         weight = base_layer.weight
-        r = lora_A.weight.shape[0]
-        lora_weight = torch.mm(lora_B.weight.view([-1, r]), lora_A.weight.view([r, -1]))
-        lora_weight = lora_weight.reshape(weight.shape)
+        lora_weight = self.get_lora_weight(lora_A=lora_A, lora_B=lora_B, adapter_name=adapter_name).reshape(
+            weight.shape
+        )
         magnitude = self.weight
-        weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
+        weight_norm = self.get_weight_norm(
+            weight=weight, lora_weight=lora_weight.detach(), scaling=scaling, adapter_name=adapter_name
+        )
         # see section 4.3 of DoRA (https://huggingface.co/papers/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
         # Eq. (5) as a constant, thereby detaching it from the gradient

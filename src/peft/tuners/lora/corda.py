@@ -23,6 +23,7 @@ import torch
 import torch.nn as nn
 from attr import dataclass
 from tqdm import tqdm
+from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.lora.config import LoraConfig
 from peft.tuners.lora.model import LoraModel
@@ -39,10 +40,10 @@ class CordaEigens:
 def target_modules(model: nn.Module, config: LoraConfig) -> Iterable[nn.Module]:
     """
     Iterate over CorDA target name and modules of a model. A module is a target if its name is in
-    `config.target_modules` and is `nn.Linear`.
+    `config.target_modules` and is `nn.Linear` or `Conv1D`.
     """
     for name, module in model.named_modules():
-        if LoraModel._check_target_module_exists(config, name) and isinstance(module, nn.Linear):
+        if LoraModel._check_target_module_exists(config, name) and isinstance(module, (nn.Linear, Conv1D)):
             yield name, module
 
 
@@ -250,10 +251,14 @@ def collect_eigens(
 
 @torch.no_grad()
 def collect_eigens_for_layer(
-    linear: nn.Linear,
+    linear: nn.Module,
     config: LoraConfig,
 ) -> CordaEigens:
     w = linear.weight.data.float()
+    # Conv1D stores weights as (in_features, out_features), transposed compared to Linear
+    # We need to transpose it to match Linear's (out_features, in_features) layout for SVD
+    if isinstance(linear, Conv1D):
+        w = w.T
     out_dim = w.size(0)
     in_dim = w.size(1)
     min_dim = min(in_dim, out_dim)
@@ -333,14 +338,19 @@ def crop_corda_eigens(model: nn.Module, config: LoraConfig):
             raise ValueError(f"Invalid corda_method found: {module.corda_method}, it should be 'ipm' or 'kpm'.")
 
         # Sanity check
+        # For Conv1D, weight is stored as (in_features, out_features), transposed compared to Linear
+        # But U and V are computed on the transposed weight, so we need to account for this
+        weight_out_dim = module.weight.size(1) if isinstance(module, Conv1D) else module.weight.size(0)
+        weight_in_dim = module.weight.size(0) if isinstance(module, Conv1D) else module.weight.size(1)
+
         if module.eigens.S_WC.size(0) != module.rank:
             raise ValueError(
                 f"rank mismatch: {module.eigens.S_WC.size(0)} vs. {module.rank},"
                 "please file an issue at https://github.com/huggingface/peft/issues."
             )
-        if module.eigens.U_WC.size(0) != module.weight.size(0):
+        if module.eigens.U_WC.size(0) != weight_out_dim:
             raise ValueError(
-                f"U size mismatch: {module.eigens.U_WC.size(0)} vs. {module.weight.size(0)},"
+                f"U size mismatch: {module.eigens.U_WC.size(0)} vs. {weight_out_dim},"
                 "please file an issue at https://github.com/huggingface/peft/issues."
             )
         if module.eigens.U_WC.size(1) != module.rank:
@@ -348,9 +358,9 @@ def crop_corda_eigens(model: nn.Module, config: LoraConfig):
                 f"U size mismatch: {module.eigens.U_WC.size(1)} vs. {module.rank},"
                 "please file an issue at https://github.com/huggingface/peft/issues."
             )
-        if module.eigens.V_WC.size(0) != module.weight.size(1):
+        if module.eigens.V_WC.size(0) != weight_in_dim:
             raise ValueError(
-                f"V size mismatch: {module.eigens.V_WC.size(0)} vs. {module.weight.size(1)},"
+                f"V size mismatch: {module.eigens.V_WC.size(0)} vs. {weight_in_dim},"
                 "please file an issue at https://github.com/huggingface/peft/issues."
             )
         if module.eigens.V_WC.size(1) != module.rank:

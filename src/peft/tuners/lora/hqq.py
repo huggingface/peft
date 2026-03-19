@@ -23,6 +23,7 @@ from peft.import_utils import is_hqq_available
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.other import transpose
 
+from .config import LoraConfig
 from .layer import LoraLayer, LoraVariant
 
 
@@ -35,16 +36,12 @@ if is_hqq_available():
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
+            config: LoraConfig,
             r: int = 0,
             lora_alpha: int = 1,
-            lora_dropout: float = 0.0,
-            init_lora_weights: bool = True,
-            use_rslora: bool = False,
-            use_dora: bool = False,
-            lora_bias: bool = False,
             **kwargs,
         ) -> None:
-            if lora_bias:
+            if config.lora_bias:
                 raise ValueError(f"{self.__class__.__name__} does not support lora_bias yet, set it to False")
 
             super().__init__()
@@ -56,15 +53,11 @@ if is_hqq_available():
                 adapter_name,
                 r,
                 lora_alpha=lora_alpha,
-                lora_dropout=lora_dropout,
-                init_lora_weights=init_lora_weights,
-                use_rslora=use_rslora,
-                use_dora=use_dora,
-                lora_bias=lora_bias,
+                config=config,
             )
 
-        def resolve_lora_variant(self, *, use_dora: bool, **kwargs) -> Optional[LoraVariant]:
-            if not use_dora:
+        def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
+            if not config.use_dora:
                 return None
 
             from .variants import DoraLinearVariant
@@ -237,7 +230,7 @@ if is_hqq_available():
             return "lora." + rep
 
 
-def dispatch_hqq(target: torch.nn.Module, adapter_name: str, **kwargs):
+def dispatch_hqq(target: torch.nn.Module, adapter_name: str, config: LoraConfig, **kwargs):
     new_module = None
 
     if isinstance(target, BaseTunerLayer):
@@ -246,6 +239,6 @@ def dispatch_hqq(target: torch.nn.Module, adapter_name: str, **kwargs):
         target_base_layer = target
 
     if is_hqq_available() and isinstance(target_base_layer, HQQLinear):
-        new_module = HqqLoraLinear(target_base_layer, adapter_name, **kwargs)
+        new_module = HqqLoraLinear(target_base_layer, adapter_name, config=config, **kwargs)
 
     return new_module

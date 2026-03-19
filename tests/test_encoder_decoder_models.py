@@ -20,7 +20,6 @@ from transformers import AutoModelForSeq2SeqLM, AutoModelForTokenClassification
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
-    BoneConfig,
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
@@ -28,13 +27,17 @@ from peft import (
     HiraConfig,
     HRAConfig,
     IA3Config,
+    LilyConfig,
     LoraConfig,
     MissConfig,
     OFTConfig,
     OSFConfig,
+    PeanutConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    PsoftConfig,
+    PveraConfig,
     RoadConfig,
     ShiraConfig,
     TaskType,
@@ -68,14 +71,6 @@ ALL_CONFIGS = [
         BOFTConfig,
         {
             "target_modules": None,
-            "task_type": "SEQ_2_SEQ_LM",
-        },
-    ),
-    (
-        BoneConfig,
-        {
-            "target_modules": None,
-            "r": 2,
             "task_type": "SEQ_2_SEQ_LM",
         },
     ),
@@ -129,6 +124,16 @@ ALL_CONFIGS = [
         {
             "target_modules": None,
             "feedforward_modules": None,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        LilyConfig,
+        {
+            "target_modules": None,
+            "r": 8,
+            "stride_A": 1,
+            "num_B": 2,
             "task_type": "SEQ_2_SEQ_LM",
         },
     ),
@@ -225,6 +230,25 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PveraConfig,
+        {
+            "r": 8,
+            "pvera_dropout": 0.05,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        PeanutConfig,
+        {
+            "r": 4,
+            "depth": 1,
+            "scaling": 1.0,
+            "act_fn": "relu",
+            "target_modules": None,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
         C3AConfig,
         {
             "task_type": "SEQ_2_SEQ_LM",
@@ -244,6 +268,14 @@ ALL_CONFIGS = [
         OSFConfig,
         {
             "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        PsoftConfig,
+        {
+            "task_type": "SEQ_2_SEQ_LM",
+            "r": 4,
+            "psoft_alpha": 4,
         },
     ),
 ]
@@ -290,21 +322,25 @@ class TestEncoderDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained(self, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_pickle(self, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs, safe_serialization=False)
 
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters_pickle(self, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs, safe_serialization=False)
 
     def test_load_model_low_cpu_mem_usage(self):

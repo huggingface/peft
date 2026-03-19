@@ -7,16 +7,10 @@ FROM continuumio/miniconda3:latest AS compile-image
 ENV PYTHON_VERSION=3.11
 # Install apt libs - copied from https://github.com/huggingface/accelerate/blob/main/docker/accelerate-gpu/Dockerfile
 RUN apt-get update && \
-    apt-get install -y curl git wget software-properties-common git-lfs && \
+    apt-get install -y curl git wget git-lfs ffmpeg libsndfile1-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists*
 
-
-# Install audio-related libraries 
-RUN apt-get update && \
-    apt install -y ffmpeg
-
-RUN apt install -y libsndfile1-dev
 RUN git lfs install
 
 # Create our conda env - copied from https://github.com/huggingface/accelerate/blob/main/docker/accelerate-gpu/Dockerfile
@@ -26,7 +20,7 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip
 # Below is copied from https://github.com/huggingface/accelerate/blob/main/docker/accelerate-gpu/Dockerfile
 # We don't install pytorch here yet since CUDA isn't available
 # instead we use the direct torch wheel
-ENV PATH /opt/conda/envs/peft/bin:$PATH
+ENV PATH=/opt/conda/envs/peft/bin:$PATH
 # Activate our bash shell
 RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
