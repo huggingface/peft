@@ -2069,15 +2069,25 @@ class ParamWrapper(nn.Module, LoraLayer):
         # For ParamWrapper, we don't derive the in_features and out_features based on the base layer type, but directly
         # from the targeted parameter.
         param = self.get_param()
-        if param.ndim == 3:
-            num_experts, in_features, out_features = param.shape
-        else:
-            num_experts, in_features, out_features = 1, param.shape[1], param.shape[0]
         if param.ndim not in (2, 3):
             raise ValueError(
                 f"lora.{self.__class__.__name__} was initialized with {param.ndim} dimensional Parameter, but only 2d "
                 "and 3d are supported."
             )
+        if param.ndim == 3:
+            base_layer = self.get_base_layer()
+            # Auto-detect weight layout from the base module's is_transposed attribute
+            # (set by transformers' @use_experts_implementation decorator).
+            #   is_transposed=True  -> weights are (E, in_features, out_features), e.g. GPT-OSS
+            #   is_transposed=False -> weights are (E, out_features, in_features), e.g. Qwen3.5 MoE
+            self._is_weight_transposed = getattr(base_layer, "is_transposed", False)
+            if self._is_weight_transposed:
+                num_experts, in_features, out_features = param.shape
+            else:
+                num_experts, out_features, in_features = param.shape
+        else:
+            self._is_weight_transposed = True
+            num_experts, in_features, out_features = 1, param.shape[1], param.shape[0]
         # we have to store the num_experts attribute here, as the parent class only stores in_features and out_features.
         self.num_experts = num_experts
         return in_features, out_features
@@ -2197,8 +2207,11 @@ class ParamWrapper(nn.Module, LoraLayer):
             weight_A = weight_A.reshape(self.num_experts, -1, weight_A.shape[-1])
             # shape: out_features x rank x experts
             weight_B = weight_B.reshape(weight_B.shape[0], -1, self.num_experts)
-            # fan_in_fan_out must be False, so no transpose call here
+            # einsum produces (E, in_features, out_features)
             delta_weight = torch.einsum("o r e, e r i -> e i o", weight_B, weight_A) * self.scaling[adapter_name]
+            if not self._is_weight_transposed:
+                # base param is (E, out_features, in_features), transpose delta to match
+                delta_weight = delta_weight.transpose(1, 2)
 
         base_layer = self.get_base_layer()
         param = self.get_param()
