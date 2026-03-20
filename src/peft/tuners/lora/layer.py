@@ -19,6 +19,7 @@ from contextlib import contextmanager
 from typing import Any, Optional, Union
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import svd_lowrank
@@ -256,29 +257,47 @@ class LoraLayer(BaseTunerLayer):
                     self.lora_arrow[adapter].on_adapter_change(self.lora_A, self.lora_B)
 
     def reset_lora_parameters(self, adapter_name, init_lora_weights):
-        if init_lora_weights is False:
-            return
+        if init_lora_weights is not False:
+            if adapter_name in self.lora_A.keys():
+                if init_lora_weights is True:
+                    # initialize A the same way as the default for nn.Linear and B to zero
+                    # https://github.com/microsoft/LoRA/blob/a0a92e0f26c067cf94747bdbf1ce73793fa44d19/loralib/layers.py#L124
+                    nn.init.kaiming_uniform_(self.lora_A[adapter_name].weight, a=math.sqrt(5))
+                elif init_lora_weights.lower() == "gaussian":
+                    nn.init.normal_(self.lora_A[adapter_name].weight, std=1 / self.r[adapter_name])
+                else:
+                    raise ValueError(f"Unknown initialization {init_lora_weights=}")
+                nn.init.zeros_(self.lora_B[adapter_name].weight)
+                if self.lora_bias[adapter_name]:
+                    nn.init.zeros_(self.lora_B[adapter_name].bias)
+            if adapter_name in self.lora_embedding_A.keys():
+                # Initialize A to zeros and B the same way as the default for nn.Embedding, see:
+                # https://github.com/microsoft/LoRA/blob/4c0333854cb905966f8cc4e9a74068c1e507c7b7/loralib/layers.py#L59-L60
+                nn.init.zeros_(self.lora_embedding_A[adapter_name])
+                nn.init.normal_(self.lora_embedding_B[adapter_name])
+                if self.lora_bias[adapter_name]:
+                    # embeddings are not supported at the moment, but still adding this for consistency
+                    nn.init.zeros_(self.lora_embedding_B[adapter_name].bias)
 
-        if adapter_name in self.lora_A.keys():
-            if init_lora_weights is True:
-                # initialize A the same way as the default for nn.Linear and B to zero
-                # https://github.com/microsoft/LoRA/blob/a0a92e0f26c067cf94747bdbf1ce73793fa44d19/loralib/layers.py#L124
-                nn.init.kaiming_uniform_(self.lora_A[adapter_name].weight, a=math.sqrt(5))
-            elif init_lora_weights.lower() == "gaussian":
-                nn.init.normal_(self.lora_A[adapter_name].weight, std=1 / self.r[adapter_name])
-            else:
-                raise ValueError(f"Unknown initialization {init_lora_weights=}")
-            nn.init.zeros_(self.lora_B[adapter_name].weight)
-            if self.lora_bias[adapter_name]:
-                nn.init.zeros_(self.lora_B[adapter_name].bias)
-        if adapter_name in self.lora_embedding_A.keys():
-            # Initialize A to zeros and B the same way as the default for nn.Embedding, see:
-            # https://github.com/microsoft/LoRA/blob/4c0333854cb905966f8cc4e9a74068c1e507c7b7/loralib/layers.py#L59-L60
-            nn.init.zeros_(self.lora_embedding_A[adapter_name])
-            nn.init.normal_(self.lora_embedding_B[adapter_name])
-            if self.lora_bias[adapter_name]:
-                # embeddings are not supported at the moment, but still adding this for consistency
-                nn.init.zeros_(self.lora_embedding_B[adapter_name].bias)
+        # Always synchronize non-sharded LoRA weights across TP ranks, regardless of
+        # init_lora_weights, since each rank initializes weights independently.
+        # We could skip some broadcast, for instance when the lora weights are initialized to zero,
+        # but this is a minor optimization and would add extra complexity to the code.
+        if dist.is_available() and dist.is_initialized():
+            base_layer = self.get_base_layer()
+            tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+            device_mesh = getattr(base_layer, "_hf_device_mesh", None)
+            if device_mesh is not None and tp_plan in ("colwise", "rowwise"):
+                pg = device_mesh.get_group()
+                src = dist.get_global_rank(pg, 0)
+                if tp_plan == "colwise" and adapter_name in self.lora_A:
+                    # The adapter weights need to be on device for broadcasting
+                    self._move_adapter_to_device_of_base_layer(adapter_name)
+                    dist.broadcast(self.lora_A[adapter_name].weight.data, src=src, group=pg)
+                elif tp_plan == "rowwise" and adapter_name in self.lora_B:
+                    # The adapter weights need to be on device for broadcasting
+                    self._move_adapter_to_device_of_base_layer(adapter_name)
+                    dist.broadcast(self.lora_B[adapter_name].weight.data, src=src, group=pg)
 
     def olora_init(self, adapter_name):
         base_layer = self.get_base_layer()

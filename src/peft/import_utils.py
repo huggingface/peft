@@ -25,6 +25,8 @@ is_transformers_ge_v5 = packaging.version.parse(transformers.__version__) >= pac
 
 is_transformers_ge_v5_1_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.1.0")
 
+is_transformers_ge_v5_4_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.4.0")
+
 is_transformers_le_4_53 = packaging.version.parse(transformers.__version__) < packaging.version.parse("4.54.0.dev0")
 
 
