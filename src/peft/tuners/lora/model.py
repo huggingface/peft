@@ -13,6 +13,7 @@
 # limitations under the License.
 from __future__ import annotations
 
+import copy
 import math
 import operator
 import re
@@ -20,6 +21,7 @@ import warnings
 from contextlib import contextmanager
 from dataclasses import replace
 from functools import partial, reduce
+from types import SimpleNamespace
 from typing import Literal, Optional
 
 import packaging.version
@@ -285,23 +287,52 @@ class LoraModel(BaseTuner):
                     "support LoRA with Tensor Parallelism. Please upgrade to transformers >= 5.4.0."
                 )
             from transformers.integrations.tensor_parallel import (
+                ALL_PARALLEL_STYLES,
                 add_tensor_parallel_hooks_to_module,
             )
 
-            if tp_plan == "colwise":
-                tp_module = lora_module.lora_B[adapter_name]
-                tp_layer_name = (f"{current_key}.lora_B.{adapter_name}",)
-            else:  # rowwise
-                tp_module = lora_module.lora_A[adapter_name]
-                tp_layer_name = (f"{current_key}.lora_A.{adapter_name}",)
-            add_tensor_parallel_hooks_to_module(
-                self.model,
-                tp_module,
-                tp_plan,
-                tp_layer_name,
-                tp_plan,
-                device_mesh,
-            )
+            if tp_plan in ["colwise", "rowwise"]:
+                if tp_plan == "colwise":
+                    tp_module = lora_module.lora_B[adapter_name]
+                    tp_layer_name = (f"{current_key}.lora_B.{adapter_name}",)
+                else:  # rowwise
+                    tp_module = lora_module.lora_A[adapter_name]
+                    tp_layer_name = (f"{current_key}.lora_A.{adapter_name}",)
+                add_tensor_parallel_hooks_to_module(
+                    self.model,
+                    tp_module,
+                    tp_plan,
+                    tp_layer_name,
+                    tp_plan,
+                    device_mesh,
+                )
+            elif tp_plan == "embedding_rowwise":
+                # LoRA embeddings are a bit special, there is no new module but just weights.
+                # To use the TP hooks machinery, we need to create a fake module that has the weights as attributes
+                # (used by the hooks), make the hooks use this fake module, and then add the hooks to the original
+                # `_embed` method acting as the forward pass lora_embedding_A.
+                tp_layer = copy.deepcopy(ALL_PARALLEL_STYLES[tp_plan])
+                mod = SimpleNamespace()
+                mod.weight = lora_module.lora_embedding_A[adapter_name].T  # lora_embedding_A shape is (r, vocab_size)
+
+                def input_fn(inputs):
+                    return tp_layer._prepare_input_fn(mod, inputs, device_mesh)
+
+                def output_fn(outputs):
+                    return tp_layer._prepare_output_fn(mod, outputs, device_mesh)
+
+                original_embed = lora_module._embed
+
+                def wrapper(input, weight):
+                    masked_input = input_fn((input,))
+                    return output_fn(original_embed(masked_input, weight))
+
+                lora_module._embed = wrapper
+            else:
+                warnings.warn(
+                    f'TP plan "{tp_plan}" on the base layer is not supported for LoRA. '
+                    "LoRA adapters will be created without tensor parallel hooks."
+                )
 
     def _replace_module(self, parent, child_name, new_module, child):
         # override in LoraModel to handle quantized weights properly
