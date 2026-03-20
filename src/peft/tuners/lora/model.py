@@ -21,7 +21,6 @@ import warnings
 from contextlib import contextmanager
 from dataclasses import replace
 from functools import partial, reduce
-from types import SimpleNamespace
 from typing import Literal, Optional
 
 import packaging.version
@@ -312,8 +311,25 @@ class LoraModel(BaseTuner):
                 # (used by the hooks), make the hooks use this fake module, and then add the hooks to the original
                 # `_embed` method acting as the forward pass lora_embedding_A.
                 tp_layer = copy.deepcopy(ALL_PARALLEL_STYLES[tp_plan])
-                mod = SimpleNamespace()
-                mod.weight = lora_module.lora_embedding_A[adapter_name].T  # lora_embedding_A shape is (r, vocab_size)
+
+                class LoraEmbeddingAHolder(nn.Module):
+                    """
+                    A "fake" module to hold the lora_embedding_A weights for the TP hooks.
+                    We store the `lora_embedding_A` and `adapter_name` separately and get the adapter weight dynamically
+                    to avoid issues where the parameter is overwritten after adapter creation.
+                    With this implementation, there is no stale weights.
+                    """
+
+                    def __init__(self, lora_embedding_A, adapter_name):
+                        super().__init__()
+                        self.lora_embedding_A = lora_embedding_A
+                        self.adapter_name = adapter_name
+
+                    @property
+                    def weight(self):
+                        return self.lora_embedding_A[self.adapter_name].T  # lora_embedding_A shape is (r, vocab_size)
+
+                mod = LoraEmbeddingAHolder(lora_module.lora_embedding_A, adapter_name)
 
                 def input_fn(inputs):
                     return tp_layer._prepare_input_fn(mod, inputs, device_mesh)
