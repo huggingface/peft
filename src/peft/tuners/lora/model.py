@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import copy
-import logging
 import math
 import operator
 import re
@@ -61,9 +60,6 @@ from .layer import Conv2d, LoraLayer, ParamWrapper, dispatch_default
 from .te import dispatch_transformer_engine
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
-
-
-logger = logging.getLogger(__name__)
 
 
 def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
@@ -333,7 +329,7 @@ class LoraModel(BaseTuner):
 
                 lora_module._embed = wrapper
             else:
-                logger.warning(
+                warnings.warn(
                     f'TP plan "{tp_plan}" on the base layer is not supported for LoRA. '
                     "LoRA adapters will be created without tensor parallel hooks."
                 )
