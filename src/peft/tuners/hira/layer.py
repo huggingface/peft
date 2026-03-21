@@ -182,10 +182,6 @@ class Linear(nn.Module, HiraLayer):
                 merged_delta = merged_delta + self.get_delta_weight(active_adapter).to(orig_dtype)
                 self.merged_adapters.append(active_adapter)
 
-        if merged_delta is base_layer.weight.data:
-            # should not happen, but guard against accidental in-place use
-            merged_delta = merged_delta.clone()
-
         if safe_merge:
             orig_weight = base_layer.weight.data.clone()
             merged_weight = orig_weight * (1 + merged_delta)
@@ -285,6 +281,9 @@ class Linear(nn.Module, HiraLayer):
             result = result.to(torch_result_dtype)
 
         return result
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        return True
 
     def __repr__(self) -> str:
         rep = super().__repr__()
