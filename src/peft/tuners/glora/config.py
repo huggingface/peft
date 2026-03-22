@@ -37,7 +37,7 @@ class GloraConfig(PeftConfig):
     _VALID_D_E_CONFIGS = {"constant", "none", "vector"}
 
     r: int = field(
-        default=4, metadata={"help": "Default rank of the LoRA matrices if the config contains LoRA parametrization."}
+        default=8, metadata={"help": "Default rank of the LoRA matrices if the config contains LoRA parametrization."}
     )
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
