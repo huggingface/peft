@@ -44,9 +44,9 @@ class GloraLayer(nn.Module):
 
     def add_adapter(self, adapter_name: str, r: int, config_A_B: str, config_C: str, config_D_E: str):
         self.r[adapter_name] = r
-        Ad, Au = self.make_param((self.out_features, self.in_features), f"LoRA_{r}")
-        Bd, Bu = self.make_param((self.out_features, self.in_features), f"LoRA_{r}")
-        Cd, Cu = self.make_param((self.in_features, 1), f"LoRA_{r}")
+        Ad, Au = self.make_param((self.out_features, self.in_features), f"lora_{r}")
+        Bd, Bu = self.make_param((self.out_features, self.in_features), f"lora_{r}")
+        Cd, Cu = self.make_param((self.in_features, 1), f"lora_{r}")
         D = nn.Parameter(torch.zeros(self.out_features))
         E = nn.Parameter(torch.zeros(self.out_features))
         self.glora_Ad[adapter_name] = Ad
@@ -74,7 +74,7 @@ class GloraLayer(nn.Module):
         nn.init.kaiming_uniform_(self.glora_Cu[adapter_name], a=math.sqrt(5))
 
     def make_param(self, shape, config=None):
-        if config is not None and "LoRA" in config:
+        if config is not None and "lora" in str(config).lower():
             out_feature = shape[0]
             in_feature = shape[1]
             try:
@@ -305,7 +305,7 @@ class GloraLayer(nn.Module):
         device = device or Xd.device
         dtype = dtype or Xd.dtype
         if Xu is not None:
-            if "LoRA" in config:
+            if "lora" in config.lower():
                 rank = int(config.split("_")[1])
                 X = torch.matmul(Xd[:, :rank], Xu[:rank, :])
             elif "vector" in config:

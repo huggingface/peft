@@ -32,12 +32,12 @@ class GloraConfig(PeftConfig):
         config_D_E (`str`): Configuration for D and E matrices. Valid values: 'constant', 'none', 'vector'.
     """
 
-    _VALID_A_B_CONFIGS = {"LoRA", "vector", "constant", "none"}
-    _VALID_C_CONFIGS = {"LoRA", "vector", "none"}
+    _VALID_A_B_CONFIGS = {"lora", "vector", "constant", "none"}
+    _VALID_C_CONFIGS = {"lora", "vector", "none"}
     _VALID_D_E_CONFIGS = {"constant", "none", "vector"}
 
     r: int = field(
-        default=8, metadata={"help": "Default rank of the LoRA matrices if the config contains LoRA parametrization."}
+        default=8, metadata={"help": "Default rank of the LoRA matrices if the config contains lora parametrization."}
     )
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
@@ -48,20 +48,20 @@ class GloraConfig(PeftConfig):
     )
 
     config_A_B: str = field(
-        default="LoRA",
+        default="lora",
         metadata={
             "help": "Configuration for A and B matrices in Glora."
             f"Valid values: {', '.join(_VALID_A_B_CONFIGS)}. "
-            "For LoRA, it will be post-processed to LoRA_<rank>."
+            "For lora, it will be post-processed to lora_<rank>."
         },
     )
 
     config_C: str = field(
-        default="LoRA",
+        default="lora",
         metadata={
             "help": "Configuration for C matrix in Glora."
             f"Valid values: {', '.join(_VALID_C_CONFIGS)}. "
-            "For LoRA, it will be post-processed to LoRA_<rank>."
+            "For lora, it will be post-processed to lora_<rank>."
         },
     )
 
@@ -90,12 +90,14 @@ class GloraConfig(PeftConfig):
         Raises:
             ValueError: If the configuration value is invalid
         """
-        if config_value and "LoRA" in config_value:
+        config_value = str(config_value).lower()
+
+        if config_value and "lora" in config_value:
             if not allow_lora:
                 raise ValueError(
-                    f"Invalid {config_name} value: {config_value}. LoRA is not supported for {config_name}."
+                    f"Invalid {config_name} value: {config_value}. lora is not supported for {config_name}."
                 )
-            return f"LoRA_{self.r}"
+            return f"lora_{self.r}"
 
         if config_value not in valid_configs:
             raise ValueError(

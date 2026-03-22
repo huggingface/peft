@@ -247,7 +247,7 @@ class GloraModel(BaseTuner):
     def set_adapter_eval_config(self, adapter_name: str, eval_config: dict[str, str]):
         """
         Sets the evaluation configuration for all GloraLinear layers associated with a given adapter. The eval_config
-        dictionary should specify the path choices for A, B, C, D, E. Example: {'A':'LoRA_4', 'B':'none', 'C':'vector',
+        dictionary should specify the path choices for A, B, C, D, E. Example: {'A':'lora_8', 'B':'none', 'C':'vector',
         'D':'constant', 'E':'none'}
         """
         if adapter_name not in self.peft_config:

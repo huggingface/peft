@@ -26,8 +26,8 @@ Glora is especially useful for research and advanced applications where you want
 ### Key Configuration Options
 - `r`: The rank of the low-rank matrices (default: 4).
 - `target_modules`: List or regex of module names to adapt (e.g., `["q_proj", "v_proj"]`).
-- `config_A_B`: Path type for A and B ("LoRA", "vector", "constant", "none").
-- `config_C`: Path type for C ("LoRA", "vector", "none").
+- `config_A_B`: Path type for A and B ("lora", "vector", "constant", "none").
+- `config_C`: Path type for C ("lora", "vector", "none").
 - `config_D_E`: Path type for D and E ("constant", "vector", "none").
 
 Each path can be set independently, allowing for highly customized adaptation.
@@ -58,7 +58,7 @@ model = AutoModelForCausalLM.from_pretrained("your-model-id")
 glora_config = GloraConfig(
     r=8,
     target_modules=["q_proj", "v_proj"],
-    config_A_B="LoRA",
+    config_A_B="lora",
     config_C="vector",
     config_D_E="constant",
     task_type="CAUSAL_LM",
@@ -72,7 +72,7 @@ model.merge_and_unload()
 ```
 
 ## Notes
-- Glora is a superset of LoRA: setting all paths to "LoRA" recovers standard LoRA.
+- Glora is a superset of LoRA: setting all paths to "lora" recovers standard LoRA.
 - You can use different path types for A/B/C/D/E to experiment with new adaptation strategies.
 - Glora supports all standard PEFT adapter management features (add, delete, switch, merge, etc).
 
