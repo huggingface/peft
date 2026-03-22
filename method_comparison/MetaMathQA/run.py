@@ -54,7 +54,7 @@ from utils import (
 )
 
 from data import get_train_valid_test_datasets, get_wiki_small
-from peft import AdaLoraConfig, PeftConfig
+from peft import AdaLoraConfig, AdamssConfig, PeftConfig
 from peft.utils import CONFIG_NAME, infer_device
 
 
@@ -156,6 +156,7 @@ def train(
     lr_scheduler_arg: Optional[Literal["cosine"]],
     use_amp: bool,
     is_adalora: bool,
+    is_adamss: bool,
 ) -> TrainResult:
     accelerator_memory_allocated_log = []
     accelerator_memory_reserved_log = []
@@ -256,7 +257,7 @@ def train(
             grad_scaler.update()
             lr_scheduler.step()
 
-            if is_adalora:
+            if is_adalora or is_adamss:
                 model.base_model.update_and_allocate(step)
 
             losses.append(loss.item())
@@ -453,6 +454,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         lr_scheduler_arg=train_config.lr_scheduler,
         use_amp=train_config.use_amp,
         is_adalora=isinstance(peft_config, AdaLoraConfig),
+        is_adamss=isinstance(peft_config, AdamssConfig),
     )
 
     if train_result.status == TrainStatus.FAILED:
