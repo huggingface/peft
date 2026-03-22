@@ -18,6 +18,10 @@ import importlib
 import os
 from typing import Optional
 
+# Allowlist of known-safe parent library modules for auto_mapping loading.
+# Only these modules may be resolved via importlib when loading adapter configs.
+ALLOWED_PARENT_LIBRARIES = {"transformers", "diffusers"}
+
 from transformers import (
     AutoModel,
     AutoModelForCausalLM,
@@ -104,6 +108,13 @@ class _BaseAutoPeftModel:
             auto_mapping = getattr(peft_config, "auto_mapping", None)
             base_model_class = auto_mapping["base_model_class"]
             parent_library_name = auto_mapping["parent_library"]
+
+            if parent_library_name not in ALLOWED_PARENT_LIBRARIES:
+                raise ValueError(
+                    f"Invalid parent_library '{parent_library_name}' in auto_mapping. "
+                    f"Only modules from {sorted(ALLOWED_PARENT_LIBRARIES)} are allowed. "
+                    "If this is a legitimate use case, please open an issue to request adding it to the allowlist."
+                )
 
             parent_library = importlib.import_module(parent_library_name)
             target_class = getattr(parent_library, base_model_class)

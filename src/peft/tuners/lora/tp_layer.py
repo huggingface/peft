@@ -313,6 +313,11 @@ def dispatch_megatron(
         target_base_layer = target
 
     if config.megatron_config:
+        if not config.megatron_core or "." not in config.megatron_core:
+            raise ValueError(
+                f"Invalid megatron_core value '{config.megatron_core}'. "
+                "It must be a fully qualified module name (e.g., 'megatron.core')."
+            )
         megatron_core = importlib.import_module(config.megatron_core)
     else:
         megatron_core = None
