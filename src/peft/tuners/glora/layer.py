@@ -20,7 +20,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class GLoraLayer(nn.Module):
+class GloraLayer(nn.Module):
     def __init__(self, in_features: int, out_features: int):
         # Only call nn.Module.__init__ if not already initialized (i.e., not an nn.Linear)
         if not isinstance(self, nn.Linear):
@@ -328,11 +328,11 @@ class GLoraLayer(nn.Module):
         return X.to(device=device, dtype=dtype)
 
 
-# Refactored GLoraLinear for PEFT compatibility
-class GLoraLinear(GLoraLayer, nn.Linear):
+# Refactored GloraLinear for PEFT compatibility
+class GloraLinear(GloraLayer, nn.Linear):
     def __init__(self, in_features, out_features, bias=True, **kwargs):
         nn.Linear.__init__(self, in_features, out_features, bias=bias)
-        GLoraLayer.__init__(self, in_features=in_features, out_features=out_features)
+        GloraLayer.__init__(self, in_features=in_features, out_features=out_features)
         self.weight.requires_grad = False
         if self.bias is not None:
             self.bias.requires_grad = False

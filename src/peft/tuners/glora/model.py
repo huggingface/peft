@@ -6,7 +6,7 @@ import torch.nn as nn
 from tqdm import tqdm
 
 from peft.config import PeftConfig
-from peft.tuners.glora.layer import GLoraLayer
+from peft.tuners.glora.layer import GloraLayer
 from peft.tuners.tuners_utils import BaseTuner
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_GLORA_TARGET_MODULES_MAPPING,
@@ -16,8 +16,8 @@ from peft.utils import (
 )
 from peft.utils.peft_types import PeftType
 
-from .config import GLoraConfig
-from .layer import GLoraLinear
+from .config import GloraConfig
+from .layer import GloraLinear
 
 
 def mark_only_glora_as_trainable(model: nn.Module, bias: str = "none") -> None:
@@ -37,27 +37,27 @@ def mark_only_glora_as_trainable(model: nn.Module, bias: str = "none") -> None:
                 p.requires_grad = True
     elif bias == "glora_only":
         for m in model.modules():
-            if isinstance(m, GLoraLinear) and hasattr(m, "bias") and m.bias is not None:
+            if isinstance(m, GloraLinear) and hasattr(m, "bias") and m.bias is not None:
                 m.bias.requires_grad = True
 
 
-class GLoraModel(BaseTuner):
+class GloraModel(BaseTuner):
     """
-    Creates Generalized Low Rank Adapter (GLora) model from a pretrained transformers model.
+    Creates Generalized Low Rank Adapter (Glora) model from a pretrained transformers model.
     """
 
-    def __init__(self, model: nn.Module, config: GLoraConfig, adapter_name: str = "default"):
+    def __init__(self, model: nn.Module, config: GloraConfig, adapter_name: str = "default"):
         super().__init__(model, config, adapter_name)
         self.model = model
         self.forward = self.model.forward
 
-        self.peft_config: dict[str, GLoraConfig] = {}
+        self.peft_config: dict[str, GloraConfig] = {}
         self.active_adapter: Union[str, list[str]] = adapter_name
         self.peft_type = PeftType.GLORA
         self.adapters_config_history: dict[str, Any] = {}
 
         # Accept both single config and dict of configs
-        if isinstance(config, GLoraConfig):
+        if isinstance(config, GloraConfig):
             self.peft_config[adapter_name] = config
         elif isinstance(config, dict):
             for name, cfg in config.items():
@@ -69,7 +69,7 @@ class GLoraModel(BaseTuner):
         for name, cfg in self.peft_config.items():
             self.add_adapter(name, cfg)
 
-    def add_adapter(self, adapter_name: str, config: GLoraConfig):
+    def add_adapter(self, adapter_name: str, config: GloraConfig):
         # Avoid re-adding if already present
         if hasattr(self, "_added_adapters") and adapter_name in self._added_adapters:
             return
@@ -84,7 +84,7 @@ class GLoraModel(BaseTuner):
         # Replace or add adapters in target modules
         self._find_and_replace(adapter_name)
 
-        # Mark only GLora params as trainable
+        # Mark only Glora params as trainable
         mark_only_glora_as_trainable(self.model, bias=getattr(current_config, "bias", "none"))
 
         # Optionally freeze for inference
@@ -93,7 +93,7 @@ class GLoraModel(BaseTuner):
 
         self._added_adapters.add(adapter_name)
 
-    def _create_new_module(self, peft_config: GLoraConfig, adapter_name: str, target: nn.Module) -> GLoraLinear:
+    def _create_new_module(self, peft_config: GloraConfig, adapter_name: str, target: nn.Module) -> GloraLinear:
         bias = hasattr(target, "bias") and target.bias is not None
         if not isinstance(target, nn.Linear):
             raise ValueError(
@@ -106,7 +106,7 @@ class GLoraModel(BaseTuner):
             "config_C": peft_config.config_C,
             "config_D_E": peft_config.config_D_E,
         }
-        new_module = GLoraLinear(in_features, out_features, bias=bias, **kwargs_glora)
+        new_module = GloraLinear(in_features, out_features, bias=bias, **kwargs_glora)
         # Add the adapter to the new module
         new_module.add_adapter(
             adapter_name,
@@ -129,8 +129,8 @@ class GLoraModel(BaseTuner):
             is_target_modules_in_base_model = True
             parent, target, target_name = _get_submodules(self.model, key)
 
-            if isinstance(target, GLoraLinear):
-                # Add adapter to existing GLoraLinear
+            if isinstance(target, GloraLinear):
+                # Add adapter to existing GloraLinear
                 target.add_adapter(
                     adapter_name,
                     peft_config.r,
@@ -169,11 +169,11 @@ class GLoraModel(BaseTuner):
             return getattr(self.model, name)
 
     @staticmethod
-    def _prepare_peft_config(peft_config: GLoraConfig, model_config: dict) -> GLoraConfig:
+    def _prepare_peft_config(peft_config: GloraConfig, model_config: dict) -> GloraConfig:
         if peft_config.target_modules is None:
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_GLORA_TARGET_MODULES_MAPPING:
                 raise ValueError(
-                    f"Please specify `target_modules` in `GLoraConfig` for model_type {model_config['model_type']}"
+                    f"Please specify `target_modules` in `GloraConfig` for model_type {model_config['model_type']}"
                 )
             peft_config.target_modules = TRANSFORMERS_MODELS_TO_GLORA_TARGET_MODULES_MAPPING[
                 model_config["model_type"]
@@ -185,7 +185,7 @@ class GLoraModel(BaseTuner):
             return
 
         for module in self.model.modules():
-            if isinstance(module, GLoraLayer):
+            if isinstance(module, GloraLayer):
                 module.set_adapter(adapter_name, inference_mode=inference_mode)
         self.active_adapter = adapter_name
 
@@ -214,7 +214,7 @@ class GLoraModel(BaseTuner):
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ):
         """
-        This method merges the GLora layers into the base model.
+        This method merges the Glora layers into the base model.
         """
         if getattr(self, "hf_device_map", None):
             raise ValueError("Merging LoRA weights is not supported when using HF device map.")
@@ -228,7 +228,7 @@ class GLoraModel(BaseTuner):
             except AttributeError:
                 continue
 
-            if isinstance(target, GLoraLinear):
+            if isinstance(target, GloraLinear):
                 if not target.active_adapters:
                     continue
                 # Merge all or specified adapters
@@ -246,7 +246,7 @@ class GLoraModel(BaseTuner):
 
     def set_adapter_eval_config(self, adapter_name: str, eval_config: dict[str, str]):
         """
-        Sets the evaluation configuration for all GLoraLinear layers associated with a given adapter. The eval_config
+        Sets the evaluation configuration for all GloraLinear layers associated with a given adapter. The eval_config
         dictionary should specify the path choices for A, B, C, D, E. Example: {'A':'LoRA_4', 'B':'none', 'C':'vector',
         'D':'constant', 'E':'none'}
         """
@@ -254,7 +254,7 @@ class GLoraModel(BaseTuner):
             raise ValueError(f"Adapter {adapter_name} not found.")
 
         for module in self.model.modules():
-            if isinstance(module, GLoraLinear):
+            if isinstance(module, GloraLinear):
                 if adapter_name in module.eval_config:
                     module.eval_config[adapter_name] = eval_config
                     self.adapters_config_history[adapter_name] = eval_config
@@ -288,5 +288,5 @@ class GLoraModel(BaseTuner):
         mark_only_glora_as_trainable(model)
 
     def _prepare_adapter_config(self, peft_config: PeftConfig, model_config: dict) -> PeftConfig:
-        assert isinstance(peft_config, GLoraConfig) # ty linting
-        return GLoraModel._prepare_peft_config(peft_config, model_config)
+        assert isinstance(peft_config, GloraConfig) # ty linting
+        return GloraModel._prepare_peft_config(peft_config, model_config)

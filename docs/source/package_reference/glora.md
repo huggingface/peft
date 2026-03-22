@@ -13,15 +13,15 @@ specific language governing permissions and limitations under the License.
 rendered properly in your Markdown viewer.
 -->
 
-# GLora
+# Glora
 
-Generalized Low-Rank Adaptation (**GLora**) is a highly flexible PEFT method that generalizes LoRA and related approaches. GLora allows you to decompose weight updates into multiple configurable low-rank, vector, or constant paths, providing a superset of LoRA's expressivity. Each path (A, B, C, D, E) can be independently configured, enabling a wide range of adaptation strategies.
+Generalized Low-Rank Adaptation (**Glora**) is a highly flexible PEFT method that generalizes LoRA and related approaches. Glora allows you to decompose weight updates into multiple configurable low-rank, vector, or constant paths, providing a superset of LoRA's expressivity. Each path (A, B, C, D, E) can be independently configured, enabling a wide range of adaptation strategies.
 
-GLora is especially useful for research and advanced applications where you want to experiment with different low-rank or structured update patterns, or combine multiple adaptation mechanisms in a single layer.
+Glora is especially useful for research and advanced applications where you want to experiment with different low-rank or structured update patterns, or combine multiple adaptation mechanisms in a single layer.
 
-## GLoraConfig
+## GloraConfig
 
-[[autodoc]] tuners.glora.config.GLoraConfig
+[[autodoc]] tuners.glora.config.GloraConfig
 
 ### Key Configuration Options
 - `r`: The rank of the low-rank matrices (default: 4).
@@ -32,30 +32,30 @@ GLora is especially useful for research and advanced applications where you want
 
 Each path can be set independently, allowing for highly customized adaptation.
 
-## GLoraModel
+## GloraModel
 
-[[autodoc]] tuners.glora.model.GLoraModel
+[[autodoc]] tuners.glora.model.GloraModel
 
-- Wraps a base model and injects GLora adapters into the specified modules.
+- Wraps a base model and injects Glora adapters into the specified modules.
 - Supports multiple adapters, adapter switching, merging/unmerging, and mixed-batch inference.
 - Use `set_adapter`, `merge_and_unload`, and related methods for adapter management.
 
-## GLoraLayer and GLoraLinear
+## GloraLayer and GloraLinear
 
-[[autodoc]] tuners.glora.layer.GLoraLayer
-[[autodoc]] tuners.glora.layer.Linear
+[[autodoc]] tuners.glora.layer.GloraLayer
+[[autodoc]] tuners.glora.layer.GloraLinear
 
-- `GLoraLayer` is the core logic for generalized low-rank adaptation, supporting multiple adapters and flexible path configs.
-- `GLoraLinear` is a drop-in replacement for `nn.Linear` with GLora support.
+- `GloraLayer` is the core logic for generalized low-rank adaptation, supporting multiple adapters and flexible path configs.
+- `GloraLinear` is a drop-in replacement for `nn.Linear` with Glora support.
 
 ## Example Usage
 
 ```python
 from transformers import AutoModelForCausalLM
-from peft import GLoraConfig, get_peft_model
+from peft import GloraConfig, get_peft_model
 
 model = AutoModelForCausalLM.from_pretrained("your-model-id")
-glora_config = GLoraConfig(
+glora_config = GloraConfig(
     r=8,
     target_modules=["q_proj", "v_proj"],
     config_A_B="LoRA",
@@ -72,9 +72,9 @@ model.merge_and_unload()
 ```
 
 ## Notes
-- GLora is a superset of LoRA: setting all paths to "LoRA" recovers standard LoRA.
+- Glora is a superset of LoRA: setting all paths to "LoRA" recovers standard LoRA.
 - You can use different path types for A/B/C/D/E to experiment with new adaptation strategies.
-- GLora supports all standard PEFT adapter management features (add, delete, switch, merge, etc).
+- Glora supports all standard PEFT adapter management features (add, delete, switch, merge, etc).
 
 ## See Also
 - [Adapter conceptual guide](../conceptual_guides/adapter.md)

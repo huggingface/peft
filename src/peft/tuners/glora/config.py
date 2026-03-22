@@ -20,13 +20,13 @@ from peft.utils.peft_types import PeftType
 
 
 @dataclass
-class GLoraConfig(PeftConfig):
+class GloraConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a [`GLoraModel`].
+    This is the configuration class to store the configuration of a [`GloraModel`].
 
     Args:
-        r (`int`): GLora attention dimension (rank of the LoRA matrices).
-        target_modules (`Optional[Union[List[str], str]]`): The names of the modules to apply GLora to.
+        r (`int`): Glora attention dimension (rank of the LoRA matrices).
+        target_modules (`Optional[Union[List[str], str]]`): The names of the modules to apply Glora to.
         config_A_B (`str`): Configuration for A and B matrices. Valid values: 'LoRA', 'vector', 'constant', 'none'.
         config_C (`str`): Configuration for C matrix. Valid values: 'LoRA', 'vector', 'none'.
         config_D_E (`str`): Configuration for D and E matrices. Valid values: 'constant', 'none', 'vector'.
@@ -50,7 +50,7 @@ class GLoraConfig(PeftConfig):
     config_A_B: str = field(
         default="LoRA",
         metadata={
-            "help": "Configuration for A and B matrices in GLora."
+            "help": "Configuration for A and B matrices in Glora."
             f"Valid values: {', '.join(_VALID_A_B_CONFIGS)}. "
             "For LoRA, it will be post-processed to LoRA_<rank>."
         },
@@ -59,7 +59,7 @@ class GLoraConfig(PeftConfig):
     config_C: str = field(
         default="LoRA",
         metadata={
-            "help": "Configuration for C matrix in GLora."
+            "help": "Configuration for C matrix in Glora."
             f"Valid values: {', '.join(_VALID_C_CONFIGS)}. "
             "For LoRA, it will be post-processed to LoRA_<rank>."
         },
@@ -68,7 +68,7 @@ class GLoraConfig(PeftConfig):
     config_D_E: str = field(
         default="constant",
         metadata={
-            "help": f"Configuration for D and E matrices in GLora. Valid values: {', '.join(_VALID_D_E_CONFIGS)}."
+            "help": f"Configuration for D and E matrices in Glora. Valid values: {', '.join(_VALID_D_E_CONFIGS)}."
         },
     )
 

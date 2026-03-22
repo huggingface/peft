@@ -7,13 +7,13 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from peft import (
-    GLoraConfig,
+    GloraConfig,
     PeftModel,
     TaskType,
     get_peft_model,
     prepare_model_for_kbit_training,
 )
-from peft.tuners.glora.layer import GLoraLinear
+from peft.tuners.glora.layer import GloraLinear
 
 
 # A very simple model for testing
@@ -91,7 +91,7 @@ class GLORATester(unittest.TestCase):
         return self.tokenizer(prompt, return_tensors="pt")["input_ids"]
 
     def test_glora_model_creation_and_forward(self):
-        glora_config = GLoraConfig(r=4, target_modules=self.target_modules, task_type=TaskType.CAUSAL_LM)
+        glora_config = GloraConfig(r=4, target_modules=self.target_modules, task_type=TaskType.CAUSAL_LM)
         peft_model = get_peft_model(self.base_model, glora_config)
         assert isinstance(peft_model, PeftModel)
         assert hasattr(peft_model, "base_model")
@@ -104,7 +104,7 @@ class GLORATester(unittest.TestCase):
         assert output_peft.logits.shape == output_base.logits.shape
 
     def test_save_and_load_glora_adapter(self):
-        glora_config = GLoraConfig(r=4, target_modules=self.target_modules, task_type=TaskType.CAUSAL_LM)
+        glora_config = GloraConfig(r=4, target_modules=self.target_modules, task_type=TaskType.CAUSAL_LM)
         peft_model = get_peft_model(self.base_model, glora_config)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
@@ -122,20 +122,20 @@ class GLORATester(unittest.TestCase):
                 assert torch.allclose(v_orig, v_load)
 
     def test_merge_and_unload_glora(self):
-        glora_config = GLoraConfig(r=4, target_modules=self.target_modules, task_type=TaskType.CAUSAL_LM)
+        glora_config = GloraConfig(r=4, target_modules=self.target_modules, task_type=TaskType.CAUSAL_LM)
         peft_model = get_peft_model(self.base_model, glora_config)
 
         target_layer_name = self.target_modules[0]
         module_ptr = None
         module_path = None
         for name, module in peft_model.model.named_modules():
-            if name.split(".")[-1] == target_layer_name and isinstance(module, GLoraLinear):
+            if name.split(".")[-1] == target_layer_name and isinstance(module, GloraLinear):
                 module_ptr = module
                 module_path = name
                 break
-        if not isinstance(module_ptr, GLoraLinear):
-            self.skipTest(f"Target module {target_layer_name} is not a GLoraLinear layer after PEFT application.")
-        assert isinstance(module_ptr, GLoraLinear)
+        if not isinstance(module_ptr, GloraLinear):
+            self.skipTest(f"Target module {target_layer_name} is not a GloraLinear layer after PEFT application.")
+        assert isinstance(module_ptr, GloraLinear)
 
         original_weight = module_ptr.weight.data.clone()
         if "default" in module_ptr.glora_Au:
@@ -179,7 +179,7 @@ class GLORATester(unittest.TestCase):
             model_4bit = prepare_model_for_kbit_training(model_4bit)
         except Exception as e:
             self.skipTest(f"bitsandbytes or quantized model loading failed: {e}")
-        glora_config = GLoraConfig(
+        glora_config = GloraConfig(
             r=4,
             target_modules=["q_proj", "v_proj"],
             task_type=TaskType.CAUSAL_LM,
