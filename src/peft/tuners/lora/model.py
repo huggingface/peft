@@ -13,7 +13,6 @@
 # limitations under the License.
 from __future__ import annotations
 
-import copy
 import math
 import operator
 import re
@@ -286,7 +285,6 @@ class LoraModel(BaseTuner):
                     "support LoRA with Tensor Parallelism. Please upgrade to transformers >= 5.4.0."
                 )
             from transformers.integrations.tensor_parallel import (
-                ALL_PARALLEL_STYLES,
                 add_tensor_parallel_hooks_to_module,
             )
 
@@ -306,44 +304,8 @@ class LoraModel(BaseTuner):
                     device_mesh,
                 )
             elif tp_plan == "embedding_rowwise":
-                # LoRA embeddings are a bit special, there is no new module but just weights.
-                # To use the TP hooks machinery, we need to create a fake module that has the weights as attributes
-                # (used by the hooks), make the hooks use this fake module, and then add the hooks to the original
-                # `_embed` method acting as the forward pass lora_embedding_A.
-                tp_layer = copy.deepcopy(ALL_PARALLEL_STYLES[tp_plan])
-
-                class LoraEmbeddingAHolder(nn.Module):
-                    """
-                    A "fake" module to hold the lora_embedding_A weights for the TP hooks.
-                    We store the `lora_embedding_A` and `adapter_name` separately and get the adapter weight dynamically
-                    to avoid issues where the parameter is overwritten after adapter creation.
-                    With this implementation, there is no stale weights.
-                    """
-
-                    def __init__(self, lora_embedding_A, adapter_name):
-                        super().__init__()
-                        self.lora_embedding_A = lora_embedding_A
-                        self.adapter_name = adapter_name
-
-                    @property
-                    def weight(self):
-                        return self.lora_embedding_A[self.adapter_name].T  # lora_embedding_A shape is (r, vocab_size)
-
-                mod = LoraEmbeddingAHolder(lora_module.lora_embedding_A, adapter_name)
-
-                def input_fn(inputs):
-                    return tp_layer._prepare_input_fn(mod, inputs, device_mesh)
-
-                def output_fn(outputs):
-                    return tp_layer._prepare_output_fn(mod, outputs, device_mesh)
-
-                original_embed = lora_module._embed
-
-                def wrapper(input, weight):
-                    masked_input = input_fn((input,))
-                    return output_fn(original_embed(masked_input, weight))
-
-                lora_module._embed = wrapper
+                # It is handled in the `_embed` method in lora/layer.py where the hooks are explicitely called.
+                pass
             else:
                 warnings.warn(
                     f'TP plan "{tp_plan}" on the base layer is not supported for LoRA. '
