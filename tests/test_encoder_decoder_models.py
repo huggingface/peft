@@ -31,6 +31,7 @@ from peft import (
     MissConfig,
     OFTConfig,
     OSFConfig,
+    PeanutConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
@@ -225,6 +226,17 @@ ALL_CONFIGS = [
         {
             "r": 8,
             "pvera_dropout": 0.05,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        PeanutConfig,
+        {
+            "r": 4,
+            "depth": 1,
+            "scaling": 1.0,
+            "act_fn": "relu",
+            "target_modules": None,
             "task_type": "SEQ_2_SEQ_LM",
         },
     ),
