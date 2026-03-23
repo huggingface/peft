@@ -347,6 +347,15 @@ def get_peft_model_state_dict(
             # nothing to do
             return key
 
+        if config.peft_type == PeftType.PEANUT:
+            # PEANuT stores residual blocks as ModuleDict[adapter] -> ModuleList.
+            # Their keys look like `...peanut_encoders.<adapter>.0.weight` (and similarly for decoders),
+            # where adapter_name is not in the second-to-last position.
+            for container in ("peanut_encoders", "peanut_decoders"):
+                marker = f".{container}.{adapter_name}."
+                if marker in key:
+                    return key.replace(marker, f".{container}.")
+
         if key.endswith(f".{adapter_name}"):
             # comes from an nn.Parameter, so no .weight suffix, the adapter name is directly at the end
             return key.removesuffix(f".{adapter_name}")
@@ -579,6 +588,47 @@ def set_peft_model_state_dict(
                 return k
 
             peft_model_state_dict = {renamed_dora_weights(k): v for k, v in peft_model_state_dict.items()}
+
+            if torch.distributed.is_available() and torch.distributed.is_initialized():
+                from transformers.integrations.tensor_parallel import (
+                    ALL_PARALLEL_STYLES,
+                    ColwiseParallel,
+                    RowwiseParallel,
+                )
+
+                from ..tuners.lora.layer import LoraLayer  # lazy import to avoid circular import
+
+                for name, module in model.named_modules():
+                    if not isinstance(module, LoraLayer):
+                        continue
+                    base_layer = module.get_base_layer()
+                    device = base_layer.weight.device
+                    dtype = base_layer.weight.dtype
+
+                    tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+                    device_mesh = getattr(base_layer, "_hf_device_mesh", None)
+
+                    if tp_plan is None or device_mesh is None:
+                        continue
+
+                    # We create and initialize the TensorParallelLayer on the fly,
+                    # and we set the `empty_param` attribute depending on the proper
+                    # state dict key to shard.
+                    # This attribute is used by the sharding logic for shape reference,
+                    # it must be of the same shape as the parameter to shard.
+                    tp_layer = ALL_PARALLEL_STYLES[tp_plan]
+                    tp_layer.device_mesh = device_mesh
+                    tp_layer.rank = device_mesh.get_local_rank()
+
+                    if isinstance(tp_layer, ColwiseParallel):
+                        key = f"{name}.lora_B.{adapter_name}.weight"
+                    elif isinstance(tp_layer, RowwiseParallel):
+                        key = f"{name}.lora_A.{adapter_name}.weight"
+                    tp_layer.empty_param = peft_model_state_dict[key]
+                    peft_model_state_dict[key] = tp_layer.shard_tensor(
+                        peft_model_state_dict[key], device=device, dtype=dtype
+                    )
+
         elif config.peft_type == PeftType.OFT:
             if any(".oft_r." in key for key in peft_model_state_dict):
                 raise ValueError(

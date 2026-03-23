@@ -616,6 +616,26 @@ model = model.unload()
 model.delete_adapter("dpo")
 ```
 
+## Tensor Parallelism
+
+LoRA supports [Tensor Parallelism (TP)](https://huggingface.co/docs/transformers/main/en/perf_train_gpu_many#tensor-parallelism) as provided by Transformers. When a base model is loaded with a `tp_plan`, PEFT automatically detects the TP configuration of each target module and adds the appropriate hooks to the LoRA adapter weights so that they participate correctly in the tensor-parallel computation.
+
+> [!WARNING]
+> Tensor Parallelism support for LoRA requires `transformers >= 5.4.0`.
+
+Usage is identical to the standard LoRA workflow — simply load the base model with a `tp_plan` before wrapping it with PEFT:
+
+```py
+from transformers import AutoModelForCausalLM
+from peft import get_peft_model, LoraConfig
+
+model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.1-8B", tp_plan="auto")
+lora_config = LoraConfig(r=16, target_modules=["q_proj", "v_proj"])
+model = get_peft_model(model, lora_config)
+```
+
+Saving and loading work as usual via `save_pretrained` / `from_pretrained`. PEFT gathers the sharded adapter weights back to full tensors before saving, so checkpoints are portable and independent of the number of devices used during training.
+
 ## Inference
 
 This section showcases what you can do during inference time with LoRA, such as uncoupling the adapter.

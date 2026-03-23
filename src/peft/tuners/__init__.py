@@ -23,6 +23,7 @@ from .fourierft import FourierFTConfig, FourierFTModel
 from .gralora import GraloraConfig, GraloraModel
 from .hra import HRAConfig, HRAModel
 from .ia3 import IA3Config, IA3Model
+from .lily import LilyConfig, LilyModel
 from .ln_tuning import LNTuningConfig, LNTuningModel
 from .loha import LoHaConfig, LoHaModel
 from .lokr import LoKrConfig, LoKrModel
@@ -48,6 +49,7 @@ from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTu
 from .oft import OFTConfig, OFTModel
 from .osf import OSFConfig, OSFModel
 from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparameterizationType
+from .peanut import PeanutConfig, PeanutModel
 from .poly import PolyConfig, PolyModel
 from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
 from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
@@ -91,6 +93,8 @@ __all__ = [
     "IA3Model",
     "LNTuningConfig",
     "LNTuningModel",
+    "LilyConfig",
+    "LilyModel",
     "LoHaConfig",
     "LoHaModel",
     "LoKrConfig",
@@ -110,6 +114,8 @@ __all__ = [
     "OFTModel",
     "OSFConfig",
     "OSFModel",
+    "PeanutConfig",
+    "PeanutModel",
     "PolyConfig",
     "PolyModel",
     "PrefixEncoder",

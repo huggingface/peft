@@ -24,9 +24,11 @@ from peft import (
     GraloraConfig,
     HRAConfig,
     IA3Config,
+    LilyConfig,
     LoraConfig,
     MissConfig,
     OFTConfig,
+    PeanutConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
@@ -116,6 +118,16 @@ ALL_CONFIGS = [
         },
     ),
     (
+        LilyConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "r": 8,
+            "stride_A": 1,
+            "num_B": 2,
+        },
+    ),
+    (
         LoraConfig,
         {
             "task_type": "SEQ_CLS",
@@ -174,6 +186,16 @@ ALL_CONFIGS = [
             "task_type": "SEQ_CLS",
             "r": 32,
             "psoft_alpha": 32,
+            "target_modules": None,
+        },
+    ),
+    (
+        PeanutConfig,
+        {
+            "r": 8,
+            "depth": 1,
+            "act_fn": "relu",
+            "task_type": "SEQ_CLS",
             "target_modules": None,
         },
     ),

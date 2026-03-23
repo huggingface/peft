@@ -47,15 +47,18 @@ from .constants import (
     TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_GRALORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_LILY_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LOKR_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_MISS_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_OFT_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_PEANUT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_POLY_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     TRANSFORMERS_MODELS_TO_PSOFT_TARGET_MODULES_MAPPING,
@@ -88,15 +91,18 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_GRALORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_LILY_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LOKR_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_MISS_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_OFT_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_PEANUT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_POLY_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
     "TRANSFORMERS_MODELS_TO_PSOFT_TARGET_MODULES_MAPPING",
@@ -344,7 +350,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         """If `_hasattr_wrapped` returns True for `name`, then this function should return the corresponding
         value associated with `name`.
         """
-        return None
+        return
 
     def __getattr__(self, name: str):
         # Note: This whole method may seem overly complex at first but PyTorch messes with __getattr__ in a way that
@@ -623,8 +629,8 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             _set_layer_requires_grad(self.modules_to_save[adapter_name], True)
 
     def enable_adapters(self, enabled: bool):
-        """Takes care of setting the required_grad flag on the wrapped module.
-        If adapters are enabled, gradients for the module are required as well.
+        """Takes care of setting the required_grad flag on the modules_to_save.
+        If adapters are enabled, gradients for the modules_to_save are required as well.
         """
         super().enable_adapters(enabled)
 
@@ -1148,7 +1154,7 @@ def _prepare_prompt_learning_config(peft_config, model_config):
         peft_config.num_attention_heads = num_key_value_heads
 
     if getattr(peft_config, "encoder_hidden_size", None) is None:
-        setattr(peft_config, "encoder_hidden_size", peft_config.token_dim)
+        peft_config.encoder_hidden_size = peft_config.token_dim
 
     return peft_config
 

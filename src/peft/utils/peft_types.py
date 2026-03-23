@@ -30,6 +30,7 @@ class PeftType(str, enum.Enum):
     BOFT = "BOFT"
     ADAPTION_PROMPT = "ADAPTION_PROMPT"
     IA3 = "IA3"
+    LILY = "LILY"
     LOHA = "LOHA"
     LOKR = "LOKR"
     OFT = "OFT"
@@ -54,6 +55,7 @@ class PeftType(str, enum.Enum):
     GRALORA = "GRALORA"
     CARTRIDGE = "CARTRIDGE"
     PSOFT = "PSOFT"
+    PEANUT = "PEANUT"
 
 
 class TaskType(str, enum.Enum):

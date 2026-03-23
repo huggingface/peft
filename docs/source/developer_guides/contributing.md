@@ -73,6 +73,15 @@ Please give a description of the circumstances that led to the bug. If there is 
 
 Ideally when a bugfix is provided, it should be accompanied by a test for the bug. The test should fail with the current code and pass with the bugfix. Add a comment to the test that references the issue or PR. Without a test, it is more difficult to prevent regressions in the future.
 
+## Documentation improvements
+
+We are happy to have fixes for broken links and missing or unclear documentation. Taking care of examples, making
+sure that they are up-to-date and running fine in this fast moving environment is also highly appreciated.
+
+Please refrain from sending pull requests that *only* correct typing errors as these generally create more work
+than they safe. Such changes are better combined with more substantial fixes (such as fixing broken links or
+extending/updating documentation).
+
 ## Add a new fine-tuning method
 
 New parameter-efficient fine-tuning methods are developed all the time. If you would like to add a new and promising method to PEFT, please follow these steps.

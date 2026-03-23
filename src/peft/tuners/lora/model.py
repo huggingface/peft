@@ -27,7 +27,7 @@ import torch
 import transformers
 from torch import nn
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_transformers_ge_v5_4_0
 from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
@@ -55,6 +55,7 @@ from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .inc import dispatch_inc
 from .layer import Conv2d, LoraLayer, ParamWrapper, dispatch_default
+from .te import dispatch_transformer_engine
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
 
@@ -254,6 +255,9 @@ class LoraModel(BaseTuner):
                 target_name=current_key,
                 config=lora_config,
             )
+
+            base_layer = target.get_base_layer()
+            lora_module = target
         else:
             if isinstance(target, ParamWrapper) and (parameter_name == target.parameter_name):
                 raise ValueError(
@@ -266,6 +270,38 @@ class LoraModel(BaseTuner):
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
+
+            base_layer = target
+            lora_module = new_module
+
+        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+        device_mesh = getattr(base_layer, "_hf_device_mesh", None)
+
+        # If the module has a tp_plan, we add hooks to the LoRA layers to make sure they respect the plan
+        if tp_plan is not None:
+            if not is_transformers_ge_v5_4_0:
+                raise RuntimeError(
+                    "The base model is tensor-parallel sharded but the installed version of Transformers does not "
+                    "support LoRA with Tensor Parallelism. Please upgrade to transformers >= 5.4.0."
+                )
+            from transformers.integrations.tensor_parallel import (
+                add_tensor_parallel_hooks_to_module,
+            )
+
+            if tp_plan == "colwise":
+                tp_module = lora_module.lora_B[adapter_name]
+                tp_layer_name = (f"{current_key}.lora_B.{adapter_name}",)
+            else:  # rowwise
+                tp_module = lora_module.lora_A[adapter_name]
+                tp_layer_name = (f"{current_key}.lora_A.{adapter_name}",)
+            add_tensor_parallel_hooks_to_module(
+                self.model,
+                tp_module,
+                tp_plan,
+                tp_layer_name,
+                tp_plan,
+                device_mesh,
+            )
 
     def _replace_module(self, parent, child_name, new_module, child):
         # override in LoraModel to handle quantized weights properly
@@ -342,6 +378,7 @@ class LoraModel(BaseTuner):
                 dispatch_inc,
                 dispatch_torchao,
                 dispatch_megatron,
+                dispatch_transformer_engine,
                 dispatch_default,
             ]
         )
