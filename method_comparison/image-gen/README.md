@@ -74,4 +74,4 @@ Python 3.12+ is required.
 
 - Add further experiments (more PEFT methods) and explore better hyper-parameters.
 - Test images are already created but they're not uploaded anywhere.
-- The method comparison Gradio app needs to be updated to show the results.
+- The method comparison Gradio app needs to be updated to show the generated images.
