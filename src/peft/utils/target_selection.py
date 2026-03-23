@@ -72,6 +72,21 @@ class KappaTuneSelector:
         num_modules: Optional[int] = None,
         threshold: Optional[float] = None,
     ) -> List[str]:
+        
+        """
+        Return the best target modules according to one of three mutually-exclusive strategies.
+        Args:
+            top_p: Return the top best modules (e.g. 0.2 = paper default).
+            num_modules: Return exactly this many best modules (fixed budget).
+            threshold: Return every module with κ ≤ threshold (quality cutoff).
+        Returns:
+            List of module names (e.g. [model.layers.0.self_attn.q_proj, ...])
+        Notes:
+            - Precedence (checked in order): num_modules → top_p → threshold → all modules.
+            - Modules are always sorted by ascending κ (lowest = best).
+            - Recommended: top_p=0.2 for most models (Llama-3, Mistral, Qwen, etc.).
+        """
+        
         self._compute_kappas()
         if not self._condition_numbers:
             return []
@@ -93,5 +108,19 @@ class KappaTuneSelector:
 def find_kappa_target_modules(
     model: nn.Module, top_p: float = 0.2, max_dim_size_to_analyze: int = 16384
 ) -> List[str]:
+
+    """
+    One-liner convenience function (recommended for most users).
+    Equivalent to:
+        selector = KappaTuneSelector(model, max_dim_size_to_analyze)
+        return selector.get_best_targets(top_p=top_p)
+    Args:
+        model: The base model.
+        top_p: Fraction of best modules to return (paper default = 0.2).
+        max_dim_size_to_analyze: See KappaTuneSelector.__init__.
+    Returns:
+        List of module names ready for LoraConfig(target_modules=...).
+    """
+    
     selector = KappaTuneSelector(model, max_dim_size_to_analyze)
     return selector.get_best_targets(top_p=top_p)
