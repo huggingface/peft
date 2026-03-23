@@ -167,7 +167,8 @@ def evaluate(
         seed = config.seed + 100_000  # don't use the same seed as in training just to be sure
         generator = torch.Generator(device=pipeline.transformer.device).manual_seed(seed)
         cosine_sim_scores = []
-        for _ in range(num_repeats):
+        iter_ = range(num_repeats) if num_repeats <= 1 else tqdm(range(num_repeats))
+        for _ in iter_:
             generated_images = []
             reference_images = []
             batch_size = config.batch_size_eval
@@ -196,6 +197,7 @@ def measure_drift(*, pipeline, processor, dino_model, config: TrainConfig) -> fl
     # to be low.
     batch_size = config.batch_size_eval
     prompts = config.drift_image_prompts
+    pbar = tqdm(total=len(prompts) * 2)
     with offload_models(pipeline.text_encoder, pipeline.vae, device=pipeline.transformer.device, offload=True):
         # without adapter
         seed = config.seed + 100_000_000  # don't use the same seed as in training or eval just to be sure
@@ -206,6 +208,7 @@ def measure_drift(*, pipeline, processor, dino_model, config: TrainConfig) -> fl
                 prompt_batch = prompts[i * batch_size : (i + 1) * batch_size]
                 outputs = _generate_images(pipeline, generator=generator, prompts=prompt_batch, config=config)
                 generated_base.extend(outputs.images)
+                pbar.update(1)
 
         # with adapter
         seed = config.seed + 100_000_000  # don't use the same seed as in training or eval just to be sure
@@ -215,6 +218,7 @@ def measure_drift(*, pipeline, processor, dino_model, config: TrainConfig) -> fl
             prompt_batch = prompts[i * batch_size : (i + 1) * batch_size]
             outputs = _generate_images(pipeline, generator=generator, prompts=prompt_batch, config=config)
             generated_adapter.extend(outputs.images)
+            pbar.update(1)
 
     # calculate drift
     generated_embeddings = get_dino_embeddings(generated_adapter, processor, dino_model, batch_size=batch_size)
@@ -454,6 +458,7 @@ def train(
             config=train_config,
             num_repeats=3,
         )
+        print_verbose("Calculating drift.")
         test_drift = measure_drift(pipeline=pipeline, processor=processor, dino_model=dino_model, config=train_config)
         metrics.append(
             {
@@ -512,7 +517,10 @@ def generate_sample_images(
         # don't use the same seed as in training just to be sure
         seed = train_config.seed + 100_000
         generator = torch.Generator(device=target_device).manual_seed(seed)
-        for idx, prompt in enumerate(train_config.sample_image_prompts, start=1):
+        pbar = tqdm(
+            enumerate(train_config.sample_image_prompts, start=1), total=len(train_config.sample_image_prompts)
+        )
+        for idx, prompt in pbar:
             image_path = os.path.join(sample_image_dir, f"{file_stem}_{idx:02d}.png")
             outputs = _generate_images(pipeline, generator=generator, prompts=[prompt], config=train_config)
             outputs.images[0].save(image_path)
