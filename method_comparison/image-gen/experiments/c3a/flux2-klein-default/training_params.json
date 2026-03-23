@@ -1,0 +1,6 @@
+{
+  "optimizer_kwargs": {
+    "lr": 3e-1,
+    "weight_decay": 1e-5
+  }
+}
