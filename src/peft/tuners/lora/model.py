@@ -13,8 +13,6 @@
 # limitations under the License.
 from __future__ import annotations
 
-import copy
-import logging
 import math
 import operator
 import re
@@ -333,12 +331,12 @@ class LoraModel(BaseTuner):
                     if key not in self._tuner_tp_plan:
                         self._tuner_tp_plan[key] = plan
                     elif self._tuner_tp_plan[key] != plan:
-                        logger.warning(f"Found conflicting TP plans for {key}: {self._tuner_tp_plan[key]} vs {plan}.")
+                        warnings.warn(f"Found conflicting TP plans for {key}: {self._tuner_tp_plan[key]} vs {plan}.")
 
                 if self._tuner_device_mesh is None:
                     self._tuner_device_mesh = device_mesh
                 elif self._tuner_device_mesh != device_mesh:
-                    logger.warning(
+                    warnings.warn(
                         f"Found conflicting device meshes for {current_key}: {self._tuner_device_mesh} vs "
                         f"{device_mesh}. "
                     )
@@ -347,7 +345,7 @@ class LoraModel(BaseTuner):
                 if self._tuner_tp_size is None:
                     self._tuner_tp_size = tp_size
                 elif self._tuner_tp_size != tp_size:
-                    logger.warning(
+                    warnings.warn(
                         f"Found conflicting TP sizes for {current_key}: {self._tuner_tp_size} vs {tp_size}. "
                     )
 
