@@ -54,7 +54,7 @@ from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .inc import dispatch_inc
-from .layer import Conv2d, LoraLayer, ParamWrapper, dispatch_default
+from .layer import Conv2d, LoraLayer, LoraTpInfo, ParamWrapper, dispatch_default
 from .te import dispatch_transformer_engine
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
@@ -327,27 +327,11 @@ class LoraModel(BaseTuner):
                     # to embedding_colwise so that the gathering happens on the correct dimension at save time.
                     tp_plans.append("embedding_colwise")
 
-                for key, plan in zip(tp_plan_keys, tp_plans):
-                    if key not in self._tuner_tp_plan:
-                        self._tuner_tp_plan[key] = plan
-                    elif self._tuner_tp_plan[key] != plan:
-                        warnings.warn(f"Found conflicting TP plans for {key}: {self._tuner_tp_plan[key]} vs {plan}.")
-
-                if self._tuner_device_mesh is None:
-                    self._tuner_device_mesh = device_mesh
-                elif self._tuner_device_mesh != device_mesh:
-                    warnings.warn(
-                        f"Found conflicting device meshes for {current_key}: {self._tuner_device_mesh} vs "
-                        f"{device_mesh}. "
-                    )
-
-                tp_size = self.model._tp_size
-                if self._tuner_tp_size is None:
-                    self._tuner_tp_size = tp_size
-                elif self._tuner_tp_size != tp_size:
-                    warnings.warn(
-                        f"Found conflicting TP sizes for {current_key}: {self._tuner_tp_size} vs {tp_size}. "
-                    )
+                lora_module._tp_info = LoraTpInfo(
+                    tp_plan=dict(zip(tp_plan_keys, tp_plans)),
+                    device_mesh=device_mesh,
+                    tp_size=self.model._tp_size,
+                )
 
     def _replace_module(self, parent, child_name, new_module, child):
         # override in LoraModel to handle quantized weights properly

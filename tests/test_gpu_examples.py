@@ -6209,6 +6209,94 @@ def _test_multiple_adapters(rank, world_size, port):
             assert torch.isfinite(outputs.loss), f"Loss not finite with adapter '{adapter_name}': {outputs.loss}"
 
 
+def _test_inject_adapter_forward(rank, world_size, port):
+    """
+    Test that inject_adapter_in_model works with a TP base model and the forward pass produces the same loss on every
+    rank and that it is finite.
+
+    This exercises the low-level API path where no PeftModel/tuner is created, so TP info must be stored
+    on the lora modules themselves (via _tp_info) rather than on the tuner.
+    """
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+
+    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
+    model.to(device)
+
+    lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
+    model = inject_adapter_in_model(lora_config, model)
+
+    for mod in model.modules():
+        if isinstance(mod, LoraLayer):
+            assert hasattr(mod, "_tp_info"), "inject_adapter_in_model did not store TP info on the LoRA module"
+
+    tokenizer = AutoTokenizer.from_pretrained(TINY_MODEL_ID)
+    inputs = tokenizer("Paris is the capital of France.", return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    model.eval()
+    with torch.no_grad():
+        outputs = model(**inputs, labels=inputs["input_ids"])
+
+    all_losses = [torch.empty_like(outputs.loss) for _ in range(world_size)]
+    dist.all_gather(all_losses, outputs.loss)
+
+    assert all(loss.item() == all_losses[0].item() for loss in all_losses), (
+        f"Losses differ across ranks: {[loss.item() for loss in all_losses]}"
+    )
+
+    assert torch.isfinite(outputs.loss), f"Loss is not finite: {outputs.loss}"
+
+
+def _test_inject_adapter_save(rank, world_size, port, tmp_dir_reference, tmp_dir_tp):
+    """
+    Test that get_peft_model_state_dict correctly gathers unsharded TP weights when using inject_adapter_in_model.
+
+    Flow:
+      1. Rank 0: create a plain (non-TP) model, inject adapter, save state dict as reference.
+      2. All ranks: load TP base model, inject adapter, save state dict via get_peft_model_state_dict.
+      3. Rank 0: compare re-saved state dict against the reference — keys and values must match.
+    """
+    from safetensors.torch import save_file
+
+    if rank == 0:
+        plain_model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID)
+        lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
+        plain_model = inject_adapter_in_model(lora_config, plain_model)
+        reference_sd = get_peft_model_state_dict(plain_model)
+        save_file(reference_sd, f"{tmp_dir_reference}/adapter_model.safetensors")
+
+    dist.barrier()
+
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+
+    tp_base = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
+    tp_base.to(device)
+    lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
+    tp_model = inject_adapter_in_model(lora_config, tp_base)
+
+    tp_sd = get_peft_model_state_dict(tp_model)
+    if rank == 0:
+        save_file(tp_sd, f"{tmp_dir_tp}/adapter_model.safetensors")
+
+    dist.barrier()
+
+    if rank == 0:
+        from safetensors.torch import load_file
+
+        reference_sd = load_file(f"{tmp_dir_reference}/adapter_model.safetensors")
+        saved_sd = load_file(f"{tmp_dir_tp}/adapter_model.safetensors")
+
+        assert set(reference_sd.keys()) == set(saved_sd.keys()), (
+            f"State dict keys differ.\n  reference: {sorted(reference_sd.keys())}\n  saved: {sorted(saved_sd.keys())}"
+        )
+        for key in reference_sd:
+            assert reference_sd[key].shape == saved_sd[key].shape, (
+                f"Shape mismatch for '{key}': reference {reference_sd[key].shape} vs saved {saved_sd[key].shape}"
+            )
+
+
 @require_torch_gpu
 @pytest.mark.skipif(
     not is_transformers_ge_v5_4_0, reason="transformers TP integration supported for transformers >= 5.4.0"
@@ -6233,3 +6321,10 @@ class TestLoraTensorParallel:
 
     def test_multiple_adapters(self):
         self._spawn(_test_multiple_adapters, port_offset=4)
+
+    def test_inject_adapter_forward(self):
+        self._spawn(_test_inject_adapter_forward, port_offset=5)
+
+    def test_inject_adapter_save(self):
+        with tempfile.TemporaryDirectory() as tmp_dir_reference, tempfile.TemporaryDirectory() as tmp_dir_tp:
+            self._spawn(_test_inject_adapter_save, tmp_dir_reference, tmp_dir_tp, port_offset=6)

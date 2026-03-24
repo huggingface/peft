@@ -56,6 +56,17 @@ def get_embedding_layer_name(model, layer, is_embedding_in_target_modules):
     return None
 
 
+def _get_tp_info(model):
+    """Collect TP info from lora modules that have _tp_info set."""
+    tp_plan, device_mesh, tp_size = {}, None, None
+    for module in model.modules():
+        if hasattr(module, "_tp_info"):
+            tp_plan.update(module._tp_info.tp_plan)
+            device_mesh = module._tp_info.device_mesh
+            tp_size = module._tp_info.tp_size
+    return tp_plan, device_mesh, tp_size
+
+
 def get_peft_model_state_dict(
     model, state_dict=None, adapter_name="default", unwrap_compiled=False, save_embedding_layers="auto"
 ):
@@ -93,21 +104,23 @@ def get_peft_model_state_dict(
         state_dict = model.state_dict()
 
     # If model was sharded with TP, gather full tensors for saving
-    base_model = model.base_model
-    if base_model._tuner_tp_plan:
+    tp_plan, tp_device_mesh, tp_size = _get_tp_info(model)
+    if tp_plan:
         from transformers.integrations.tensor_parallel import gather_state_dict_for_save
+
+        from peft.peft_model import PeftModel
 
         # If the keys in the state dict start with the prefix, we need to add the prefix to the keys in the tp plan as
         # well.
-        prefix = "base_model." if model.active_peft_config.is_prompt_learning else "base_model.model."
-        keys_starting_with_prefix = all(k.startswith(prefix) for k in state_dict)
-        tp_plan = {
-            (f"{prefix}{k}" if keys_starting_with_prefix and not k.startswith(prefix) else k): v
-            for k, v in base_model._tuner_tp_plan.items()
-        }
-        state_dict = gather_state_dict_for_save(
-            state_dict, tp_plan, base_model._tuner_device_mesh, base_model._tuner_tp_size
+        prefix = (
+            "base_model."
+            if isinstance(model, PeftModel) and model.active_peft_config.is_prompt_learning
+            else "base_model.model."
         )
+        keys_starting_with_prefix = all(k.startswith(prefix) for k in state_dict)
+        if keys_starting_with_prefix:
+            tp_plan = {(f"{prefix}{k}" if not k.startswith(prefix) else k): v for k, v in tp_plan.items()}
+        state_dict = gather_state_dict_for_save(state_dict, tp_plan, tp_device_mesh, tp_size)
 
     # TUNER SPECIFIC CODE
     if config.peft_type in (PeftType.LORA, PeftType.ADALORA):

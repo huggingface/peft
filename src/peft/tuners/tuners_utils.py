@@ -308,12 +308,6 @@ class BaseTuner(nn.Module, ABC):
                 # user is adding a dict of PeftConfigs
                 self.peft_config.update(peft_config)
 
-        # Distributed training attributes.
-        # We do not use the same names as in Transformers to avoid issues with self.__getattr__.
-        self._tuner_tp_plan = {}
-        self._tuner_tp_size = None
-        self._tuner_device_mesh = None
-
         self.active_adapter: str | list[str] = adapter_name
         self._pre_injection_hook(self.model, self.peft_config[adapter_name], adapter_name)
         if peft_config != PeftType.XLORA or peft_config[adapter_name] != PeftType.XLORA:

@@ -18,6 +18,7 @@ import math
 import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any, Optional, Union
 
 import torch
@@ -41,6 +42,13 @@ from peft.utils.other import transpose
 from peft.utils.warning import PeftWarning
 
 from .config import LoraConfig
+
+
+@dataclass
+class LoraTpInfo:
+    tp_plan: dict[str, str]
+    device_mesh: torch.distributed.DeviceMesh
+    tp_size: int
 
 
 VARIANT_KWARG_KEYS = ["alora_offsets"]
