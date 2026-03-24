@@ -71,7 +71,7 @@ def evaluate_perplexity(model, dataset, name="Dataset"):
     with torch.no_grad():
         for i, batch in enumerate(dataloader):
             batch = {k: v.to(model.device) for k, v in batch.items()}
-            outputs = model(**batch)
+            outputs = model(**batch, use_cache=False)
             total_loss += outputs.loss.item()
             if i >= 40: break 
     return math.exp(total_loss / (i + 1))
