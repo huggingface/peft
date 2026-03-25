@@ -6214,8 +6214,8 @@ def _test_inject_adapter_forward(rank, world_size, port):
     Test that inject_adapter_in_model works with a TP base model and the forward pass produces the same loss on every
     rank and that it is finite.
 
-    This exercises the low-level API path where no PeftModel/tuner is created, so TP info must be stored
-    on the lora modules themselves (via _tp_info) rather than on the tuner.
+    This exercises the low-level API path where no PeftModel/tuner is created, so TP info must be stored on the lora
+    modules themselves (via _tp_info) rather than on the tuner.
     """
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
