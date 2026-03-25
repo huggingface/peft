@@ -21,6 +21,7 @@ import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.utils import quant_extra_repr, resolve_quant_backend
 from peft.utils.other import transpose
 
 from .._buffer_dict import BufferDict
@@ -33,6 +34,9 @@ class VeraLayer(BaseTunerLayer):
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer
+        self.quant_backend = resolve_quant_backend(
+            self.get_base_layer(), get_apply_tensor_subclass=kwargs.get("get_apply_tensor_subclass")
+        )
         self.r = {}
         self.vera_dropout = nn.ModuleDict({})
 
@@ -60,10 +64,6 @@ class VeraLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
         self.kwargs = kwargs
-
-    @property
-    def merged(self) -> bool:
-        return bool(self.merged_adapters)
 
     def update_layer(
         self,
@@ -185,22 +185,22 @@ class Linear(nn.Linear, VeraLayer):
 
         for active_adapter in adapter_names:
             if active_adapter in self.vera_lambda_d.keys():
-                base_layer = self.get_base_layer()
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
-                    orig_weights = base_layer.weight.data.clone()
+                    weight = self.get_base_weight().clone()
+                    weight += self.get_delta_weight(active_adapter)
 
-                    orig_weights += self.get_delta_weight(active_adapter)
-
-                    if not torch.isfinite(orig_weights).all():
+                    if not torch.isfinite(weight).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weights
+                    self.set_base_weight(weight)
                 else:
-                    base_layer.weight.data += self.get_delta_weight(active_adapter)
+                    weight = self.get_base_weight()
+                    weight += self.get_delta_weight(active_adapter)
+                    self.set_base_weight(weight)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -211,7 +211,9 @@ class Linear(nn.Linear, VeraLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.vera_lambda_d.keys():
-                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
+                weight = self.get_base_weight()
+                weight -= self.get_delta_weight(active_adapter)
+                self.set_base_weight(weight)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -263,6 +265,8 @@ class Linear(nn.Linear, VeraLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
+            if self.quant_backend is not None:
+                result = self.quant_backend.maybe_clone_base_result(result)
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.vera_lambda_d.keys():
                     continue
@@ -292,3 +296,6 @@ class Linear(nn.Linear, VeraLayer):
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "vera." + rep
+
+    def extra_repr(self) -> str:
+        return quant_extra_repr(self)
