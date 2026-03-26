@@ -32,12 +32,12 @@ from peft.import_utils import (
 from peft.utils.integrations import dequantize_bnb_weight
 
 
-class QuantBackend(ABC):
+class Quantizationbackend(ABC):
     """Base class for quantization backends used in PEFT layers.
 
-    A `QuantBackend` encapsulates the quantization-specific logic for accessing and modifying a base layer's weights.
-    By attaching an instance to a PEFT layer (`layer.quant_backend = backend`), the PEFT layer's `merge` / `unmerge`
-    methods can work with quantized weights without needing a dedicated subclass.
+    A `Quantizationbackend` encapsulates the quantization-specific logic for accessing and modifying a base layer's
+    weights. By attaching an instance to a PEFT layer (`layer.quantization_backend = backend`), the PEFT layer's
+    `merge` / `unmerge` methods can work with quantized weights without needing a dedicated subclass.
 
     Subclasses must implement `get_base_weight` and `set_base_weight` if they support merging.
     """
@@ -54,22 +54,24 @@ class QuantBackend(ABC):
         original must be preserved (e.g. for safe_merge).
 
         Args:
-            base_layer: The quantized base layer module (e.g. ``bnb.nn.Linear8bitLt``).
+            base_layer: The quantized base layer module (e.g. `bnb.nn.Linear8bitLt`).
 
         Returns:
-            Dequantized weight as a ``torch.Tensor``.
+            Dequantized weight as a `torch.Tensor`.
         """
         raise NotImplementedError
 
     def set_base_weight(self, peft_layer, weight_data: torch.Tensor) -> None:
         """Store the (modified) weight back into the base layer, re-quantizing as needed.
 
-        Some backends (e.g. HQQ) replace ``peft_layer.base_layer`` entirely with a new module.
+        Some backends (e.g. HQQ) replace `peft_layer.base_layer` entirely with a new module.
 
         Args:
-            peft_layer: The PEFT layer that owns the base layer. Provides access to ``peft_layer.get_base_layer()``
-                and allows replacing ``peft_layer.base_layer`` when needed (e.g. HQQ).
-            weight_data: The modified weight tensor to store.
+            peft_layer:
+                The PEFT layer that owns the base layer. Provides access to `peft_layer.get_base_layer()` and allows
+                replacing `peft_layer.base_layer` when needed (e.g. HQQ).
+            weight_data:
+                The modified weight tensor to store.
         """
         raise NotImplementedError
 
@@ -82,7 +84,7 @@ class QuantBackend(ABC):
         return x
 
 
-class ForwardOnlyQuantBackend(QuantBackend):
+class ForwardOnlyQuantizationbackend(Quantizationbackend):
     """Backend for quantization frameworks that do not support merging of weights.
 
     Used for GPTQ etc. The forward pass works without modification because `base_layer(x)` already dispatches to the
@@ -105,7 +107,7 @@ class ForwardOnlyQuantBackend(QuantBackend):
         )
 
 
-class Bnb8bitBackend(QuantBackend):
+class Bnb8bitBackend(Quantizationbackend):
     """Backend for bitsandbytes 8-bit quantized layers (`bnb.nn.Linear8bitLt`)."""
 
     supports_merge = True
@@ -130,7 +132,7 @@ class Bnb8bitBackend(QuantBackend):
         base_layer.state.reset_grads()
 
 
-class Bnb4bitBackend(QuantBackend):
+class Bnb4bitBackend(Quantizationbackend):
     """Backend for bitsandbytes 4-bit quantized layers (`bnb.nn.Linear4bit`)."""
 
     supports_merge = True
@@ -162,7 +164,7 @@ class Bnb4bitBackend(QuantBackend):
         return x.clone()
 
 
-class HqqBackend(QuantBackend):
+class HqqBackend(Quantizationbackend):
     """Backend for HQQ quantized layers (`hqq.core.quantize.HQQLinear`)."""
 
     supports_merge = True
@@ -185,12 +187,13 @@ class HqqBackend(QuantBackend):
         peft_layer.base_layer = new_hqq_layer
 
 
-class TorchaoBackend(QuantBackend):
+class TorchaoBackend(Quantizationbackend):
     """Backend for torchao quantized layers.
 
     Args:
-        get_apply_tensor_subclass: A callable that returns the tensor subclass to use for re-quantization. This is
-            stored from the original quantization config and is needed to re-quantize after merging.
+        get_apply_tensor_subclass:
+            A callable that returns the tensor subclass to use for re-quantization. This is stored from the original
+            quantization config and is needed to re-quantize after merging.
     """
 
     supports_merge = True
@@ -222,20 +225,21 @@ class TorchaoBackend(QuantBackend):
         quantize_(base_layer, self.get_apply_tensor_subclass())
 
 
-def resolve_quant_backend(base_layer: nn.Module, **kwargs) -> QuantBackend | None:
+def resolve_quantization_backend(base_layer: nn.Module, **kwargs) -> Quantizationbackend | None:
     """Determine the appropriate quantization backend for a given base layer.
 
-    Inspects the type of `base_layer` and returns the matching `QuantBackend` instance, or `None` if the layer is not
-    quantized.
+    Inspects the type of `base_layer` and returns the matching `Quantizationbackend` instance, or `None` if the layer
+    is not quantized.
 
     Args:
-        base_layer: The base layer module to inspect.
-        **kwargs: Additional keyword arguments needed by specific backends. Currently used:
-
+        base_layer:
+            The base layer module to inspect.
+        **kwargs:
+            Additional keyword arguments needed by specific backends. Currently used:
             - `get_apply_tensor_subclass` (callable): Required for torchao layers.
 
     Returns:
-        A `QuantBackend` instance, or `None` if the layer is not quantized.
+        A `Quantizationbackend` instance, or `None` if the layer is not quantized.
     """
     # bitsandbytes
     if is_bnb_available():
@@ -281,47 +285,47 @@ def resolve_quant_backend(base_layer: nn.Module, **kwargs) -> QuantBackend | Non
         from aqlm import QuantizedLinear
 
         if isinstance(base_layer, QuantizedLinear):
-            return ForwardOnlyQuantBackend("aqlm")
+            return ForwardOnlyQuantizationbackend("aqlm")
 
     # EETQ
     if is_eetq_available():
         from eetq import EetqLinear
 
         if isinstance(base_layer, EetqLinear):
-            return ForwardOnlyQuantBackend("eetq")
+            return ForwardOnlyQuantizationbackend("eetq")
 
     # GPTQ (via gptqmodel)
     if is_gptqmodel_available():
         from gptqmodel.nn_modules.qlinear import BaseQuantLinear
 
         if isinstance(base_layer, BaseQuantLinear):
-            return ForwardOnlyQuantBackend("gptq")
+            return ForwardOnlyQuantizationbackend("gptq")
 
     # AWQ (via gptqmodel)
     if is_gptqmodel_available():
         from gptqmodel.nn_modules.qlinear.gemm_awq import AwqGEMMQuantLinear
 
         if isinstance(base_layer, AwqGEMMQuantLinear):
-            return ForwardOnlyQuantBackend("awq")
+            return ForwardOnlyQuantizationbackend("awq")
 
     # INC (Intel Neural Compressor)
     if is_inc_available():
         from neural_compressor.torch.algorithms.fp8_quant._quant_common.helper_modules import PatchedLinear
 
         if isinstance(base_layer, PatchedLinear):
-            return ForwardOnlyQuantBackend("inc")
+            return ForwardOnlyQuantizationbackend("inc")
 
     if is_te_pytorch_available():
         import transformer_engine as te
 
         if isinstance(base_layer, (te.pytorch.LayerNormLinear, te.pytorch.LayerNormMLP, te.pytorch.Linear)):
-            return ForwardOnlyQuantBackend("te")
+            return ForwardOnlyQuantizationbackend("te")
 
     # Not quantized
     return None
 
 
-def quant_extra_repr(module: nn.Module) -> str:
+def quantization_extra_repr(module: nn.Module) -> str:
     """Extend the repr of the PEFT module.
 
     extra_repr is a method on nn.Modules that can be used to extend the repr of a module.
@@ -330,6 +334,6 @@ def quant_extra_repr(module: nn.Module) -> str:
     parts = []
     if base:
         parts.append(base)
-    if getattr(module, "quant_backend", None):
-        parts.append(f"quant_backend='{module.quant_backend.backend_name}'")
+    if getattr(module, "quantization_backend", None):
+        parts.append(f"quantization_backend='{module.quantization_backend.backend_name}'")
     return ", ".join(parts)

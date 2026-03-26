@@ -22,7 +22,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
-from peft.utils import quant_extra_repr, resolve_quant_backend
+from peft.utils import quantization_extra_repr, resolve_quantization_backend
 
 
 class MissLayer(BaseTunerLayer):
@@ -33,7 +33,7 @@ class MissLayer(BaseTunerLayer):
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
-        self.quant_backend = resolve_quant_backend(
+        self.quantization_backend = resolve_quantization_backend(
             self.get_base_layer(), get_apply_tensor_subclass=kwargs.get("get_apply_tensor_subclass")
         )
         self.miss_r = {}
@@ -368,8 +368,8 @@ class MissLinear(nn.Module, MissLayer):
                 result = F.linear(input=x, weight=orig_weight, bias=bias)
             else:
                 result = self.base_layer(x, *args, **kwargs)
-                if self.quant_backend is not None:
-                    result = self.quant_backend.maybe_clone_base_result(result)
+                if self.quantization_backend is not None:
+                    result = self.quantization_backend.maybe_clone_base_result(result)
                 for active_adapter in self.active_adapters:
                     if active_adapter not in self.miss_block.keys():
                         continue
@@ -397,4 +397,4 @@ class MissLinear(nn.Module, MissLayer):
         return "miss." + rep
 
     def extra_repr(self) -> str:
-        return quant_extra_repr(self)
+        return quantization_extra_repr(self)

@@ -1140,7 +1140,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
            The names of the merged adapters, if any, e.g. `["default"]`.
         - `available_adapters` (`list[str]`):
            The names of the available adapters, e.g. `["default"]`.
-        - `quant_backend` (`str` or `None`):
+        - `quantization_backend` (`str` or `None`):
            The name of the quantization backend, e.g. `"bnb 4bit"`, or `None` if not quantized.
 
         Args:
@@ -1182,7 +1182,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
            `"irregular"`, which means that your model is in an inconsistent state and might not work as expected.
         - `available_adapters` (`list[str]`):
            The names of the available adapters, e.g. `["default"]`.
-        - `quant_backend` (`str`, `None`, `Literal["irregular"]`):
+        - `quantization_backend` (`str`, `None`, `Literal["irregular"]`):
            The name of the quantization backend, e.g. `"bnb 4bit"`, or `None` if not quantized. If the backend is not
            consistent across all layers, this will be `"irregular"`.
 
@@ -3159,7 +3159,7 @@ class TunerLayerStatus:
     requires_grad: dict[str, bool | Literal["irregular"]]
     available_adapters: list[str]
     devices: dict[str, list[str]]
-    quant_backend: str | None
+    quantization_backend: str | None
 
 
 def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
@@ -3186,7 +3186,7 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
        The names of the available adapters, e.g. `["default"]`.
     - `devices` (`dict[str, list[str]]`):
        The devices where the parameters of the given adapter are stored, e.g. `["cuda"]`.
-    - `quant_backend` (`str` or `None`):
+    - `quantization_backend` (`str` or `None`):
        The name of the quantization backend, e.g. `"bnb 4bit"`, or `None` if not quantized.
 
     Args:
@@ -3254,8 +3254,8 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
                     devices_dd[key].append(param.device.type)
         devices = {key: sorted(set(val)) for key, val in devices_dd.items()}
 
-        quant_backend = getattr(module, "quant_backend", None)
-        quant_backend_name = quant_backend.backend_name if quant_backend is not None else None
+        quantization_backend = getattr(module, "quantization_backend", None)
+        quantization_backend_name = quantization_backend.backend_name if quantization_backend is not None else None
 
         status = TunerLayerStatus(
             name=name,
@@ -3266,7 +3266,7 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
             requires_grad=requires_grad,
             available_adapters=sorted(module._get_available_adapters()),
             devices=devices,
-            quant_backend=quant_backend_name,
+            quantization_backend=quantization_backend_name,
         )
         layer_status.append(status)
 
@@ -3293,7 +3293,7 @@ class TunerModelStatus:
     requires_grad: dict[str, bool | Literal["irregular"]]
     available_adapters: list[str]
     devices: dict[str, list[str]]
-    quant_backend: str | None | Literal["irregular"]
+    quantization_backend: str | None | Literal["irregular"]
 
 
 def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
@@ -3330,7 +3330,7 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
        The names of the available adapters, e.g. `["default"]`.
     - `devices` (`dict[str, list[str]]`):
        The devices where the parameters of the given adapter are stored, e.g. `["cuda"]`.
-    - `quant_backend` (`str`, `None`, `Literal["irregular"]`):
+    - `quantization_backend` (`str`, `None`, `Literal["irregular"]`):
        The name of the quantization backend, e.g. `"bnb 4bit"`, or `None` if not quantized. If the backend is not
        consistent across all layers, this will be `"irregular"`.
 
@@ -3431,12 +3431,12 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
     devices = {key: sorted(set(val)) for key, val in devices_dd.items()}
 
     # check quant backend consistency
-    quant_backends_set: set[str | None] = {status.quant_backend for status in layer_status}
-    quant_backend: str | None | Literal["irregular"]
-    if len(quant_backends_set) == 1:
-        quant_backend = quant_backends_set.pop()
+    quantization_backends_set: set[str | None] = {status.quantization_backend for status in layer_status}
+    quantization_backend: str | None | Literal["irregular"]
+    if len(quantization_backends_set) == 1:
+        quantization_backend = quantization_backends_set.pop()
     else:
-        quant_backend = "irregular"
+        quantization_backend = "irregular"
 
     adapter_model_status = TunerModelStatus(
         base_model_type=base_model_type,
@@ -3451,7 +3451,7 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
         requires_grad=requires_grad,
         available_adapters=available_adapters,
         devices=devices,
-        quant_backend=quant_backend,
+        quantization_backend=quantization_backend,
     )
     return adapter_model_status
 

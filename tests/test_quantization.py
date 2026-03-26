@@ -13,14 +13,7 @@
 # limitations under the License.
 
 """
-Generic unit tests for PEFT method x quantization backend combinations.
-
-These tests verify that the composition-based quantization support (via ``QuantBackend`` in ``quant_utils.py``) works
-correctly for each supported PEFT method. Tests are parametrized over PEFT configs and quantization backends so that
-adding support for a new method or backend only requires extending the parameter lists.
-
-Tests that require a GPU (e.g. bitsandbytes) are skipped on CPU via decorators. Nightly CI with GPU runners will
-execute the full matrix.
+Test PEFT method x quantization method matrix, focusing on basic tests.
 """
 
 from dataclasses import dataclass
@@ -34,7 +27,7 @@ from peft import MissConfig, VeraConfig, get_peft_model
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_torchao_available
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import infer_device
-from peft.utils.quant_utils import Bnb4bitBackend, Bnb8bitBackend, TorchaoBackend
+from peft.utils.quantization_utils import Bnb4bitBackend, Bnb8bitBackend, TorchaoBackend
 
 from .testing_utils import hub_online_once, set_init_weights_false
 
@@ -104,14 +97,14 @@ class TorchAoInt8DynamicActivationInt8WeightLoader:
             return AutoModelForCausalLM.from_pretrained(MODEL_ID, quantization_config=quant_config).to(DEVICE)
 
 
-QUANT_BACKENDS = []
+QUANTIZATION_BACKENDS = []
 if is_bnb_available():
-    QUANT_BACKENDS.append(Bnb8bitLoader())
+    QUANTIZATION_BACKENDS.append(Bnb8bitLoader())
 if is_bnb_4bit_available():
-    QUANT_BACKENDS.append(Bnb4bitLoader())
+    QUANTIZATION_BACKENDS.append(Bnb4bitLoader())
 if is_torchao_available():
-    QUANT_BACKENDS.append(TorchAoInt8WeightOnlyLoader())
-    QUANT_BACKENDS.append(TorchAoInt8DynamicActivationInt8WeightLoader())
+    QUANTIZATION_BACKENDS.append(TorchAoInt8WeightOnlyLoader())
+    QUANTIZATION_BACKENDS.append(TorchAoInt8DynamicActivationInt8WeightLoader())
 
 
 def _quant_id(backend):
@@ -181,21 +174,23 @@ class TestQuantization:
     def dummy_input(self):
         return torch.arange(10).view(1, -1).to(DEVICE)
 
-    @pytest.mark.parametrize("quant", QUANT_BACKENDS, ids=_quant_id)
+    @pytest.mark.parametrize("quant", QUANTIZATION_BACKENDS, ids=_quant_id)
     @pytest.mark.parametrize("config_cls,config_kwargs", TEST_CASES, ids=_peft_id)
-    def test_quant_backend_is_set_and_repr(self, config_cls, config_kwargs, quant):
-        """PEFT layers should have quant_backend set"""
+    def test_quantization_backend_is_set_and_repr(self, config_cls, config_kwargs, quant):
+        """PEFT layers should have quantization_backend set"""
         model = quant.load_model()
         config = config_cls(**config_kwargs)
         model = get_peft_model(model, config)
 
-        quant_layers = [m for m in model.modules() if isinstance(m, BaseTunerLayer) and m.quant_backend is not None]
-        assert len(quant_layers) == 24  # (q_proj, v_proj) x 12 layers
-        for layer in quant_layers:
+        quantized_layers = [
+            m for m in model.modules() if isinstance(m, BaseTunerLayer) and m.quantization_backend is not None
+        ]
+        assert len(quantized_layers) == 24  # (q_proj, v_proj) x 12 layers
+        for layer in quantized_layers:
             rep = repr(layer)
-            assert "quant_backend=" in rep
+            assert "quantization_backend=" in rep
 
-    @pytest.mark.parametrize("quant", QUANT_BACKENDS, ids=_quant_id)
+    @pytest.mark.parametrize("quant", QUANTIZATION_BACKENDS, ids=_quant_id)
     @pytest.mark.parametrize("config_cls,config_kwargs", TEST_CASES, ids=_peft_id)
     def test_forward_changes_output(self, config_cls, config_kwargs, quant, dummy_input):
         """Check that the forward pass works, also check if the results are affected"""
@@ -214,7 +209,7 @@ class TestQuantization:
         atol, rtol = 1e-3, 1e-3
         assert not torch.allclose(out_base, out_peft, atol=atol, rtol=rtol)
 
-    @pytest.mark.parametrize("quant", QUANT_BACKENDS, ids=_quant_id)
+    @pytest.mark.parametrize("quant", QUANTIZATION_BACKENDS, ids=_quant_id)
     @pytest.mark.parametrize("config_cls,config_kwargs", TEST_CASES, ids=_peft_id)
     def test_quantized_output_similar_to_non_quantized(self, config_cls, config_kwargs, quant, dummy_input):
         """Quantized PEFT output should be similar to non-quantized PEFT output.
@@ -248,7 +243,7 @@ class TestQuantization:
 
         check_outputs_similar(out_non_quant, out_quant)
 
-    @pytest.mark.parametrize("quant", QUANT_BACKENDS, ids=_quant_id)
+    @pytest.mark.parametrize("quant", QUANTIZATION_BACKENDS, ids=_quant_id)
     @pytest.mark.parametrize("config_cls,config_kwargs", TEST_CASES, ids=_peft_id)
     def test_merge_unmerge_unload(self, config_cls, config_kwargs, quant, dummy_input):
         """Check merge and unmerge roundtrip"""

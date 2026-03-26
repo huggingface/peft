@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
-from peft.utils import quant_extra_repr, resolve_quant_backend
+from peft.utils import quantization_extra_repr, resolve_quantization_backend
 from peft.utils.other import transpose
 
 from .._buffer_dict import BufferDict
@@ -34,7 +34,7 @@ class VeraLayer(BaseTunerLayer):
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer
-        self.quant_backend = resolve_quant_backend(
+        self.quantization_backend = resolve_quantization_backend(
             self.get_base_layer(), get_apply_tensor_subclass=kwargs.get("get_apply_tensor_subclass")
         )
         self.r = {}
@@ -266,8 +266,8 @@ class Linear(nn.Module, VeraLayer):
         else:
             result = self.base_layer(x, *args, **kwargs)
             orig_dtype = result.dtype
-            if self.quant_backend is not None:
-                result = self.quant_backend.maybe_clone_base_result(result)
+            if self.quantization_backend is not None:
+                result = self.quantization_backend.maybe_clone_base_result(result)
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.vera_lambda_d.keys():
                     continue
@@ -300,4 +300,4 @@ class Linear(nn.Module, VeraLayer):
         return "vera." + rep
 
     def extra_repr(self) -> str:
-        return quant_extra_repr(self)
+        return quantization_extra_repr(self)

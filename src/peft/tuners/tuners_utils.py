@@ -52,7 +52,7 @@ from peft.utils.other import (
     set_additional_trainable_modules,
 )
 from peft.utils.peft_types import PeftType, TaskType
-from peft.utils.quant_utils import QuantBackend
+from peft.utils.quantization_utils import Quantizationbackend
 from peft.utils.warning import PeftWarning
 
 from ..config import PeftConfig
@@ -1362,7 +1362,7 @@ class BaseTunerLayer(ABC):
     merged_adapters: list[str] = []
 
     # the quantization backend used within this class, e.g. Bnb8bitBackend or None if no quantization
-    quant_backend: QuantBackend | None = None
+    quantization_backend: Quantizationbackend | None = None
 
     def get_base_layer(self) -> nn.Module:
         """
@@ -1381,8 +1381,8 @@ class BaseTunerLayer(ABC):
 
         This takes care of potentially dequantizing the weight if it is quantized.
         """
-        if self.quant_backend is not None:
-            return self.quant_backend.get_base_weight(self.get_base_layer())
+        if self.quantization_backend is not None:
+            return self.quantization_backend.get_base_weight(self.get_base_layer())
         return self.get_base_layer().weight.data
 
     def set_base_weight(self, weight_data: torch.Tensor) -> None:
@@ -1390,8 +1390,8 @@ class BaseTunerLayer(ABC):
 
         This works also with quantized weights.
         """
-        if self.quant_backend is not None:
-            self.quant_backend.set_base_weight(self, weight_data)
+        if self.quantization_backend is not None:
+            self.quantization_backend.set_base_weight(self, weight_data)
         else:
             self.get_base_layer().weight.data = weight_data
 

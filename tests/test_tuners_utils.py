@@ -57,7 +57,7 @@ from peft.tuners.tuners_utils import (
 )
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, ModulesToSaveWrapper, infer_device
 from peft.utils.constants import DUMMY_MODEL_CONFIG, MIN_TARGET_MODULES_FOR_OPTIMIZATION
-from peft.utils.quant_utils import Bnb8bitBackend
+from peft.utils.quantization_utils import Bnb8bitBackend
 
 from .testing_utils import hub_online_once, require_bitsandbytes, require_non_cpu
 
@@ -909,19 +909,19 @@ class TestModelAndLayerStatus:
         assert [status.name for status in layer_status] == ["model.lin0", "model.lin1"]
         assert [status.module_type for status in layer_status] == ["lora.ParamWrapper", "lora.Linear"]
 
-    def test_quant_backend_small(self, small_model):
-        # non-quantized model should have quant_backend=None
+    def test_quantization_backend_small(self, small_model):
+        # non-quantized model should have quantization_backend=None
         layer_status = small_model.get_layer_status()
-        assert [status.quant_backend for status in layer_status] == [None]
+        assert [status.quantization_backend for status in layer_status] == [None]
 
-    def test_quant_backend_large(self, large_model):
+    def test_quantization_backend_large(self, large_model):
         layer_status = large_model.get_layer_status()
-        result = [status.quant_backend for status in layer_status]
+        result = [status.quantization_backend for status in layer_status]
         expected = [None, None, None, None]
         assert result == expected
 
-    def test_quant_backend_bnb(self, small_base_model_cls):
-        # Manually inject an inconsistent quant_backend instead of loading a model with bnb so that the test can run
+    def test_quantization_backend_bnb(self, small_base_model_cls):
+        # Manually inject an inconsistent quantization_backend instead of loading a model with bnb so that the test can run
         # without bnb
         model = small_base_model_cls()
         config = LoraConfig(target_modules=["lin0", "lin1"])
@@ -929,27 +929,27 @@ class TestModelAndLayerStatus:
 
         for module in model.modules():
             if isinstance(module, BaseTunerLayer):
-                module.quant_backend = Bnb8bitBackend()
+                module.quantization_backend = Bnb8bitBackend()
 
         layer_status = model.get_layer_status()
-        result = [status.quant_backend for status in layer_status]
+        result = [status.quantization_backend for status in layer_status]
         assert result == ["bnb 8bit", "bnb 8bit"]
 
-    def test_quant_backend_irregular(self, small_base_model_cls):
-        # Manually inject an inconsistent quant_backend to simulate irregular state. This is an invalid state, but we
+    def test_quantization_backend_irregular(self, small_base_model_cls):
+        # Manually inject an inconsistent quantization_backend to simulate irregular state. This is an invalid state, but we
         # should still test it.
         model = small_base_model_cls()
         config = LoraConfig(target_modules=["lin0", "lin1"])
         model = get_peft_model(model, config)
 
-        # set quant_backend on only one layer
+        # set quantization_backend on only one layer
         for module in model.modules():
             if isinstance(module, BaseTunerLayer):
-                module.quant_backend = Bnb8bitBackend()
+                module.quantization_backend = Bnb8bitBackend()
                 break
 
         layer_status = model.get_layer_status()
-        result = [status.quant_backend for status in layer_status]
+        result = [status.quantization_backend for status in layer_status]
         assert result == ["bnb 8bit", None]
 
     ################
@@ -1391,16 +1391,16 @@ class TestModelAndLayerStatus:
         assert layer_status0.available_adapters == ["default"]
         assert layer_status0.devices == {"default": ["cpu", self.torch_device]}
 
-    def test_model_quant_backend_small(self, small_model):
+    def test_model_quantization_backend_small(self, small_model):
         model_status = small_model.get_model_status()
-        assert model_status.quant_backend is None
+        assert model_status.quantization_backend is None
 
-    def test_model_quant_backend_large(self, large_model):
+    def test_model_quantization_backend_large(self, large_model):
         model_status = large_model.get_model_status()
-        assert model_status.quant_backend is None
+        assert model_status.quantization_backend is None
 
-    def test_model_quant_backend_bnb(self, small_base_model_cls):
-        # Manually inject an inconsistent quant_backend instead of loading a model with bnb so that the test can run
+    def test_model_quantization_backend_bnb(self, small_base_model_cls):
+        # Manually inject an inconsistent quantization_backend instead of loading a model with bnb so that the test can run
         # without bnb
         model = small_base_model_cls()
         config = LoraConfig(target_modules=["lin0", "lin1"])
@@ -1408,26 +1408,26 @@ class TestModelAndLayerStatus:
 
         for module in model.modules():
             if isinstance(module, BaseTunerLayer):
-                module.quant_backend = Bnb8bitBackend()
+                module.quantization_backend = Bnb8bitBackend()
 
         model_status = model.get_model_status()
-        assert model_status.quant_backend == "bnb 8bit"
+        assert model_status.quantization_backend == "bnb 8bit"
 
-    def test_model_quant_backend_irregular(self, small_base_model_cls):
-        # Manually inject an inconsistent quant_backend to simulate irregular state. This is an invalid state, but we
+    def test_model_quantization_backend_irregular(self, small_base_model_cls):
+        # Manually inject an inconsistent quantization_backend to simulate irregular state. This is an invalid state, but we
         # should still test it.
         model = small_base_model_cls()
         config = LoraConfig(target_modules=["lin0", "lin1"])
         model = get_peft_model(model, config)
 
-        # set quant_backend on only one layer
+        # set quantization_backend on only one layer
         for module in model.modules():
             if isinstance(module, BaseTunerLayer):
-                module.quant_backend = Bnb8bitBackend()
+                module.quantization_backend = Bnb8bitBackend()
                 break
 
         model_status = model.get_model_status()
-        assert model_status.quant_backend == "irregular"
+        assert model_status.quantization_backend == "irregular"
 
     ###################
     # non-PEFT models #
