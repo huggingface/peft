@@ -38,6 +38,7 @@ from accelerate.utils.memory import clear_device_cache
 from datasets import Audio, Dataset, DatasetDict, load_dataset
 from packaging import version
 from parameterized import parameterized
+from safetensors.torch import load_file
 from torch.distributed import init_process_group
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.utils.data import DataLoader
@@ -6173,8 +6174,6 @@ def _test_save_unsharded_weights(rank, world_size, port, tmp_dir_reference, tmp_
     dist.barrier()
 
     if rank == 0:
-        from safetensors.torch import load_file
-
         reference_sd = load_file(f"{tmp_dir_reference}/adapter_model.safetensors")
         saved_sd = load_file(f"{tmp_dir_tp}/adapter_model.safetensors")
 
