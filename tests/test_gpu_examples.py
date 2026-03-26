@@ -6315,9 +6315,10 @@ class TestLoraTensorParallel:
         with tempfile.TemporaryDirectory() as tmp_dir:
             self._spawn(_test_load_from_checkpoint, tmp_dir, port_offset=1)
 
-    def test_save_unsharded_weights(self):
-        with tempfile.TemporaryDirectory() as tmp_dir_reference, tempfile.TemporaryDirectory() as tmp_dir_tp:
-            self._spawn(_test_save_unsharded_weights, tmp_dir_reference, tmp_dir_tp, port_offset=3)
+    def test_save_unsharded_weights(self, tmp_path):
+        tmp_dir_reference = tmp_path / "reference"
+        tmp_dir_tp = tmp_path / "tp"
+        self._spawn(_test_save_unsharded_weights, tmp_dir_reference, tmp_dir_tp, port_offset=3)
 
     def test_multiple_adapters(self):
         self._spawn(_test_multiple_adapters, port_offset=4)
@@ -6325,6 +6326,7 @@ class TestLoraTensorParallel:
     def test_inject_adapter_forward(self):
         self._spawn(_test_inject_adapter_forward, port_offset=5)
 
-    def test_inject_adapter_save(self):
-        with tempfile.TemporaryDirectory() as tmp_dir_reference, tempfile.TemporaryDirectory() as tmp_dir_tp:
-            self._spawn(_test_inject_adapter_save, tmp_dir_reference, tmp_dir_tp, port_offset=6)
+    def test_inject_adapter_save(self, tmp_path):
+        tmp_dir_reference = tmp_path / "reference"
+        tmp_dir_tp = tmp_path / "tp"
+        self._spawn(_test_inject_adapter_save, tmp_dir_reference, tmp_dir_tp, port_offset=6)
