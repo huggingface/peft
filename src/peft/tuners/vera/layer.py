@@ -265,6 +265,7 @@ class Linear(nn.Linear, VeraLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
+            orig_dtype = result.dtype
             if self.quant_backend is not None:
                 result = self.quant_backend.maybe_clone_base_result(result)
             for active_adapter in self.active_adapters:
@@ -284,8 +285,9 @@ class Linear(nn.Linear, VeraLayer):
                 sliced_B = vera_B[: self.out_features, :].to(x.device)
 
                 dropout = self.vera_dropout[active_adapter]
-                x = x.to(lambda_d.dtype)
+                x = self._cast_input_dtype(x, lambda_d.dtype)
                 result = result + lambda_b * F.linear(lambda_d * F.linear(dropout(x), sliced_A), sliced_B)
+            result = result.to(orig_dtype)
 
         result = result.to(previous_dtype)
         return result
