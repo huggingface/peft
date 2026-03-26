@@ -128,7 +128,7 @@ def convert_to_lora(
             whether to show a progressbar indicating the progress of the conversion (it can take a few minutes for big
             models).
         compile_kwargs (`dict`, *optional*):
-            If provided, the compile the function to convert individual modules to LoRA with the given kwargs being
+            If provided, compile the function to convert individual modules to LoRA with the given kwargs being
             passed to `torch.compile`. This can potentially speed up the conversion on large models.
 
     Returns:
@@ -355,7 +355,7 @@ def save_as_lora(
             whether to show a progressbar indicating the progress of the conversion (it can take a few minutes for big
             models).
         compile_kwargs (`dict`, *optional*):
-            If provided, the compile the function to convert individual modules to LoRA with the given kwargs being
+            If provided, compile the function to convert individual modules to LoRA with the given kwargs being
             passed to `torch.compile`. This can potentially speed up the conversion on large models.
 
     Raises
