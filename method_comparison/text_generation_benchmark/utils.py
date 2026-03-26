@@ -21,10 +21,9 @@ import json
 import os
 import platform
 import subprocess
-from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import psutil
 import torch
