@@ -44,6 +44,7 @@ from peft.utils import (
     get_peft_model_state_dict,
     get_quantization_config,
 )
+from peft.utils.integrations import TpInfo
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 from peft.utils.other import get_pattern_key
 
@@ -54,7 +55,7 @@ from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .inc import dispatch_inc
-from .layer import Conv2d, LoraLayer, LoraTpInfo, ParamWrapper, dispatch_default
+from .layer import Conv2d, LoraLayer, ParamWrapper, dispatch_default
 from .te import dispatch_transformer_engine
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
@@ -327,7 +328,7 @@ class LoraModel(BaseTuner):
                     # to embedding_colwise so that the gathering happens on the correct dimension at save time.
                     tp_plans.append("embedding_colwise")
 
-                lora_module._tp_info = LoraTpInfo(
+                lora_module._tp_info = TpInfo(
                     tp_plan=dict(zip(tp_plan_keys, tp_plans)),
                     device_mesh=device_mesh,
                     tp_size=self.model._tp_size,
