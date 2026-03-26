@@ -52,7 +52,7 @@ from peft.utils.other import (
     set_additional_trainable_modules,
 )
 from peft.utils.peft_types import PeftType, TaskType
-from peft.utils.quantization_utils import Quantizationbackend
+from peft.utils.quantization_utils import QuantizationBackend
 from peft.utils.warning import PeftWarning
 
 from ..config import PeftConfig
@@ -1362,7 +1362,7 @@ class BaseTunerLayer(ABC):
     merged_adapters: list[str] = []
 
     # the quantization backend used within this class, e.g. Bnb8bitBackend or None if no quantization
-    quantization_backend: Quantizationbackend | None = None
+    quantization_backend: QuantizationBackend | None = None
 
     def get_base_layer(self) -> nn.Module:
         """

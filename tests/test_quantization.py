@@ -47,7 +47,7 @@ class Bnb8bitLoader:
     def load_model():
         quant_config = BitsAndBytesConfig(load_in_8bit=True)
         with hub_online_once(MODEL_ID):
-            return AutoModelForCausalLM.from_pretrained(MODEL_ID, quantization_config=quant_config).to(DEVICE)
+            return AutoModelForCausalLM.from_pretrained(MODEL_ID, quantization_config=quant_config, device_map={"": DEVICE})
 
 
 @dataclass
@@ -64,7 +64,7 @@ class Bnb4bitLoader:
             bnb_4bit_compute_dtype=torch.float32,
         )
         with hub_online_once(MODEL_ID):
-            return AutoModelForCausalLM.from_pretrained(MODEL_ID, quantization_config=quant_config).to(DEVICE)
+            return AutoModelForCausalLM.from_pretrained(MODEL_ID, quantization_config=quant_config, device_map={"": DEVICE})
 
 
 @dataclass
@@ -79,7 +79,7 @@ class TorchAoInt8WeightOnlyLoader:
 
         quant_config = TorchAoConfig(quant_type=Int8WeightOnlyConfig())
         with hub_online_once(MODEL_ID):
-            return AutoModelForCausalLM.from_pretrained(MODEL_ID, quantization_config=quant_config).to(DEVICE)
+            return AutoModelForCausalLM.from_pretrained(MODEL_ID, quantization_config=quant_config, device_map={"": DEVICE})
 
 
 @dataclass
@@ -94,7 +94,7 @@ class TorchAoInt8DynamicActivationInt8WeightLoader:
 
         quant_config = TorchAoConfig(quant_type=Int8DynamicActivationInt8WeightConfig())
         with hub_online_once(MODEL_ID):
-            return AutoModelForCausalLM.from_pretrained(MODEL_ID, quantization_config=quant_config).to(DEVICE)
+            return AutoModelForCausalLM.from_pretrained(MODEL_ID, quantization_config=quant_config, device_map={"": DEVICE})
 
 
 QUANTIZATION_BACKENDS = []
@@ -232,11 +232,10 @@ class TestQuantization:
 
         # Non-quantized model
         with hub_online_once(MODEL_ID):
-            model = AutoModelForCausalLM.from_pretrained(MODEL_ID)
+            model = AutoModelForCausalLM.from_pretrained(MODEL_ID, device_map={"": DEVICE})
         config = config_cls(**config_kwargs.copy())
         torch.manual_seed(SEED)
         model = get_peft_model(model, config).eval()
-        model_non_quant = model.to(quant.load_model().device)
 
         with torch.inference_mode():
             out_non_quant = model(dummy_input).logits

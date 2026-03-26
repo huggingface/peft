@@ -32,10 +32,10 @@ from peft.import_utils import (
 from peft.utils.integrations import dequantize_bnb_weight
 
 
-class Quantizationbackend(ABC):
+class QuantizationBackend(ABC):
     """Base class for quantization backends used in PEFT layers.
 
-    A `Quantizationbackend` encapsulates the quantization-specific logic for accessing and modifying a base layer's
+    A `QuantizationBackend` encapsulates the quantization-specific logic for accessing and modifying a base layer's
     weights. By attaching an instance to a PEFT layer (`layer.quantization_backend = backend`), the PEFT layer's
     `merge` / `unmerge` methods can work with quantized weights without needing a dedicated subclass.
 
@@ -84,7 +84,7 @@ class Quantizationbackend(ABC):
         return x
 
 
-class ForwardOnlyQuantizationbackend(Quantizationbackend):
+class ForwardOnlyQuantizationBackend(QuantizationBackend):
     """Backend for quantization frameworks that do not support merging of weights.
 
     Used for GPTQ etc. The forward pass works without modification because `base_layer(x)` already dispatches to the
@@ -107,7 +107,7 @@ class ForwardOnlyQuantizationbackend(Quantizationbackend):
         )
 
 
-class Bnb8bitBackend(Quantizationbackend):
+class Bnb8bitBackend(QuantizationBackend):
     """Backend for bitsandbytes 8-bit quantized layers (`bnb.nn.Linear8bitLt`)."""
 
     supports_merge = True
@@ -132,7 +132,7 @@ class Bnb8bitBackend(Quantizationbackend):
         base_layer.state.reset_grads()
 
 
-class Bnb4bitBackend(Quantizationbackend):
+class Bnb4bitBackend(QuantizationBackend):
     """Backend for bitsandbytes 4-bit quantized layers (`bnb.nn.Linear4bit`)."""
 
     supports_merge = True
@@ -164,7 +164,7 @@ class Bnb4bitBackend(Quantizationbackend):
         return x.clone()
 
 
-class HqqBackend(Quantizationbackend):
+class HqqBackend(QuantizationBackend):
     """Backend for HQQ quantized layers (`hqq.core.quantize.HQQLinear`)."""
 
     supports_merge = True
@@ -187,7 +187,7 @@ class HqqBackend(Quantizationbackend):
         peft_layer.base_layer = new_hqq_layer
 
 
-class TorchaoBackend(Quantizationbackend):
+class TorchaoBackend(QuantizationBackend):
     """Backend for torchao quantized layers.
 
     Args:
@@ -225,10 +225,10 @@ class TorchaoBackend(Quantizationbackend):
         quantize_(base_layer, self.get_apply_tensor_subclass())
 
 
-def resolve_quantization_backend(base_layer: nn.Module, **kwargs) -> Quantizationbackend | None:
+def resolve_quantization_backend(base_layer: nn.Module, **kwargs) -> QuantizationBackend | None:
     """Determine the appropriate quantization backend for a given base layer.
 
-    Inspects the type of `base_layer` and returns the matching `Quantizationbackend` instance, or `None` if the layer
+    Inspects the type of `base_layer` and returns the matching `QuantizationBackend` instance, or `None` if the layer
     is not quantized.
 
     Args:
@@ -239,7 +239,7 @@ def resolve_quantization_backend(base_layer: nn.Module, **kwargs) -> Quantizatio
             - `get_apply_tensor_subclass` (callable): Required for torchao layers.
 
     Returns:
-        A `Quantizationbackend` instance, or `None` if the layer is not quantized.
+        A `QuantizationBackend` instance, or `None` if the layer is not quantized.
     """
     # bitsandbytes
     if is_bnb_available():
@@ -285,41 +285,41 @@ def resolve_quantization_backend(base_layer: nn.Module, **kwargs) -> Quantizatio
         from aqlm import QuantizedLinear
 
         if isinstance(base_layer, QuantizedLinear):
-            return ForwardOnlyQuantizationbackend("aqlm")
+            return ForwardOnlyQuantizationBackend("aqlm")
 
     # EETQ
     if is_eetq_available():
         from eetq import EetqLinear
 
         if isinstance(base_layer, EetqLinear):
-            return ForwardOnlyQuantizationbackend("eetq")
+            return ForwardOnlyQuantizationBackend("eetq")
 
     # GPTQ (via gptqmodel)
     if is_gptqmodel_available():
         from gptqmodel.nn_modules.qlinear import BaseQuantLinear
 
         if isinstance(base_layer, BaseQuantLinear):
-            return ForwardOnlyQuantizationbackend("gptq")
+            return ForwardOnlyQuantizationBackend("gptq")
 
     # AWQ (via gptqmodel)
     if is_gptqmodel_available():
         from gptqmodel.nn_modules.qlinear.gemm_awq import AwqGEMMQuantLinear
 
         if isinstance(base_layer, AwqGEMMQuantLinear):
-            return ForwardOnlyQuantizationbackend("awq")
+            return ForwardOnlyQuantizationBackend("awq")
 
     # INC (Intel Neural Compressor)
     if is_inc_available():
         from neural_compressor.torch.algorithms.fp8_quant._quant_common.helper_modules import PatchedLinear
 
         if isinstance(base_layer, PatchedLinear):
-            return ForwardOnlyQuantizationbackend("inc")
+            return ForwardOnlyQuantizationBackend("inc")
 
     if is_te_pytorch_available():
         import transformer_engine as te
 
         if isinstance(base_layer, (te.pytorch.LayerNormLinear, te.pytorch.LayerNormMLP, te.pytorch.Linear)):
-            return ForwardOnlyQuantizationbackend("te")
+            return ForwardOnlyQuantizationBackend("te")
 
     # Not quantized
     return None
