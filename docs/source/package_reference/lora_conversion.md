@@ -78,7 +78,12 @@ Using this type of dynamic LoRA rank can be useful if the contribution of the di
 
 ### Compiling the model
 
-For large models, doing the conversion may take some time; for instance each PEFT module has to go through an SVD computation. By passing `compile_kwargs` to [`save_as_lora`] or [`convert_to_lora`], you can apply `torch.compile` to the conversion function and potentially speed up the process. The `compile_kwargs` are a dict of keyword arguments that are passed to `torch.compile` (empty dict also works).
+For large models, doing the conversion may take some time; for instance each PEFT module has to go through an SVD computation. By passing `compile_kwargs` to [`save_as_lora`] or [`convert_to_lora`], you can apply [`torch.compile`](https://docs.pytorch.org/docs/stable/generated/torch.compile.html) to the conversion function and potentially speed up the process. The `compile_kwargs` are a dict of keyword arguments that are passed to `torch.compile` (empty dict also works). Below is an example:
+
+```python
+compile_kwargs = {"dynamic": True, "mode": "max-autotune-no-cudagraphs", "fullgraph": True}
+save_as_lora(output_path, model, rank=rank, compile_kwargs=compile_kwargs)
+```
 
 ### LoRA to LoRA conversion
 
