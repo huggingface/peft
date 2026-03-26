@@ -140,7 +140,7 @@ class VeraLayer(BaseTunerLayer):
                 nn.init.zeros_(self.vera_lambda_b[adapter_name])
 
 
-class Linear(nn.Linear, VeraLayer):
+class Linear(nn.Module, VeraLayer):
     # Vera implemented in a dense layer
     def __init__(
         self,
@@ -157,7 +157,7 @@ class Linear(nn.Linear, VeraLayer):
         **kwargs,
     ) -> None:
         # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__, which should always be called
-        super(nn.Linear, self).__init__()
+        super().__init__()
         VeraLayer.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
 
