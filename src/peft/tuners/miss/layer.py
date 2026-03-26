@@ -188,12 +188,9 @@ class MissLinear(nn.Module, MissLayer):
                     weight = self.get_base_weight().clone()
                     orig_dtype = weight.dtype
                     if self.miss_fn == "bat":
-                        delta_weight = self.get_delta_weight(active_adapter, weight)
-                    elif self.miss_fn == "mini":
-                        delta_weight = self.get_delta_weight_miss(active_adapter, weight)
-                    else:
-                        delta_weight = self.get_delta_weight_miss(active_adapter, weight)
-                    weight += delta_weight
+                        weight += self.get_delta_weight(active_adapter, weight)
+                    else:  # mini
+                        weight = self.get_delta_weight_miss(active_adapter, weight)
 
                     if not torch.isfinite(weight).all():
                         raise ValueError(
@@ -203,14 +200,12 @@ class MissLinear(nn.Module, MissLayer):
                     self.set_base_weight(weight.to(orig_dtype))
                 else:
                     weight = self.get_base_weight()
+                    orig_dtype = weight.dtype
                     if self.miss_fn == "bat":
-                        delta_weight = self.get_delta_weight(active_adapter, weight)
-                    elif self.miss_fn == "mini":
-                        delta_weight = self.get_delta_weight_miss(active_adapter, weight)
-                    else:
-                        delta_weight = self.get_delta_weight_miss(active_adapter, weight)
-                    weight += delta_weight
-                    self.set_base_weight(weight)
+                        weight += self.get_delta_weight(active_adapter, weight)
+                    else:  # mini
+                        weight = self.get_delta_weight_miss(active_adapter, weight)
+                    self.set_base_weight(weight.to(orig_dtype))
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -228,21 +223,20 @@ class MissLinear(nn.Module, MissLayer):
                 weight = self.get_base_weight()
                 orig_dtype = weight.dtype
                 if self.miss_fn == "bat":
-                    delta_weight = self.get_delta_weight(active_adapter, weight, re=True)
-                elif self.miss_fn == "mini":
-                    delta_weight = self.get_delta_weight_miss(active_adapter, weight, re=True)
-                else:
-                    delta_weight = self.get_delta_weight_miss(active_adapter, weight, re=True)
-                weight -= delta_weight.to(orig_dtype)
-                self.set_base_weight(weight)
+                    weight = self.get_delta_weight(active_adapter, weight, re=True)
+                else:  # mini
+                    weight = self.get_delta_weight_miss(active_adapter, weight, re=True)
+                self.set_base_weight(weight.to(orig_dtype))
 
     def get_delta_weight(self, adapter, orig_weight, re: bool = False) -> torch.Tensor:
         """
         Compute the delta weight for the given adapter.
 
         Args:
-            adapter (str):
+            adapter (`str`):
                 The name of the adapter for which the delta weight should be computed.
+            re (`bool`)
+                Pass `re=True` for unmerging. Returns the full weight, not the delta.
         """
         device = self.miss_block[adapter].device
         dtype = self.miss_block[adapter].dtype
@@ -284,11 +278,13 @@ class MissLinear(nn.Module, MissLayer):
 
     def get_delta_weight_miss(self, adapter, orig_weight, re: bool = False) -> torch.Tensor:
         """
-        Compute the delta weight for the given adapter.
+        Compute the *full* weight for the given adapter (not the weight delta!)
 
         Args:
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
+            re (`bool`)
+                Pass `re=True` for unmerging.
         """
         device = self.miss_block[adapter].device
         dtype = self.miss_block[adapter].dtype

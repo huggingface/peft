@@ -143,7 +143,7 @@ def _peft_id(val):
     return id_
 
 
-def check_outputs_similar(x, y, min_corr=0.5, max_mse=5.0):
+def check_outputs_similar(x, y, min_corr=0.9, max_mse=1.0):
     # As quantization introduces a lot of error, use generous tolerances
     assert x.shape == y.shape
     corr = torch.corrcoef(torch.stack((x.flatten(), y.flatten())))
