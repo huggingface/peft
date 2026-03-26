@@ -28,6 +28,7 @@ from peft import (
     LoraConfig,
     MissConfig,
     OFTConfig,
+    PeanutConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptLearningConfig,
@@ -176,6 +177,17 @@ ALL_CONFIGS = [
         {
             "task_type": "FEATURE_EXTRACTION",
             "num_virtual_tokens": 10,
+        },
+    ),
+    (
+        PeanutConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "r": 8,
+            "depth": 1,
+            "act_fn": "relu",
+            "scaling": 1.0,
         },
     ),
     (
