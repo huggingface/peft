@@ -121,9 +121,10 @@ def get_peft_model_state_dict(
             else "base_model.model."
         )
         keys_starting_with_prefix = all(k.startswith(prefix) for k in state_dict)
+        tp_plan = tp_info.tp_plan
         if keys_starting_with_prefix:
-            tp_plan = {f"{prefix}{k}": v for k, v in tp_info.tp_plan.items()}
-        state_dict = gather_state_dict_for_save(state_dict, tp_info.tp_plan, tp_info.device_mesh, tp_info.tp_size)
+            tp_plan = {f"{prefix}{k}": v for k, v in tp_plan.items()}
+        state_dict = gather_state_dict_for_save(state_dict, tp_plan, tp_info.device_mesh, tp_info.tp_size)
 
     # TUNER SPECIFIC CODE
     if config.peft_type in (PeftType.LORA, PeftType.ADALORA):
