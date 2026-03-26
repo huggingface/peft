@@ -105,6 +105,13 @@ TEST_CASES = [
     ("Embedding + transformers Conv1D 1 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Embedding + transformers Conv1D 2 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
     ("Embedding + transformers Conv1D 3 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
+    ("Vanilla MLP 1 SineLoRA", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"], "use_sinelora": True}),
+    (
+        "Embedding + transformers Conv1D 2 SineLoRA",
+        "EmbConv1D",
+        LoraConfig,
+        {"target_modules": ["emb"], "use_sinelora": True},
+    ),
     (
         "Embedding + transformers Conv1D 1 DoRA",
         "EmbConv1D",
@@ -160,6 +167,8 @@ TEST_CASES = [
     ),
     ("MHA 1 LoRA", "MHA", LoraConfig, {"target_modules": ["mha"]}),
     ("MHA 2 LoRA", "MHA", LoraConfig, {"target_modules": ["mha", "lin0"]}),
+    ("MHA 1 SineLoRA", "MHA", LoraConfig, {"target_modules": ["mha"], "use_sinelora": True}),
+    ("MHA 2 SineLoRA", "MHA", LoraConfig, {"target_modules": ["mha", "lin0"], "use_sinelora": True}),
     # targeting parameters directly
     ("MLP 1 using nn.Parameter LoRA", "MlpUsingParameters", LoraConfig, {"target_parameters": ["lin0.weight"]}),
     (
@@ -2355,10 +2364,12 @@ class TestPeftCustomModel(PeftCommonTester):
             torch.nn.init.zeros_(model.vblora_vector_bank["default"])
         model.eval()
         outputs_before = model(**X)
+        use_sinelora = issubclass(config_cls, LoraConfig) and config_kwargs.get("use_sinelora", False)
         # OSF uses SVD reconstruction which introduces small numerical differences
+        # SineLoRA uses kaiming uniform init for lora_B, giving a non-zero initial adapter contribution
         if issubclass(config_cls, OSFConfig):
             assert torch.allclose(outputs_base, outputs_before, rtol=1e-4, atol=1e-4)
-        else:
+        elif not use_sinelora:
             assert torch.allclose(outputs_base, outputs_before)
 
         if issubclass(config_cls, VBLoRAConfig):
@@ -2400,8 +2411,11 @@ class TestPeftCustomModel(PeftCommonTester):
             rtol, atol = 1e-5, 1e-8
         assert not torch.allclose(outputs_before, outputs_after, rtol=rtol, atol=atol)
         # OSF uses SVD reconstruction which introduces small numerical differences
+        # SineLoRA has non-zero initial contribution, so compare disabled output to base model, not outputs_before
         if issubclass(config_cls, OSFConfig):
             assert torch.allclose(outputs_before, outputs_disabled, rtol=1e-4, atol=1e-4)
+        elif use_sinelora:
+            assert torch.allclose(outputs_base, outputs_disabled)
         else:
             assert torch.allclose(outputs_before, outputs_disabled)
         assert torch.allclose(outputs_after, outputs_enabled_after_disable)
@@ -2419,6 +2433,12 @@ class TestPeftCustomModel(PeftCommonTester):
             # since apparently CUDA ReLU clips the gradient at a
             # certain point. On CPU, avoid this.
             model.conv1d.weight.data += 10
+
+        use_sinelora = issubclass(config_cls, LoraConfig) and config_kwargs.get("use_sinelora", False)
+        if use_sinelora:
+            # SineLoRA has non-zero initial contribution (kaiming uniform for lora_B), so capture base model output
+            outputs_base = model.eval()(**X)
+            model.train()
 
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -2477,6 +2497,10 @@ class TestPeftCustomModel(PeftCommonTester):
         if config_kwargs.get("use_dora") and model_id == "EmbConv1D":
             atol, rtol = 1e-4, 1e-4
 
+        if use_sinelora:
+            # SineLoRA sin transformation introduces extra numerical rounding vs standard LoRA
+            atol, rtol = 1e-4, 1e-4
+
         # check that there is a difference in results after training
         assert not torch.allclose(outputs_before, outputs_after, atol=atol, rtol=rtol)
 
@@ -2487,7 +2511,11 @@ class TestPeftCustomModel(PeftCommonTester):
         assert torch.allclose(outputs_after, outputs_unmerged, atol=atol, rtol=rtol)
 
         # check that disabling adapters gives the same results as before training
-        assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol)
+        # SineLoRA has non-zero initial contribution, so compare disabled output to base model, not outputs_before
+        if use_sinelora:
+            assert torch.allclose(outputs_base, outputs_disabled, atol=atol, rtol=rtol)
+        else:
+            assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol)
 
         # check that enabling + disabling adapters does not change the results
         assert torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol)
