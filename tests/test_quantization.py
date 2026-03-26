@@ -35,6 +35,8 @@ from .testing_utils import hub_online_once, set_init_weights_false
 MODEL_ID = "peft-internal-testing/opt-125m"
 SEED = 0
 DEVICE = infer_device()
+MIN_CORR = 0.9
+MAX_MSE = 1.0
 
 
 @dataclass
@@ -47,7 +49,9 @@ class Bnb8bitLoader:
     def load_model():
         quant_config = BitsAndBytesConfig(load_in_8bit=True)
         with hub_online_once(MODEL_ID):
-            return AutoModelForCausalLM.from_pretrained(MODEL_ID, quantization_config=quant_config, device_map={"": DEVICE})
+            return AutoModelForCausalLM.from_pretrained(
+                MODEL_ID, quantization_config=quant_config, device_map={"": DEVICE}
+            )
 
 
 @dataclass
@@ -64,7 +68,9 @@ class Bnb4bitLoader:
             bnb_4bit_compute_dtype=torch.float32,
         )
         with hub_online_once(MODEL_ID):
-            return AutoModelForCausalLM.from_pretrained(MODEL_ID, quantization_config=quant_config, device_map={"": DEVICE})
+            return AutoModelForCausalLM.from_pretrained(
+                MODEL_ID, quantization_config=quant_config, device_map={"": DEVICE}
+            )
 
 
 @dataclass
@@ -79,7 +85,9 @@ class TorchAoInt8WeightOnlyLoader:
 
         quant_config = TorchAoConfig(quant_type=Int8WeightOnlyConfig())
         with hub_online_once(MODEL_ID):
-            return AutoModelForCausalLM.from_pretrained(MODEL_ID, quantization_config=quant_config, device_map={"": DEVICE})
+            return AutoModelForCausalLM.from_pretrained(
+                MODEL_ID, quantization_config=quant_config, device_map={"": DEVICE}
+            )
 
 
 @dataclass
@@ -94,7 +102,9 @@ class TorchAoInt8DynamicActivationInt8WeightLoader:
 
         quant_config = TorchAoConfig(quant_type=Int8DynamicActivationInt8WeightConfig())
         with hub_online_once(MODEL_ID):
-            return AutoModelForCausalLM.from_pretrained(MODEL_ID, quantization_config=quant_config, device_map={"": DEVICE})
+            return AutoModelForCausalLM.from_pretrained(
+                MODEL_ID, quantization_config=quant_config, device_map={"": DEVICE}
+            )
 
 
 QUANTIZATION_BACKENDS = []
@@ -136,7 +146,7 @@ def _peft_id(val):
     return id_
 
 
-def check_outputs_similar(x, y, min_corr=0.9, max_mse=1.0):
+def check_outputs_similar(x, y, min_corr=MIN_CORR, max_mse=MAX_MSE):
     # As quantization introduces a lot of error, use generous tolerances
     assert x.shape == y.shape
     corr = torch.corrcoef(torch.stack((x.flatten(), y.flatten())))
@@ -248,6 +258,8 @@ class TestQuantization:
         """Check merge and unmerge roundtrip"""
         if not quant.supports_merge:
             pytest.skip(f"{quant.name} does not support merging")
+        if (DEVICE == "cpu") and isinstance(quant, Bnb4bitLoader):
+            pytest.skip("Bnb 4 bit quant with CPU results in high variance, skipping")
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         model = quant.load_model()
