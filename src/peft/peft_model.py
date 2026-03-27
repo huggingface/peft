@@ -69,6 +69,18 @@ from .utils import (
 )
 
 
+def _requires_prompt_injection(past_key_values: Any) -> bool:
+    """Return True when prefix-style prompt learning still needs to initialize the cache."""
+    if past_key_values is None:
+        return True
+
+    if isinstance(past_key_values, Cache):
+        return past_key_values.get_seq_length() == 0
+
+    # Legacy cache implementations are typically `None` during prefill, but be defensive about empty containers.
+    return isinstance(past_key_values, (tuple, list)) and len(past_key_values) == 0
+
+
 class PeftModel(PushToHubMixin, torch.nn.Module):
     """
     Base model encompassing various Peft methods.
@@ -2215,17 +2227,18 @@ class PeftModelForCausalLM(PeftModel):
                 kwargs["token_type_ids"] = None
 
             cache: transformers.Cache | None = model_kwargs.get("past_key_values", None)
-            # no past_key_values or past_key_values empty cache
-            requires_prompt_injection = (cache is None) or (
-                isinstance(cache, transformers.Cache) and not cache.get_seq_length()
-            )
+            requires_prompt_injection = _requires_prompt_injection(cache)
 
             if requires_prompt_injection and peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
                 # some archs require max_cache_len to re-initialize the cache, but DynamicCache has no max len
+                max_cache_len = -1  # -1 means no max length
                 if isinstance(cache, transformers.Cache) and not isinstance(cache, transformers.DynamicCache):
-                    max_cache_len = cache.max_cache_len
-                else:
-                    max_cache_len = -1  # -1 means no max length
+                    try:
+                        cache_max_cache_len = cache.max_cache_len
+                    except (AttributeError, NotImplementedError):
+                        cache_max_cache_len = None
+                    if cache_max_cache_len is not None:
+                        max_cache_len = cache_max_cache_len
                 new_past_key_values = self.get_prompt(
                     batch_size=model_kwargs["input_ids"].shape[0],
                     max_cache_len=max_cache_len,
@@ -2517,17 +2530,19 @@ class PeftModelForSeq2SeqLM(PeftModel):
             model_kwargs["task_ids"] = task_ids
         elif peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
             past_key_values = model_kwargs.get("past_key_values", None)
-            cache_position = model_kwargs.get("cache_position", [None])
-            # check prefill stage
-            is_prefill_stage = (
-                # old cache implementation
-                (past_key_values is None)
-                # new cache implementation
-                or (isinstance(past_key_values, Cache) and (cache_position[0] == 0))
-            )
-            if is_prefill_stage:
-                batch_size = model_kwargs["decoder_input_ids"].shape[0]
-                new_past_key_values = self.get_prompt(batch_size)
+            if _requires_prompt_injection(past_key_values):
+                max_cache_len = -1  # -1 means no max length
+                if isinstance(past_key_values, Cache) and not isinstance(past_key_values, DynamicCache):
+                    try:
+                        cache_max_cache_len = past_key_values.max_cache_len
+                    except (AttributeError, NotImplementedError):
+                        cache_max_cache_len = None
+                    if cache_max_cache_len is not None:
+                        max_cache_len = cache_max_cache_len
+
+                decoder_model_input = model_kwargs.get("decoder_input_ids", model_kwargs.get("decoder_inputs_embeds"))
+                batch_size = decoder_model_input.shape[0]
+                new_past_key_values = self.get_prompt(batch_size, max_cache_len=max_cache_len)
                 model_kwargs["past_key_values"] = new_past_key_values
 
         return model_kwargs
