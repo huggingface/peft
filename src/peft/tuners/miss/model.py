@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import operator
 
 import torch
 
@@ -96,6 +97,13 @@ class MissModel(BaseTuner):
             "init_weights": miss_config.init_weights,
         }
         kwargs["bias"] = bias
+        # for torchao merging, we need the get_apply_tensor_subclass from the quantization config
+        try:
+            kwargs["get_apply_tensor_subclass"] = operator.attrgetter(
+                "hf_quantizer.quantization_config.get_apply_tensor_subclass"
+            )(self.model)
+        except AttributeError:
+            pass
 
         # If it is not a MissLayer, create a new module, else update it with new adapters
         if not isinstance(target, MissLayer):
