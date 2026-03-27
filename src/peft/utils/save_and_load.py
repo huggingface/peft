@@ -31,6 +31,7 @@ from transformers.utils import http_user_agent
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
 
 from .constants import INCLUDE_LINEAR_LAYERS_SHORTHAND
+from .integrations import TpInfo
 from .other import (
     EMBEDDING_LAYER_NAMES,
     SAFETENSORS_WEIGHTS_NAME,
@@ -53,6 +54,19 @@ def get_embedding_layer_name(model, layer, is_embedding_in_target_modules):
     for name, module in model.named_modules():
         if (not is_embedding_in_target_modules and module == layer) or module == getattr(layer, "base_layer", None):
             return name
+    return None
+
+
+def _get_tp_info(model) -> TpInfo | None:
+    """Collect TP info from lora modules that have _tp_info set."""
+    tp_plan, device_mesh, tp_size = {}, None, None
+    for module in model.modules():
+        if hasattr(module, "_tp_info"):
+            tp_plan.update(module._tp_info.tp_plan)
+            device_mesh = module._tp_info.device_mesh
+            tp_size = module._tp_info.tp_size
+    if tp_plan is not None:
+        return TpInfo(tp_plan=tp_plan, device_mesh=device_mesh, tp_size=tp_size)
     return None
 
 
@@ -91,6 +105,26 @@ def get_peft_model_state_dict(
     config = model.peft_config[adapter_name]
     if state_dict is None:
         state_dict = model.state_dict()
+
+    # If model was sharded with TP, gather full tensors for saving
+    tp_info = _get_tp_info(model)
+    if tp_info is not None:
+        from transformers.integrations.tensor_parallel import gather_state_dict_for_save
+
+        from peft.peft_model import PeftModel
+
+        # If the keys in the state dict start with the prefix, we need to add the prefix to the keys in the tp plan as
+        # well.
+        prefix = (
+            "base_model."
+            if isinstance(model, PeftModel) and model.active_peft_config.is_prompt_learning
+            else "base_model.model."
+        )
+        keys_starting_with_prefix = all(k.startswith(prefix) for k in state_dict)
+        tp_plan = tp_info.tp_plan
+        if keys_starting_with_prefix:
+            tp_plan = {f"{prefix}{k}": v for k, v in tp_plan.items()}
+        state_dict = gather_state_dict_for_save(state_dict, tp_plan, tp_info.device_mesh, tp_info.tp_size)
 
     # TUNER SPECIFIC CODE
     if config.peft_type in (PeftType.LORA, PeftType.ADALORA):
