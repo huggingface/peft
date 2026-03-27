@@ -313,6 +313,11 @@ def dispatch_megatron(
         target_base_layer = target
 
     if config.megatron_config:
+        if not config.megatron_core.startswith("megatron."):
+            raise ValueError(
+                f"{config.megatron_core=} does not start with 'megatron.' which is unsupported and a potential "
+                "security risk. If you think it should be supported, please raise an issue in PEFT."
+            )
         megatron_core = importlib.import_module(config.megatron_core)
     else:
         megatron_core = None
