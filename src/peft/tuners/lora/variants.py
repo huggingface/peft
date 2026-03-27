@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import collections
+import math
 import warnings
 from typing import Any, Optional
 
@@ -27,7 +28,321 @@ from peft.utils.other import transpose
 from .arrow import ArrowLoraLinearLayer
 from .config import LoraConfig, PeftConfig
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
-from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
+from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd, LoraLayer
+
+import math
+
+class SineLoraLinearVariant(LoraVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs) -> None:
+        module.sinelora_frequency = config.sinelora_frequency
+        module.sinelora_scaling = config.sinelora_scaling
+        if module.sinelora_scaling is None:
+            module.sinelora_scaling = math.sqrt(module.in_features)
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * lora_A.weight.T @ lora_B.weight.T).T
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+
+        delta_weight = delta_weight.to(orig_dtype)
+        unmerged_weight = orig_weight - delta_weight
+        return unmerged_weight
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * (lora_A.weight.T @ lora_B.weight.T)).T
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        merged_weight = orig_weight + delta_weight
+        if not torch.isfinite(merged_weight).all():
+            raise ValueError(f"NaNs detected in merged weights for adapter {active_adapter}")
+        module._cache_store(f"{active_adapter}-delta_weight", delta_weight)
+        merged_weight = merged_weight.to(orig_dtype)
+        return merged_weight
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * (lora_A.weight.T @ lora_B.weight.T)).T
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        module._cache_store(f"{active_adapter}-delta_weight", delta_weight)
+        orig_weight.data += delta_weight
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        sine_output = (
+            x
+            @ torch.sin(module.sinelora_frequency * lora_A.weight.T @ lora_B.weight.T)
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        result = result + sine_output
+        return result
+
+
+class SineLoraEmbeddingVariant(LoraVariant):
+    @staticmethod
+    def init(module: Embedding, adapter_name: str, config: LoraConfig, **kwargs) -> None:
+        module.sinelora_frequency = config.sinelora_frequency
+        module.sinelora_scaling = config.sinelora_scaling
+        if module.sinelora_scaling is None:
+            module.sinelora_scaling = math.sqrt(module.in_features)
+
+    @staticmethod
+    def unmerge(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        lora_embedding_A = module.lora_embedding_A[active_adapter]
+        lora_embedding_B = module.lora_embedding_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * lora_embedding_A.T @ lora_embedding_B.T)
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        delta_weight = delta_weight.to(orig_dtype)
+        unmerged_weight = orig_weight - delta_weight
+        return unmerged_weight
+
+    @staticmethod
+    def merge_safe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        lora_embedding_A = module.lora_embedding_A[active_adapter]
+        lora_embedding_B = module.lora_embedding_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * (lora_embedding_A.T @ lora_embedding_B.T))
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        merged_weight = orig_weight + delta_weight
+        if not torch.isfinite(merged_weight).all():
+            raise ValueError(f"NaNs detected in merged weights for adapter {active_adapter}")
+        module._cache_store(f"{active_adapter}-delta_weight", delta_weight)
+        merged_weight = merged_weight.to(orig_dtype)
+        return merged_weight
+
+    @staticmethod
+    def merge_unsafe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        lora_embedding_A = module.lora_embedding_A[active_adapter]
+        lora_embedding_B = module.lora_embedding_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * (lora_embedding_A.T @ lora_embedding_B.T))
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        module._cache_store(f"{active_adapter}-delta_weight", delta_weight)
+        orig_weight.data += delta_weight
+
+    @staticmethod
+    def forward(
+        module: Embedding,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        lora_embedding_A = module.lora_embedding_A[active_adapter]
+        lora_embedding_B = module.lora_embedding_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        # In Sine-LoRA for embeddings, we apply the sine transformation to the full delta weight
+        # then use _embed to get the corresponding vectors.
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * lora_embedding_A.T @ lora_embedding_B.T)
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        sine_output = module._embed(x, delta_weight)
+        result = result + sine_output
+        return result
+
+
+
+class SineLoraLinearVariant(LoraVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs) -> None:
+        module.sinelora_frequency = config.sinelora_frequency
+        module.sinelora_scaling = config.sinelora_scaling
+        if module.sinelora_scaling is None:
+            module.sinelora_scaling = math.sqrt(module.in_features)
+        # SineLoRA requires both A and B to be non-zero for sin(freq * A^T @ B^T) to have effect.
+        # Re-initialize lora_B with kaiming uniform (same as lora_A) instead of the default zeros.
+        nn.init.kaiming_uniform_(module.lora_B[adapter_name].weight, a=math.sqrt(5))
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * lora_A.weight.T @ lora_B.weight.T).T
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+
+        delta_weight = delta_weight.to(orig_dtype)
+        unmerged_weight = orig_weight - delta_weight
+        return unmerged_weight
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * (lora_A.weight.T @ lora_B.weight.T)).T
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        merged_weight = orig_weight + delta_weight
+        if not torch.isfinite(merged_weight).all():
+            raise ValueError(f"NaNs detected in merged weights for adapter {active_adapter}")
+        module._cache_store(f"{active_adapter}-delta_weight", delta_weight)
+        merged_weight = merged_weight.to(orig_dtype)
+        return merged_weight
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * (lora_A.weight.T @ lora_B.weight.T)).T
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        module._cache_store(f"{active_adapter}-delta_weight", delta_weight)
+        orig_weight.data += delta_weight
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        sine_output = (
+            x
+            @ torch.sin(module.sinelora_frequency * lora_A.weight.T @ lora_B.weight.T)
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        result = result + sine_output
+        return result
+
+
+class SineLoraEmbeddingVariant(LoraVariant):
+    @staticmethod
+    def init(module: Embedding, adapter_name: str, config: LoraConfig, **kwargs) -> None:
+        module.sinelora_frequency = config.sinelora_frequency
+        module.sinelora_scaling = config.sinelora_scaling
+        if module.sinelora_scaling is None:
+            module.sinelora_scaling = math.sqrt(module.in_features)
+        # SineLoRA uses kaiming uniform for both A and B (A defaults to zeros, B defaults to normal).
+        nn.init.kaiming_uniform_(module.lora_embedding_A[adapter_name], a=math.sqrt(5))
+        nn.init.kaiming_uniform_(module.lora_embedding_B[adapter_name], a=math.sqrt(5))
+
+    @staticmethod
+    def unmerge(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        lora_embedding_A = module.lora_embedding_A[active_adapter]
+        lora_embedding_B = module.lora_embedding_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * lora_embedding_A.T @ lora_embedding_B.T)
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        delta_weight = delta_weight.to(orig_dtype)
+        unmerged_weight = orig_weight - delta_weight
+        return unmerged_weight
+
+    @staticmethod
+    def merge_safe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        lora_embedding_A = module.lora_embedding_A[active_adapter]
+        lora_embedding_B = module.lora_embedding_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * (lora_embedding_A.T @ lora_embedding_B.T))
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        merged_weight = orig_weight + delta_weight
+        if not torch.isfinite(merged_weight).all():
+            raise ValueError(f"NaNs detected in merged weights for adapter {active_adapter}")
+        module._cache_store(f"{active_adapter}-delta_weight", delta_weight)
+        merged_weight = merged_weight.to(orig_dtype)
+        return merged_weight
+
+    @staticmethod
+    def merge_unsafe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        lora_embedding_A = module.lora_embedding_A[active_adapter]
+        lora_embedding_B = module.lora_embedding_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * (lora_embedding_A.T @ lora_embedding_B.T))
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        module._cache_store(f"{active_adapter}-delta_weight", delta_weight)
+        orig_weight.data += delta_weight
+
+    @staticmethod
+    def forward(
+        module: Embedding,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        lora_embedding_A = module.lora_embedding_A[active_adapter]
+        lora_embedding_B = module.lora_embedding_B[active_adapter]
+        lora_scaling = module.scaling[active_adapter]
+        # In Sine-LoRA for embeddings, we apply the sine transformation to the full delta weight
+        # then use _embed to get the corresponding vectors.
+        delta_weight = (
+            torch.sin(module.sinelora_frequency * lora_embedding_A.T @ lora_embedding_B.T)
+            / module.sinelora_scaling
+            * lora_scaling
+        )
+        sine_output = module._embed(x, delta_weight)
+        result = result + sine_output
+        return result
 
 
 class ArrowLinearVariant(LoraVariant):

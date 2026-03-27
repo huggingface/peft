@@ -781,6 +781,9 @@ class PeftCommonTester:
                 atol, rtol = 1e-3, 1e-3
             elif issubclass(config_cls, PveraConfig):
                 atol, rtol = 1e-5, 1e-5
+            elif issubclass(config_cls, LoraConfig) and config_kwargs.get("use_sinelora"):
+                # SineLoRA sin transformation introduces extra numerical rounding on some architectures
+                atol, rtol = 1e-5, 1e-5
 
             # check that the logits are the same after unloading
             assert torch.allclose(logits_peft, logits_unloaded, atol=atol, rtol=rtol)
