@@ -162,7 +162,11 @@ class LoraLayer(BaseTunerLayer):
         init_lora_weights = config.init_lora_weights
         use_rslora = config.use_rslora
         lora_bias = config.lora_bias
+        monteclora_config = config.monteclora_config
         inference_mode = config.inference_mode
+
+        if monteclora_config is not None:
+            kwargs["monteclora_config"] = monteclora_config
 
         target_name = kwargs.get("target_name", "")  # preserve target_name before overwriting kwargs
         kwargs["target_name"] = target_name  # restore target_name
@@ -245,6 +249,8 @@ class LoraLayer(BaseTunerLayer):
 
         if adapter_name in self.lora_variant:
             self.lora_variant[adapter_name].init(self, adapter_name=adapter_name, config=config, **kwargs)
+            # Some variants create adapter modules during init; align them with base-layer device/dtype too.
+            self._move_adapter_to_device_of_base_layer(adapter_name)
 
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
@@ -797,6 +803,10 @@ class Linear(nn.Module, LoraLayer):
 
             return ArrowLinearVariant()
 
+        if config.monteclora_config is not None:
+            from .variants import MontecloraLinearVariant
+
+            return MontecloraLinearVariant()
         if config.use_bdlora is not None:
             from .variants import BdLoraLinearVariant
 
