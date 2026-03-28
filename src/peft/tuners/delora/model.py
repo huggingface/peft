@@ -29,7 +29,8 @@ class DeloraModel(BaseTuner):
     """
     Creates DeLoRA model from a pretrained transformers model.
 
-    The method is described in detail in [TODO].
+    The method is described in detail in [DeLoRA: Decoupled Low-rank
+    Adaptation](https://huggingface.co/papers/2503.18225).
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.

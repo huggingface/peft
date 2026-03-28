@@ -34,7 +34,17 @@ from peft.import_utils import is_transformers_ge_v5_4_0
 
 
 TINY_MODEL_ID = "peft-internal-testing/zephyr-smol_llama-100m-sft-full"
-TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
+TARGET_MODULES = ["embed_tokens", "q_proj", "k_proj", "v_proj", "o_proj"]
+TP_PLAN = {
+    "model.embed_tokens": "embedding_rowwise",
+    "model.layers.*.self_attn.q_proj": "colwise",
+    "model.layers.*.self_attn.k_proj": "colwise",
+    "model.layers.*.self_attn.v_proj": "colwise",
+    "model.layers.*.self_attn.o_proj": "rowwise",
+    "model.layers.*.mlp.gate_proj": "colwise",
+    "model.layers.*.mlp.up_proj": "colwise",
+    "model.layers.*.mlp.down_proj": "rowwise",
+}
 STEPS = 20
 BATCH_SIZE = 4
 LEARNING_RATE = 1e-3
@@ -78,7 +88,7 @@ def main(model_id: str, target_modules: list[str]):
     set_seed(42)
 
     tokenizer = AutoTokenizer.from_pretrained(model_id)
-    model = AutoModelForCausalLM.from_pretrained(model_id, tp_plan="auto")
+    model = AutoModelForCausalLM.from_pretrained(model_id, tp_plan=TP_PLAN)
     config = model.config
 
     torch.cuda.set_device(rank)

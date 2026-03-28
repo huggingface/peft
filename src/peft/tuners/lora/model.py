@@ -288,20 +288,29 @@ class LoraModel(BaseTuner):
                 add_tensor_parallel_hooks_to_module,
             )
 
-            if tp_plan == "colwise":
-                tp_module = lora_module.lora_B[adapter_name]
-                tp_layer_name = (f"{current_key}.lora_B.{adapter_name}",)
-            else:  # rowwise
-                tp_module = lora_module.lora_A[adapter_name]
-                tp_layer_name = (f"{current_key}.lora_A.{adapter_name}",)
-            add_tensor_parallel_hooks_to_module(
-                self.model,
-                tp_module,
-                tp_plan,
-                tp_layer_name,
-                tp_plan,
-                device_mesh,
-            )
+            if tp_plan in ["colwise", "rowwise"]:
+                if tp_plan == "colwise":
+                    tp_module = lora_module.lora_B[adapter_name]
+                    tp_layer_name = (f"{current_key}.lora_B.{adapter_name}",)
+                else:  # rowwise
+                    tp_module = lora_module.lora_A[adapter_name]
+                    tp_layer_name = (f"{current_key}.lora_A.{adapter_name}",)
+                add_tensor_parallel_hooks_to_module(
+                    self.model,
+                    tp_module,
+                    tp_plan,
+                    tp_layer_name,
+                    tp_plan,
+                    device_mesh,
+                )
+            elif tp_plan == "embedding_rowwise":
+                # It is handled in the `_embed` method in lora/layer.py where the hooks are explicitely called.
+                pass
+            else:
+                warnings.warn(
+                    f'TP plan "{tp_plan}" on the base layer is not supported for LoRA. '
+                    "LoRA adapters will be created without tensor parallel hooks."
+                )
 
     def _replace_module(self, parent, child_name, new_module, child):
         # override in LoraModel to handle quantized weights properly
