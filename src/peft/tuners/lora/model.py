@@ -629,7 +629,19 @@ class LoraModel(BaseTuner):
         adapters: list[str],
         weights: list[float],
         adapter_name: str,
-        combination_type: str = "svd",
+        combination_type: Literal[
+            "svd",
+            "linear",
+            "cat",
+            "ties",
+            "ties_svd",
+            "dare_ties",
+            "dare_linear",
+            "dare_ties_svd",
+            "dare_linear_svd",
+            "magnitude_prune",
+            "magnitude_prune_svd",
+        ] = "svd",
         svd_rank: int | None = None,
         svd_clamp: int | None = None,
         svd_full_matrices: bool = True,
@@ -656,7 +668,9 @@ class LoraModel(BaseTuner):
                 The merging type can be one of [`svd`, `linear`, `cat`, `ties`, `ties_svd`, `dare_ties`, `dare_linear`,
                 `dare_ties_svd`, `dare_linear_svd`, `magnitude_prune`, `magnitude_prune_svd`]. When using the `cat`
                 combination_type, the rank of the resulting adapter is equal to the sum of all adapters ranks (the
-                mixed adapter may be too big and result in OOM errors).
+                mixed adapter may be too big and result in OOM errors). Note that `cat` and `svd` are precise methods
+                and will give you good accuracy, `linear` is efficient but a very rough approximation and should be
+                avoided if you can afford it.
             svd_rank (`int`, *optional*):
                 Rank of output adapter for svd. If None provided, will use max rank of merging adapters.
             svd_clamp (`float`, *optional*):
@@ -782,11 +796,12 @@ class LoraModel(BaseTuner):
         for adapter, weight in zip(adapters, weights):
             if adapter in target.lora_A or adapter in target.lora_embedding_A:
                 valid_adapters.append(adapter)
-                valid_weights.append(weight * target.scaling[adapter])
+                valid_weights.append(weight)
 
         # if no valid adapter, nothing to do
         if len(valid_adapters) == 0:
-            raise ValueError("No matching LoRAs found. Please raise an issue on Github.")
+            raise ValueError("No matching LoRAs found. Please raise an issue on GitHub.")
+        # get_delta_weight applies the scaling, no need to handle it explicitly
         delta_weight = [target.get_delta_weight(adapter) for adapter in valid_adapters]
         valid_weights = torch.tensor(valid_weights).to(delta_weight[0].device)
         if combination_type == "svd":
