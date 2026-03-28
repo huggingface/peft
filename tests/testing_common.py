@@ -602,6 +602,10 @@ class PeftCommonTester:
             if config.peft_type in ("ADALORA", "OFT"):
                 # these methods require a bit higher tolerance
                 atol, rtol = 1e-2, 1e-2
+            if config.peft_type == "ADAMSS":
+                # AdaMSS merges via B @ A @ newB (triple matmul), which accumulates more FP32
+                # rounding error on CPU than the default 1e-4 allows
+                atol, rtol = 1e-3, 1e-3
             if (config.peft_type in {"IA3", "LORA", "OFT"}) and (model_id in conv_ids):
                 # for some reason, the Conv introduces a larger error
                 atol, rtol = 0.3, 0.01
@@ -781,6 +785,11 @@ class PeftCommonTester:
                 atol, rtol = 1e-3, 1e-3
             elif issubclass(config_cls, PveraConfig):
                 atol, rtol = 1e-5, 1e-5
+
+            if config.peft_type == "ADAMSS":
+                # AdaMSS merges via B @ A @ newB (triple matmul), which accumulates more FP32
+                # rounding error on CPU than the default 1e-6 allows
+                atol, rtol = 1e-3, 1e-3
 
             # check that the logits are the same after unloading
             assert torch.allclose(logits_peft, logits_unloaded, atol=atol, rtol=rtol)
@@ -980,7 +989,7 @@ class PeftCommonTester:
         _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs)
 
         with hub_online_once(model_id):
-            model = self.transformers_class.from_pretrained(model_id, dtype=torch.bfloat16)
+            model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16)
             config = config_cls(
                 base_model_name_or_path=model_id,
                 **config_kwargs,
