@@ -118,8 +118,8 @@ class AdamssLayer(BaseTunerLayer):
                 param = param_list[i]
                 if param.grad is not None:
                     if ipt_list[i] is None:
-                        ipt_list[i] = torch.zeros_like(param)
-                        unc_list[i] = torch.zeros_like(param)
+                        ipt_list[i] = torch.zeros_like(param, requires_grad=False)
+                        unc_list[i] = torch.zeros_like(param, requires_grad=False)
 
                     # Calculate importance: |w * g|
                     ipt = (param * param.grad).abs().detach()

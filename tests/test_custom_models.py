@@ -2302,6 +2302,7 @@ class TestPeftCustomModel(PeftCommonTester):
             (config_kwargs.get("use_dora") and model_id == "EmbConv1D")
             or issubclass(config_cls, VBLoRAConfig)
             or issubclass(config_cls, LilyConfig)
+            or issubclass(config_cls, AdamssConfig)
         ):
             # this high learning rate was found through testing to be necessary to avoid flakiness
             lr = 100
