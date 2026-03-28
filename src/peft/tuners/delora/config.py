@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -93,7 +93,9 @@ class DeloraConfig(PeftConfig):
         default=None,
         metadata={"help": "List of module names or regex expression of the module names to exclude from DeLoRA."},
     )
-    bias: str = field(default="none", metadata={"help": "Bias type for DeLoRA. Can be 'none' or 'all'"})
+    bias: Literal["none", "all", "delora_only"] = field(
+        default="none", metadata={"help": "Bias type for DeLoRA. Can be 'none', 'all' or 'delora_only'"}
+    )
     init_weights: bool = field(
         default=True,
         metadata={
@@ -145,6 +147,9 @@ class DeloraConfig(PeftConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
+        self.exclude_modules = (
+            set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
+        )
         # if target_modules is a regex expression, then layers_to_transform should be None
         if isinstance(self.target_modules, str) and self.layers_to_transform is not None:
             raise ValueError("`layers_to_transform` cannot be used when `target_modules` is a str.")
@@ -152,3 +157,6 @@ class DeloraConfig(PeftConfig):
         # check for layers_to_transform and layers_pattern
         if self.layers_pattern and not self.layers_to_transform:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
+
+        if self.r <= 0:
+            raise ValueError(f"`r` must be a positive integer; got {self.r}.")

@@ -5992,7 +5992,18 @@ class TestTransformerEngine:
 WORLD_SIZE = 2
 MODEL_ID = "Qwen/Qwen3-0.6B"
 TINY_MODEL_ID = "peft-internal-testing/zephyr-smol_llama-100m-sft-full"
-TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
+TARGET_MODULES = ["embed_tokens", "q_proj", "k_proj", "v_proj", "o_proj"]
+
+TP_PLAN = {
+    "model.embed_tokens": "embedding_rowwise",
+    "model.layers.*.self_attn.q_proj": "colwise",
+    "model.layers.*.self_attn.k_proj": "colwise",
+    "model.layers.*.self_attn.v_proj": "colwise",
+    "model.layers.*.self_attn.o_proj": "rowwise",
+    "model.layers.*.mlp.gate_proj": "colwise",
+    "model.layers.*.mlp.up_proj": "colwise",
+    "model.layers.*.mlp.down_proj": "rowwise",
+}
 
 
 def _find_free_port():
@@ -6029,7 +6040,7 @@ def _test_lora_weight_synchronization(rank, world_size, port):
     """
     Test that non-sharded LoRA weights are identical across ranks after training step.
     """
-    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan="auto")
+    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
     lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
     model = get_peft_model(model, lora_config)
 
@@ -6071,6 +6082,12 @@ def _test_lora_weight_synchronization(rank, world_size, port):
             dist.all_gather(gathered, weight)
             for i, g in enumerate(gathered):
                 assert torch.allclose(weight, g), f"{name}.lora_B differs between rank {rank} and rank {i}"
+        elif tp_plan == "embedding_rowwise":
+            weight = module.lora_embedding_B["default"].data.contiguous()
+            gathered = [torch.zeros_like(weight) for _ in range(world_size)]
+            dist.all_gather(gathered, weight)
+            for i, g in enumerate(gathered):
+                assert torch.allclose(weight, g), f"{name}.lora_embedding_B differs between rank {rank} and rank {i}"
 
 
 def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
@@ -6088,7 +6105,7 @@ def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
 
-    tp_base = AutoModelForCausalLM.from_pretrained(MODEL_ID, tp_plan="auto")
+    tp_base = AutoModelForCausalLM.from_pretrained(MODEL_ID, tp_plan=TP_PLAN)
     tp_base.to(device)
     tp_model = PeftModel.from_pretrained(tp_base, tmp_dir)
 
@@ -6111,6 +6128,13 @@ def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
             assert lora_a_in == base_layer_in, (
                 f"{name}: lora_A in_dim {lora_a_in} != local base in_dim {base_layer_in}"
             )
+        elif tp_plan == "embedding_rowwise":
+            # lora_embedding_A vocab size must match base layer vocab size
+            lora_emb_vocab = module.lora_embedding_A["default"].shape[1]  # Lora embedding weights are (r, vocab_size)
+            base_emb_vocab = base_layer.weight.shape[0]
+            assert lora_emb_vocab == base_emb_vocab, (
+                f"{name}: lora_embedding_A vocab {lora_emb_vocab} != local base vocab {base_emb_vocab}"
+            )
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
     inputs = tokenizer("The capital of France is Paris.", return_tensors="pt")
@@ -6125,7 +6149,7 @@ def _test_multiple_adapters(rank, world_size, port):
     """Two LoRA adapters coexist on a TP model and can be switched between."""
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
-    model = AutoModelForCausalLM.from_pretrained(MODEL_ID, tp_plan="auto")
+    model = AutoModelForCausalLM.from_pretrained(MODEL_ID, tp_plan=TP_PLAN)
     model.to(device)
 
     for adapter_name in ["adapter_a", "adapter_b"]:
