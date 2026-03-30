@@ -106,6 +106,7 @@ New parameter-efficient fine-tuning methods are developed all the time. If you w
 
 - [ ] Ensure that the configuration arguments that are specific to the method are well named and explained, don't assume that the user knows the paper inside out.
 - [ ] Follow the naming and coding conventions of PEFT.
+- [ ] Ensure that you didn't accidentally check in unrelated changes, e.g. the code formatter changing unrelated files.
 - [ ] If some implementation choices are non-trivial, document them with a code comment.
 - [ ] Complete the full test suite (`test_config.py`, `test_decoder_models.py`, etc.) by adding the PEFT method to the test matrix. Ensure that the tests pass.
 - [ ] Add docs in `docs/source/package_reference/` with a short explanation, paper link, usage snippet, and autodoc blocks. Explain the pros and cons compared to other methods like LoRA. Register that doc page in `docs/source/_toctree.yml`.
