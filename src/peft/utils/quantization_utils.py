@@ -13,10 +13,13 @@
 # limitations under the License.
 
 import copy
+import operator
 from abc import ABC
+from typing import Any
 
 import torch
 from torch import nn
+from transformers import PreTrainedModel
 
 from peft.import_utils import (
     is_aqlm_available,
@@ -337,3 +340,19 @@ def quantization_extra_repr(module: nn.Module) -> str:
     if getattr(module, "quantization_backend", None):
         parts.append(f"quantization_backend='{module.quantization_backend.backend_name}'")
     return ", ".join(parts)
+
+
+def get_quantization_kwargs(model: PreTrainedModel | nn.Module) -> dict[str, Any]:
+    """Helper function to extract arguments related to quantization from the model.
+
+    These arguments may, for instance, be needed to correctly deal with PEFT layers being applied to quantized layers.
+    """
+    quantization_kwargs = {}
+    try:
+        # torchao-specific function required to re-quantize layers
+        quantization_kwargs["get_apply_tensor_subclass"] = operator.attrgetter(
+            "hf_quantizer.quantization_config.get_apply_tensor_subclass"
+        )(model)
+    except AttributeError:
+        pass
+    return quantization_kwargs

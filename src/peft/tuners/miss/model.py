@@ -12,12 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import operator
 
 import torch
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
-from peft.utils import TRANSFORMERS_MODELS_TO_MISS_TARGET_MODULES_MAPPING
+from peft.utils import TRANSFORMERS_MODELS_TO_MISS_TARGET_MODULES_MAPPING, get_quantization_kwargs
 
 from .layer import MissLayer, MissLinear
 
@@ -97,13 +96,7 @@ class MissModel(BaseTuner):
             "init_weights": miss_config.init_weights,
         }
         kwargs["bias"] = bias
-        # for torchao merging, we need the get_apply_tensor_subclass from the quantization config
-        try:
-            kwargs["get_apply_tensor_subclass"] = operator.attrgetter(
-                "hf_quantizer.quantization_config.get_apply_tensor_subclass"
-            )(self.model)
-        except AttributeError:
-            pass
+        kwargs.update(get_quantization_kwargs(self.model))
 
         # If it is not a MissLayer, create a new module, else update it with new adapters
         if not isinstance(target, MissLayer):
