@@ -60,6 +60,9 @@ def get_embedding_layer_name(model, layer, is_embedding_in_target_modules):
 def _get_tp_info(model) -> TpInfo | None:
     """Collect TP info from lora modules that have _tp_info set."""
     tp_plan, device_mesh, tp_size = {}, None, None
+    # We check if there is a TP plan, otherwise it is not worth looping over the modules for nothing.
+    if getattr(model, "_tp_plan", None) is None:
+        return None
     for module in model.modules():
         if hasattr(module, "_tp_info"):
             tp_plan.update(module._tp_info.tp_plan)
