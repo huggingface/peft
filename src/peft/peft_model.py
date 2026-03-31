@@ -2519,12 +2519,14 @@ class PeftModelForSeq2SeqLM(PeftModel):
             past_key_values = model_kwargs.get("past_key_values", None)
             cache_position = model_kwargs.get("cache_position", [None])
             # check prefill stage
-            is_prefill_stage = (
-                # old cache implementation
-                (past_key_values is None)
-                # new cache implementation
-                or (isinstance(past_key_values, Cache) and (past_key_values.get_seq_length() == 0))
-            )
+            is_prefill_stage = kwargs.get("is_first_iteration")
+            if is_prefill_stage is None:  # transformers < v5
+                is_prefill_stage = (
+                    # old cache implementation
+                    (past_key_values is None)
+                    # new cache implementation
+                    or (isinstance(past_key_values, Cache) and (past_key_values.get_seq_length() == 0))
+                )
             if is_prefill_stage:
                 batch_size = model_kwargs["decoder_input_ids"].shape[0]
                 new_past_key_values = self.get_prompt(batch_size)
