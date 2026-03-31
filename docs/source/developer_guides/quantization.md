@@ -258,9 +258,10 @@ PEFT supports models quantized with [torchao](https://github.com/pytorch/ao) ("a
 ```python
 from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, TorchAoConfig
+from torchao.quantization import Int8WeightOnlyConfig
 
 model_id = ...
-quantization_config = TorchAoConfig(quant_type="int8_weight_only")
+quantization_config = TorchAoConfig(quant_type=Int8WeightOnlyConfig())
 base_model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=quantization_config)
 peft_config = LoraConfig(...)
 model = get_peft_model(base_model, peft_config)
