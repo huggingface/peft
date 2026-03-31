@@ -42,15 +42,20 @@ class EmbeddingModel(nn.Module):
 
 class TestSineLoRA:
     def test_sinelora_output_differs_from_plain_lora(self):
-        """SineLoRA output must differ from plain LoRA (sine transformation changes the update)."""
+        """SineLoRA output must differ from plain LoRA when weights are non-zero.
+
+        Use init_lora_weights=False so both A and B are non-zero, making the difference between sin(A^T @ B^T) and B @
+        A visible without training.
+        """
         torch.manual_seed(0)
         base_model_lora = MLP()
         base_model_sinelora = MLP()
-        # copy weights so models start identical
         base_model_sinelora.load_state_dict(base_model_lora.state_dict())
 
-        lora_config = LoraConfig(target_modules=["lin0", "lin1"], r=4, lora_alpha=8)
-        sinelora_config = LoraConfig(target_modules=["lin0", "lin1"], r=4, lora_alpha=8, use_sinelora=True)
+        lora_config = LoraConfig(target_modules=["lin0", "lin1"], r=4, lora_alpha=8, init_lora_weights=False)
+        sinelora_config = LoraConfig(
+            target_modules=["lin0", "lin1"], r=4, lora_alpha=8, use_sinelora=True, init_lora_weights=False
+        )
 
         peft_lora = get_peft_model(base_model_lora, lora_config)
         peft_sinelora = get_peft_model(base_model_sinelora, sinelora_config)
@@ -69,9 +74,11 @@ class TestSineLoRA:
         base_model_2 = MLP()
         base_model_2.load_state_dict(base_model_1.state_dict())
 
-        config_low_freq = LoraConfig(target_modules=["lin0", "lin1"], r=4, use_sinelora=True, sinelora_frequency=1.0)
+        config_low_freq = LoraConfig(
+            target_modules=["lin0", "lin1"], r=4, use_sinelora=True, sinelora_frequency=1.0, init_lora_weights=False
+        )
         config_high_freq = LoraConfig(
-            target_modules=["lin0", "lin1"], r=4, use_sinelora=True, sinelora_frequency=1000.0
+            target_modules=["lin0", "lin1"], r=4, use_sinelora=True, sinelora_frequency=1000.0, init_lora_weights=False
         )
 
         peft_low = get_peft_model(base_model_1, config_low_freq)
@@ -91,9 +98,11 @@ class TestSineLoRA:
         base_model_2 = MLP()
         base_model_2.load_state_dict(base_model_1.state_dict())
 
-        config_small_scale = LoraConfig(target_modules=["lin0", "lin1"], r=4, use_sinelora=True, sinelora_scaling=1.0)
+        config_small_scale = LoraConfig(
+            target_modules=["lin0", "lin1"], r=4, use_sinelora=True, sinelora_scaling=1.0, init_lora_weights=False
+        )
         config_large_scale = LoraConfig(
-            target_modules=["lin0", "lin1"], r=4, use_sinelora=True, sinelora_scaling=100.0
+            target_modules=["lin0", "lin1"], r=4, use_sinelora=True, sinelora_scaling=100.0, init_lora_weights=False
         )
 
         peft_small = get_peft_model(base_model_1, config_small_scale)
@@ -122,10 +131,10 @@ class TestSineLoRA:
                 break
 
     def test_sinelora_merge_unmerge_roundtrip(self):
-        """Merging then unmerging weights must restore original weights."""
+        """Merging then unmerging weights must restore original output (with non-zero weights)."""
         torch.manual_seed(0)
         model = MLP()
-        config = LoraConfig(target_modules=["lin0", "lin1"], r=4, use_sinelora=True)
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=4, use_sinelora=True, init_lora_weights=False)
         peft_model = get_peft_model(model, config)
 
         x = torch.randn(4, 16)
@@ -143,10 +152,10 @@ class TestSineLoRA:
         )
 
     def test_sinelora_merge_changes_base_weights(self):
-        """After merging, the base weights must have changed."""
+        """After merging, the base weights must have changed (with non-zero weights)."""
         torch.manual_seed(0)
         model = MLP()
-        config = LoraConfig(target_modules=["lin0"], r=4, use_sinelora=True)
+        config = LoraConfig(target_modules=["lin0"], r=4, use_sinelora=True, init_lora_weights=False)
         peft_model = get_peft_model(model, config)
 
         orig_weight = peft_model.base_model.model.lin0.weight.detach().clone()
@@ -168,10 +177,10 @@ class TestSineLoRA:
         assert out.shape == (4, 8, 16)
 
     def test_sinelora_embedding_merge_unmerge(self):
-        """Merge/unmerge roundtrip must work for Embedding layers."""
+        """Merge/unmerge roundtrip must work for Embedding layers (with non-zero weights)."""
         torch.manual_seed(0)
         model = EmbeddingModel()
-        config = LoraConfig(target_modules=["emb"], r=4, use_sinelora=True)
+        config = LoraConfig(target_modules=["emb"], r=4, use_sinelora=True, init_lora_weights=False)
         peft_model = get_peft_model(model, config)
 
         x = torch.randint(0, 100, (4, 8))

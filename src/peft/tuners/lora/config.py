@@ -702,9 +702,9 @@ class LoraConfig(PeftConfig):
         default=False,
         metadata={
             "help": (
-                "Enable 'Sine Activated Low-Rank Adaptation' (Sine-LoRA). This technique introduce to apply sine activation "
+                "Enable 'Sine Activated Low-Rank Adaptation' (Sine-LoRA). This technique applies a sine activation "
                 "on the low-rank adaptor. This can be beneficial for rank boosting for low-rank matrices and enhancing its "
-                "capacity. For more information, see https://arxiv.org/pdf/2403.19243. "
+                "capacity. For more information, see https://huggingface.co/papers/2403.19243. "
             )
         },
     )
