@@ -23,7 +23,7 @@ from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
 )
-from peft.utils import TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING
+from peft.utils import TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING, get_quantization_kwargs
 
 from .layer import BOFTLayer, Conv2d, Linear
 
@@ -87,6 +87,7 @@ class BOFTModel(BaseTuner):
             "init_weights": boft_config.init_weights,
         }
         kwargs["bias"] = bias
+        kwargs.update(get_quantization_kwargs(self.model))
 
         # If it is not a BOFTLayer, create a new module, else update it with new adapters
         if not isinstance(target, BOFTLayer):

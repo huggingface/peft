@@ -23,7 +23,7 @@ import torch
 from accelerate.utils.memory import clear_device_cache
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig, TorchAoConfig
 
-from peft import MissConfig, VeraConfig, get_peft_model
+from peft import BOFTConfig, MissConfig, VeraConfig, get_peft_model
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_torchao_available
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import infer_device
@@ -122,6 +122,10 @@ def _quant_id(backend):
 
 
 TEST_CASES = [
+    (
+        BOFTConfig,
+        {"boft_block_size": 4, "target_modules": ["q_proj", "v_proj"]},
+    ),
     (
         MissConfig,
         {"r": 2},
