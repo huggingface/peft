@@ -54,7 +54,7 @@ from utils import (
 )
 
 from data import get_train_valid_test_datasets, get_wiki_small
-from peft import AdaLoraConfig, PeftConfig
+from peft import AdaLoraConfig, PeftConfig, initialize_kv_prefix_from_text
 from peft.utils import CONFIG_NAME, infer_device
 
 
@@ -156,6 +156,7 @@ def train(
     lr_scheduler_arg: Optional[Literal["cosine"]],
     use_amp: bool,
     is_adalora: bool,
+    init_kv_cache_prefix: Optional[str],
 ) -> TrainResult:
     accelerator_memory_allocated_log = []
     accelerator_memory_reserved_log = []
@@ -182,6 +183,11 @@ def train(
         lr_scheduler_arg=lr_scheduler_arg,
         **optimizer_kwargs,
     )
+
+    if init_kv_cache_prefix is not None:
+        initialize_kv_prefix_from_text(model, tokenizer, text=init_kv_cache_prefix)
+
+
     # print this after getting the optimizer, in case it modifies requires_gard
     if hasattr(model, "get_nb_trainable_parameters"):
         num_trainable_params, num_params = model.get_nb_trainable_parameters()
@@ -453,6 +459,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         lr_scheduler_arg=train_config.lr_scheduler,
         use_amp=train_config.use_amp,
         is_adalora=isinstance(peft_config, AdaLoraConfig),
+        init_kv_cache_prefix=train_config.init_kv_cache_prefix,
     )
 
     if train_result.status == TrainStatus.FAILED:
