@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import re
 
 import packaging.version
 import pytest
 import torch
 import transformers
 from torch import nn
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, AutoModelForImageTextToText
 
 from peft import LoraConfig, PeftModel, get_peft_model
 from peft.tuners import lora
@@ -271,3 +272,42 @@ class TestTransformersV5:
         # a little bit of deviation but that's fine
         atol, rtol = 1e-3, 1e-4
         assert torch.allclose(output[0, :3, :3], expected_logits, atol=atol, rtol=rtol)
+
+    def test_qwen2_5_vl_works(self):
+        # https://github.com/huggingface/trl/issues/5428
+
+        # It can happen that a model returns an entry for get_checkpoint_conversion_mapping but there is nothing further
+        # to do because no weights are being fused (e.g. only renamed). In that case, we have no entry in
+        # _MOE_TARGET_MODULE_MAPPING. The bug was that we would call dict.__getitem__ instead of dict.get.
+        model_id = "trl-internal-testing/tiny-Qwen2_5_VLForConditionalGeneration"
+        with hub_online_once(model_id):
+            model = AutoModelForImageTextToText.from_pretrained(model_id)
+            config = LoraConfig(target_modules=["q_proj", "v_proj"])
+            get_peft_model(model, config)  # does not raise
+
+    def test_qwen3_moe_error_message(self):
+        # https://github.com/huggingface/trl/issues/5428
+        # When only targeting the up_proj, we should get an error because up and gate projection are fused. There was an
+        # error during handling of the error message. This test ensure that the error is handled correctly. See the net
+        # test for a correct PEFT config.
+        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            # only target up_proj but not gate_proj
+            config = LoraConfig(target_modules=["up_proj", "down_proj", "score"])
+            msg = re.escape(
+                "Cannot convert PEFT target(s) up_proj without also targeting gate_proj because they are fused into "
+                "gate_up_proj."
+            )
+            with pytest.raises(ValueError, match=msg):
+                get_peft_model(model, config)
+
+    def test_qwen3_moe_works(self):
+        # https://github.com/huggingface/trl/issues/5428
+        # When correctly targeting both up and gate projection, there should be no error (see previous test)
+        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            # target up_proj and gate_proj
+            config = LoraConfig(target_modules=["gate_proj", "up_proj", "down_proj", "score"])
+            get_peft_model(model, config)  # does not raise
