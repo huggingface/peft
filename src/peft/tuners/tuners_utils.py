@@ -665,8 +665,9 @@ class BaseTuner(nn.Module, ABC):
             del self.model.peft_config
 
         # If embeddings have diverged (e.g. after vocab resize), fix config to match actual state.
-        if merge and getattr(self.model, "config", None) is not None:
-            if getattr(self.model.config, "tie_word_embeddings", False):
+        if merge:
+            model_config = self.get_model_config(self.model)
+            if model_config.get("tie_word_embeddings"):
                 try:
                     out_emb = self.model.get_output_embeddings()
                     in_emb = self.model.get_input_embeddings()
