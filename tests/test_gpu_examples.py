@@ -4827,6 +4827,60 @@ class TestFSDPWrap:
         # Avoid raising on custom models since Trainer uses fsdp_auto_wrap_policy automatically for PEFT + FSDP
         fsdp_auto_wrap_policy(SimpleModel())  # does not raise
 
+    @pytest.mark.multi_gpu_tests
+    @require_torch_multi_gpu
+    def test_fsdp_paramwrapper_get_delta_weight(self):
+        """
+        Test that ParamWrapper.get_delta_weight works with FSDP wrapping.
+        
+        This test ensures that FSDP + ParamWrapper works correctly for MoE layers
+        with multiple experts. The get_delta_weight method uses fsdp_summon_full_params_ctx
+        to gather full parameters across GPUs before computing delta weights.
+        
+        See https://github.com/huggingface/peft/issues/3080
+        """
+        from peft.tuners.lora.layer import ParamWrapper
+        from peft.utils.integrations import fsdp_summon_full_params_ctx
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29502"
+
+        # Initialize process group
+        init_process_group(world_size=1, rank=0)
+
+        # Create a simple model with ParamWrapper (simulating MoE with num_experts > 1)
+        base_model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-125m")
+        
+        # Configure LoRA with MoE (num_experts > 1)
+        config = LoraConfig(
+            target_modules=["q_proj"],
+            task_type="CAUSAL_LM",
+            r=8,
+            num_experts=4,  # MoE configuration
+        )
+        model = get_peft_model(base_model, config)
+
+        # Verify that the model has ParamWrapper instances
+        param_wrappers = [m for m in model.modules() if isinstance(m, ParamWrapper)]
+        assert len(param_wrappers) > 0, "Model should have ParamWrapper instances"
+
+        # Wrap with FSDP
+        fsdp_model = FSDP(
+            model,
+            auto_wrap_policy=fsdp_auto_wrap_policy(model),
+            use_orig_params=True,
+            sync_module_states=True,
+        )
+
+        # Test that get_delta_weight works with FSDP wrapping
+        # This should not raise an error when accessing sharded parameters
+        for wrapper in param_wrappers:
+            if "default" in wrapper.lora_A:
+                # This should work without errors due to fsdp_summon_full_params_ctx
+                delta_weight = wrapper.get_delta_weight("default")
+                assert delta_weight is not None
+                break
+
 
 class TestBOFT:
     """

@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 from contextlib import contextmanager
 from typing import Literal, Optional
@@ -43,6 +44,39 @@ def gather_params_ctx(param, modifier_rank: Optional[int] = 0, fwd_module: torch
     import deepspeed
 
     with deepspeed.zero.GatheredParameters(param, modifier_rank=modifier_rank, fwd_module=fwd_module):
+        yield
+    return
+
+
+@contextmanager
+def fsdp_summon_full_params_ctx(*modules: torch.nn.Module):
+    """
+    Context manager to gather full parameters for FSDP-wrapped modules.
+    If the module is not FSDP-wrapped, this is a no-op.
+    
+    Accepts multiple modules (variadic) for consistency with gather_params_ctx.
+    Uses ExitStack to chain contexts since FSDP.summon_full_params only accepts
+    a single module.
+    """
+    # Collect all FSDP-wrapped modules
+    fsdp_modules = []
+    for module in modules:
+        is_fsdp_wrapped = (
+            hasattr(module, "_is_fsdp_managed_module")
+            or module.__class__.__name__ == "FullyShardedDataParallel"
+        )
+        if is_fsdp_wrapped:
+            fsdp_modules.append(module)
+
+    if not fsdp_modules:
+        yield
+        return
+
+    from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
+    with contextlib.ExitStack() as exit_stack:
+        for module in fsdp_modules:
+            exit_stack.enter_context(FSDP.summon_full_params(module))
         yield
     return
 
