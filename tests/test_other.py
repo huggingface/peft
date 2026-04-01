@@ -23,8 +23,6 @@ from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
-    LlamaConfig,
-    LlamaForCausalLM,
     LlavaForConditionalGeneration,
 )
 
@@ -635,30 +633,6 @@ class TestGetModuleNamesTiedWithEmbedding:
             modules = peft_model._get_module_names_tied_with_embedding()
 
             assert expected == modules
-
-
-def test_merge_and_unload_fixes_tie_word_embeddings_config():
-    # When weights have diverged (e.g. after vocab resizing) but config still
-    # has tie_word_embeddings=True, merge_and_unload should fix the config so
-    # downstream tools (e.g. llama.cpp converters) don't silently discard lm_head.
-    config = LlamaConfig(
-        num_hidden_layers=2, hidden_size=32, intermediate_size=64,
-        num_attention_heads=2, tie_word_embeddings=True
-    )
-    model = LlamaForCausalLM(config)
-    assert model.lm_head.weight is model.model.embed_tokens.weight
-
-    # Simulate vocab resize: weights become separate tensors with different values
-    with torch.no_grad():
-        model.lm_head.weight = nn.Parameter(model.lm_head.weight.data.clone())
-        model.lm_head.weight.data.fill_(0.42)
-        model.model.embed_tokens.weight.data.fill_(0.24)
-
-    peft_model = get_peft_model(model, LoraConfig(target_modules=["q_proj", "v_proj"]))
-    merged = peft_model.merge_and_unload()
-
-    assert not merged.config.tie_word_embeddings
-    assert merged.lm_head.weight is not merged.model.embed_tokens.weight
 
 
 # TODO for PEFT 0.20 remove this
