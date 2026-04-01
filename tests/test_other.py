@@ -635,6 +635,28 @@ class TestGetModuleNamesTiedWithEmbedding:
             assert expected == modules
 
 
+
+def test_merge_and_unload_fixes_tie_word_embeddings_config():
+    model = AutoModelForCausalLM.from_pretrained(
+        "trl-internal-testing/tiny-random-LlamaForCausalLM", tie_word_embeddings=True
+    )
+    assert model.config.tie_word_embeddings
+
+    # Simulate vocab resize: clone lm_head to break weight tying, then set different values
+    with torch.no_grad():
+        model.lm_head.weight = nn.Parameter(model.lm_head.weight.data.clone())
+        model.lm_head.weight.data.fill_(0.42)
+        model.model.embed_tokens.weight.data.fill_(0.24)
+
+    peft_model = get_peft_model(model, LoraConfig(target_modules=["q_proj", "v_proj"]))
+
+    with pytest.warns(UserWarning, match="tie_word_embeddings"):
+        merged = peft_model.merge_and_unload()
+
+    assert not merged.config.tie_word_embeddings
+    assert merged.lm_head.weight is not merged.model.embed_tokens.weight
+
+
 # TODO for PEFT 0.20 remove this
 class TestLoftQDeprecation:
     def test_nfquantizer_deprecation(self):
