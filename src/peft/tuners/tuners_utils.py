@@ -664,6 +664,21 @@ class BaseTuner(nn.Module, ABC):
         if hasattr(self.model, "peft_config"):
             del self.model.peft_config
 
+        # If lm_head was a LoRA target, its weights have diverged from embed_tokens after merging.
+        # Fix the config so downstream tools (e.g. llama.cpp converters) don't silently discard lm_head.
+        if merge and getattr(self.model, "config", None) is not None:
+            if getattr(self.model.config, "tie_word_embeddings", False):
+                try:
+                    out_emb = self.model.get_output_embeddings()
+                    in_emb = self.model.get_input_embeddings()
+                    if out_emb is not None and in_emb is not None:
+                        out_w = getattr(out_emb, "weight", None)
+                        in_w = getattr(in_emb, "weight", None)
+                        if out_w is not None and in_w is not None and out_w is not in_w:
+                            self.model.config.tie_word_embeddings = False
+                except NotImplementedError:
+                    pass
+
         return self.model
 
     def merge_and_unload(
