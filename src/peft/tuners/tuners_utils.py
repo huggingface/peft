@@ -676,7 +676,11 @@ class BaseTuner(nn.Module, ABC):
                         in_w = getattr(in_emb, "weight", None)
                         if out_w is not None and in_w is not None and out_w is not in_w:
                             self.model.config.tie_word_embeddings = False
-                except NotImplementedError:
+                            warnings.warn(
+                                "Input and output embeddings are no longer tied after merging. "
+                                "Setting `tie_word_embeddings=False` in the model config."
+                            )
+                except (NotImplementedError, AttributeError):
                     pass
 
         return self.model
