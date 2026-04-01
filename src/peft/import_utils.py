@@ -128,7 +128,7 @@ def is_torchao_available():
     if importlib.util.find_spec("torchao") is None:
         return False
 
-    TORCHAO_MINIMUM_VERSION = packaging.version.parse("0.4.0")
+    TORCHAO_MINIMUM_VERSION = packaging.version.parse("0.16.0")
     try:
         torchao_version = packaging.version.parse(importlib_metadata.version("torchao"))
     except importlib_metadata.PackageNotFoundError:
