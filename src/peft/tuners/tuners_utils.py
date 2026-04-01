@@ -664,8 +664,7 @@ class BaseTuner(nn.Module, ABC):
         if hasattr(self.model, "peft_config"):
             del self.model.peft_config
 
-        # If lm_head was a LoRA target, its weights have diverged from embed_tokens after merging.
-        # Fix the config so downstream tools (e.g. llama.cpp converters) don't silently discard lm_head.
+        # If embeddings have diverged (e.g. after vocab resize), fix config to match actual state.
         if merge and getattr(self.model, "config", None) is not None:
             if getattr(self.model.config, "tie_word_embeddings", False):
                 try:
