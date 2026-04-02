@@ -1059,7 +1059,8 @@ class TestDecoderModels(PeftCommonTester):
                 model, LoraConfig(target_modules=["embed_tokens"], init_lora_weights=False)
             )
 
-            merged = peft_model.merge_and_unload()
+            with pytest.warns(UserWarning, match="Setting.*tie_word_embeddings"):
+                merged = peft_model.merge_and_unload()
 
         assert not merged.config.tie_word_embeddings
         assert merged.lm_head.weight is not merged.model.embed_tokens.weight
