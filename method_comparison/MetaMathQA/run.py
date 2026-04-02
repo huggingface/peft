@@ -119,7 +119,9 @@ def calculate_mean_per_token_loss(model, tokenizer, rows: list[str], batch_size:
         for logit, target, mask in zip(logits, batch["input_ids"], batch["attention_mask"]):
             # calculate loss per token so that the mean is not skewed by sequence length of sample, padding from left
             num_tokens = mask.sum()
-            token_losses = torch.nn.functional.cross_entropy(logit[-num_tokens:], target[-num_tokens:], reduction="none")
+            token_losses = torch.nn.functional.cross_entropy(
+                logit[-num_tokens:], target[-num_tokens:], reduction="none"
+            )
             losses.extend(loss.item() for loss in token_losses)
     return torch.tensor(losses).mean().item()
 
@@ -186,7 +188,6 @@ def train(
 
     if init_kv_cache_prefix is not None:
         initialize_kv_prefix_from_text(model, tokenizer, text=init_kv_cache_prefix)
-
 
     # print this after getting the optimizer, in case it modifies requires_gard
     if hasattr(model, "get_nb_trainable_parameters"):

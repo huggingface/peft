@@ -23,8 +23,9 @@ rendered properly in your Markdown viewer.
 ## Possible Initialization
 
 By default, prefix tuning is randomly initialized. There's also the option to initialize the embeddings (or the
-projection thereof) to be a no-op (initialized to zero). This means that the KV-cache injected prefixes have less
-impact from the beginning and reduces the variance in training performance.
+projection thereof) to be close to a no-op (initialized to zero, it will still shift the probability mass a bit).
+This means that the KV-cache injected prefixes have less impact from the beginning and reduces the variance in training
+performance.
 
 PEFT also provides utilities to initialize a prefix-tuning adapter from an existing KV cache prefix (for example, from
 the first `p` tokens of a prompt/corpus). This is only supported when `prefix_projection=False` (the default), because
@@ -54,7 +55,7 @@ Make sure the text is long enough to produce at least `num_virtual_tokens` token
 As a guideline:
 
 * start with a neutral starting sequence using `initialize_kv_prefix_from_text`, it can be a very short string like
-  "Question:", as long as it is tokenized similarly to how the model is presented text
+  "Question: "
 * if that doesn't help, use a longer sequence with task relevance (i.e. an engineered prompt), giving you more virtual
   tokens to fit but also more steering of the model
 * if it is not possible to use an initialization text or you want to quickly check if prefix tuning is viable at all,

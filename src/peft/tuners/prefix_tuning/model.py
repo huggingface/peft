@@ -72,8 +72,7 @@ class PrefixEncoder(torch.nn.Module):
 
             if init_weights == "zero":
                 torch.nn.init.zeros_(self.transform[-1].weight.data)
-                if self.transform[-1].bias is not None:
-                    torch.nn.init.zeros_(self.transform[-1].bias.data)
+                torch.nn.init.zeros_(self.transform[-1].bias.data)
         else:
             self.embedding = torch.nn.Embedding(num_virtual_tokens, num_layers * 2 * token_dim)
             if init_weights == "zero":

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Literal
 
 from peft.config import PromptLearningConfig
 from peft.utils import PeftType
@@ -31,7 +31,7 @@ class PrefixTuningConfig(PromptLearningConfig):
         prefix_projection (`bool`): Whether to project the prefix embeddings.
     """
 
-    init_weights: Optional[str] = field(
+    init_weights: Literal["zero"] | None = field(
         default=None,
         metadata={
             "help": 'If not set, weights are initialized at random, if set to "zero" the '

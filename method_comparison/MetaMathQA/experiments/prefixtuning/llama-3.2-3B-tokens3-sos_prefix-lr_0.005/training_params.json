@@ -1,6 +1,0 @@
-{
-  "optimizer_kwargs": {
-    "lr": 0.005
-  },
-  "init_kv_cache_prefix": "Question:"
-}
