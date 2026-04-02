@@ -350,10 +350,15 @@ def _convert_peft_config_moe(peft_config, model_type: str) -> None:
     """
     base_model_type = _MODEL_TO_CONVERSION_PATTERN.get(model_type, None)
     if base_model_type is None:
-        return peft_config
+        return
 
-    target_module_mapping = _MOE_TARGET_MODULE_MAPPING[base_model_type]
+    target_module_mapping = _MOE_TARGET_MODULE_MAPPING.get(base_model_type)
+    if not target_module_mapping:
+        return
+
     fused_targets = _MOE_FUSED_TARGETS.get(base_model_type, {})
+    if not fused_targets:
+        return
 
     peft_config.target_parameters = set(peft_config.target_parameters or [])
     peft_config.target_modules = set(peft_config.target_modules or [])
@@ -386,7 +391,7 @@ def _convert_peft_config_moe(peft_config, model_type: str) -> None:
     for new_name, required_old_targets in fused_targets.items():
         present_targets = matched_targets.get(new_name, set())
         if 0 < len(present_targets) < len(required_old_targets):
-            missing = ", ".join(sorted(required_old_targets - present_targets))
+            missing = ", ".join(sorted(set(required_old_targets) - present_targets))
             present = ", ".join(sorted(present_targets))
             raise ValueError(
                 f"Cannot convert PEFT target(s) {present} without also targeting {missing} because they are fused "
