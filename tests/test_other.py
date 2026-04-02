@@ -635,7 +635,6 @@ class TestGetModuleNamesTiedWithEmbedding:
             assert expected == modules
 
 
-
 # TODO for PEFT 0.20 remove this
 class TestLoftQDeprecation:
     def test_nfquantizer_deprecation(self):
