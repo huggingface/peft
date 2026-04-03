@@ -41,6 +41,7 @@ from peft import (
     RoadConfig,
     ShiraConfig,
     TaskType,
+    TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -219,6 +220,13 @@ ALL_CONFIGS = [
             "d_initial": 0.1,
             "save_projection": True,
             "bias": "none",
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        TinyLoraConfig,
+        {
+            "target_modules": None,
             "task_type": "SEQ_2_SEQ_LM",
         },
     ),
