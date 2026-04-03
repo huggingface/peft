@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # AdaMSS
 
-[AdaMSS](https://huggingface.co/papers/2501.02756) (AdaMSS: Adaptive Multi-Subspace Approach for Parameter-Efficient Fine-Tuning) is a parameter-efficient fine-tuning method that decomposes weight matrices using SVD and clusters the decomposed space into multiple trainable subspaces. Each subspace learns independent low-rank updates while the original weights remain frozen. AdaMSS also supports Adaptive Subspace Allocation (ASA), which dynamically prunes less important subspaces during training based on gradient information.
+[AdaMSS](https://openreview.net/forum?id=8ZdWmpYxT0) (AdaMSS: Adaptive Multi-Subspace Approach for Parameter-Efficient Fine-Tuning) is a parameter-efficient fine-tuning method that decomposes weight matrices using SVD and clusters the decomposed space into multiple trainable subspaces. Each subspace learns independent low-rank updates while the original weights remain frozen. AdaMSS also supports Adaptive Subspace Allocation (ASA), which dynamically prunes less important subspaces during training based on gradient information.
 
 The abstract from the paper is:
 
