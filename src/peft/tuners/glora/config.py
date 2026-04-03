@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils.peft_types import PeftType
@@ -65,7 +65,7 @@ class GloraConfig(PeftConfig):
         },
     )
 
-    config_A_B: str = field(
+    config_A_B: Literal["lora", "vector", "constant", "none"] = field(
         default="lora",
         metadata={
             "help": (
@@ -79,7 +79,7 @@ class GloraConfig(PeftConfig):
         },
     )
 
-    config_C: str = field(
+    config_C: Literal["lora", "vector", "none"] = field(
         default="lora",
         metadata={
             "help": (
@@ -92,7 +92,7 @@ class GloraConfig(PeftConfig):
         },
     )
 
-    config_D_E: str = field(
+    config_D_E: Literal["vector", "constant", "none"] = field(
         default="constant",
         metadata={
             "help": (
@@ -144,10 +144,10 @@ class GloraConfig(PeftConfig):
         self.peft_type = PeftType.GLORA
 
         # Validate and process each configuration
-        self.config_A_B = self._validate_and_process_config(self.config_A_B, self._VALID_A_B_CONFIGS, "config_A_B")
+        self.config_A_B = self._validate_and_process_config(self.config_A_B, self._VALID_A_B_CONFIGS, "config_A_B")  # type: ignore[assignment]
 
-        self.config_C = self._validate_and_process_config(self.config_C, self._VALID_C_CONFIGS, "config_C")
+        self.config_C = self._validate_and_process_config(self.config_C, self._VALID_C_CONFIGS, "config_C")  # type: ignore[assignment]
 
-        self.config_D_E = self._validate_and_process_config(
+        self.config_D_E = self._validate_and_process_config(  # type: ignore[assignment]
             self.config_D_E, self._VALID_D_E_CONFIGS, "config_D_E", allow_lora=False
         )
