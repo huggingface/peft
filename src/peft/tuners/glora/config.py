@@ -24,12 +24,30 @@ class GloraConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`GloraModel`].
 
+    Glora modifies a frozen linear layer W0 as:
+        W_eff = W0 + W0 * A + B
+        b_eff = b0 + b0 * D + E + W0 @ C
+
+    Each matrix (A, B, C, D, E) can be parameterized independently. The config values control
+    how many parameters are used and what shapes they can express:
+
+    - `lora`: Low-rank decomposition `Xd @ Xu` with shapes `(out, r)` and `(r, in)`. Uses
+      `r * (out + in)` parameters and can express any rank-r correction. Like standard LoRA.
+    - `vector`: A single column vector of shape `(out, 1)`, broadcast across the full matrix.
+      Uses `out` parameters; only per-output-channel scaling or shifts.
+    - `constant`: A single scalar shared across all elements. Uses 1 parameter; most constrained.
+    - `none`: Zeros, no trainable parameters. Effectively disables this path.
+
     Args:
-        r (`int`): Glora attention dimension (rank of the LoRA matrices).
+        r (`int`): Rank of the low-rank decomposition used when a config is set to `lora`.
         target_modules (`Optional[Union[List[str], str]]`): The names of the modules to apply Glora to.
-        config_A_B (`str`): Configuration for A and B matrices. Valid values: 'LoRA', 'vector', 'constant', 'none'.
-        config_C (`str`): Configuration for C matrix. Valid values: 'LoRA', 'vector', 'none'.
-        config_D_E (`str`): Configuration for D and E matrices. Valid values: 'constant', 'none', 'vector'.
+        config_A_B (`str`): Parameterization for the A and B matrices (weight multiplicative and additive
+            corrections). Valid values: `lora`, `vector`, `constant`, `none`.
+        config_C (`str`): Parameterization for the C matrix (weight-to-bias coupling: b += W0 @ C).
+            Valid values: `lora`, `vector`, `none`.
+        config_D_E (`str`): Parameterization for the D and E scalars (bias multiplicative and additive
+            corrections). Does not support `lora` since D and E are bias-sized vectors, not matrices.
+            Valid values: `vector`, `constant`, `none`.
     """
 
     _VALID_A_B_CONFIGS = {"lora", "vector", "constant", "none"}
@@ -50,25 +68,41 @@ class GloraConfig(PeftConfig):
     config_A_B: str = field(
         default="lora",
         metadata={
-            "help": "Configuration for A and B matrices in Glora."
-            f"Valid values: {', '.join(_VALID_A_B_CONFIGS)}. "
-            "For lora, it will be post-processed to lora_<rank>."
+            "help": (
+                "Parameterization for A and B (weight multiplicative and additive corrections: W_eff = W0 + W0*A + B). "
+                "'lora': low-rank Xd@Xu (out x r and r x in), r*(out+in) params, most expressive. "
+                "'vector': per-output-channel scalar (out params). "
+                "'constant': single scalar (1 param). "
+                "'none': disabled (0 params). "
+                f"Valid values: {', '.join(sorted(_VALID_A_B_CONFIGS))}. 'lora' is post-processed to lora_<rank>."
+            )
         },
     )
 
     config_C: str = field(
         default="lora",
         metadata={
-            "help": "Configuration for C matrix in Glora."
-            f"Valid values: {', '.join(_VALID_C_CONFIGS)}. "
-            "For lora, it will be post-processed to lora_<rank>."
+            "help": (
+                "Parameterization for C (weight-to-bias coupling: b += W0 @ C). "
+                "'lora': low-rank column Xd@Xu (in x r and r x 1), couples bias to a rank-r projection of W0. "
+                "'vector': single (in x 1) column, couples each bias element to a weighted sum of W0 rows. "
+                "'none': disabled (0 params). "
+                f"Valid values: {', '.join(sorted(_VALID_C_CONFIGS))}. 'lora' is post-processed to lora_<rank>."
+            )
         },
     )
 
     config_D_E: str = field(
         default="constant",
         metadata={
-            "help": f"Configuration for D and E matrices in Glora. Valid values: {', '.join(_VALID_D_E_CONFIGS)}."
+            "help": (
+                "Parameterization for D and E (bias multiplicative and additive corrections: b_eff = b0 + b0*D + E). "
+                "'vector': per-output-channel value (out params). "
+                "'constant': single scalar shared across all bias elements (1 param). "
+                "'none': disabled (0 params). "
+                "Does not support 'lora' since D and E are bias-length vectors, not matrices. "
+                f"Valid values: {', '.join(sorted(_VALID_D_E_CONFIGS))}."
+            )
         },
     )
 
