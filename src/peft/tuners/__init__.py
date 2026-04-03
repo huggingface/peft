@@ -21,6 +21,7 @@ from .cpt import CPTConfig, CPTEmbedding
 from .delora import DeloraConfig, DeloraModel
 from .fourierft import FourierFTConfig, FourierFTModel
 from .gralora import GraloraConfig, GraloraModel
+from .hira import HiraConfig,HiraModel
 from .hra import HRAConfig, HRAModel
 from .ia3 import IA3Config, IA3Model
 from .lily import LilyConfig, LilyModel
@@ -88,6 +89,8 @@ __all__ = [
     "FourierFTModel",
     "GraloraConfig",
     "GraloraModel",
+    "HiraConfig",
+    "HiraModel",
     "HRAConfig",
     "HRAModel",
     "IA3Config",
