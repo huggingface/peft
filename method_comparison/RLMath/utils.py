@@ -83,7 +83,9 @@ def load_train_config(exp_dir: str) -> RLTrainConfig:
             override = json.load(f)
         base.update(override)
 
-    return RLTrainConfig(**base)
+    valid_fields = {f.name for f in RLTrainConfig.__dataclass_fields__.values()}
+    filtered = {k: v for k, v in base.items() if k in valid_fields}
+    return RLTrainConfig(**filtered)
 
 
 def get_peft_branch() -> str:

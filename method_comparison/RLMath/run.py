@@ -77,27 +77,40 @@ def evaluate_pass_at_1(
     tokenizer: AutoTokenizer,
     dataset,
     max_completion_length: int,
+    batch_size: int = 8,
 ) -> float:
     correct = 0
     total = 0
 
-    for row in dataset:
-        inputs = tokenizer(row["prompt"], return_tensors="pt").to(model.device)
+    tokenizer.padding_side = "left"
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    prompts = [row["prompt"] for row in dataset]
+    ground_truths = [row["ground_truth"] for row in dataset]
+
+    for i in range(0, len(prompts), batch_size):
+        batch_prompts = prompts[i : i + batch_size]
+        batch_gts = ground_truths[i : i + batch_size]
+
+        inputs = tokenizer(batch_prompts, return_tensors="pt", padding=True).to(model.device)
         outputs = model.generate(
             **inputs,
             do_sample=False,
             max_new_tokens=max_completion_length,
             pad_token_id=tokenizer.pad_token_id,
         )
-        completion = tokenizer.decode(outputs[0][inputs["input_ids"].shape[-1] :], skip_special_tokens=True)
 
-        try:
-            pred = extract_boxed(completion)
-            is_correct = safe_grade(pred, row["ground_truth"])
-        except ValueError:
-            is_correct = False
-        correct += int(is_correct)
-        total += 1
+        for j, (output, gt) in enumerate(zip(outputs, batch_gts)):
+            prompt_len = inputs["input_ids"][j].ne(tokenizer.pad_token_id).sum()
+            completion = tokenizer.decode(output[prompt_len:], skip_special_tokens=True)
+            try:
+                pred = extract_boxed(completion)
+                is_correct = safe_grade(pred, gt)
+            except ValueError:
+                is_correct = False
+            correct += int(is_correct)
+            total += 1
 
     return correct / max(total, 1)
 
