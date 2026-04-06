@@ -1,7 +1,7 @@
 {
   "run_info": {
-    "created_at": "2026-04-05T20:54:25.809969+00:00",
-    "total_time": 29.550274739041924,
+    "created_at": "2026-04-06T09:13:22.357940+00:00",
+    "total_time": 3.9529151059687138,
     "experiment_name": "gralora/grpo-qwen35-4b-gsm8k-r4",
     "peft_branch": "lora-comparison",
     "train_config": {
@@ -77,8 +77,8 @@
     "train_completed": false,
     "train_time": null,
     "metrics": [],
-    "last_update_at": "2026-04-05T20:54:55.397941+00:00",
-    "error": "The server socket has failed to listen on any local network address. port: 29500, useIpv6: false, code: -98, name: EADDRINUSE, message: address already in use"
+    "last_update_at": "2026-04-06T09:13:26.344624+00:00",
+    "error": "Qwen/Qwen3.5-4B does not appear to have a file named model.safetensors-00001-of-00002.safetensors. Checkout 'https://huggingface.co/Qwen/Qwen3.5-4B/tree/main' for available files."
   },
   "rl_eval_info": {},
   "meta_info": {
