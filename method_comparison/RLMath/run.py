@@ -232,16 +232,41 @@ def _load_eval_model(
     torch_dtype = _resolve_torch_dtype(dtype_name)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     if peft_cfg is None:
+        # Load the trained model.  For composite architectures (e.g. Qwen3.5)
+        # the checkpoint may use different key names, so load base model and
+        # copy trained weights with key remapping if needed.
+        import safetensors.torch as st
+
+        ckpt_file = os.path.join(checkpoint_dir, "model.safetensors")
         model = AutoModelForCausalLM.from_pretrained(
-            checkpoint_dir, torch_dtype=torch_dtype, device_map=device
+            model_id, torch_dtype=torch_dtype, device_map=device
         )
+        if os.path.exists(ckpt_file):
+            trained = st.load_file(ckpt_file)
+            model_sd = model.state_dict()
+            # Build a lookup that strips all "language_model." prefixes from ckpt keys
+            stripped = {}
+            for ck, cv in trained.items():
+                sk = ck
+                while ".language_model." in sk:
+                    sk = sk.replace(".language_model.", ".", 1)
+                stripped[sk] = cv
+            loaded = 0
+            for k in model_sd:
+                if k in stripped:
+                    model_sd[k] = stripped[k]
+                    loaded += 1
+            model.load_state_dict(model_sd)
     else:
         _remap_adapter_keys(checkpoint_dir)
         base_model = AutoModelForCausalLM.from_pretrained(
             model_id, torch_dtype=torch_dtype, device_map=device
         )
         model = PeftModel.from_pretrained(base_model, checkpoint_dir)
-        model = model.merge_and_unload()
+        try:
+            model = model.merge_and_unload()
+        except NotImplementedError:
+            pass  # Some adapters (e.g. LILY) don't support merge; eval with adapter active
     model.eval()
     return model
 

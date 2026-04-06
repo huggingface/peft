@@ -1,0 +1,5 @@
+{
+  "base_model_name_or_path": "Qwen/Qwen3.5-4B",
+  "peft_type": "TRAINABLE_TOKENS",
+  "task_type": "CAUSAL_LM"
+}

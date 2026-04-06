@@ -30,7 +30,7 @@
   "vllm_enable_sleep_mode": true,
   "gradient_checkpointing": true,
   "train_subset_size": 3000,
-  "eval_subset_size": 50,
+  "eval_subset_size": 500,
   "save_steps": 0,
   "save_total_limit": 1,
   "logging_steps": 5,

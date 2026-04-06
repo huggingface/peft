@@ -1,0 +1,6 @@
+{
+  "model_id": "meta-llama/Llama-3.2-1B-Instruct",
+  "save_checkpoint": true,
+  "vllm_gpu_memory_utilization": 0.4,
+  "vllm_max_model_length": 1536
+}
