@@ -54,7 +54,7 @@ from utils import (
 )
 
 from data import get_train_valid_test_datasets, get_wiki_small
-from peft import AdaLoraConfig, AdamssConfig, PeftConfig
+from peft import AdaLoraConfig, AdamssConfig, PeftConfig, initialize_kv_prefix_from_text
 from peft.utils import CONFIG_NAME, infer_device
 
 
@@ -119,7 +119,9 @@ def calculate_mean_per_token_loss(model, tokenizer, rows: list[str], batch_size:
         for logit, target, mask in zip(logits, batch["input_ids"], batch["attention_mask"]):
             # calculate loss per token so that the mean is not skewed by sequence length of sample, padding from left
             num_tokens = mask.sum()
-            token_losses = torch.nn.functional.cross_entropy(logit[-num_tokens:], target[-num_tokens:], reduction="none")
+            token_losses = torch.nn.functional.cross_entropy(
+                logit[-num_tokens:], target[-num_tokens:], reduction="none"
+            )
             losses.extend(loss.item() for loss in token_losses)
     return torch.tensor(losses).mean().item()
 
@@ -156,6 +158,7 @@ def train(
     lr_scheduler_arg: Optional[Literal["cosine"]],
     use_amp: bool,
     is_adalora: bool,
+    init_kv_cache_prefix: Optional[str],
     is_adamss: bool,
 ) -> TrainResult:
     accelerator_memory_allocated_log = []
@@ -183,6 +186,10 @@ def train(
         lr_scheduler_arg=lr_scheduler_arg,
         **optimizer_kwargs,
     )
+
+    if init_kv_cache_prefix is not None:
+        initialize_kv_prefix_from_text(model, tokenizer, text=init_kv_cache_prefix)
+
     # print this after getting the optimizer, in case it modifies requires_gard
     if hasattr(model, "get_nb_trainable_parameters"):
         num_trainable_params, num_params = model.get_nb_trainable_parameters()
@@ -454,6 +461,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         lr_scheduler_arg=train_config.lr_scheduler,
         use_amp=train_config.use_amp,
         is_adalora=isinstance(peft_config, AdaLoraConfig),
+        init_kv_cache_prefix=train_config.init_kv_cache_prefix,
         is_adamss=isinstance(peft_config, AdamssConfig),
     )
 

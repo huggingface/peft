@@ -169,6 +169,14 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PrefixTuningConfig,
+        {
+            "num_virtual_tokens": 10,
+            "task_type": "SEQ_2_SEQ_LM",
+            "init_weights": "zero",
+        },
+    ),
+    (
         PromptEncoderConfig,
         {
             "num_virtual_tokens": 10,
