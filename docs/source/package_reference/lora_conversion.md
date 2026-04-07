@@ -61,7 +61,7 @@ set_peft_model_state_dict(lora_model, state_dict)
 
 ### Dynamic LoRA rank
 
-In the examples above, we used a fixed LoRA rank for conversion. However, it is conceivable that some layers don't require a high rank to be accurately converted, while other layers require a higher rank. To accomodate this, PEFT offers the option to pass a float between 0 and 1 as the `rank` argument. Let's say you pass `rank=0.5`. This means that for each layer, the rank for the LoRA adapter is chosen such that the LoRA adapter explains 50% of the variance in weight introduced by original adapter. In more technical terms, under the hood we perform a [Singular Value Decomposition](https://en.wikipedia.org/wiki/Singular_value_decomposition) on the weight contribution of the adapter and then take the top singular values that, when normalized, sum up to the passed value.
+In the examples above, we used a fixed LoRA rank for conversion. However, it is conceivable that some layers don't require a high rank to be accurately converted, while other layers require a higher rank. To accommodate this, PEFT offers the option to pass a float between 0 and 1 as the `rank` argument. Let's say you pass `rank=0.5`. This means that for each layer, the rank for the LoRA adapter is chosen such that the LoRA adapter explains 50% of the variance in weight introduced by original adapter. In more technical terms, under the hood we perform a [Singular Value Decomposition](https://en.wikipedia.org/wiki/Singular_value_decomposition) on the weight contribution of the adapter and then take the top singular values that, when normalized, sum up to the passed value.
 
 ```python
 # set a dynamic rank by passing a float
@@ -76,6 +76,15 @@ print(lora_config.rank_pattern)
 
 Using this type of dynamic LoRA rank can be useful if the contribution of the different layers varies a lot. The disadvantage is that it could mean that some layers will have a very high LoRA rank, which can lead to memory spikes. Please test what works best for your use case.
 
+### Compiling the model
+
+For large models, doing the conversion may take some time; for instance each PEFT module has to go through an SVD computation. By passing `compile_kwargs` to [`save_as_lora`] or [`convert_to_lora`], you can apply [`torch.compile`](https://docs.pytorch.org/docs/stable/generated/torch.compile.html) to the conversion function and potentially speed up the process. The `compile_kwargs` are a dict of keyword arguments that are passed to `torch.compile` (empty dict also works). Below is an example:
+
+```python
+compile_kwargs = {"dynamic": True, "mode": "max-autotune-no-cudagraphs", "fullgraph": True}
+save_as_lora(output_path, model, rank=rank, compile_kwargs=compile_kwargs)
+```
+
 ### LoRA to LoRA conversion
 
 It is also possible to convert a LoRA adapter into another LoRA adapter. Why would you want to do that? There is one reason, namely if you want to reduce the rank of the LoRA adapter. If, after training, you want to shrink the LoRA adapter, use [`save_as_lora`] or [`convert_to_lora`] and pass a smaller rank. This will give you a new LoRA adapter that has a smaller memory and storage footprint.
@@ -86,7 +95,7 @@ It is also possible to convert a LoRA adapter into another LoRA adapter. Why wou
 
 Of course, converting one PEFT adapter into another adapter is a lossy process. The new adapter will most likely not perform as well as the initial adapter. Therefore, it is highly advised to **evaluate the converted LoRA adapter**. This way, you can make sure that the converted adapter performs well enough for your use case. The general rule applies that the higher the rank of the LoRA adaper, the better it will approximate your initial adapter. This means that the converted LoRA adapter may require more parameters than the original adapter to achieve a similar performanace.
 
-To give an example, here are some numbers that were derived on the [PEFT MetaMathQA benchmark](https://github.com/huggingface/peft/tree/main/method_comparison/MetaMathQA). For this, a [LoHa](https://huggingface.co/docs/peft/package_reference/loha) was used to fine-tune `meta-llama/Llama-3.2-3B` on MetaMathQA and evaluated on GSM8K. The initial LoKr adapter had rank 32, resulting in 18,350,080 trainable parameters, and a test accuracy of 41.85%. Evaluation required 12.25 GB of memory. The checkpoint was converted into LoRA with different values for the `rank`. The resulting outcome is:
+To give an example, here are some numbers that were derived on the [PEFT MetaMathQA benchmark](https://github.com/huggingface/peft/tree/main/method_comparison/MetaMathQA). For this, a [LoHa](https://huggingface.co/docs/peft/package_reference/loha) adapter was used to fine-tune `meta-llama/Llama-3.2-3B` on MetaMathQA and evaluated on GSM8K. The initial LoKr adapter had rank 32, resulting in 18,350,080 trainable parameters and a test accuracy of 41.85%. Evaluation required 12.25 GB of memory. The checkpoint was converted into LoRA with different values for the `rank`. The resulting outcome is:
 
 | rank | trainable parameters | test accuracy (%) | accuracy change | memory reserved (max, GB) | memory increase |
 |------|---------------------:|------------------:|----------------:|--------------------------:|----------------:|
@@ -131,7 +140,7 @@ There are some limitations to the LoRA conversion. As mentioned above, a reducti
 - Right now, only adapters applied to linear layers can be converted.
 - Not all PEFT methods currently support LoRA conversion.
 
-If there is a lot of demand to extend LoRA conversion, please let us know and we will make it work with more layer types and PEFT methods.
+If there is a lot of demand to extend LoRA conversion, please let us know by creating a [GitHub discussion](https://github.com/huggingface/peft/discussions) and we will make it work with more layer types and PEFT methods.
 
 ## API
 

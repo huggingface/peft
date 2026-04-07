@@ -30,7 +30,7 @@ from transformers import (
 from peft import CPTConfig, TaskType, get_peft_model
 
 
-TEMPLATE = {"input": "input: {}", "intra_seperator": " ", "output": "output: {}", "inter_seperator": "\n"}
+TEMPLATE = {"input": "input: {}", "intra_separator": " ", "output": "output: {}", "inter_separator": "\n"}
 
 MODEL_NAME = "peft-internal-testing/tiny-random-OPTForCausalLM"
 MAX_INPUT_LENGTH = 1024
@@ -143,7 +143,7 @@ def dataset(data, tokenizer):
             self.attention_mask = []
             self.input_ids = []
             self.input_type_mask = []
-            self.inter_seperator_ids = self._get_input_ids(template["inter_seperator"])
+            self.inter_separator_ids = self._get_input_ids(template["inter_separator"])
 
             for sample_i in tqdm(samples):
                 input_text, label = sample_i["sentence"], sample_i["label_text"]
@@ -162,7 +162,7 @@ def dataset(data, tokenizer):
             input_tokenized = self._get_input_ids(input_text)
             input_template_tokenized_part2 = self._get_input_ids(input_template_part_2_text)
 
-            sep_tokenized = self._get_input_ids(self.template["intra_seperator"])
+            sep_tokenized = self._get_input_ids(self.template["intra_separator"])
 
             label_template_part_1, label_template_part_2 = self.template["output"].split("{}")
             label_template_part1_tokenized = self._get_input_ids(label_template_part_1)

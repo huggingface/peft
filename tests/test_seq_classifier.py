@@ -28,6 +28,7 @@ from peft import (
     LoraConfig,
     MissConfig,
     OFTConfig,
+    PeanutConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
@@ -35,6 +36,7 @@ from peft import (
     PsoftConfig,
     RoadConfig,
     ShiraConfig,
+    TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -189,6 +191,16 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PeanutConfig,
+        {
+            "r": 8,
+            "depth": 1,
+            "act_fn": "relu",
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+        },
+    ),
+    (
         RoadConfig,
         {
             "task_type": "SEQ_CLS",
@@ -226,6 +238,13 @@ ALL_CONFIGS = [
             "d_initial": 0.1,
             "save_projection": True,
             "bias": "none",
+        },
+    ),
+    (
+        TinyLoraConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
         },
     ),
     (

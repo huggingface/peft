@@ -589,11 +589,21 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             **kwargs,
         )
 
+        # Filter out shared parameters that are duplicated at layer level:
         # 1. Remove VB-LoRA vector bank, since it's a shared parameter set via the VBLoRAModel
         # 2. Remove the prompt encoder, as it does not need to be part of the checkpoint
-        missing_keys = [
-            k for k in load_result.missing_keys if "vblora_vector_bank" not in k and "prompt_encoder" not in k
-        ]
+        # 3. Remove TinyLoRA layer-level tinylora_v references (they share with model-level tinylora_v)
+        def is_expected_missing_key(k):
+            if "vblora_vector_bank" in k:
+                return False
+            if "prompt_encoder" in k:
+                return False
+            # TinyLoRA: layer-level tinylora_v is a reference to model-level, exclude from warning
+            if ".tinylora_v." in k:
+                return False
+            return True
+
+        missing_keys = [k for k in load_result.missing_keys if is_expected_missing_key(k)]
         if missing_keys:
             # Let's warn here since (in contrast to load_adapter) we don't return the load result, so it could be quite
             # difficult for users to even notice that something might have gone wrong here. As we filter out non PEFT
@@ -1054,12 +1064,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         try:
             if peft_config.is_prompt_learning:
                 self.peft_config[adapter_name] = peft_config
-                if hasattr(self.config, "to_dict"):
-                    dict_config = self.config.to_dict()
-                else:
-                    dict_config = self.config
-
-                peft_config = _prepare_prompt_learning_config(peft_config, dict_config)
+                peft_config = _prepare_prompt_learning_config(peft_config, self.config)
                 self._setup_prompt_encoder(adapter_name)
                 set_additional_trainable_modules(
                     model=self.base_model,
@@ -1415,6 +1420,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # Filter missing keys specific to the current adapter and tuner prefix.
         for key in load_result.missing_keys:
             if tuner_prefix in key and adapter_name in key:
+                # TinyLoRA: layer-level tinylora_v is a reference to model-level, skip it
+                if ".tinylora_v." in key:
+                    continue
                 adapter_missing_keys.append(key)
 
         load_result.missing_keys.clear()
@@ -2524,12 +2532,14 @@ class PeftModelForSeq2SeqLM(PeftModel):
             past_key_values = model_kwargs.get("past_key_values", None)
             cache_position = model_kwargs.get("cache_position", [None])
             # check prefill stage
-            is_prefill_stage = (
-                # old cache implementation
-                (past_key_values is None)
-                # new cache implementation
-                or (isinstance(past_key_values, Cache) and (cache_position[0] == 0))
-            )
+            is_prefill_stage = kwargs.get("is_first_iteration")
+            if is_prefill_stage is None:  # transformers < v5
+                is_prefill_stage = (
+                    # old cache implementation
+                    (past_key_values is None)
+                    # new cache implementation
+                    or (isinstance(past_key_values, Cache) and (past_key_values.get_seq_length() == 0))
+                )
             if is_prefill_stage:
                 batch_size = model_kwargs["decoder_input_ids"].shape[0]
                 new_past_key_values = self.get_prompt(batch_size)

@@ -25,6 +25,8 @@ is_transformers_ge_v5 = packaging.version.parse(transformers.__version__) >= pac
 
 is_transformers_ge_v5_1_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.1.0")
 
+is_transformers_ge_v5_4_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.4.0")
+
 is_transformers_le_4_53 = packaging.version.parse(transformers.__version__) < packaging.version.parse("4.54.0.dev0")
 
 
@@ -51,7 +53,16 @@ def is_gptqmodel_available():
         version_gptqmodel = packaging.version.parse(importlib_metadata.version("gptqmodel"))
         if GPTQMODEL_MINIMUM_VERSION <= version_gptqmodel:
             if is_optimum_available():
-                version_optimum = packaging.version.parse(importlib_metadata.version("optimum"))
+                try:
+                    version_optimum = packaging.version.parse(importlib_metadata.version("optimum"))
+                except importlib_metadata.PackageNotFoundError:
+                    # Same idea as in diffusers:
+                    # https://github.com/huggingface/diffusers/blob/9f06a0d1a4a998ac6a463c5be728c892f95320a8/src/diffusers/utils/import_utils.py#L351-L357
+                    # It's not clear under what circumstances `importlib_metadata.version("optimum")` can raise an error
+                    # even though `importlib.util.find_spec("optimum") is not None` but it has been observed, so adding
+                    # this for precaution. If we cannot detect it, we just optimistically assume it's high enough.
+                    return True
+
                 if OPTIMUM_MINIMUM_VERSION <= version_optimum:
                     return True
                 else:
@@ -117,7 +128,7 @@ def is_torchao_available():
     if importlib.util.find_spec("torchao") is None:
         return False
 
-    TORCHAO_MINIMUM_VERSION = packaging.version.parse("0.4.0")
+    TORCHAO_MINIMUM_VERSION = packaging.version.parse("0.16.0")
     try:
         torchao_version = packaging.version.parse(importlib_metadata.version("torchao"))
     except importlib_metadata.PackageNotFoundError:
@@ -164,3 +175,13 @@ def is_diffusers_available():
 @lru_cache
 def is_te_available():
     return importlib.util.find_spec("transformer_engine") is not None
+
+
+@lru_cache
+def is_te_pytorch_available():
+    if not is_te_available():
+        return False
+
+    import transformer_engine
+
+    return hasattr(transformer_engine, "pytorch")

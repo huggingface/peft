@@ -17,14 +17,14 @@ from typing import Any, Optional
 
 import torch
 
-from peft.import_utils import is_te_available
+from peft.import_utils import is_te_pytorch_available
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 
 from .config import LoraConfig
 
 
-if is_te_available():
+if is_te_pytorch_available():
     import transformer_engine as te
 
 
@@ -122,7 +122,7 @@ def dispatch_transformer_engine(
     else:
         target_base_layer = target
 
-    if is_te_available() and isinstance(
+    if is_te_pytorch_available() and isinstance(
         target_base_layer, (te.pytorch.LayerNormLinear, te.pytorch.LayerNormMLP, te.pytorch.Linear)
     ):
         new_module = TeLinear(target, adapter_name, config=config, **kwargs)
