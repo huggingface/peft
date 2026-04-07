@@ -6337,10 +6337,10 @@ class TestLoraTensorParallel:
     def test_multiple_adapters(self):
         self._spawn(_test_multiple_adapters, port_offset=4)
 
-    def test_inject_adapter_forward(self, tmp_path):
-        self._spawn(_test_inject_adapter_forward, tmp_path, port_offset=5)
+    def test_load_adapter_forward(self, tmp_path):
+        self._spawn(_test_load_adapter_forward, tmp_path, port_offset=5)
 
-    def test_inject_adapter_save(self, tmp_path):
+    def test_load_adapter_save(self, tmp_path):
         tmp_dir_reference = tmp_path / "reference"
         tmp_dir_tp = tmp_path / "tp"
-        self._spawn(_test_inject_adapter_save, tmp_dir_reference, tmp_dir_tp, port_offset=6)
+        self._spawn(_test_load_adapter_save, tmp_dir_reference, tmp_dir_tp, port_offset=6)
