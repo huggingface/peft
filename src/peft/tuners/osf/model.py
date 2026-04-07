@@ -50,10 +50,13 @@ class OSFModel(BaseTuner):
 
     def _prepare_adapter_config(self, peft_config, model_config):
         # If target_modules is unspecified, try mapping; else fall back to all linear layers for custom models
-        if getattr(peft_config, "target_modules", None) is None:
-            model_type = model_config.get("model_type")
-            if model_type in self.target_module_mapping:
-                peft_config.target_modules = set(self.target_module_mapping[model_type])
+        if peft_config.target_modules is None:
+            target_modules = self.target_module_mapping.get(model_config["model_type"])
+            if target_modules is not None:
+                if isinstance(target_modules, str):
+                    peft_config.target_modules = target_modules
+                else:
+                    peft_config.target_modules = set(target_modules)
             else:
                 from peft.utils.constants import INCLUDE_LINEAR_LAYERS_SHORTHAND
 

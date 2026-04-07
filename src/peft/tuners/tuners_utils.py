@@ -384,7 +384,10 @@ class BaseTuner(nn.Module, ABC):
             target_modules = self.target_module_mapping.get(model_config["model_type"])
             if target_modules is None:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = set(target_modules)
+            if isinstance(target_modules, str):
+                peft_config.target_modules = target_modules
+            else:
+                peft_config.target_modules = set(target_modules)
         return peft_config
 
     def _prepare_model(self, peft_config: PeftConfig, model: nn.Module):

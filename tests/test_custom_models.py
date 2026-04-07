@@ -23,6 +23,7 @@ import tempfile
 import time
 from contextlib import contextmanager
 from functools import partial
+from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -6561,3 +6562,62 @@ class TestDynamicDispatch:
         # we should still get a warning message
         msg = "Unsupported layer type '<class 'torch.nn.modules.rnn.LSTM'>' encountered, proceed at your own risk."
         assert str(recwarn.list[-1].message) == msg
+
+
+class TestDefaultTargetModules:
+    """Tests that the default target_modules work as expected
+
+    Here we only test LoRA since the other PEFT methods share the same code path. Testing all PEFT methods would thus
+    be wasteful and it would require some effort to patch the correct target module mapping.
+    """
+
+    def test_default_target_modules_not_set_raises(self):
+        # With a custom model and without explicit target_modules, raise an error
+        model = MLP()
+        config = LoraConfig()  # no target modules
+        with pytest.raises(ValueError, match="Please specify `target_modules`"):
+            get_peft_model(model, config)
+
+    def test_default_target_modules_not_set_model_type_set_raises(self):
+        # With a transformers-like model but without default target modules, raise an error
+        model = MLP()
+        # create a mock model_config that mimics transformers
+        model_config = MagicMock(return_value="foobar")
+        model_config.to_dict.return_value = {"model_type": "foobar"}
+        model.config = model_config
+
+        peft_config = LoraConfig()  # no target modules
+        with pytest.raises(ValueError, match="Please specify `target_modules`"):
+            get_peft_model(model, peft_config)
+
+    def test_default_target_modules_list_of_str(self, monkeypatch):
+        # With a transformers-like model and with default target modules as list of str, it works
+        from peft.tuners.lora.model import TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING
+
+        model = MLP()
+        # create a mock model_config that mimics transformers
+        model_config = MagicMock()
+        model_config.to_dict.return_value = {"model_type": "foobar"}
+        model.config = model_config
+        monkeypatch.setitem(TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING, "foobar", ["lin0"])
+
+        peft_config = LoraConfig()  # no target modules
+        model = get_peft_model(model, peft_config)
+        assert model.targeted_module_names == ["lin0"]
+        assert model.peft_config["default"].target_modules == {"lin0"}
+
+    def test_default_target_modules_str(self, monkeypatch):
+        # With a transformers-like model and with default target modules as a str, it works
+        from peft.tuners.lora.model import TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING
+
+        model = MLP()
+        # create a mock model_config that mimics transformers
+        model_config = MagicMock()
+        model_config.to_dict.return_value = {"model_type": "foobar"}
+        model.config = model_config
+        monkeypatch.setitem(TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING, "foobar", "lin0")
+
+        peft_config = LoraConfig()  # no target modules
+        model = get_peft_model(model, peft_config)
+        assert model.targeted_module_names == ["lin0"]
+        assert model.peft_config["default"].target_modules == "lin0"

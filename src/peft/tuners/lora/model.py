@@ -539,8 +539,12 @@ class LoraModel(BaseTuner):
 
     def _prepare_adapter_config(self, peft_config, model_config):
         if peft_config.target_modules is None:
-            if model_config["model_type"] in self.target_module_mapping:
-                peft_config.target_modules = set(self.target_module_mapping[model_config["model_type"]])
+            target_modules = self.target_module_mapping.get(model_config["model_type"])
+            if target_modules is not None:
+                if isinstance(target_modules, str):
+                    peft_config.target_modules = target_modules
+                else:
+                    peft_config.target_modules = set(target_modules)
             elif not peft_config.target_parameters:
                 raise ValueError("Please specify `target_modules` or `target_parameters`in `peft_config`")
         return peft_config
