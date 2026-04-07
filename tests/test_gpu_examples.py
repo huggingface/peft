@@ -6210,7 +6210,7 @@ def _test_multiple_adapters(rank, world_size, port):
             assert torch.isfinite(outputs.loss), f"Loss not finite with adapter '{adapter_name}': {outputs.loss}"
 
 
-def _test_inject_adapter_forward(rank, world_size, port, tmp_dir_reference):
+def _test_load_adapter_forward(rank, world_size, port, tmp_dir_reference):
     """
     Test that load_adapter (with a peft_config) works with a TP base model and the forward pass produces the same loss
     on every rank and that it is finite.
@@ -6255,7 +6255,7 @@ def _test_inject_adapter_forward(rank, world_size, port, tmp_dir_reference):
     assert torch.isfinite(outputs.loss), f"Loss is not finite: {outputs.loss}"
 
 
-def _test_inject_adapter_save(rank, world_size, port, tmp_dir_reference, tmp_dir_tp):
+def _test_load_adapter_save(rank, world_size, port, tmp_dir_reference, tmp_dir_tp):
     """
     Test that get_peft_model_state_dict correctly gathers unsharded TP weights when using load_adapter with a
     peft_config.
