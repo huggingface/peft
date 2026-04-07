@@ -464,6 +464,14 @@ def _insert_adapter_name_into_state_dict(
 
 
 def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
+    """
+    Shard LoRA adapter weights in-place in `state_dict` according to the tensor-parallel plan of the model.
+
+    Args:
+        model (`nn.Module`): The TP base model (with `_hf_tp_plan` and `_hf_device_mesh` set on its layers).
+        state_dict (`dict`): The adapter state dict to shard in-place (as loaded from a checkpoint).
+        adapter_name (`str`): The name of the adapter whose weights are being sharded.
+    """
     from transformers.integrations.tensor_parallel import (
         ALL_PARALLEL_STYLES,
         ColwiseParallel,
@@ -491,6 +499,8 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
         if tp_plan is None or device_mesh is None:
             continue
 
+        # One time check to make sure we are adding / removing a potential prefix to get the proper key in the state
+        # dict. Same thing for the adapter name.
         if should_check:
             for key in state_dict:
                 if adapter_name in key:

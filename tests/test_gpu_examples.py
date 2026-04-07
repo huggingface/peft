@@ -5992,7 +5992,6 @@ class TestTransformerEngine:
 ### LoRA and Tensor Parallelism tests ###
 
 WORLD_SIZE = 2
-MODEL_ID = "Qwen/Qwen3-0.6B"
 TINY_MODEL_ID = "peft-internal-testing/zephyr-smol_llama-100m-sft-full"
 TARGET_MODULES = ["embed_tokens", "q_proj", "k_proj", "v_proj", "o_proj"]
 
@@ -6099,17 +6098,17 @@ def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
     Test that loading from a checkpoint correctly handles the sharding of LoRA weights according to the TP plan.
     """
     if rank == 0:
-        plain_model = AutoModelForCausalLM.from_pretrained(MODEL_ID)
+        plain_model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID)
         lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
         plain_model = get_peft_model(plain_model, lora_config)
         plain_model.save_pretrained(tmp_dir)
 
-    dist.barrier()
+    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
 
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
 
-    tp_base = AutoModelForCausalLM.from_pretrained(MODEL_ID, tp_plan=TP_PLAN)
+    tp_base = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
     tp_base.to(device)
     tp_model = PeftModel.from_pretrained(tp_base, tmp_dir)
 
@@ -6140,7 +6139,7 @@ def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
                 f"{name}: lora_embedding_A vocab {lora_emb_vocab} != local base vocab {base_emb_vocab}"
             )
 
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    tokenizer = AutoTokenizer.from_pretrained(TINY_MODEL_ID)
     inputs = tokenizer("The capital of France is Paris.", return_tensors="pt")
     inputs = {k: v.to(device) for k, v in inputs.items()}
     tp_model.eval()
@@ -6159,22 +6158,22 @@ def _test_save_unsharded_weights(rank, world_size, port, tmp_dir_reference, tmp_
       3. Rank 0: compare the re-saved state dict against the original reference — they must match exactly.
     """
     if rank == 0:
-        plain_model = AutoModelForCausalLM.from_pretrained(MODEL_ID)
+        plain_model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID)
         lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
         plain_model = get_peft_model(plain_model, lora_config)
         plain_model.save_pretrained(tmp_dir_reference)
 
-    dist.barrier()
+    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
 
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
 
-    tp_base = AutoModelForCausalLM.from_pretrained(MODEL_ID, tp_plan=TP_PLAN)
+    tp_base = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
     tp_base.to(device)
     tp_model = PeftModel.from_pretrained(tp_base, tmp_dir_reference)
     tp_model.save_pretrained(tmp_dir_tp)
 
-    dist.barrier()
+    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
 
     if rank == 0:
         reference_sd = load_file(f"{tmp_dir_reference}/adapter_model.safetensors")
@@ -6193,14 +6192,14 @@ def _test_multiple_adapters(rank, world_size, port):
     """Two LoRA adapters coexist on a TP model and can be switched between."""
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
-    model = AutoModelForCausalLM.from_pretrained(MODEL_ID, tp_plan=TP_PLAN)
+    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
     model.to(device)
 
     for adapter_name in ["adapter_a", "adapter_b"]:
         lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
         model = get_peft_model(model, lora_config, adapter_name=adapter_name)
 
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    tokenizer = AutoTokenizer.from_pretrained(TINY_MODEL_ID)
     inputs = tokenizer("What is the capital of France?", return_tensors="pt")
     inputs = {k: v.to(device) for k, v in inputs.items()}
     model.eval()
@@ -6228,7 +6227,7 @@ def _test_inject_adapter_forward(rank, world_size, port, tmp_dir_reference):
         plain_model = get_peft_model(plain_model, lora_config)
         plain_model.save_pretrained(tmp_dir_reference)
 
-    dist.barrier()
+    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
 
     model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
     model.load_adapter(tmp_dir_reference)
@@ -6327,9 +6326,8 @@ class TestLoraTensorParallel:
     def test_lora_weight_synchronization(self):
         self._spawn(_test_lora_weight_synchronization, port_offset=0)
 
-    def test_from_checkpoint(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            self._spawn(_test_load_from_checkpoint, tmp_dir, port_offset=1)
+    def test_from_checkpoint(self, tmp_path):
+        self._spawn(_test_load_from_checkpoint, tmp_path, port_offset=1)
 
     def test_save_unsharded_weights(self, tmp_path):
         tmp_dir_reference = tmp_path / "reference"
