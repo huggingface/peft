@@ -16,8 +16,7 @@ import gc
 import math
 
 # ==========================================
-# 1. Kappa-Selection using OFFICIAL PEFT KappaTuneSelector
-#    (exact paper logic: lowest κ on experts only)
+# 1. Target layer selection using KappaTuneSelector
 # ==========================================
 def get_stable_expert_names(model, budget_k=300):
     print(f" [KappaTune] Identifying {budget_k} most stable expert modules using PEFT KappaTuneSelector...")
