@@ -18,6 +18,8 @@ env:
 jobs:
   latest-cpu:
     name: "Latest Peft CPU [dev]"
+    # GH Environment for extra protection: https://github.com/huggingface/peft/settings/environments
+    environment: branch-protection-main
     runs-on:
       group: aws-general-8-plus
     steps:
@@ -51,6 +53,8 @@ jobs:
 
   latest-cuda:
     name: "Latest Peft GPU [dev]"
+    # GH Environment for extra protection: https://github.com/huggingface/peft/settings/environments
+    environment: branch-protection-main
     runs-on:
       group: aws-general-8-plus
     steps:

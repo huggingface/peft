@@ -80,6 +80,8 @@
   - sections:
     - local: package_reference/adalora
       title: AdaLoRA
+    - local: package_reference/adamss
+      title: AdaMSS
     - local: package_reference/ia3
       title: IA3
     - local: package_reference/llama_adapter
@@ -146,6 +148,8 @@
       title: WaveFT
     - local: package_reference/delora
       title: DeLoRA
+    - local: package_reference/tinylora
+      title: TinyLoRA
     - local: package_reference/lily
       title: Lily
     - local: package_reference/peanut

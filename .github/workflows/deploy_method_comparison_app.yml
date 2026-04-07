@@ -11,6 +11,8 @@ permissions: {}
 
 jobs:
   deploy:
+    # GH Environment for extra protection: https://github.com/huggingface/peft/settings/environments
+    environment: branch-protection-main
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
