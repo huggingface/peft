@@ -19,6 +19,7 @@ from transformers import AutoModelForSeq2SeqLM, AutoModelForTokenClassification
 
 from peft import (
     AdaLoraConfig,
+    AdamssConfig,
     BOFTConfig,
     C3AConfig,
     DeloraConfig,
@@ -276,6 +277,14 @@ ALL_CONFIGS = [
             "task_type": "SEQ_2_SEQ_LM",
             "r": 4,
             "psoft_alpha": 4,
+        },
+    ),
+    (
+        AdamssConfig,
+        {
+            "target_modules": None,
+            "r": 8,
+            "task_type": "SEQ_2_SEQ_LM",
         },
     ),
 ]

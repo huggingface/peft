@@ -80,6 +80,8 @@
   - sections:
     - local: package_reference/adalora
       title: AdaLoRA
+    - local: package_reference/adamss
+      title: AdaMSS
     - local: package_reference/ia3
       title: IA3
     - local: package_reference/llama_adapter
