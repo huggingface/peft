@@ -1055,3 +1055,9 @@ class TestDecoderModels(PeftCommonTester):
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_lora_conversion(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_get_base_model_state_dict(self, model_id, config_cls, config_kwargs):
+        _skip_if_not_conv1d_supported(model_id, config_cls)
+        self._test_get_base_model_state_dict(model_id, config_cls, config_kwargs.copy())

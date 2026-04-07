@@ -1883,3 +1883,22 @@ class PeftCommonTester:
             diff2 = output_after.hidden_states[-1] - output_base.hidden_states[-1]
             mse = torch.nn.functional.mse_loss(diff1, diff2).item()
             assert mse < max_mse, f"LoRA conversion MSE too high, {mse:.4f}, only {max_mse:.1f} allowed"
+
+    def _test_get_base_model_state_dict(self, model_id, config_cls, config_kwargs):
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+
+        base_model_keys = set(model.state_dict().keys())
+        original_state_dict = {k: v.clone() for k, v in model.state_dict().items()}
+
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        peft_model = get_peft_model(model, config)
+
+        extracted_state_dict = peft_model.get_base_model_state_dict()
+        assert set(extracted_state_dict.keys()) == base_model_keys
+
+        for key in original_state_dict:
+            assert torch.allclose(original_state_dict[key], extracted_state_dict[key]), f"Value mismatch for key {key}"

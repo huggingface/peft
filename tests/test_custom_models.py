@@ -3112,6 +3112,10 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
 
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_get_base_model_state_dict(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_get_base_model_state_dict(model_id, config_cls, config_kwargs.copy())
+
     @staticmethod
     def _check_requires_grad(module, adapter_name, requires_grad):
         # a bit of a clumsy way to test requires_grad on the PEFT parameters
