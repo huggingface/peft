@@ -40,6 +40,7 @@ extras["test"] = extras["dev"] + [
     "scikit-learn",
     "protobuf",
     "sentencepiece",
+    "torchvision",
 ]
 
 setup(
