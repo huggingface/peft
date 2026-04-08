@@ -2193,7 +2193,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
-@require_torch_gpu
+@require_non_cpu
 @require_gptqmodel
 @require_optimum
 class PeftGPTQGPUTests(unittest.TestCase):
@@ -2407,7 +2407,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    @require_torch_multi_gpu
+    @require_torch_multi_accelerator
     def test_causal_lm_training_multi_gpu(self):
         r"""
         Test the CausalLM training on a multi-GPU device. The test would simply fail if the adapters are not set
