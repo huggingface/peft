@@ -240,6 +240,14 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PrefixTuningConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "num_virtual_tokens": 10,
+            "init_weights": "zero",
+        },
+    ),
+    (
         PromptEncoderConfig,
         {
             "task_type": "CAUSAL_LM",

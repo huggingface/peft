@@ -22,6 +22,7 @@ import pytest
 
 from peft import (
     AdaLoraConfig,
+    AdamssConfig,
     AdaptionPromptConfig,
     BOFTConfig,
     C3AConfig,
@@ -65,6 +66,7 @@ PEFT_MODELS_TO_TEST = [("peft-internal-testing/tiny-opt-lora-revision", "test")]
 # Config classes and their mandatory parameters
 ALL_CONFIG_CLASSES = (
     (AdaLoraConfig, {"total_step": 1}),
+    (AdamssConfig, {}),
     (AdaptionPromptConfig, {}),
     (BOFTConfig, {}),
     (C3AConfig, {}),

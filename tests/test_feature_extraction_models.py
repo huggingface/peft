@@ -17,6 +17,7 @@ from transformers import AutoModel
 
 from peft import (
     AdaLoraConfig,
+    AdamssConfig,
     BOFTConfig,
     C3AConfig,
     DeloraConfig,
@@ -261,6 +262,14 @@ ALL_CONFIGS = [
             "r": 4,
             "psoft_alpha": 4,
             "target_modules": None,
+        },
+    ),
+    (
+        AdamssConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "r": 8,
         },
     ),
 ]
