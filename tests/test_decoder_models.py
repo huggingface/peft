@@ -1055,9 +1055,7 @@ class TestDecoderModels(PeftCommonTester):
             model = AutoModelForCausalLM.from_pretrained(model_id, tie_word_embeddings=True)
             assert model.config.tie_word_embeddings
 
-            peft_model = get_peft_model(
-                model, LoraConfig(target_modules=["embed_tokens"], init_lora_weights=False)
-            )
+            peft_model = get_peft_model(model, LoraConfig(target_modules=["embed_tokens"], init_lora_weights=False))
 
             with pytest.warns(UserWarning, match="Setting.*tie_word_embeddings"):
                 merged = peft_model.merge_and_unload()
