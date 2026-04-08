@@ -2079,6 +2079,174 @@ class _LoraParameterProxy(nn.Module):
         return W + self.delta_weight
 
 
+class _SparseLoraFunctionMode(torch.overrides.TorchFunctionMode):
+    """Intercepts grouped_mm calls to sparsely inject LoRA deltas only for active experts.
+
+    The general idea is the following: In the standard path, we always materialize the full `delta_weight` from LoRA
+    and add it onto the base weight. The `delta_weight` is big, the same size as the base weight, no matter how small
+    the LoRA rank. When we have MoE layers, we typically only need a handful of experts though, which makes this
+    wasteful. We would thus like to only materialize the `delta_weight` at the indices where it's really needed.
+
+    This is easier said than done. Let's say the transformers code looks something like this:
+
+    `output = self.gate_up_proj[expert_idx]`
+
+    When the `self.gate_up_proj` is fetched, it triggers `nn.utils.parametrize` (the mechanism we use to implement LoRA
+    on `nn.Parameter`) and we thus materialize the whole `delta_weight`. Only then is the indexing applied, but it's
+    too late now.
+
+    The solution used here works like this: In Transformers, some (but not all) MoE implementations use
+    `grouped_mm_experts_forward`. Under the hood, this will call the `_grouped_mm` aten operation. We hook into the
+    PyTorch dispatch machinery with `TorchFunctionMode` and write a special dispatch for this operation. Since the
+    index is an argument, we can select the experts we need to materialize. As we bypass `nn.utils.parametrize`, we
+    also don't need to worry about accidentally eagerly materializing the weight.
+
+    In practice, the advantage of using this approach depends. During training, even though we only typically have a
+    small amount of experts, since those can differ per token, in practice we will often activate a large fraction of
+    all experts over the full sequence. Therefore, calculating the full diff amortizes and we see no big speed
+    difference. In fact, this optimization *increases* overall memory usage during training. It's not quite clear why,
+    possibly memory fragmentation increases the peak memory reserved by PyTorch.
+
+    During inference, we get a different picture. Due to KV caching, we only need to calculate the last token.
+    Therefore, for each step, we only activate a small number of experts and thus there is a real benefit from sparsely
+    materializing the `delta_weight`.
+
+    In a simple test run with `microsoft/Phi-tiny-MoE-instruct`, when targeting `["experts.gate_up_proj",
+    "experts.down_proj"]`, inference time increased by > 600% with the vanilla LoRA implementation. With the
+    optimization from this branch, the PEFT code was _only_ 43% slower.
+
+    Caveats:
+
+    The presented implementation is very brittle. It assumes that `_grouped_mm` is being used, which is a Transformers
+    implementation detail and which is not used by all model architectures. For production ready code, this needs to be
+    hardened.
+
+    Moreover, we doubt that in practice, the speed advantage at inference time is very relevant. If PEFT is used for
+    serving, most users have the option to merge the weight, at which point there is no runtime overhead. There are a
+    few use cases that wouldn't allow that (e.g. loading multiple LoRA adapters and switching between them dynamically)
+    but those are probably not common.
+
+    Furthermore, as mentioned earlier, this approach is actually less memory efficient during training, which is
+    arguably the main selling point of PEFT. For all these reasons, we decide not to proceed with this implementation.
+    We still publish the code in case someone has a use case where the inference speed improvement matters.
+
+    Not working:
+
+    A different approach that was tried was to return a `torch.Tensor` subclass that lazily materializes the LoRA
+    weights and return that class from `nn.utils.parametrize`. There, we could also override `__torch_dispatch__` in a
+    way similar to what can be seen below. The disadvantage of this approach, however, is that other operations may be
+    performed on the weights than just calling `_grouped_mm`. For instance, the weight may be first transposed, which
+    would trigger a full materialization. We could intercept that too and try to delay it, but in the end we ran into
+    all kinds of problems with the autograd engine. The approach presented here is more streamlined and thus we went
+    with that.
+
+    """
+
+    def __init__(self, weight_info: dict):
+        """
+        Args:
+            weight_info: dict mapping data_ptr -> {
+                "original_shape": tuple, "lora_A_weights": list[Tensor], "lora_B_weights": list[Tensor], "scalings":
+                list[float], "num_experts": int, "did_swap_in_out_features": bool,
+            }
+        """
+        super().__init__()
+        self.weight_info = weight_info
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+
+        if self._is_grouped_mm(func):
+            # Handle both positional and keyword `offs` argument
+            if "offs" in kwargs:
+                assert len(args) == 2, f"Expected 2 positional args with offs as kwarg, got {len(args)}"
+                mat_a, mat_b = args
+                offs = kwargs["offs"]
+            elif len(args) >= 3:
+                mat_a, mat_b, offs = args[0], args[1], args[2]
+            else:
+                return func(*args, **kwargs)
+
+            info = self.weight_info.get(mat_b.data_ptr())
+            if info is not None and offs is not None:
+                compressed_weight, compressed_offs = self._compress_and_apply_lora(mat_b, offs, info)
+                return func(mat_a.to(compressed_weight.dtype), compressed_weight, offs=compressed_offs)
+
+        return func(*args, **kwargs)
+
+    @staticmethod
+    def _is_grouped_mm(func):
+        name = getattr(func, "__name__", "")
+        return name in ("grouped_mm", "_grouped_mm")
+
+    @staticmethod
+    def _compress_and_apply_lora(mat_b, offs, info):
+        """Compress weight to active experts only and add LoRA delta.
+
+        Instead of passing all experts to _grouped_mm (where autograd saves the full tensor), we only pass the active
+        expert slices. This is valid because the input is already sorted by expert and _grouped_mm just processes N
+        groups sequentially.
+
+        Returns:
+            compressed_weight: (num_active, d1, d2) — only active experts with LoRA applied compressed_offs:
+            (num_active,) — recomputed cumulative offsets for active experts
+        """
+        num_experts = info["num_experts"]
+        original_shape = info["original_shape"]
+        did_swap = info["did_swap_in_out_features"]
+
+        # Determine if mat_b has been transposed by comparing shape to original
+        is_transposed = mat_b.shape[-2:] != original_shape[-2:]
+
+        # Determine active experts from the cumulative offsets
+        tokens_per_expert = offs.clone()
+        tokens_per_expert[1:] = offs[1:] - offs[:-1]
+        active_mask = tokens_per_expert > 0
+        active_indices = torch.where(active_mask)[0]
+
+        if len(active_indices) == 0:
+            # No active experts; return empty weight and offs to avoid errors
+            empty_weight = mat_b[:0]
+            empty_offs = offs[:0].to(torch.int32)
+            return empty_weight, empty_offs
+
+        # Extract only the active expert slices from the (possibly transposed) weight
+        active_weight = mat_b[active_indices]  # (num_active, d1, d2) — small!
+
+        # Accumulate LoRA deltas from all adapters for active experts only
+        accumulated_delta = None
+        for lora_A, lora_B, scaling in zip(info["lora_A_weights"], info["lora_B_weights"], info["scalings"]):
+            # shape: experts x rank x in_features
+            weight_A = lora_A.reshape(num_experts, -1, lora_A.shape[-1])
+            # shape: out_features x rank x experts
+            weight_B = lora_B.reshape(lora_B.shape[0], -1, num_experts)
+
+            # Only compute delta for active experts
+            weight_A_active = weight_A[active_indices]
+            weight_B_active = weight_B[:, :, active_indices]
+
+            if not did_swap:
+                delta = torch.einsum("o r e, e r i -> e i o", weight_B_active, weight_A_active) * scaling
+            else:
+                delta = torch.einsum("o r e, e r i -> e o i", weight_B_active, weight_A_active) * scaling
+
+            if is_transposed:
+                delta = delta.transpose(-2, -1)
+
+            if accumulated_delta is None:
+                accumulated_delta = delta
+            else:
+                accumulated_delta = accumulated_delta + delta
+
+        # Add LoRA delta to active weight slices — all tensors are (num_active, d1, d2)
+        compressed_weight = active_weight + accumulated_delta.to(active_weight.dtype)
+
+        # Recompute cumulative offsets for active experts only
+        compressed_offs = torch.cumsum(tokens_per_expert[active_mask], dim=0, dtype=torch.int32)
+
+        return compressed_weight, compressed_offs
+
+
 # copied from:
 # https://github.com/pytorch/pytorch/blob/5e386eec9426f174eea130c0c012d9f65ebe65fb/torch/nn/utils/parametrize.py#L75-L79
 def _register_parameter_or_buffer(module, name, X):
@@ -2294,27 +2462,57 @@ class ParamWrapper(nn.Module, LoraLayer):
             yield
             return
 
-        delta_weight = None
-        for active_adapter in active_adapters:
-            if active_adapter not in self.lora_A:
-                continue
-            if delta_weight is None:
-                delta_weight = self.get_delta_weight(active_adapter)
-            else:
-                delta_weight = delta_weight + self.get_delta_weight(active_adapter)
+        param = self.get_param()
 
-        base_layer = self.get_base_layer()
-        requires_grad_before = self.get_param().requires_grad
-        nn.utils.parametrize.register_parametrization(
-            base_layer, self.parameter_name, _LoraParameterProxy(delta_weight)
-        )
-        # set requires_grad, as it defaults to False
-        base_layer.parametrizations[self.parameter_name].original.requires_grad_(requires_grad_before)
-        try:
-            with nn.utils.parametrize.cached():
+        if param.ndim == 3 and self.num_experts > 1:
+            # MoE path: use dispatch mode to sparsely inject LoRA at _grouped_mm time
+            lora_A_weights, lora_B_weights, scalings = [], [], []
+            for active_adapter in active_adapters:
+                if active_adapter not in self.lora_A:
+                    continue
+                lora_A_weights.append(self.lora_A[active_adapter].weight)
+                lora_B_weights.append(self.lora_B[active_adapter].weight)
+                scalings.append(self.scaling[active_adapter])
+
+            if not lora_A_weights:
                 yield
-        finally:
-            self._remove_parametrizations()
+                return
+
+            weight_info = {
+                param.data_ptr(): {
+                    "original_shape": param.shape,
+                    "lora_A_weights": lora_A_weights,
+                    "lora_B_weights": lora_B_weights,
+                    "scalings": scalings,
+                    "num_experts": self.num_experts,
+                    "did_swap_in_out_features": self._did_swap_in_out_features,
+                }
+            }
+            with _SparseLoraFunctionMode(weight_info):
+                yield
+        else:
+            # Standard path: eagerly compute delta_weight and use parametrize
+            delta_weight = None
+            for active_adapter in active_adapters:
+                if active_adapter not in self.lora_A:
+                    continue
+                if delta_weight is None:
+                    delta_weight = self.get_delta_weight(active_adapter)
+                else:
+                    delta_weight = delta_weight + self.get_delta_weight(active_adapter)
+
+            base_layer = self.get_base_layer()
+            requires_grad_before = param.requires_grad
+            nn.utils.parametrize.register_parametrization(
+                base_layer, self.parameter_name, _LoraParameterProxy(delta_weight)
+            )
+            # set requires_grad, as it defaults to False
+            base_layer.parametrizations[self.parameter_name].original.requires_grad_(requires_grad_before)
+            try:
+                with nn.utils.parametrize.cached():
+                    yield
+            finally:
+                self._remove_parametrizations()
 
     def _remove_parametrizations(self):
         # Remove the parametrization of this specific parameter
