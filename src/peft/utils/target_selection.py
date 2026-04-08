@@ -43,24 +43,22 @@ class KappaTuneSelector:
             if not isinstance(module, nn.Linear):
                 continue
 
-            # Handle quantized weights (bnb 4-bit and int8)
+            # Handle quantized weights (bnb 4-bit + int8)
             weight = module.weight
             if bnb is not None:
-                # 4-bit (NF4 / FP4)
-                if hasattr(weight, "quant_state"):
+                if hasattr(weight, "quant_state"):                    # 4-bit (NF4/FP4)
                     try:
                         w = bnb.functional.dequantize_4bit(
                             weight.data, weight.quant_state
                         ).float()
-                    except Exception:
+                    except (RuntimeError, ValueError, AttributeError):
                         w = weight.data.detach().float()
-                # int8
-                elif hasattr(weight, "state") and hasattr(weight.state, "CB"):
+                elif hasattr(weight, "state") and hasattr(weight.state, "CB"):  # int8
                     try:
                         w = bnb.functional.int8_vectorwise_dequant(
                             weight.state.CB, weight.state.SCB
                         ).float()
-                    except Exception:
+                    except (RuntimeError, ValueError, AttributeError):
                         w = weight.data.detach().float()
                 else:
                     w = weight.data.detach().float()
