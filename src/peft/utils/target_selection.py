@@ -78,7 +78,7 @@ class KappaTuneSelector:
         Args:
             top_p: Return the top best modules (e.g. 0.2 = paper default).
             num_modules: Return exactly this many best modules (fixed budget).
-            threshold: Return every module with κ ≤ threshold (quality cutoff).
+            threshold: Return every module with κ ≤ threshold (quality cutoff: lower κ = more isotropic matrix → higher flexibility for fine-tuning / higher differential entropy).
         Returns:
             List of module names (e.g. [model.layers.0.self_attn.q_proj, ...])
         Notes:
