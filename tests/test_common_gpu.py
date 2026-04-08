@@ -541,7 +541,10 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         config = LoraConfig(task_type="CAUSAL_LM")
         peft_model = get_peft_model(model, config)
-        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(peft_model.device))
+        # For CPU/XPU inference mode, weight layout is changed during the first forward pass for better performance,
+        # so saving after forward is not supported. Skip generate here to allow save_pretrained below.
+        if peft_model.device.type not in ["cpu", "xpu"]:
+            peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(peft_model.device))
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             peft_model.save_pretrained(tmp_dir)
