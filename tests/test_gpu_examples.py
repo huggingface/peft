@@ -4586,7 +4586,7 @@ class TestPeftTorchao:
 
     @pytest.mark.single_gpu_tests
     def test_torchao_merge_layers_int8_weight_only(self):
-        from torchao.dtypes import AffineQuantizedTensor
+        from torchao.utils import TorchAOBaseTensor
         from transformers import TorchAoConfig
 
         quant_type = "int8_weight_only"
@@ -4623,13 +4623,13 @@ class TestPeftTorchao:
         logits_merged = model(dummy_input)[0]
         for name, module in model.named_modules():
             if "base_layer" in name:
-                assert isinstance(module.weight, AffineQuantizedTensor)
+                assert isinstance(module.weight, TorchAOBaseTensor)
 
         model.unmerge_adapter()
         logits_unmerged = model(dummy_input)[0]
         for name, module in model.named_modules():
             if "base_layer" in name:
-                assert isinstance(module.weight, AffineQuantizedTensor)
+                assert isinstance(module.weight, TorchAOBaseTensor)
 
         model = model.merge_and_unload()
         logits_merged_unloaded = model(dummy_input)[0]

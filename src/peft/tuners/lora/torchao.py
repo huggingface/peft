@@ -142,10 +142,9 @@ def dispatch_torchao(
     if not is_torchao_available():
         return new_module
 
-    from torchao.dtypes import AffineQuantizedTensor
-    from torchao.quantization import Int4Tensor, LinearActivationQuantizedTensor
+    from torchao.utils import TorchAOBaseTensor
 
-    if isinstance(target_base_layer.weight, (AffineQuantizedTensor, Int4Tensor, LinearActivationQuantizedTensor)):
+    if isinstance(target_base_layer.weight, TorchAOBaseTensor):
         new_module = TorchaoLoraLinear(target, adapter_name, config=config, **kwargs)
 
     return new_module
