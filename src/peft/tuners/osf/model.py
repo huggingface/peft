@@ -53,7 +53,7 @@ class OSFModel(BaseTuner):
         if peft_config.target_modules is None:
             target_modules = self.target_module_mapping.get(model_config["model_type"])
             if target_modules is not None:
-                peft_config = super()._prepare_adapter_config()
+                peft_config = super()._prepare_adapter_config(peft_config, model_config)
             else:
                 from peft.utils.constants import INCLUDE_LINEAR_LAYERS_SHORTHAND
 
