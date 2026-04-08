@@ -16,7 +16,8 @@ tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
 tokenizer.pad_token_id = tokenizer.eos_token_id
 
 miss_config = MissConfig(
-    r = 64
+    r = 64,
+    miss_dropout = 0.01
 )
 #bat: In this mode, you can enable nonlinear updates across different shards.
 # miss_config = MissConfig(
@@ -69,6 +70,7 @@ python miss_finetuning.py \
     --base_model_name_or_path meta-llama/Llama-2-7b-hf \
     --output_dir output/miss-llama-2-7b-metamath-10k \
     --miss_r 64 \
+    --miss_dropout 0.01 \
     --init_weights True \
     --bits bf16 \
     --data_path meta-math/MetaMathQA \
@@ -93,12 +95,12 @@ python miss_finetuning.py \
 
 # Citation
 ```bib
-@misc{kang2025balancingloraperformanceefficiency,
-      title={Balancing LoRA Performance and Efficiency with Simple Shard Sharing}, 
-      author={Jiale Kang and Qingyu Yin},
-      year={2025},
-      eprint={2409.15371},
-      archivePrefix={arXiv},
-      primaryClass={cs.CL},
-      url={https://arxiv.org/abs/2409.15371}, 
+@misc{kang2025missrevisitingtradeofflora,
+  title={MiSS: Revisiting the Trade-off in LoRA with an Efficient Shard-Sharing Structure},
+  author={Jiale Kang and Qingyu Yin},
+  year={2025},
+  eprint={2409.15371},
+  archivePrefix={arXiv},
+  primaryClass={cs.CL},
+  url={https://arxiv.org/abs/2409.15371},
 }

@@ -54,6 +54,7 @@ from peft import (
     RoadConfig,
     ShiraConfig,
     TaskType,
+    TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -239,6 +240,14 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PrefixTuningConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "num_virtual_tokens": 10,
+            "init_weights": "zero",
+        },
+    ),
+    (
         PromptEncoderConfig,
         {
             "task_type": "CAUSAL_LM",
@@ -291,6 +300,13 @@ ALL_CONFIGS = [
             "d_initial": 0.1,
             "save_projection": True,
             "bias": "none",
+        },
+    ),
+    (
+        TinyLoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
         },
     ),
     (
