@@ -131,7 +131,6 @@ def run_experiment(method_name):
     
     del model
     gc.collect()
-    torch.cuda.empty_cache()
     return t_ppl_test, t_ppl_train, f_ppl
 
 # ==========================================
