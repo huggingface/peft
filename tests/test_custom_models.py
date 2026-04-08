@@ -6571,7 +6571,7 @@ class TestDefaultTargetModules:
     that the other PEFT methods share. Testing all PEFT methods would thus be wasteful and it would require some effort
     to patch the correct target module mapping.
 
-    Only LoRA and OSF have custom implementations, thus they are tested her explicitly.
+    Only LoRA and OSF have custom implementations, thus they are tested here explicitly.
     """
 
     @pytest.mark.parametrize("config_cls", [DeloraConfig, LoraConfig])
