@@ -315,7 +315,6 @@ class LoraModel(BaseTuner):
                         tp_module,
                         tp_plan,
                         tp_layer_name,
-                        tp_plan,
                         device_mesh,
                     )
                 else:  # embedding_rowwise
