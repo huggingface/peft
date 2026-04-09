@@ -43,10 +43,12 @@ from .constants import (
     INCLUDE_LINEAR_LAYERS_SHORTHAND,
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_GRALORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
@@ -65,6 +67,7 @@ from .constants import (
     TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_TINYLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING,
@@ -86,10 +89,12 @@ __all__ = [
     "INCLUDE_LINEAR_LAYERS_SHORTHAND",
     "SAFETENSORS_WEIGHTS_NAME",
     "TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_GRALORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING",
@@ -108,6 +113,7 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_TINYLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING",
@@ -1060,7 +1066,7 @@ def _set_trainable(
             # embeddings. If we replaced the tied weight (i.e. moved it to, say, `lm_head.token_adapter.base_layer`)
             # we'll get the new name whereas the old way was that we got `lm_head` regardless of whether it was modified
             # or not. We'll assume that we always have two levels of nesting and therefore do the same check as before
-            # but on the grandparent to accomodate for the new behavior.
+            # but on the grandparent to accommodate for the new behavior.
             if isinstance(grandparent, wrapper_cls):
                 grandparent.update(adapter_name, **wrapper_kwargs)
                 grandparent.set_adapter(grandparent.active_adapter, inference_mode=inference_mode)
@@ -1102,12 +1108,21 @@ def _set_adapter(model, adapter_name: str | list[str], inference_mode: bool = Fa
 
 
 def _prepare_prompt_learning_config(peft_config, model_config):
+    orig_model_config = model_config
+    if hasattr(model_config, "to_dict"):
+        model_config = model_config.to_dict()
+    else:
+        model_config = model_config
+
     # In case of VLM we focus on the language model portion of the model.
     if "text_config" in model_config:
         model_config = model_config["text_config"]
 
     if peft_config.num_layers is None:
-        if "num_hidden_layers" in model_config:
+        if hasattr(orig_model_config, "num_hidden_layers"):
+            # dict entry was removed in https://github.com/huggingface/transformers/pull/41250
+            num_layers = orig_model_config.num_hidden_layers
+        elif "num_hidden_layers" in model_config:
             num_layers = model_config["num_hidden_layers"]
         elif "num_layers" in model_config:
             num_layers = model_config["num_layers"]

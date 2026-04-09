@@ -94,7 +94,7 @@ jobs:
 
           df -h
       - name: Model cache
-        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7  # v5.0.4
         with:
           # Avoid caching HF_HOME/modules and Python cache files to prevent interoperability
           # issues and potential cache poisioning. We also avoid lock files to prevent runs
@@ -152,7 +152,7 @@ jobs:
           # make sure that cache cleaning doesn't break the pipeline
           python scripts/ci_clean_cache.py -d || true
       - name: Update model cache
-        uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7  # v5.0.4
         # Only let one runner (preferably the one that covers most tests) update the model cache
         # after *every* run. This way we make sure that our cache is never outdated and we don't
         # have to keep track of hashes.

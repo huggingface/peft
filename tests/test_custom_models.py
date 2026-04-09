@@ -33,6 +33,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft import (
     AdaLoraConfig,
+    AdamssConfig,
     BOFTConfig,
     C3AConfig,
     DeloraConfig,
@@ -57,6 +58,7 @@ from peft import (
     RoadConfig,
     ShiraConfig,
     TaskType,
+    TinyLoraConfig,
     TrainableTokensConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -623,6 +625,32 @@ TEST_CASES = [
         VeraConfig,
         {"target_modules": ["conv1d"]},
     ),
+    ############
+    # TinyLoRA #
+    ############
+    ("Vanilla MLP 1 TinyLoRA", "MLP", TinyLoraConfig, {"target_modules": "lin0", "r": 2, "u": 16}),
+    ("Vanilla MLP 2 TinyLoRA", "MLP", TinyLoraConfig, {"target_modules": ["lin0"], "r": 2, "u": 16}),
+    ("Vanilla MLP 3 TinyLoRA", "MLP", TinyLoraConfig, {"target_modules": ["lin1"], "r": 2, "u": 16}),
+    ("Vanilla MLP 4 TinyLoRA", "MLP", TinyLoraConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "u": 32}),
+    (
+        "Vanilla MLP 5 TinyLoRA",
+        "MLP",
+        TinyLoraConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2, "u": 16},
+    ),
+    (
+        "Vanilla MLP TinyLoRA weight_tying",
+        "MLP",
+        TinyLoraConfig,
+        {"target_modules": ["lin0", "lin1"], "r": 2, "u": 8, "weight_tying": 1.0},
+    ),
+    (
+        "Embedding + transformers Conv1D 1 TinyLoRA",
+        "EmbConv1D",
+        TinyLoraConfig,
+        {"target_modules": ["conv1d"], "r": 2, "u": 16, "init_v_bound": 0.5},
+    ),
+    #############
     #########
     # PVERA #
     #########
@@ -1033,6 +1061,48 @@ TEST_CASES = [
         {"target_modules": ["lin0", "lin1"], "r": 2, "depth": 0, "act_fn": "relu"},
     ),
     ("Vanilla MLP 5 Peanut", "MLP", PeanutConfig, {"target_modules": "lin0", "r": 2, "depth": 1, "act_fn": "gelu"}),
+    ##########
+    # Adamss #
+    ##########
+    ("Vanilla MLP 1 Adamss", "MLP", AdamssConfig, {"target_modules": "lin0", "r": 8}),
+    ("Vanilla MLP 2 Adamss", "MLP", AdamssConfig, {"target_modules": ["lin0"], "r": 8}),
+    ("Vanilla MLP 3 Adamss", "MLP", AdamssConfig, {"target_modules": ["lin1"], "r": 2}),
+    ("Vanilla MLP 4 Adamss", "MLP", AdamssConfig, {"target_modules": ["lin0", "lin1"], "r": 8}),
+    (
+        "Vanilla MLP 5 Adamss with custom params",
+        "MLP",
+        AdamssConfig,
+        {
+            "target_modules": ["lin0", "lin1"],
+            "r": 8,
+            "num_subspaces": 3,
+            "subspace_rank": 2,
+        },
+    ),
+    (
+        "Vanilla MLP 6 Adamss with ASA",
+        "MLP",
+        AdamssConfig,
+        {
+            "target_modules": ["lin0", "lin1"],
+            "r": 8,
+            "num_subspaces": 6,
+            "use_asa": True,
+            "asa_target_subspaces": 3,
+        },
+    ),
+    (
+        "Vanilla MLP 7 Adamss with dynamic rank",
+        "MLP",
+        AdamssConfig,
+        {
+            "target_modules": ["lin0"],
+            "r": 8,
+            "num_subspaces": 3,
+            "use_dynamic_rank": True,
+            "svd_threshold": 0.1,
+        },
+    ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 
@@ -2237,7 +2307,14 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_only_params_are_updated(self, test_name, model_id, config_cls, config_kwargs):
         # An explicit test that when using an adapter on a custom model, only the adapter parameters are updated during
         # training
-        X = self.prepare_inputs_for_testing()
+        if issubclass(config_cls, AdamssConfig):
+            # AdaMSS initializes B=0 which blocks gradient flow to A parameters.
+            config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+            # Use random float inputs to avoid ReLU dead zones that block gradient to specific subspaces.
+            X = {"X": torch.randn(9, 10, device=self.torch_device)}
+        else:
+            X = self.prepare_inputs_for_testing()
+
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -2252,6 +2329,7 @@ class TestPeftCustomModel(PeftCommonTester):
             (config_kwargs.get("use_dora") and model_id == "EmbConv1D")
             or issubclass(config_cls, VBLoRAConfig)
             or issubclass(config_cls, LilyConfig)
+            or issubclass(config_cls, AdamssConfig)
         ):
             # this high learning rate was found through testing to be necessary to avoid flakiness
             lr = 100
@@ -2364,6 +2442,9 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, VBLoRAConfig):
             # initialize `vblora_vector_bank` so it can be trained
             model._init_vblora_vector_bank(config, "default")
+        if issubclass(config_cls, TinyLoraConfig):
+            # Re-initialize tinylora_v so it can be trained
+            model.base_model._init_tinylora_v(config, "default")
         model.train()
         # EmbConv1D is slow to learn for some reason
         lr = 0.01 if model_id != "EmbConv1D" else 1.0
@@ -2434,6 +2515,9 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, VBLoRAConfig):
             # initialize `vblora_vector_bank` so it can be trained
             model._init_vblora_vector_bank(config, "default")
+        if issubclass(config_cls, TinyLoraConfig):
+            # Re-initialize tinylora_v so it can be trained
+            model.base_model._init_tinylora_v(config, "default")
         model.train()
         if isinstance(config_cls, LNTuningConfig):
             # LayerNorm tuning is slow to learn
