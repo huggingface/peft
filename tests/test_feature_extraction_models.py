@@ -17,6 +17,7 @@ from transformers import AutoModel
 
 from peft import (
     AdaLoraConfig,
+    AdamssConfig,
     BOFTConfig,
     C3AConfig,
     DeloraConfig,
@@ -28,6 +29,7 @@ from peft import (
     LoraConfig,
     MissConfig,
     OFTConfig,
+    PeanutConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptLearningConfig,
@@ -35,6 +37,7 @@ from peft import (
     PsoftConfig,
     RoadConfig,
     ShiraConfig,
+    TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -179,6 +182,17 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PeanutConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "r": 8,
+            "depth": 1,
+            "act_fn": "relu",
+            "scaling": 1.0,
+        },
+    ),
+    (
         RoadConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
@@ -219,6 +233,13 @@ ALL_CONFIGS = [
         },
     ),
     (
+        TinyLoraConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+        },
+    ),
+    (
         C3AConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
@@ -241,6 +262,14 @@ ALL_CONFIGS = [
             "r": 4,
             "psoft_alpha": 4,
             "target_modules": None,
+        },
+    ),
+    (
+        AdamssConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "r": 8,
         },
     ),
 ]

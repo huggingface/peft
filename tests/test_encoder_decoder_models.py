@@ -19,6 +19,7 @@ from transformers import AutoModelForSeq2SeqLM, AutoModelForTokenClassification
 
 from peft import (
     AdaLoraConfig,
+    AdamssConfig,
     BOFTConfig,
     C3AConfig,
     DeloraConfig,
@@ -31,6 +32,7 @@ from peft import (
     MissConfig,
     OFTConfig,
     OSFConfig,
+    PeanutConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
@@ -39,6 +41,7 @@ from peft import (
     RoadConfig,
     ShiraConfig,
     TaskType,
+    TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -166,6 +169,14 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PrefixTuningConfig,
+        {
+            "num_virtual_tokens": 10,
+            "task_type": "SEQ_2_SEQ_LM",
+            "init_weights": "zero",
+        },
+    ),
+    (
         PromptEncoderConfig,
         {
             "num_virtual_tokens": 10,
@@ -221,10 +232,28 @@ ALL_CONFIGS = [
         },
     ),
     (
+        TinyLoraConfig,
+        {
+            "target_modules": None,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
         PveraConfig,
         {
             "r": 8,
             "pvera_dropout": 0.05,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        PeanutConfig,
+        {
+            "r": 4,
+            "depth": 1,
+            "scaling": 1.0,
+            "act_fn": "relu",
+            "target_modules": None,
             "task_type": "SEQ_2_SEQ_LM",
         },
     ),
@@ -256,6 +285,14 @@ ALL_CONFIGS = [
             "task_type": "SEQ_2_SEQ_LM",
             "r": 4,
             "psoft_alpha": 4,
+        },
+    ),
+    (
+        AdamssConfig,
+        {
+            "target_modules": None,
+            "r": 8,
+            "task_type": "SEQ_2_SEQ_LM",
         },
     ),
 ]

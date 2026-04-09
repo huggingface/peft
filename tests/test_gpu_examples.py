@@ -15,17 +15,21 @@ import importlib
 import itertools
 import os
 import re
+import socket
 import tempfile
 import unittest
 from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any, Union
 
 import numpy as np
 import pytest
 import torch
+import torch.distributed as dist
+import torch.multiprocessing as mp
 from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import get_backend, run_command
 from accelerate.utils import patch_environment
@@ -78,8 +82,15 @@ from peft import (
     replace_lora_weights_loftq,
     set_peft_model_state_dict,
 )
-from peft.import_utils import is_diffusers_available, is_te_available, is_transformers_ge_v5, is_xpu_available
+from peft.import_utils import (
+    is_diffusers_available,
+    is_te_available,
+    is_transformers_ge_v5,
+    is_transformers_ge_v5_4_0,
+    is_xpu_available,
+)
 from peft.tuners import boft
+from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
@@ -2182,7 +2193,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
-@require_torch_gpu
+@require_non_cpu
 @require_gptqmodel
 @require_optimum
 class PeftGPTQGPUTests(unittest.TestCase):
@@ -2396,7 +2407,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
-    @require_torch_multi_gpu
+    @require_torch_multi_accelerator
     def test_causal_lm_training_multi_gpu(self):
         r"""
         Test the CausalLM training on a multi-GPU device. The test would simply fail if the adapters are not set
@@ -4240,44 +4251,50 @@ class PeftEetqGPUTests(unittest.TestCase):
 
 @require_non_cpu
 @require_torchao
-class PeftTorchaoGPUTests(unittest.TestCase):
-    r"""
-    torchao + peft tests
-    """
-
+class TestPeftTorchao:
+    causal_lm_model_id = "peft-internal-testing/opt-125m"
     supported_quant_types = [
         "int8_weight_only",
         "int8_dynamic_activation_int8_weight",
         # int4_weight_only raises an error:
-        # RuntimeError: derivative for aten::_weight_int4pack_mm is not implemented
+        # RuntimeError: We encountered some issues during automatic conversion of the weights
         # "int4_weight_only",
     ]
 
-    def setUp(self):
-        self.causal_lm_model_id = "peft-internal-testing/opt-125m"
-        self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
-        # torchao breaks with fp16 and if a previous test uses fp16, transformers will set this env var, which affects
-        # subsequent tests, therefore the env var needs to be cleared explicitly
-        #
-        # TODO: remove this once https://github.com/huggingface/transformers/pull/39483 is merged
-        os.environ.pop("ACCELERATE_MIXED_PRECISION", None)
+    @pytest.fixture(scope="class")
+    def tokenizer(self):
+        return AutoTokenizer.from_pretrained(self.causal_lm_model_id)
 
-    def tearDown(self):
-        r"""
-        Efficient mechanism to free GPU memory after each test. Based on
-        https://github.com/huggingface/transformers/issues/21094
-        """
+    @pytest.fixture(scope="class", autouse=True)
+    def setup_teardown(self):
+        # Efficient mechanism to free GPU memory after each test. Based on
+        # https://github.com/huggingface/transformers/issues/21094
+        yield
         clear_device_cache(garbage_collection=True)
 
-    @parameterized.expand(supported_quant_types)
+    @staticmethod
+    def get_quant_type(quant_type: str):
+        from torchao.quantization import (
+            Int4WeightOnlyConfig,
+            Int8DynamicActivationInt8WeightConfig,
+            Int8WeightOnlyConfig,
+        )
+
+        return {
+            "int4_weight_only": Int4WeightOnlyConfig(),
+            "int8_weight_only": Int8WeightOnlyConfig(),
+            "int8_dynamic_activation_int8_weight": Int8DynamicActivationInt8WeightConfig(),
+        }[quant_type]
+
+    @pytest.mark.parametrize("quant_type", supported_quant_types)
     @pytest.mark.single_gpu_tests
-    def test_causal_lm_training_single_gpu_torchao(self, quant_type):
+    def test_causal_lm_training_single_gpu_torchao(self, quant_type, tokenizer):
         from transformers import TorchAoConfig
 
         device = 0
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            quantization_config = TorchAoConfig(quant_type=quant_type)
+            quantization_config = TorchAoConfig(quant_type=self.get_quant_type(quant_type))
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
             )
@@ -4294,7 +4311,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
-            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
                 model=model,
@@ -4308,7 +4325,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
                     logging_steps=1,
                     output_dir=tmp_dir,
                 ),
-                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
             )
             trainer.model.config.use_cache = False
             trainer.train()
@@ -4322,13 +4339,13 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.single_gpu_tests
-    def test_causal_lm_training_single_gpu_torchao_dora_int8_weight_only(self):
+    def test_causal_lm_training_single_gpu_torchao_dora_int8_weight_only(self, tokenizer):
         from transformers import TorchAoConfig
 
         device = 0
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            quantization_config = TorchAoConfig(quant_type="int8_weight_only")
+            quantization_config = TorchAoConfig(quant_type=self.get_quant_type("int8_weight_only"))
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
             )
@@ -4346,7 +4363,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
-            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
                 model=model,
@@ -4360,7 +4377,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
                     logging_steps=1,
                     output_dir=tmp_dir,
                 ),
-                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
             )
             trainer.model.config.use_cache = False
             trainer.train()
@@ -4379,7 +4396,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
 
         device = 0
 
-        quantization_config = TorchAoConfig(quant_type="int8_dynamic_activation_int8_weight")
+        quantization_config = TorchAoConfig(quant_type=self.get_quant_type("int8_dynamic_activation_int8_weight"))
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
         )
@@ -4408,7 +4425,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
 
         device = 0
 
-        quantization_config = TorchAoConfig(quant_type="int4_weight_only")
+        quantization_config = TorchAoConfig(quant_type=self.get_quant_type("int4_weight_only"))
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
         )
@@ -4430,10 +4447,10 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         # tested in multiple matchines
         model(inputs)
 
-    @parameterized.expand(supported_quant_types)
+    @pytest.mark.parametrize("quant_type", supported_quant_types)
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_accelerator
-    def test_causal_lm_training_multi_accelerator_torchao(self, quant_type):
+    def test_causal_lm_training_multi_accelerator_torchao(self, quant_type, tokenizer):
         from transformers import TorchAoConfig
 
         device_map = {
@@ -4458,7 +4475,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         }
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            quantization_config = TorchAoConfig(quant_type=quant_type)
+            quantization_config = TorchAoConfig(quant_type=self.get_quant_type(quant_type))
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
                 device_map=device_map,
@@ -4484,7 +4501,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             model = get_peft_model(model, config)
 
             data = load_dataset_english_quotes()
-            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
                 model=model,
@@ -4498,7 +4515,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
                     logging_steps=1,
                     output_dir=tmp_dir,
                 ),
-                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
             )
             trainer.model.config.use_cache = False
             trainer.train()
@@ -4539,7 +4556,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             "model.decoder.layers.11": 1,
             "model.decoder.final_layer_norm": 1,
         }
-        quantization_config = TorchAoConfig(quant_type="int4_weight_only")
+        quantization_config = TorchAoConfig(self.get_quant_type(quant_type="int4_weight_only"))
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
             device_map=device_map,
@@ -4577,7 +4594,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         device = 0
         dummy_input = torch.arange(10).view(-1, 1).to(device)
 
-        quantization_config = TorchAoConfig(quant_type=quant_type)
+        quantization_config = TorchAoConfig(self.get_quant_type(quant_type=quant_type))
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
         ).eval()
@@ -4630,7 +4647,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         torch.manual_seed(0)
         device = 0
 
-        quantization_config = TorchAoConfig(quant_type=quant_type)
+        quantization_config = TorchAoConfig(quant_type=self.get_quant_type(quant_type))
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
         ).eval()
@@ -5974,3 +5991,205 @@ class TestTransformerEngine:
         assert torch.isfinite(loss), f"Loss is not finite: {loss.item()}"
         loss.backward()
         optimizer.step()
+
+
+### LoRA and Tensor Parallelism tests ###
+
+WORLD_SIZE = 2
+MODEL_ID = "Qwen/Qwen3-0.6B"
+TINY_MODEL_ID = "peft-internal-testing/zephyr-smol_llama-100m-sft-full"
+TARGET_MODULES = ["embed_tokens", "q_proj", "k_proj", "v_proj", "o_proj"]
+
+TP_PLAN = {
+    "model.embed_tokens": "embedding_rowwise",
+    "model.layers.*.self_attn.q_proj": "colwise",
+    "model.layers.*.self_attn.k_proj": "colwise",
+    "model.layers.*.self_attn.v_proj": "colwise",
+    "model.layers.*.self_attn.o_proj": "rowwise",
+    "model.layers.*.mlp.gate_proj": "colwise",
+    "model.layers.*.mlp.up_proj": "colwise",
+    "model.layers.*.mlp.down_proj": "rowwise",
+}
+
+
+def _find_free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+
+
+_BASE_PORT = _find_free_port()
+
+
+def _setup_dist(rank, world_size, port):
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = str(port)
+    os.environ["LOCAL_RANK"] = str(rank)
+    os.environ["RANK"] = str(rank)
+    os.environ["WORLD_SIZE"] = str(rank)
+    dist.init_process_group(backend="gloo", rank=rank, world_size=world_size)
+
+
+def _teardown_dist():
+    dist.destroy_process_group()
+
+
+def _test_function_wrapper(fn, rank, world_size, port, *extra_args):
+    try:
+        _setup_dist(rank, world_size, port)
+        fn(rank, world_size, port, *extra_args)
+    finally:
+        _teardown_dist()
+
+
+def _test_lora_weight_synchronization(rank, world_size, port):
+    """
+    Test that non-sharded LoRA weights are identical across ranks after training step.
+    """
+    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
+    lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
+    model = get_peft_model(model, lora_config)
+
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    model.to(device)
+
+    tokenizer = AutoTokenizer.from_pretrained(TINY_MODEL_ID)
+    inputs = tokenizer("Paris is the most beautiful city in the world.", return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    model.train()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+
+    # Test that loss is finite and decreases over multiple steps
+    for _ in range(3):
+        outputs = model(**inputs, labels=inputs["input_ids"])
+        loss = outputs.loss
+        assert torch.isfinite(loss), f"Loss is not finite: {loss}"
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+    # Test that non-sharded LoRA weights are identical across ranks after training step
+    for name, module in model.named_modules():
+        if not isinstance(module, LoraLayer):
+            continue
+        base_layer = module.get_base_layer()
+        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+        if tp_plan == "colwise":
+            weight = module.lora_A["default"].weight.data.contiguous()
+            gathered = [torch.zeros_like(weight) for _ in range(world_size)]
+            dist.all_gather(gathered, weight)
+            for i, g in enumerate(gathered):
+                assert torch.allclose(weight, g), f"{name}.lora_A differs between rank {rank} and rank {i}"
+        elif tp_plan == "rowwise":
+            weight = module.lora_B["default"].weight.data.contiguous()
+            gathered = [torch.zeros_like(weight) for _ in range(world_size)]
+            dist.all_gather(gathered, weight)
+            for i, g in enumerate(gathered):
+                assert torch.allclose(weight, g), f"{name}.lora_B differs between rank {rank} and rank {i}"
+        elif tp_plan == "embedding_rowwise":
+            weight = module.lora_embedding_B["default"].data.contiguous()
+            gathered = [torch.zeros_like(weight) for _ in range(world_size)]
+            dist.all_gather(gathered, weight)
+            for i, g in enumerate(gathered):
+                assert torch.allclose(weight, g), f"{name}.lora_embedding_B differs between rank {rank} and rank {i}"
+
+
+def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
+    """
+    Test that loading from a checkpoint correctly handles the sharding of LoRA weights according to the TP plan.
+    """
+    if rank == 0:
+        plain_model = AutoModelForCausalLM.from_pretrained(MODEL_ID)
+        lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
+        plain_model = get_peft_model(plain_model, lora_config)
+        plain_model.save_pretrained(tmp_dir)
+
+    dist.barrier()
+
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+
+    tp_base = AutoModelForCausalLM.from_pretrained(MODEL_ID, tp_plan=TP_PLAN)
+    tp_base.to(device)
+    tp_model = PeftModel.from_pretrained(tp_base, tmp_dir)
+
+    for name, module in tp_model.named_modules():
+        if not isinstance(module, LoraLayer):
+            continue
+        base_layer = module.get_base_layer()
+        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+        if tp_plan == "colwise":
+            # lora_B output dim must match base layer output dim
+            lora_b_out = module.lora_B["default"].weight.shape[0]
+            base_layer_out = base_layer.weight.shape[0]
+            assert lora_b_out == base_layer_out, (
+                f"{name}: lora_B out_dim {lora_b_out} != local base out_dim {base_layer_out}"
+            )
+        elif tp_plan == "rowwise":
+            # lora_A input dim must match base layer input dim
+            lora_a_in = module.lora_A["default"].weight.shape[1]
+            base_layer_in = base_layer.weight.shape[1]
+            assert lora_a_in == base_layer_in, (
+                f"{name}: lora_A in_dim {lora_a_in} != local base in_dim {base_layer_in}"
+            )
+        elif tp_plan == "embedding_rowwise":
+            # lora_embedding_A vocab size must match base layer vocab size
+            lora_emb_vocab = module.lora_embedding_A["default"].shape[1]  # Lora embedding weights are (r, vocab_size)
+            base_emb_vocab = base_layer.weight.shape[0]
+            assert lora_emb_vocab == base_emb_vocab, (
+                f"{name}: lora_embedding_A vocab {lora_emb_vocab} != local base vocab {base_emb_vocab}"
+            )
+
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    inputs = tokenizer("The capital of France is Paris.", return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+    tp_model.eval()
+    with torch.no_grad():
+        outputs = tp_model(**inputs, labels=inputs["input_ids"])
+    assert torch.isfinite(outputs.loss), f"Loss not finite after checkpoint load: {outputs.loss}"
+
+
+def _test_multiple_adapters(rank, world_size, port):
+    """Two LoRA adapters coexist on a TP model and can be switched between."""
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    model = AutoModelForCausalLM.from_pretrained(MODEL_ID, tp_plan=TP_PLAN)
+    model.to(device)
+
+    for adapter_name in ["adapter_a", "adapter_b"]:
+        lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
+        model = get_peft_model(model, lora_config, adapter_name=adapter_name)
+
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    inputs = tokenizer("What is the capital of France?", return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+    model.eval()
+    with torch.no_grad():
+        for adapter_name in ["adapter_a", "adapter_b"]:
+            model.set_adapter(adapter_name)
+            outputs = model(**inputs, labels=inputs["input_ids"])
+            assert torch.isfinite(outputs.loss), f"Loss not finite with adapter '{adapter_name}': {outputs.loss}"
+
+
+@require_torch_gpu
+@pytest.mark.skipif(
+    not is_transformers_ge_v5_4_0, reason="transformers TP integration supported for transformers >= 5.4.0"
+)
+@pytest.mark.multi_gpu_tests
+class TestLoraTensorParallel:
+    def _spawn(self, fn, *extra_args, port_offset=0):
+        port = _BASE_PORT + port_offset
+        wrapped_fn = partial(_test_function_wrapper, fn)
+        mp.spawn(wrapped_fn, args=(WORLD_SIZE, port) + extra_args, nprocs=WORLD_SIZE, join=True)
+
+    def test_lora_weight_synchronization(self):
+        self._spawn(_test_lora_weight_synchronization, port_offset=0)
+
+    def test_from_checkpoint(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            self._spawn(_test_load_from_checkpoint, tmp_dir, port_offset=1)
+
+    def test_multiple_adapters(self):
+        self._spawn(_test_multiple_adapters, port_offset=2)

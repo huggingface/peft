@@ -295,10 +295,11 @@ The same logic applies to `alpha_pattern`. If you're in doubt, don't try to get 
 
 ### Targeting `nn.Parameter` directly
 
-> [!WARNING]
-> This feature is experimental and subject to change.
-
 Generally, you should use `target_modules` to target the module (e.g. `nn.Linear`). However, in some circumstances, this is not possible. E.g., in many mixture of expert (MoE) layers in HF Transformers, instead of using `nn.Linear`, an `nn.Parameter` is used. PEFT normally overwrites the `forward` method for LoRA, but for `nn.Parameter`, there is none. Therefore, to apply LoRA to that parameter, it needs to be targeted with `target_parameters`. As an example, for [Llama4](https://huggingface.co/collections/meta-llama/llama-4-67f0c30d9fe03840bc9d0164), you can pass: `target_parameters=['feed_forward.experts.gate_up_proj', 'feed_forward.experts.down_proj]`.
+
+Note that when targeting expert parameters, PEFT can add a substantial runtime overhead. The reason is that PEFT always materializes the LoRA contribution for _each expert_ even if only a small amount of experts is required. During training, this is less relevant since, over the course of the sequence, typically a large fraction of experts is activated at least once. However, during inference, normally a KV cache is used and we thus need to only compute the last token, which means that only a small amount of experts is activated. Therefore, using LoRA on MoE layers can result in a substantial slowdown at inference time. The recommendation is thus to merge the weights (`model.merge_adapter()` or `model = model.merge_and_unload()`). This removes the PEFT overhead.
+
+A more detailed investigation of this issue can be found on this [pull request on MoE optimization](https://github.com/huggingface/peft/pull/3139).
 
 #### Caveats
 
@@ -615,6 +616,26 @@ model = model.unload()
 # delete adapter
 model.delete_adapter("dpo")
 ```
+
+## Tensor Parallelism
+
+LoRA supports [Tensor Parallelism (TP)](https://huggingface.co/docs/transformers/main/en/perf_train_gpu_many#tensor-parallelism) as provided by Transformers. When a base model is loaded with a `tp_plan`, PEFT automatically detects the TP configuration of each target module and adds the appropriate hooks to the LoRA adapter weights so that they participate correctly in the tensor-parallel computation.
+
+> [!WARNING]
+> Tensor Parallelism support for LoRA requires `transformers >= 5.4.0`.
+
+Usage is identical to the standard LoRA workflow — simply load the base model with a `tp_plan` before wrapping it with PEFT:
+
+```py
+from transformers import AutoModelForCausalLM
+from peft import get_peft_model, LoraConfig
+
+model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.1-8B", tp_plan="auto")
+lora_config = LoraConfig(r=16, target_modules=["q_proj", "v_proj"])
+model = get_peft_model(model, lora_config)
+```
+
+Saving and loading work as usual via `save_pretrained` / `from_pretrained`. PEFT gathers the sharded adapter weights back to full tensors before saving, so checkpoints are portable and independent of the number of devices used during training.
 
 ## Inference
 
