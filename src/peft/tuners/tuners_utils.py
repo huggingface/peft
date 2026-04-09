@@ -671,7 +671,7 @@ class BaseTuner(nn.Module, ABC):
                 try:
                     out_emb = self.model.get_output_embeddings()
                     in_emb = self.model.get_input_embeddings()
-                    if out_emb is not None and in_emb is not None:
+                    if (out_emb is not None) and (in_emb is not None):
                         out_w = getattr(out_emb, "weight", None)
                         in_w = getattr(in_emb, "weight", None)
                         if (out_w is not None) and (in_w is not None) and (out_w is not in_w):
