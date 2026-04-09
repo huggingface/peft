@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# See https://arxiv.org/abs/2506.16289 for details
 
 import torch
 import torch.nn as nn
