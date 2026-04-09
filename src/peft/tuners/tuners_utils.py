@@ -665,6 +665,25 @@ class BaseTuner(nn.Module, ABC):
         if hasattr(self.model, "peft_config"):
             del self.model.peft_config
 
+        # If embeddings have diverged (e.g. after vocab resize), fix config to match actual state.
+        if merge:
+            model_config = self.get_model_config(self.model)
+            if model_config.get("tie_word_embeddings"):
+                try:
+                    out_emb = self.model.get_output_embeddings()
+                    in_emb = self.model.get_input_embeddings()
+                    if (out_emb is not None) and (in_emb is not None):
+                        out_w = getattr(out_emb, "weight", None)
+                        in_w = getattr(in_emb, "weight", None)
+                        if (out_w is not None) and (in_w is not None) and (out_w.data_ptr() != in_w.data_ptr()):
+                            self.model.config.tie_word_embeddings = False
+                            warnings.warn(
+                                "Input and output embeddings are no longer tied after merging. "
+                                "Setting `tie_word_embeddings=False` in the model config."
+                            )
+                except (NotImplementedError, AttributeError):
+                    pass
+
         return self.model
 
     def merge_and_unload(
