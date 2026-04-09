@@ -25,7 +25,7 @@ except ImportError:
 class KappaTuneSelector:
     """
     Lightweight utility to compute per-module condition numbers (κ = σ_max / σ_min)
-    and return the best LoRA target modules. Now supports bnb 4-bit models (paper reproduction).
+    and return the best LoRA target modules.
     """
     def __init__(self, model: nn.Module, max_dim_size_to_analyze: int = 16384):
         self.model = model
@@ -94,7 +94,7 @@ class KappaTuneSelector:
             List of module names (e.g. [model.layers.0.self_attn.q_proj, ...])
         Notes:
             - Precedence (checked in order): num_modules → top_p → threshold → all modules.
-            - Modules are always sorted by ascending κ (lowest = best).
+            - Modules are always sorted by ascending κ (lower values are better for mitigating catastrophic forgetting during fine-tuning).
             - Recommended: top_p=0.2 for most models (Llama-3, Mistral, Qwen, etc.).
         """
         
