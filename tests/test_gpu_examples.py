@@ -27,10 +27,12 @@ from pathlib import Path
 from typing import Any, Union
 
 import numpy as np
+import packaging
 import pytest
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
+import transformers
 from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import get_backend, run_command
 from accelerate.utils import patch_environment
@@ -88,7 +90,6 @@ from peft.import_utils import (
     is_diffusers_available,
     is_te_available,
     is_transformers_ge_v5,
-    is_transformers_ge_v5_4_0,
     is_xpu_available,
 )
 from peft.tuners import boft
@@ -6312,9 +6313,14 @@ def _test_load_adapter_save(rank, world_size, port, tmp_dir_reference, tmp_dir_t
             )
 
 
+# transformers >= 5.4.0 is required for TP integration
+# transformers >= 5.6.0 is required for PreTrainedModel.load_adapter with TP models integration
+is_transformers_ge_v5_6_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.6.0")
+
+
 @require_torch_gpu
 @pytest.mark.skipif(
-    not is_transformers_ge_v5_4_0, reason="transformers TP integration supported for transformers >= 5.4.0"
+    not is_transformers_ge_v5_6_0, reason="transformers TP integration supported for transformers >= 5.6.0"
 )
 @pytest.mark.multi_gpu_tests
 class TestLoraTensorParallel:
