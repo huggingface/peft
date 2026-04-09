@@ -97,6 +97,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "gemma": ["q_proj", "v_proj"],
     "gemma2": ["q_proj", "v_proj"],
     "gemma3_text": ["q_proj", "v_proj"],
+    "gemma4": r".*language_model\..*\.(q_proj|v_proj)",
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
     "rwkv": ["key", "value", "receptance", "output"],
@@ -264,6 +265,7 @@ TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
     "gemma": ["q_proj", "v_proj"],
     "gemma2": ["q_proj", "v_proj"],
     "gemma3_text": ["q_proj", "v_proj"],
+    "gemma4": r".*language_model\..*\.(q_proj|v_proj)",
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
 }
@@ -288,6 +290,7 @@ TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING = {
     "gemma": ["q_proj", "v_proj"],
     "gemma2": ["q_proj", "v_proj"],
     "gemma3_text": ["q_proj", "v_proj"],
+    "gemma4": r".*language_model\..*\.(q_proj|v_proj)",
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
 }
@@ -346,6 +349,7 @@ TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING = {
     "gemma": ["q_proj", "v_proj"],
     "gemma2": ["q_proj", "v_proj"],
     "gemma3_text": ["q_proj", "v_proj"],
+    "gemma4": r".*language_model\..*\.(q_proj|v_proj)",
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
 }

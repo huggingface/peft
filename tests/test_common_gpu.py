@@ -530,30 +530,34 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         model_id = "marcsun13/opt-350m-gptq-4bit"
         quantization_config = GPTQConfig(bits=4, backend=BACKEND.AUTO_TRAINABLE)
+        # Use explicit device instead of "auto" to ensure model stays on single device
+        # This avoids device mismatch issues when reloading the model
+        device_map = f"{self.device}:0"  # e.g., "cuda:0", "xpu:0"
         kwargs = {
             "pretrained_model_name_or_path": model_id,
             "dtype": torch.float16,
-            "device_map": "auto",
+            "device_map": device_map,
             "quantization_config": quantization_config,
         }
         model = AutoModelForCausalLM.from_pretrained(**kwargs)
+        device = model.device
         model = prepare_model_for_kbit_training(model)
 
         config = LoraConfig(task_type="CAUSAL_LM")
         peft_model = get_peft_model(model, config)
-        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(peft_model.device))
+        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(device))
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             peft_model.save_pretrained(tmp_dir)
             model = AutoModelForCausalLM.from_pretrained(**kwargs)
             model = PeftModel.from_pretrained(model, tmp_dir)
             model = prepare_model_for_kbit_training(model)
-            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(peft_model.device))
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(device))
 
             # loading a 2nd adapter works, #1239
             model.load_adapter(tmp_dir, "adapter2")
             model.set_adapter("adapter2")
-            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(peft_model.device))
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(device))
 
             # check that both adapters are in the same layer
             assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A

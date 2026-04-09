@@ -41,16 +41,16 @@ tests_common_gpu:
 	python -m pytest tests/test_gptqmodel.py $(if $(IS_GITHUB_CI),--report-log "gptqmodel_gpu.log",)
 
 tests_examples_multi_gpu_bnb:
-	python -m pytest -m "multi_gpu_tests and bitsandbytes" tests/test_gpu_examples.py $(if $(IS_GITHUB_CI),--report-log "multi_gpu_examples.log",)
+	python -m pytest -m "multi_gpu_tests and bitsandbytes" tests/test_gpu_examples.py $(if $(IS_GITHUB_CI),--report-log "multi_gpu_bnb_examples.log",)
 
 tests_examples_single_gpu_bnb:
-	python -m pytest -m "single_gpu_tests and bitsandbytes" tests/test_gpu_examples.py $(if $(IS_GITHUB_CI),--report-log "single_gpu_examples.log",)
+	python -m pytest -m "single_gpu_tests and bitsandbytes" tests/test_gpu_examples.py $(if $(IS_GITHUB_CI),--report-log "single_gpu_bnb_examples.log",)
 
 tests_core_multi_gpu_bnb:
-	python -m pytest -m "multi_gpu_tests and bitsandbytes" tests/test_common_gpu.py $(if $(IS_GITHUB_CI),--report-log "core_multi_gpu.log",)
+	python -m pytest -m "multi_gpu_tests and bitsandbytes" tests/test_common_gpu.py $(if $(IS_GITHUB_CI),--report-log "core_multi_gpu_bnb.log",)
 
 tests_core_single_gpu_bnb:
-	python -m pytest -m "single_gpu_tests and bitsandbytes" tests/test_common_gpu.py $(if $(IS_GITHUB_CI),--report-log "core_single_gpu.log",)
+	python -m pytest -m "single_gpu_tests and bitsandbytes" tests/test_common_gpu.py $(if $(IS_GITHUB_CI),--report-log "core_single_gpu_bnb.log",)
 
 # For testing transformers tests for bnb runners
 transformers_tests:
@@ -63,13 +63,13 @@ tests_torch_compile:
 	python -m pytest tests/test_torch_compile.py $(if $(IS_GITHUB_CI),--report-log "compile_tests.log",)
 
 tests_training:
-	accelerate launch --config_file tests/training/deepspeed_config.yaml tests/training/training.py -- $(if $(IS_GITHUB_CI),--report-log "training_deepspeed.log",)
-	accelerate launch --config_file tests/training/deepspeed_config.yaml tests/training/training.py --quant 4bit -- $(if $(IS_GITHUB_CI),--report-log "training_deepspeed_4bit.log",)
-	accelerate launch --config_file tests/training/deepspeed_config.yaml tests/training/training.py --quant 8bit -- $(if $(IS_GITHUB_CI),--report-log "training_deepspeed_8bit.log",)
-	accelerate launch --config_file tests/training/fsdp_config.yaml tests/training/training.py -- $(if $(IS_GITHUB_CI),--report-log "training_fsdp.log",)
-	accelerate launch --config_file tests/training/fsdp_config.yaml tests/training/training.py --quant 4bit -- $(if $(IS_GITHUB_CI),--report-log "training_fsdp_4bit.log",)
-	accelerate launch --config_file tests/training/fsdp2_config.yaml tests/training/training.py -- $(if $(IS_GITHUB_CI),--report-log "training_fsdp2.log",)
-	accelerate launch --config_file tests/training/fsdp2_config.yaml tests/training/training.py --quant 4bit -- $(if $(IS_GITHUB_CI),--report-log "training_fsdp2_4bit.log",)
-	accelerate launch --config_file tests/training/fsdp2_config.yaml tests/training/training.py --quant 4bit --target_modules q_proj --target_parameters v_proj.weight -- $(if $(IS_GITHUB_CI),--report-log "training_fsdp2_target_params.log",)
-	accelerate launch --config_file tests/training/fsdp_config.yaml tests/training/adapters.py -- $(if $(IS_GITHUB_CI),--report-log "training_fsdp_adapters.log",)
+	accelerate launch --config_file tests/training/deepspeed_config.yaml tests/training/training.py
+	accelerate launch --config_file tests/training/deepspeed_config.yaml tests/training/training.py --quant 4bit
+	accelerate launch --config_file tests/training/deepspeed_config.yaml tests/training/training.py --quant 8bit
+	accelerate launch --config_file tests/training/fsdp_config.yaml tests/training/training.py
+	accelerate launch --config_file tests/training/fsdp_config.yaml tests/training/training.py --quant 4bit
+	accelerate launch --config_file tests/training/fsdp2_config.yaml tests/training/training.py
+	accelerate launch --config_file tests/training/fsdp2_config.yaml tests/training/training.py --quant 4bit
+	accelerate launch --config_file tests/training/fsdp2_config.yaml tests/training/training.py --quant 4bit --target_modules q_proj --target_parameters v_proj.weight
+	accelerate launch --config_file tests/training/fsdp_config.yaml tests/training/adapters.py
 	accelerate launch --config_file tests/training/tp_config.yaml tests/training/lora_tp.py

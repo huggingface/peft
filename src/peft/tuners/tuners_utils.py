@@ -384,7 +384,10 @@ class BaseTuner(nn.Module, ABC):
             target_modules = self.target_module_mapping.get(model_config["model_type"])
             if target_modules is None:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = set(target_modules)
+            if isinstance(target_modules, str):
+                peft_config.target_modules = target_modules
+            else:
+                peft_config.target_modules = set(target_modules)
         return peft_config
 
     def _prepare_model(self, peft_config: PeftConfig, model: nn.Module):
@@ -664,6 +667,25 @@ class BaseTuner(nn.Module, ABC):
         # This prevents spurious warnings when re-wrapping the model with get_peft_model().
         if hasattr(self.model, "peft_config"):
             del self.model.peft_config
+
+        # If embeddings have diverged (e.g. after vocab resize), fix config to match actual state.
+        if merge:
+            model_config = self.get_model_config(self.model)
+            if model_config.get("tie_word_embeddings"):
+                try:
+                    out_emb = self.model.get_output_embeddings()
+                    in_emb = self.model.get_input_embeddings()
+                    if (out_emb is not None) and (in_emb is not None):
+                        out_w = getattr(out_emb, "weight", None)
+                        in_w = getattr(in_emb, "weight", None)
+                        if (out_w is not None) and (in_w is not None) and (out_w.data_ptr() != in_w.data_ptr()):
+                            self.model.config.tie_word_embeddings = False
+                            warnings.warn(
+                                "Input and output embeddings are no longer tied after merging. "
+                                "Setting `tie_word_embeddings=False` in the model config."
+                            )
+                except (NotImplementedError, AttributeError):
+                    pass
 
         return self.model
 
