@@ -299,6 +299,8 @@ Generally, you should use `target_modules` to target the module (e.g. `nn.Linear
 
 Note that when targeting expert parameters, PEFT can add a substantial runtime overhead. The reason is that PEFT always materializes the LoRA contribution for _each expert_ even if only a small amount of experts is required. During training, this is less relevant since, over the course of the sequence, typically a large fraction of experts is activated at least once. However, during inference, normally a KV cache is used and we thus need to only compute the last token, which means that only a small amount of experts is activated. Therefore, using LoRA on MoE layers can result in a substantial slowdown at inference time. The recommendation is thus to merge the weights (`model.merge_adapter()` or `model = model.merge_and_unload()`). This removes the PEFT overhead.
 
+A more detailed investigation of this issue can be found on this [pull request on MoE optimization](https://github.com/huggingface/peft/pull/3139).
+
 #### Caveats
 
 - At the moment, this argument allows to target 2-dim or 3-dim `nn.Parameter`s. It is assumed that in the case of a 3-dim parameter, the 0th dimension is the expert dimension.
