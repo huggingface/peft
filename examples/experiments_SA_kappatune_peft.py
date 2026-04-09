@@ -21,7 +21,7 @@ import math
 def get_stable_expert_names(model, budget_k=300):
     print(f" [KappaTune] Identifying {budget_k} most stable expert modules using PEFT KappaTuneSelector...")
     
-    selector = KappaTuneSelector(model)                     # ← uses the new PEFT class
+    selector = KappaTuneSelector(model)
     
     # Get top candidates (more than needed)
     all_low_kappa = selector.get_best_targets(num_modules=budget_k * 2)
