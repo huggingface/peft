@@ -1062,3 +1062,4 @@ class TestDecoderModels(PeftCommonTester):
 
         assert not merged.config.tie_word_embeddings
         assert merged.lm_head.weight is not merged.model.embed_tokens.weight
+        assert merged.lm_head.weight.data_ptr() != merged.model.embed_tokens.weight.data_ptr()
