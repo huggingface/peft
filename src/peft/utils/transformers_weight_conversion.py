@@ -37,6 +37,11 @@ from transformers.core_model_loading import (
 from peft import PeftType
 
 
+# https://github.com/huggingface/transformers/pull/45340#issuecomment-4222734042
+_MODEL_TO_CONVERSION_PATTERN = _MODEL_TO_CONVERSION_PATTERN.copy()
+_MODEL_TO_CONVERSION_PATTERN["mixtral"] = "mixtral"
+
+
 def _block_diag_3d(tensors: list[torch.Tensor]) -> torch.Tensor:
     if len(tensors) < 2:
         raise ValueError(f"_block_diag_3d expects at least 2 tensors, got {len(tensors)}")
