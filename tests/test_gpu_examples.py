@@ -10,6 +10,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import datetime
 import gc
 import importlib
 import itertools
@@ -26,10 +27,12 @@ from pathlib import Path
 from typing import Any, Union
 
 import numpy as np
+import packaging
 import pytest
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
+import transformers
 from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import get_backend, run_command
 from accelerate.utils import patch_environment
@@ -38,6 +41,7 @@ from accelerate.utils.memory import clear_device_cache
 from datasets import Audio, Dataset, DatasetDict, load_dataset
 from packaging import version
 from parameterized import parameterized
+from safetensors.torch import load_file, save_file
 from torch.distributed import init_process_group
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.utils.data import DataLoader
@@ -87,7 +91,6 @@ from peft.import_utils import (
     is_diffusers_available,
     is_te_available,
     is_transformers_ge_v5,
-    is_transformers_ge_v5_4_0,
     is_xpu_available,
 )
 from peft.tuners import boft
@@ -6150,9 +6153,10 @@ class TestTransformerEngine:
 ### LoRA and Tensor Parallelism tests ###
 
 WORLD_SIZE = 2
-MODEL_ID = "Qwen/Qwen3-0.6B"
 TINY_MODEL_ID = "peft-internal-testing/zephyr-smol_llama-100m-sft-full"
 TARGET_MODULES = ["embed_tokens", "q_proj", "k_proj", "v_proj", "o_proj"]
+
+TIMEOUT_BARRIER = datetime.timedelta(seconds=30)
 
 TP_PLAN = {
     "model.embed_tokens": "embedding_rowwise",
@@ -6255,17 +6259,17 @@ def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
     Test that loading from a checkpoint correctly handles the sharding of LoRA weights according to the TP plan.
     """
     if rank == 0:
-        plain_model = AutoModelForCausalLM.from_pretrained(MODEL_ID)
+        plain_model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID)
         lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
         plain_model = get_peft_model(plain_model, lora_config)
         plain_model.save_pretrained(tmp_dir)
 
-    dist.barrier()
+    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
 
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
 
-    tp_base = AutoModelForCausalLM.from_pretrained(MODEL_ID, tp_plan=TP_PLAN)
+    tp_base = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
     tp_base.to(device)
     tp_model = PeftModel.from_pretrained(tp_base, tmp_dir)
 
@@ -6296,7 +6300,7 @@ def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
                 f"{name}: lora_embedding_A vocab {lora_emb_vocab} != local base vocab {base_emb_vocab}"
             )
 
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    tokenizer = AutoTokenizer.from_pretrained(TINY_MODEL_ID)
     inputs = tokenizer("The capital of France is Paris.", return_tensors="pt")
     inputs = {k: v.to(device) for k, v in inputs.items()}
     tp_model.eval()
@@ -6305,18 +6309,58 @@ def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
     assert torch.isfinite(outputs.loss), f"Loss not finite after checkpoint load: {outputs.loss}"
 
 
+def _test_save_unsharded_weights(rank, world_size, port, tmp_dir_reference, tmp_dir_tp):
+    """
+    Test that saving a TP PEFT model produces fully unsharded weights identical to the original non-TP weights.
+
+    Flow:
+      1. Rank 0: create a plain (non-TP) PEFT model, save it as the reference.
+      2. All ranks: load the TP base model, load the reference PEFT weights (shards on load), then save again.
+      3. Rank 0: compare the re-saved state dict against the original reference — they must match exactly.
+    """
+    if rank == 0:
+        plain_model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID)
+        lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
+        plain_model = get_peft_model(plain_model, lora_config)
+        plain_model.save_pretrained(tmp_dir_reference)
+
+    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
+
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+
+    tp_base = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
+    tp_base.to(device)
+    tp_model = PeftModel.from_pretrained(tp_base, tmp_dir_reference)
+    tp_model.save_pretrained(tmp_dir_tp)
+
+    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
+
+    if rank == 0:
+        reference_sd = load_file(f"{tmp_dir_reference}/adapter_model.safetensors")
+        saved_sd = load_file(f"{tmp_dir_tp}/adapter_model.safetensors")
+
+        assert set(reference_sd.keys()) == set(saved_sd.keys()), (
+            f"State dict keys differ.\n  reference: {sorted(reference_sd.keys())}\n  saved: {sorted(saved_sd.keys())}"
+        )
+        for key in reference_sd:
+            assert torch.allclose(reference_sd[key], saved_sd[key], atol=1e-6), (
+                f"Weight mismatch for '{key}': max diff = {(reference_sd[key] - saved_sd[key]).abs().max()}"
+            )
+
+
 def _test_multiple_adapters(rank, world_size, port):
     """Two LoRA adapters coexist on a TP model and can be switched between."""
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
-    model = AutoModelForCausalLM.from_pretrained(MODEL_ID, tp_plan=TP_PLAN)
+    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
     model.to(device)
 
     for adapter_name in ["adapter_a", "adapter_b"]:
         lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
         model = get_peft_model(model, lora_config, adapter_name=adapter_name)
 
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    tokenizer = AutoTokenizer.from_pretrained(TINY_MODEL_ID)
     inputs = tokenizer("What is the capital of France?", return_tensors="pt")
     inputs = {k: v.to(device) for k, v in inputs.items()}
     model.eval()
@@ -6327,9 +6371,116 @@ def _test_multiple_adapters(rank, world_size, port):
             assert torch.isfinite(outputs.loss), f"Loss not finite with adapter '{adapter_name}': {outputs.loss}"
 
 
+def _test_load_adapter_forward(rank, world_size, port, tmp_dir_reference):
+    """
+    Test that load_adapter (with a peft_config) works with a TP base model and the forward pass produces the same loss
+    on every rank and that it is finite.
+
+    This exercises the low-level API path where no PeftModel/tuner is created, so TP info must be stored on the lora
+    modules themselves (via _tp_info) rather than on the tuner.
+    """
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+
+    if rank == 0:
+        plain_model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID)
+        lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
+        plain_model = get_peft_model(plain_model, lora_config)
+        plain_model.save_pretrained(tmp_dir_reference)
+
+    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
+
+    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
+    model.load_adapter(tmp_dir_reference)
+    model.to(device)
+
+    for mod in model.modules():
+        if isinstance(mod, LoraLayer):
+            assert hasattr(mod, "_tp_info"), "load_adapter did not store TP info on the LoRA module"
+
+    tokenizer = AutoTokenizer.from_pretrained(TINY_MODEL_ID)
+    inputs = tokenizer("Paris is the capital of France.", return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    model.eval()
+    with torch.no_grad():
+        outputs = model(**inputs, labels=inputs["input_ids"])
+
+    all_losses = [torch.empty_like(outputs.loss) for _ in range(world_size)]
+    dist.all_gather(all_losses, outputs.loss)
+
+    assert all(loss.item() == all_losses[0].item() for loss in all_losses), (
+        f"Losses differ across ranks: {[loss.item() for loss in all_losses]}"
+    )
+
+    assert torch.isfinite(outputs.loss), f"Loss is not finite: {outputs.loss}"
+
+
+def _test_load_adapter_save(rank, world_size, port, tmp_dir_reference, tmp_dir_tp):
+    """
+    Test that get_peft_model_state_dict correctly gathers unsharded TP weights when using load_adapter with a
+    peft_config.
+
+    Flow:
+      1. Rank 0: create a plain (non-TP) model, load adapter from config, save state dict as reference.
+      2. All ranks: load TP base model, load adapter from config, save state dict via get_peft_model_state_dict.
+      3. Rank 0: compare re-saved state dict against the reference — keys and values must match.
+    """
+    if rank == 0:
+        plain_model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID)
+        lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
+        plain_model = get_peft_model(plain_model, lora_config)
+        plain_model.save_pretrained(tmp_dir_reference)
+
+    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
+
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+
+    tp_base = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
+    tp_base.load_adapter(tmp_dir_reference)
+    tp_base.to(device)
+
+    tp_sd = get_peft_model_state_dict(tp_base)
+    if rank == 0:
+        tmp_dir_tp.mkdir(exist_ok=True)
+        save_file(tp_sd, f"{tmp_dir_tp}/adapter_model.safetensors")
+
+    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
+
+    if rank == 0:
+        reference_sd = load_file(f"{tmp_dir_reference}/adapter_model.safetensors")
+        saved_sd = load_file(f"{tmp_dir_tp}/adapter_model.safetensors")
+
+        prefix = "base_model.model."
+        reference_sd = {k[len(prefix) :]: v for k, v in reference_sd.items() if k.startswith(prefix)}
+
+        assert set(reference_sd.keys()) == set(saved_sd.keys()), (
+            f"State dict keys differ.\n  reference: {sorted(reference_sd.keys())}\n  saved: {sorted(saved_sd.keys())}"
+        )
+        for key in reference_sd:
+            if reference_sd[key].shape != saved_sd[key].shape:
+                raise AssertionError(
+                    f"Shape mismatch for '{key}': reference shape {reference_sd[key].shape} vs saved shape "
+                    f"{saved_sd[key].shape}"
+                )
+            torch.testing.assert_close(
+                reference_sd[key].to(torch.bfloat16),
+                saved_sd[key].to(torch.bfloat16),
+                rtol=1e-5,
+                atol=1e-6,
+                msg=f"Weight mismatch for '{key}'",
+            )
+
+
+# transformers >= 5.4.0 is required for TP integration
+# transformers >= 5.6.0 is required for PreTrainedModel.load_adapter with TP models integration
+is_transformers_ge_v5_6_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.6.0")
+
+
 @require_torch_gpu
 @pytest.mark.skipif(
-    not is_transformers_ge_v5_4_0, reason="transformers TP integration supported for transformers >= 5.4.0"
+    not is_transformers_ge_v5_6_0, reason="transformers TP integration supported for transformers >= 5.6.0"
 )
 @pytest.mark.multi_gpu_tests
 class TestLoraTensorParallel:
@@ -6341,9 +6492,21 @@ class TestLoraTensorParallel:
     def test_lora_weight_synchronization(self):
         self._spawn(_test_lora_weight_synchronization, port_offset=0)
 
-    def test_from_checkpoint(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            self._spawn(_test_load_from_checkpoint, tmp_dir, port_offset=1)
+    def test_from_checkpoint(self, tmp_path):
+        self._spawn(_test_load_from_checkpoint, tmp_path, port_offset=1)
+
+    def test_save_unsharded_weights(self, tmp_path):
+        tmp_dir_reference = tmp_path / "reference"
+        tmp_dir_tp = tmp_path / "tp"
+        self._spawn(_test_save_unsharded_weights, tmp_dir_reference, tmp_dir_tp, port_offset=3)
 
     def test_multiple_adapters(self):
-        self._spawn(_test_multiple_adapters, port_offset=2)
+        self._spawn(_test_multiple_adapters, port_offset=4)
+
+    def test_load_adapter_forward(self, tmp_path):
+        self._spawn(_test_load_adapter_forward, tmp_path, port_offset=5)
+
+    def test_load_adapter_save(self, tmp_path):
+        tmp_dir_reference = tmp_path / "reference"
+        tmp_dir_tp = tmp_path / "tp"
+        self._spawn(_test_load_adapter_save, tmp_dir_reference, tmp_dir_tp, port_offset=6)
