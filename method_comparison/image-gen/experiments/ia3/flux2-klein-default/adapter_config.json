@@ -1,0 +1,39 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "exclude_modules": null,
+  "fan_in_fan_out": false,
+  "feedforward_modules": [
+    "to_v",
+    "add_v_proj",
+    "to_qkv_mlp_proj",
+    "linear_out",
+    "to_k",
+    "to_add_out",
+    "add_q_proj",
+    "linear_in",
+    "add_k_proj",
+    "to_q",
+    "to_out.0"
+  ],
+  "inference_mode": false,
+  "init_ia3_weights": true,
+  "modules_to_save": null,
+  "peft_type": "IA3",
+  "peft_version": "0.18.2.dev0@UNKNOWN",
+  "revision": null,
+  "target_modules": [
+    "to_v",
+    "add_v_proj",
+    "to_qkv_mlp_proj",
+    "linear_out",
+    "to_k",
+    "to_add_out",
+    "add_q_proj",
+    "linear_in",
+    "add_k_proj",
+    "to_q",
+    "to_out.0"
+  ],
+  "task_type": null
+}
