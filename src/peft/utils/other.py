@@ -966,7 +966,7 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         return set(self.token_adapter.trainable_tokens_delta.keys())
 
 
-def _get_input_embeddings_name(model, default=None):
+def _get_input_embeddings_name(model: torch.nn.Module, default: Optional[str] = None) -> Optional[str]:
     if not hasattr(model, "get_input_embeddings"):
         return default
 
@@ -978,14 +978,16 @@ def _get_input_embeddings_name(model, default=None):
     return default
 
 
-def _get_submodules(model, key):
+def _get_submodules(model: torch.nn.Module, key: str) -> tuple[torch.nn.Module, torch.nn.Module, str]:
     parent = model.get_submodule(".".join(key.split(".")[:-1]))
     target_name = key.split(".")[-1]
     target = model.get_submodule(key)
     return parent, target, target_name
 
 
-def _get_submodules_with_grandparent(model, key):
+def _get_submodules_with_grandparent(
+    model: torch.nn.Module, key: str
+) -> tuple[torch.nn.Module, Optional[torch.nn.Module], torch.nn.Module, str]:
     parent = model.get_submodule(".".join(key.split(".")[:-1]))
     try:
         grandparent = model.get_submodule(".".join(key.split(".")[:-2]))
@@ -997,7 +999,7 @@ def _get_submodules_with_grandparent(model, key):
     return parent, grandparent, target, target_name
 
 
-def _freeze_adapter(model, adapter_name):
+def _freeze_adapter(model: torch.nn.Module, adapter_name: str) -> None:
     for n, p in model.named_parameters():
         if adapter_name in n:
             p.requires_grad = False
@@ -1245,7 +1247,7 @@ def fsdp_auto_wrap_policy(model):
     return auto_wrap_policy
 
 
-def transpose(weight, fan_in_fan_out):
+def transpose(weight: torch.Tensor, fan_in_fan_out: bool) -> torch.Tensor:
     if not fan_in_fan_out:
         return weight
 
@@ -1254,7 +1256,7 @@ def transpose(weight, fan_in_fan_out):
     return weight.T
 
 
-def _is_valid_match(key: str, target_key: str):
+def _is_valid_match(key: str, target_key: str) -> bool:
     """
     Helper function to match module names target_key and key. Makes sure that either the key is exactly the target_key
     or the target_key is a submodule of key
@@ -1361,7 +1363,7 @@ def id_tensor_storage(tensor: torch.Tensor) -> tuple[torch.device, int, int]:
     return tensor.device, unique_id, storage_size(tensor)
 
 
-def cast_mixed_precision_params(model, dtype):
+def cast_mixed_precision_params(model: torch.nn.Module, dtype: torch.dtype) -> None:
     """
     Cast all non-trainable parameters of the model to the given `dtype`. The `dtype` can be `torch.float16` or
     `torch.bfloat16` as per the mixed-precision training you are performing. The trainable parameters are cast to full
@@ -1424,7 +1426,7 @@ def check_file_exists_on_hf_hub(repo_id: str, filename: str, **kwargs) -> Option
     return exists
 
 
-def match_target_against_key(target_pattern: str, key: str):
+def match_target_against_key(target_pattern: str, key: str) -> Optional[re.Match[str]]:
     """Backing function for `target_modules` config parameter.
 
     Having this as its own function ensures that target key matching can be implemented in the same way everywhere.
