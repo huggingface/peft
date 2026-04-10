@@ -21,6 +21,7 @@ import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.utils import quantization_extra_repr, resolve_quantization_backend
 from peft.utils.other import transpose
 
 from .._buffer_dict import BufferDict
@@ -33,6 +34,9 @@ class VeraLayer(BaseTunerLayer):
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer
+        self.quantization_backend = resolve_quantization_backend(
+            self.get_base_layer(), get_apply_tensor_subclass=kwargs.get("get_apply_tensor_subclass")
+        )
         self.r = {}
         self.vera_dropout = nn.ModuleDict({})
 
@@ -60,10 +64,6 @@ class VeraLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
         self.kwargs = kwargs
-
-    @property
-    def merged(self) -> bool:
-        return bool(self.merged_adapters)
 
     def update_layer(
         self,
@@ -140,7 +140,7 @@ class VeraLayer(BaseTunerLayer):
                 nn.init.zeros_(self.vera_lambda_b[adapter_name])
 
 
-class Linear(nn.Linear, VeraLayer):
+class Linear(nn.Module, VeraLayer):
     # Vera implemented in a dense layer
     def __init__(
         self,
@@ -157,7 +157,7 @@ class Linear(nn.Linear, VeraLayer):
         **kwargs,
     ) -> None:
         # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__, which should always be called
-        super(nn.Linear, self).__init__()
+        super().__init__()
         VeraLayer.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
 
@@ -185,22 +185,22 @@ class Linear(nn.Linear, VeraLayer):
 
         for active_adapter in adapter_names:
             if active_adapter in self.vera_lambda_d.keys():
-                base_layer = self.get_base_layer()
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
-                    orig_weights = base_layer.weight.data.clone()
+                    weight = self.get_base_weight().clone()
+                    weight += self.get_delta_weight(active_adapter)
 
-                    orig_weights += self.get_delta_weight(active_adapter)
-
-                    if not torch.isfinite(orig_weights).all():
+                    if not torch.isfinite(weight).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weights
+                    self.set_base_weight(weight)
                 else:
-                    base_layer.weight.data += self.get_delta_weight(active_adapter)
+                    weight = self.get_base_weight()
+                    weight += self.get_delta_weight(active_adapter)
+                    self.set_base_weight(weight)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -211,7 +211,9 @@ class Linear(nn.Linear, VeraLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.vera_lambda_d.keys():
-                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
+                weight = self.get_base_weight()
+                weight -= self.get_delta_weight(active_adapter)
+                self.set_base_weight(weight)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -263,6 +265,9 @@ class Linear(nn.Linear, VeraLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
+            orig_dtype = result.dtype
+            if self.quantization_backend is not None:
+                result = self.quantization_backend.maybe_clone_base_result(result)
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.vera_lambda_d.keys():
                     continue
@@ -280,8 +285,9 @@ class Linear(nn.Linear, VeraLayer):
                 sliced_B = vera_B[: self.out_features, :].to(x.device)
 
                 dropout = self.vera_dropout[active_adapter]
-                x = x.to(lambda_d.dtype)
+                x = self._cast_input_dtype(x, lambda_d.dtype)
                 result = result + lambda_b * F.linear(lambda_d * F.linear(dropout(x), sliced_A), sliced_B)
+            result = result.to(orig_dtype)
 
         result = result.to(previous_dtype)
         return result
@@ -292,3 +298,6 @@ class Linear(nn.Linear, VeraLayer):
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "vera." + rep
+
+    def extra_repr(self) -> str:
+        return quantization_extra_repr(self)

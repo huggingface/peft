@@ -23,11 +23,8 @@ import torch.nn as nn
 from torch.nn.init import _calculate_correct_fan
 from transformers.pytorch_utils import Conv1D
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
-from peft.utils import (
-    TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
-)
+from peft.utils import TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING, get_quantization_kwargs
 
 from .._buffer_dict import BufferDict
 from ..tuners_utils import _maybe_include_all_linear_layers
@@ -204,6 +201,7 @@ class VeraModel(BaseTuner):
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
         kwargs["bias"] = bias
+        kwargs.update(get_quantization_kwargs(self.model))
 
         if isinstance(target, Linear):
             target.update_layer(
@@ -224,45 +222,14 @@ class VeraModel(BaseTuner):
 
     @staticmethod
     def _create_new_module(vera_config, vera_A, vera_B, adapter_name, target, **kwargs):
-        # avoid eager bnb import
-        if is_bnb_available():
-            import bitsandbytes as bnb
-
-            from .bnb import Linear8bitLt
-
-        if is_bnb_4bit_available():
-            from .bnb import Linear4bit
-
         bias = kwargs.pop("bias", False)
-        loaded_in_8bit = kwargs.get("loaded_in_8bit", False)
-        loaded_in_4bit = kwargs.get("loaded_in_4bit", False)
 
         if isinstance(target, BaseTunerLayer):
             target_base_layer = target.get_base_layer()
         else:
             target_base_layer = target
 
-        if loaded_in_8bit and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
-            eightbit_kwargs = kwargs.copy()
-            eightbit_kwargs.update(
-                {
-                    "has_fp16_weights": target_base_layer.state.has_fp16_weights,
-                    "threshold": target_base_layer.state.threshold,
-                    "index": target_base_layer.index,
-                }
-            )
-            return Linear8bitLt(target, adapter_name, vera_A, vera_B, **eightbit_kwargs)
-        elif loaded_in_4bit and isinstance(target_base_layer, bnb.nn.Linear4bit):
-            fourbit_kwargs = kwargs.copy()
-            fourbit_kwargs.update(
-                {
-                    "compute_dtype": target_base_layer.compute_dtype,
-                    "compress_statistics": target_base_layer.weight.compress_statistics,
-                    "quant_type": target_base_layer.weight.quant_type,
-                }
-            )
-            return Linear4bit(target, adapter_name, vera_A, vera_B, **fourbit_kwargs)
-        elif isinstance(target_base_layer, torch.nn.Linear):
+        if isinstance(target_base_layer, torch.nn.Linear):
             if kwargs["fan_in_fan_out"]:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "

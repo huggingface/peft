@@ -80,14 +80,12 @@ if is_bnb_available():
     from peft.tuners.lora import Linear8bitLt as LoraLinear8bitLt
     from peft.tuners.randlora import Linear8bitLt as RandLoraLinear8bitLt
     from peft.tuners.road import Linear8bitLt as RoadLinear8bitLt
-    from peft.tuners.vera import Linear8bitLt as VeraLinear8bitLt
 
     if is_bnb_4bit_available():
         from peft.tuners.ia3 import Linear4bit as IA3Linear4bit
         from peft.tuners.lora import Linear4bit as LoraLinear4bit
         from peft.tuners.randlora import Linear4bit as RandLoraLinear4bit
         from peft.tuners.road import Linear4bit as RoadLinear4bit
-        from peft.tuners.vera import Linear4bit as VeraLinear4bit
 
 
 @require_non_cpu
@@ -199,13 +197,16 @@ class PeftGPUCommonTests(unittest.TestCase):
         config = VeraConfig(r=32, target_modules=["q_proj", "v_proj"], vera_dropout=0.05, bias="none")
 
         flan_8bit = get_peft_model(flan_8bit, flan_vera_config)
-        assert isinstance(flan_8bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, VeraLinear8bitLt)
+        quant_layers = [m for m in flan_8bit.modules() if getattr(m, "quantization_backend", None) is not None]
+        assert len(quant_layers) > 0
 
         opt_8bit = get_peft_model(opt_8bit, opt_vera_config)
-        assert isinstance(opt_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, VeraLinear8bitLt)
+        quant_layers = [m for m in opt_8bit.modules() if getattr(m, "quantization_backend", None) is not None]
+        assert len(quant_layers) > 0
 
         whisper_8bit = get_peft_model(whisper_8bit, config)
-        assert isinstance(whisper_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, VeraLinear8bitLt)
+        quant_layers = [m for m in whisper_8bit.modules() if getattr(m, "quantization_backend", None) is not None]
+        assert len(quant_layers) > 0
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -652,13 +653,16 @@ class PeftGPUCommonTests(unittest.TestCase):
         config = VeraConfig(r=32, target_modules=["q_proj", "v_proj"], vera_dropout=0.05, bias="none")
 
         flan_4bit = get_peft_model(flan_4bit, flan_vera_config)
-        assert isinstance(flan_4bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, VeraLinear4bit)
+        quant_layers = [m for m in flan_4bit.modules() if getattr(m, "quantization_backend", None) is not None]
+        assert len(quant_layers) > 0
 
         opt_4bit = get_peft_model(opt_4bit, opt_vera_config)
-        assert isinstance(opt_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, VeraLinear4bit)
+        quant_layers = [m for m in opt_4bit.modules() if getattr(m, "quantization_backend", None) is not None]
+        assert len(quant_layers) > 0
 
         whisper_4bit = get_peft_model(whisper_4bit, config)
-        assert isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, VeraLinear4bit)
+        quant_layers = [m for m in whisper_4bit.modules() if getattr(m, "quantization_backend", None) is not None]
+        assert len(quant_layers) > 0
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests

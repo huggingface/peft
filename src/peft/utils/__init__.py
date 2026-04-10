@@ -71,6 +71,7 @@ from .other import (
     transpose,
 )
 from .peft_types import PeftType, TaskType, register_peft_method
+from .quantization_utils import get_quantization_kwargs, quantization_extra_repr, resolve_quantization_backend
 from .save_and_load import get_peft_model_state_dict, load_peft_weights, set_peft_model_state_dict
 from .warning import PeftWarning
 
@@ -128,13 +129,16 @@ __all__ = [
     "get_gptqmodel_quant_linear",
     "get_peft_model_state_dict",
     "get_quantization_config",
+    "get_quantization_kwargs",
     "id_tensor_storage",
     "infer_device",
     "load_peft_weights",
     "map_cache_to_layer_device_map",
     "prepare_model_for_kbit_training",
+    "quantization_extra_repr",
     "register_peft_method",
     "replace_lora_weights_loftq",
+    "resolve_quantization_backend",
     "set_additional_trainable_modules",
     "set_peft_model_state_dict",
     "shift_tokens_right",
