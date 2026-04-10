@@ -5787,10 +5787,6 @@ class TestArrowQuantized:
     @require_bitsandbytes
     @pytest.mark.single_gpu_tests
     def test_arrow_4bit_opt125m_load_and_generate_with_local_adapters(self, ts_adapters_opt):
-        # Skip if CUDA or bitsandbytes isn’t available
-        if not torch.cuda.is_available():
-            pytest.skip("CUDA required for 4-bit bitsandbytes test.")
-
         model_id = "peft-internal-testing/opt-125m"
 
         # Quantization config (nf4, bf16 compute)
