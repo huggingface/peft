@@ -1,7 +1,7 @@
 {
   "run_info": {
-    "created_at": "2026-04-06T10:42:55.441865+00:00",
-    "total_time": 3.3506136732175946,
+    "created_at": "2026-04-06T15:58:11.576404+00:00",
+    "total_time": 1.3014089036732912,
     "experiment_name": "gralora/grpo-qwen35-4b-gsm8k-mlp-only",
     "peft_branch": "lora-comparison",
     "train_config": {
@@ -72,8 +72,8 @@
     "train_completed": false,
     "train_time": null,
     "metrics": [],
-    "last_update_at": "2026-04-06T10:42:58.837302+00:00",
-    "error": "Qwen/Qwen3.5-4B does not appear to have a file named model.safetensors-00001-of-00002.safetensors. Checkout 'https://huggingface.co/Qwen/Qwen3.5-4B/tree/main' for available files."
+    "last_update_at": "2026-04-06T15:58:12.927433+00:00",
+    "error": "[Errno 116] Stale file handle"
   },
   "rl_eval_info": {},
   "meta_info": {

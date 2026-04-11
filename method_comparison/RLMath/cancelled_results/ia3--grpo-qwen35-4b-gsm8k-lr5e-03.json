@@ -1,7 +1,7 @@
 {
   "run_info": {
-    "created_at": "2026-04-06T10:43:12.062427+00:00",
-    "total_time": 27.11086375103332,
+    "created_at": "2026-04-06T15:58:38.299039+00:00",
+    "total_time": 30.719271908979863,
     "experiment_name": "ia3/grpo-qwen35-4b-gsm8k-lr5e-03",
     "peft_branch": "lora-comparison",
     "train_config": {
@@ -73,7 +73,7 @@
     "train_completed": false,
     "train_time": null,
     "metrics": [],
-    "last_update_at": "2026-04-06T10:43:39.215729+00:00",
+    "last_update_at": "2026-04-06T15:59:09.068398+00:00",
     "error": "The server socket has failed to listen on any local network address. port: 23456, useIpv6: false, code: -98, name: EADDRINUSE, message: address already in use"
   },
   "rl_eval_info": {},

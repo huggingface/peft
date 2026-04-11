@@ -1,6 +1,6 @@
 {
   "run_info": {
-    "created_at": "2026-04-06T11:39:24.307397+00:00",
+    "created_at": "2026-04-06T16:33:51.310508+00:00",
     "total_time": null,
     "experiment_name": "trainable_tokens/grpo-qwen35-4b-gsm8k",
     "peft_branch": "lora-comparison",
@@ -65,7 +65,7 @@
     "train_completed": false,
     "train_time": null,
     "metrics": [],
-    "last_update_at": "2026-04-06T11:39:35.744349+00:00"
+    "last_update_at": "2026-04-06T16:34:02.637946+00:00"
   },
   "rl_eval_info": {},
   "meta_info": {

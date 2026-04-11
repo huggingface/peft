@@ -1,7 +1,7 @@
 {
   "run_info": {
-    "created_at": "2026-04-06T10:43:12.182282+00:00",
-    "total_time": 27.644749133847654,
+    "created_at": "2026-04-06T15:58:26.580864+00:00",
+    "total_time": 3.1902819231618196,
     "experiment_name": "ia3/grpo-qwen35-4b-gsm8k-lr2e-03",
     "peft_branch": "lora-comparison",
     "train_config": {
@@ -73,8 +73,8 @@
     "train_completed": false,
     "train_time": null,
     "metrics": [],
-    "last_update_at": "2026-04-06T10:43:39.866429+00:00",
-    "error": "The server socket has failed to listen on any local network address. port: 23456, useIpv6: false, code: -98, name: EADDRINUSE, message: address already in use"
+    "last_update_at": "2026-04-06T15:58:29.811770+00:00",
+    "error": "Qwen/Qwen3.5-4B does not appear to have a file named pytorch_model.bin or model.safetensors."
   },
   "rl_eval_info": {},
   "meta_info": {

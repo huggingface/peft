@@ -1,7 +1,7 @@
 {
   "run_info": {
-    "created_at": "2026-04-06T11:39:24.307397+00:00",
-    "total_time": 11.507784981047735,
+    "created_at": "2026-04-06T16:33:51.310508+00:00",
+    "total_time": 11.393785214051604,
     "experiment_name": "trainable_tokens/grpo-qwen35-4b-gsm8k",
     "peft_branch": "lora-comparison",
     "train_config": {
@@ -65,7 +65,7 @@
     "train_completed": false,
     "train_time": null,
     "metrics": [],
-    "last_update_at": "2026-04-06T11:39:35.854992+00:00",
+    "last_update_at": "2026-04-06T16:34:02.750058+00:00",
     "error": "index_copy_(): Expected a long tensor for index, but got Float"
   },
   "rl_eval_info": {},

@@ -1,7 +1,7 @@
 {
   "run_info": {
     "created_at": "2026-04-06T11:12:34.694289+00:00",
-    "total_time": null,
+    "total_time": 3298.2528694886714,
     "experiment_name": "lora/grpo-qwen35-4b-gsm8k-r1-a32-steps400",
     "peft_branch": "lora-comparison",
     "train_config": {
@@ -71,8 +71,8 @@
     }
   },
   "train_info": {
-    "status": "train_completed",
-    "phase": "eval",
+    "status": "success",
+    "phase": "done",
     "train_completed": true,
     "train_time": 2271.7148,
     "metrics": [
@@ -2726,10 +2726,16 @@
         "step": 400
       }
     ],
-    "last_update_at": "2026-04-06T11:51:07.793712+00:00",
+    "last_update_at": "2026-04-06T12:07:32.984137+00:00",
     "checkpoint_path": "checkpoints/lora--grpo-qwen35-4b-gsm8k-r1-a32-steps400/eval_checkpoint"
   },
-  "rl_eval_info": {},
+  "rl_eval_info": {
+    "test_pass_at_1": 0.932,
+    "reward_mean": 0.9375,
+    "reward_std": 0.1767766922712326,
+    "kl_mean": 0.011747988278511912,
+    "num_eval_samples": 500
+  },
   "meta_info": {
     "package_info": {
       "transformers-version": "5.6.0.dev0",

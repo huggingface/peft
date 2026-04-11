@@ -1,7 +1,7 @@
 {
   "run_info": {
-    "created_at": "2026-04-06T10:42:03.919204+00:00",
-    "total_time": 4.5692839082330465,
+    "created_at": "2026-04-06T15:57:10.619457+00:00",
+    "total_time": 4.141011517029256,
     "experiment_name": "dora/grpo-qwen35-4b-gsm8k-r32-a32",
     "peft_branch": "lora-comparison",
     "train_config": {
@@ -77,8 +77,8 @@
     "train_completed": false,
     "train_time": null,
     "metrics": [],
-    "last_update_at": "2026-04-06T10:42:08.595008+00:00",
-    "error": "Qwen/Qwen3.5-4B does not appear to have files named ('model.safetensors-00001-of-00002.safetensors', 'model.safetensors-00002-of-00002.safetensors'). Checkout 'https://huggingface.co/Qwen/Qwen3.5-4B/tree/main' for available files."
+    "last_update_at": "2026-04-06T15:57:14.807521+00:00",
+    "error": "Qwen/Qwen3.5-4B does not appear to have a file named model.safetensors-00001-of-00002.safetensors. Checkout 'https://huggingface.co/Qwen/Qwen3.5-4B/tree/main' for available files."
   },
   "rl_eval_info": {},
   "meta_info": {

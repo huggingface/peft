@@ -1,7 +1,7 @@
 {
   "run_info": {
-    "created_at": "2026-04-06T10:41:57.286075+00:00",
-    "total_time": 32.21795747010037,
+    "created_at": "2026-04-06T15:57:10.840190+00:00",
+    "total_time": 36.94936062488705,
     "experiment_name": "dora/grpo-qwen35-4b-gsm8k-ga2",
     "peft_branch": "lora-comparison",
     "train_config": {
@@ -77,7 +77,7 @@
     "train_completed": false,
     "train_time": null,
     "metrics": [],
-    "last_update_at": "2026-04-06T10:42:29.546747+00:00",
+    "last_update_at": "2026-04-06T15:57:47.860646+00:00",
     "error": "The server socket has failed to listen on any local network address. port: 29500, useIpv6: false, code: -98, name: EADDRINUSE, message: address already in use"
   },
   "rl_eval_info": {},
