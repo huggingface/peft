@@ -1657,9 +1657,8 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     to the base model anyway. Non-transformer models have to provide a `_tied_weights_keys` attribute for this function
     to work.
 
-    Note that this function will not check if weight tying is disabled by the model's config. There can be the case
-    that the weight tying definition is present but the tying is disabled via `model_config.tie_word_embeddings=False`.
-    You have to check that yourself.
+    If the model's config has `tie_word_embeddings` set to `False`, this function returns an empty list, as weight
+    tying is explicitly disabled for that model checkpoint.
     """
     tied_weights: list[str] = []
 
@@ -1670,6 +1669,16 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     if hasattr(model, "tuner_layer_cls"):
         # unpack BaseTuner
         model = model.model
+
+    # `_tied_weights_keys` is architectural capability; `tie_word_embeddings=False` means tying is
+    # explicitly disabled for this checkpoint and must be respected.
+    model_config = getattr(model, "config", None)
+    if (
+        model_config is not None
+        and hasattr(model_config, "tie_word_embeddings")
+        and not model_config.tie_word_embeddings
+    ):
+        return []
 
     if not hasattr(model, "_tied_weights_keys"):
         return []
