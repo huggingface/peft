@@ -154,6 +154,19 @@ ALL_CONFIGS = [
             "task_type": "SEQ_2_SEQ_LM",
         },
     ),
+    # Sine-LoRA
+    (
+        LoraConfig,
+        {
+            "r": 8,
+            "lora_alpha": 32,
+            "target_modules": None,
+            "lora_dropout": 0.05,
+            "bias": "none",
+            "use_sinelora": True,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
     (
         OFTConfig,
         {

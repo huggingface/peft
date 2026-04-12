@@ -186,6 +186,19 @@ ALL_CONFIGS = [
             "bias": "none",
         },
     ),
+    # Sine-LoRA
+    (
+        LoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "r": 8,
+            "lora_alpha": 32,
+            "target_modules": None,
+            "lora_dropout": 0.05,
+            "bias": "none",
+            "use_sinelora": True,
+        },
+    ),
     # Activated LoRA (aLoRA)
     (
         LoraConfig,
