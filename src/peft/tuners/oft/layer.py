@@ -771,7 +771,7 @@ class Conv2d(nn.Module, OFTLayer):
         if base_layer.dilation[0] > 1:
             raise ValueError("Conv2d with dilation > 1 is not supported by OFT.")
 
-        conv_filter_dim = self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
+        conv_filter_dim = self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[1]
 
         if r == 0 and oft_block_size != 0:
             if conv_filter_dim % oft_block_size != 0 or oft_block_size > conv_filter_dim:
@@ -847,13 +847,13 @@ class Conv2d(nn.Module, OFTLayer):
                     oft_mat = self.get_delta_weight(active_adapter)
 
                     orig_weights = orig_weights.view(
-                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
+                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[1]
                     )
                     orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = torch.mm(oft_mat, orig_weights.to(oft_mat.dtype))
                     orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = orig_weights.view(
-                        self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
+                        self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[1]
                     )
 
                     base_layer.weight.data = orig_weights.contiguous().to(orig_dtype)
@@ -862,13 +862,13 @@ class Conv2d(nn.Module, OFTLayer):
 
                     orig_weights = base_layer.weight.data.clone()
                     orig_weights = orig_weights.view(
-                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
+                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[1]
                     )
                     orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = torch.mm(oft_mat, orig_weights.to(oft_mat.dtype))
                     orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = orig_weights.view(
-                        self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
+                        self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[1]
                     )
 
                     base_layer.weight.data = orig_weights.contiguous().to(orig_dtype)
