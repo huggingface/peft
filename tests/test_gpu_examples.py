@@ -6169,7 +6169,6 @@ class TestDtypeFp8:
     @pytest.fixture
     def model_high_prec(self):
         model_id = "facebook/opt-125m"
-        # only convert q_proj to fp8, otherwise we get nan results
         model = AutoModelForCausalLM.from_pretrained(model_id, device_map=0)
         return model
 
