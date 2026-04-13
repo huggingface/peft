@@ -30,6 +30,7 @@ from transformers.pytorch_utils import Conv1D
 from peft.import_utils import is_transformers_ge_v5_4_0
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
+from peft.utils import ALLOWED_COMPUTE_DTYPES, UPCAST_DTYPES
 from peft.utils.integrations import (
     dequantize_module_weight,
     gather_params_ctx,
@@ -2075,7 +2076,28 @@ class _LoraParameterProxy(nn.Module):
         super().__init__()
         self.delta_weight = delta_weight
 
+    @staticmethod
+    def _low_prec_add(x, y):
+        # addition in fp8 is not directly supported, need to use a higher precision
+        orig_dtype = x.dtype
+        upcast_dtype = y.dtype
+        if upcast_dtype not in ALLOWED_COMPUTE_DTYPES:
+            raise RuntimeError(
+                f"There is an attempt to upcast the targeted parameter to {upcast_dtype} "
+                f"but the only supported are: {ALLOWED_COMPUTE_DTYPES}."
+            )
+
+        # this operation can be quite costly
+        x = x.to(upcast_dtype)
+        z = x + y
+        # clamp to valid range before casting down, as this is *not* performed automatically and can thus result in NANs
+        info = torch.finfo(orig_dtype)
+        z = z.clamp(min=info.min, max=info.max)
+        return z.to(orig_dtype)
+
     def forward(self, W):
+        if any(getattr(torch, dtype_name, None) == W.dtype for dtype_name in UPCAST_DTYPES):
+            return self._low_prec_add(W, self.delta_weight)
         return W + self.delta_weight
 
 
@@ -2284,7 +2306,12 @@ class ParamWrapper(nn.Module, LoraLayer):
                 delta_weight = torch.einsum("o r e, e r i -> e o i", weight_B, weight_A) * self.scaling[adapter_name]
 
         param = self.get_param()
-        delta_weight = delta_weight.to(param.device, param.dtype)
+        if param.dtype in ALLOWED_COMPUTE_DTYPES:
+            delta_weight = delta_weight.to(param.device, param.dtype)
+        else:
+            # don't cast dW to weight dtype if it is in torch.float8_e4m3fn etc. as these low precision dtypes because
+            # we want to perform the W+dW addition in high precision before downcasting, see _low_prec_add.
+            delta_weight = delta_weight.to(param.device)
         return delta_weight
 
     @contextmanager
