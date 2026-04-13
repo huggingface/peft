@@ -6167,7 +6167,14 @@ class TestDtypeFp8:
         clear_device_cache(garbage_collection=True)
 
     @pytest.fixture
-    def model(self):
+    def model_high_prec(self):
+        model_id = "facebook/opt-125m"
+        # only convert q_proj to fp8, otherwise we get nan results
+        model = AutoModelForCausalLM.from_pretrained(model_id, device_map=0)
+        return model
+
+    @pytest.fixture
+    def model_low_prec(self):
         model_id = "facebook/opt-125m"
         # only convert q_proj to fp8, otherwise we get nan results
         modules_not_to_convert = ["embed_tokens", "lm_head", "v_proj", "k_proj", "out_proj", "fc1", "fc2"]
@@ -6185,75 +6192,102 @@ class TestDtypeFp8:
     @pytest.mark.parametrize(
         "config",
         [
-            LoraConfig(target_modules=["q_proj", "v_proj"]),
-            VeraConfig(target_modules=["q_proj", "v_proj"]),
-            RoadConfig(target_modules=["q_proj", "v_proj"]),
+            LoraConfig(target_modules=["q_proj", "v_proj"], init_lora_weights=False),
+            VeraConfig(target_modules=["q_proj", "v_proj"], init_weights=False),
+            RoadConfig(target_modules=["q_proj", "v_proj"], init_weights=False),
         ],
         ids=lambda c: c.__class__.__name__,
     )
-    def test_target_modules_float8_e4m3fn(self, model, config):
+    def test_target_modules_float8_e4m3fn(self, model_high_prec, model_low_prec, config):
         # Test should work with all adapters, but only testing a few here to save time and resources.
-        inputs = torch.arange(10).view(1, -1).to(model.device)
-        with torch.inference_mode():
-            output_base = model(inputs)
-        # sanity check
-        assert torch.isfinite(output_base.logits).all()
+        inputs = torch.arange(10).view(1, -1).to(model_low_prec.device)
 
-        model = get_peft_model(model, config)
+        # high precision
+        torch.manual_seed(0)
+        model_high_prec = get_peft_model(model_high_prec, config)
         with torch.inference_mode():
             # check that there are no errors
-            output_peft = model(inputs)
-        # with default init, lora should be a no-op
-        assert torch.allclose(output_peft.logits, output_base.logits)
+            output_high_prec = model_high_prec(inputs).logits
+
+        # low precision
+        torch.manual_seed(0)
+        model_low_prec = get_peft_model(model_low_prec, config)
+        with torch.inference_mode():
+            # check that there are no errors
+            output_low_prec = model_low_prec(inputs).logits
+        # sanity check
+        assert torch.isfinite(output_low_prec).all()
+
+        # use relatively high tolerances because of low precision dtype
+        mse = ((output_low_prec - output_high_prec) ** 2).mean()
+        assert mse < 0.05
 
     @pytest.mark.parametrize(
         "config",
         [
-            LoraConfig(target_modules=["q_proj", "v_proj"]),
-            VeraConfig(target_modules=["q_proj", "v_proj"]),
-            RoadConfig(target_modules=["q_proj", "v_proj"]),
+            LoraConfig(target_modules=["q_proj", "v_proj"], init_lora_weights=False),
+            VeraConfig(target_modules=["q_proj", "v_proj"], init_weights=False),
+            RoadConfig(target_modules=["q_proj", "v_proj"], init_weights=False),
         ],
         ids=lambda c: c.__class__.__name__,
     )
     @pytest.mark.xfail(reason="Merging with float8 not supported (yet)", strict=True)
-    def test_merge_with_float8_e4m3fn(self, model, config):
+    def test_merge_with_float8_e4m3fn(self, model_high_prec, model_low_prec, config):
         # Test should work with all adapters, but only testing a few here to save time and resources.
-        inputs = torch.arange(10).view(1, -1).to(model.device)
-        with torch.inference_mode():
-            output_base = model(inputs)
-        # sanity check
-        assert torch.isfinite(output_base.logits).all()
+        inputs = torch.arange(10).view(1, -1).to(model_low_prec.device)
 
-        model = get_peft_model(model, config)
-        unloaded = model.merge_and_unload()
+        # high precision
+        torch.manual_seed(0)
+        model_high_prec = get_peft_model(model_high_prec, config).merge_and_unload()
         with torch.inference_mode():
             # check that there are no errors
-            output_unloaded = model(inputs)
-        # with default init, lora should be a no-op
-        assert torch.allclose(output_unloaded.logits, output_base.logits)
+            output_high_prec = model_high_prec(inputs).logits
 
-    def test_lora_target_parameters_float8_e4m3fn(self, model):
-        # target_modules uses a different mechanism (return W + dW) so it gets its own test
-        inputs = torch.arange(10).view(1, -1).to(model.device)
-        with torch.inference_mode():
-            output_base = model(inputs)
-        # sanity check
-        assert torch.isfinite(output_base.logits).all()
-
-        config = LoraConfig(target_modules=["k_proj", "v_proj"], target_parameters=["q_proj.weight"])
-        model = get_peft_model(model, config)
+        # low precision
+        torch.manual_seed(0)
+        model_low_prec = get_peft_model(model_low_prec, config).merge_and_unload()
         with torch.inference_mode():
             # check that there are no errors
-            output_lora = model(inputs)
-        # with default init, lora should be a no-op
-        assert torch.allclose(output_lora.logits, output_base.logits)
+            output_low_prec = model_low_prec(inputs).logits
+        # sanity check
+        assert torch.isfinite(output_low_prec).all()
 
-    def test_target_modules_no_autocast_prevserves_e4m3fn(self, model):
+        # use relatively high tolerances because of low precision dtype
+        mse = ((output_low_prec - output_high_prec) ** 2).mean()
+        assert mse < 0.05
+
+    def test_lora_target_parameters_float8_e4m3fn(self, model_high_prec, model_low_prec):
+        inputs = torch.arange(10).view(1, -1).to(model_low_prec.device)
+
+        # high precision
+        torch.manual_seed(0)
+        config = LoraConfig(
+            target_modules=["k_proj", "v_proj"], target_parameters=["q_proj.weight"], init_lora_weights=False
+        )
+        model_high_prec = get_peft_model(model_high_prec, config)
+        with torch.inference_mode():
+            # check that there are no errors
+            output_high_prec = model_high_prec(inputs).logits
+
+        # low precision
+        torch.manual_seed(0)
+        model_low_prec = get_peft_model(model_low_prec, config)
+        with torch.inference_mode():
+            # check that there are no errors
+            output_low_prec = model_low_prec(inputs).logits
+        # sanity check
+        assert torch.isfinite(output_low_prec).all()
+
+        # use relatively high tolerances because of low precision dtype
+        mse = ((output_low_prec - output_high_prec) ** 2).mean()
+        assert mse < 0.05
+
+    def test_target_modules_no_autocast_prevserves_e4m3fn(self, model_low_prec):
         # ensure that users can choose to keep the adapter weights in the same dtype as the original weights by passing
         # autocast_adapter_dtype=False, even though the resulting model is not usable (no inference or training
         # possible)
-        config = LoraConfig(target_modules=["q_proj", "v_proj"])
-        model = get_peft_model(model, config, autocast_adapter_dtype=False)
+        config = LoraConfig(target_modules=["q_proj", "v_proj"], init_lora_weights=False)
+        model = get_peft_model(model_low_prec, config, autocast_adapter_dtype=False)
         q_proj = model.base_model.model.model.decoder.layers[0].self_attn.q_proj
         assert q_proj.lora_A.default.weight.dtype == torch.float8_e4m3fn
         assert q_proj.lora_B.default.weight.dtype == torch.float8_e4m3fn
