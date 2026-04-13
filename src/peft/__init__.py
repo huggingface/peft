@@ -156,6 +156,7 @@ from .utils import (
     shift_tokens_right,
 )
 
+from .utils.target_selection import KappaTuneSelector, find_kappa_target_modules
 
 __all__ = [
     "MODEL_TYPE_TO_PEFT_MODEL_MAPPING",
