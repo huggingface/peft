@@ -1600,21 +1600,7 @@ class PeftCommonTester:
                 density=0.5,
             )
 
-        new_adapters = [
-            "single_adapter_reweighting",
-            "multi_adapter_svd_reweighting",
-            "multi_adapter_ties_svd_reweighting",
-            "multi_adapter_dare_linear_svd_reweighting",
-            "multi_adapter_dare_ties_svd_reweighting",
-            "multi_adapter_magnitude_prune_svd_reweighting",
-            "multi_adapter_cat_reweighting",
-            "multi_adapter_linear_reweighting",
-            "multi_adapter_linear_reweighting_single_enabled",
-            "multi_adapter_ties_reweighting",
-            "multi_adapter_dare_linear_reweighting",
-            "multi_adapter_dare_ties_reweighting",
-            "multi_adapter_magnitude_prune_reweighting",
-        ]
+        new_adapters = [k for k in model.peft_config.keys() if not k.startswith("adapter_")]
         for new_adapter in new_adapters:
             assert new_adapter in model.peft_config
 
@@ -1623,11 +1609,11 @@ class PeftCommonTester:
             _, target, _ = _get_submodules(model, key)
             if isinstance(target, LoraLayer):
                 for adapter_name in new_adapters:
+                    # for a single adapter, the result should be exact and we can check that; otherwise, we deal with
+                    # approximations
                     if "single" in adapter_name:
                         new_delta_weight = target.get_delta_weight(adapter_name)
                         weighted_original_delta_weights = target.get_delta_weight(adapter_list[0]) * weight_list[0]
-                        sign = 1 if weight_list[0] > 0 else -1
-                        weighted_original_delta_weights = sign * weighted_original_delta_weights
                         assert torch.allclose(new_delta_weight, weighted_original_delta_weights, atol=1e-4, rtol=1e-4)
                     elif "svd" in adapter_name:
                         assert target.r[adapter_name] == 20
@@ -1682,7 +1668,7 @@ class PeftCommonTester:
         if "gemma" in model_id.lower():
             return pytest.skip("Combining Gemma adapters with SVD is currently failing")
 
-        adapter_list = ["adapter1", "adapter_2", "adapter_3"]
+        adapter_list = ["adapter_1", "adapter_2", "adapter_3"]
         weight_list = [0.5, 1.5, 1.5]
         negative_weight_list = [-0.5, -0.8, -1.2]
         # Initialize the config
@@ -1699,11 +1685,22 @@ class PeftCommonTester:
             model = self.transformers_class.from_pretrained(model_id)
             model = get_peft_model(model, config, adapter_list[0])
 
+            # test positive weights
             if isinstance(config, LoraConfig):
                 self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, weight_list)
-                self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, negative_weight_list)
             elif isinstance(config, IA3Config):
                 self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, weight_list)
+            else:
+                pytest.skip(f"Test not applicable for {config}")
+
+            del model
+            model = self.transformers_class.from_pretrained(model_id)
+            model = get_peft_model(model, config, adapter_list[0])
+
+            # test negative weights
+            if isinstance(config, LoraConfig):
+                self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, negative_weight_list)
+            elif isinstance(config, IA3Config):
                 self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, negative_weight_list)
             else:
                 pytest.skip(f"Test not applicable for {config}")
