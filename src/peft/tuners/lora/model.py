@@ -421,10 +421,42 @@ class LoraModel(BaseTuner):
 
         if new_module is None:
             # no module could be matched
-            raise ValueError(
-                f"Target module {target} is not supported. Currently, only the following modules are supported: "
+            supported_msg = (
+                "Currently, only the following modules are supported: "
                 "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv1d`, `torch.nn.Conv2d`, `torch.nn.Conv3d`, "
                 "`transformers.pytorch_utils.Conv1D`, `torch.nn.MultiheadAttention.`."
+            )
+            # Check for a common failure mode: the target is a wrapper module that
+            # contains a single `nn.Linear` in a submodule (typically named `.linear`).
+            # Examples include `transformers.models.gemma4.modeling_gemma4.Gemma4ClippableLinear`,
+            # which inherits from `nn.Module` rather than `nn.Linear`. In these cases
+            # the user can target the inner linear directly by appending its attribute
+            # name to their `target_modules` regex. Surface this hint in the error so
+            # users do not have to guess.
+            wrapper_hint = ""
+            if isinstance(target, torch.nn.Module):
+                inner_linear_attrs = [
+                    attr_name
+                    for attr_name, child in target.named_children()
+                    if isinstance(child, torch.nn.Linear)
+                ]
+                # Only offer the hint when the wrapper contains exactly one inner
+                # `nn.Linear`. Multiple inner linears would be ambiguous and are
+                # out of scope for this error message.
+                if len(inner_linear_attrs) == 1:
+                    inner_attr = inner_linear_attrs[0]
+                    target_cls_name = type(target).__name__
+                    wrapper_hint = (
+                        f"\n\nHint: `{target_cls_name}` appears to be a wrapper module that contains a "
+                        f"single `nn.Linear` in its `.{inner_attr}` attribute. You can target the inner "
+                        f"linear by appending `\\.{inner_attr}` to your `target_modules` regex, for example "
+                        f"`target_modules=r\".*\\.{inner_attr}\"` or a more specific pattern like "
+                        f"`target_modules=r\".*(q_proj|v_proj)\\.{inner_attr}\"`. See "
+                        f"https://github.com/huggingface/peft/issues/3129 for a worked example with "
+                        f"`Gemma4ClippableLinear`."
+                    )
+            raise ValueError(
+                f"Target module {target} is not supported. {supported_msg}{wrapper_hint}"
             )
 
         return new_module

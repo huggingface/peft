@@ -1613,6 +1613,58 @@ class TestLoraInitialization:
         config2 = LoraConfig(target_modules=["linear"], bias="none")
         model.add_adapter("other", config2)  # does not raise
 
+    def test_dispatch_error_hints_inner_linear_attribute(self):
+        # When a target module is an unsupported wrapper that contains a single
+        # nn.Linear in a submodule attribute (e.g. the `.linear` in Gemma 4's
+        # Gemma4ClippableLinear), the error message should explicitly suggest
+        # targeting the inner attribute. Regression test for issue #3129.
+        class ClippableLinearWrapper(nn.Module):
+            """Minimal reproduction of transformers.Gemma4ClippableLinear."""
+
+            def __init__(self, in_features: int, out_features: int):
+                super().__init__()
+                self.linear = nn.Linear(in_features, out_features, bias=False)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class WrapperModel(nn.Module):
+            def __init__(self, dim: int = 16):
+                super().__init__()
+                self.q_proj = ClippableLinearWrapper(dim, dim)
+
+            def forward(self, x):
+                return self.q_proj(x)
+
+        model = WrapperModel()
+        config = LoraConfig(target_modules=["q_proj"], r=4)
+        with pytest.raises(ValueError) as exc_info:
+            get_peft_model(model, config)
+
+        msg = str(exc_info.value)
+        # Preserves the original "not supported" message so existing string matches still work.
+        assert "is not supported" in msg
+        # Surfaces the wrapper class name so the user knows which module triggered the hint.
+        assert "ClippableLinearWrapper" in msg
+        # Surfaces the inner attribute name (`.linear`) and the suggested regex.
+        assert "`.linear`" in msg
+        assert "target_modules" in msg
+        # Points users at the worked example issue for more context.
+        assert "3129" in msg
+
+        # The .linear regex workaround should succeed: targeting the inner nn.Linear
+        # drills past the wrapper and produces a valid LoRA adapter.
+        model = WrapperModel()
+        config = LoraConfig(target_modules=r".*q_proj\.linear", r=4)
+        peft_model = get_peft_model(model, config)
+        # Verify the inner linear was actually wrapped as a LoRA layer.
+        inner = peft_model.base_model.model.q_proj.linear
+        assert hasattr(inner, "lora_A")
+        # And the forward pass still runs through the wrapper's forward method.
+        x = torch.randn(2, 16)
+        out = peft_model(x)
+        assert out.shape == (2, 16)
+
 
 class TestLokrInitialization:
     torch_device = infer_device()
