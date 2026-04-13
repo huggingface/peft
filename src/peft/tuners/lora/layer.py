@@ -2090,7 +2090,7 @@ class _LoraParameterProxy(nn.Module):
         # this operation can be quite costly
         x = x.to(upcast_dtype)
         z = x + y
-        # clamp to valid range before casting down
+        # clamp to valid range before casting down, as this is *not* performed automatically and can thus result in NANs
         info = torch.finfo(orig_dtype)
         z = z.clamp(min=info.min, max=info.max)
         return z.to(orig_dtype)
@@ -2309,7 +2309,8 @@ class ParamWrapper(nn.Module, LoraLayer):
         if param.dtype in ALLOWED_COMPUTE_DTYPES:
             delta_weight = delta_weight.to(param.device, param.dtype)
         else:
-            # don't cast dW to weight dtype if it is in torch.float8_e4m3fn etc.
+            # don't cast dW to weight dtype if it is in torch.float8_e4m3fn etc. as these low precision dtypes because
+            # we want to perform the W+dW addition in high precision before downcasting, see _low_prec_add.
             delta_weight = delta_weight.to(param.device)
         return delta_weight
 
