@@ -438,6 +438,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         model_id=train_config.model_id,
         dtype=train_config.dtype,
         compile=train_config.compile,
+        use_gc=train_config.use_gc,
         attn_implementation=train_config.attn_implementation,
         peft_config=peft_config,
         autocast_adapter_dtype=train_config.autocast_adapter_dtype,

@@ -7,6 +7,7 @@
   "max_steps": 5000,
   "eval_steps": 250,
   "compile": false,
+  "use_gc": false,
   "seed": 0,
   "grad_norm_clip": 1.0,
   "optimizer_type": "AdamW",
