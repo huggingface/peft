@@ -5019,6 +5019,31 @@ class TestRequiresGrad:
             "base_model.model.lin0.oft_R.adapter1.weight",
         )
 
+    def test_oft_conv2d_non_square_kernel(self):
+        # OFT on a Conv2d with non-square kernel used to crash because the adapter
+        # filter dimension was computed as kernel_size[0] ** 2 instead of
+        # kernel_size[0] * kernel_size[1]; the forward pass then hit a shape
+        # mismatch and `merge_and_unload` failed to reshape the weights.
+        class NonSquareKernelConv2D(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv2d = nn.Conv2d(5, 10, kernel_size=(3, 5))
+
+            def forward(self, X):
+                X = X.float().reshape(-1, 5, 3, 5)
+                return self.conv2d(X)
+
+        torch.manual_seed(0)
+        model = NonSquareKernelConv2D().to(self.torch_device)
+        config = OFTConfig(r=5, oft_block_size=0, target_modules=["conv2d"], init_weights=False)
+        peft_model = get_peft_model(model, config)
+
+        X = torch.arange(5 * 5 * 3 * 5, dtype=torch.float, device=self.torch_device).reshape(5, 5, 3, 5)
+        output = peft_model(X)
+        merged = peft_model.merge_and_unload()
+        output_merged = merged(X)
+        assert torch.allclose(output, output_merged, atol=1e-5, rtol=1e-5)
+
     def test_requires_grad_hra_different_targets(self):
         # test two different HRA adapters that target different modules
         config0 = HRAConfig(target_modules=["lin0"])
