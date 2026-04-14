@@ -637,8 +637,9 @@ class TestGetModuleNamesTiedWithEmbedding:
     @pytest.mark.parametrize("tied_weights_type", ["list", "mapping"])
     @pytest.mark.parametrize("model_id", model_ids)
     def test_get_modules_tied_returns_empty_when_tying_disabled(self, model_id, tied_weights_type):
-        """When tie_word_embeddings=False, no tied modules should be reported even if _tied_weights_keys exists."""
-        with self.patch_model(model_id, tied_weights_type) as (model, _expected):
+        # When tie_word_embeddings=False, no tied modules should be reported even if _tied_weights_keys exists
+        # Linked to origin issue #2944
+        with self.patch_model(model_id, tied_weights_type) as (model, _):
             # Model has _tied_weights_keys (architectural capability) but tying is disabled
             model.config.tie_word_embeddings = False
 
