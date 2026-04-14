@@ -949,16 +949,9 @@ class Embedding(nn.Module, OFTLayer):
         self,
         base_layer: nn.Module,
         adapter_name: str,
+        config: OFTConfig,
         r: int = 8,
-        oft_block_size: int = 0,
-        module_dropout: float = 0.0,
-        coft: bool = False,
-        eps: float = 6e-5,
-        block_share: bool = False,
-        use_cayley_neumann: bool = False,
-        num_cayley_neumann_terms: int = 5,
-        fan_in_fan_out: bool = False,  # unused for embedding, kept for API parity
-        init_weights: Union[bool, str] = True,
+        fan_in_fan_out: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -969,34 +962,24 @@ class Embedding(nn.Module, OFTLayer):
         self.update_layer(
             adapter_name,
             r,
-            oft_block_size=oft_block_size,
-            module_dropout=module_dropout,
-            coft=coft,
-            eps=eps,
-            block_share=block_share,
-            init_weights=init_weights,
-            use_cayley_neumann=use_cayley_neumann,
-            num_cayley_neumann_terms=num_cayley_neumann_terms,
+            config=config,
         )
 
     def update_layer(
         self,
-        adapter_name,
-        r,
-        oft_block_size,
-        module_dropout,
-        coft,
-        eps,
-        block_share,
-        init_weights,
-        use_cayley_neumann,
-        num_cayley_neumann_terms,
+        adapter_name: str,
+        r: int,
+        config: OFTConfig,
         inference_mode: bool = False,
         **kwargs,
     ):
-        # collect the kwargs
-        kwargs = locals().copy()
-        del kwargs["self"]
+        oft_block_size = config.oft_block_size
+        coft = config.coft
+        eps = config.eps
+        block_share = config.block_share
+        init_weights = config.init_weights
+        use_cayley_neumann = config.use_cayley_neumann
+        num_cayley_neumann_terms = config.num_cayley_neumann_terms
 
         if r == 0 and oft_block_size != 0:
             if self.in_features % oft_block_size != 0 or oft_block_size > self.in_features:
@@ -1200,6 +1183,6 @@ def dispatch_default(
     elif isinstance(target_base_layer, torch.nn.Embedding):
         embedding_kwargs = kwargs.copy()
         embedding_kwargs.pop("fan_in_fan_out", None)
-        new_module = Embedding(target, adapter_name, config=oft_config **embedding_kwargs)
+        new_module = Embedding(target, adapter_name, config=oft_config, **embedding_kwargs)
 
     return new_module
