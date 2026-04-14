@@ -54,7 +54,7 @@ from utils import (
 )
 
 from data import get_train_valid_test_datasets, get_wiki_small
-from peft import AdaLoraConfig, PeftConfig
+from peft import AdaLoraConfig, AdamssConfig, PeftConfig, initialize_kv_prefix_from_text
 from peft.utils import CONFIG_NAME, infer_device
 
 
@@ -69,18 +69,20 @@ os.environ["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
 
 def get_generation_config(*, seq_len, generate_kwargs) -> GenerationConfig:
     # filter out None values so that we don't depend on setting correct defaults in the config
-    generation_kwargs = {k: v for k, v in generate_kwargs.items() if v is not None}
-    if ("max_length" in generation_kwargs) and ("max_new_tokens" in generation_kwargs):
+    generate_kwargs = {k: v for k, v in generate_kwargs.items() if v is not None}
+    if ("max_length" in generate_kwargs) and ("max_new_tokens" in generate_kwargs):
         # transformers does not support setting both max_length and max_new_tokens, but what we want in this case is to
         # take the smaller of the two values
-        new_max_length = min(generation_kwargs["max_new_tokens"] + seq_len, generation_kwargs["max_length"])
-        del generation_kwargs["max_new_tokens"]
-        generation_kwargs["max_length"] = new_max_length
+        new_max_length = min(generate_kwargs["max_new_tokens"] + seq_len, generate_kwargs["max_length"])
+        del generate_kwargs["max_new_tokens"]
+        generate_kwargs["max_length"] = new_max_length
     generation_config = GenerationConfig(**generate_kwargs)
     return generation_config
 
 
 def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm: bool = False) -> tuple[list[str], list[str]]:
+    generate_kwargs = generate_kwargs.copy()
+    generate_kwargs["pad_token_id"] = tokenizer.eos_token_id
     with torch.inference_mode():
         predictions = []
         responses = []
@@ -93,7 +95,7 @@ def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm: bool =
             batch = tokenizer.pad(sliced, return_tensors="pt", padding_side="left").to(model.device)
             seq_len = batch["input_ids"].shape[1]
             generation_config = get_generation_config(seq_len=seq_len, generate_kwargs=generate_kwargs)
-            outputs = model.generate(**batch, generation_config=generation_config, pad_token_id=tokenizer.eos_token_id)
+            outputs = model.generate(**batch, generation_config=generation_config)
             predictions += tokenizer.batch_decode(outputs, skip_special_tokens=True)
     return predictions, responses
 
@@ -117,7 +119,9 @@ def calculate_mean_per_token_loss(model, tokenizer, rows: list[str], batch_size:
         for logit, target, mask in zip(logits, batch["input_ids"], batch["attention_mask"]):
             # calculate loss per token so that the mean is not skewed by sequence length of sample, padding from left
             num_tokens = mask.sum()
-            token_losses = torch.nn.functional.cross_entropy(logit[-num_tokens:], target[-num_tokens:], reduction="none")
+            token_losses = torch.nn.functional.cross_entropy(
+                logit[-num_tokens:], target[-num_tokens:], reduction="none"
+            )
             losses.extend(loss.item() for loss in token_losses)
     return torch.tensor(losses).mean().item()
 
@@ -154,6 +158,8 @@ def train(
     lr_scheduler_arg: Optional[Literal["cosine"]],
     use_amp: bool,
     is_adalora: bool,
+    init_kv_cache_prefix: Optional[str],
+    is_adamss: bool,
 ) -> TrainResult:
     accelerator_memory_allocated_log = []
     accelerator_memory_reserved_log = []
@@ -180,6 +186,10 @@ def train(
         lr_scheduler_arg=lr_scheduler_arg,
         **optimizer_kwargs,
     )
+
+    if init_kv_cache_prefix is not None:
+        initialize_kv_prefix_from_text(model, tokenizer, text=init_kv_cache_prefix)
+
     # print this after getting the optimizer, in case it modifies requires_gard
     if hasattr(model, "get_nb_trainable_parameters"):
         num_trainable_params, num_params = model.get_nb_trainable_parameters()
@@ -254,7 +264,7 @@ def train(
             grad_scaler.update()
             lr_scheduler.step()
 
-            if is_adalora:
+            if is_adalora or is_adamss:
                 model.base_model.update_and_allocate(step)
 
             losses.append(loss.item())
@@ -451,6 +461,8 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         lr_scheduler_arg=train_config.lr_scheduler,
         use_amp=train_config.use_amp,
         is_adalora=isinstance(peft_config, AdaLoraConfig),
+        init_kv_cache_prefix=train_config.init_kv_cache_prefix,
+        is_adamss=isinstance(peft_config, AdamssConfig),
     )
 
     if train_result.status == TrainStatus.FAILED:

@@ -26,7 +26,7 @@ RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
 
 # Stage 2
-FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS build-image
+FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04 AS build-image
 COPY --from=compile-image /opt/conda /opt/conda
 ENV PATH=/opt/conda/bin:$PATH
 
@@ -55,6 +55,9 @@ RUN \
     # script directly imports torch from the environment which would fail with isolation.
     conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
 
+RUN \
+    conda run -n peft pip install --no-build-isolation "transformer_engine[pytorch]"
+
 # Activate the conda env and install transformers + accelerate from source
 RUN conda run -n peft pip install -U --no-cache-dir \
         librosa \
@@ -68,7 +71,8 @@ RUN conda run -n peft pip install -U --no-cache-dir \
         # Add aqlm for quantization testing
         aqlm[gpu]>=1.0.2 \
         # Add HQQ for quantization testing
-        hqq
+        hqq \
+        deepspeed
 
 RUN conda run -n peft pip freeze | grep transformers
 

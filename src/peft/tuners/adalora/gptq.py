@@ -34,7 +34,7 @@ class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
         # for backwards compatibility
         self.quant_linear_module = base_layer
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, config=config)
+        self.update_layer(adapter_name, r, lora_alpha=lora_alpha, config=config)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         result = self.quant_linear_module(x)

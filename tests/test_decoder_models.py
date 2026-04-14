@@ -32,7 +32,6 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
-    BoneConfig,
     C3AConfig,
     CartridgeConfig,
     CPTConfig,
@@ -50,9 +49,12 @@ from peft import (
     PromptEncoderConfig,
     PromptTuningConfig,
     PromptTuningInit,
+    PsoftConfig,
+    PveraConfig,
     RoadConfig,
     ShiraConfig,
     TaskType,
+    TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -99,14 +101,6 @@ ALL_CONFIGS = [
         {
             "task_type": "CAUSAL_LM",
             "target_modules": None,
-        },
-    ),
-    (
-        BoneConfig,
-        {
-            "task_type": "CAUSAL_LM",
-            "target_modules": None,
-            "r": 2,
         },
     ),
     (
@@ -246,6 +240,14 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PrefixTuningConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "num_virtual_tokens": 10,
+            "init_weights": "zero",
+        },
+    ),
+    (
         PromptEncoderConfig,
         {
             "task_type": "CAUSAL_LM",
@@ -301,6 +303,21 @@ ALL_CONFIGS = [
         },
     ),
     (
+        TinyLoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+        },
+    ),
+    (
+        PveraConfig,
+        {
+            "r": 8,
+            "pvera_dropout": 0.05,
+            "task_type": "CAUSAL_LM",
+        },
+    ),
+    (
         C3AConfig,
         {
             "task_type": "CAUSAL_LM",
@@ -322,13 +339,20 @@ ALL_CONFIGS = [
             "task_type": "CAUSAL_LM",
         },
     ),
+    (
+        PsoftConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "r": 4,
+            "psoft_alpha": 4,
+        },
+    ),
 ]
 
 
 def _skip_if_not_conv1d_supported(model_id, config_cls):
     if "GPT2LMHeadModel" in model_id and config_cls in [
         BOFTConfig,
-        BoneConfig,
         HRAConfig,
         OFTConfig,
         OSFConfig,
@@ -337,23 +361,9 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         C3AConfig,
         MissConfig,
         DeloraConfig,
+        PsoftConfig,
     ]:
-        pytest.skip("Skipping BOFT/HRA/OFT/Bone/Road/SHiRA/C3A/MiSS/OSF/DeLoRA for GPT2LMHeadModel")
-
-
-def _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls):
-    if "GPT2LMHeadModel" in model_id and config_cls in [
-        AdaLoraConfig,
-        BOFTConfig,
-        HRAConfig,
-        OFTConfig,
-        BoneConfig,
-        C3AConfig,
-        RoadConfig,
-        MissConfig,
-        DeloraConfig,
-    ]:
-        pytest.skip("Skipping AdaLora/BOFT/HRA/OFT/Bone/MiSS/DeLoRA for GPT2LMHeadModel")
+        pytest.skip("Skipping BOFT/HRA/OFT/Road/SHiRA/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel")
 
 
 def _skip_alora_no_activation(config_cls, config_kwargs):
@@ -662,7 +672,6 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_unload_adapter(self, model_id, config_cls, config_kwargs):
-        _skip_adalora_oft_hra_bone_for_gpt2(model_id, config_cls)
         _skip_if_not_conv1d_supported(model_id, config_cls)
         _skip_alora_no_activation(config_cls, config_kwargs)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
@@ -1054,3 +1063,19 @@ class TestDecoderModels(PeftCommonTester):
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_lora_conversion(model_id, config_cls, config_kwargs)
+
+    def test_merge_and_unload_fixes_tie_word_embeddings_config(self):
+        # See https://github.com/huggingface/transformers/issues/45127
+        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id, tie_word_embeddings=True)
+            assert model.config.tie_word_embeddings
+
+            peft_model = get_peft_model(model, LoraConfig(target_modules=["embed_tokens"], init_lora_weights=False))
+
+            with pytest.warns(UserWarning, match="Setting.*tie_word_embeddings"):
+                merged = peft_model.merge_and_unload()
+
+        assert not merged.config.tie_word_embeddings
+        assert merged.lm_head.weight is not merged.model.embed_tokens.weight
+        assert merged.lm_head.weight.data_ptr() != merged.model.embed_tokens.weight.data_ptr()

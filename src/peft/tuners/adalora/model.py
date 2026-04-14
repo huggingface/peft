@@ -264,8 +264,7 @@ class AdaLoraModel(LoraModel):
                 adapter_name,
                 rank,
                 lora_config.lora_alpha,
-                lora_config.lora_dropout,
-                lora_config.init_lora_weights,
+                config=lora_config,
             )
             with torch.no_grad():
                 if rank > 0:

@@ -19,24 +19,29 @@ from transformers import AutoModelForSeq2SeqLM, AutoModelForTokenClassification
 
 from peft import (
     AdaLoraConfig,
+    AdamssConfig,
     BOFTConfig,
-    BoneConfig,
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
     GraloraConfig,
     HRAConfig,
     IA3Config,
+    LilyConfig,
     LoraConfig,
     MissConfig,
     OFTConfig,
     OSFConfig,
+    PeanutConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    PsoftConfig,
+    PveraConfig,
     RoadConfig,
     ShiraConfig,
     TaskType,
+    TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -67,14 +72,6 @@ ALL_CONFIGS = [
         BOFTConfig,
         {
             "target_modules": None,
-            "task_type": "SEQ_2_SEQ_LM",
-        },
-    ),
-    (
-        BoneConfig,
-        {
-            "target_modules": None,
-            "r": 2,
             "task_type": "SEQ_2_SEQ_LM",
         },
     ),
@@ -125,6 +122,16 @@ ALL_CONFIGS = [
         },
     ),
     (
+        LilyConfig,
+        {
+            "target_modules": None,
+            "r": 8,
+            "stride_A": 1,
+            "num_B": 2,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
         LoraConfig,
         {
             "r": 8,
@@ -159,6 +166,14 @@ ALL_CONFIGS = [
         {
             "num_virtual_tokens": 10,
             "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        PrefixTuningConfig,
+        {
+            "num_virtual_tokens": 10,
+            "task_type": "SEQ_2_SEQ_LM",
+            "init_weights": "zero",
         },
     ),
     (
@@ -217,6 +232,32 @@ ALL_CONFIGS = [
         },
     ),
     (
+        TinyLoraConfig,
+        {
+            "target_modules": None,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        PveraConfig,
+        {
+            "r": 8,
+            "pvera_dropout": 0.05,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        PeanutConfig,
+        {
+            "r": 4,
+            "depth": 1,
+            "scaling": 1.0,
+            "act_fn": "relu",
+            "target_modules": None,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
         C3AConfig,
         {
             "task_type": "SEQ_2_SEQ_LM",
@@ -235,6 +276,22 @@ ALL_CONFIGS = [
     (
         OSFConfig,
         {
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        PsoftConfig,
+        {
+            "task_type": "SEQ_2_SEQ_LM",
+            "r": 4,
+            "psoft_alpha": 4,
+        },
+    ),
+    (
+        AdamssConfig,
+        {
+            "target_modules": None,
+            "r": 8,
             "task_type": "SEQ_2_SEQ_LM",
         },
     ),

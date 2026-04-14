@@ -258,9 +258,10 @@ PEFT supports models quantized with [torchao](https://github.com/pytorch/ao) ("a
 ```python
 from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, TorchAoConfig
+from torchao.quantization import Int8WeightOnlyConfig
 
 model_id = ...
-quantization_config = TorchAoConfig(quant_type="int8_weight_only")
+quantization_config = TorchAoConfig(quant_type=Int8WeightOnlyConfig())
 base_model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=quantization_config)
 peft_config = LoraConfig(...)
 model = get_peft_model(base_model, peft_config)
@@ -321,6 +322,31 @@ Besides LoRA, the following PEFT methods also support quantization:
 - **VeRA** (supports bitsandbytes quantization)
 - **AdaLoRA** (supports both bitsandbytes and GPTQ quantization)
 - **(IA)³** (supports bitsandbytes quantization)
+
+## Transformer Engine (TE) LoRA
+
+PEFT supports LoRA adapters on top of [NVIDIA Transformer Engine](https://docs.nvidia.com/deeplearning/transformer-engine/) layers (`te.pytorch.Linear`, `te.pytorch.LayerNormLinear`, and `te.pytorch.LayerNormMLP`). TE layers use FP8 and fused kernels to accelerate transformer training, and attaching LoRA adapters lets you parameter-efficiently fine-tune TE-accelerated models.
+
+```python
+from peft import LoraConfig, get_peft_model
+
+config = LoraConfig(
+    r=8,
+    lora_alpha=16,
+    target_modules=["q_proj", "v_proj"],
+    task_type="TOKEN_CLS",
+)
+model = get_peft_model(te_model, config)
+```
+
+When Transformer Engine is installed, PEFT automatically dispatches matching layers to the `TeLinear` adapter — no extra configuration is needed.
+
+### Caveats
+
+- `merge()` and `unmerge()` are not yet supported for TE layers.
+- DoRA is not supported with TE layers.
+
+A complete ESM2 token-classification example is available under `examples/lora_finetuning_transformer_engine/`.
 
 ## Next steps
 

@@ -110,6 +110,7 @@ class TrainConfig:
     autocast_adapter_dtype: bool
     generation_kwargs: dict[str, Any]
     attn_implementation: Optional[str]
+    init_kv_cache_prefix: Optional[str]
 
     def __post_init__(self) -> None:
         if not isinstance(self.model_id, str):

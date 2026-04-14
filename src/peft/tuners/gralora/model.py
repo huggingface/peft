@@ -20,9 +20,7 @@ import torch
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
-from peft.utils import (
-    TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
-)
+from peft.utils import TRANSFORMERS_MODELS_TO_GRALORA_TARGET_MODULES_MAPPING
 
 from .layer import GraloraLayer, Linear
 
@@ -60,7 +58,7 @@ class GraloraModel(BaseTuner):
     # The class of tuner layer for GraLoRA method
     tuner_layer_cls = GraloraLayer
 
-    target_module_mapping = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING
+    target_module_mapping = TRANSFORMERS_MODELS_TO_GRALORA_TARGET_MODULES_MAPPING
 
     def _create_and_replace(
         self,

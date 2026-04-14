@@ -17,23 +17,27 @@ from transformers import AutoModel
 
 from peft import (
     AdaLoraConfig,
+    AdamssConfig,
     BOFTConfig,
-    BoneConfig,
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
     GraloraConfig,
     HRAConfig,
     IA3Config,
+    LilyConfig,
     LoraConfig,
     MissConfig,
     OFTConfig,
+    PeanutConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
+    PsoftConfig,
     RoadConfig,
     ShiraConfig,
+    TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -66,14 +70,6 @@ ALL_CONFIGS = [
         {
             "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
-        },
-    ),
-    (
-        BoneConfig,
-        {
-            "task_type": "FEATURE_EXTRACTION",
-            "target_modules": None,
-            "r": 2,
         },
     ),
     (
@@ -120,6 +116,16 @@ ALL_CONFIGS = [
             "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
             "feedforward_modules": None,
+        },
+    ),
+    (
+        LilyConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "r": 8,
+            "stride_A": 1,
+            "num_B": 2,
         },
     ),
     (
@@ -176,6 +182,17 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PeanutConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "r": 8,
+            "depth": 1,
+            "act_fn": "relu",
+            "scaling": 1.0,
+        },
+    ),
+    (
         RoadConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
@@ -216,6 +233,13 @@ ALL_CONFIGS = [
         },
     ),
     (
+        TinyLoraConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+        },
+    ),
+    (
         C3AConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
@@ -231,6 +255,23 @@ ALL_CONFIGS = [
             "target_modules": None,
         },
     ),
+    (
+        PsoftConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "r": 4,
+            "psoft_alpha": 4,
+            "target_modules": None,
+        },
+    ),
+    (
+        AdamssConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "r": 8,
+        },
+    ),
 ]
 
 
@@ -243,7 +284,7 @@ def skip_deberta_lora_tests(config_cls, model_id):
     if "deberta" not in model_id.lower():
         return
 
-    to_skip = ["lora", "ia3", "boft", "vera", "fourierft", "hra", "bone", "randlora"]
+    to_skip = ["lora", "ia3", "boft", "vera", "fourierft", "hra", "randlora"]
     config_name = config_cls.__name__.lower()
     if any(k in config_name for k in to_skip):
         pytest.skip(f"Skip tests that use {config_name} for Deberta models")

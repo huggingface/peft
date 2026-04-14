@@ -17,23 +17,27 @@ from transformers import AutoModelForSequenceClassification
 
 from peft import (
     AdaLoraConfig,
+    AdamssConfig,
     BOFTConfig,
-    BoneConfig,
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
     GraloraConfig,
     HRAConfig,
     IA3Config,
+    LilyConfig,
     LoraConfig,
     MissConfig,
     OFTConfig,
+    PeanutConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
     PromptTuningInit,
+    PsoftConfig,
     RoadConfig,
     ShiraConfig,
+    TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -67,14 +71,6 @@ ALL_CONFIGS = [
         {
             "task_type": "SEQ_CLS",
             "target_modules": None,
-        },
-    ),
-    (
-        BoneConfig,
-        {
-            "task_type": "SEQ_CLS",
-            "target_modules": None,
-            "r": 2,
         },
     ),
     (
@@ -121,6 +117,16 @@ ALL_CONFIGS = [
             "task_type": "SEQ_CLS",
             "target_modules": None,
             "feedforward_modules": None,
+        },
+    ),
+    (
+        LilyConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "r": 8,
+            "stride_A": 1,
+            "num_B": 2,
         },
     ),
     (
@@ -177,6 +183,25 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PsoftConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "r": 32,
+            "psoft_alpha": 32,
+            "target_modules": None,
+        },
+    ),
+    (
+        PeanutConfig,
+        {
+            "r": 8,
+            "depth": 1,
+            "act_fn": "relu",
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+        },
+    ),
+    (
         RoadConfig,
         {
             "task_type": "SEQ_CLS",
@@ -217,6 +242,13 @@ ALL_CONFIGS = [
         },
     ),
     (
+        TinyLoraConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+        },
+    ),
+    (
         C3AConfig,
         {
             "task_type": "SEQ_CLS",
@@ -230,6 +262,14 @@ ALL_CONFIGS = [
             "task_type": "SEQ_CLS",
             "n_frequency": 8,
             "target_modules": None,
+        },
+    ),
+    (
+        AdamssConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "r": 8,
         },
     ),
 ]

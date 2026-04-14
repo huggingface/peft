@@ -329,6 +329,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     output_state_dict = save_mutated_as_lora(
                         peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
                     )
+
+                # Before exporting the parameters we need to make sure all the tensors are contigious as saving
+                # non-contiguous parameters is not supported. Tensors can become non contigiuous
+                # if they are a transpose view of another tensor. This can happen
+                # during adapter tying or parameter sharing.
+                for k, v in output_state_dict.items():
+                    if not v.is_contiguous():
+                        output_state_dict[k] = v.contiguous()
+
                 safe_save_file(
                     output_state_dict,
                     os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
@@ -580,11 +589,21 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             **kwargs,
         )
 
+        # Filter out shared parameters that are duplicated at layer level:
         # 1. Remove VB-LoRA vector bank, since it's a shared parameter set via the VBLoRAModel
         # 2. Remove the prompt encoder, as it does not need to be part of the checkpoint
-        missing_keys = [
-            k for k in load_result.missing_keys if "vblora_vector_bank" not in k and "prompt_encoder" not in k
-        ]
+        # 3. Remove TinyLoRA layer-level tinylora_v references (they share with model-level tinylora_v)
+        def is_expected_missing_key(k):
+            if "vblora_vector_bank" in k:
+                return False
+            if "prompt_encoder" in k:
+                return False
+            # TinyLoRA: layer-level tinylora_v is a reference to model-level, exclude from warning
+            if ".tinylora_v." in k:
+                return False
+            return True
+
+        missing_keys = [k for k in load_result.missing_keys if is_expected_missing_key(k)]
         if missing_keys:
             # Let's warn here since (in contrast to load_adapter) we don't return the load result, so it could be quite
             # difficult for users to even notice that something might have gone wrong here. As we filter out non PEFT
@@ -1045,12 +1064,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         try:
             if peft_config.is_prompt_learning:
                 self.peft_config[adapter_name] = peft_config
-                if hasattr(self.config, "to_dict"):
-                    dict_config = self.config.to_dict()
-                else:
-                    dict_config = self.config
-
-                peft_config = _prepare_prompt_learning_config(peft_config, dict_config)
+                peft_config = _prepare_prompt_learning_config(peft_config, self.config)
                 self._setup_prompt_encoder(adapter_name)
                 set_additional_trainable_modules(
                     model=self.base_model,
@@ -1406,6 +1420,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # Filter missing keys specific to the current adapter and tuner prefix.
         for key in load_result.missing_keys:
             if tuner_prefix in key and adapter_name in key:
+                # TinyLoRA: layer-level tinylora_v is a reference to model-level, skip it
+                if ".tinylora_v." in key:
+                    continue
                 adapter_missing_keys.append(key)
 
         load_result.missing_keys.clear()
@@ -1436,6 +1453,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 dispatch_model_kwargs["offload_index"] = offload_index
 
             no_split_module_classes = self._no_split_modules
+            if isinstance(no_split_module_classes, set):
+                no_split_module_classes = list(no_split_module_classes)
 
             if device_map != "sequential":
                 max_memory = get_balanced_memory(
@@ -1475,34 +1494,30 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self.eval()
         return load_result
 
-    def set_adapter(self, adapter_name: str) -> None:
+    def set_adapter(self, adapter_name: str, inference_mode: bool = False) -> None:
         """
         Sets the active adapter.
 
         Only one adapter can be active at a time.
 
-        Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True). If this is
-        not desired, use the following code.
-
-        ```py
-        >>> for name, param in model_peft.named_parameters():
-        ...     if ...:  # some check on name (ex. if 'lora' in name)
-        ...         param.requires_grad = False
-        ```
+        Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True) unless
+        inference_mode is True.
 
         Args:
             adapter_name (`str`):
                 The name of the adapter to be set as active. The adapter must be loaded first.
+            inference_mode (`bool`, optional):
+                Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
         if adapter_name not in self.peft_config:
             raise ValueError(f"Adapter {adapter_name} not found.")
         self.active_adapter = adapter_name
         if not self.peft_config[adapter_name].is_prompt_learning:
             # _set_adapter does not need to be called, since it's called through the BaseTuner class.
-            self.base_model.set_adapter(adapter_name)
+            self.base_model.set_adapter(adapter_name, inference_mode=inference_mode)
         else:
             # handle auxiliary modules
-            _set_adapter(self, adapter_name)
+            _set_adapter(self, adapter_name, inference_mode=inference_mode)
 
     def set_requires_grad(self, adapter_names: str | Sequence[str], requires_grad: bool = True) -> None:
         """
@@ -2517,12 +2532,14 @@ class PeftModelForSeq2SeqLM(PeftModel):
             past_key_values = model_kwargs.get("past_key_values", None)
             cache_position = model_kwargs.get("cache_position", [None])
             # check prefill stage
-            is_prefill_stage = (
-                # old cache implementation
-                (past_key_values is None)
-                # new cache implementation
-                or (isinstance(past_key_values, Cache) and (cache_position[0] == 0))
-            )
+            is_prefill_stage = kwargs.get("is_first_iteration")
+            if is_prefill_stage is None:  # transformers < v5
+                is_prefill_stage = (
+                    # old cache implementation
+                    (past_key_values is None)
+                    # new cache implementation
+                    or (isinstance(past_key_values, Cache) and (past_key_values.get_seq_length() == 0))
+                )
             if is_prefill_stage:
                 batch_size = model_kwargs["decoder_input_ids"].shape[0]
                 new_past_key_values = self.get_prompt(batch_size)
@@ -3422,19 +3439,3 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
         devices=devices,
     )
     return adapter_model_status
-
-
-def __getattr__(name):
-    if name == "PEFT_TYPE_TO_MODEL_MAPPING":
-        # This is for backwards compatibility: In #2282, PEFT_TYPE_TO_MODEL_MAPPING was removed as it was redundant with
-        # PEFT_TYPE_TO_TUNER_MAPPING. However, third party code could still use this mapping, e.g.:
-        # https://github.com/AutoGPTQ/AutoGPTQ/blob/6689349625de973b9ee3016c28c11f32acf7f02c/auto_gptq/utils/peft_utils.py#L8
-        # TODO: Remove after 2026-01
-        msg = (
-            "PEFT_TYPE_TO_MODEL_MAPPING is deprecated, please use `from peft import PEFT_TYPE_TO_TUNER_MAPPING` instead. "
-            "The deprecated variable will be removed in 2026."
-        )
-        warnings.warn(msg, category=DeprecationWarning)
-        return PEFT_TYPE_TO_TUNER_MAPPING
-
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

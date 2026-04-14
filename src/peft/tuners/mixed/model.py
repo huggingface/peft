@@ -267,6 +267,11 @@ class MixedModel(BaseTuner):
                     new_module = new_module.get_base_layer()
                 setattr(parent, target_name, new_module)
 
+        # Clean up peft_config from the model since all PEFT modules have been removed.
+        # This prevents spurious warnings when re-wrapping the model with get_peft_model().
+        if hasattr(self.model, "peft_config"):
+            del self.model.peft_config
+
         return self.model
 
     def add_weighted_adapter(self, *args: Any, **kwargs: Any) -> None:

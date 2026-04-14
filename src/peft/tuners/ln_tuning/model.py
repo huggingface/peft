@@ -123,6 +123,11 @@ class LNTuningModel(BaseTuner):
                     target.merge(adapter_names)
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
 
+        # Clean up peft_config from the model since all PEFT modules have been removed.
+        # This prevents spurious warnings when re-wrapping the model with get_peft_model().
+        if hasattr(self.model, "peft_config"):
+            del self.model.peft_config
+
         return self.model
 
     def _cast_adapter_dtype(self, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:

@@ -20,9 +20,12 @@ rendered properly in your Markdown viewer.
 
 **Note** For encoder-decoder models (seq2seq), the prefix is only applied to the decoder, which does not correspond to the paper specification (see e.g. Figure 2). Prefix tuning can still be fine-tuned on these model architectures but the performance could be sub-par; consider using other PEFT methods for encoder-decoder models.
 
-## Initialize from a KV cache prefix
+## Possible Initialization
 
-By default, prefix tuning is randomly initialized.
+By default, prefix tuning is randomly initialized. There's also the option to initialize the embeddings (or the
+projection thereof) to be close to a no-op (initialized to zero, it will still shift the probability mass a bit).
+This means that the KV-cache injected prefixes have less impact from the beginning and reduces the variance in training
+performance.
 
 PEFT also provides utilities to initialize a prefix-tuning adapter from an existing KV cache prefix (for example, from
 the first `p` tokens of a prompt/corpus). This is only supported when `prefix_projection=False` (the default), because
@@ -48,6 +51,15 @@ initialize_kv_prefix_from_text(
 ```
 
 Make sure the text is long enough to produce at least `num_virtual_tokens` tokens, otherwise initialization will fail.
+
+As a guideline:
+
+* start with a neutral starting sequence using `initialize_kv_prefix_from_text`, it can be a very short string like
+  "Question: "
+* if that doesn't help, use a longer sequence with task relevance (i.e. an engineered prompt), giving you more virtual
+  tokens to fit but also more steering of the model
+* if it is not possible to use an initialization text or you want to quickly check if prefix tuning is viable at all,
+  use a zero init without projection
 
 The abstract from the paper is:
 
