@@ -191,8 +191,8 @@ class C3ALinear(nn.Module, C3ALayer):
                 if active_adapter not in self.c3a_kernel.keys():
                     continue
                 c3a_kernel = self.c3a_kernel[active_adapter].to(torch.float32)
-                x = BlockCircularConvolution.apply(x, c3a_kernel) / x.size(-1)
-                result += x.to(result.dtype)
+                delta = BlockCircularConvolution.apply(x, c3a_kernel) / x.size(-1)
+                result += delta.to(result.dtype)
 
         result = result.to(previous_dtype)
         return result
