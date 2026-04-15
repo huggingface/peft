@@ -2167,8 +2167,8 @@ def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dty
     # Upcast lower precision floats like float8_e4m3fn; defensively only include dtypes that are actually found, as this
     # could depend on torch version and platform
     for name in UPCAST_DTYPES:
-        torch_dtype = getattr(torch, name)
-        dtypes_to_convert_to_fp32.add(torch_dtype)
+        if (torch_dtype := getattr(torch, name, None)) is not None:
+            dtypes_to_convert_to_fp32.add(torch_dtype)
 
     for module in model.modules():
         if not isinstance(module, BaseTunerLayer):
