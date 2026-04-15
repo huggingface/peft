@@ -25,6 +25,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check
 from peft.utils.other import transpose
 
 from .._buffer_dict import BufferDict
+from .config import TinyLoraConfig
 
 
 class TinyLoraLayer(BaseTunerLayer):
@@ -149,9 +150,9 @@ class TinyLoraLayer(BaseTunerLayer):
         tinylora_v: nn.ModuleDict,
         v_key: str,
         r: int,
-        config,
+        config: TinyLoraConfig,
         **kwargs,
-    ):
+    ) -> None:
         """Initialize layer with SVD decomposition and projection tensors."""
         # Extract config values
         u = config.u
@@ -313,7 +314,7 @@ class Linear(nn.Linear, TinyLoraLayer):
         tinylora_v: nn.ModuleDict,
         v_key: str,
         adapter_name: str,
-        config,
+        config: TinyLoraConfig,
         **kwargs,
     ) -> None:
         # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__
@@ -440,7 +441,7 @@ class Embedding(nn.Module, TinyLoraLayer):
         tinylora_v: nn.ModuleDict,
         v_key: str,
         adapter_name: str,
-        config,
+        config: TinyLoraConfig,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -463,7 +464,7 @@ class Embedding(nn.Module, TinyLoraLayer):
         r: int,
         config,
         **kwargs,
-    ):
+    ) -> None:
         """Initialize layer with SVD decomposition and projection tensors."""
         # Extract config values
         u = config.u
