@@ -340,6 +340,19 @@ class BucketIterator:
             yield from self._batch_iterator(bucket)
 
 
+def upload_checkpoint_to_bucket(model: nn.Module, experiment_name: str, bucket_name: str):
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True, delete=True) as tmp_dir:
+            model.save_pretrained(tmp_dir)
+            huggingface_hub.batch_bucket_files(
+                bucket_name,
+                add=[(os.path.join(tmp_dir, fname), f"{experiment_name}/{fname}") for fname in os.listdir(tmp_dir)],
+            )
+    except Exception as exc:
+        print(f"Failed to upload model checkpoint to hub: {exc}")
+        breakpoint()
+
+
 def get_file_size(
     model: nn.Module, *, peft_config: Optional[PeftConfig], clean: bool, print_fn: Callable[..., None]
 ) -> int:

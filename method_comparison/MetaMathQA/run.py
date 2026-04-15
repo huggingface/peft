@@ -50,6 +50,7 @@ from utils import (
     get_train_config,
     init_accelerator,
     log_results,
+    upload_checkpoint_to_bucket,
     validate_experiment_path,
 )
 
@@ -405,7 +406,7 @@ def train(
     return train_result
 
 
-def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
+def main(*, path_experiment: str, experiment_name: str, clean: bool, bucket_name: Optional[str]) -> None:
     tic_total = time.perf_counter()
     start_date = dt.datetime.now(tz=dt.timezone.utc).replace(microsecond=0).isoformat()
 
@@ -476,6 +477,9 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         print_fn=print_verbose,
     )
 
+    if bucket_name is not None:
+        upload_checkpoint_to_bucket(model, experiment_name, bucket_name)
+
     time_total = time.perf_counter() - tic_total
     # log results: print and save to file
     log_results(
@@ -502,6 +506,7 @@ if __name__ == "__main__":
         action="store_true",
         help="Delete training artifacts after run finishes (logs are still saved)",
     )
+    parser.add_argument("--bucket_name", type=str, help="HF bucket to upload checkpoints to.")
     args = parser.parse_args()
 
     experiment_name = validate_experiment_path(args.path_experiment)
@@ -520,4 +525,5 @@ if __name__ == "__main__":
         path_experiment=args.path_experiment,
         experiment_name=experiment_name,
         clean=args.clean,
+        bucket_name=args.bucket_name,
     )
