@@ -24,6 +24,7 @@ from peft.tuners.tuners_utils import check_adapters_to_merge
 from peft.utils.integrations import dequantize_bnb_weight
 from peft.utils.other import transpose
 
+from .config import PveraConfig
 from .layer import PveraLayer
 
 
@@ -36,16 +37,13 @@ if is_bnb_available():
             adapter_name: str,
             pvera_A,
             pvera_B,
-            r: int = 0,
-            pvera_dropout: float = 0.0,
-            fan_in_fan_out: bool = False,
-            init_weights: bool = True,
-            d_initial: float = 0.1,
+            r: int,
+            config: PveraConfig,
             **kwargs,
         ) -> None:
             super().__init__()
             PveraLayer.__init__(self, base_layer)
-            self.fan_in_fan_out = fan_in_fan_out
+            self.fan_in_fan_out = config.fan_in_fan_out
 
             self._active_adapter = adapter_name
             self.update_layer(
@@ -53,9 +51,7 @@ if is_bnb_available():
                 pvera_A,
                 pvera_B,
                 r,
-                pvera_dropout=pvera_dropout,
-                init_weights=init_weights,
-                d_initial=d_initial,
+                config=config,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -254,16 +250,13 @@ if is_bnb_4bit_available():
             adapter_name: str,
             pvera_A,
             pvera_B,
-            r: int = 0,
-            pvera_dropout: float = 0.0,
-            fan_in_fan_out: bool = False,
-            init_weights: bool = True,
-            d_initial: float = 0.1,
+            r: int,
+            config: PveraConfig,
             **kwargs,
         ) -> None:
             super().__init__()
             PveraLayer.__init__(self, base_layer)
-            self.fan_in_fan_out = fan_in_fan_out
+            self.fan_in_fan_out = config.fan_in_fan_out
 
             self._active_adapter = adapter_name
             self.update_layer(
@@ -271,9 +264,7 @@ if is_bnb_4bit_available():
                 pvera_A,
                 pvera_B,
                 r,
-                pvera_dropout=pvera_dropout,
-                init_weights=init_weights,
-                d_initial=d_initial,
+                config=config,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
