@@ -350,7 +350,6 @@ def upload_checkpoint_to_bucket(model: nn.Module, experiment_name: str, bucket_n
             )
     except Exception as exc:
         print(f"Failed to upload model checkpoint to hub: {exc}")
-        breakpoint()
 
 
 def get_file_size(
