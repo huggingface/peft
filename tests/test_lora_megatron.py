@@ -190,4 +190,4 @@ if is_megatron_available():
 
         with pytest.raises(ValueError) as e:
             megatron_model = get_peft_model(model, lora_config)
-        assert "unsupported and a potential security" in str(e)
+        assert "unsupported due to being a potential security" in str(e)
