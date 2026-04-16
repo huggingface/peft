@@ -219,7 +219,12 @@ class DeloraLinear(nn.Module, DeloraLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.delora_A.keys():
-                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
+                base_layer = self.get_base_layer()
+                base_layer.weight.data -= (
+                    self.get_delta_weight(active_adapter)
+                    .detach()
+                    .to(dtype=base_layer.weight.dtype, device=base_layer.weight.device)
+                )
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
