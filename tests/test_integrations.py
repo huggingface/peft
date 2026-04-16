@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import functools
 import inspect
 import re
 
@@ -119,8 +120,8 @@ def _transformers_moe_patch(request):
     `load_adapter` method is being called. Therefore, the order in which the tests were executed could hide or surface
     the bug.
 
-    With this fixture, we ensure that each test is run twice, once without and once with the patch. At fixture exit,
-    the previous state is restored.
+    With this fixture, we ensure that each test is run twice, once without and once with the patch. This should mirror
+    real world usage, where the patch may or may not be active. At fixture exit, the patch is always removed.
 
     For details, see discussion in #3165
 
@@ -138,19 +139,6 @@ def _transformers_moe_patch(request):
         )
 
     is_patched = hasattr(lora.layer.ParamWrapper.update_layer, "__wrapped__")
-
-    # 4 cases:
-    # should_patch | is_patched
-    #         true |       true
-    #         true |      false
-    #        false |       true
-    #        false |      false
-
-    if should_patch is is_patched:
-        # agreement, nothing to do
-        yield
-        return
-
     orig_update_layer = inspect.unwrap(lora.layer.ParamWrapper.update_layer)
 
     def new_update_layer(layer, *args, **kwargs):
@@ -164,20 +152,37 @@ def _transformers_moe_patch(request):
             layer._did_swap_in_out_features = True
         return orig_update_layer(layer, *args, **kwargs)
 
-    if should_patch and not is_patched:
+    # 4 cases:
+    # should_patch | is_patched
+    #         true |       true
+    #         true |      false
+    #        false |       true
+    #        false |      false
+
+    if not should_patch and not is_patched:
+        yield
+        return
+
+    if not should_patch and is_patched:
+        lora.layer.ParamWrapper.update_layer = orig_update_layer
+        yield
+        return
+
+    if should_patch and is_patched:
         try:
-            lora.layer.ParamWrapper.update_layer = new_update_layer
             yield
         finally:
             lora.layer.ParamWrapper.update_layer = orig_update_layer
         return
 
-    if not should_patch and is_patched:
+    if should_patch and not is_patched:
         try:
-            lora.layer.ParamWrapper.update_layer = orig_update_layer
+            lora.layer.ParamWrapper.update_layer = functools.wraps(lora.layer.ParamWrapper.update_layer)(
+                new_update_layer
+            )
             yield
         finally:
-            lora.layer.ParamWrapper.update_layer = new_update_layer
+            lora.layer.ParamWrapper.update_layer = orig_update_layer
         return
     # this is unreachable
 
