@@ -2199,7 +2199,8 @@ class ParamWrapper(nn.Module, LoraLayer):
             raise ValueError(f"lora.{self.__class__.__name__} does not work with LoRA variants like DoRA.")
 
         # for some MoE layers, the order is (experts, out_features, in_features)
-        swap_in_out_features = getattr(self.get_base_layer(), "is_transposed", False)
+        is_transposed = getattr(self.get_base_layer(), "is_transposed", False)
+        swap_in_out_features = (self.get_param().ndim == 3) and not is_transposed
         if swap_in_out_features and not self._did_swap_in_out_features:
             self.in_features, self.out_features = self.out_features, self.in_features
             self._did_swap_in_out_features = True
