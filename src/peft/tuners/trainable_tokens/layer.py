@@ -106,24 +106,23 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         dist.broadcast(token_weights, src=src_rank)
         return token_weights
 
-    def update_layer(self, adapter_name, config: TrainableTokensConfig | dict | None = None, **kwargs):
-        # normalize config
-        if isinstance(config, dict):
-            cfg = config
-        elif config is not None:
-            cfg = {
-                "token_indices": config.token_indices,
-                "init_weights": config.init_weights,
-            }
-        else:
-            cfg = kwargs
-
-        if cfg.get("tied_adapter", None):
+    def update_layer(
+        self,
+        adapter_name,
+        config: TrainableTokensConfig | None = None,
+        tied_adapter: nn.Module | None = None,
+        **kwargs,
+    ):
+        # config can be None when update_layer is called through _set_trainable, in which case the relevant
+        # arguments should be in kwargs
+        if tied_adapter is not None:
             # as a tied adapter, we're just following whatever the adpater we're tied to does, we don't update anything.
             return
 
-        self.token_indices[adapter_name] = cfg["token_indices"]
-        init_weights = cfg.get("init_weights", True)
+        token_indices = config.token_indices if (config is not None) else kwargs["token_indices"]
+        init_weights = config.init_weights if (config is not None) else kwargs.get("init_weights", True)
+
+        self.token_indices[adapter_name] = token_indices
 
         # we initialize the delta embedding weights from the base embedding matrix and replace values instead of
         # adding/subtracting deltas. we do it this way and use `embedding.weight.index_copy()` to write the updated
