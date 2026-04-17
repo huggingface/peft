@@ -35,7 +35,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_transformers_ge_v5
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
-from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
+from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, UPCAST_DTYPES
 from peft.utils.constants import (
     DUMMY_MODEL_CONFIG,
     DUMMY_TARGET_MODULES,
@@ -2152,7 +2152,7 @@ def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dty
     """
     A helper method to cast the adapter weights to the correct dtype.
 
-    Currently, this only upcasts float16 and bfloat16 to float32.
+    Currently, this only upcasts float dtypes to float32.
 
     Args:
         adapter_name (`str`):
@@ -2164,6 +2164,11 @@ def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dty
         return
 
     dtypes_to_convert_to_fp32 = {torch.float16, torch.bfloat16}
+    # Upcast lower precision floats like float8_e4m3fn; defensively only include dtypes that are actually found, as this
+    # could depend on torch version and platform
+    for name in UPCAST_DTYPES:
+        torch_dtype = getattr(torch, name)
+        dtypes_to_convert_to_fp32.add(torch_dtype)
 
     for module in model.modules():
         if not isinstance(module, BaseTunerLayer):

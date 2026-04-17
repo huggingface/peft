@@ -1676,7 +1676,7 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     if (
         model_config is not None
         and hasattr(model_config, "tie_word_embeddings")
-        and not model_config.tie_word_embeddings
+        and getattr(model_config, "tie_word_embeddings") is False
     ):
         return []
 

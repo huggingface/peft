@@ -5027,14 +5027,23 @@ class TestWeightTying:
                 self.embed_tokens = nn.Embedding(1000, 1000)
                 self.linear = nn.Linear(1000, 1000, bias=False)
 
+        # Config object
+        class ModelConfig:
+            def __init__(self, tie_word_embeddings):
+                self.tie_word_embeddings = tie_word_embeddings
+
+            def to_dict(self):
+                return {"tie_word_embeddings": self.tie_word_embeddings}
+
         class CausalLM(nn.Module):
-            if tie_weights:
-                _tied_weights_keys = ["lm_head.weight"]
+            # _tied_weights_keys on class-level architectural
+            # so it exists regardless of whether tying is actually enabled
+            _tied_weights_keys = ["lm_head.weight"]
 
             def __init__(self):
                 super().__init__()
                 self.model = MyModule()
-                self.config = {"tie_word_embeddings": tie_weights}
+                self.config = ModelConfig(tie_word_embeddings=tie_weights)  # Updated Config Object!
                 self.lm_head = nn.Linear(1000, 1000, bias=False)
 
                 if tie_weights:
@@ -5063,18 +5072,26 @@ class TestWeightTying:
                 self.encoder = Seq2SeqStack()
                 self.decoder = Seq2SeqStack()
 
+        class ModelConfig:
+            def __init__(self, tie_word_embeddings):
+                self.tie_word_embeddings = tie_word_embeddings
+
+            def to_dict(self):
+                return {"tie_word_embeddings": self.tie_word_embeddings}
+
         class Seq2SeqLM(nn.Module):
-            if tie_weights:
-                _tied_weights_keys = {
-                    "model.encoder.embed_tokens.weight": "model.shared.weight",
-                    "model.decoder.embed_tokens.weight": "model.shared.weight",
-                    "lm_head.weight": "model.shared.weight",
-                }
+            # _tied_weights_keys on class-level architectural
+            # so it exists regardless of whether tying is actually enabled
+            _tied_weights_keys = {
+                "model.encoder.embed_tokens.weight": "model.shared.weight",
+                "model.decoder.embed_tokens.weight": "model.shared.weight",
+                "lm_head.weight": "model.shared.weight",
+            }
 
             def __init__(self):
                 super().__init__()
                 self.model = MySeq2SeqModule()
-                self.config = {"tie_word_embeddings": tie_weights}
+                self.config = ModelConfig(tie_word_embeddings=tie_weights)
                 self.lm_head = nn.Linear(1000, 1000, bias=False)
 
                 if tie_weights:
@@ -5417,6 +5434,34 @@ class TestWeightTying:
 
         if "lm_head" in modules_to_save:
             assert isinstance(model.base_model.model.lm_head, ModulesToSaveWrapper)
+        else:
+            assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
+
+        # weights must NOT share memory (they should be separate)
+        embed_ptr = model.base_model.model.model.embed_tokens.weight.data_ptr()
+        lm_head_ptr = model.base_model.model.lm_head.weight.data_ptr()
+        assert embed_ptr != lm_head_ptr
+
+    @pytest.mark.parametrize("target_modules", [["lm_head"], ["embed_tokens"], ["lm_head", "embed_tokens"]])
+    def test_ensure_weight_tying_not_tying_when_model_config_tie_false_target_modules(self, target_modules):
+        # When tie_word_embeddings=False, ensure_weight_tying=True should not tie weights.
+        # Regression test for issue #2944 targeting target_modules flow
+        model = self.get_lm_model(tie_weights=False)
+        config = LoraConfig(
+            target_modules=["linear"] + target_modules,  # Passing to target_module
+            ensure_weight_tying=True,
+        )
+
+        with pytest.warns(UserWarning, match="no tied modules were found in the model"):
+            model = get_peft_model(model, config)
+
+        if "embed_tokens" in target_modules:
+            assert isinstance(model.base_model.model.model.embed_tokens, LoraLayer)
+        else:
+            assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
+
+        if "lm_head" in target_modules:
+            assert isinstance(model.base_model.model.lm_head, LoraLayer)
         else:
             assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
 
