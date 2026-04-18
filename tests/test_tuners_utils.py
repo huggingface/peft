@@ -715,6 +715,49 @@ class TestTargetModuleSuggester:
                 f"or remove it from this assertion."
             )
 
+    def test_suggestion_absent_at_no_target_modules_raise(self):
+        # Triggers line-994 raise: no target_modules and no target_parameters passed.
+        # Hook is only at line-1008, so no "Did you mean" should appear here.
+        model = MLP()
+        with pytest.raises(ValueError) as excinfo:
+            get_peft_model(model, LoraConfig(target_modules=[]))
+        msg = str(excinfo.value)
+        # The line-994 error message starts with "No `target_modules` passed".
+        assert "Did you mean" not in msg
+
+    def test_suggestion_uses_minimal_suffix_compression(self):
+        # Hierarchical model with repeated submodule names. The suggester should
+        # compress fully-qualified names like layers.0.q_proj, layers.1.q_proj
+        # into the minimal suffix set {q_proj, v_proj} via _find_minimal_target_modules.
+        class HierarchicalModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = nn.ModuleList([
+                    nn.ModuleDict({
+                        "q_proj": nn.Linear(8, 8),
+                        "v_proj": nn.Linear(8, 8),
+                    })
+                    for _ in range(3)
+                ])
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer["v_proj"](layer["q_proj"](x))
+                return x
+
+        model = HierarchicalModel()
+        with pytest.raises(ValueError) as excinfo:
+            get_peft_model(model, LoraConfig(target_modules=["non_existent"]))
+        msg = str(excinfo.value)
+        assert "Did you mean" in msg
+        suggestion = msg.split("Did you mean", 1)[1]
+        # Both compressed suffixes should appear.
+        assert "q_proj" in suggestion
+        assert "v_proj" in suggestion
+        # Fully-qualified paths should NOT appear: the minimal form must be used.
+        assert "layers.0.q_proj" not in suggestion
+        assert "layers.2.v_proj" not in suggestion
+
 
 class TestModelAndLayerStatus:
     """Check the methods `get_layer_status` and `get_model_status`.`
