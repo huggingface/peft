@@ -90,9 +90,15 @@ def suggest_target_modules(tuner, model, peft_config, unmatched_modules) -> str 
     return _format_suggestion(sorted(minimal), peft_type)
 
 
-def _format_suggestion(minimal_targets: list[str], peft_type: str) -> str:
+def _format_suggestion(minimal_targets: list[str], peft_type) -> str:
     """First-version output format. Bossan invited iteration via tests."""
+    # `peft_type` is typically a `PeftType` enum member (a `str`-mixin Enum).
+    # In Python 3.12, `f"{peft_type}"` returns the enum's __str__ ("PeftType.LORA")
+    # rather than the value ("LORA"). Use `.value` when available to keep the
+    # user-facing message clean. Fall back to str() for plain-string callers
+    # (e.g. test fixtures that use a fabricated `peft_type`).
+    type_name = getattr(peft_type, "value", peft_type)
     return (
         f"Did you mean one of these? Valid `target_modules` candidates "
-        f"for {peft_type} on this model: {set(minimal_targets)}."
+        f"for {type_name} on this model: {set(minimal_targets)}."
     )
