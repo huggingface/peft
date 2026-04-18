@@ -595,6 +595,127 @@ class TestExcludedModuleNames:
         assert model.targeted_module_names == expected
 
 
+class TestTargetModuleSuggester:
+    """Tests for the target module suggester hook at tuners_utils.py:1008.
+
+    The suggester appends a "Did you mean" paragraph to the existing error
+    message when the user named modules that do not exist in the model.
+    Behavior is purely additive: when no suggestion is possible, the original
+    message is unchanged.
+    """
+
+    def test_suggests_valid_lora_targets_when_user_names_wrong(self):
+        model = MLP()
+        with pytest.raises(ValueError) as excinfo:
+            get_peft_model(model, LoraConfig(target_modules=["non_existent"]))
+        msg = str(excinfo.value)
+        assert "Target modules" in msg
+        assert "Did you mean" in msg
+        assert ("lin0" in msg) or ("lin1" in msg)
+
+    def test_returns_no_suggestion_when_model_has_no_candidates(self):
+        # Model with only Dropout/ReLU (no LoRA-compatible types).
+        class NoCandidates(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.drop = nn.Dropout(0.5)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(self.drop(x))
+
+        model = NoCandidates()
+        with pytest.raises(ValueError) as excinfo:
+            get_peft_model(model, LoraConfig(target_modules=["non_existent"]))
+        msg = str(excinfo.value)
+        assert "Target modules" in msg
+        assert "Did you mean" not in msg
+
+    def test_suggestion_does_not_leak_unsupported_types(self):
+        model = MLP()
+        with pytest.raises(ValueError) as excinfo:
+            get_peft_model(model, LoraConfig(target_modules=["non_existent"]))
+        msg = str(excinfo.value)
+        assert "Did you mean" in msg
+        # Inspect only the suggestion paragraph to avoid matching the
+        # original message (which echoes the user's unmatched name).
+        suggestion = msg.split("Did you mean", 1)[1]
+        # MLP fixture has lin0, relu, drop, lin1, sm. Only lin0 and lin1
+        # are LoRA-compatible.
+        assert "drop" not in suggestion
+        assert "relu" not in suggestion
+        assert "'sm'" not in suggestion
+
+    def test_suggestion_absent_when_modules_excluded(self):
+        # Triggers line-1021 raise (combination case) on MLP because the
+        # non-target modules (relu, drop, sm) populate unmatched_modules.
+        # Line-989 ("All modules were excluded") only fires when EVERY module
+        # matches the target pattern, which is hard to construct with MLP and
+        # exact-name targeting. The behavioral guarantee we are testing here
+        # is that the suggester is NOT called when excluded_modules is
+        # non-empty, regardless of which specific raise fires.
+        model = MLP()
+        with pytest.raises(ValueError) as excinfo:
+            get_peft_model(
+                model,
+                LoraConfig(
+                    target_modules=["lin0", "lin1"],
+                    exclude_modules=["lin0", "lin1"],
+                ),
+            )
+        msg = str(excinfo.value)
+        assert "Did you mean" not in msg
+
+    def test_suggestion_absent_at_combination_raise(self):
+        # Triggers line-1021 raise: some matched-and-excluded, some unmatched.
+        model = MLP()
+        with pytest.raises(ValueError) as excinfo:
+            get_peft_model(
+                model,
+                LoraConfig(
+                    target_modules=["lin0", "non_existent"],
+                    exclude_modules=["lin0"],
+                ),
+            )
+        msg = str(excinfo.value)
+        assert "No modules were targeted" in msg
+        assert "Did you mean" not in msg
+
+    def test_unregistered_tuner_returns_none(self):
+        from peft.tuners.target_suggester import suggest_target_modules
+
+        class FakeConfig:
+            peft_type = "DEFINITELY_NOT_REGISTERED"
+            target_modules = ["non_existent"]
+
+        model = MLP()
+        result = suggest_target_modules(None, model, FakeConfig(), ["non_existent"])
+        assert result is None
+
+    def test_lora_collector_is_side_effect_free(self):
+        from peft.tuners.lora.candidate_collector import lora_candidates
+
+        model = MLP()
+        before_state = {k: v.clone() for k, v in model.state_dict().items()}
+        names_first = list(lora_candidates(model))
+        names_second = list(lora_candidates(model))
+        after_state = {k: v.clone() for k, v in model.state_dict().items()}
+        assert names_first == names_second
+        for key in before_state:
+            assert torch.equal(before_state[key], after_state[key])
+
+    def test_all_known_tuners_have_candidate_collector_registered(self):
+        from peft.tuners.target_suggester import TUNER_TYPE_TO_CANDIDATE_COLLECTOR
+        # LoRA must be registered with a real collector.
+        # IA3, LOHA, LOKR, OFT are stubs added in Phase 4 but must be present.
+        for peft_type in ("LORA", "IA3", "LOHA", "LOKR", "OFT"):
+            assert peft_type in TUNER_TYPE_TO_CANDIDATE_COLLECTOR, (
+                f"Tuner {peft_type} has no registered candidate collector. "
+                f"Either add a stub via @register_candidate_collector('{peft_type}') "
+                f"or remove it from this assertion."
+            )
+
+
 class TestModelAndLayerStatus:
     """Check the methods `get_layer_status` and `get_model_status`.`
 
