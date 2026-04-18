@@ -19,6 +19,7 @@ from .config import OFTConfig
 from .gptq import GPTQOFTLinear
 from .layer import Conv2d, Linear, OFTLayer
 from .model import OFTModel
+from . import candidate_collector  # noqa: F401  # registers OFT collector stub via decorator
 
 
 __all__ = [

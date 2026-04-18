@@ -18,6 +18,7 @@ from peft.utils import register_peft_method
 from .config import IA3Config
 from .layer import Conv2d, Conv3d, IA3Layer, Linear
 from .model import IA3Model
+from . import candidate_collector  # noqa: F401  # registers IA3 collector stub via decorator
 
 
 __all__ = ["Conv2d", "Conv3d", "IA3Config", "IA3Layer", "IA3Model", "Linear"]

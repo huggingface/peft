@@ -17,6 +17,7 @@ from peft.utils import register_peft_method
 from .config import LoKrConfig
 from .layer import Conv2d, Linear, LoKrLayer
 from .model import LoKrModel
+from . import candidate_collector  # noqa: F401  # registers LoKr collector stub via decorator
 
 
 __all__ = ["Conv2d", "Linear", "LoKrConfig", "LoKrLayer", "LoKrModel"]

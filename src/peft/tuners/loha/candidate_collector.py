@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,14 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from peft.utils import register_peft_method
+"""LoHa candidate enumerator. STUB. Returns empty until implemented.
 
-from .config import LoHaConfig
-from .layer import Conv2d, Linear, LoHaLayer
-from .model import LoHaModel
-from . import candidate_collector  # noqa: F401  # registers LoHa collector stub via decorator
+TODO: implement candidate enumeration for LoHa. The function should yield
+full module names that LoHa could validly adapt. See lora/candidate_collector.py
+for the implemented LoRA pattern.
+"""
+
+from peft.tuners.target_suggester import register_candidate_collector
 
 
-__all__ = ["Conv2d", "Linear", "LoHaConfig", "LoHaLayer", "LoHaModel"]
-
-register_peft_method(name="loha", config_cls=LoHaConfig, model_cls=LoHaModel, prefix="hada_", is_mixed_compatible=True)
+@register_candidate_collector("LOHA")
+def loha_candidates(model):
+    """Yield full module names that LoHa could validly adapt. STUB."""
+    return iter(())
