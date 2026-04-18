@@ -23,6 +23,7 @@ from .gptq import GPTQLoraLinear
 from .layer import Conv2d, Conv3d, Embedding, Linear, LoraLayer, ParamWrapper
 from .loraga import preprocess_loraga
 from .model import LoraModel
+from . import candidate_collector  # noqa: F401  # registers LoRA collector via decorator
 
 
 __all__ = [
