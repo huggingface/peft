@@ -91,7 +91,11 @@ def _format_suggestion(minimal_targets: list[str], peft_type) -> str:
     # user-facing message clean. Fall back to str() for plain-string callers
     # (e.g. test fixtures that use a fabricated `peft_type`).
     type_name = getattr(peft_type, "value", peft_type)
+    # Render the minimal targets as a deterministic set-shaped string. The caller
+    # passes `sorted(minimal)`, but using `set(minimal_targets)` in the f-string
+    # would re-randomize the order via Python's hash randomization. Build the
+    # set-shaped repr by hand to preserve the sort and stay run-to-run stable.
+    sorted_repr = "{" + ", ".join(repr(t) for t in minimal_targets) + "}"
     return (
-        f"Did you mean one of these? Valid `target_modules` candidates "
-        f"for {type_name} on this model: {set(minimal_targets)}."
+        f"Did you mean one of these? Valid `target_modules` candidates for {type_name} on this model: {sorted_repr}."
     )
