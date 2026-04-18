@@ -1005,6 +1005,12 @@ class BaseTuner(nn.Module, ABC):
                     error_msg += f" Note: You specified 'layers_to_transform': {peft_config.layers_to_transform}."
                 if getattr(peft_config, "layers_pattern", None) is not None:
                     error_msg += f" You also specified 'layers_pattern': {peft_config.layers_pattern}."
+                # Suggest valid target modules if a tuner-specific collector is registered.
+                # Local import to avoid circular dependency with target_suggester.
+                from peft.tuners.target_suggester import suggest_target_modules
+                suggestion = suggest_target_modules(self, model, peft_config, unmatched_modules)
+                if suggestion:
+                    error_msg += f"\n\n{suggestion}"
                 raise ValueError(error_msg)
             else:
                 # Some modules did not match and some matched but were excluded
