@@ -706,6 +706,7 @@ class TestTargetModuleSuggester:
 
     def test_all_known_tuners_have_candidate_collector_registered(self):
         from peft.tuners.target_suggester import TUNER_TYPE_TO_CANDIDATE_COLLECTOR
+
         # LoRA must be registered with a real collector.
         # IA3, LOHA, LOKR, OFT are stubs added in Phase 4 but must be present.
         for peft_type in ("LORA", "IA3", "LOHA", "LOKR", "OFT"):
@@ -732,13 +733,17 @@ class TestTargetModuleSuggester:
         class HierarchicalModel(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.layers = nn.ModuleList([
-                    nn.ModuleDict({
-                        "q_proj": nn.Linear(8, 8),
-                        "v_proj": nn.Linear(8, 8),
-                    })
-                    for _ in range(3)
-                ])
+                self.layers = nn.ModuleList(
+                    [
+                        nn.ModuleDict(
+                            {
+                                "q_proj": nn.Linear(8, 8),
+                                "v_proj": nn.Linear(8, 8),
+                            }
+                        )
+                        for _ in range(3)
+                    ]
+                )
 
             def forward(self, x):
                 for layer in self.layers:

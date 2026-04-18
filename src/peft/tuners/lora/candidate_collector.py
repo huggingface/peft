@@ -14,11 +14,10 @@
 
 """LoRA candidate enumerator. Registered for `PeftType.LORA`.
 
-The supported-types tuple mirrors `peft.tuners.lora.layer.dispatch_default`
-but this module does NOT call dispatch_default itself: dispatch_default has
-side effects on `config.fan_in_fan_out` (lines 2495-2500 and 2502-2508 of
-layer.py at commit 2859358). If LoRA gains support for a new module type,
-both this tuple and dispatch_default need updating.
+The supported-types tuple mirrors `peft.tuners.lora.layer.dispatch_default` but this module does NOT call
+dispatch_default itself: dispatch_default has side effects on `config.fan_in_fan_out` (lines 2495-2500 and 2502-2508 of
+layer.py at commit 2859358). If LoRA gains support for a new module type, both this tuple and dispatch_default need
+updating.
 """
 
 from torch import nn
@@ -26,6 +25,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.target_suggester import register_candidate_collector
 from peft.tuners.tuners_utils import BaseTunerLayer
+
 
 _LORA_SUPPORTED_TYPES = (
     nn.Linear,

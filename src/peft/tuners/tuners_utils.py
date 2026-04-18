@@ -1008,6 +1008,7 @@ class BaseTuner(nn.Module, ABC):
                 # Suggest valid target modules if a tuner-specific collector is registered.
                 # Local import to avoid circular dependency with target_suggester.
                 from peft.tuners.target_suggester import suggest_target_modules
+
                 suggestion = suggest_target_modules(self, model, peft_config, unmatched_modules)
                 if suggestion:
                     error_msg += f"\n\n{suggestion}"

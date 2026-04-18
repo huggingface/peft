@@ -14,24 +14,20 @@
 
 """Target module suggester.
 
-When a user passes a `target_modules` value that does not match any module
-in the model, `suggest_target_modules` returns a tuner-aware suggestion of
-valid candidates, compressed via `_find_minimal_target_modules`. Behavior is
-purely additive: callers should treat `None` returns as "no decoration" and
-leave the original error message unchanged.
+When a user passes a `target_modules` value that does not match any module in the model, `suggest_target_modules`
+returns a tuner-aware suggestion of valid candidates, compressed via `_find_minimal_target_modules`. Behavior is purely
+additive: callers should treat `None` returns as "no decoration" and leave the original error message unchanged.
 
-Extension: per-tuner candidate enumeration is registered via the
-`register_candidate_collector` decorator. Each tuner package registers its
-own collector at import time. To add a new tuner, create a candidate
-collector module under `src/peft/tuners/<tuner>/` and import it from that
-package's `__init__.py`.
+Extension: per-tuner candidate enumeration is registered via the `register_candidate_collector` decorator. Each tuner
+package registers its own collector at import time. To add a new tuner, create a candidate collector module under
+`src/peft/tuners/<tuner>/` and import it from that package's `__init__.py`.
 
-IMPORTANT: do NOT add module-top-level imports from `peft.tuners.tuners_utils`.
-The local import of `_find_minimal_target_modules` inside
-`suggest_target_modules` is required for circular-import safety.
+IMPORTANT: do NOT add module-top-level imports from `peft.tuners.tuners_utils`. The local import of
+`_find_minimal_target_modules` inside `suggest_target_modules` is required for circular-import safety.
 """
 
-from typing import Callable
+from collections.abc import Callable
+
 
 TUNER_TYPE_TO_CANDIDATE_COLLECTOR: dict[str, Callable] = {}
 
@@ -42,12 +38,14 @@ def register_candidate_collector(tuner_type: str) -> Callable:
     Args:
         tuner_type: The `PeftType` value as a string, e.g. "LORA", "IA3".
 
-    The decorated function should accept a `model` argument and yield full
-    module names (str) that this tuner could validly adapt.
+    The decorated function should accept a `model` argument and yield full module names (str) that this tuner could
+    validly adapt.
     """
+
     def decorator(fn: Callable) -> Callable:
         TUNER_TYPE_TO_CANDIDATE_COLLECTOR[tuner_type] = fn
         return fn
+
     return decorator
 
 
@@ -58,10 +56,8 @@ def suggest_target_modules(tuner, model, peft_config, unmatched_modules) -> str 
     Returns None when:
         - peft_config.peft_type is not registered with a candidate collector
         - the model has zero candidate modules for this tuner
-        - _find_minimal_target_modules returns empty (defensive; given the
-          upstream candidate-set non-empty check, this branch is technically
-          unreachable for the current implementation of
-          _find_minimal_target_modules)
+        - _find_minimal_target_modules returns empty (defensive; given the upstream candidate-set non-empty check, this
+          branch is technically unreachable for the current implementation of _find_minimal_target_modules)
     """
     peft_type = getattr(peft_config, "peft_type", None)
     if peft_type is None:
@@ -75,10 +71,7 @@ def suggest_target_modules(tuner, model, peft_config, unmatched_modules) -> str 
         return None
 
     candidate_set = set(candidate_names)
-    non_candidate_names = [
-        n for n, _ in model.named_modules()
-        if n and n not in candidate_set
-    ]
+    non_candidate_names = [n for n, _ in model.named_modules() if n and n not in candidate_set]
 
     # Local import for circular-import safety. Do NOT promote to module top.
     from peft.tuners.tuners_utils import _find_minimal_target_modules
