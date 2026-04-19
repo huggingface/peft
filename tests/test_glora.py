@@ -179,6 +179,12 @@ class GLORATester(unittest.TestCase):
             model_4bit = prepare_model_for_kbit_training(model_4bit)
         except Exception as e:
             self.skipTest(f"bitsandbytes or quantized model loading failed: {e}")
+        q_proj = model_4bit.model.layers[0].self_attn.q_proj
+        if type(q_proj) is not torch.nn.Linear:
+            self.skipTest(
+                "GLORA replaces only plain torch.nn.Linear layers; quantized projections "
+                f"(e.g. {type(q_proj).__name__}) are not supported."
+            )
         glora_config = GloraConfig(
             r=4,
             target_modules=["q_proj", "v_proj"],

@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 from peft.config import PeftConfig
 from peft.tuners.glora.layer import GloraLayer
-from peft.tuners.tuners_utils import BaseTuner
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_GLORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
@@ -45,6 +45,9 @@ class GloraModel(BaseTuner):
     """
     Creates Generalized Low Rank Adapter (Glora) model from a pretrained transformers model.
     """
+
+    prefix = "glora_"
+    tuner_layer_cls = GloraLayer
 
     def __init__(self, model: nn.Module, config: GloraConfig, adapter_name: str = "default"):
         super().__init__(model, config, adapter_name)
@@ -94,20 +97,21 @@ class GloraModel(BaseTuner):
         self._added_adapters.add(adapter_name)
 
     def _create_new_module(self, peft_config: GloraConfig, adapter_name: str, target: nn.Module) -> GloraLinear:
-        bias = hasattr(target, "bias") and target.bias is not None
-        if not isinstance(target, nn.Linear):
+        if isinstance(target, BaseTunerLayer):
+            target_base_layer = target.get_base_layer()
+        else:
+            target_base_layer = target
+        if type(target_base_layer) is not nn.Linear:
             raise ValueError(
-                f"Target module {target} is not a nn.Linear layer, which is required for GLORA replacement."
+                f"Target module {target} is not a plain torch.nn.Linear (after unwrapping); GLORA does not support this layer type."
             )
 
-        in_features, out_features = target.in_features, target.out_features
         kwargs_glora = {
             "config_A_B": peft_config.config_A_B,
             "config_C": peft_config.config_C,
             "config_D_E": peft_config.config_D_E,
         }
-        new_module = GloraLinear(in_features, out_features, bias=bias, **kwargs_glora)
-        # Add the adapter to the new module
+        new_module = GloraLinear(target, **kwargs_glora)
         new_module.add_adapter(
             adapter_name,
             peft_config.r,
@@ -138,7 +142,7 @@ class GloraModel(BaseTuner):
                     peft_config.config_C,
                     peft_config.config_D_E,
                 )
-            elif isinstance(target, nn.Linear):
+            elif type(target) is nn.Linear:
                 new_module = self._create_new_module(peft_config, adapter_name, target)
                 self._replace_module(parent, target_name, new_module, target)
 
@@ -147,18 +151,6 @@ class GloraModel(BaseTuner):
                 f"Target modules {peft_config.target_modules} not found in the base model. "
                 f"Please check the target modules and try again."
             )
-
-    def _replace_module(self, parent: nn.Module, child_name: str, new_module: nn.Module, child: nn.Module) -> None:
-        setattr(parent, child_name, new_module)
-        # Copy weights and bias
-        if hasattr(child, "weight") and hasattr(new_module, "weight"):
-            new_module.weight = child.weight
-        if hasattr(child, "bias") and hasattr(new_module, "bias") and child.bias is not None:
-            new_module.bias = child.bias
-        # Copy state if present
-        if getattr(child, "state", None) is not None:
-            new_module.state = child.state
-            new_module.to(child.weight.device)
 
     def __getattr__(self, name: str):
         try:
@@ -192,12 +184,12 @@ class GloraModel(BaseTuner):
     def enable_adapter_layers(self):
         for module in self.model.modules():
             if hasattr(module, "enable_adapters"):
-                module.enable_adapters()
+                module.enable_adapters(True)
 
     def disable_adapter_layers(self):
         for module in self.model.modules():
-            if hasattr(module, "disable_adapters"):
-                module.disable_adapters()
+            if hasattr(module, "enable_adapters"):
+                module.enable_adapters(False)
 
     def delete_adapter(self, adapter_name: str):
         if adapter_name not in self.peft_config:
@@ -235,9 +227,9 @@ class GloraModel(BaseTuner):
                 merge_adapters = adapter_names if adapter_names is not None else target.active_adapters
                 target.merge(safe_merge=safe_merge, adapter_names=merge_adapters)
                 new_module = nn.Linear(target.in_features, target.out_features, bias=(target.bias is not None))
-                new_module.weight.data = target.weight.data.clone()  # Get merged weight
+                new_module.weight.data = target.weight.data.clone()
                 if target.bias is not None:
-                    new_module.bias.data = target.bias.data.clone()  # Get merged bias
+                    new_module.bias.data = target.bias.data.clone()
                 self._replace_module(parent, target_name, new_module.to(target.weight.device), target)
 
             if isinstance(target, ModulesToSaveWrapper):
@@ -288,5 +280,5 @@ class GloraModel(BaseTuner):
         mark_only_glora_as_trainable(model)
 
     def _prepare_adapter_config(self, peft_config: PeftConfig, model_config: dict) -> PeftConfig:
-        assert isinstance(peft_config, GloraConfig) # ty linting
+        assert isinstance(peft_config, GloraConfig)  # ty linting
         return GloraModel._prepare_peft_config(peft_config, model_config)

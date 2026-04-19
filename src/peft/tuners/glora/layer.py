@@ -13,20 +13,46 @@
 # limitations under the License.
 
 import math
-from typing import Optional
+from typing import Any, Optional
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
+
+from peft.tuners.tuners_utils import BaseTunerLayer
 
 
-class GloraLayer(nn.Module):
-    def __init__(self, in_features: int, out_features: int):
-        # Only call nn.Module.__init__ if not already initialized (i.e., not an nn.Linear)
-        if not isinstance(self, nn.Linear):
-            nn.Module.__init__(self)
-        self.in_features: int = in_features
-        self.out_features: int = out_features
+class GloraLayer(BaseTunerLayer):
+    adapter_layer_names = (
+        "glora_Ad",
+        "glora_Au",
+        "glora_Bd",
+        "glora_Bu",
+        "glora_Cd",
+        "glora_Cu",
+        "glora_D",
+        "glora_E",
+    )
+    other_param_names = ("r", "eval_config")
+
+    def __init__(self, base_layer: nn.Module, **kwargs) -> None:
+        self.base_layer = base_layer
+        self.in_features: int
+        self.out_features: int
+        base = self.get_base_layer()
+        # Use exact type check: bitsandbytes.Linear4bit subclasses nn.Linear but is not compatible with GLORA math.
+        if type(base) is not nn.Linear:
+            raise NotImplementedError(
+                f"GLORA only supports torch.nn.Linear as base_layer, got {type(base).__name__}. "
+                "Quantized Linear subclasses are not supported."
+            )
+        self.in_features = base.in_features
+        self.out_features = base.out_features
+
+        base.weight.requires_grad = False
+        if getattr(base, "bias", None) is not None:
+            base.bias.requires_grad = False
+
         self.r: dict[str, int] = {}
         self.glora_Ad: nn.ParameterDict = nn.ParameterDict()
         self.glora_Au: nn.ParameterDict = nn.ParameterDict()
@@ -39,10 +65,10 @@ class GloraLayer(nn.Module):
         self.eval_config: dict[str, dict[str, object]] = {}
         self.merged_adapters: list[str] = []
         self._disable_adapters: bool = False
-        self.active_adapters: list[str] = []
-        self.kwargs: dict[str, object] = {}
+        self._active_adapter: str | list[str] = []
+        self.kwargs: dict[str, Any] = dict(kwargs)
 
-    def add_adapter(self, adapter_name: str, r: int, config_A_B: str, config_C: str, config_D_E: str):
+    def add_adapter(self, adapter_name: str, r: int, config_A_B: str, config_C: str, config_D_E: str) -> None:
         self.r[adapter_name] = r
         Ad, Au = self.make_param((self.out_features, self.in_features), f"lora_{r}")
         Bd, Bu = self.make_param((self.out_features, self.in_features), f"lora_{r}")
@@ -65,10 +91,13 @@ class GloraLayer(nn.Module):
             "E": config_D_E,
         }
         self.reset_glora_parameters(adapter_name)
-        if adapter_name not in self.active_adapters:
-            self.active_adapters.append(adapter_name)
+        active = list(self.active_adapters)
+        if adapter_name not in active:
+            active.append(adapter_name)
+        self.set_adapter(active, inference_mode=False)
+        self._move_adapter_to_device_of_base_layer(adapter_name)
 
-    def reset_glora_parameters(self, adapter_name):
+    def reset_glora_parameters(self, adapter_name: str) -> None:
         nn.init.kaiming_uniform_(self.glora_Au[adapter_name], a=math.sqrt(5))
         nn.init.kaiming_uniform_(self.glora_Bu[adapter_name], a=math.sqrt(5))
         nn.init.kaiming_uniform_(self.glora_Cu[adapter_name], a=math.sqrt(5))
@@ -78,65 +107,25 @@ class GloraLayer(nn.Module):
             out_feature = shape[0]
             in_feature = shape[1]
             try:
-                rank = int(config.split("_")[1])
-            except Exception:
+                rank = int(str(config).split("_")[1])
+            except (ValueError, IndexError):
                 rank = 4
             return nn.Parameter(torch.zeros(out_feature, rank)), nn.Parameter(torch.zeros(rank, in_feature))
         return nn.Parameter(torch.zeros(*shape)), nn.Parameter(torch.zeros(1, 1))
 
-    def set_adapter(self, adapter_names: str | list[str], inference_mode: bool = False) -> None:
-        # inference_mode (gradient freezing) is handled at the model level via _freeze_adapter
-        if isinstance(adapter_names, str):
-            self.active_adapters = [adapter_names]
-        else:
-            self.active_adapters = list(adapter_names)
-
-    def delete_adapter(self, adapter_name):
-        for d in [
-            self.glora_Ad,
-            self.glora_Au,
-            self.glora_Bd,
-            self.glora_Bu,
-            self.glora_Cd,
-            self.glora_Cu,
-            self.glora_D,
-            self.glora_E,
-        ]:
-            if adapter_name in d:
-                del d[adapter_name]
-        if adapter_name in self.r:
-            del self.r[adapter_name]
-        if adapter_name in self.eval_config:
-            del self.eval_config[adapter_name]
-        if adapter_name in self.active_adapters:
-            self.active_adapters.remove(adapter_name)
-        if adapter_name in self.merged_adapters:
-            self.merged_adapters.remove(adapter_name)
-
-    def enable_adapters(self):
-        self._disable_adapters = False
-
-    def disable_adapters(self):
-        self._disable_adapters = True
-
-    @property
-    def merged(self):
-        return len(self.merged_adapters) > 0
-
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None):
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         if adapter_names is None:
             adapter_names = self.active_adapters
         for adapter_name in adapter_names:
             if adapter_name in self.merged_adapters:
                 continue
             path_config = self.eval_config[adapter_name]
-            # Ensure self.weight and self.bias are tensors
-            if not isinstance(self.weight, torch.Tensor):
-                raise TypeError(f"self.weight must be a torch.Tensor, got {type(self.weight)}")
             weight = self.weight
-            if self.bias is not None and not isinstance(self.bias, torch.Tensor):
-                raise TypeError(f"self.bias must be a torch.Tensor or None, got {type(self.bias)}")
+            if not isinstance(weight, torch.Tensor):
+                raise TypeError(f"weight must be a torch.Tensor, got {type(weight)}")
             bias = self.bias
+            if bias is not None and not isinstance(bias, torch.Tensor):
+                raise TypeError(f"bias must be a torch.Tensor or None, got {type(bias)}")
             device, dtype = weight.device, weight.dtype
             A = self.prepare_path(
                 path_config["A"], self.glora_Ad[adapter_name], self.glora_Au[adapter_name], device=device, dtype=dtype
@@ -149,43 +138,42 @@ class GloraLayer(nn.Module):
             )
             D = self.prepare_path(path_config["D"], self.glora_D[adapter_name], device=device, dtype=dtype)
             E = self.prepare_path(path_config["E"], self.glora_E[adapter_name], device=device, dtype=dtype)
-            # Clone before any in-place modification so subsequent uses of w0/b0
-            # always refer to the original (pre-merge) values.
             w0 = weight.data.clone()
             b0 = bias.data.clone() if bias is not None else None
+            base_layer = self.get_base_layer()
             if safe_merge:
                 merged_weight = w0 + w0 * A + B
                 if not torch.isfinite(merged_weight).all():
                     raise ValueError(f"NaNs detected in merged weights for adapter {adapter_name}")
-                self.weight.data = merged_weight
+                base_layer.weight.data = merged_weight
                 if bias is not None:
                     merged_bias = b0 + b0 * D + E + torch.matmul(w0, C).squeeze(-1)
                     if not torch.isfinite(merged_bias).all():
                         raise ValueError(f"NaNs detected in merged bias for adapter {adapter_name}")
-                    self.bias.data = merged_bias
+                    base_layer.bias.data = merged_bias
             else:
-                self.weight.data += (w0 * A) + B
+                base_layer.weight.data += (w0 * A) + B
                 if bias is not None:
-                    self.bias.data += (b0 * D) + E + torch.matmul(w0, C).squeeze(-1)
+                    base_layer.bias.data += (b0 * D) + E + torch.matmul(w0, C).squeeze(-1)
                 elif E.numel() > 0 or C.numel() > 0:
                     new_bias_val = E + torch.matmul(w0, C).squeeze(-1)
                     if not torch.all(new_bias_val == 0):
-                        self.bias = nn.Parameter(new_bias_val)
+                        base_layer.register_parameter("bias", nn.Parameter(new_bias_val.to(base_layer.weight.dtype)))
             self.merged_adapters.append(adapter_name)
 
-    def unmerge(self, adapter_names: Optional[list[str]] = None):
+    def unmerge(self, adapter_names: Optional[list[str]] = None) -> None:
         if adapter_names is None:
             adapter_names = list(self.merged_adapters)
         for adapter_name in adapter_names:
             if adapter_name not in self.merged_adapters:
                 continue
             path_config = self.eval_config[adapter_name]
-            if not isinstance(self.weight, torch.Tensor):
-                raise TypeError(f"self.weight must be a torch.Tensor, got {type(self.weight)}")
             weight = self.weight
-            if self.bias is not None and not isinstance(self.bias, torch.Tensor):
-                raise TypeError(f"self.bias must be a torch.Tensor or None, got {type(self.bias)}")
+            if not isinstance(weight, torch.Tensor):
+                raise TypeError(f"weight must be a torch.Tensor, got {type(weight)}")
             bias = self.bias
+            if bias is not None and not isinstance(bias, torch.Tensor):
+                raise TypeError(f"bias must be a torch.Tensor or None, got {type(bias)}")
             device, dtype = weight.device, weight.dtype
             A = self.prepare_path(
                 path_config["A"], self.glora_Ad[adapter_name], self.glora_Au[adapter_name], device=device, dtype=dtype
@@ -198,23 +186,21 @@ class GloraLayer(nn.Module):
             )
             D = self.prepare_path(path_config["D"], self.glora_D[adapter_name], device=device, dtype=dtype)
             E = self.prepare_path(path_config["E"], self.glora_E[adapter_name], device=device, dtype=dtype)
-            # Clone before any modification so the exact pre-unmerge values
-            # are available when computing the bias inverse below.
             w_merged = weight.data.clone()
             b_merged = bias.data.clone() if bias is not None else None
-            # Exact inverse of W_merged = W₀*(1+A) + B  →  W₀ = (W_merged - B) / (1+A)
             w0 = (w_merged - B) / (1.0 + A)
-            self.weight.data = w0
+            base_layer = self.get_base_layer()
+            base_layer.weight.data = w0
             if bias is not None:
-                # Exact inverse of b_merged = b₀*(1+D) + E + W₀@C  →  b₀ = (b_merged - E - W₀@C) / (1+D)
-                self.bias.data = (b_merged - E - torch.matmul(w0, C).squeeze(-1)) / (1.0 + D)
+                base_layer.bias.data = (b_merged - E - torch.matmul(w0, C).squeeze(-1)) / (1.0 + D)
             self.merged_adapters.remove(adapter_name)
 
-    def forward(self, x: torch.Tensor, adapter_names: Optional[list[str]] = None) -> torch.Tensor:
-        if self._disable_adapters or not self.active_adapters:
-            return F.linear(x, self.weight, self.bias)
+    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        adapter_names = kwargs.pop("adapter_names", None)
+        if self.disable_adapters or not self.active_adapters:
+            return self.base_layer(x, *args, **kwargs)
         if adapter_names is not None:
-            result = F.linear(x, self.weight, self.bias)
+            result = self.base_layer(x, *args, **kwargs)
             unique_adapters = set(adapter_names)
             sub_batch_indices_list = [
                 [i for i, a in enumerate(adapter_names) if a == adapter] for adapter in unique_adapters
@@ -258,7 +244,7 @@ class GloraLayer(nn.Module):
                         bias_eff = new_bias_val
                 result[sub_batch_indices_list[i]] = F.linear(sub_batch, weight_eff, bias=bias_eff)
             return result
-        result = F.linear(x, self.weight, self.bias)
+        result = self.base_layer(x, *args, **kwargs)
         for active_adapter in self.active_adapters:
             if active_adapter not in self.glora_Ad:
                 continue
@@ -328,14 +314,40 @@ class GloraLayer(nn.Module):
         return X.to(device=device, dtype=dtype)
 
 
-# Refactored GloraLinear for PEFT compatibility
-class GloraLinear(GloraLayer, nn.Linear):
-    def __init__(self, in_features, out_features, bias=True, **kwargs):
-        nn.Linear.__init__(self, in_features, out_features, bias=bias)
-        GloraLayer.__init__(self, in_features=in_features, out_features=out_features)
-        self.weight.requires_grad = False
-        if self.bias is not None:
-            self.bias.requires_grad = False
+class GloraLinear(nn.Module, GloraLayer):
+    """GLORA adapter wrapping a dense [`~torch.nn.Linear`] `base_layer`."""
+
+    def __init__(self, base_layer: nn.Module, **kwargs) -> None:
+        nn.Module.__init__(self)
+        GloraLayer.__init__(self, base_layer, **kwargs)
         self._disable_adapters = False
-        self.active_adapters = []
-        self.merged_adapters = []
+
+    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        # Explicit dispatch: nn.Module precedes GloraLayer in the MRO, so we must not rely on inheriting forward.
+        return GloraLayer.forward(self, x, *args, **kwargs)
+
+    def _load_from_state_dict(
+        self,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
+        # Checkpoints from before base_layer composition used top-level weight/bias on the wrapper.
+        legacy_weight = prefix + "weight"
+        new_weight = prefix + "base_layer.weight"
+        if legacy_weight in state_dict and new_weight not in state_dict:
+            state_dict[new_weight] = state_dict.pop(legacy_weight)
+        legacy_bias = prefix + "bias"
+        new_bias = prefix + "base_layer.bias"
+        if legacy_bias in state_dict and new_bias not in state_dict:
+            state_dict[new_bias] = state_dict.pop(legacy_bias)
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+        )
+
+    def __repr__(self) -> str:
+        return "glora." + super().__repr__()
