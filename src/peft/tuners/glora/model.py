@@ -46,8 +46,9 @@ class GloraModel(BaseTuner):
     Creates Generalized Low Rank Adapter (Glora) model from a pretrained transformers model.
     """
 
-    prefix = "glora_"
+    prefix: str = "glora_"
     tuner_layer_cls = GloraLayer
+    target_module_mapping = TRANSFORMERS_MODELS_TO_GLORA_TARGET_MODULES_MAPPING
 
     def __init__(self, model: nn.Module, config: GloraConfig, adapter_name: str = "default"):
         super().__init__(model, config, adapter_name)
