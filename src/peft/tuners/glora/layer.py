@@ -19,7 +19,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 
 class GloraLayer(BaseTunerLayer):
@@ -114,10 +114,11 @@ class GloraLayer(BaseTunerLayer):
         return nn.Parameter(torch.zeros(*shape)), nn.Parameter(torch.zeros(1, 1))
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
-        if adapter_names is None:
-            adapter_names = self.active_adapters
+        adapter_names = check_adapters_to_merge(self, adapter_names)
+        if not adapter_names:
+            return
         for adapter_name in adapter_names:
-            if adapter_name in self.merged_adapters:
+            if adapter_name not in self.eval_config:
                 continue
             path_config = self.eval_config[adapter_name]
             weight = self.weight
@@ -167,6 +168,8 @@ class GloraLayer(BaseTunerLayer):
         for adapter_name in adapter_names:
             if adapter_name not in self.merged_adapters:
                 continue
+            if adapter_name not in self.eval_config:
+                continue
             path_config = self.eval_config[adapter_name]
             weight = self.weight
             if not isinstance(weight, torch.Tensor):
@@ -197,10 +200,15 @@ class GloraLayer(BaseTunerLayer):
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         adapter_names = kwargs.pop("adapter_names", None)
-        if self.disable_adapters or not self.active_adapters:
+        if self.disable_adapters:
+            if self.merged:
+                self.unmerge()
+            return self.base_layer(x, *args, **kwargs)
+        if not self.active_adapters:
             return self.base_layer(x, *args, **kwargs)
         if adapter_names is not None:
             result = self.base_layer(x, *args, **kwargs)
+            base_result = result.clone()
             unique_adapters = set(adapter_names)
             sub_batch_indices_list = [
                 [i for i, a in enumerate(adapter_names) if a == adapter] for adapter in unique_adapters
@@ -233,7 +241,8 @@ class GloraLayer(BaseTunerLayer):
                 )
                 D = self.prepare_path(path_config["D"], self.glora_D[active_adapter], device=device, dtype=dtype)
                 E = self.prepare_path(path_config["E"], self.glora_E[active_adapter], device=device, dtype=dtype)
-                sub_batch = x[sub_batch_indices_list[i]]
+                idx = sub_batch_indices_list[i]
+                sub_batch = x[idx]
                 weight_eff = self.weight + self.weight * A + B
                 bias_eff = self.bias
                 if bias_eff is not None:
@@ -242,9 +251,14 @@ class GloraLayer(BaseTunerLayer):
                     new_bias_val = E + torch.matmul(self.weight, C).squeeze(-1)
                     if not torch.all(new_bias_val == 0):
                         bias_eff = new_bias_val
-                result[sub_batch_indices_list[i]] = F.linear(sub_batch, weight_eff, bias=bias_eff)
+                adapted = F.linear(sub_batch, weight_eff, bias=bias_eff)
+                result[idx] = result[idx] + (adapted - base_result[idx])
             return result
-        result = self.base_layer(x, *args, **kwargs)
+        if self.merged:
+            return self.base_layer(x, *args, **kwargs)
+        base_result = self.base_layer(x, *args, **kwargs)
+        torch_result_dtype = base_result.dtype
+        result = base_result
         for active_adapter in self.active_adapters:
             if active_adapter not in self.glora_Ad:
                 continue
@@ -281,8 +295,9 @@ class GloraLayer(BaseTunerLayer):
                 new_bias_val = E + torch.matmul(self.weight, C).squeeze(-1)
                 if not torch.all(new_bias_val == 0):
                     bias_eff = new_bias_val
-            result = F.linear(x, weight_eff, bias=bias_eff)
-        return result
+            adapted = F.linear(x, weight_eff, bias=bias_eff)
+            result = result + (adapted - base_result)
+        return result.to(torch_result_dtype)
 
     def prepare_path(
         self, config: str | object, Xd: nn.Parameter, Xu: Optional[nn.Parameter] = None, device=None, dtype=None

@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils.peft_types import PeftType
+from peft.utils import PeftType
 
 
 @dataclass
@@ -62,6 +62,20 @@ class GloraConfig(PeftConfig):
         metadata={
             "help": "List of module names or regex expression of the module names to replace with Lora."
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
+        },
+    )
+    bias: str = field(
+        default="none",
+        metadata={
+            "help": "Bias handling: 'none', 'all', or 'glora_only' (train bias on GLoRA layers when adapters are active)."
+        },
+    )
+    modules_to_save: Optional[list[str]] = field(
+        default=None,
+        metadata={
+            "help": (
+                "List of modules apart from GLoRA layers to be set as trainable and saved in the final checkpoint."
+            )
         },
     )
 
@@ -136,7 +150,11 @@ class GloraConfig(PeftConfig):
         return config_value
 
     def __post_init__(self):
+        super().__post_init__()
         self.peft_type = PeftType.GLORA
+        self.target_modules = (
+            set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
+        )
 
         # Validate and process each configuration
         self.config_A_B = self._validate_and_process_config(self.config_A_B, self._VALID_A_B_CONFIGS, "config_A_B")  # type: ignore[assignment]
