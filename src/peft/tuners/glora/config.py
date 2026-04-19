@@ -106,9 +106,7 @@ class GloraConfig(PeftConfig):
         },
     )
 
-    def _validate_and_process_config(
-        self, config_value: str, valid_configs: set, config_name: str, allow_lora: bool = True
-    ) -> str:
+    def _validate_and_process_config(self, config_value: str, valid_configs: set, config_name: str) -> str:
         """
         Validate and process a configuration value.
 
@@ -116,7 +114,6 @@ class GloraConfig(PeftConfig):
             config_value: The configuration value to validate
             valid_configs: Set of valid configuration values
             config_name: Name of the configuration (for error messages)
-            allow_lora: Whether LoRA configuration is allowed
 
         Returns:
             Processed configuration value
@@ -126,12 +123,10 @@ class GloraConfig(PeftConfig):
         """
         config_value = str(config_value).lower()
 
-        if config_value and "lora" in config_value:
-            if not allow_lora:
-                raise ValueError(
-                    f"Invalid {config_name} value: {config_value}. lora is not supported for {config_name}."
-                )
-            return f"lora_{self.r}"
+        if "lora" in config_value:
+            if "lora" in valid_configs:
+                return f"lora_{self.r}"
+            raise ValueError(f"Invalid {config_name} value: {config_value}. lora is not supported for {config_name}.")
 
         if config_value not in valid_configs:
             raise ValueError(
@@ -149,5 +144,5 @@ class GloraConfig(PeftConfig):
         self.config_C = self._validate_and_process_config(self.config_C, self._VALID_C_CONFIGS, "config_C")  # type: ignore[assignment]
 
         self.config_D_E = self._validate_and_process_config(  # type: ignore[assignment]
-            self.config_D_E, self._VALID_D_E_CONFIGS, "config_D_E", allow_lora=False
+            self.config_D_E, self._VALID_D_E_CONFIGS, "config_D_E"
         )
