@@ -156,10 +156,11 @@ class LoraLayer(BaseTunerLayer):
         r: int,
         lora_alpha: int,
         config: LoraConfig,
+        lora_dropout: Optional[float] = None,
         **kwargs,
     ) -> None:
         # collect the kwargs
-        lora_dropout = config.lora_dropout
+        lora_dropout = config.lora_dropout if lora_dropout is None else lora_dropout
         init_lora_weights = config.init_lora_weights
         use_rslora = config.use_rslora
         lora_bias = config.lora_bias
