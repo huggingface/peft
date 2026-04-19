@@ -204,8 +204,10 @@ class LoraModel(BaseTuner):
         # Regexp matching - Find key which matches current target_name in patterns provided
         r_key = get_pattern_key(lora_config.rank_pattern.keys(), current_key)
         alpha_key = get_pattern_key(lora_config.alpha_pattern.keys(), current_key)
+        dropout_key = get_pattern_key(lora_config.dropout_pattern.keys(), current_key)
         r = lora_config.rank_pattern.get(r_key, lora_config.r)
         alpha = lora_config.alpha_pattern.get(alpha_key, lora_config.lora_alpha)
+        dropout = lora_config.dropout_pattern.get(dropout_key, lora_config.lora_dropout)
 
         # Checks if the target is marked as a tied layer
         # If true, we add the reference to lora adapters of embedding layer in `tied_adapter`
@@ -253,6 +255,7 @@ class LoraModel(BaseTuner):
                 adapter_name,
                 r,
                 lora_alpha=alpha,
+                lora_dropout=dropout,
                 target_name=current_key,
                 config=lora_config,
             )
