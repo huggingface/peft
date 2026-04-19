@@ -79,3 +79,4 @@ model.merge_and_unload()
 ## See Also
 - [Adapter conceptual guide](../conceptual_guides/adapter.md)
 - [LoRA reference](./lora.md)
+- [Paper: https://huggingface.co/papers/2306.07967](https://huggingface.co/papers/2306.07967)
