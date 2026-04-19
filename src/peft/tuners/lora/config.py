@@ -393,6 +393,11 @@ class LoraConfig(PeftConfig):
         alpha_pattern (`dict`):
             The mapping from layer names or regexp expression to alphas which are different from the default alpha
             specified by `lora_alpha`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
+        dropout_pattern (`dict`):
+            The mapping from layer names or regexp expression to dropout probabilities which are different from
+            the default dropout specified by `lora_dropout`. For example,
+            `{'^model.decoder.layers.0.encoder_attn.k_proj': 0.05}`. Useful for applying stronger regularization
+            to specific layers while keeping others at a lower (or zero) dropout rate.
         megatron_config (`Optional[dict]`):
             The TransformerConfig arguments for Megatron. It is used to create LoRA's parallel linear layer. You can
             get it like this, `core_transformer_config_from_args(get_args())`, these two functions being from Megatron.
@@ -566,6 +571,16 @@ class LoraConfig(PeftConfig):
             "help": (
                 "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `lora_alpha`. "
                 "For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`."
+            )
+        },
+    )
+    dropout_pattern: Optional[dict] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "The mapping from layer names or regexp expression to dropout probabilities which are different from "
+                "the default dropout specified by `lora_dropout`. "
+                "For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 0.05}`."
             )
         },
     )
