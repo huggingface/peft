@@ -215,6 +215,7 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
     logging.info(
         f"Weight: ({out_feature}, {in_feature}) | Rank: {reduced_rank} | Num Iter: {num_iter} | Num Bits: {num_bits}"
     )
+    quantizer: Optional[NFQuantizer] = None
     if not is_bnb_4bit_available() and num_bits == 4:
         # TODO for PEFT 0.20 remove NFQuantizer invocation and throw an exception
         quantizer = NFQuantizer(num_bits=num_bits, device=device, method="normal", block_size=64)
@@ -228,6 +229,9 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
 
     weight = weight.to(device=compute_device, dtype=torch.float32)
     res = weight.clone()
+    dequantized_weight: torch.Tensor = weight
+    L: torch.Tensor = weight
+    R: torch.Tensor = weight
     for i in range(num_iter):
         clear_device_cache()
         # Quantization
@@ -237,6 +241,7 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
             ).to(compute_device)
             dequantized_weight = bnb.functional.dequantize_4bit(qweight.data, qweight.quant_state)
         elif num_bits == 4:
+            assert quantizer is not None
             quantized_weight, max_abs, shape = quantizer.quantize_block(res)
             dequantized_weight = quantizer.dequantize_block(quantized_weight, max_abs, shape)
         elif num_bits == 8:
@@ -325,6 +330,8 @@ class _SafetensorLoader:
                     f"Could not find file for {model_path}, ensure that there is a (sharded) safetensors file of the model."
                 ) from exc
 
+            assert resolved_archive_file is not None
+            assert sharded_metadata is not None
             self.is_sharded = True
             # maps from 'model-X-of-Y.safetensors' to full file path
             file_map = {k.rpartition(os.path.sep)[-1]: k for k in resolved_archive_file}
