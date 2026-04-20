@@ -326,7 +326,6 @@ class GloraLayer(BaseTunerLayer):
         return result.to(torch_result_dtype)
 
 
-
 class GloraLinear(nn.Module, GloraLayer):
     """GLORA adapter wrapping a dense [`~torch.nn.Linear`] `base_layer`."""
 
@@ -338,7 +337,6 @@ class GloraLinear(nn.Module, GloraLayer):
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         # Explicit dispatch: nn.Module precedes GloraLayer in the MRO, so we must not rely on inheriting forward.
         return GloraLayer.forward(self, x, *args, **kwargs)
-
 
     def __repr__(self) -> str:
         return "glora." + super().__repr__()

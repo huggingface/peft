@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import ClassVar, Literal, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -50,9 +50,9 @@ class GloraConfig(PeftConfig):
             Valid values: `vector`, `constant`, `none`.
     """
 
-    _VALID_A_B_CONFIGS = {"lora", "vector", "constant", "none"}
-    _VALID_C_CONFIGS = {"lora", "vector", "none"}
-    _VALID_D_E_CONFIGS = {"constant", "none", "vector"}
+    _VALID_A_B_CONFIGS: ClassVar[set[str]] = {"lora", "vector", "constant", "none"}
+    _VALID_C_CONFIGS: ClassVar[set[str]] = {"lora", "vector", "none"}
+    _VALID_D_E_CONFIGS: ClassVar[set[str]] = {"constant", "none", "vector"}
 
     r: int = field(
         default=8, metadata={"help": "Default rank of the LoRA matrices if the config contains lora parametrization."}
