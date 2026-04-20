@@ -190,10 +190,7 @@ class TinyLoraLayer(BaseTunerLayer):
         - We store: tinylora_B = U[:, :r] @ diag(sqrt(S[:r])) (shape: out_features x r)
 
         Distributing S equally avoids imbalanced norms between A and B. This allows: delta_W = tinylora_B @ R @
-        tinylora_A
-
-        Returns:
-            int: The actual rank used (may be less than r if matrix dimensions are smaller)
+        tinylora_A.
         """
         base_layer = self.get_base_layer()
         weight = base_layer.weight.data
@@ -496,9 +493,6 @@ class Embedding(nn.Module, TinyLoraLayer):
         - W = U @ S @ V^T (full SVD)
         - tinylora_A = diag(sqrt(S[:r])) @ V[:r, :] (shape: r x embedding_dim)
         - tinylora_B = U[:, :r] @ diag(sqrt(S[:r])) (shape: num_embeddings x r)
-
-        Returns:
-            int: The actual rank used (may be less than r if dimensions are smaller)
         """
         base_layer = self.get_base_layer()
         weight = base_layer.weight.data  # (num_embeddings, embedding_dim)

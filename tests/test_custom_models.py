@@ -1447,14 +1447,14 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
     # for TinyLoRA, use uniform init, which allows the different adapters to be sufficiently different that they don't
     # produce identical results within allowed tolerance
     (
-        "TinyLora Same",
+        "TinyLoRA Same",
         "tinylora",
         TinyLoraConfig,
         {"target_modules": ["lin0"], "init_weights": "uniform"},
         {"target_modules": ["lin0"], "init_weights": "uniform"},
     ),
     (
-        "TinyLora Different",
+        "TinyLoRA Different",
         "tinylora",
         TinyLoraConfig,
         {"target_modules": ["lin0"], "init_weights": "uniform"},
