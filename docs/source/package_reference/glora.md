@@ -15,22 +15,38 @@ rendered properly in your Markdown viewer.
 
 # Glora
 
-Generalized Low-Rank Adaptation (**Glora**) is a highly flexible PEFT method that generalizes LoRA and related approaches. Glora allows you to decompose weight updates into multiple configurable low-rank, vector, or constant paths, providing a superset of LoRA's expressivity. Each path (A, B, C, D, E) can be independently configured, enabling a wide range of adaptation strategies.
+Generalized Low-Rank Adaptation (**Glora**) is a PEFT method that generalizes LoRA and related approaches. Glora decomposes updates into configurable paths (A, B, C, D, E), where each path can use low-rank, vector, constant, or disabled parameterization depending on the path.
 
-Glora is especially useful for research and advanced applications where you want to experiment with different low-rank or structured update patterns, or combine multiple adaptation mechanisms in a single layer.
+Glora is especially useful for research and advanced applications where you want to experiment with structured update patterns and combine multiple adaptation mechanisms in a single layer.
+
+At a high level, Glora modifies a frozen linear layer with:
+
+$$
+W_{\mathrm{eff}} = W_0 + W_0 \odot A + B
+$$
+
+$$
+b_{\mathrm{eff}} = b_0 + b_0 \odot D + E + W_0 C
+$$
+
+where each path is independently parameterized.
 
 ## GloraConfig
 
 [[autodoc]] tuners.glora.config.GloraConfig
 
 ### Key Configuration Options
-- `r`: The rank of the low-rank matrices (default: 4).
+- `r`: Rank used when a path is configured as `"lora"` (default: `8`).
 - `target_modules`: List or regex of module names to adapt (e.g., `["q_proj", "v_proj"]`).
 - `config_A_B`: Path type for A and B ("lora", "vector", "constant", "none").
 - `config_C`: Path type for C ("lora", "vector", "none").
 - `config_D_E`: Path type for D and E ("constant", "vector", "none").
+- `bias`: Bias handling (`"none"`, `"all"`, or `"glora_only"`).
 
-Each path can be set independently, allowing for highly customized adaptation.
+Notes:
+- `"lora"` values are internally expanded to `"lora_<r>"`.
+- `config_D_E` does not support `"lora"`.
+- `target_modules` can be omitted for supported model types (PEFT default mappings are used).
 
 ## GloraModel
 
@@ -39,6 +55,7 @@ Each path can be set independently, allowing for highly customized adaptation.
 - Wraps a base model and injects Glora adapters into the specified modules.
 - Supports multiple adapters, adapter switching, merging/unmerging, and mixed-batch inference.
 - Use `set_adapter`, `merge_and_unload`, and related methods for adapter management.
+- Supports `set_adapter_eval_config` for per-adapter evaluation path selection.
 
 ## GloraLayer and GloraLinear
 
@@ -47,6 +64,7 @@ Each path can be set independently, allowing for highly customized adaptation.
 
 - `GloraLayer` is the core logic for generalized low-rank adaptation, supporting multiple adapters and flexible path configs.
 - `GloraLinear` is a drop-in replacement for `nn.Linear` with Glora support.
+- Glora currently supports plain `torch.nn.Linear` base layers.
 
 ## Example Usage
 
@@ -75,6 +93,7 @@ model.merge_and_unload()
 - Glora is a superset of LoRA: setting all paths to "lora" recovers standard LoRA.
 - You can use different path types for A/B/C/D/E to experiment with new adaptation strategies.
 - Glora supports all standard PEFT adapter management features (add, delete, switch, merge, etc).
+- For unsupported module types, set `target_modules` to linear projections only.
 
 ## See Also
 - [Adapter conceptual guide](../conceptual_guides/adapter.md)

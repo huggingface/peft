@@ -1421,10 +1421,10 @@ def _glora_init_down_factors_for_multiadapter_testing(peft_model, adapter_names=
             for adapter_name in names:
                 if adapter_name not in module.eval_config:
                     continue
-                path = module.eval_config[adapter_name]
-                for key, xd_dict in (("A", module.glora_Ad), ("B", module.glora_Bd), ("C", module.glora_Cd)):
-                    if "lora" in str(path[key]).lower():
-                        nn.init.kaiming_uniform_(xd_dict[adapter_name], a=math.sqrt(5))
+                for key in ("A", "B", "C"):
+                    path_module = getattr(module, f"glora_{key}")[adapter_name]
+                    if hasattr(path_module, "Xd"):
+                        nn.init.kaiming_uniform_(path_module.Xd, a=math.sqrt(5))
 
 
 class MLP(nn.Module):
