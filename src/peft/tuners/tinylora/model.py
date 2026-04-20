@@ -174,7 +174,6 @@ class TinyLoraModel(BaseTuner):
                 v_key,
                 tinylora_config.r,
                 tinylora_config,
-                layer_idx=layer_idx,
             )
         else:
             new_module = self._create_new_module(
