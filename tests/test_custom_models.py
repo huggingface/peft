@@ -1444,6 +1444,22 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "r": 2, "depth": 1, "act_fn": "relu", "init_weights": False},
         {"target_modules": ["lin1"], "r": 2, "depth": 1, "act_fn": "relu", "init_weights": False},
     ),
+    # for TinyLoRA, choosing a very high r; this is just so that when the 2nd adapter is created, it is sufficiently
+    # different from the first to detect the difference above tolerance level
+    (
+        "TinyLora Same",
+        "tinylora",
+        TinyLoraConfig,
+        {"target_modules": ["lin0"], "r": 1024, "u": 16, "init_weights": False},
+        {"target_modules": ["lin0"], "r": 1024, "u": 16, "init_weights": False},
+    ),
+    (
+        "TinyLora Different",
+        "tinylora",
+        TinyLoraConfig,
+        {"target_modules": ["lin0"], "r": 1024, "u": 16, "init_weights": False},
+        {"target_modules": ["lin1"], "r": 1024, "u": 16, "init_weights": False},
+    ),
 ]
 
 
