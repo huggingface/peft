@@ -27,7 +27,7 @@ from transformers import (
 )
 
 from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model
-from peft.import_utils import is_transformers_ge_v5_1_0, is_transformers_gt_v5_5_0
+from peft.import_utils import is_transformers_ge_v5_1_0, is_transformers_ge_v5_6_0
 from peft.utils.other import ModulesToSaveWrapper, _get_module_names_tied_with_embedding, _get_no_split_modules
 
 from .testing_utils import hub_online_once
@@ -547,7 +547,7 @@ class TestGetNoSplitModules:
             assert model._no_split_modules == []
             no_split_modules = _get_no_split_modules(model)
             assert no_split_modules == {"CLIPEncoderLayer", "LlamaDecoderLayer"}
-        elif not is_transformers_gt_v5_5_0:
+        elif not is_transformers_ge_v5_6_0:
             # TODO remove this once transformers <5.6.0 is not supported anymore
             assert model._no_split_modules == {"CLIPEncoderLayer", "LlamaDecoderLayer"}
             no_split_modules = _get_no_split_modules(model)
