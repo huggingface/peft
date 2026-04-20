@@ -480,16 +480,15 @@ class Embedding(nn.Module, TinyLoraLayer):
         self._tinylora_v_ref[adapter_name] = tinylora_v[adapter_name][v_key]
 
         # Compute truncated SVD of embedding weights
-        actual_r = self._init_svd_embedding(adapter_name, r)
-        self.r[adapter_name] = actual_r
+        self._init_svd_embedding(adapter_name, r)
 
         # Initialize random projection tensors P using the actual rank
-        self._init_projection(adapter_name, u, actual_r, projection_seed)
+        self._init_projection(adapter_name, u, projection_seed)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
-    def _init_svd_embedding(self, adapter_name: str, r: int) -> int:
+    def _init_svd_embedding(self, adapter_name: str, r: int) -> None:
         """
         Compute truncated SVD of embedding weights and store as frozen buffers.
 
@@ -523,8 +522,7 @@ class Embedding(nn.Module, TinyLoraLayer):
         # Distribute singular values equally to both A and B via sqrt(S_r)
         self.tinylora_A[adapter_name] = (sqrt_S_r.unsqueeze(1) * V_r).contiguous()
         self.tinylora_B[adapter_name] = (U_r * sqrt_S_r.unsqueeze(0)).contiguous()
-
-        return actual_r
+        self.r[adapter_name] = actual_r
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """Merge the active adapter weights into the base weights."""

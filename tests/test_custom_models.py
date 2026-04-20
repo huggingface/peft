@@ -651,6 +651,12 @@ TEST_CASES = [
         TinyLoraConfig,
         {"target_modules": ["conv1d"], "r": 2, "u": 16, "init_v_bound": 0.5},
     ),
+    (
+        "Embedding + transformers Conv1D 2 TinyLoRA",
+        "EmbConv1D",
+        TinyLoraConfig,
+        {"target_modules": ["emb"], "r": 2, "u": 16},
+    ),
     #############
     #########
     # PVERA #
