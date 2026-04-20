@@ -181,16 +181,15 @@ class TinyLoraLayer(BaseTunerLayer):
 
         # Compute truncated SVD of base weights (following LoRA-XS convention)
         # actual_r may be less than r if matrix dimensions are smaller
-        actual_r = self._init_svd(adapter_name, r, fan_in_fan_out)
-        self.r[adapter_name] = actual_r
+        self._init_svd(adapter_name, r, fan_in_fan_out)
 
         # Initialize random projection tensors P using the actual rank
-        self._init_projection(adapter_name, u, actual_r, projection_seed)
+        self._init_projection(adapter_name, u, projection_seed)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
-    def _init_svd(self, adapter_name: str, r: int, fan_in_fan_out: bool) -> int:
+    def _init_svd(self, adapter_name: str, r: int, fan_in_fan_out: bool) -> None:
         """
         Compute truncated SVD of base weights and store as frozen buffers.
 
@@ -234,20 +233,19 @@ class TinyLoraLayer(BaseTunerLayer):
         # Use .contiguous() to ensure tensors can be saved with safetensors
         self.tinylora_A[adapter_name] = (sqrt_S_r.unsqueeze(1) * V_r).contiguous()
         self.tinylora_B[adapter_name] = (U_r * sqrt_S_r.unsqueeze(0)).contiguous()
+        self.r[adapter_name] = actual_r
 
-        return actual_r
-
-    def _init_projection(self, adapter_name: str, u: int, r: int, base_seed: int):
+    def _init_projection(self, adapter_name: str, u: int, base_seed: int):
         """Initialize fixed random projection tensors P ∈ R^{u×r×r}."""
         seed = self._get_layer_seed(adapter_name, base_seed)
         gen = torch.Generator().manual_seed(seed)
+        r = self.r[adapter_name]
 
         # P has shape (u, r, r)
         # Note: The paper describes P as "fixed random matrices" but does not specify the distribution.
         # We sample from N(0, 1/r) which is standard for random projections
         # (see Johnson-Lindenstrauss lemma: https://en.wikipedia.org/wiki/Johnson-Lindenstrauss_lemma).
         P = torch.normal(mean=0.0, std=1.0 / (r**0.5), size=(u, r, r), generator=gen)
-
         self.tinylora_P[adapter_name] = P
 
     def _compute_R(self, adapter_name: str) -> torch.Tensor:
