@@ -168,17 +168,18 @@ class TinyLoraModel(BaseTuner):
             self.tinylora_v[adapter_name][v_key] = v
 
         if isinstance(target, TinyLoraLayer):
-            target.set_layer_idx(layer_idx)
             target.update_layer(
                 adapter_name,
                 self.tinylora_v,
                 v_key,
                 tinylora_config.r,
                 tinylora_config,
+                layer_idx=layer_idx,
             )
         else:
-            new_module = self._create_new_module(tinylora_config, self.tinylora_v, v_key, adapter_name, target)
-            new_module.set_layer_idx(layer_idx)
+            new_module = self._create_new_module(
+                tinylora_config, self.tinylora_v, v_key, adapter_name, target, layer_idx=layer_idx
+            )
 
             if adapter_name not in self.active_adapter:
                 # adding an additional adapter: it is not automatically trainable

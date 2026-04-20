@@ -46,11 +46,12 @@ class TinyLoraLayer(BaseTunerLayer):
     adapter_layer_names = ("tinylora_v",)
     other_param_names = ("tinylora_A", "tinylora_B", "tinylora_P")
 
-    def __init__(self, base_layer: nn.Module, **kwargs):
+    def __init__(self, base_layer: nn.Module, layer_idx: int, **kwargs):
         self.base_layer = base_layer
         self.r = {}
         self.u = {}
         self.tinylora_dropout = nn.ModuleDict({})
+        self._layer_idx = layer_idx  # used for deterministic seeding of projection matrices
 
         # Reference to the model-level ModuleDict (set during update_layer).
         # PyTorch won't double-register the same ModuleDict object across layers.
@@ -72,9 +73,6 @@ class TinyLoraLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
-
-        # Track layer index for seeding
-        self._layer_idx: Optional[int] = None
 
         self.in_features, self.out_features = _get_in_out_features(self.get_base_layer())
         self.kwargs = kwargs
@@ -132,16 +130,9 @@ class TinyLoraLayer(BaseTunerLayer):
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         return True
 
-    def set_layer_idx(self, idx: int):
-        """Set the layer index, used for deterministic seeding of projection matrices."""
-        self._layer_idx = idx
-
     def _get_layer_seed(self, adapter_name: str, base_seed: int) -> int:
         """Get a deterministic seed for this layer's projection matrices."""
-        if self._layer_idx is not None:
-            return base_seed + self._layer_idx
-        # Fallback: use hash of the adapter name
-        return base_seed + hash(adapter_name) % 10000
+        return base_seed + self._layer_idx
 
     def update_layer(
         self,
