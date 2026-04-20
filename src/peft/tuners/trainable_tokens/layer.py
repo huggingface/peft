@@ -143,7 +143,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             if check_deepspeed_zero3_enabled():
                 values = self._collect_token_weights(weight, self.token_indices[adapter_name], embed_dim)
             else:
-                values = self.weight[self.token_indices[adapter_name]]
+                values = weight[self.token_indices[adapter_name]]
         else:
             # random init with matching dtype/device
             values = torch.randn(
