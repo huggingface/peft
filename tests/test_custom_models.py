@@ -1444,21 +1444,21 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "r": 2, "depth": 1, "act_fn": "relu", "init_weights": False},
         {"target_modules": ["lin1"], "r": 2, "depth": 1, "act_fn": "relu", "init_weights": False},
     ),
-    # for TinyLoRA, choosing a very high r; this is just so that when the 2nd adapter is created, it is sufficiently
-    # different from the first to detect the difference above tolerance level
+    # for TinyLoRA, use uniform init, which allows the different adapters to be sufficiently different that they don't
+    # produce identical results within allowed tolerance
     (
         "TinyLora Same",
         "tinylora",
         TinyLoraConfig,
-        {"target_modules": ["lin0"], "r": 1024, "u": 16, "init_weights": False},
-        {"target_modules": ["lin0"], "r": 1024, "u": 16, "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": "uniform"},
+        {"target_modules": ["lin0"], "init_weights": "uniform"},
     ),
     (
         "TinyLora Different",
         "tinylora",
         TinyLoraConfig,
-        {"target_modules": ["lin0"], "r": 1024, "u": 16, "init_weights": False},
-        {"target_modules": ["lin1"], "r": 1024, "u": 16, "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": "uniform"},
+        {"target_modules": ["lin1"], "init_weights": "uniform"},
     ),
 ]
 
