@@ -247,6 +247,7 @@ if is_bnb_available():
                 result = self.base_layer(x, *args, **kwargs)
             else:
                 result = self.base_layer(x, *args, **kwargs)
+                result = result.to(x.device)  # normalize device for CPU-offloaded layers
                 for active_adapter in self.active_adapters:
                     if active_adapter not in self.lora_A.keys():
                         continue
@@ -521,6 +522,7 @@ if is_bnb_4bit_available():
                 result = self.base_layer(x, *args, **kwargs)
             else:
                 result = self.base_layer(x, *args, **kwargs)
+                result = result.to(x.device)  # normalize device for CPU-offloaded layers
                 # As per Tim Dettmers, for 4bit, we need to defensively clone here.
                 # The reason is that in some cases, an error can occur that backprop
                 # does not work on a manipulated view. This issue may be solved with
