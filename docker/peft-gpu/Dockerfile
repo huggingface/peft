@@ -57,7 +57,7 @@ RUN \
     conda run -n peft pip install ninja && conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
 
 RUN \
-    conda run -n peft pip install --no-build-isolation "transformer_engine[pytorch]"
+    NVTE_BUILD_USE_NVIDIA_WHEELS=1 conda run -n peft pip install --no-build-isolation "transformer_engine[pytorch]"
 
 # Activate the conda env and install transformers + accelerate from source
 RUN conda run -n peft pip install -U --no-cache-dir \
@@ -65,7 +65,7 @@ RUN conda run -n peft pip install -U --no-cache-dir \
         "soundfile>=0.12.1" \
         scipy \
         torchao \
-        fbgemm-gpu-genai>=1.2.0 \
+        "fbgemm-gpu-genai>=1.2.0" \
         git+https://github.com/huggingface/transformers \
         git+https://github.com/huggingface/accelerate \
         peft[test]@git+https://github.com/huggingface/peft \
