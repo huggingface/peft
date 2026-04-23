@@ -56,8 +56,11 @@ RUN \
     # Ninja should speed up build time.
     conda run -n peft pip install ninja && conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
 
-RUN \
-    NVTE_BUILD_USE_NVIDIA_WHEELS=1 conda run -n peft pip install --no-build-isolation "transformer_engine[pytorch]"
+RUN NCCL_DIR=$(ls -d /opt/conda/envs/peft/lib/python*/site-packages/nvidia/nccl) && \
+    NVTE_BUILD_USE_NVIDIA_WHEELS=1 \
+    CPATH="${NCCL_DIR}/include:${CPATH}" \
+    LIBRARY_PATH="${NCCL_DIR}/lib:${LIBRARY_PATH}" \
+    conda run -n peft pip install --no-build-isolation "transformer_engine[pytorch]"
 
 # Activate the conda env and install transformers + accelerate from source
 RUN conda run -n peft pip install -U --no-cache-dir \
