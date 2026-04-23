@@ -26,7 +26,7 @@ RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
 
 # Stage 2
-FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04 AS build-image
+FROM nvidia/cuda:13.2.1-cudnn-devel-ubuntu24.04 AS build-image
 COPY --from=compile-image /opt/conda /opt/conda
 ENV PATH=/opt/conda/bin:$PATH
 
@@ -53,7 +53,8 @@ RUN CUDA_ARCH_LIST=8.9 conda run -n peft pip install gptqmodel
 RUN \
     # Add eetq for quantization testing; needs to run without build isolation since the setup
     # script directly imports torch from the environment which would fail with isolation.
-    conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
+    # Ninja should speed up build time.
+    conda run -n peft pip install ninja && conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
 
 RUN \
     conda run -n peft pip install --no-build-isolation "transformer_engine[pytorch]"
