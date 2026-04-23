@@ -35,7 +35,8 @@ class LoKrConfig(LycorisConfig):
         module_dropout (`float`):
             The dropout probability for disabling LoKr modules during training.
         use_effective_conv2d (`bool`):
-            Use parameter effective decomposition for Conv2d with ksize > 1 ("Proposition 3" from FedPara paper).
+            Use parameter effective decomposition for Conv2d (and Conv1d) with ksize > 1 ("Proposition 3" from FedPara
+            paper).
         decompose_both (`bool`):
             Perform rank decomposition of left kronecker product matrix.
         decompose_factor (`int`):
@@ -66,10 +67,10 @@ class LoKrConfig(LycorisConfig):
             `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
         rank_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default rank
-            specified by `r`.
+            specified by `r`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
         alpha_pattern (`dict`):
             The mapping from layer names or regexp expression to alphas which are different from the default alpha
-            specified by `alpha`.
+            specified by `alpha`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
         modules_to_save (`Optional[List[str]]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
     """
@@ -85,7 +86,10 @@ class LoKrConfig(LycorisConfig):
     use_effective_conv2d: bool = field(
         default=False,
         metadata={
-            "help": 'Use parameter effective decomposition for Conv2d 3x3 with ksize > 1 ("Proposition 3" from FedPara paper)'
+            "help": (
+                "Use parameter effective decomposition for Conv2d (and Conv1d) with ksize > 1 "
+                '("Proposition 3" from FedPara paper)'
+            )
         },
     )
     decompose_both: bool = field(

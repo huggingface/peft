@@ -11,15 +11,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
+
+import importlib.metadata
 import inspect
 import json
 import os
 import warnings
 from dataclasses import asdict, dataclass, field
-from typing import Dict, Optional, Union
+from typing import Optional, Union
 
+import packaging.version
 from huggingface_hub import hf_hub_download
-from transformers.utils import PushToHubMixin
+from transformers.utils import PushToHubMixin, http_user_agent
+
+from peft import __version__
 
 from .utils import CONFIG_NAME, PeftType, TaskType
 
@@ -43,6 +49,30 @@ def _check_and_remove_unused_kwargs(cls, kwargs):
     return kwargs, unexpected_kwargs
 
 
+def _is_dev_version(version: str) -> bool:
+    # check if the given version is a dev version
+    return packaging.version.Version(version).dev is not None
+
+
+def _get_commit_hash(pkg_name: str) -> str | None:
+    # If PEFT was installed from a specific commit hash, try to get it. This works e.g. when installing PEFT with `pip
+    # install git+https://github.com/huggingface/peft.git@<HASH>`. This works not for other means, like editable
+    # installs.
+    try:
+        dist = importlib.metadata.distribution(pkg_name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+    # See: https://packaging.python.org/en/latest/specifications/direct-url/
+    for path in dist.files or []:
+        if path.name == "direct_url.json":
+            direct_url = json.loads((dist.locate_file(path)).read_text())
+            vcs_info = direct_url.get("vcs_info")
+            if vcs_info and "commit_id" in vcs_info:
+                return vcs_info["commit_id"]
+    return None
+
+
 @dataclass
 class PeftConfigMixin(PushToHubMixin):
     r"""
@@ -60,6 +90,7 @@ class PeftConfigMixin(PushToHubMixin):
     auto_mapping: Optional[dict] = field(
         default=None, metadata={"help": "An auto mapping dict to help retrieve the base model class if needed."}
     )
+    peft_version: Optional[str] = field(default=None, metadata={"help": "PEFT version, leave empty to auto-fill."})
 
     def __post_init__(self):
         # check for invalid task type
@@ -67,8 +98,32 @@ class PeftConfigMixin(PushToHubMixin):
             raise ValueError(
                 f"Invalid task type: '{self.task_type}'. Must be one of the following task types: {', '.join(TaskType)}."
             )
+        if self.peft_version is None:
+            self.peft_version = self._get_peft_version()
 
-    def to_dict(self) -> Dict:
+    @staticmethod
+    def _get_peft_version() -> str:
+        # gets the current peft version; if it's a dev version, try to get the commit hash too, as the dev version is
+        # ambiguous
+        version = __version__
+        if not _is_dev_version(version):
+            return version
+
+        try:
+            git_hash = _get_commit_hash("peft")
+            if git_hash is None:
+                git_hash = "UNKNOWN"
+        except Exception:
+            # Broad exception: We never want to break user code just because the git_hash could not be determined
+            warnings.warn(
+                "A dev version of PEFT is used but there was an error while trying to determine the commit hash. "
+                "Please open an issue: https://github.com/huggingface/peft/issues"
+            )
+            git_hash = "UNKNOWN"
+        version = version + f"@{git_hash}"
+        return version
+
+    def to_dict(self) -> dict:
         r"""
         Returns the configuration for your adapter model as a dictionary.
         """
@@ -190,6 +245,8 @@ class PeftConfigMixin(PushToHubMixin):
         )
 
         hf_hub_download_kwargs, class_kwargs, _ = cls._split_kwargs(kwargs)
+        if "user_agent" not in hf_hub_download_kwargs:
+            hf_hub_download_kwargs["user_agent"] = http_user_agent()
 
         if os.path.isfile(os.path.join(path, CONFIG_NAME)):
             config_file = os.path.join(path, CONFIG_NAME)
@@ -333,6 +390,15 @@ class PromptLearningConfig(PeftConfig):
     )
     num_attention_heads: Optional[int] = field(default=None, metadata={"help": "Number of attention heads"})
     num_layers: Optional[int] = field(default=None, metadata={"help": "Number of transformer layers"})
+    modules_to_save: Optional[list[str]] = field(
+        default=None,
+        metadata={
+            "help": "List of extra modules to be set as trainable and saved in the final checkpoint. "
+            "For example, in Sequence Classification or Token Classification tasks, "
+            "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved. "
+            "The module(s) will be fully fine-tuned."
+        },
+    )
 
     @property
     def is_prompt_learning(self) -> bool:

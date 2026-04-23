@@ -1,0 +1,11 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "exclude_modules": null,
+  "inference_mode": false,
+  "modules_to_save": null,
+  "peft_type": "LN_TUNING",
+  "revision": null,
+  "target_modules": null,
+  "task_type": null
+}

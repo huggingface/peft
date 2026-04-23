@@ -1,0 +1,3 @@
+dash
+gradio>=6.0.2
+pandas

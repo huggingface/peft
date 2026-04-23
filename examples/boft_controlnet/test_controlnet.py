@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # The implementation is based on "Parameter-Efficient Orthogonal Finetuning
-# via Butterfly Factorization" (https://arxiv.org/abs/2311.06243) in ICLR 2024.
+# via Butterfly Factorization" (https://huggingface.co/papers/2311.06243) in ICLR 2024.
 
 import os
 import sys
@@ -22,7 +22,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.utils.checkpoint
 from accelerate import Accelerator
 from diffusers import DDIMScheduler
 from diffusers.utils import check_min_version
@@ -42,7 +41,12 @@ from peft import PeftModel  # noqa: E402
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.10.0.dev0")
-device = torch.device("cuda:0")
+if torch.xpu.is_available():
+    device = "xpu:0"
+elif torch.cuda.is_available():
+    device = "cuda:0"
+else:
+    device = "cpu"
 
 
 def main(args):
@@ -80,7 +84,7 @@ def main(args):
         args.pretrained_model_name_or_path,
         controlnet=controlnet,
         unet=unet.model,
-        torch_dtype=torch.float32,
+        dtype=torch.float32,
         requires_safety_checker=False,
     ).to(device)
 

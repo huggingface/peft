@@ -14,7 +14,7 @@
 
 
 import os
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import transformers
@@ -43,8 +43,8 @@ def train(
     lora_r: int = 32,
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
-    lora_target_modules: List[str] = None,
-    torch_dtype: str = "float16",
+    lora_target_modules: list[str] = None,
+    dtype: str = "float16",
     init_lora_weights="olora",
     seed: Optional[int] = None,
 ):
@@ -57,7 +57,7 @@ def train(
     # Set seed
     if seed is not None:
         set_seed(seed)
-    model_kwargs = {"torch_dtype": getattr(torch, torch_dtype), "device_map": device_map}
+    model_kwargs = {"dtype": getattr(torch, dtype), "device_map": device_map}
     if quantize:
         model_kwargs["quantization_config"] = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -125,7 +125,7 @@ def train(
             learning_rate=learning_rate,
             logging_steps=100,
             optim="adamw_torch",
-            evaluation_strategy="steps",
+            eval_strategy="steps",
             save_strategy="steps",
             eval_steps=eval_step,
             save_steps=save_step,
@@ -170,7 +170,7 @@ if __name__ == "__main__":
     parser.add_argument("--lora_alpha", type=int, default=16)
     parser.add_argument("--lora_dropout", type=float, default=0.05)
     parser.add_argument("--lora_target_modules", type=str, default=None)
-    parser.add_argument("--torch_dtype", type=str, default="float16")
+    parser.add_argument("--dtype", type=str, default="float16")
     parser.add_argument("--init_lora_weights", type=str, default="olora")
     parser.add_argument("--seed", type=int, default=None)
 
@@ -193,7 +193,7 @@ if __name__ == "__main__":
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
         lora_target_modules=args.lora_target_modules,
-        torch_dtype=args.torch_dtype,
+        dtype=args.dtype,
         init_lora_weights=args.init_lora_weights,
         seed=args.seed,
     )

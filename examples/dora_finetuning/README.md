@@ -4,7 +4,7 @@
 
 
 ## Introduction
-[DoRA](https://arxiv.org/abs/2402.09353) is a novel approach that leverages low rank adaptation through weight decomposition analysis to investigate the inherent differences between full fine-tuning and LoRA. DoRA initially decomposes the pretrained weight into its magnitude and directional components and finetunes both of them. Because the directional component is large in terms of parameter numbers, we further decompose it with LoRA for efficient finetuning. This results in enhancing both the learning capacity and training stability of LoRA while avoiding any additional inference overhead.
+[DoRA](https://huggingface.co/papers/2402.09353) is a novel approach that leverages low rank adaptation through weight decomposition analysis to investigate the inherent differences between full fine-tuning and LoRA. DoRA initially decomposes the pretrained weight into its magnitude and directional components and finetunes both of them. Because the directional component is large in terms of parameter numbers, we further decompose it with LoRA for efficient finetuning. This results in enhancing both the learning capacity and training stability of LoRA while avoiding any additional inference overhead.
 
 ## Quick start
 ```python
@@ -13,7 +13,7 @@ from peft import LoraConfig, get_peft_model
 from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer
 from datasets import load_dataset
 
-model = AutoModelForCausalLM.from_pretrained("huggyllama/llama-7b", device_map="cuda")
+model = AutoModelForCausalLM.from_pretrained("huggyllama/llama-7b", device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained("huggyllama/llama-7b")
 dataset = load_dataset("timdettmers/openassistant-guanaco", split="train")
 lora_config = LoraConfig(
@@ -24,7 +24,7 @@ trainer = transformers.Trainer(
     model=peft_model,
     train_dataset=dataset,
     dataset_text_field="text",
-    max_seq_length=2048,
+    max_length=2048,
     tokenizer=tokenizer,
 )
 trainer.train()
@@ -70,7 +70,6 @@ python dora_finetuning.py \
     --quantize \
     --eval_step 10 \
     --save_step 100 \
-    --device "cuda:0" \
     --lora_r 16 \
     --lora_alpha 32 \
     --lora_dropout 0.05 \

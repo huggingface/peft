@@ -97,7 +97,9 @@ def create_and_prepare_model(args, data_args, training_args):
     ):
         raise NotImplementedError("Unsloth is not supported in distributed training")
 
-    if args.use_4bit_quantization:
+    if args.use_4bit_quantization and args.use_8bit_quantization:
+        raise ValueError("You configured 4bit and 8bit quantization at the same time, please choose only one of them.")
+    elif args.use_4bit_quantization:
         compute_dtype = getattr(torch, args.bnb_4bit_compute_dtype)
         quant_storage_dtype = getattr(torch, args.bnb_4bit_quant_storage_dtype)
 
@@ -115,28 +117,39 @@ def create_and_prepare_model(args, data_args, training_args):
                 print("=" * 80)
                 print("Your GPU supports bfloat16, you can accelerate training with the argument --bf16")
                 print("=" * 80)
-        elif args.use_8bit_quantization:
-            bnb_config = BitsAndBytesConfig(load_in_8bit=args.use_8bit_quantization)
+    elif args.use_8bit_quantization:
+        bnb_config = BitsAndBytesConfig(load_in_8bit=args.use_8bit_quantization)
 
     if args.use_unsloth:
+        if torch.xpu.is_available():
+            raise NotImplementedError("XPU hasn't supported unsloth yet")
         # Load model
         model, _ = FastLanguageModel.from_pretrained(
             model_name=args.model_name_or_path,
-            max_seq_length=data_args.max_seq_length,
+            max_seq_length=training_args.max_length,
             dtype=None,
             load_in_4bit=args.use_4bit_quantization,
         )
     else:
-        torch_dtype = (
-            quant_storage_dtype if quant_storage_dtype and quant_storage_dtype.is_floating_point else torch.float32
-        )
-        model = AutoModelForCausalLM.from_pretrained(
-            args.model_name_or_path,
-            quantization_config=bnb_config,
-            trust_remote_code=True,
-            attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
-            torch_dtype=torch_dtype,
-        )
+        dtype = quant_storage_dtype if quant_storage_dtype and quant_storage_dtype.is_floating_point else torch.float32
+
+        # Prepare model loading arguments
+        model_kwargs = {
+            "trust_remote_code": True,
+            "dtype": dtype,
+        }
+        if args.use_flash_attn:
+            if torch.xpu.is_available():
+                print("XPU hasn't supported flash_attn yet, use eager implementation instead.")
+                model_kwargs["attn_implementation"] = "eager"
+            else:
+                model_kwargs["attn_implementation"] = "flash_attention_2"
+
+        # Only add quantization_config if bnb_config is not None
+        if bnb_config is not None:
+            model_kwargs["quantization_config"] = bnb_config
+
+        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, **model_kwargs)
 
     peft_config = None
     chat_template = None
@@ -177,8 +190,10 @@ def create_and_prepare_model(args, data_args, training_args):
         # embedding could be on meta device, therefore, we set mean_resizing=False in that case (i.e. the status quo
         # ante). See https://github.com/huggingface/accelerate/issues/1620.
         uses_transformers_4_46 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.46.0")
-        uses_fsdp = os.environ.get("ACCELERATE_USE_FSDP").lower() == "true"
-        if (bnb_config is not None) and uses_fsdp and uses_transformers_4_46:
+        uses_fsdp = os.environ.get("ACCELERATE_USE_FSDP", "false").lower() == "true"
+        # Check if the model is quantized
+        is_quantized = (bnb_config is not None) or (getattr(model, "hf_quantizer", None) is not None)
+        if is_quantized and uses_fsdp and uses_transformers_4_46:
             model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8, mean_resizing=False)
         else:
             model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
@@ -198,7 +213,7 @@ def create_and_prepare_model(args, data_args, training_args):
             else args.lora_target_modules,
             use_gradient_checkpointing=training_args.gradient_checkpointing,
             random_state=training_args.seed,
-            max_seq_length=data_args.max_seq_length,
+            max_seq_length=training_args.max_length,
         )
 
     return model, peft_config, tokenizer

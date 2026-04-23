@@ -26,7 +26,7 @@ class VBLoRAConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`VBLoRAConfig`].
 
-    Paper: https://arxiv.org/abs/2405.15179
+    Paper: https://huggingface.co/papers/2405.15179
 
     Args:
         r (`int`):

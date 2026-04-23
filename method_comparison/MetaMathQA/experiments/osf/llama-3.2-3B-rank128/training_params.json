@@ -1,0 +1,7 @@
+{
+  "autocast_adapter_dtype": false,
+  "optimizer_kwargs": {
+    "lr": 5e-5
+  }
+}
+

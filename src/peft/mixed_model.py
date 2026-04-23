@@ -71,12 +71,8 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
     This class does not support loading/saving, and it shouldn't usually be initialized directly. Instead, use
     `get_peft_model` with the argument `mixed=True`.
 
-    <Tip>
-
-    Read the [Mixed adapter types](https://huggingface.co/docs/peft/en/developer_guides/mixed_models) guide to learn
-    more about using different adapter types.
-
-    </Tip>
+    > [!TIP] > Read the [Mixed adapter types](https://huggingface.co/docs/peft/en/developer_guides/mixed_models) guide
+    to learn > more about using different adapter types.
 
     Example:
 
@@ -204,7 +200,13 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         finally:
             self.base_model.enable_adapter_layers()
 
-    def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
+    def add_adapter(
+        self,
+        adapter_name: str,
+        peft_config: PeftConfig,
+        low_cpu_mem_usage: bool = False,
+        autocast_adapter_dtype: bool = True,
+    ) -> None:
         """
         Add an adapter to the model based on the passed configuration.
 
@@ -224,12 +226,13 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
                 Create empty adapter weights on meta device. Useful to speed up the process when loading saved
                 adapters.
 
-                <Tip>
-
-                Don't use `low_cpu_mem_usage=True` when creating a new PEFT adapter for training (training is untested
-                and discouraged for PeftMixedModel in general).
-
-                </Tip>
+                > [!TIP] > Don't use `low_cpu_mem_usage=True` when creating a new PEFT adapter for training (training
+                is untested > and discouraged for PeftMixedModel in general).
+            autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
+                Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter
+                weights using float16 and bfloat16 to float32, as this is typically required for stable training, and
+                only affect select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the
+                corresponding layer.
         """
         _check_config_compatible(peft_config)
 
@@ -241,6 +244,8 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
                 del self.peft_config[adapter_name]
             raise
 
+        self.base_model._cast_adapter_dtype(adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
+
         self.set_modules_to_save(peft_config, adapter_name)
 
     def set_modules_to_save(self, peft_config: PeftConfig, adapter_name: str) -> None:
@@ -251,9 +256,14 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
             self.modules_to_save = set(modules_to_save)
         else:
             self.modules_to_save.update(modules_to_save)
-        _set_trainable(self, adapter_name, module_names=peft_config.modules_to_save)
+        _set_trainable(
+            self,
+            adapter_name,
+            module_names=getattr(peft_config, "modules_to_save", None),
+            inference_mode=peft_config.inference_mode,
+        )
 
-    def set_adapter(self, adapter_name: Union[str, list[str]]) -> None:
+    def set_adapter(self, adapter_name: Union[str, list[str]], inference_mode: bool = False) -> None:
         """
         Sets the active adapter(s) for the model.
 
@@ -262,18 +272,14 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         order in which the adapters were loaded into the model. The active adapters only determine which adapters are
         active during the forward pass, but not the order in which they are applied.
 
-        Additionally, this function will set the specified adapters to trainable (i.e., requires_grad=True). If this is
-        not desired, use the following code.
-
-        ```py
-        >>> for name, param in model_peft.named_parameters():
-        ...     if ...:  # some check on name (ex. if 'lora' in name)
-        ...         param.requires_grad = False
-        ```
+        Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True) unless
+        inference_mode is True.
 
         Args:
-            adapter_name (`str` or `List[str]`):
-                The name of the adapter(s) to be activated.
+            adapter_name (str, list[str]):
+                The name(s) of the adapter(s) to set as active
+            inference_mode (bool, optional):
+                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
         if isinstance(adapter_name, str):
             adapter_name = [adapter_name]
@@ -284,8 +290,8 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
                 f"Adapter(s) {sorted(mismatched)} not found, available adapters: {sorted(self.peft_config.keys())}"
             )
 
-        self.base_model.set_adapter(adapter_name)
-        _set_adapter(self, adapter_name)
+        self.base_model.set_adapter(adapter_name, inference_mode=inference_mode)
+        _set_adapter(self, adapter_name, inference_mode=inference_mode)
 
     def delete_adapter(self, adapter_name: Union[str, list[str]]) -> None:
         if isinstance(adapter_name, str):
@@ -429,15 +435,17 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
 
         # load the config
         if config is None:
-            config = PEFT_TYPE_TO_CONFIG_MAPPING[
-                PeftConfig._get_peft_type(
-                    model_id,
-                    subfolder=kwargs.get("subfolder", None),
-                    revision=kwargs.get("revision", None),
-                    cache_dir=kwargs.get("cache_dir", None),
-                    use_auth_token=kwargs.get("use_auth_token", None),
-                )
-            ].from_pretrained(model_id, **kwargs)
+            hf_kwargs = {
+                "subfolder": kwargs.get("subfolder", None),
+                "revision": kwargs.get("revision", None),
+                "cache_dir": kwargs.get("cache_dir", None),
+                "token": kwargs.get("token", None),
+            }
+            if use_auth_token := kwargs.get("use_auth_token", None):
+                hf_kwargs["use_auth_token"] = use_auth_token
+            config = PEFT_TYPE_TO_CONFIG_MAPPING[PeftConfig._get_peft_type(model_id, **hf_kwargs)].from_pretrained(
+                model_id, **kwargs
+            )
         elif isinstance(config, PeftConfig):
             config.inference_mode = not is_trainable
         else:

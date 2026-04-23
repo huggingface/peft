@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # The implementation is based on "Parameter-Efficient Orthogonal Finetuning
-# via Butterfly Factorization" (https://arxiv.org/abs/2311.06243) in ICLR 2024.
+# via Butterfly Factorization" (https://huggingface.co/papers/2311.06243) in ICLR 2024.
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ import math
 import os
 import warnings
 from contextlib import contextmanager
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -29,6 +29,8 @@ import torch.nn.functional as F
 from torch.autograd import Function
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+
+from .config import BOFTConfig
 
 
 _FBD_CUDA = None
@@ -220,6 +222,8 @@ class BOFTLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
+        # flag to enable/disable casting of input to weight dtype during forward call
+        self.cast_input_dtype_enabled = True
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
@@ -259,11 +263,21 @@ class BOFTLayer(BaseTunerLayer):
             warnings.warn("Unscaling operation for BOFT not supported! Keeping scale to 1.")
 
     def update_layer(
-        self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
+        self,
+        adapter_name: str,
+        config: BOFTConfig,
+        **kwargs,
     ):
         """
         Update the linear layer with trainable BOFT weights. Override for other layer types.
         """
+        boft_block_size = config.boft_block_size
+        boft_block_num = config.boft_block_num
+        boft_n_butterfly_factor = config.boft_n_butterfly_factor
+        boft_dropout = config.boft_dropout
+        init_weights = config.init_weights
+        inference_mode = config.inference_mode
+
         # Attempt to load the CUDA extension during model initialization
         if not get_fbd_cuda():
             self.fbd_cuda_available = False
@@ -358,7 +372,7 @@ class BOFTLayer(BaseTunerLayer):
         self.boft_block_num[adapter_name] = boft_block_num
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_boft_parameters(self, adapter_name, init_weights):
         """
@@ -447,10 +461,10 @@ class BOFTLayer(BaseTunerLayer):
         skew_mat = 0.5 * (data - data.transpose(1, 2))
         id_mat = torch.eye(r, device=data.device).unsqueeze(0).expand(b, r, c)
 
-        # Perform the Cayley parametrization
+        # Perform the Cayley parametrization, must be in float32
         Q = torch.linalg.solve(id_mat + skew_mat, id_mat - skew_mat, left=False)
 
-        return Q
+        return Q.to(data.dtype)
 
 
 class Linear(nn.Module, BOFTLayer):
@@ -462,24 +476,17 @@ class Linear(nn.Module, BOFTLayer):
         self,
         base_layer,
         adapter_name: str,
-        boft_block_size: int = 8,
-        boft_block_num: int = 0,
-        boft_n_butterfly_factor: int = 0,
-        boft_dropout: float = 0.1,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-        init_weights: Union[bool, str] = True,
+        config: BOFTConfig,
         is_target_conv_1d_layer: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
         BOFTLayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
 
         self._active_adapter = adapter_name
 
-        self.update_layer(
-            adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
-        )
+        self.update_layer(adapter_name, config=config)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -503,13 +510,14 @@ class Linear(nn.Module, BOFTLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.boft_R.keys():
                 base_layer = self.get_base_layer()
+                orig_dtype = base_layer.weight.dtype
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weight = base_layer.weight.data.clone()
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
                     orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight.to(butterfly_oft_mat.dtype))
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = orig_weight * boft_s
 
@@ -518,16 +526,16 @@ class Linear(nn.Module, BOFTLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.base_layer.weight.data = orig_weight.contiguous()
+                    self.base_layer.weight.data = orig_weight.contiguous().to(orig_dtype)
                 else:
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
                     orig_weight = base_layer.weight.data.clone()
                     orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight.to(butterfly_oft_mat.dtype))
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = orig_weight * boft_s
 
-                    self.base_layer.weight.data = orig_weight.contiguous()
+                    self.base_layer.weight.data = orig_weight.contiguous().to(orig_dtype)
 
                 self.merged_adapters.append(active_adapter)
 
@@ -538,17 +546,20 @@ class Linear(nn.Module, BOFTLayer):
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
+
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
+            base_layer = self.get_base_layer()
+            orig_dtype = base_layer.weight.dtype
             if active_adapter in self.boft_R.keys():
                 butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
 
-                orig_weight = self.get_base_layer().weight.data.clone()
+                orig_weight = base_layer.weight.data.clone()
                 orig_weight = torch.transpose(orig_weight, 0, 1)
-                orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight)
+                orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight.to(butterfly_oft_mat.dtype))
                 orig_weight = torch.transpose(orig_weight, 0, 1)
 
-                self.get_base_layer().weight.data = orig_weight * (1 / boft_s)
+                base_layer.weight.data = (orig_weight * (1 / boft_s)).to(orig_dtype)
 
     def get_delta_weight(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -572,7 +583,7 @@ class Linear(nn.Module, BOFTLayer):
             block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
             block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
 
-        boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+        boft_P = self.boft_P.to(block_diagonal_butterfly.device, block_diagonal_butterfly.dtype)
         butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
         butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
         butterfly_oft_mat = butterfly_oft_mat_batch[0]
@@ -660,27 +671,30 @@ class Conv2d(nn.Module, BOFTLayer):
         self,
         base_layer: nn.Module,
         adapter_name: str,
-        boft_block_size: int = 8,
-        boft_block_num: int = 0,
-        boft_n_butterfly_factor: int = 0,
-        boft_dropout: float = 0.1,
-        init_weights: Union[bool, str] = True,
+        config: BOFTConfig,
         **kwargs,
     ) -> None:
         super().__init__()
         BOFTLayer.__init__(self, base_layer)
 
         self._active_adapter = adapter_name
-        self.update_layer(
-            adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
-        )
+        self.update_layer(adapter_name, config=config)
 
     def update_layer(
-        self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
+        self,
+        adapter_name: str,
+        config: BOFTConfig,
+        **kwargs,
     ):
         """
         Update the conv2d layer with trainable BOFT weights.
         """
+        boft_block_size = config.boft_block_size
+        boft_block_num = config.boft_block_num
+        boft_n_butterfly_factor = config.boft_n_butterfly_factor
+        boft_dropout = config.boft_dropout
+        init_weights = config.init_weights
+        inference_mode = config.inference_mode
 
         # Attempt to load the CUDA extension during model initialization
         if not get_fbd_cuda():
@@ -781,7 +795,7 @@ class Conv2d(nn.Module, BOFTLayer):
         self.boft_block_num[adapter_name] = boft_block_num
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -804,6 +818,7 @@ class Conv2d(nn.Module, BOFTLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.boft_R.keys():
                 base_layer = self.get_base_layer()
+                orig_dtype = base_layer.weight.dtype
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
@@ -814,14 +829,14 @@ class Conv2d(nn.Module, BOFTLayer):
                         self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
                     )
                     orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight.to(butterfly_oft_mat.dtype))
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = orig_weight * boft_s
                     orig_weight = orig_weight.view(
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
                     )
 
-                    self.base_layer.weight.data = orig_weight.contiguous()
+                    self.base_layer.weight.data = orig_weight.contiguous().to(orig_dtype)
                 else:
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
 
@@ -830,14 +845,14 @@ class Conv2d(nn.Module, BOFTLayer):
                         self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
                     )
                     orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight.to(butterfly_oft_mat.dtype))
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = orig_weight * boft_s
                     orig_weight = orig_weight.view(
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
                     )
 
-                    self.base_layer.weight.data = orig_weight.contiguous()
+                    self.base_layer.weight.data = orig_weight.contiguous().to(orig_dtype)
 
                 self.merged_adapters.append(active_adapter)
 
@@ -850,26 +865,28 @@ class Conv2d(nn.Module, BOFTLayer):
             return
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
+            base_layer = self.get_base_layer()
+            orig_dtype = base_layer.weight.dtype
             if active_adapter in self.boft_R.keys():
                 butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
 
-                orig_weight = self.get_base_layer().weight.data.clone()
+                orig_weight = base_layer.weight.data.clone()
                 orig_weight = orig_weight.view(
                     self.out_features,
-                    self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0],
+                    self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0],
                 )
                 orig_weight = torch.transpose(orig_weight, 0, 1)
-                orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight)
+                orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight.to(butterfly_oft_mat.dtype))
                 orig_weight = torch.transpose(orig_weight, 0, 1)
                 orig_weight = orig_weight * (1 / boft_s)
                 orig_weight = orig_weight.view(
                     self.out_features,
                     self.in_features,
-                    self.get_base_layer().kernel_size[0],
-                    self.get_base_layer().kernel_size[0],
+                    base_layer.kernel_size[0],
+                    base_layer.kernel_size[0],
                 )
 
-                self.get_base_layer().weight.data = orig_weight
+                base_layer.weight.data = orig_weight.to(orig_dtype)
 
     def get_delta_weight(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -894,7 +911,7 @@ class Conv2d(nn.Module, BOFTLayer):
             block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
             block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
 
-        boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+        boft_P = self.boft_P.to(block_diagonal_butterfly.device, block_diagonal_butterfly.dtype)
         butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
         butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
         butterfly_oft_mat = butterfly_oft_mat_batch[0]
@@ -968,10 +985,12 @@ class Conv2d(nn.Module, BOFTLayer):
             scaled_rotated_weight = scaled_rotated_weight.view(
                 self.out_features, self.in_features, self.base_layer.kernel_size[0], self.base_layer.kernel_size[0]
             )
+            x = self._cast_input_dtype(x, scaled_rotated_weight.dtype)
+            bias = self._cast_input_dtype(self.base_layer.bias, scaled_rotated_weight.dtype)
             result = F.conv2d(
                 input=x,
                 weight=scaled_rotated_weight,
-                bias=self.base_layer.bias,
+                bias=bias,
                 padding=self.base_layer.padding[0],
                 stride=self.base_layer.stride[0],
             )

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import warnings
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -22,6 +22,8 @@ from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.other import transpose
+
+from .config import VBLoRAConfig
 
 
 class VBLoRALayer(BaseTunerLayer):
@@ -63,12 +65,16 @@ class VBLoRALayer(BaseTunerLayer):
         adapter_name: str,
         vblora_vector_bank,
         r: int,
-        topk: int,
-        num_vectors: int,
-        vector_length: float,
-        vblora_dropout: float = 0.0,
-        init_logits_std: float = 0.01,
+        config: VBLoRAConfig,
+        inference_mode: bool = False,
+        **kwargs,
     ):
+        topk = config.topk
+        num_vectors = config.num_vectors
+        vector_length = config.vector_length
+        vblora_dropout = config.vblora_dropout
+        init_logits_std = config.init_logits_std
+
         if r <= 0:
             raise ValueError(f"`r` {r} should be a positive integer value")
         if topk <= 0:
@@ -97,7 +103,7 @@ class VBLoRALayer(BaseTunerLayer):
         self.vblora_vector_bank = vblora_vector_bank
         self.reset_vblora_logits(adapter_name, init_logits_std)
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_vblora_logits(self, adapter_name, init_logits_std):
         if adapter_name in self.vblora_logits_A.keys():
@@ -113,27 +119,20 @@ class Linear(nn.Linear, VBLoRALayer):
         base_layer,
         vblora_vector_bank,
         adapter_name: str,
+        config: VBLoRAConfig,
         r: int,
-        num_vectors: int,
-        vector_length: int,
-        topk: int = 2,
-        vblora_dropout: float = 0.0,
-        init_logits_std: float = 0.01,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
         **kwargs,
     ) -> None:
         # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__, which should always be called
         super(nn.Linear, self).__init__()
         VBLoRALayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
         self._active_adapter = adapter_name
-        self.update_layer(
-            adapter_name, vblora_vector_bank, r, topk, num_vectors, vector_length, vblora_dropout, init_logits_std
-        )
+        self.update_layer(adapter_name, vblora_vector_bank, r, config=config)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -183,7 +182,7 @@ class Linear(nn.Linear, VBLoRALayer):
         topk_weights = F.softmax(top_k_logits, dim=-1)
         return (topk_weights.unsqueeze(-1) * vblora_vector_bank[indices]).sum(-2)
 
-    def _get_lora_matrices(self, adapter, cast_to_fp32=False) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _get_lora_matrices(self, adapter, cast_to_fp32=False) -> tuple[torch.Tensor, torch.Tensor]:
         vblora_logits_A = self.vblora_logits_A[adapter]
         vblora_logits_B = self.vblora_logits_B[adapter]
 
@@ -247,3 +246,10 @@ class Linear(nn.Linear, VBLoRALayer):
                 result = result + F.linear(F.linear(dropout(x), A), B)
         result = result.to(previous_dtype)
         return result
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        return True
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "vblora." + rep

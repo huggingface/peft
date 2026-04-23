@@ -18,11 +18,15 @@ import warnings
 from typing import Optional
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 
 from peft.tuners._buffer_dict import BufferDict
-from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
+from peft.utils.integrations import check_deepspeed_zero3_enabled, gather_params_ctx
+
+from .config import TrainableTokensConfig
 
 
 class TrainableTokensLayer(nn.Module, BaseTunerLayer):
@@ -36,7 +40,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         self,
         base_layer: nn.Module,
         adapter_name: str,
-        token_indices: list[int],
+        config: TrainableTokensConfig | dict | None = None,
         tied_adapter: Optional[TrainableTokensLayer] = None,
         **kwargs,
     ) -> None:
@@ -67,19 +71,58 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         # Mark the weight as unmerged
         self.merged_adapters = []
 
+        in_features, out_features = _get_in_out_features(self.get_base_layer())
+        self.in_features = in_features
+        self.out_features = out_features
+
     @property
     def tied_adapter(self):
         if self._tied_adapter:
             return self._tied_adapter[0]
         return None
 
-    def update_layer(self, adapter_name, **kwargs):
-        if kwargs.get("tied_adapter", None):
+    def _collect_token_weights(self, weight: torch.Tensor, rows: torch.Tensor, embed_dim: int) -> torch.Tensor:
+        """DeepSpeed zero3 specific code to initialize trainable tokens.
+
+        Ensures that only the necessary weights are collected to a single rank, initialized, and then shared with all
+        ranks.
+        """
+        src_rank = 0
+        # right now, only CUDA is implemented
+        device = torch.device("cuda", torch.cuda.current_device())
+
+        with gather_params_ctx([weight], modifier_rank=None):
+            if dist.is_available() and dist.is_initialized() and dist.get_rank() == src_rank:
+                token_weights = weight[rows].clone()
+            else:
+                # build an empty tensor with correct shape/type/device
+                token_weights = torch.empty(
+                    (len(rows), embed_dim),
+                    dtype=weight.dtype,
+                    device=device,
+                )
+
+        # share the weights with all ranks
+        dist.broadcast(token_weights, src=src_rank)
+        return token_weights
+
+    def update_layer(
+        self,
+        adapter_name,
+        config: TrainableTokensConfig | None = None,
+        tied_adapter: nn.Module | None = None,
+        **kwargs,
+    ):
+        # config can be None when update_layer is called through _set_trainable, in which case the relevant
+        # arguments should be in kwargs
+        if tied_adapter is not None:
             # as a tied adapter, we're just following whatever the adpater we're tied to does, we don't update anything.
             return
 
-        self.token_indices[adapter_name] = kwargs["token_indices"]
-        init_weights = kwargs.get("init_weights", True)
+        token_indices = config.token_indices if (config is not None) else kwargs["token_indices"]
+        init_weights = config.init_weights if (config is not None) else kwargs.get("init_weights", True)
+
+        self.token_indices[adapter_name] = token_indices
 
         # we initialize the delta embedding weights from the base embedding matrix and replace values instead of
         # adding/subtracting deltas. we do it this way and use `embedding.weight.index_copy()` to write the updated
@@ -88,11 +131,26 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         # thus re-initializing the new embeddings again with new random variables. If we would add/subtract deltas
         # onto the new values, we would get undefined behavior. By replacing the specific token values we always
         # get defined behavior.
-        #
-        if init_weights:
-            values = self.get_base_layer().weight[self.token_indices[adapter_name]]
+        weight = self.get_base_layer().weight
+
+        if hasattr(self.get_base_layer(), "embedding_dim"):
+            embed_dim = self.get_base_layer().embedding_dim
         else:
-            values = torch.rand_like(self.get_base_layer().weight[self.token_indices[adapter_name]])
+            # lm_head doesn't have embedding_dim attribute
+            embed_dim = self.get_base_layer().in_features
+
+        if init_weights:
+            if check_deepspeed_zero3_enabled():
+                values = self._collect_token_weights(weight, self.token_indices[adapter_name], embed_dim)
+            else:
+                values = self.weight[self.token_indices[adapter_name]]
+        else:
+            # random init with matching dtype/device
+            values = torch.randn(
+                (len(self.token_indices[adapter_name]), embed_dim),
+                dtype=weight.dtype,
+                device=weight.device,
+            )
 
         self.trainable_tokens_delta[adapter_name] = nn.Parameter(values.clone(), requires_grad=True)
         self.trainable_tokens_original[adapter_name] = values.clone()
@@ -109,7 +167,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
 
         indices = set()
 
-        # we take already merged adapters into account as well since they can be overriden by new adapters as well.
+        # we take already merged adapters into account as well since they can be overridden by new adapters as well.
         for adapter_name in set(adapter_names + self.merged_adapters):
             index_set = set(self.token_indices[adapter_name])
             if len(indices.intersection(index_set)):
@@ -153,7 +211,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             originals = self.trainable_tokens_original[adapter_name].to(self.base_layer.weight)
             self.base_layer.weight.data.index_copy_(dim=0, index=index, source=originals)
 
-    def get_merged_weights(self, active_adapters):
+    def get_merged_weights(self, active_adapters) -> torch.Tensor:
         W = self.base_layer.weight
 
         for adapter_name in active_adapters:
@@ -161,6 +219,9 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             deltas = self.trainable_tokens_delta[adapter_name].to(W)
             W = W.index_copy(dim=0, index=index, source=deltas)
 
+        # Note: the return type is a Tensor, not an nn.Parameter. This can lead to some errors, e.g. torch's
+        # model.get_parameter fails as it does a type check. But we cannot return an nn.Parameter here, as it can lead
+        # to other failures, as this is not a true nn.Parameter of the model.
         return W
 
     def forward_adapters(self, x: torch.Tensor, active_adapters, *args, **kwargs) -> torch.Tensor:
@@ -191,6 +252,11 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
                     scale_grad_by_freq=self.base_layer.scale_grad_by_freq,
                     sparse=self.base_layer.sparse,
                 )
+                # Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling in their forward method.
+                # Since we're using F.embedding directly, we need to apply this scaling manually.
+                embed_scale = self._get_embed_scale()
+                if embed_scale is not None:
+                    result = result * embed_scale.to(result.dtype)
             elif isinstance(self.base_layer, torch.nn.Linear):
                 # Probably a tied adapter that wraps an LM head.
                 result = F.linear(

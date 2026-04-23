@@ -158,7 +158,7 @@ class XLoraModel(BaseTuner):
     Creates an X-LoRA (Mixture of LoRA experts), model from a pretrained transformers model. Currently, this X-LoRA
     implementation only works with models with a transformer architecture.
 
-    The method is described in detail in https://arxiv.org/abs/2402.07148.
+    The method is described in detail in https://huggingface.co/papers/2402.07148.
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.
@@ -327,12 +327,11 @@ class XLoraModel(BaseTuner):
             kwargs["scalings"] = scalings
             return args, kwargs
 
-        handles_to_remove = None
+        hook_handles = []
 
-        def pre_forward(module, *args, **kwargs):
-            nonlocal handles_to_remove
-
+        def _pre_forward(module, *args, **kwargs):
             # =========================== Forward pass with "dummy" scalings ==================
+            nonlocal hook_handles
 
             args_real = args[0]
             kwargs_real = args[1]
@@ -340,10 +339,15 @@ class XLoraModel(BaseTuner):
 
             dummy_scalings = self.internal_xlora_classifier.make_dummy_scalings(*args_real, **kwargs_real)
 
-            hook_handles = []
             for module in self.modules():
                 if isinstance(module, LoraLayer):
                     pre_forward = partial(scalings_injection_hook, scalings=dummy_scalings)
+                    existing_hooks = getattr(module, "_forward_pre_hooks", {})
+                    if any(val is scalings_injection_hook for val in existing_hooks.values()):
+                        # When calling generate, module.forward is called multiple times inside the forward hook
+                        # context, resulting in multiple hooks being registered. Therefore, we check if the hooks is
+                        # already present and skip it in that case.
+                        continue
                     handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                     hook_handles.append(handle)
 
@@ -364,6 +368,8 @@ class XLoraModel(BaseTuner):
                     self.lora_model.enable_adapter_layers()
 
             xlora_scalings = self.internal_xlora_classifier(result=base_output, *args_real, **kwargs_real)
+            # Store computed scalings to fix get_latest_scalings() returning None
+            self.internal_xlora_scalings = xlora_scalings
 
             # =========================== Real forward pass with calculated scalings ==================
 
@@ -374,19 +380,17 @@ class XLoraModel(BaseTuner):
                     handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                     hook_handles.append(handle)
 
-            handles_to_remove = hook_handles
-
         if not self.disabled:
-            forward_handle = self.lora_model.model.register_forward_pre_hook(pre_forward, with_kwargs=True)
+            forward_handle = self.lora_model.model.register_forward_pre_hook(_pre_forward, with_kwargs=True)
 
         # Run the forward pass: first the scaling pass in the hook, and then with the base model
-        yield
-
-        if not self.disabled:
-            # TODO(EricLBuehler): If we get a forward exception, we may have multiple forward hooks.
-            for handle in handles_to_remove:
-                handle.remove()
-            forward_handle.remove()
+        try:
+            yield
+        finally:
+            if not self.disabled:
+                for handle in hook_handles:
+                    handle.remove()
+                forward_handle.remove()
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""

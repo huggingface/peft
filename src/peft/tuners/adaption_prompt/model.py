@@ -12,20 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Dict, List
 
 import torch.nn as nn
 
 from peft.utils import _freeze_adapter, _get_submodules
 
 from .config import AdaptionPromptConfig, prepare_config
-from .layer import AdaptedAttention
+from .layer import AdaptedAttention, AdaptedAttentionGPT
 from .utils import is_adaption_prompt_trainable
 
 
 class AdaptionPromptModel(nn.Module):
     """
-    Implements adaption prompts as described in https://arxiv.org/pdf/2303.16199.pdf.
+    Implements adaption prompts as described in https://huggingface.co/papers/2303.16199.
 
     The top L attention modules are replaced with AdaptedAttention modules that wrap the original ones, but insert
     trainable prompts with gates (for zero init).
@@ -40,16 +39,16 @@ class AdaptionPromptModel(nn.Module):
     - Disabling the adapter would also result in the modules being removed from the model.
     """
 
-    def __init__(self, model, configs: Dict, adapter_name: str):
+    def __init__(self, model, configs: dict, adapter_name: str):
         super().__init__()
         self.model = model
         # Store adapter configs by name.
-        self.peft_config: Dict[str, AdaptionPromptConfig] = {}
+        self.peft_config: dict[str, AdaptionPromptConfig] = {}
         # Store lists of the parents of the affected attention modules by adapter name.
         # We keep references to the parents so we can swap the adapters in-and-out of the model.
-        self._parents: Dict[str, List[nn.Module]] = {}
+        self._parents: dict[str, list[nn.Module]] = {}
         # Store lists of cached AdaptedAttention modules by name.
-        self._cached_adapters: Dict[str, List] = {}
+        self._cached_adapters: dict[str, list] = {}
         # The name of the currently active adapter.
         self._active_adapter = None
         # Whether the adapter is enabled.
@@ -66,7 +65,7 @@ class AdaptionPromptModel(nn.Module):
 
         parents = []
         for name, _ in self.model.named_modules():
-            if name.endswith(config.target_modules):
+            if name.endswith(f".{config.target_modules}"):
                 par, _, _ = _get_submodules(self.model, name)
                 parents.append(par)
         if len(parents) < config.adapter_layers:
@@ -93,8 +92,10 @@ class AdaptionPromptModel(nn.Module):
         if config.inference_mode:
             _freeze_adapter(self.model, adapter_name)
 
-    def set_adapter(self, adapter_name: str) -> None:
+    def set_adapter(self, adapter_name: str, inference_mode: bool = False) -> None:
         """Set the model to use the adapter with the given name."""
+        if inference_mode:
+            raise ValueError("inference_mode is not supported for AdaptionPromptModel.")
         if self._active_adapter == adapter_name:
             return
         if adapter_name not in self.peft_config:
@@ -116,14 +117,22 @@ class AdaptionPromptModel(nn.Module):
         self._enabled = False
         self._remove_adapted_attentions(self._active_adapter)
 
-    def _create_adapted_attentions(self, config: AdaptionPromptConfig, parents: List[nn.Module]) -> None:
+    def _create_adapted_attentions(self, config: AdaptionPromptConfig, parents: list[nn.Module]) -> None:
         """Wrap LlamaAttention modules with newly created AdaptedAttention modules."""
         for par in parents:
-            attn = AdaptedAttention(
-                model_type=self.model.config.model_type,
-                adapter_len=config.adapter_len,
-                model=getattr(par, config.target_modules),
-            )
+            if self.model.config.model_type == "gpt2":
+                attn = AdaptedAttentionGPT(
+                    model_type=self.model.config.model_type,
+                    adapter_len=config.adapter_len,
+                    model=getattr(par, config.target_modules),
+                )
+
+            else:
+                attn = AdaptedAttention(
+                    model_type=self.model.config.model_type,
+                    adapter_len=config.adapter_len,
+                    model=getattr(par, config.target_modules),
+                )
             setattr(par, config.target_modules, attn)
 
     def _set_adapted_attentions(self, adapter_name: str) -> None:

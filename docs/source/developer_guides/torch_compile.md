@@ -36,7 +36,6 @@ The following adapters were tested successfully:
 
 - AdaLoRA
 - BOFT
-- Bone
 - IA³
 - Layer Norm Tuning
 - LoHa

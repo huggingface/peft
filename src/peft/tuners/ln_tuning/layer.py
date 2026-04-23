@@ -14,12 +14,14 @@
 
 import warnings
 from copy import deepcopy
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.nn as nn
 
-from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
+
+from .config import LNTuningConfig
 
 
 class LNTuningLayer(nn.Module, BaseTunerLayer):
@@ -29,16 +31,22 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
 
     adapter_layer_names = ("ln_tuning_layers",)
 
-    def __init__(self, base_layer: nn.Module, adapter_name: str):
+    def __init__(self, base_layer: nn.Module, adapter_name: str, config: LNTuningConfig):
         super().__init__()
         self.base_layer = base_layer
         self.ln_tuning_layers = nn.ModuleDict({})
-        self.update_layer(self.base_layer, adapter_name)
+        self.update_layer(self.base_layer, adapter_name, config=config)
         self._active_adapter = adapter_name
         self.merged_adapters = []
 
-    def update_layer(self, layer: nn.Module, adapter_name: str):
+        in_features, out_features = _get_in_out_features(self.get_base_layer())
+        self.in_features = in_features
+        self.out_features = out_features
+
+    def update_layer(self, layer: nn.Module, adapter_name: str, config: LNTuningConfig, **kwargs):
+        inference_mode = config.inference_mode
         self.ln_tuning_layers[adapter_name] = deepcopy(layer)
+        self.set_adapter(adapter_name, inference_mode=inference_mode)
 
     def enable_adapters(self, enabled: bool) -> None:
         """Toggle the enabling and disabling of adapters
@@ -60,7 +68,8 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
                 layer.requires_grad_(False)
             self._disable_adapters = True
 
-    def merge(self, adapter_names: Optional[List[str]] = None):
+    def merge(self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False):
+        # note that there is no actual merging, so whether safe_merge is True or False is irrelevant
         adapter_names = check_adapters_to_merge(self, adapter_names)
         if not adapter_names:
             # no adapter to merge
@@ -99,7 +108,7 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
             if self.merged:
                 self.unmerge()
             result = self.base_layer(x, *args, **kwargs)
-        elif self.merged:
+        elif self.merged or (len(self.active_adapters) == 0):
             result = self.base_layer(x, *args, **kwargs)
         else:
             if len(self.active_adapters) != 1:

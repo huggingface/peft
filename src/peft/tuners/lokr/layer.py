@@ -13,13 +13,15 @@
 # limitations under the License.
 
 import math
-from typing import Any, Optional, Set, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from peft.tuners.lycoris_utils import LycorisLayer
+
+from .config import LoKrConfig
 
 
 class LoKrLayer(nn.Module, LycorisLayer):
@@ -49,7 +51,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
         self.lokr_t2 = nn.ParameterDict({})
 
     @property
-    def _available_adapters(self) -> Set[str]:
+    def _available_adapters(self) -> set[str]:
         return {
             *self.lokr_w1,
             *self.lokr_w1_a,
@@ -75,8 +77,8 @@ class LoKrLayer(nn.Module, LycorisLayer):
             self.lokr_w1_a[adapter_name] = nn.Parameter(torch.empty(shape[0][0], r))
             self.lokr_w1_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1][0]))
 
-        if len(shape) == 4:
-            # Conv2d
+        # Handle both Conv2d and Conv1d
+        if len(shape) == 4:  # Conv2d
             if use_w2:
                 self.lokr_w2[adapter_name] = nn.Parameter(torch.empty(shape[0][1], shape[1][1], *shape[2:]))
             elif use_effective_conv2d:
@@ -86,6 +88,18 @@ class LoKrLayer(nn.Module, LycorisLayer):
             else:
                 self.lokr_w2_a[adapter_name] = nn.Parameter(torch.empty(shape[0][1], r))
                 self.lokr_w2_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1][1] * shape[2] * shape[3]))
+        elif len(shape) == 3:  # Conv1d
+            if use_w2:
+                self.lokr_w2[adapter_name] = nn.Parameter(torch.empty(shape[0][1], shape[1][1], shape[2]))
+            elif use_effective_conv2d:  # Even for Conv1d, use the effective parameter for kernel dimension
+                # We pass (r, r, kernel_size, 1) in order to be compatible with the 2d assumptions made
+                # in make_weight_cp (only relevant for the effective conv2d case).
+                self.lokr_t2[adapter_name] = nn.Parameter(torch.empty(r, r, shape[2], 1))
+                self.lokr_w2_a[adapter_name] = nn.Parameter(torch.empty(r, shape[0][1]))  # b, 1-mode
+                self.lokr_w2_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1][1]))  # d, 2-mode
+            else:
+                self.lokr_w2_a[adapter_name] = nn.Parameter(torch.empty(shape[0][1], r))
+                self.lokr_w2_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1][1] * shape[2]))
         else:
             # Linear
             if use_w2:
@@ -148,12 +162,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
         adapter_name: str,
         r: int,
         alpha: float,
-        rank_dropout: float,
-        module_dropout: float,
-        init_weights: bool,
-        use_effective_conv2d: bool,
-        decompose_both: bool,
-        decompose_factor: int,
+        config: LoKrConfig,
         **kwargs,
     ) -> None:
         """Internal function to create lokr adapter
@@ -162,13 +171,16 @@ class LoKrLayer(nn.Module, LycorisLayer):
             adapter_name (`str`): Name for the adapter to add.
             r (`int`): Rank for the added adapter.
             alpha (`float`): Alpha for the added adapter.
-            rank_dropout (`float`): The dropout probability for rank dimension during training
-            module_dropout (`float`): The dropout probability for disabling adapter during training.
-            init_weights (`bool`): Whether to initialize adapter weights.
-            use_effective_conv2d (`bool`): Use parameter effective decomposition for Conv2d with ksize > 1.
-            decompose_both (`bool`): Perform rank decomposition of left kronecker product matrix.
-            decompose_factor (`int`): Kronecker product decomposition factor.
+            config (`LoKrConfig`): The adapter configuration for this layer.
         """
+        rank_dropout = config.rank_dropout
+        module_dropout = config.module_dropout
+        init_weights = config.init_weights
+        use_effective_conv2d = config.use_effective_conv2d
+        decompose_both = config.decompose_both
+        decompose_factor = config.decompose_factor
+        inference_mode = config.inference_mode
+
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -177,7 +189,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
         self.scaling[adapter_name] = alpha / r
         self.rank_dropout[adapter_name] = rank_dropout
         self.module_dropout[adapter_name] = module_dropout
-        self.rank_dropout_scale[adapter_name] = kwargs["rank_dropout_scale"]
+        self.rank_dropout_scale[adapter_name] = config.rank_dropout_scale
         base_layer = self.get_base_layer()
 
         # Determine shape of LoKr weights
@@ -201,7 +213,27 @@ class LoKrLayer(nn.Module, LycorisLayer):
 
             use_w1 = not (decompose_both and r < max(shape[0][0], shape[1][0]) / 2)
             use_w2 = r >= max(shape[0][1], shape[1][1]) / 2
+            # For 1x1 convolutions, disable effective_conv2d to avoid unnecessary tensor reshaping overhead.
+            # Since 1x1 convolutions are essentially pointwise operations (matrix multiplications),
+            # they can be more efficiently handled with the flattened weight representation,
+            # similar to how Linear layers work. This optimization reduces computational cost
+            # without affecting the mathematical equivalence of the operation.
             use_effective_conv2d = use_effective_conv2d and base_layer.kernel_size != (1, 1)
+        elif isinstance(base_layer, nn.Conv1d):
+            in_dim, out_dim = base_layer.in_channels, base_layer.out_channels
+            k_size = (base_layer.kernel_size[0],)  # Convert to a tuple with single element
+
+            in_m, in_n = factorization(in_dim, decompose_factor)
+            out_l, out_k = factorization(out_dim, decompose_factor)
+            shape = ((out_l, out_k), (in_m, in_n), *k_size)  # ((a, b), (c, d), k)
+
+            use_w1 = not (decompose_both and r < max(shape[0][0], shape[1][0]) / 2)
+            use_w2 = r >= max(shape[0][1], shape[1][1]) / 2
+            # For Conv1d with kernel_size=1, disable effective_conv2d for the same optimization reasons
+            # as 1x1 Conv2d. Kernel size 1 means no spatial/temporal context, making it equivalent
+            # to a Linear layer applied across the channel dimension. Using flattened representation
+            # avoids unnecessary reshaping and improves computational efficiency.
+            use_effective_conv2d = use_effective_conv2d and base_layer.kernel_size[0] != 1
         else:
             raise TypeError(f"LoKr is not implemented for base layers of type {type(base_layer).__name__}")
 
@@ -219,7 +251,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
 
         # Move new weights to device
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         # https://github.com/KohakuBlueleaf/LyCORIS/blob/e4259b870d3354a9615a96be61cb5d07455c58ea/lycoris/modules/lokr.py#L224
@@ -237,7 +269,12 @@ class LoKrLayer(nn.Module, LycorisLayer):
 
         # Make weights with Kronecker product
         weight = make_kron(w1, w2, self.scaling[adapter_name])
-        weight = weight.reshape(self.get_base_layer().weight.shape)
+
+        # Get base layer for reshaping
+        base_layer = self.get_base_layer()
+
+        # Regular reshape to match base layer shape
+        weight = weight.reshape(base_layer.weight.shape)
 
         # Perform rank dropout during training - drop rows of addition weights
         rank_dropout = self.rank_dropout[adapter_name]
@@ -283,28 +320,30 @@ class Linear(LoKrLayer):
     def __init__(
         self,
         base_layer: nn.Module,
+        adapter_name: str,
+        config: LoKrConfig,
         device: Optional[Union[str, torch.device]] = None,
         dtype: Optional[torch.dtype] = None,
-        adapter_name: str = "default",
         r: int = 0,
         alpha: float = 0.0,
-        rank_dropout: float = 0.0,
-        module_dropout: float = 0.0,
-        init_weights: bool = True,
         **kwargs,
     ):
         super().__init__(base_layer)
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, **kwargs)
+        self.update_layer(adapter_name, r, alpha, config=config, **kwargs)
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
         delta_weight = self.get_delta_weight(adapter_name)
+        input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         return F.linear(input, delta_weight)
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        return True
 
     def __repr__(self) -> str:
         rep = super().__repr__()
@@ -317,29 +356,25 @@ class Conv2d(LoKrLayer):
     def __init__(
         self,
         base_layer: nn.Module,
+        adapter_name: str,
+        config: LoKrConfig,
         device: Optional[Union[str, torch.device]] = None,
         dtype: Optional[torch.dtype] = None,
-        adapter_name: str = "default",
         r: int = 0,
         alpha: float = 0.0,
-        rank_dropout: float = 0.0,
-        module_dropout: float = 0.0,
-        use_effective_conv2d: bool = False,
-        init_weights: bool = True,
         **kwargs,
     ):
         super().__init__(base_layer)
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(
-            adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
-        )
+        self.update_layer(adapter_name, r, alpha, config=config, **kwargs)
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
         delta_weight = self.get_delta_weight(adapter_name)
+        input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
         return F.conv2d(
@@ -356,10 +391,51 @@ class Conv2d(LoKrLayer):
         return "lokr." + rep
 
 
+class Conv1d(LoKrLayer):
+    """LoKr implemented in Conv1d layer"""
+
+    def __init__(
+        self,
+        base_layer: nn.Module,
+        adapter_name: str,
+        config: LoKrConfig,
+        device: Optional[Union[str, torch.device]] = None,
+        dtype: Optional[torch.dtype] = None,
+        r: int = 0,
+        alpha: float = 0.0,
+        **kwargs,
+    ):
+        super().__init__(base_layer)
+
+        # Create adapter and set it active
+        self._active_adapter = adapter_name
+        self.update_layer(adapter_name, r, alpha, config=config, **kwargs)
+
+    def _get_delta_activations(
+        self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
+    ) -> torch.Tensor:
+        delta_weight = self.get_delta_weight(adapter_name)
+        input = self._cast_input_dtype(input, delta_weight.dtype)
+        # don't add bias here, because the bias is already included in the output of the base_layer
+        base_layer = self.get_base_layer()
+        return F.conv1d(
+            input,
+            delta_weight,
+            stride=base_layer.stride,
+            padding=base_layer.padding,
+            dilation=base_layer.dilation,
+            groups=base_layer.groups,
+        )
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "lokr." + rep
+
+
 # Below code is a direct copy from https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/lokr.py#L11
 
 
-def factorization(dimension: int, factor: int = -1) -> Tuple[int, int]:
+def factorization(dimension: int, factor: int = -1) -> tuple[int, int]:
     """Factorizes the provided number into the product of two numbers
 
     Args:

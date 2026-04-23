@@ -1,0 +1,18 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "bias": "none",
+  "exclude_modules": null,
+  "inference_mode": false,
+  "init_weights": "bat",
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "mini_r": 1,
+  "miss_dropout": 0.0,
+  "modules_to_save": null,
+  "peft_type": "MISS",
+  "r": 64,
+  "revision": null,
+  "target_modules": null,
+  "task_type": null
+}

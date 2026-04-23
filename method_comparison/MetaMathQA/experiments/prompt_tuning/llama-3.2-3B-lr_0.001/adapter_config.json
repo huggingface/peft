@@ -1,0 +1,17 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "inference_mode": false,
+  "num_attention_heads": 24,
+  "num_layers": 28,
+  "num_transformer_submodules": 1,
+  "num_virtual_tokens": 200,
+  "peft_type": "PROMPT_TUNING",
+  "prompt_tuning_init": "RANDOM",
+  "prompt_tuning_init_text": null,
+  "revision": null,
+  "task_type": "CAUSAL_LM",
+  "token_dim": 3072,
+  "tokenizer_kwargs": null,
+  "tokenizer_name_or_path": null
+}

@@ -24,11 +24,8 @@ Additionally, PEFT supports the [X-LoRA](../conceptual_guides/adapter#mixture-of
 
 This guide will show you how to quickly train an image classification model - with a low-rank decomposition method - to identify the class of food shown in an image.
 
-<Tip>
-
-Some familiarity with the general process of training an image classification model would be really helpful and allow you to focus on the low-rank decomposition methods. If you're new, we recommend taking a look at the [Image classification](https://huggingface.co/docs/transformers/tasks/image_classification) guide first from the Transformers documentation. When you're ready, come back and see how easy it is to drop PEFT in to your training!
-
-</Tip>
+> [!TIP]
+> Some familiarity with the general process of training an image classification model would be really helpful and allow you to focus on the low-rank decomposition methods. If you're new, we recommend taking a look at the [Image classification](https://huggingface.co/docs/transformers/tasks/image_classification) guide first from the Transformers documentation. When you're ready, come back and see how easy it is to drop PEFT in to your training!
 
 Before you begin, make sure you have all the necessary libraries installed.
 
@@ -150,11 +147,8 @@ model = AutoModelForImageClassification.from_pretrained(
 
 Every PEFT method requires a configuration that holds all the parameters specifying how the PEFT method should be applied. Once the configuration is setup, pass it to the [`~peft.get_peft_model`] function along with the base model to create a trainable [`PeftModel`].
 
-<Tip>
-
-Call the [`~PeftModel.print_trainable_parameters`] method to compare the number of parameters of [`PeftModel`] versus the number of parameters in the base model!
-
-</Tip>
+> [!TIP]
+> Call the [`~PeftModel.print_trainable_parameters`] method to compare the number of parameters of [`PeftModel`] versus the number of parameters in the base model!
 
 <hfoptions id="loras">
 <hfoption id="LoRA">
@@ -281,7 +275,7 @@ trainer = Trainer(
     args,
     train_dataset=train_ds,
     eval_dataset=val_ds,
-    tokenizer=image_processor,
+    processing_class=image_processor,
     data_collator=collate_fn,
 )
 trainer.train()

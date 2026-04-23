@@ -104,7 +104,7 @@ accelerate launch --config_file "configs/deepspeed_config.yaml"  train.py \
 --learning_rate 1e-4 \
 --lr_scheduler_type "cosine" \
 --weight_decay 1e-4 \
---warmup_ratio 0.0 \
+--warmup_steps 0 \
 --max_grad_norm 1.0 \
 --output_dir "llama-sft-lora-deepspeed" \
 --per_device_train_batch_size 8 \
@@ -134,7 +134,7 @@ The first thing to know is that the script uses DeepSpeed for distributed traini
 # trainer
 trainer = SFTTrainer(
     model=model,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,
@@ -195,7 +195,7 @@ tpu_use_sudo: false
 use_cpu: false
 ```
 
-Launch command is given below which is available at [run_peft_qlora_deepspeed_stage3.sh](https://github.com/huggingface/peft/blob/main/examples/sft/run_peft_deepspeed.sh):
+Launch command is given below which is available at [run_peft_qlora_deepspeed_stage3.sh](https://github.com/huggingface/peft/blob/main/examples/sft/run_peft_qlora_deepspeed_stage3.sh):
 ```
 accelerate launch --config_file "configs/deepspeed_config_z3_qlora.yaml"  train.py \
 --seed 100 \
@@ -220,7 +220,7 @@ accelerate launch --config_file "configs/deepspeed_config_z3_qlora.yaml"  train.
 --learning_rate 1e-4 \
 --lr_scheduler_type "cosine" \
 --weight_decay 1e-4 \
---warmup_ratio 0.0 \
+--warmup_steps 0 \
 --max_grad_norm 1.0 \
 --output_dir "llama-sft-qlora-dsz3" \
 --per_device_train_batch_size 2 \
@@ -263,11 +263,11 @@ model = AutoModelForCausalLM.from_pretrained(
     quantization_config=bnb_config,
     trust_remote_code=True,
     attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
-+   torch_dtype=quant_storage_dtype or torch.float32,
++   dtype=quant_storage_dtype or torch.float32,
 )
 ```
 
-Notice that `torch_dtype` for `AutoModelForCausalLM` is same as the `bnb_4bit_quant_storage` data type. That's it. Everything else is handled by Trainer and TRL.
+Notice that `dtype` for `AutoModelForCausalLM` is same as the `bnb_4bit_quant_storage` data type. That's it. Everything else is handled by Trainer and TRL.
 
 ## Memory usage
 
@@ -276,11 +276,8 @@ In the above example, the memory consumed per GPU is **36.6 GB**. Therefore, wha
 # Use PEFT and DeepSpeed with ZeRO3 and CPU Offloading for finetuning large models on a single GPU
 This section of guide will help you learn how to use our DeepSpeed [training script](https://github.com/huggingface/peft/blob/main/examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py). You'll configure the script to train a large model for conditional generation with ZeRO-3 and CPU Offload.
 
-<Tip>
-
-💡 To help you get started, check out our example training scripts for [causal language modeling](https://github.com/huggingface/peft/blob/main/examples/causal_language_modeling/peft_lora_clm_accelerate_ds_zero3_offload.py) and [conditional generation](https://github.com/huggingface/peft/blob/main/examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py). You can adapt these scripts for your own applications or even use them out of the box if your task is similar to the one in the scripts.
-
-</Tip>
+> [!TIP]
+> 💡 To help you get started, check out our example training scripts for [causal language modeling](https://github.com/huggingface/peft/blob/main/examples/causal_language_modeling/peft_lora_clm_accelerate_ds_zero3_offload.py) and [conditional generation](https://github.com/huggingface/peft/blob/main/examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py). You can adapt these scripts for your own applications or even use them out of the box if your task is similar to the one in the scripts.
 
 ## Configuration
 
@@ -338,11 +335,8 @@ Let's dive a little deeper into the script so you can see what's going on, and u
 
 Within the [`main`](https://github.com/huggingface/peft/blob/2822398fbe896f25d4dac5e468624dc5fd65a51b/examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py#L103) function, the script creates an [`~accelerate.Accelerator`] class to initialize all the necessary requirements for distributed training.
 
-<Tip>
-
-💡 Feel free to change the model and dataset inside the `main` function. If your dataset format is different from the one in the script, you may also need to write your own preprocessing function. 
-
-</Tip>
+> [!TIP]
+> 💡 Feel free to change the model and dataset inside the `main` function. If your dataset format is different from the one in the script, you may also need to write your own preprocessing function.
 
 The script also creates a configuration for the 🤗 PEFT method you're using, which in this case, is LoRA. The [`LoraConfig`] specifies the task type and important parameters such as the dimension of the low-rank matrices, the matrices scaling factor, and the dropout probability of the LoRA layers. If you want to use a different 🤗 PEFT method, make sure you replace `LoraConfig` with the appropriate [class](../package_reference/tuners).
 
@@ -438,3 +432,18 @@ dataset['train'][label_column][:10]=['no complaint', 'no complaint', 'complaint'
 1. Merging when using PEFT and DeepSpeed is currently unsupported and will raise error.
 2. When using CPU offloading, the major gains from using PEFT to shrink the optimizer states and gradients to that of the adapter weights would be realized on CPU RAM and there won't be savings with respect to GPU memory.
 3. DeepSpeed Stage 3 and qlora when used with CPU offloading leads to more GPU memory usage when compared to disabling CPU offloading. 
+
+> [!TIP]
+> 💡 When you have code that requires merging (and unmerging) of weights, try to manually collect the parameters with DeepSpeed Zero-3 beforehand:
+>
+> ```python
+> import deepspeed
+>
+> is_ds_zero_3 = ... # check if Zero-3
+>
+> with deepspeed.zero.GatheredParameters(list(model.parameters()), enabled= is_ds_zero_3):
+>     model.merge_adapter()
+>     # do whatever is needed, then unmerge in the same context if unmerging is required
+>     ...
+>     model.unmerge_adapter()
+> ```

@@ -84,7 +84,7 @@ accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
 --learning_rate 1e-4 \
 --lr_scheduler_type "cosine" \
 --weight_decay 1e-4 \
---warmup_ratio 0.0 \
+--warmup_steps 0 \
 --max_grad_norm 1.0 \
 --output_dir "llama-sft-lora-fsdp" \
 --per_device_train_batch_size 8 \
@@ -114,7 +114,7 @@ The first thing to know is that the script uses FSDP for distributed training as
 # trainer
 trainer = SFTTrainer(
     model=model,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,
@@ -221,7 +221,7 @@ accelerate launch --config_file "configs/fsdp_config_qlora.yaml"  train.py \
 --learning_rate 1e-4 \
 --lr_scheduler_type "cosine" \
 --weight_decay 1e-4 \
---warmup_ratio 0.0 \
+--warmup_steps 0 \
 --max_grad_norm 1.0 \
 --output_dir "llama-sft-qlora-fsdp" \
 --per_device_train_batch_size 2 \
@@ -264,11 +264,11 @@ model = AutoModelForCausalLM.from_pretrained(
     quantization_config=bnb_config,
     trust_remote_code=True,
     attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
-+   torch_dtype=quant_storage_dtype or torch.float32,
++   dtype=quant_storage_dtype or torch.float32,
 )
 ```
 
-Notice that `torch_dtype` for `AutoModelForCausalLM` is same as the `bnb_4bit_quant_storage` data type. That's it. Everything else is handled by Trainer and TRL.
+Notice that `dtype` for `AutoModelForCausalLM` is same as the `bnb_4bit_quant_storage` data type. That's it. Everything else is handled by Trainer and TRL.
 
 ## Memory usage
 

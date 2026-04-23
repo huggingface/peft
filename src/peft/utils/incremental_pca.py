@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 
@@ -125,7 +125,7 @@ class IncrementalPCA:
     @staticmethod
     def _incremental_mean_and_var(
         X, last_mean, last_variance, last_sample_count
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Computes the incremental mean and variance for the data `X`.
 
@@ -180,7 +180,7 @@ class IncrementalPCA:
         return updated_mean, updated_variance, updated_sample_count
 
     @staticmethod
-    def _svd_flip(u, v, u_based_decision=True) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _svd_flip(u, v, u_based_decision=True) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Adjusts the signs of the singular vectors from the SVD decomposition for deterministic output.
 

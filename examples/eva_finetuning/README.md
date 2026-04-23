@@ -1,5 +1,5 @@
 # EVA: Explained Variance Adaptation
-## Introduction ([Paper](https://arxiv.org/abs/2410.07170), [code](https://github.com/ml-jku/EVA))
+## Introduction ([Paper](https://huggingface.co/papers/2410.07170), [code](https://github.com/ml-jku/EVA))
 Explained Variance Adaptation (EVA) is a novel initialization method for LoRA style adapters which initializes adapter weights in a data driven manner and adaptively allocates ranks according to the variance they explain. EVA improves average performance on a multitude of tasks across various domains, such as Language generation and understanding, Image classification, and Decision Making.
 
 The abstract from the paper is:
@@ -60,8 +60,9 @@ peft_config = LoraConfig(
     eva_config=eva_config
 )
 
-# move model to GPU
-model = model.cuda()
+# move model to accelerator
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+model = model.to(device)
 
 # to optimize memory usage during EVA initialization, set low_cpu_mem_usage=True
 peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
@@ -90,7 +91,7 @@ In some cases you might just want to get the state_dict after EVA initialization
 - you want to precompute and store the state_dict for different downstream tasks.
 - you need to quantize the model for finetuning but want to perform EVA initialization with model weights in full/half precision.
 - you do not intend to use a peft model for LoRA finetuning.
-- you would like to leverage multiple GPUs for EVA initialization. (At the moment this is not directly supported by `initialize_lora_eva_weights`)
+- you would like to leverage multiple accelerators for EVA initialization. (At the moment this is not directly supported by `initialize_lora_eva_weights`)
 
 You can do this by calling `get_eva_state_dict` directly (you only need to pass `peft_config` if `model` is not a PeftModel):
 ```python
@@ -103,13 +104,13 @@ Later you can load the state_dict into a `PeftModel` by using the `eva_state_dic
 initialize_lora_eva_weights(peft_model, eva_state_dict=eva_state_dict)
 ```
 
-## Leveraging multiple GPUs
+## Leveraging multiple accelerators
 
-EVA initialization can be parallelized across multiple GPUs. In this case inputs from multiple GPUs are gathered before computing the SVD for the batch. This requires that the model is wrapped in a `torch.nn.DataParallel` or `torch.nn.DistributedDataParallel` class. An example of how to use this can be found in [eva_finetuning_multi_gpu.py](https://github.com/huggingface/peft/blob/main/examples/eva_finetuning/eva_finetuning_multi_gpu.py).
+EVA initialization can be parallelized across multiple accelerators. In this case inputs from multiple accelerators are gathered before computing the SVD for the batch. This requires that the model is wrapped in a `torch.nn.DataParallel` or `torch.nn.DistributedDataParallel` class. An example of how to use this can be found in [eva_finetuning_multi_accelerator.py](https://github.com/huggingface/peft/blob/main/examples/eva_finetuning/eva_finetuning_multi_accelerator.py).
 
 ## Customizing EVA
 
-By default, EVA is designed to work with standard transformer language models. However we integrated three different paramters which can be used to customize EVA for other types of models.
+By default, EVA is designed to work with standard transformer language models. However we integrated three different parameters which can be used to customize EVA for other types of models.
 1. `forward_fn`: Defines how the forward pass during EVA initialization should be computed.
 2. `prepare_model_inputs_fn`: Can be used if it is necessary to use information contained in the original model_input to prepare the input for SVD in individual layers.
 3. `prepare_layer_inputs_fn`: Defines how layer inputs should be prepared for SVD.

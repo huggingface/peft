@@ -1,0 +1,9 @@
+{
+  "optimizer_type": "lora-fa",
+  "optimizer_kwargs": {
+    "r": 32,
+    "lora_alpha": 64,
+    "lr": 1e-4,
+    "weight_decay": 0.1
+  }
+}

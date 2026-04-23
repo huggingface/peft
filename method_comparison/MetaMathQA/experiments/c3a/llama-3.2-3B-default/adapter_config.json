@@ -1,0 +1,21 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "bias": "none",
+  "exclude_modules": null,
+  "fan_in_fan_out": false,
+  "inference_mode": false,
+  "init_weights": false,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "modules_to_save": null,
+  "block_size": 64,
+  "block_size_pattern": {},
+  "peft_type": "C3A",
+  "revision": null,
+  "target_modules": [
+    "v_proj",
+    "q_proj"
+  ],
+  "task_type": null
+}

@@ -14,13 +14,13 @@
 
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional, Union
 
 import torch
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.attention_processor import AttentionProcessor, AttnProcessor
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.unet_2d_blocks import (
+from diffusers.models.unets.unet_2d_blocks import (
     CrossAttnDownBlock2D,
     DownBlock2D,
 )
@@ -34,13 +34,13 @@ logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 @dataclass
 class ControlNetOutput(BaseOutput):
-    down_block_res_samples: Tuple[torch.Tensor]
+    down_block_res_samples: tuple[torch.Tensor]
     mid_block_res_sample: torch.Tensor
 
 
 class ControlNetConditioningEmbedding(nn.Module):
     """
-    Quoting from https://arxiv.org/abs/2302.05543: "Stable Diffusion uses a pre-processing method similar to VQ-GAN
+    Quoting from https://huggingface.co/papers/2302.05543: "Stable Diffusion uses a pre-processing method similar to VQ-GAN
     [11] to convert the entire dataset of 512 × 512 images into smaller 64 × 64 “latent images” for stabilized
     training. This requires ControlNets to convert image-based conditions to 64 × 64 feature space to match the
     convolution size. We use a tiny network E(·) of four convolution layers with 4 × 4 kernels and 2 × 2 strides
@@ -52,7 +52,7 @@ class ControlNetConditioningEmbedding(nn.Module):
         self,
         conditioning_embedding_channels: int,
         conditioning_channels: int = 3,
-        block_out_channels: Tuple[int] = (16, 32, 96, 256),
+        block_out_channels: tuple[int] = (16, 32, 96, 256),
     ):
         super().__init__()
 
@@ -92,7 +92,7 @@ class ControlNetModel(ModelMixin, ConfigMixin):
         in_channels: int = 4,
         out_channels: int = 320,
         controlnet_conditioning_channel_order: str = "rgb",
-        conditioning_embedding_out_channels: Optional[Tuple[int]] = (16, 32, 96, 256),
+        conditioning_embedding_out_channels: Optional[tuple[int]] = (16, 32, 96, 256),
     ):
         super().__init__()
 
@@ -104,7 +104,7 @@ class ControlNetModel(ModelMixin, ConfigMixin):
 
     @property
     # Copied from diffusers.models.unet_2d_condition.UNet2DConditionModel.attn_processors
-    def attn_processors(self) -> Dict[str, AttentionProcessor]:
+    def attn_processors(self) -> dict[str, AttentionProcessor]:
         r"""
         Returns:
             `dict` of attention processors: A dictionary containing all attention processors used in the model with
@@ -113,7 +113,7 @@ class ControlNetModel(ModelMixin, ConfigMixin):
         # set recursively
         processors = {}
 
-        def fn_recursive_add_processors(name: str, module: torch.nn.Module, processors: Dict[str, AttentionProcessor]):
+        def fn_recursive_add_processors(name: str, module: torch.nn.Module, processors: dict[str, AttentionProcessor]):
             if hasattr(module, "set_processor"):
                 processors[f"{name}.processor"] = module.processor
 
@@ -128,7 +128,7 @@ class ControlNetModel(ModelMixin, ConfigMixin):
         return processors
 
     # Copied from diffusers.models.unet_2d_condition.UNet2DConditionModel.set_attn_processor
-    def set_attn_processor(self, processor: Union[AttentionProcessor, Dict[str, AttentionProcessor]]):
+    def set_attn_processor(self, processor: Union[AttentionProcessor, dict[str, AttentionProcessor]]):
         r"""
         Parameters:
             `processor (`dict` of `AttentionProcessor` or `AttentionProcessor`):
@@ -220,7 +220,7 @@ class ControlNetModel(ModelMixin, ConfigMixin):
         # Recursively walk through all the children.
         # Any children which exposes the set_attention_slice method
         # gets the message
-        def fn_recursive_set_attention_slice(module: torch.nn.Module, slice_size: List[int]):
+        def fn_recursive_set_attention_slice(module: torch.nn.Module, slice_size: list[int]):
             if hasattr(module, "set_attention_slice"):
                 module.set_attention_slice(slice_size.pop())
 
@@ -238,7 +238,7 @@ class ControlNetModel(ModelMixin, ConfigMixin):
     def forward(
         self,
         controlnet_cond: torch.FloatTensor,
-    ) -> Union[ControlNetOutput, Tuple]:
+    ) -> Union[ControlNetOutput, tuple]:
         # check channel order
         channel_order = self.config.controlnet_conditioning_channel_order
 

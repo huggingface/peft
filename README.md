@@ -39,38 +39,43 @@ pip install peft
 Prepare a model for training with a PEFT method such as LoRA by wrapping the base model and PEFT configuration with `get_peft_model`. For the bigscience/mt0-large model, you're only training 0.19% of the parameters!
 
 ```python
-from transformers import AutoModelForSeq2SeqLM
-from peft import get_peft_config, get_peft_model, LoraConfig, TaskType
-model_name_or_path = "bigscience/mt0-large"
-tokenizer_name_or_path = "bigscience/mt0-large"
+from transformers import AutoModelForCausalLM
+from peft import LoraConfig, TaskType, get_peft_model
 
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+model_id = "Qwen/Qwen2.5-3B-Instruct"
+model = AutoModelForCausalLM.from_pretrained(model_id, device_map=device)
 peft_config = LoraConfig(
-    task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1
+    r=16,
+    lora_alpha=32,
+    task_type=TaskType.CAUSAL_LM,
+    # target_modules=["q_proj", "v_proj", ...]  # optionally indicate target modules
 )
-
-model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
 model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
-"trainable params: 2359296 || all params: 1231940608 || trainable%: 0.19151053100118282"
+# prints: trainable params: 3,686,400 || all params: 3,089,625,088 || trainable%: 0.1193
+
+# now perform training on your dataset, e.g. using transformers Trainer, then save the model
+model.save_pretrained("qwen2.5-3b-lora")
 ```
 
 To load a PEFT model for inference:
 
-```py
-from peft import AutoPeftModelForCausalLM
-from transformers import AutoTokenizer
-import torch
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import PeftModel
 
-model = AutoPeftModelForCausalLM.from_pretrained("ybelkada/opt-350m-lora").to("cuda")
-tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+model_id = "Qwen/Qwen2.5-3B-Instruct"
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+model = AutoModelForCausalLM.from_pretrained(model_id, device_map=device)
+model = PeftModel.from_pretrained(model, "qwen2.5-3b-lora")
 
-model.eval()
 inputs = tokenizer("Preheat the oven to 350 degrees and place the cookie dough", return_tensors="pt")
+outputs = model.generate(**inputs.to(device), max_new_tokens=50)
+print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 
-outputs = model.generate(input_ids=inputs["input_ids"].to("cuda"), max_new_tokens=50)
-print(tokenizer.batch_decode(outputs, skip_special_tokens=True)[0])
-
-"Preheat the oven to 350 degrees and place the cookie dough in the center of the oven. In a large bowl, combine the flour, baking powder, baking soda, salt, and cinnamon. In a separate bowl, combine the egg yolks, sugar, and vanilla."
+# prints something like: Preheat the oven to 350 degrees and place the cookie dough in a baking dish [...]
 ```
 
 ## Why you should use PEFT
@@ -124,6 +129,32 @@ The iterative diffusion process consumes a lot of memory which can make it diffi
 > [!TIP]
 > Take a look at the [examples/lora_dreambooth/train_dreambooth.py](examples/lora_dreambooth/train_dreambooth.py) training script to try training your own Stable Diffusion model with LoRA, and play around with the [smangrul/peft-lora-sd-dreambooth](https://huggingface.co/spaces/smangrul/peft-lora-sd-dreambooth) Space which is running on a T4 instance. Learn more about the PEFT integration in Diffusers in this [tutorial](https://huggingface.co/docs/peft/main/en/tutorial/peft_integrations#diffusers).
 
+### Transformers
+
+PEFT is directly integrated with [Transformers](https://huggingface.co/docs/transformers/main/en/peft). After loading a model, call `add_adapter` to add a new PEFT adapter to the model:
+
+```python
+from peft import LoraConfig
+model = ...  # transformers model
+peft_config = LoraConfig(...)
+model.add_adapter(lora_config, adapter_name="lora_1")
+```
+
+To load a trained PEFT adapter, call `load_adapter`:
+
+```python
+model = ...  # transformers model
+model.load_adapter(<path-to-adapter>, adapter_name="lora_1")
+```
+
+And to switch between different adapters, call `set_adapter`:
+
+```python
+model.set_adapter("lora_2")
+```
+
+The Transformers integration doesn't include all the functionalities offered in PEFT, such as methods for merging the adapter into the base model.
+
 ### Accelerate
 
 [Accelerate](https://huggingface.co/docs/accelerate/index) is a library for distributed training and inference on various training setups and hardware (GPUs, TPUs, Apple Silicon, etc.). PEFT models work with Accelerate out of the box, making it really convenient to train really large models or use them for inference on consumer hardware with limited resources.
@@ -150,8 +181,8 @@ To use 🤗 PEFT in your publication, please cite it by using the following BibT
 
 ```bibtex
 @Misc{peft,
-  title =        {PEFT: State-of-the-art Parameter-Efficient Fine-Tuning methods},
-  author =       {Sourab Mangrulkar and Sylvain Gugger and Lysandre Debut and Younes Belkada and Sayak Paul and Benjamin Bossan},
+  title =        {{PEFT}: State-of-the-art Parameter-Efficient Fine-Tuning methods},
+  author =       {Sourab Mangrulkar and Sylvain Gugger and Lysandre Debut and Younes Belkada and Sayak Paul and Benjamin Bossan and Marian Tietz},
   howpublished = {\url{https://github.com/huggingface/peft}},
   year =         {2022}
 }

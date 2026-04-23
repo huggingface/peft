@@ -33,6 +33,13 @@ Note that this method does not add tokens for you, you have to add tokens to the
 embedding matrix of the model accordingly. This method will only re-train the embeddings for the tokens you specify.
 This method can also be used in conjunction with LoRA layers! See [the LoRA developer guide](../developer_guides/lora#efficiently-train-tokens-alongside-lora).
 
+> [!TIP]
+> Saving the model with [`~PeftModel.save_pretrained`] or retrieving the state dict using
+> [`get_peft_model_state_dict`] when adding new tokens may save the full embedding matrix instead of only the difference
+> as a precaution because the embedding matrix was resized. To save space you can disable this behavior by setting
+> `save_embedding_layers=False` when calling `save_pretrained`. This is safe to do as long as you don't modify the
+> embedding matrix through other means as well, as such changes will be not tracked by trainable tokens.
+
 ## TrainableTokensConfig
 
 [[autodoc]] tuners.trainable_tokens.config.TrainableTokensConfig

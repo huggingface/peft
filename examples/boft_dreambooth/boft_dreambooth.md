@@ -18,9 +18,9 @@ rendered properly in your Markdown viewer.
 
 This guide demonstrates how to use BOFT, an orthogonal fine-tuning method, to fine-tune Dreambooth with either `stabilityai/stable-diffusion-2-1` or `runwayml/stable-diffusion-v1-5` model.
 
-By using BOFT from 🤗 PEFT, we can significantly reduce the number of trainable parameters while still achieving impressive results in various fine-tuning tasks across different foundation models. BOFT enhances model efficiency by integrating full-rank orthogonal matrices with a butterfly structure into specific model blocks, such as attention blocks, mirroring the approach used in LoRA. During fine-tuning, only these inserted matrices are trained, leaving the original model parameters untouched. During inference, the trainable BOFT paramteres can be merged into the original model, eliminating any additional computational costs.
+By using BOFT from 🤗 PEFT, we can significantly reduce the number of trainable parameters while still achieving impressive results in various fine-tuning tasks across different foundation models. BOFT enhances model efficiency by integrating full-rank orthogonal matrices with a butterfly structure into specific model blocks, such as attention blocks, mirroring the approach used in LoRA. During fine-tuning, only these inserted matrices are trained, leaving the original model parameters untouched. During inference, the trainable BOFT parameters can be merged into the original model, eliminating any additional computational costs.
 
-As a member of the **orthogonal finetuning** class, BOFT presents a systematic and principled method for fine-tuning. It possesses several unique properties and has demonstrated superior performance compared to LoRA in a variety of scenarios. For further details on BOFT, please consult the [PEFT's GitHub repo's concept guide OFT](https://https://huggingface.co/docs/peft/index), the [original BOFT paper](https://arxiv.org/abs/2311.06243) and the [original OFT paper](https://arxiv.org/abs/2306.07280).
+As a member of the **orthogonal finetuning** class, BOFT presents a systematic and principled method for fine-tuning. It possesses several unique properties and has demonstrated superior performance compared to LoRA in a variety of scenarios. For further details on BOFT, please consult the [PEFT's GitHub repo's concept guide OFT](https://https://huggingface.co/docs/peft/index), the [original BOFT paper](https://huggingface.co/papers/2311.06243) and the [original OFT paper](https://huggingface.co/papers/2306.07280).
 
 In this guide we provide a Dreambooth fine-tuning script that is available in [PEFT's GitHub repo examples](https://github.com/huggingface/peft/tree/main/examples/boft_dreambooth). This implementation is adapted from [peft's lora_dreambooth](https://github.com/huggingface/peft/tree/main/examples/lora_dreambooth). You can try it out and finetune on your custom images.
 
@@ -40,11 +40,22 @@ cd peft/examples/boft_dreambooth
 
 Set up your environment: install PEFT, and all the required libraries. At the time of writing this guide we recommend installing PEFT from source. The following environment setup should work on A100 and H100:
 
+### CUDA
 ```bash
 conda create --name peft python=3.10
 conda activate peft
 conda install pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=11.8 -c pytorch -c nvidia
 conda install xformers -c xformers
+pip install -r requirements.txt
+pip install git+https://github.com/huggingface/peft
+```
+The follwing environment setuo is validated work on Intel XPU:
+
+### Intel XPU
+```bash
+conda create --name peft python=3.10
+conda activate peft
+pip install pip install torch==2.8.0.dev20250615+xpu torchvision==0.23.0.dev20250615+xpu torchaudio==2.8.0.dev20250615+xpu --index-url https://download.pytorch.org/whl/nightly/xpu --no-cache-dir
 pip install -r requirements.txt
 pip install git+https://github.com/huggingface/peft
 ```
@@ -92,10 +103,10 @@ To learn more about DreamBooth fine-tuning with prior-preserving loss, check out
 Launch the training script with `accelerate` and pass hyperparameters, as well as LoRa-specific arguments to it such as:
 
 - `use_boft`: Enables BOFT in the training script.
-- `boft_block_size`: the BOFT matrix block size across different layers, expressed in `int`. Smaller block size results in sparser update matrices with fewer trainable paramters. **Note**, please choose it to be dividable to most layer `in_features` dimension, e.g., 4, 8, 16. Also, you can only specify either `boft_block_size` or `boft_block_num`, but not both simultaneously, because `boft_block_size` x `boft_block_num` = layer dimension.
-- `boft_block_num`: the number of BOFT matrix blocks across different layers, expressed in `int`. Fewer blocks result in sparser update matrices with fewer trainable paramters. **Note**, please choose it to be dividable to most layer `in_features` dimension, e.g., 4, 8, 16. Also, you can only specify either `boft_block_size` or `boft_block_num`, but not both simultaneously, because `boft_block_size` x `boft_block_num` = layer dimension.
-- `boft_n_butterfly_factor`: the number of butterfly factors. **Note**, for `boft_n_butterfly_factor=1`, BOFT is the same as vanilla OFT, for `boft_n_butterfly_factor=2`, the effective block size of OFT becomes twice as big and the number of blocks become half.
-- `bias`: specify if the `bias` paramteres should be traind. Can be `none`, `all` or `boft_only`.
+- `boft_block_size`: the BOFT matrix block size across different layers, expressed in `int`. Smaller block size results in sparser update matrices with fewer trainable parameters. **Note**, please choose it to be dividable to most layer `in_features` dimension, e.g., 4, 8, 16. Also, you can only specify either `boft_block_size` or `boft_block_num`, but not both simultaneously, because `boft_block_size` x `boft_block_num` = layer dimension.
+- `boft_block_num`: the number of BOFT matrix blocks across different layers, expressed in `int`. Fewer blocks result in sparser update matrices with fewer trainable parameters. **Note**, please choose it to be dividable to most layer `in_features` dimension, e.g., 4, 8, 16. Also, you can only specify either `boft_block_size` or `boft_block_num`, but not both simultaneously, because `boft_block_size` x `boft_block_num` = layer dimension.
+- `boft_n_butterfly_factor`: the number of butterfly factors. **Note**, for `boft_n_butterfly_factor=1`, BOFT is the same as vanilla OFT, for `boft_n_butterfly_factor=2`, the effective block size of OFT becomes twice as big and the number of blocks becomes half.
+- `bias`: specify if the `bias` parameters should be trained. Can be `none`, `all` or `boft_only`.
 - `boft_dropout`: specify the probability of multiplicative dropout.
 
 Here's what the full set of script arguments may look like:

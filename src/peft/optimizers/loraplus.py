@@ -35,7 +35,7 @@ def create_loraplus_optimizer(
     """
     Creates a LoraPlus optimizer.
 
-    Efficient Low Rank Adaptation of Large Models: https://arxiv.org/abs/2402.12354
+    Efficient Low Rank Adaptation of Large Models: https://huggingface.co/papers/2402.12354
 
     Reference: https://github.com/nikhil-ghosh-berkeley/loraplus/
 

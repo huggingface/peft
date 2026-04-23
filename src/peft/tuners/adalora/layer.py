@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import warnings
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import packaging
 import torch
@@ -23,6 +23,8 @@ from torch import nn
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import check_adapters_to_merge
 from peft.utils import transpose
+
+from .config import AdaLoraConfig
 
 
 if packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.33.0"):
@@ -45,7 +47,10 @@ class AdaLoraLayer(LoraLayer):
         self.lora_B = nn.ParameterDict({})
         self.ranknum = nn.ParameterDict({})
 
-    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
+    def update_layer(self, adapter_name: str, r: int, lora_alpha: int, config: AdaLoraConfig, **kwargs) -> None:
+        lora_dropout = config.lora_dropout
+        init_lora_weights = config.init_lora_weights
+        inference_mode = config.inference_mode
         if r < 0:
             # note: r == 0 is allowed for AdaLora, see #1539
             raise ValueError(f"`r` should be a positive integer or 0, but the value passed is {r}")
@@ -74,7 +79,7 @@ class AdaLoraLayer(LoraLayer):
             self.reset_lora_parameters(adapter_name)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_lora_parameters(self, adapter_name):
         if adapter_name in self.lora_A.keys():
@@ -89,11 +94,9 @@ class SVDLinear(nn.Module, AdaLoraLayer):
         self,
         base_layer: nn.Module,
         adapter_name: str,
+        config: AdaLoraConfig,
         r: int = 0,
         lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
-        fan_in_fan_out: bool = False,
-        init_lora_weights: bool = True,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -101,11 +104,11 @@ class SVDLinear(nn.Module, AdaLoraLayer):
         # Freezing the pre-trained weight matrix
         self.get_base_layer().weight.requires_grad = False
 
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+        self.update_layer(adapter_name, r, lora_alpha, config=config)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import warnings
-from typing import Any, List, Optional, Union
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -21,6 +21,9 @@ import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.utils.other import transpose
+
+from .config import FourierFTConfig
 
 
 class FourierFTLayer(BaseTunerLayer):
@@ -51,7 +54,12 @@ class FourierFTLayer(BaseTunerLayer):
         else:
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
-    def update_layer(self, adapter_name, n_frequency, scaling, init_weights, random_loc_seed):
+    def update_layer(self, adapter_name: str, n_frequency: int, config: FourierFTConfig, **kwargs):
+        scaling = config.scaling
+        init_weights = config.init_weights
+        random_loc_seed = config.random_loc_seed
+        inference_mode = config.inference_mode
+
         if n_frequency <= 0:
             raise ValueError(f"`n_frequency` should be a positive integer value but the value passed is {n_frequency}")
         if n_frequency > self.in_features * self.out_features:
@@ -76,7 +84,7 @@ class FourierFTLayer(BaseTunerLayer):
             self.reset_fourier_parameters(adapter_name)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     @torch.no_grad()
     def reset_fourier_parameters(self, adapter_name):
@@ -84,12 +92,13 @@ class FourierFTLayer(BaseTunerLayer):
             nn.init.zeros_(self.fourierft_spectrum[adapter_name])
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
+        # careful: ifft2 does not work with float16 or bfloat16
         spectrum = self.fourierft_spectrum[adapter]
         indices = self.indices[adapter].to(spectrum.device)
-        dense_spectrum = torch.zeros(self.out_features, self.in_features, device=spectrum.device, dtype=spectrum.dtype)
-        dense_spectrum[indices[0, :], indices[1, :]] = spectrum
+        dense_spectrum = torch.zeros(self.out_features, self.in_features, device=spectrum.device)
+        dense_spectrum[indices[0, :], indices[1, :]] = spectrum.float()
         delta_weight = torch.fft.ifft2(dense_spectrum).real * self.fourierft_scaling[adapter]
-        return delta_weight
+        return delta_weight.to(spectrum.dtype)
 
 
 class FourierFTLinear(nn.Module, FourierFTLayer):
@@ -98,20 +107,17 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
         self,
         base_layer,
         adapter_name: str,
+        config: FourierFTConfig,
         n_frequency: int = 1000,
-        scaling: float = 150.0,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-        init_weights: Union[bool, str] = False,
-        random_loc_seed: int = 777,
         **kwargs,
     ) -> None:
         super().__init__()
         FourierFTLayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, n_frequency, scaling, init_weights, random_loc_seed)
+        self.update_layer(adapter_name, n_frequency, config=config)
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -136,7 +142,7 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weights = base_layer.weight.data.clone()
-                    orig_weights += self.get_delta_weight(active_adapter)
+                    orig_weights += transpose(self.get_delta_weight(active_adapter), self.fan_in_fan_out)
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
@@ -145,7 +151,7 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
 
                     base_layer.weight.data = orig_weights
                 else:
-                    base_layer.weight.data += self.get_delta_weight(active_adapter)
+                    base_layer.weight.data += transpose(self.get_delta_weight(active_adapter), self.fan_in_fan_out)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -158,10 +164,9 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.fourierft_spectrum.keys():
-                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
-
-    def get_delta_weight(self, adapter) -> torch.Tensor:
-        return super().get_delta_weight(adapter)
+                self.get_base_layer().weight.data -= transpose(
+                    self.get_delta_weight(active_adapter), self.fan_in_fan_out
+                )
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
@@ -184,6 +189,13 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
 
         result = result.to(previous_dtype)
         return result
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        if isinstance(self.get_base_layer(), Conv1D):
+            # get_delta_weight does not transpose Conv1D because it is used in forward, therefore, it has the wrong
+            # shape for conversion
+            return False
+        return True
 
     def __repr__(self) -> str:
         rep = super().__repr__()

@@ -21,7 +21,8 @@ from types import MethodType
 from torch import nn
 
 from .peft_model import PeftConfig, PeftModel
-from .tuners.lora import LoraLayer
+from .tuners.lora import LoraLayer, dora
+from .tuners.tuners_utils import BaseTunerLayer
 
 
 def update_forward_signature(model: PeftModel) -> None:
@@ -161,9 +162,9 @@ def rescale_adapter_scale(model, multiplier):
     transformers and diffusers models that have directly loaded LoRA adapters.
 
     For LoRA, applying this context manager with multiplier in [0, 1] is strictly equivalent to applying
-    [wise-ft](https://arxiv.org/abs/2109.01903) (see [#1940](https://github.com/huggingface/peft/issues/1940) for
-    details). It can improve the performances of the model if there is a distribution shiftbetween the training data
-    used for fine-tuning, and the test data used during inference.
+    [wise-ft](https://huggingface.co/papers/2109.01903) (see [#1940](https://github.com/huggingface/peft/issues/1940)
+    for details). It can improve the performances of the model if there is a distribution shiftbetween the training
+    data used for fine-tuning, and the test data used during inference.
 
     Warning: It has been reported that when using Apple's MPS backend for PyTorch, it is necessary to add a short sleep
         time after exiting the context before the scales are fully restored.
@@ -218,8 +219,6 @@ def disable_input_dtype_casting(model: nn.Module, active: bool = True):
     """
     Context manager disables input dtype casting to the dtype of the weight.
 
-    Currently specifically works for LoRA.
-
     Parameters:
         model (nn.Module):
             The model containing PEFT modules whose input dtype casting is to be adjusted.
@@ -237,7 +236,7 @@ def disable_input_dtype_casting(model: nn.Module, active: bool = True):
 
     original_values = {}
     for name, module in model.named_modules():
-        if not isinstance(module, LoraLayer):
+        if not isinstance(module, BaseTunerLayer):
             continue
         original_values[name] = module.cast_input_dtype_enabled
         module.cast_input_dtype_enabled = False
@@ -246,7 +245,51 @@ def disable_input_dtype_casting(model: nn.Module, active: bool = True):
         yield
     finally:
         for name, module in model.named_modules():
-            if not isinstance(module, LoraLayer):
+            if not isinstance(module, BaseTunerLayer):
                 continue
             if name in original_values:
                 module.cast_input_dtype_enabled = original_values[name]
+
+
+class DoraCaching:
+    """Context manager to enable DoRA caching, which improves speed of DoRA inference at the expense of memory.
+
+    With active caching, the materialized LoRA weight (B @ A) and the weight norm (base weight + LoRA weight) are
+    cached.
+
+    Even within the caching context, if the model is in training mode, caching is disabled. When the model switches to
+    training mode, the cache will be cleared.
+
+    Example:
+
+        ```py
+        >>> from peft.helpers import enable_dora_scaling
+
+        >>> model.eval()  # put in eval model for caching to work
+
+        >>> with DoraCaching():  # use as a context manager
+        ...     output = model(inputs)
+
+        >>> dora_caching = DoraCaching()
+        >>> dora_caching(enabled=True)  # permanently enable caching
+        >>> output = model(inputs)
+        >>> dora_caching(enabled=False)  # permanently disable caching
+        >>> output = model(inputs)
+        ```
+
+    """
+
+    def __init__(self, enabled: bool = True) -> None:
+        self.enabled = enabled
+        self.prev_value = None
+
+    def __enter__(self):
+        self.prev_value = dora.ENABLE_DORA_CACHING
+        dora.ENABLE_DORA_CACHING = self.enabled
+
+    def __exit__(self, type, value, traceback):
+        dora.ENABLE_DORA_CACHING = self.prev_value
+        self.prev_value = None
+
+    def __call__(self, enabled: bool = True):
+        dora.ENABLE_DORA_CACHING = enabled

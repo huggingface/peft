@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import warnings
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -24,6 +24,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.other import transpose
 
 from .._buffer_dict import BufferDict
+from .config import VeraConfig
 
 
 class VeraLayer(BaseTunerLayer):
@@ -71,10 +72,14 @@ class VeraLayer(BaseTunerLayer):
         vera_A: BufferDict,
         vera_B: BufferDict,
         r,
-        vera_dropout,
-        init_weights,
-        d_initial: float = 0.1,
+        config: VeraConfig,
+        inference_mode: bool = False,
+        **kwargs,
     ):
+        vera_dropout = config.vera_dropout
+        init_weights = config.init_weights
+        d_initial = config.d_initial
+
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         self.r[adapter_name] = r
@@ -129,7 +134,7 @@ class VeraLayer(BaseTunerLayer):
             self.reset_vera_parameters(adapter_name, d_initial=d_initial)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_vera_parameters(self, adapter_name, d_initial: float = 0.1):
         if adapter_name in self.vera_lambda_d.keys():
@@ -146,24 +151,21 @@ class Linear(nn.Linear, VeraLayer):
         vera_A: BufferDict,
         vera_B: BufferDict,
         adapter_name: str,
+        config: VeraConfig,
         r: int = 0,
-        vera_dropout: float = 0.0,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
-        init_weights: bool = True,
-        d_initial: float = 0.1,
         **kwargs,
     ) -> None:
         # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__, which should always be called
         super(nn.Linear, self).__init__()
         VeraLayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, vera_A, vera_B, r, vera_dropout, init_weights, d_initial=d_initial)
+        self.update_layer(adapter_name, vera_A, vera_B, r, config=config)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -248,11 +250,6 @@ class Linear(nn.Linear, VeraLayer):
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
 
-            # cast back the weights
-            # TODO: why?
-            self.vera_lambda_d[adapter].data = lambda_d.to(dtype)
-            self.vera_lambda_b[adapter].data = lambda_b.to(dtype)
-
         return output_tensor
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
@@ -288,6 +285,9 @@ class Linear(nn.Linear, VeraLayer):
 
         result = result.to(previous_dtype)
         return result
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        return True
 
     def __repr__(self) -> str:
         rep = super().__repr__()

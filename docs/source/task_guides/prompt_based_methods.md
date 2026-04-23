@@ -22,11 +22,8 @@ The PEFT library supports several types of prompting methods (p-tuning, prefix t
 
 This guide will show you how to train a causal language model - with a soft prompting method - to *generate a classification* for whether a tweet is a complaint or not.
 
-<Tip>
-
-Some familiarity with the general process of training a causal language model would be really helpful and allow you to focus on the soft prompting methods. If you're new, we recommend taking a look at the [Causal language modeling](https://huggingface.co/docs/transformers/tasks/language_modeling) guide first from the Transformers documentation. When you're ready, come back and see how easy it is to drop PEFT in to your training!
-
-</Tip>
+> [!TIP]
+> Some familiarity with the general process of training a causal language model would be really helpful and allow you to focus on the soft prompting methods. If you're new, we recommend taking a look at the [Causal language modeling](https://huggingface.co/docs/transformers/tasks/language_modeling) guide first from the Transformers documentation. When you're ready, come back and see how easy it is to drop PEFT in to your training!
 
 Before you begin, make sure you have all the necessary libraries installed.
 
@@ -43,7 +40,13 @@ Use the [`~datasets.load_dataset`] function to load the dataset and create a new
 ```py
 from datasets import load_dataset
 
-ds = load_dataset("ought/raft", "twitter_complaints")
+ds = load_dataset(
+    "parquet",
+    data_files={
+        "train": "hf://datasets/ought/raft@refs/convert/parquet/twitter_complaints/train/0000.parquet",
+        "test": "hf://datasets/ought/raft@refs/convert/parquet/twitter_complaints/test/0000.parquet"
+    }
+)
 
 classes = [k.replace("_", " ") for k in ds["train"].features["Label"].names]
 ds = ds.map(
@@ -140,11 +143,8 @@ model = AutoModelForCausalLM.from_pretrained("bigscience/bloomz-560m")
 
 For any PEFT method, you'll need to create a configuration which contains all the parameters that specify how the PEFT method should be applied. Once the configuration is setup, pass it to the [`~peft.get_peft_model`] function along with the base model to create a trainable [`PeftModel`].
 
-<Tip>
-
-Call the [`~PeftModel.print_trainable_parameters`] method to compare the number of trainable parameters of [`PeftModel`] versus the number of parameters in the base model!
-
-</Tip>
+> [!TIP]
+> Call the [`~PeftModel.print_trainable_parameters`] method to compare the number of trainable parameters of [`PeftModel`] versus the number of parameters in the base model!
 
 <hfoptions id="configurations">
 <hfoption id="p-tuning">
@@ -241,17 +241,14 @@ for epoch in range(num_epochs):
 
     model.eval()
     eval_loss = 0
-    eval_preds = []
+
     for step, batch in enumerate(tqdm(eval_dataloader)):
         batch = {k: v.to(device) for k, v in batch.items()}
         with torch.no_grad():
             outputs = model(**batch)
         loss = outputs.loss
         eval_loss += loss.detach().float()
-        eval_preds.extend(
-            tokenizer.batch_decode(torch.argmax(outputs.logits, -1).detach().cpu().numpy(), skip_special_tokens=True)
-        )
-
+    
     eval_epoch_loss = eval_loss / len(eval_dataloader)
     eval_ppl = torch.exp(eval_epoch_loss)
     train_epoch_loss = total_loss / len(train_dataloader)

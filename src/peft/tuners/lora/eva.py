@@ -14,12 +14,12 @@
 
 import warnings
 from collections import Counter, defaultdict
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import nullcontext
-from copy import deepcopy
+from copy import copy, deepcopy
 from functools import partial
 from itertools import cycle
-from typing import Dict, Iterable, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -46,7 +46,7 @@ class _Hook:
     def __init__(
         self,
         name: str,
-        prepare_layer_inputs_fn: Optional[callable] = None,
+        prepare_layer_inputs_fn: Optional[Callable] = None,
         gather_distributed_inputs: bool = True,
     ):
         self.name = name
@@ -116,7 +116,7 @@ class SVDHook(_Hook):
         name (str): Name of the layer to which this hook is attached.
         n_components (int): Number of principal components to compute.
         sim_thresh (Union[float, torch.Tensor]): Similarity threshold for convergence.
-        prepare_layer_inputs_fn (Optional[callable]): Function to prepare layer inputs for SVD.
+        prepare_layer_inputs_fn (Optional[Callable]): Function to prepare layer inputs for SVD.
     """
 
     def __init__(
@@ -180,7 +180,7 @@ class HashHook(_Hook):
 
     Args:
         name (str): Name of the layer to which this hook is attached. hashed_inputs (list): List of hashed inputs.
-        prepare_layer_inputs_fn (Optional[callable]): Function to prepare layer inputs for hashing.
+        prepare_layer_inputs_fn (Optional[Callable]): Function to prepare layer inputs for hashing.
     """
 
     def __init__(self, **base_class_kwargs):
@@ -290,10 +290,10 @@ def _get_eva_state_dict(
     model: torch.nn.Module,
     dataloader: Iterable,
     peft_config: Optional[LoraConfig],
-    target_module_check_fn: callable,
-    forward_fn: Optional[callable],
-    prepare_model_inputs_fn: Optional[callable],
-    prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None],
+    target_module_check_fn: Callable,
+    forward_fn: Optional[Callable],
+    prepare_model_inputs_fn: Optional[Callable],
+    prepare_layer_inputs_fn: Union[Callable, dict[str, Callable], None],
     gather_distributed_inputs: bool,
     show_progress_bar: bool,
 ) -> dict:
@@ -491,14 +491,7 @@ def _load_eva_state_dict(
     eva_state_dict: dict,
     adapter_name: str,
 ):
-    peft_config = model.peft_config[adapter_name]
-    update_layer_kwargs = {
-        "adapter_name": adapter_name,
-        "lora_dropout": peft_config.lora_dropout,
-        "use_rslora": peft_config.use_rslora,
-        "use_dora": peft_config.use_dora,
-        "lora_bias": peft_config.lora_bias,
-    }
+    peft_config = copy(model.peft_config[adapter_name])
     missing_eva_inits = []
     new_target_modules = []
     other_module_names = []
@@ -525,11 +518,13 @@ def _load_eva_state_dict(
                 if peft_config.eva_config.adjust_scaling_factors:
                     alpha *= new_rank / r
             if new_rank != r or module.lora_A[adapter_name].weight.device.type == "meta":
-                module.update_layer(r=new_rank, lora_alpha=alpha, init_lora_weights="eva", **update_layer_kwargs)
+                peft_config.init_lora_weights = "eva"
+                module.update_layer(adapter_name=adapter_name, r=new_rank, lora_alpha=alpha, config=peft_config)
             module.lora_A[adapter_name].weight.copy_(w)
             new_target_modules.append(name_in_base_model)
         else:
-            module.update_layer(r=r, lora_alpha=alpha, init_lora_weights=True, **update_layer_kwargs)
+            peft_config.init_lora_weights = True
+            module.update_layer(adapter_name=adapter_name, r=r, lora_alpha=alpha, config=peft_config)
             missing_eva_inits.append(name_in_base_model)
             new_rank = r
         # update rank pattern and alpha pattern
@@ -563,9 +558,9 @@ def get_eva_state_dict(
     model: torch.nn.Module,
     dataloader: Iterable,
     peft_config: Optional[LoraConfig] = None,
-    forward_fn: Optional[callable] = forward_fn_dict,
-    prepare_model_inputs_fn: Optional[callable] = prepare_model_inputs_fn_language_modeling,
-    prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None] = prepare_layer_inputs_fn_language_modeling,
+    forward_fn: Optional[Callable] = forward_fn_dict,
+    prepare_model_inputs_fn: Optional[Callable] = prepare_model_inputs_fn_language_modeling,
+    prepare_layer_inputs_fn: Union[Callable, dict[str, Callable], None] = prepare_layer_inputs_fn_language_modeling,
     adapter_name: str = "default",
     gather_distributed_inputs: bool = True,
     show_progress_bar: bool = True,
@@ -582,17 +577,17 @@ def get_eva_state_dict(
         dataloader (Iterable): The dataloader to use for the forward pass.
         peft_config (Optional[LoraConfig]):
             The configuration for the LoRA layers. Only required if `model` is not a PeftModel.
-        forward_fn (callable):
+        forward_fn (Callable):
             The forward function to use for the forward pass. Takes two arguments: `model` and `inputs`. Default
             behavior is `return model(**inputs)`
-        prepare_model_inputs_fn (Optional[callable]):
+        prepare_model_inputs_fn (Optional[Callable]):
             This function receives the model inputs and the peft_config and passes the output to
             `prepare_layer_inputs_fn`. Can be used to modify the input to the SVD computation based on the original
             model inputs. For example for language modeling the attention mask is used to determine which indices are
             padding tokens and should not be used for SVD. Any function defined here expects two arguments:
             `model_input` and `peft_config`. `peft.tuners.lora.eva.prepare_model_inputs_fn_language_modeling` is used
             by default.
-        prepare_layer_inputs_fn (Union[callable, Dict[str, callable], None]):
+        prepare_layer_inputs_fn (Union[Callable, Dict[str, Callable], None]):
             This function receives the layer inputs, the model inputs (potentially modified by
             `prepare_model_inputs_fn`) and the name of the layer and returns the inputs that should be used for SVD for
             that particular layer. Any custom function defined here expects three arguments: `layer_input`,
@@ -661,9 +656,9 @@ def initialize_lora_eva_weights(
     model: torch.nn.Module,
     dataloader: Optional[Iterable] = None,
     eva_state_dict: Optional[dict] = None,
-    forward_fn: Optional[callable] = forward_fn_dict,
-    prepare_model_inputs_fn: Optional[callable] = prepare_model_inputs_fn_language_modeling,
-    prepare_layer_inputs_fn: Union[callable, Dict[str, callable], None] = prepare_layer_inputs_fn_language_modeling,
+    forward_fn: Optional[Callable] = forward_fn_dict,
+    prepare_model_inputs_fn: Optional[Callable] = prepare_model_inputs_fn_language_modeling,
+    prepare_layer_inputs_fn: Union[Callable, dict[str, Callable], None] = prepare_layer_inputs_fn_language_modeling,
     adapter_name: str = "default",
     gather_distributed_inputs: bool = True,
     show_progress_bar: bool = True,
@@ -681,17 +676,17 @@ def initialize_lora_eva_weights(
         eva_state_dict (Optional[dict]):
             The state_dict to load into the model. If None, a dataloader needs to be provided and the state_dict will
             be computed using `get_eva_state_dict`.
-        forward_fn (callable):
+        forward_fn (Callable):
             The forward function to use for the forward pass. Takes two arguments: `model` and `inputs`. Default
             behavior is `return model(**inputs)`
-        prepare_model_inputs_fn (Optional[callable]):
+        prepare_model_inputs_fn (Optional[Callable]):
             This function receives the model inputs and the peft_config and passes the output to
             `prepare_layer_inputs_fn`. Can be used to modify the input to the SVD computation based on the original
             model inputs. For example for language modeling the attention mask is used to determine which indices are
             padding tokens and should not be used for SVD. Any function defined here expects two arguments:
             `model_input` and `peft_config`. `peft.tuners.lora.eva.prepare_model_inputs_fn_language_modeling` is used
             by default.
-        prepare_layer_inputs_fn (Union[callable, Dict[str, callable], None]):
+        prepare_layer_inputs_fn (Union[Callable, Dict[str, Callable], None]):
             This function receives the layer inputs, the model inputs (potentially modified by
             `prepare_model_inputs_fn`) and the name of the layer and returns the inputs that should be used for SVD for
             that particular layer. Any custom function defined here expects three arguments: `layer_input`,

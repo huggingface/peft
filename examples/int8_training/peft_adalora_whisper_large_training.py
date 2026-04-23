@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from random import randint
-from typing import Any, Dict, List, Union
+from typing import Any, Union
 
 # datasets imports
 import datasets
@@ -337,7 +337,7 @@ def load_model_hook(models, input_dir):
 class DataCollatorSpeechSeq2SeqWithPadding:
     processor: Any
 
-    def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
+    def __call__(self, features: list[dict[str, Union[list[int], torch.Tensor]]]) -> dict[str, torch.Tensor]:
         # split inputs and labels since they have to be of different lengths and need different padding methods
         # first treat the audio inputs by simply returning torch tensors
         input_features = [{"input_features": feature["input_features"]} for feature in features]
@@ -374,8 +374,9 @@ def evaluation_loop(model, eval_dataloader, processor, normalizer, metric, force
     references = []
     normalized_predictions = []
     normalized_references = []
+    device_type = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
     for _, batch in enumerate(tqdm(eval_dataloader)):
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast(device_type=device_type):
             with torch.no_grad():
                 generated_tokens = (
                     model.generate(
@@ -487,10 +488,8 @@ def main():
         train_split = "train+validation"
         test_split = "test"
 
-    raw_datasets["train"] = loading_method(
-        args.dataset_name, args.language_abbr, split=train_split, use_auth_token=True
-    )
-    raw_datasets["test"] = loading_method(args.dataset_name, args.language_abbr, split=test_split, use_auth_token=True)
+    raw_datasets["train"] = loading_method(args.dataset_name, args.language_abbr, split=train_split)
+    raw_datasets["test"] = loading_method(args.dataset_name, args.language_abbr, split=test_split)
     raw_datasets = raw_datasets.cast_column("audio", Audio(sampling_rate=16000))
 
     logger.info("Dataset loaded: %s", raw_datasets)
@@ -540,9 +539,9 @@ def main():
     )
     model.config.forced_decoder_ids = None
     model.config.suppress_tokens = []
-    if len(set(model.hf_device_map.values()).intersection({"cpu", "disk"})) > 0:
+    if hasattr(model, "hf_device_map") and len(set(model.hf_device_map.values()).intersection({"cpu", "disk"})) > 0:
         raise ValueError("Training on CPU or disk is not supported.")
-    if len(set(model.hf_device_map.values())) > 1:
+    if hasattr(model, "hf_device_map") and len(set(model.hf_device_map.values())) > 1:
         device_map = model.hf_device_map.copy()
         # required because `labels` are on main execution device (0) while the output of `proj_out` is on other device.
         # So, this leads to device mismatch error when calculation cross-entropy between logits and labels.
@@ -567,6 +566,13 @@ def main():
 
         model.model.encoder.conv1.register_forward_hook(make_inputs_require_grad)
 
+        # Calculate total steps first for AdaLoRA
+        if args.max_train_steps is None:
+            num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
+            total_steps = args.num_train_epochs * num_update_steps_per_epoch
+        else:
+            total_steps = args.max_train_steps
+
         # wrapping model with adalora tuner
         if args.use_adalora:
             config = AdaLoraConfig(
@@ -581,6 +587,7 @@ def main():
                 lora_dropout=args.lora_dropout,
                 target_modules=["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
                 orth_reg_weight=args.orth_reg_weight,
+                total_step=total_steps,
             )
         else:
             config = LoraConfig(
@@ -620,8 +627,14 @@ def main():
     # Note here that the max steps is adjusted by the accelerator's num_processes
     args.max_train_steps = math.ceil(args.max_train_steps / accelerator.num_processes)
     if args.use_peft and args.use_adalora:
-        model.base_model.peft_config["default"].total_step = args.max_train_steps
-        # model.base_model.peft_config.total_step = args.max_train_steps
+        # Update the total_step in the config to reflect the adjusted max_train_steps
+        # Handle DDP case where model is wrapped
+        if hasattr(model, "module"):
+            # DDP case
+            model.module.base_model.peft_config["default"].total_step = args.max_train_steps
+        else:
+            # Non-DDP case
+            model.base_model.peft_config["default"].total_step = args.max_train_steps
 
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
@@ -683,7 +696,21 @@ def main():
                 # Note that this requires parameter gradients.
                 # Hence being called before optimizer.zero_grad().
                 if args.use_peft and args.use_adalora:
-                    model.update_and_allocate(global_step)
+                    # Handle DDP case where model is wrapped
+                    if hasattr(model, "module"):
+                        # DDP case
+                        peft_model = model.module
+                    else:
+                        # Non-DDP case
+                        peft_model = model
+
+                    # Check if rank_pattern exists before calling update_and_allocate
+                    if (
+                        hasattr(peft_model, "peft_config")
+                        and peft_model.peft_config["default"].rank_pattern is not None
+                        and global_step >= args.tinit  # Only start updating after tinit steps
+                    ):
+                        peft_model.update_and_allocate(global_step)
 
                 optimizer.zero_grad()
                 global_step += 1
@@ -750,7 +777,18 @@ def main():
     if args.load_best_model:
         # load the best model
         accelerator.load_state(os.path.join(args.output_dir, "best_checkpoint"))
-        model.resize_modules_by_rank_pattern(model.peft_config["default"].rank_pattern, "default")
+        # Handle DDP case where model is wrapped
+        if hasattr(model, "module"):
+            # DDP case
+            peft_model = model.module
+        else:
+            # Non-DDP case
+            peft_model = model
+
+        # Only resize if rank_pattern exists
+        if hasattr(peft_model, "peft_config") and peft_model.peft_config["default"].rank_pattern is not None:
+            peft_model.resize_modules_by_rank_pattern(peft_model.peft_config["default"].rank_pattern, "default")
+
         eval_metrics = evaluation_loop(
             model, eval_dataloader, processor, normalizer, metric, forced_decoder_ids, accelerator
         )

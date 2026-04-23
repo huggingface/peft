@@ -11,17 +11,33 @@ from peft import AdaLoraConfig, PeftConfig, PeftModel, TaskType, get_peft_model
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-device = "cuda"
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
 model_name_or_path = "facebook/bart-base"
 tokenizer_name_or_path = "facebook/bart-base"
 
-checkpoint_name = "financial_sentiment_analysis_lora_v1.pt"
-text_column = "sentence"
+text_column = "text"
 label_column = "text_label"
 max_length = 128
 lr = 1e-3
 num_epochs = 8
 batch_size = 8
+
+
+# loading dataset
+dataset = load_dataset("zeroshot/twitter-financial-news-sentiment")
+dataset = dataset["train"].train_test_split(test_size=0.1)
+dataset["validation"] = dataset["test"]
+del dataset["test"]
+
+if hasattr(dataset["train"].features["label"], "names"):
+    classes = dataset["train"].features["label"].names
+else:
+    classes = ["Bearish", "Bullish", "Neutral"]
+dataset = dataset.map(
+    lambda x: {"text_label": [classes[label] for label in x["label"]]},
+    batched=True,
+    num_proc=1,
+)
 
 
 # creating model
@@ -37,25 +53,12 @@ peft_config = AdaLoraConfig(
     lora_dropout=0.1,
     task_type=TaskType.SEQ_2_SEQ_LM,
     inference_mode=False,
+    total_step=len(dataset["train"]) * num_epochs,
 )
 
 model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
 model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
-
-
-# loading dataset
-dataset = load_dataset("financial_phrasebank", "sentences_allagree")
-dataset = dataset["train"].train_test_split(test_size=0.1)
-dataset["validation"] = dataset["test"]
-del dataset["test"]
-
-classes = dataset["train"].features["label"].names
-dataset = dataset.map(
-    lambda x: {"text_label": [classes[label] for label in x["label"]]},
-    batched=True,
-    num_proc=1,
-)
 
 
 # data preprocessing
@@ -159,7 +162,7 @@ peft_model_id = f"{model_name_or_path}_{peft_config.peft_type}_{peft_config.task
 model.save_pretrained(peft_model_id)
 
 
-ckpt = f"{peft_model_id}/adapter_model.bin"
+ckpt = f"{peft_model_id}/adapter_model.safetensors"
 # get_ipython().system('du -h $ckpt')
 
 

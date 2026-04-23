@@ -13,10 +13,12 @@ def b2mb(x):
 # This context manager is used to track the peak memory usage of the process
 class TorchTracemalloc:
     def __enter__(self):
+        self.device_type = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+        self.device_module = getattr(torch, self.device_type, torch.cuda)
         gc.collect()
-        torch.cuda.empty_cache()
-        torch.cuda.reset_max_memory_allocated()  # reset the peak gauge to zero
-        self.begin = torch.cuda.memory_allocated()
+        self.device_module.empty_cache()
+        self.device_module.reset_peak_memory_stats()  # reset the peak gauge to zero
+        self.begin = self.device_module.memory_allocated()
         self.process = psutil.Process()
 
         self.cpu_begin = self.cpu_mem_used()
@@ -46,9 +48,9 @@ class TorchTracemalloc:
         self.peak_monitoring = False
 
         gc.collect()
-        torch.cuda.empty_cache()
-        self.end = torch.cuda.memory_allocated()
-        self.peak = torch.cuda.max_memory_allocated()
+        self.device_module.empty_cache()
+        self.end = self.device_module.memory_allocated()
+        self.peak = self.device_module.max_memory_allocated()
         self.used = b2mb(self.end - self.begin)
         self.peaked = b2mb(self.peak - self.begin)
 

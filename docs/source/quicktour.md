@@ -36,11 +36,8 @@ from peft import LoraConfig, TaskType
 peft_config = LoraConfig(task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1)
 ```
 
-<Tip>
-
-See the [`LoraConfig`] reference for more details about other parameters you can adjust, such as the modules to target or the bias type.
-
-</Tip>
+> [!TIP]
+> See the [`LoraConfig`] reference for more details about other parameters you can adjust, such as the modules to target or the bias type.
 
 Once the [`LoraConfig`] is setup, create a [`PeftModel`] with the [`get_peft_model`] function. It takes a base model - which you can load from the Transformers library - and the [`LoraConfig`] containing the parameters for how to configure a model for training with LoRA.
 
@@ -90,7 +87,7 @@ trainer = Trainer(
     args=training_args,
     train_dataset=tokenized_datasets["train"],
     eval_dataset=tokenized_datasets["test"],
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
     data_collator=data_collator,
     compute_metrics=compute_metrics,
 )
@@ -124,11 +121,8 @@ Both methods only save the extra PEFT weights that were trained, meaning it is s
 
 ## Inference
 
-<Tip>
-
-Take a look at the [AutoPeftModel](package_reference/auto_class) API reference for a complete list of available `AutoPeftModel` classes.
-
-</Tip>
+> [!TIP]
+> Take a look at the [AutoPeftModel](package_reference/auto_class) API reference for a complete list of available `AutoPeftModel` classes.
 
 Easily load any PEFT-trained model for inference with the [`AutoPeftModel`] class and the [`~transformers.PreTrainedModel.from_pretrained`] method:
 

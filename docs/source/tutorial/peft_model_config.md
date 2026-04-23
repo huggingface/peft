@@ -16,17 +16,14 @@ rendered properly in your Markdown viewer.
 
 # PEFT configurations and models
 
-The sheer size of today's large pretrained models - which commonly have billions of parameters - present a significant training challenge because they require more storage space and more computational power to crunch all those calculations. You'll need access to powerful GPUs or TPUs to train these large pretrained models which is expensive, not widely accessible to everyone, not environmentally friendly, and not very practical. PEFT methods address many of these challenges. There are several types of PEFT methods (soft prompting, matrix decomposition, adapters), but they all focus on the same thing, reduce the number of trainable parameters. This makes it more accessible to train and store large models on consumer hardware.
+The sheer size of today's large pretrained models - which commonly have billions of parameters - presents a significant training challenge because they require more storage space and more computational power to crunch all those calculations. You'll need access to powerful GPUs or TPUs to train these large pretrained models which is expensive, not widely accessible to everyone, not environmentally friendly, and not very practical. PEFT methods address many of these challenges. There are several types of PEFT methods (soft prompting, matrix decomposition, adapters), but they all focus on the same thing, reduce the number of trainable parameters. This makes it more accessible to train and store large models on consumer hardware.
 
 The PEFT library is designed to help you quickly train large models on free or low-cost GPUs, and in this tutorial, you'll learn how to setup a configuration to apply a PEFT method to a pretrained base model for training. Once the PEFT configuration is setup, you can use any training framework you like (Transformer's [`~transformers.Trainer`] class, [Accelerate](https://hf.co/docs/accelerate), a custom PyTorch training loop).
 
 ## PEFT configurations
 
-<Tip>
-
-Learn more about the parameters you can configure for each PEFT method in their respective API reference page.
-
-</Tip>
+> [!TIP]
+> Learn more about the parameters you can configure for each PEFT method in their respective API reference page.
 
 A configuration stores important parameters that specify how a particular PEFT method should be applied.
 
@@ -158,15 +155,12 @@ model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path)
 lora_model = PeftModel.from_pretrained(model, "ybelkada/opt-350m-lora")
 ```
 
-<Tip>
-
-By default, the [`PeftModel`] is set for inference, but if you'd like to train the adapter some more you can set `is_trainable=True`.
-
-```py
-lora_model = PeftModel.from_pretrained(model, "ybelkada/opt-350m-lora", is_trainable=True)
-```
-
-</Tip>
+> [!TIP]
+> By default, the [`PeftModel`] is set for inference, but if you'd like to train the adapter some more you can set `is_trainable=True`.
+>
+> ```py
+> lora_model = PeftModel.from_pretrained(model, "ybelkada/opt-350m-lora", is_trainable=True)
+> ```
 
 The [`PeftModel.from_pretrained`] method is the most flexible way to load a [`PeftModel`] because it doesn't matter what model framework was used (Transformers, timm, a generic PyTorch model). Other classes, like [`AutoPeftModel`], are just a convenient wrapper around the base [`PeftModel`], and makes it easier to load PEFT models directly from the Hub or locally where the PEFT weights are stored.
 

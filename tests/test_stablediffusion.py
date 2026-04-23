@@ -12,19 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 from dataclasses import asdict, replace
-from unittest import TestCase
 
 import numpy as np
-from diffusers import StableDiffusionPipeline
-from parameterized import parameterized
+import pytest
+import torch
+from diffusers import AutoModel, StableDiffusionPipeline
 
 from peft import (
     BOFTConfig,
     HRAConfig,
     LoHaConfig,
+    LoKrConfig,
     LoraConfig,
     OFTConfig,
+    convert_to_lora,
     get_peft_model,
     get_peft_model_state_dict,
     inject_adapter_in_model,
@@ -32,105 +35,207 @@ from peft import (
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
 
-from .testing_common import ClassInstantier, PeftCommonTester
-from .testing_utils import temp_seed
+from .testing_common import PeftCommonTester
+from .testing_utils import hub_online_once, set_init_weights_false, temp_seed
 
 
 PEFT_DIFFUSERS_SD_MODELS_TO_TEST = ["hf-internal-testing/tiny-sd-pipe"]
-CONFIG_TESTING_KWARGS = (
-    {
-        "text_encoder": {
-            "r": 8,
-            "lora_alpha": 32,
-            "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
-            "lora_dropout": 0.0,
-            "bias": "none",
+DIFFUSERS_CONFIGS = [
+    (
+        LoraConfig,
+        {
+            "text_encoder": {
+                "r": 8,
+                "lora_alpha": 32,
+                "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
+                "lora_dropout": 0.0,
+                "bias": "none",
+                "init_lora_weights": False,
+            },
+            "unet": {
+                "r": 8,
+                "lora_alpha": 32,
+                "target_modules": [
+                    "proj_in",
+                    "proj_out",
+                    "to_k",
+                    "to_q",
+                    "to_v",
+                    "to_out.0",
+                    "ff.net.0.proj",
+                    "ff.net.2",
+                ],
+                "lora_dropout": 0.0,
+                "bias": "none",
+                "init_lora_weights": False,
+            },
         },
-        "unet": {
-            "r": 8,
-            "lora_alpha": 32,
-            "target_modules": ["proj_in", "proj_out", "to_k", "to_q", "to_v", "to_out.0", "ff.net.0.proj", "ff.net.2"],
-            "lora_dropout": 0.0,
-            "bias": "none",
+    ),
+    (
+        LoHaConfig,
+        {
+            "text_encoder": {
+                "r": 8,
+                "alpha": 32,
+                "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
+                "rank_dropout": 0.0,
+                "module_dropout": 0.0,
+                "init_weights": False,
+            },
+            "unet": {
+                "r": 8,
+                "alpha": 32,
+                "target_modules": [
+                    "proj_in",
+                    "proj_out",
+                    "to_k",
+                    "to_q",
+                    "to_v",
+                    "to_out.0",
+                    "ff.net.0.proj",
+                    "ff.net.2",
+                ],
+                "rank_dropout": 0.0,
+                "module_dropout": 0.0,
+                "init_weights": False,
+            },
         },
-    },
-    {
-        "text_encoder": {
-            "r": 8,
-            "alpha": 32,
-            "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
-            "rank_dropout": 0.0,
-            "module_dropout": 0.0,
+    ),
+    (
+        LoKrConfig,
+        {
+            "text_encoder": {
+                "r": 8,
+                "alpha": 32,
+                "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
+                "rank_dropout": 0.0,
+                "module_dropout": 0.0,
+                "init_weights": False,
+            },
+            "unet": {
+                "r": 8,
+                "alpha": 32,
+                "target_modules": [
+                    "proj_in",
+                    "proj_out",
+                    "to_k",
+                    "to_q",
+                    "to_v",
+                    "to_out.0",
+                    "ff.net.0.proj",
+                    "ff.net.2",
+                ],
+                "rank_dropout": 0.0,
+                "module_dropout": 0.0,
+                "init_weights": False,
+            },
         },
-        "unet": {
-            "r": 8,
-            "alpha": 32,
-            "target_modules": ["proj_in", "proj_out", "to_k", "to_q", "to_v", "to_out.0", "ff.net.0.proj", "ff.net.2"],
-            "rank_dropout": 0.0,
-            "module_dropout": 0.0,
+    ),
+    (
+        OFTConfig,
+        {
+            "text_encoder": {
+                "r": 1,
+                "oft_block_size": 0,
+                "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
+                "module_dropout": 0.0,
+                "init_weights": False,
+                "use_cayley_neumann": False,
+            },
+            "unet": {
+                "r": 1,
+                "oft_block_size": 0,
+                "target_modules": [
+                    "proj_in",
+                    "proj_out",
+                    "to_k",
+                    "to_q",
+                    "to_v",
+                    "to_out.0",
+                    "ff.net.0.proj",
+                    "ff.net.2",
+                ],
+                "module_dropout": 0.0,
+                "init_weights": False,
+                "use_cayley_neumann": False,
+            },
         },
-    },
-    {
-        "text_encoder": {
-            "r": 1,
-            "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
-            "module_dropout": 0.0,
+    ),
+    (
+        BOFTConfig,
+        {
+            "text_encoder": {
+                "boft_block_num": 1,
+                "boft_block_size": 0,
+                "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
+                "boft_dropout": 0.0,
+                "init_weights": False,
+            },
+            "unet": {
+                "boft_block_num": 1,
+                "boft_block_size": 0,
+                "target_modules": [
+                    "proj_in",
+                    "proj_out",
+                    "to_k",
+                    "to_q",
+                    "to_v",
+                    "to_out.0",
+                    "ff.net.0.proj",
+                    "ff.net.2",
+                ],
+                "boft_dropout": 0.0,
+                "init_weights": False,
+            },
         },
-        "unet": {
-            "r": 1,
-            "target_modules": ["proj_in", "proj_out", "to_k", "to_q", "to_v", "to_out.0", "ff.net.0.proj", "ff.net.2"],
-            "module_dropout": 0.0,
+    ),
+    (
+        HRAConfig,
+        {
+            "text_encoder": {
+                "r": 8,
+                "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
+                "init_weights": False,
+            },
+            "unet": {
+                "r": 8,
+                "target_modules": [
+                    "proj_in",
+                    "proj_out",
+                    "to_k",
+                    "to_q",
+                    "to_v",
+                    "to_out.0",
+                    "ff.net.0.proj",
+                    "ff.net.2",
+                ],
+                "init_weights": False,
+            },
         },
-    },
-    {
-        "text_encoder": {
-            "boft_block_num": 1,
-            "boft_block_size": 0,
-            "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
-            "boft_dropout": 0.0,
-        },
-        "unet": {
-            "boft_block_num": 1,
-            "boft_block_size": 0,
-            "target_modules": ["proj_in", "proj_out", "to_k", "to_q", "to_v", "to_out.0", "ff.net.0.proj", "ff.net.2"],
-            "boft_dropout": 0.0,
-        },
-    },
-    {
-        "text_encoder": {
-            "r": 8,
-            "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
-        },
-        "unet": {
-            "r": 8,
-            "target_modules": ["proj_in", "proj_out", "to_k", "to_q", "to_v", "to_out.0", "ff.net.0.proj", "ff.net.2"],
-        },
-    },
-)
-CLASSES_MAPPING = {
-    "lora": (LoraConfig, CONFIG_TESTING_KWARGS[0]),
-    "loha": (LoHaConfig, CONFIG_TESTING_KWARGS[1]),
-    "lokr": (LoHaConfig, CONFIG_TESTING_KWARGS[1]),
-    "oft": (OFTConfig, CONFIG_TESTING_KWARGS[2]),
-    "boft": (BOFTConfig, CONFIG_TESTING_KWARGS[3]),
-    "hra": (HRAConfig, CONFIG_TESTING_KWARGS[4]),
-}
+    ),
+]
 
 
-PeftStableDiffusionTestConfigManager = ClassInstantier(CLASSES_MAPPING)
+def skip_if_not_lora(config_cls):
+    if config_cls != LoraConfig:
+        pytest.skip("Skipping test because it is only applicable to LoraConfig")
 
 
-class StableDiffusionModelTester(TestCase, PeftCommonTester):
+class TestStableDiffusionModel(PeftCommonTester):
     r"""
     Tests that diffusers StableDiffusion model works with PEFT as expected.
-
     """
 
     transformers_class = StableDiffusionPipeline
+    sd_model = StableDiffusionPipeline.from_pretrained("hf-internal-testing/tiny-sd-pipe")
 
     def instantiate_sd_peft(self, model_id, config_cls, config_kwargs):
         # Instantiate StableDiffusionPipeline
-        model = self.transformers_class.from_pretrained(model_id)
+        if model_id == "hf-internal-testing/tiny-sd-pipe":
+            # in CI, this model often times out on the hub, let's cache it
+            model = copy.deepcopy(self.sd_model)
+        else:
+            model = self.transformers_class.from_pretrained(model_id)
 
         config_kwargs = config_kwargs.copy()
         text_encoder_kwargs = config_kwargs.pop("text_encoder")
@@ -159,20 +264,14 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
             "num_inference_steps": 3,
         }
 
-    @parameterized.expand(
-        PeftStableDiffusionTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-                "loha_kwargs": {"init_weights": [False]},
-                "oft_kwargs": {"init_weights": [False]},
-                "boft_kwargs": {"init_weights": [False]},
-                "hra_kwargs": {"init_weights": [False]},
-            },
-        )
-    )
-    def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", PEFT_DIFFUSERS_SD_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", DIFFUSERS_CONFIGS)
+    def test_merge_layers(self, model_id, config_cls, config_kwargs):
+        if (config_cls == LoKrConfig) and (self.torch_device not in ["cuda", "xpu"]):
+            pytest.skip("Merging test with LoKr fails without GPU")
+
         # Instantiate model & adapters
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
 
         # Generate output for peft modified StableDiffusion
@@ -193,19 +292,12 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
         # Images are in uint8 drange, so use large atol
         assert np.allclose(peft_output, merged_output, atol=1.0)
 
-    @parameterized.expand(
-        PeftStableDiffusionTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-                "loha_kwargs": {"init_weights": [False]},
-                "oft_kwargs": {"init_weights": [False]},
-                "boft_kwargs": {"init_weights": [False]},
-                "hra_kwargs": {"init_weights": [False]},
-            },
-        )
-    )
-    def test_merge_layers_safe_merge(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", PEFT_DIFFUSERS_SD_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", DIFFUSERS_CONFIGS)
+    def test_merge_layers_safe_merge(self, model_id, config_cls, config_kwargs):
+        if (config_cls == LoKrConfig) and (self.torch_device not in ["cuda", "xpu"]):
+            pytest.skip("Merging test with LoKr fails without GPU")
+
         # Instantiate model & adapters
         model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
 
@@ -227,19 +319,12 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
         # Images are in uint8 drange, so use large atol
         assert np.allclose(peft_output, merged_output, atol=1.0)
 
-    @parameterized.expand(
-        PeftStableDiffusionTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-            },
-            filter_params_func=lambda tests: [
-                x for x in tests if all(s not in x[0] for s in ["loha", "lokr", "oft", "hra"])
-            ],
-        )
-    )
-    def test_add_weighted_adapter_base_unchanged(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", PEFT_DIFFUSERS_SD_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", DIFFUSERS_CONFIGS)
+    def test_add_weighted_adapter_base_unchanged(self, model_id, config_cls, config_kwargs):
+        skip_if_not_lora(config_cls)
         # Instantiate model & adapters
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
 
         # Get current available adapter config
@@ -256,28 +341,15 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
         assert asdict(text_encoder_adapter_config) == asdict(model.text_encoder.peft_config[text_encoder_adapter_name])
         assert asdict(unet_adapter_config) == asdict(model.unet.peft_config[unet_adapter_name])
 
-    @parameterized.expand(
-        PeftStableDiffusionTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-                "loha_kwargs": {"init_weights": [False]},
-                "lokr_kwargs": {"init_weights": [False]},
-                "oft_kwargs": {"init_weights": [False]},
-                "boft_kwargs": {"init_weights": [False]},
-                "hra_kwargs": {"init_weights": [False]},
-            },
-        )
-    )
-    def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", PEFT_DIFFUSERS_SD_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", DIFFUSERS_CONFIGS)
+    def test_disable_adapter(self, model_id, config_cls, config_kwargs):
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_disable_adapter(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(
-        PeftStableDiffusionTestConfigManager.get_grid_parameters(
-            {"model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST},
-        )
-    )
-    def test_load_model_low_cpu_mem_usage(self, test_name, model_id, config_cls, config_kwargs):
+    @pytest.mark.parametrize("model_id", PEFT_DIFFUSERS_SD_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", DIFFUSERS_CONFIGS)
+    def test_load_model_low_cpu_mem_usage(self, model_id, config_cls, config_kwargs):
         # Instantiate model & adapters
         pipe = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
 
@@ -315,3 +387,76 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
         assert "meta" in {p.device.type for p in pipe.unet.parameters()}
         set_peft_model_state_dict(pipe.unet, unet_state_dict, low_cpu_mem_usage=True)
         assert "meta" not in {p.device.type for p in pipe.unet.parameters()}
+
+    def test_lora_conversion(self):
+        # For now, testing a model with only linear layers, as other types are not supported yet
+        torch.manual_seed(0)
+        model_id = "hf-internal-testing/tiny-flux2"
+
+        # from Flux2TransformerTests in Diffusers
+        height = 4
+        width = 4
+        batch_size = 1
+        num_latent_channels = 4
+        sequence_length = 48
+        embedding_dim = 16
+
+        hidden_states = torch.randn((batch_size, height * width, num_latent_channels))
+        encoder_hidden_states = torch.randn((batch_size, sequence_length, embedding_dim))
+
+        t_coords = torch.arange(1)
+        h_coords = torch.arange(height)
+        w_coords = torch.arange(width)
+        l_coords = torch.arange(1)
+        image_ids = torch.cartesian_prod(t_coords, h_coords, w_coords, l_coords)  # [height * width, 4]
+        image_ids = image_ids.unsqueeze(0).expand(batch_size, -1, -1)
+
+        text_t_coords = torch.arange(1)
+        text_h_coords = torch.arange(1)
+        text_w_coords = torch.arange(1)
+        text_l_coords = torch.arange(sequence_length)
+        text_ids = torch.cartesian_prod(text_t_coords, text_h_coords, text_w_coords, text_l_coords)
+        text_ids = text_ids.unsqueeze(0).expand(batch_size, -1, -1)
+
+        timestep = torch.tensor([1.0]).expand(batch_size)
+        guidance = torch.tensor([1.0]).expand(batch_size)
+
+        inputs = {
+            "hidden_states": hidden_states,
+            "encoder_hidden_states": encoder_hidden_states,
+            "timestep": timestep,
+            "img_ids": image_ids,
+            "txt_ids": text_ids,
+            "guidance": guidance,
+        }
+
+        with hub_online_once(model_id):
+            model = AutoModel.from_pretrained(model_id, subfolder="transformer")
+            with torch.inference_mode():
+                output_base = model(**inputs)
+
+            loha_config = LoHaConfig(target_modules=["to_q", "to_v"], init_weights=False, alpha=100)
+            model_loha = get_peft_model(copy.deepcopy(model), loha_config)
+            with torch.inference_mode():
+                output_loha = model_loha(**inputs)
+
+            # sanity check: loha changes outputs
+            atol, rtol = 1e-4, 1e-4
+            assert not torch.allclose(output_base.sample, output_loha.sample, atol=atol, rtol=rtol)
+
+            lora_config, state_dict = convert_to_lora(model_loha, rank=4)
+            model_lora = get_peft_model(model, lora_config).eval()
+            with torch.inference_mode():
+                output_lora = model_lora(**inputs)
+            load_result = set_peft_model_state_dict(model_lora, state_dict)
+            assert not load_result.unexpected_keys
+
+            with torch.inference_mode():
+                output_converted = model_lora(**inputs)
+
+            # calculate MSE
+            mse_lora = torch.nn.functional.mse_loss(output_loha.sample, output_lora.sample)
+            mse_converted = torch.nn.functional.mse_loss(output_loha.sample, output_converted.sample)
+
+            # converted model should be significantly closer to the LoHa model than the base model
+            assert mse_lora / mse_converted > 2

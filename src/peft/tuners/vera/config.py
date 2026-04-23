@@ -26,7 +26,7 @@ class VeraConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`VeraModel`].
 
-    Paper: https://arxiv.org/abs/2310.11454.
+    Paper: https://huggingface.co/papers/2310.11454.
 
     Args:
         r (`int`, *optional*, defaults to `256`):

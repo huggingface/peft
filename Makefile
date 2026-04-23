@@ -31,25 +31,26 @@ tests_core_multi_gpu:
 tests_core_single_gpu:
 	python -m pytest -m single_gpu_tests tests/test_common_gpu.py $(if $(IS_GITHUB_CI),--report-log "core_single_gpu.log",)
 
+# exclude gemma tests, as generation fails with torch.compile, these failures
+# trigger side effects that make other tests fail with 'RuntimeError: Offset
+# increment outside graph capture encountered unexpectedly.' 
+# TODO re-enable gemma once/if it is fixed
 tests_common_gpu:
-	python -m pytest tests/test_decoder_models.py $(if $(IS_GITHUB_CI),--report-log "common_decoder.log",)
+	python -m pytest tests/test_decoder_models.py -k "not gemma" $(if $(IS_GITHUB_CI),--report-log "common_decoder.log",)
 	python -m pytest tests/test_encoder_decoder_models.py $(if $(IS_GITHUB_CI),--report-log "common_encoder_decoder.log",)
 	python -m pytest tests/test_gptqmodel.py $(if $(IS_GITHUB_CI),--report-log "gptqmodel_gpu.log",)
 
 tests_examples_multi_gpu_bnb:
-	python -m pytest -m "multi_gpu_tests and bitsandbytes" tests/test_gpu_examples.py $(if $(IS_GITHUB_CI),--report-log "multi_gpu_examples.log",)
+	python -m pytest -m "multi_gpu_tests and bitsandbytes" tests/test_gpu_examples.py $(if $(IS_GITHUB_CI),--report-log "multi_gpu_bnb_examples.log",)
 
 tests_examples_single_gpu_bnb:
-	python -m pytest -m "single_gpu_tests and bitsandbytes" tests/test_gpu_examples.py $(if $(IS_GITHUB_CI),--report-log "single_gpu_examples.log",)
+	python -m pytest -m "single_gpu_tests and bitsandbytes" tests/test_gpu_examples.py $(if $(IS_GITHUB_CI),--report-log "single_gpu_bnb_examples.log",)
 
 tests_core_multi_gpu_bnb:
-	python -m pytest -m "multi_gpu_tests and bitsandbytes" tests/test_common_gpu.py $(if $(IS_GITHUB_CI),--report-log "core_multi_gpu.log",)
+	python -m pytest -m "multi_gpu_tests and bitsandbytes" tests/test_common_gpu.py $(if $(IS_GITHUB_CI),--report-log "core_multi_gpu_bnb.log",)
 
 tests_core_single_gpu_bnb:
-	python -m pytest -m "single_gpu_tests and bitsandbytes" tests/test_common_gpu.py $(if $(IS_GITHUB_CI),--report-log "core_single_gpu.log",)
-
-tests_gpu_bnb_regression:
-	python -m pytest tests/bnb/test_bnb_regression.py $(if $(IS_GITHUB_CI),--report-log "bnb_regression_gpu.log",)
+	python -m pytest -m "single_gpu_tests and bitsandbytes" tests/test_common_gpu.py $(if $(IS_GITHUB_CI),--report-log "core_single_gpu_bnb.log",)
 
 # For testing transformers tests for bnb runners
 transformers_tests:
@@ -60,3 +61,15 @@ tests_regression:
 
 tests_torch_compile:
 	python -m pytest tests/test_torch_compile.py $(if $(IS_GITHUB_CI),--report-log "compile_tests.log",)
+
+tests_training:
+	accelerate launch --config_file tests/training/deepspeed_config.yaml tests/training/training.py
+	accelerate launch --config_file tests/training/deepspeed_config.yaml tests/training/training.py --quant 4bit
+	accelerate launch --config_file tests/training/deepspeed_config.yaml tests/training/training.py --quant 8bit
+	accelerate launch --config_file tests/training/fsdp_config.yaml tests/training/training.py
+	accelerate launch --config_file tests/training/fsdp_config.yaml tests/training/training.py --quant 4bit
+	accelerate launch --config_file tests/training/fsdp2_config.yaml tests/training/training.py
+	accelerate launch --config_file tests/training/fsdp2_config.yaml tests/training/training.py --quant 4bit
+	accelerate launch --config_file tests/training/fsdp2_config.yaml tests/training/training.py --quant 4bit --target_modules q_proj --target_parameters v_proj.weight
+	accelerate launch --config_file tests/training/fsdp_config.yaml tests/training/adapters.py
+	accelerate launch --config_file tests/training/tp_config.yaml tests/training/lora_tp.py

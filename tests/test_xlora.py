@@ -23,7 +23,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import LoraConfig, PeftType, TaskType, XLoraConfig, get_peft_model
 from peft.peft_model import PeftModel
+from peft.tuners.xlora.layer import XLoraLayer
 from peft.utils import infer_device
+
+from .testing_utils import hub_online_once
 
 
 def flaky(num_tries: int):
@@ -48,8 +51,14 @@ def flaky(num_tries: int):
 class TestXlora:
     torch_device = infer_device()
 
-    model_id = "facebook/opt-125m"
+    model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
     num_loras = 4
+
+    @pytest.fixture
+    def base_model(self):
+        with hub_online_once(self.model_id):
+            model = AutoModelForCausalLM.from_pretrained(self.model_id)
+            yield model
 
     @pytest.fixture(scope="class")
     def lora_dir(self, tmp_path_factory):
@@ -62,27 +71,40 @@ class TestXlora:
     @pytest.fixture(scope="class")
     def saved_lora_adapters(self, lora_dir):
         file_names = []
-        for i in range(1, self.num_loras + 1):
-            torch.manual_seed(i)
-            lora_config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False)
-            model = AutoModelForCausalLM.from_pretrained(self.model_id)
-            peft_model = get_peft_model(model, lora_config)
-            file_name = os.path.join(lora_dir, f"checkpoint-{i}")
-            peft_model.save_pretrained(file_name)
-            file_names.append(file_name)
+
+        lora_configs = [
+            LoraConfig(task_type="CAUSAL_LM", target_modules=["q_proj", "v_proj"], init_lora_weights=False)
+            for _ in range(self.num_loras)
+        ]
+        # have 1 LoRA with different target modules
+        lora_configs[-1] = LoraConfig(
+            task_type="CAUSAL_LM", target_modules=["k_proj", "q_proj", "v_proj"], init_lora_weights=False
+        )
+
+        with hub_online_once(self.model_id):
+            for i, lora_config in enumerate(lora_configs, start=1):
+                torch.manual_seed(i)
+                model = AutoModelForCausalLM.from_pretrained(self.model_id)
+                peft_model = get_peft_model(model, lora_config)
+                file_name = os.path.join(lora_dir, f"checkpoint-{i}")
+                peft_model.save_pretrained(file_name)
+                file_names.append(file_name)
         return file_names
 
     @pytest.fixture(scope="class")
     def saved_lora_embedding_adapters(self, lora_embedding_dir):
         file_names = []
-        for i in range(1, self.num_loras + 1):
-            torch.manual_seed(i)
-            lora_config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["embed_tokens"])
-            model = AutoModelForCausalLM.from_pretrained(self.model_id)
-            peft_model = get_peft_model(model, lora_config)
-            file_name = os.path.join(lora_embedding_dir, f"checkpoint-{i}")
-            peft_model.save_pretrained(file_name)
-            file_names.append(file_name)
+        with hub_online_once(self.model_id):
+            for i in range(1, self.num_loras + 1):
+                torch.manual_seed(i)
+                lora_config = LoraConfig(
+                    task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["embed_tokens"]
+                )
+                model = AutoModelForCausalLM.from_pretrained(self.model_id)
+                peft_model = get_peft_model(model, lora_config)
+                file_name = os.path.join(lora_embedding_dir, f"checkpoint-{i}")
+                peft_model.save_pretrained(file_name)
+                file_names.append(file_name)
         return file_names
 
     @pytest.fixture(scope="class")
@@ -91,52 +113,49 @@ class TestXlora:
         return tokenizer
 
     @pytest.fixture(scope="function")
-    def embedding_model(self, saved_lora_embedding_adapters):
-        model = AutoModelForCausalLM.from_pretrained(self.model_id)
-        model.config.use_cache = False
+    def embedding_model(self, base_model, saved_lora_embedding_adapters):
+        base_model.config.use_cache = False
         adapters = {str(i): file_name for i, file_name in enumerate(saved_lora_embedding_adapters)}
 
         peft_config = XLoraConfig(
             task_type=TaskType.CAUSAL_LM,
             peft_type=PeftType.XLORA,
-            hidden_size=model.config.hidden_size,
+            hidden_size=base_model.config.hidden_size,
             xlora_depth=8,
             adapters=adapters,
         )
-        model = get_peft_model(model, peft_config).to(self.torch_device)
+        model = get_peft_model(base_model, peft_config).to(self.torch_device)
         return model
 
     @pytest.fixture(scope="function")
-    def model(self, saved_lora_adapters):
-        model = AutoModelForCausalLM.from_pretrained(self.model_id)
-        model.config.use_cache = False
+    def model(self, base_model, saved_lora_adapters):
+        base_model.config.use_cache = False
         adapters = {str(i): file_name for i, file_name in enumerate(saved_lora_adapters)}
 
         peft_config = XLoraConfig(
             task_type=TaskType.CAUSAL_LM,
             peft_type=PeftType.XLORA,
-            hidden_size=model.config.hidden_size,
+            hidden_size=base_model.config.hidden_size,
             xlora_depth=8,
             adapters=adapters,
         )
-        model = get_peft_model(model, peft_config).to(self.torch_device)
+        model = get_peft_model(base_model, peft_config).to(self.torch_device)
         return model
 
     @pytest.fixture(scope="function")
-    def model_layerwise(self, saved_lora_adapters):
-        model = AutoModelForCausalLM.from_pretrained(self.model_id)
-        model.config.use_cache = False
+    def model_layerwise(self, base_model, saved_lora_adapters):
+        base_model.config.use_cache = False
         adapters = {str(i): file_name for i, file_name in enumerate(saved_lora_adapters)}
 
         peft_config = XLoraConfig(
             task_type=TaskType.CAUSAL_LM,
             peft_type=PeftType.XLORA,
-            hidden_size=model.config.hidden_size,
+            hidden_size=base_model.config.hidden_size,
             xlora_depth=8,
             adapters=adapters,
             layerwise_scalings=True,
         )
-        model = get_peft_model(model, peft_config).to(self.torch_device)
+        model = get_peft_model(base_model, peft_config).to(self.torch_device)
         return model
 
     def test_functional(self, tokenizer, model):
@@ -147,6 +166,19 @@ class TestXlora:
             max_new_tokens=32,
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
+
+    def test_forward_hooks_are_cleaned_up(self, tokenizer, model):
+        # There was an issue that forward hooks would accumulate during generation, since one hook per forward step was
+        # being registered and generate would call forward multiple times. This is already undesirable, but to make it
+        # worse, only the last hook was removed, resulting in hooks accumulating.
+        # See https://github.com/huggingface/peft/issues/1472#issuecomment-3235817807
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        model.generate(input_ids=inputs.to(self.torch_device), max_new_tokens=10)
+        num_hooks_gen1 = len(model.base_model.model.model.decoder.layers[0].self_attn.k_proj._forward_pre_hooks)
+
+        model.generate(input_ids=inputs.to(self.torch_device), max_new_tokens=10)
+        num_hooks_gen2 = len(model.base_model.model.model.decoder.layers[0].self_attn.k_proj._forward_pre_hooks)
+        assert num_hooks_gen1 == num_hooks_gen2 == 0
 
     def test_scalings_logging_methods(self, tokenizer, model):
         model.enable_scalings_logging()
@@ -202,7 +234,7 @@ class TestXlora:
 
     # On CI (but not locally), this test is flaky since transformers v4.45.0.
     @flaky(num_tries=5)
-    def test_save_load_functional(self, tokenizer, model, tmp_path):
+    def test_save_load_functional(self, tokenizer, base_model, model, tmp_path):
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
             input_ids=inputs.to(self.torch_device),
@@ -215,9 +247,8 @@ class TestXlora:
 
         del model
 
-        model = AutoModelForCausalLM.from_pretrained(self.model_id)
-        model.config.use_cache = False
-        model = PeftModel.from_pretrained(model=model, model_id=tmp_path).to(self.torch_device)
+        base_model.config.use_cache = False
+        model = PeftModel.from_pretrained(model=base_model, model_id=tmp_path).to(self.torch_device)
 
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
@@ -228,7 +259,7 @@ class TestXlora:
         assert torch.isfinite(after_logits).all()
         assert torch.equal(after_logits, before_logits)
 
-    def test_save_load_functional_pt(self, tokenizer, model, tmp_path):
+    def test_save_load_functional_pt(self, tokenizer, base_model, model, tmp_path):
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
             input_ids=inputs.to(self.torch_device),
@@ -241,9 +272,8 @@ class TestXlora:
 
         del model
 
-        model = AutoModelForCausalLM.from_pretrained(self.model_id)
-        model.config.use_cache = False
-        model = PeftModel.from_pretrained(model=model, model_id=tmp_path, safe_serialization=False).to(
+        base_model.config.use_cache = False
+        model = PeftModel.from_pretrained(model=base_model, model_id=tmp_path, safe_serialization=False).to(
             self.torch_device
         )
 
@@ -289,7 +319,7 @@ class TestXlora:
         assert model.internal_xlora_classifier.override_scaling_pass_value == 2
         assert model.internal_xlora_classifier.config.scaling_pass_value == 2
 
-        # Set it to 2 and make sure it is 1/a
+        # Set it to None and make sure it is 1/n
         model.set_scaling_pass_value(None)
         assert model.internal_xlora_classifier.override_scaling_pass_value == 1 / self.num_loras
         assert model.internal_xlora_classifier.config.scaling_pass_value == 1 / self.num_loras
@@ -331,8 +361,10 @@ class TestXlora:
         # This test also simulatenously tests the loading-from-hub functionality!
         torch.manual_seed(123)
 
-        model_id = "facebook/opt-125m"
-        model = AutoModelForCausalLM.from_pretrained(model_id)
+        model_id = "peft-internal-testing/opt-125m"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            # note: exit the caching context to allow download of the LoRA adapters below
         model.config.use_cache = False
 
         adapters = [
@@ -359,3 +391,90 @@ class TestXlora:
         w1 = sd["base_model.model.model.decoder.layers.0.self_attn.q_proj.lora_A.weight"]
 
         assert torch.allclose(w0, w1)
+
+    def test_scalings_storage(self, tokenizer, model):
+        model.enable_scalings_logging()
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        outputs = model.generate(
+            input_ids=inputs.to(self.torch_device),
+            max_new_tokens=10,
+        )
+
+        latest_scalings = model.get_latest_scalings()
+        assert latest_scalings is not None, "get_latest_scalings() should not return None after generation"
+        assert isinstance(latest_scalings, torch.Tensor)
+        assert torch.isfinite(latest_scalings).all(), "Scalings should contain finite values"
+
+    def test_per_token_normalization_with_softmax_topk(self, tokenizer, model, monkeypatch):
+        model.internal_xlora_classifier.config.top_k_lora = 2
+        model.internal_xlora_classifier.config.enable_softmax = False
+        model.internal_xlora_classifier.config.enable_softmax_topk = True
+
+        captured_data = []
+        orig_get_maybe_topk_scalings = XLoraLayer.get_maybe_topk_scalings
+
+        def mock_get_maybe_topk_scalings(self, scalings):
+            result = orig_get_maybe_topk_scalings(self, scalings)
+            if getattr(model, "internal_xlora_scalings", None) is not None:
+                captured_data.append(result)
+            return result
+
+        monkeypatch.setattr(XLoraLayer, "get_maybe_topk_scalings", mock_get_maybe_topk_scalings)
+
+        model.enable_scalings_logging()
+        inputs = tokenizer.encode("Test per token normalization", add_special_tokens=False, return_tensors="pt")
+        outputs = model.generate(
+            input_ids=inputs.to(self.torch_device),
+            max_new_tokens=1,
+        )
+
+        for scaling in captured_data:
+            weight_sums = scaling.sum(dim=-1)
+            assert torch.allclose(weight_sums, torch.ones_like(weight_sums), atol=1e-5), (
+                "Per-token scaling weights are not normalized to sum to 1."
+            )
+
+    def test_xlora_embed_scale_is_applied(self, tmp_path):
+        """Test that X-LoRA correctly handles embeddings with scaling (e.g., Gemma3)."""
+        model_id = "hf-internal-testing/tiny-random-Gemma3ForCausalLM"
+        with hub_online_once(model_id):
+            # Create and save Gemma3-compatible LoRA adapters
+            adapters = {}
+            for i in range(2):
+                torch.manual_seed(i + 1)
+                lora_config = LoraConfig(
+                    task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["embed_tokens"]
+                )
+                model = AutoModelForCausalLM.from_pretrained(model_id)
+                peft_model = get_peft_model(model, lora_config)
+                adapter_path = os.path.join(tmp_path, f"checkpoint-{i + 1}")
+                peft_model.save_pretrained(adapter_path)
+                adapters[str(i)] = adapter_path
+
+            # Load base model and test X-LoRA with embed_scale
+            base_model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+            base_model.config.use_cache = False
+            orig_embedding = base_model.get_input_embeddings()
+
+            xlora_config = XLoraConfig(
+                task_type=TaskType.CAUSAL_LM,
+                hidden_size=base_model.config.hidden_size,
+                adapters=adapters,
+            )
+            xlora_model = get_peft_model(base_model, xlora_config)
+
+            x = torch.arange(10).to(self.torch_device)
+            xlora_embedding = xlora_model.base_model.model.get_input_embeddings()
+            max_embedding_output = xlora_embedding(x).abs().max(0)[0]
+            assert (max_embedding_output < 100.0).all()
+
+            # set embed_scale to an absurdly high value, then check that the embedding output is also scaled to a high
+            # value
+            orig_embedding.embed_scale.fill_(10000.0)
+            max_embedding_output = xlora_embedding(x).abs().max(0)[0]
+            assert (max_embedding_output > 100.0).all()
+
+            # set embed_scale to zero, then check that the embedding output is also zero
+            orig_embedding.embed_scale.fill_(0)
+            embedding_output = xlora_embedding(x)
+            assert (embedding_output == 0.0).all()

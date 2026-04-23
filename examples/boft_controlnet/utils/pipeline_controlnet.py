@@ -12,15 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 import PIL.Image
 import torch
 from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 from diffusers.pipelines.controlnet.pipeline_controlnet import StableDiffusionControlNetPipeline
-from diffusers.utils import BaseOutput, is_compiled_module, logging
+from diffusers.utils import BaseOutput, logging
 from torch.nn import functional as F
 from utils.light_controlnet import ControlNetModel
 
@@ -42,8 +43,8 @@ class LightControlNetPipelineOutput(BaseOutput):
             (nsfw) content, or `None` if safety checking could not be performed.
     """
 
-    images: Union[List[PIL.Image.Image], np.ndarray]
-    nsfw_content_detected: Optional[List[bool]]
+    images: Union[list[PIL.Image.Image], np.ndarray]
+    nsfw_content_detected: Optional[list[bool]]
 
 
 class LightControlNetPipeline(StableDiffusionControlNetPipeline):
@@ -164,23 +165,23 @@ class LightControlNetPipeline(StableDiffusionControlNetPipeline):
     @torch.no_grad()
     def __call__(
         self,
-        prompt: Union[str, List[str]] = None,
+        prompt: Union[str, list[str]] = None,
         image: Union[
             torch.FloatTensor,
             PIL.Image.Image,
             np.ndarray,
-            List[torch.FloatTensor],
-            List[PIL.Image.Image],
-            List[np.ndarray],
+            list[torch.FloatTensor],
+            list[PIL.Image.Image],
+            list[np.ndarray],
         ] = None,
         height: Optional[int] = None,
         width: Optional[int] = None,
         num_inference_steps: int = 50,
         guidance_scale: float = 7.5,
-        negative_prompt: Optional[Union[str, List[str]]] = None,
+        negative_prompt: Optional[Union[str, list[str]]] = None,
         num_images_per_prompt: Optional[int] = 1,
         eta: float = 0.0,
-        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
+        generator: Optional[Union[torch.Generator, list[torch.Generator]]] = None,
         latents: Optional[torch.FloatTensor] = None,
         prompt_embeds: Optional[torch.FloatTensor] = None,
         negative_prompt_embeds: Optional[torch.FloatTensor] = None,
@@ -188,8 +189,8 @@ class LightControlNetPipeline(StableDiffusionControlNetPipeline):
         return_dict: bool = True,
         callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
         callback_steps: int = 1,
-        cross_attention_kwargs: Optional[Dict[str, Any]] = None,
-        controlnet_conditioning_scale: Union[float, List[float]] = 1.0,
+        cross_attention_kwargs: Optional[dict[str, Any]] = None,
+        controlnet_conditioning_scale: Union[float, list[float]] = 1.0,
         guess_mode: bool = False,
     ):
         r"""
@@ -215,9 +216,9 @@ class LightControlNetPipeline(StableDiffusionControlNetPipeline):
                 The number of denoising steps. More denoising steps usually lead to a higher quality image at the
                 expense of slower inference.
             guidance_scale (`float`, *optional*, defaults to 7.5):
-                Guidance scale as defined in [Classifier-Free Diffusion Guidance](https://arxiv.org/abs/2207.12598).
+                Guidance scale as defined in [Classifier-Free Diffusion Guidance](https://huggingface.co/papers/2207.12598).
                 `guidance_scale` is defined as `w` of equation 2. of [Imagen
-                Paper](https://arxiv.org/pdf/2205.11487.pdf). Guidance scale is enabled by setting `guidance_scale >
+                Paper](https://huggingface.co/papers/2205.11487). Guidance scale is enabled by setting `guidance_scale >
                 1`. Higher guidance scale encourages to generate images that are closely linked to the text `prompt`,
                 usually at the expense of lower image quality.
             negative_prompt (`str` or `List[str]`, *optional*):
@@ -227,7 +228,7 @@ class LightControlNetPipeline(StableDiffusionControlNetPipeline):
             num_images_per_prompt (`int`, *optional*, defaults to 1):
                 The number of images to generate per prompt.
             eta (`float`, *optional*, defaults to 0.0):
-                Corresponds to parameter eta (η) in the DDIM paper: https://arxiv.org/abs/2010.02502. Only applies to
+                Corresponds to parameter eta (η) in the DDIM paper: https://huggingface.co/papers/2010.02502. Only applies to
                 [`schedulers.DDIMScheduler`], will be ignored for others.
             generator (`torch.Generator` or `List[torch.Generator]`, *optional*):
                 One or a list of [torch generator(s)](https://pytorch.org/docs/stable/generated/torch.Generator.html)
@@ -298,11 +299,11 @@ class LightControlNetPipeline(StableDiffusionControlNetPipeline):
 
         device = self._execution_device
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-        # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
+        # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
         # corresponds to doing no classifier free guidance.
         do_classifier_free_guidance = guidance_scale > 1.0
 
-        controlnet = self.controlnet._orig_mod if is_compiled_module(self.controlnet) else self.controlnet
+        controlnet = self.controlnet._orig_mod if hasattr(self.controlnet, "_orig_mod") else self.controlnet
 
         if isinstance(controlnet, MultiControlNetModel) and isinstance(controlnet_conditioning_scale, float):
             controlnet_conditioning_scale = [controlnet_conditioning_scale] * len(controlnet.nets)
@@ -426,7 +427,10 @@ class LightControlNetPipeline(StableDiffusionControlNetPipeline):
         if hasattr(self, "final_offload_hook") and self.final_offload_hook is not None:
             self.unet.to("cpu")
             self.controlnet.to("cpu")
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            elif torch.xpu.is_available():
+                torch.xpu.empty_cache()
 
         if not output_type == "latent":
             image = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False)[0]
