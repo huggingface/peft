@@ -57,7 +57,6 @@ RUN \
     conda run -n peft pip install ninja && conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
 
 RUN NCCL_DIR=$(ls -d /opt/conda/envs/peft/lib/python*/site-packages/nvidia/nccl) && \
-    NVTE_BUILD_USE_NVIDIA_WHEELS=1 \
     CPATH="${NCCL_DIR}/include:${CPATH}" \
     LIBRARY_PATH="${NCCL_DIR}/lib:${LIBRARY_PATH}" \
     conda run -n peft pip install --no-build-isolation "transformer_engine[pytorch]"
