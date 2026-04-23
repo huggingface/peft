@@ -143,6 +143,15 @@ class PveraLayer(BaseTunerLayer):
                 nn.init.zeros_(self.pvera_lambda_d[adapter_name]).fill_(d_initial)
                 nn.init.zeros_(self.pvera_lambda_b[adapter_name])
 
+    def _reparametrize(self, mu, logvar, sample_at_inference):
+        if self.training or (not self.training and sample_at_inference):
+            std = torch.exp(0.5 * logvar)
+            eps = torch.randn_like(std)
+            z = mu + eps * std
+        else:
+            z = mu
+        return z
+
 
 class Linear(nn.Linear, PveraLayer):
     # PVeRA implemented in a dense layer
@@ -258,15 +267,6 @@ class Linear(nn.Linear, PveraLayer):
             output_tensor = output_tensor.to(dtype=dtype)
 
         return output_tensor
-
-    def _reparametrize(self, mu, logvar, sample_at_inference):
-        if self.training or (not self.training and sample_at_inference):
-            std = torch.exp(0.5 * logvar)
-            eps = torch.randn_like(std)
-            z = mu + eps * std
-        else:
-            z = mu
-        return z
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
