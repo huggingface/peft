@@ -242,7 +242,7 @@ class VeraModel(BaseTuner):
                     "index": target_base_layer.index,
                 }
             )
-            return Linear8bitLt(target, adapter_name, vera_A, vera_B, **eightbit_kwargs)
+            return Linear8bitLt(target, adapter_name, vera_A, vera_B, config=vera_config, **eightbit_kwargs)
         elif kwargs["loaded_in_4bit"] and isinstance(target_base_layer, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
@@ -252,7 +252,7 @@ class VeraModel(BaseTuner):
                     "quant_type": target_base_layer.weight.quant_type,
                 }
             )
-            return Linear4bit(target, adapter_name, vera_A, vera_B, **fourbit_kwargs)
+            return Linear4bit(target, adapter_name, vera_A, vera_B, config=vera_config, **fourbit_kwargs)
         elif isinstance(target_base_layer, torch.nn.Linear):
             if vera_config.fan_in_fan_out:
                 warnings.warn(
