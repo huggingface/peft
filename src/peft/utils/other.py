@@ -1295,6 +1295,32 @@ def get_quantization_config(model: torch.nn.Module, method: str):
     return None
 
 
+def is_gptqmodel_quant_linear(module: Optional[torch.nn.Module]) -> bool:
+    """
+    Check if a module is a GPTQ-Model quantized linear.
+    """
+    if module is None or not is_gptqmodel_available():
+        return False
+
+    try:
+        from gptqmodel.nn_modules.qlinear import BaseQuantLinear
+    except ImportError:
+        return False
+
+    return isinstance(module, BaseQuantLinear)
+
+
+def is_gptqmodel_awq_layer(module: Optional[torch.nn.Module]) -> bool:
+    """
+    Check if a module is a GPTQ-Model quantized linear that supports the AWQ method.
+    """
+    if not is_gptqmodel_quant_linear(module):
+        return False
+
+    supported_methods = getattr(module, "SUPPORTS_METHODS", None) or ()
+    return any(getattr(method, "value", method) == "awq" for method in supported_methods)
+
+
 def get_gptqmodel_quant_linear(gptq_quantization_config, device_map=None):
     """
     Get the right GPTQQuantLinear class based on the quantization config file

@@ -55,7 +55,7 @@ from peft import (
     get_peft_model,
     prepare_model_for_kbit_training,
 )
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_gptqmodel_available, is_xpu_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_xpu_available
 from peft.tuners.lora.config import LoraRuntimeConfig
 from peft.utils import infer_device
 
