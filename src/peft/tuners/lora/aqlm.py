@@ -88,7 +88,7 @@ class AqlmLoraLinear(torch.nn.Module, LoraLayer):
         rep = super().__repr__()
         return "lora." + rep
 
-    # TODO: Check if it is better as suggested by users https://github.com/PanQiWei/AutoGPTQ/pull/102
+    # TODO: Check whether an alternative initialization would improve AQLM-backed LoRA layers.
     # def reset_lora_parameters(self, adapter_name):
     #     if adapter_name in self.lora_A.keys():
     #         torch.nn.init.xavier_uniform_(self.lora_A[adapter_name].weight)

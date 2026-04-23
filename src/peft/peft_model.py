@@ -3084,8 +3084,7 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
 def __getattr__(name):
     if name == "PEFT_TYPE_TO_MODEL_MAPPING":
         # This is for backwards compatibility: In #2282, PEFT_TYPE_TO_MODEL_MAPPING was removed as it was redundant with
-        # PEFT_TYPE_TO_TUNER_MAPPING. However, third party code could still use this mapping, e.g.:
-        # https://github.com/AutoGPTQ/AutoGPTQ/blob/6689349625de973b9ee3016c28c11f32acf7f02c/auto_gptq/utils/peft_utils.py#L8
+        # PEFT_TYPE_TO_TUNER_MAPPING. However, third-party code could still use this mapping.
         # TODO: Remove after 2026-01
         msg = (
             "PEFT_TYPE_TO_MODEL_MAPPING is deprecated, please use `from peft import PEFT_TYPE_TO_TUNER_MAPPING` instead. "

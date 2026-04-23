@@ -109,11 +109,11 @@ config = LoraConfig(target_modules="all-linear", ...)
 
 ## GPTQ quantization
 
-You can learn more about GPTQ-based `[2, 3, 4, 8]` bit quantization at [GPTQ-Model](https://github.com/ModelCloud/GPTQModel) and in the Transformers [GPTQ](https://huggingface.co/docs/transformers/quantization/gptq) documentation. Post-quant training in PEFT can use either [GPTQ-Model](https://github.com/ModelCloud/GPTQModel) or [AutoGPTQ](https://github.com/autogptq/autogptq), but we recommend GPTQ-Model because AutoGPTQ will be deprecated in a future release.
+You can learn more about GPTQ-based `[2, 3, 4, 8]` bit quantization at [GPTQ-Model](https://github.com/ModelCloud/GPTQModel) and in the Transformers [GPTQ](https://huggingface.co/docs/transformers/quantization/gptq) documentation. PEFT supports GPTQ post-training through GPTQ-Model.
 
 ```bash
 # GPTQ-Model install
-pip install gptqmodel --no-build-isolation
+pip install "gptqmodel>=6.0.3" --no-build-isolation
 ```
 
 ```py

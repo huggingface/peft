@@ -18,7 +18,6 @@ import torch
 from peft.import_utils import is_gptqmodel_available
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
-from peft.utils import get_auto_gptq_quant_linear
 
 
 class GPTQLoraLinear(torch.nn.Module, LoraLayer):
@@ -93,7 +92,7 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
         rep = super().__repr__()
         return "lora." + rep
 
-    # TODO: Check if it is better as suggested by users https://github.com/PanQiWei/AutoGPTQ/pull/102
+    # TODO: Check whether an alternative initialization is better for GPTQ-Model-backed LoRA layers.
     # def reset_lora_parameters(self, adapter_name):
     #     if adapter_name in self.lora_A.keys():
     #         torch.nn.init.xavier_uniform_(self.lora_A[adapter_name].weight)
@@ -112,18 +111,10 @@ def dispatch_gptq(
     else:
         target_base_layer = target
 
-    cfg = kwargs.get("gptq_quantization_config", None)
-
     if is_gptqmodel_available():
         from gptqmodel.nn_modules.qlinear import BaseQuantLinear
 
         if isinstance(target_base_layer, BaseQuantLinear):
-            new_module = GPTQLoraLinear(target, adapter_name, **kwargs)
-            target.qweight = target_base_layer.qweight
-    else:
-        quant_linear = get_auto_gptq_quant_linear(cfg)
-
-        if quant_linear is not None and isinstance(target_base_layer, quant_linear):
             new_module = GPTQLoraLinear(target, adapter_name, **kwargs)
             target.qweight = target_base_layer.qweight
 

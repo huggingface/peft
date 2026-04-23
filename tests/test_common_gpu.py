@@ -60,6 +60,7 @@ from peft.utils import infer_device
 from .testing_utils import (
     device_count,
     require_bitsandbytes,
+    require_gptqmodel,
     require_multi_accelerator,
     require_non_cpu,
     require_torch_gpu,
@@ -386,14 +387,15 @@ class PeftGPUCommonTests(unittest.TestCase):
             assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.ia3_l
 
     @pytest.mark.single_gpu_tests
+    @require_gptqmodel
     def test_lora_gptq_quantization_from_pretrained_safetensors(self):
         r"""
-        Tests that the autogptq quantization using LoRA works as expected with safetensors weights.
+        Tests that GPTQ-Model quantization using LoRA works as expected with safetensors weights.
         """
         from transformers import GPTQConfig
 
         model_id = "marcsun13/opt-350m-gptq-4bit"
-        quantization_config = GPTQConfig(bits=4, use_exllama=False)
+        quantization_config = GPTQConfig(bits=4)
         kwargs = {
             "pretrained_model_name_or_path": model_id,
             "torch_dtype": torch.float16,

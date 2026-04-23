@@ -22,7 +22,6 @@ from accelerate.test_utils.testing import get_backend
 from peft.import_utils import (
     is_aqlm_available,
     is_auto_awq_available,
-    is_auto_gptq_available,
     is_eetq_available,
     is_gptqmodel_available,
     is_hqq_available,
@@ -90,15 +89,6 @@ def require_bitsandbytes(test_case):
     except ImportError:
         test_case = pytest.mark.skip(reason="test requires bitsandbytes")(test_case)
     return test_case
-
-
-def require_auto_gptq(test_case):
-    """
-    Decorator marking a test that requires auto-gptq. These tests are skipped when auto-gptq isn't installed.
-    """
-    return unittest.skipUnless(is_gptqmodel_available() or is_auto_gptq_available(), "test requires auto-gptq")(
-        test_case
-    )
 
 
 def require_gptqmodel(test_case):

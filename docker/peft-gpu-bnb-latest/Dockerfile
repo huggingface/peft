@@ -55,7 +55,7 @@ RUN source activate peft && \
     accelerate \
     peft \
     optimum \
-    auto-gptq && \
+    "gptqmodel>=6.0.3" && \
     git clone https://github.com/TimDettmers/bitsandbytes && cd bitsandbytes && \
     cmake -B . -DCOMPUTE_BACKEND=cuda -S . && \
     cmake --build . && \

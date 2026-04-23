@@ -81,9 +81,9 @@ from peft.utils.other import fsdp_auto_wrap_policy
 from .testing_utils import (
     require_aqlm,
     require_auto_awq,
-    require_auto_gptq,
     require_bitsandbytes,
     require_eetq,
+    require_gptqmodel,
     require_hqq,
     require_multi_accelerator,
     require_non_cpu,
@@ -1483,19 +1483,18 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
 
 @require_torch_gpu
-@require_auto_gptq
+@require_gptqmodel
 @require_optimum
 class PeftGPTQGPUTests(unittest.TestCase):
     r"""
-    GPTQ + peft tests
+    GPTQ-Model + PEFT tests
     """
 
     def setUp(self):
         from transformers import GPTQConfig
 
         self.causal_lm_model_id = "marcsun13/opt-350m-gptq-4bit"
-        # TODO : check if it works for Exllamav2 kernels
-        self.quantization_config = GPTQConfig(bits=4, use_exllama=False)
+        self.quantization_config = GPTQConfig(bits=4, backend="auto_trainable")
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
 
     def tearDown(self):
