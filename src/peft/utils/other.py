@@ -403,20 +403,22 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         new_hook = old_hook_cls(**filtered_old_hook_attr)
         return new_hook
 
-    def _check_forward_args(self, x, *args, **kwargs):
+    def _check_forward_args(self, *args, **kwargs):
         """Check if the arguments are compatible with the configs and state of the model"""
         adapter_names = kwargs.get("adapter_names", None)
         if adapter_names is None:
             return
+        if not args:
+            return  # kwargs-only call; batch-size check requires positional input
 
-        if len(x) != len(adapter_names):
+        if len(args[0]) != len(adapter_names):
             msg = (
                 "Length of `adapter_names` should be the same as the number of inputs, but got "
-                f"{len(adapter_names)} and {len(x)} respectively."
+                f"{len(adapter_names)} and {len(args[0])} respectively."
             )
             raise ValueError(msg)
 
-    def _forward_wrapped(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def _forward_wrapped(self, *args: Any, **kwargs: Any) -> torch.Tensor:
         raise NotImplementedError
 
     def _forward_wrapped_mixed_batch(
@@ -424,7 +426,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
     ) -> torch.Tensor:
         raise NotImplementedError
 
-    def _forward_wrapped_passthrough(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def _forward_wrapped_passthrough(self, *args: Any, **kwargs: Any) -> torch.Tensor:
         """The forward call when no adapter is involved in the forward computation, only the base model"""
         raise NotImplementedError
 
@@ -462,16 +464,16 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
 
         return torch.stack(results)
 
-    def forward(self, x: torch.Tensor, *args, **kwargs):
-        self._check_forward_args(x, *args, **kwargs)
+    def forward(self, *args, **kwargs):
+        self._check_forward_args(*args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
 
         if self.disable_adapters or any(adapter not in self._adapters for adapter in self.active_adapters):
-            return self._forward_wrapped_passthrough(x, *args, **kwargs)
+            return self._forward_wrapped_passthrough(*args, **kwargs)
 
         if adapter_names is None:
-            return self._forward_wrapped(x, *args, **kwargs)
-        return self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
+            return self._forward_wrapped(*args, **kwargs)
+        return self._mixed_batch_forward(*args, adapter_names=adapter_names, **kwargs)
 
     def enable_adapters(self, enabled: bool):
         """Toggle the enabling and disabling of adapters
@@ -577,16 +579,16 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
     def _error_message_name(self):
         return "modules_to_save"
 
-    def _forward_wrapped(self, x, *args, **kwargs):
+    def _forward_wrapped(self, *args, **kwargs):
         if not self.active_adapters:
-            return self._forward_wrapped_passthrough(x, *args, **kwargs)
-        return self.modules_to_save[self.active_adapters[0]](x, *args, **kwargs)
+            return self._forward_wrapped_passthrough(*args, **kwargs)
+        return self.modules_to_save[self.active_adapters[0]](*args, **kwargs)
 
     def _forward_wrapped_mixed_batch(self, x, active_adapter, *args, **kwargs):
         return self.modules_to_save[active_adapter](x, *args, **kwargs)
 
-    def _forward_wrapped_passthrough(self, x, *args, **kwargs):
-        return self.original_module(x, *args, **kwargs)
+    def _forward_wrapped_passthrough(self, *args, **kwargs):
+        return self.original_module(*args, **kwargs)
 
     def _hasattr_wrapped(self, name, modules):
         # this method is only called if there is at least one active adapter
@@ -843,18 +845,18 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
             "Please file an issue under https://github.com/huggingface/peft/issues."
         )
 
-    def _forward_wrapped(self, x, *args, **kwargs):
+    def _forward_wrapped(self, *args, **kwargs):
         if not self.active_adapters:
-            return self._forward_wrapped_passthrough(x, *args, **kwargs)
-        return self.token_adapter(x)
+            return self._forward_wrapped_passthrough(*args, **kwargs)
+        return self.token_adapter(args[0])
 
     def _forward_wrapped_mixed_batch(self, x, active_adapter, *args, **kwargs):
         return self.token_adapter.forward_adapters(x, [active_adapter])
 
-    def _forward_wrapped_passthrough(self, x, *args, **kwargs):
+    def _forward_wrapped_passthrough(self, *args, **kwargs):
         # the token adapter knows how to deal with disabled adapter / no active adapter, don't call original_module
         # directly
-        return self.token_adapter(x, *args, **kwargs)
+        return self.token_adapter(*args, **kwargs)
 
     def update(self, active_adapter, **kwargs):
         # TODO this does not support deepspeed/fsdp since it is missing a context manager
@@ -1657,9 +1659,8 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     to the base model anyway. Non-transformer models have to provide a `_tied_weights_keys` attribute for this function
     to work.
 
-    Note that this function will not check if weight tying is disabled by the model's config. There can be the case
-    that the weight tying definition is present but the tying is disabled via `model_config.tie_word_embeddings=False`.
-    You have to check that yourself.
+    If the model's config has `tie_word_embeddings` set to `False`, this function returns an empty list, as weight
+    tying is explicitly disabled for that model checkpoint.
     """
     tied_weights: list[str] = []
 
@@ -1670,6 +1671,16 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     if hasattr(model, "tuner_layer_cls"):
         # unpack BaseTuner
         model = model.model
+
+    # `_tied_weights_keys` is architectural capability; `tie_word_embeddings=False` means tying is
+    # explicitly disabled for this checkpoint and must be respected.
+    model_config = getattr(model, "config", None)
+    if (
+        model_config is not None
+        and hasattr(model_config, "tie_word_embeddings")
+        and getattr(model_config, "tie_word_embeddings") is False
+    ):
+        return []
 
     if not hasattr(model, "_tied_weights_keys"):
         return []
@@ -1722,3 +1733,4 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
 
     # get module names from parameter names
     return sorted({name.rpartition(".")[0] for name in tied_weights})
+
