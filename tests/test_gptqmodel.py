@@ -49,7 +49,7 @@ from .testing_utils import (
 @require_gptqmodel
 class PeftGPTQModelCommonTests(unittest.TestCase):
     r"""
-    A common tester to run common operations that are performed on GPU/CPU such as generation, loading in 8bit, etc.
+    A common tester to run GPTQ-Model operations that are performed on GPU/CPU such as generation and adapter loading.
     """
 
     def setUp(self):
@@ -68,12 +68,12 @@ class PeftGPTQModelCommonTests(unittest.TestCase):
 
     def test_lora_gptq_quantization_from_pretrained_safetensors(self):
         r"""
-        Tests that the gptqmodel quantization using LoRA works as expected with safetensors weights.
+        Tests that GPTQ-Model quantization using LoRA works as expected with safetensors weights.
         """
         from transformers import GPTQConfig
 
         model_id = "marcsun13/opt-350m-gptq-4bit"
-        quantization_config = GPTQConfig(bits=4, use_exllama=False)
+        quantization_config = GPTQConfig(bits=4)
         kwargs = {
             "pretrained_model_name_or_path": model_id,
             "torch_dtype": torch.float16,
@@ -108,13 +108,14 @@ class PeftGPTQModelCommonTests(unittest.TestCase):
 @require_optimum
 class PeftGPTQModelTests(unittest.TestCase):
     r"""
-    GPTQ + peft tests
+    GPTQ-Model + PEFT tests
     """
 
     def setUp(self):
         from transformers import GPTQConfig
 
         self.causal_lm_model_id = "marcsun13/opt-350m-gptq-4bit"
+        # PEFT needs GPTQ-Model's trainable backend here rather than inference auto-selection.
         self.quantization_config = GPTQConfig(bits=4, backend="auto_trainable")
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
 
