@@ -30,7 +30,7 @@ from peft.utils import (
 from peft.utils.integrations import gather_params_ctx
 
 from .gptq import SVDQuantLinear
-from .layer import AdaLoraLayer, RankAllocator, SVDLinear
+from .layer import AdaLoraLayer, RankAllocator, SVDConv2d, SVDLinear
 
 
 class AdaLoraModel(LoraModel):
@@ -205,12 +205,15 @@ class AdaLoraModel(LoraModel):
                         "Setting fan_in_fan_out to True."
                     )
                     lora_config.fan_in_fan_out = True
-            else:
+            elif not isinstance(target_base_layer, torch.nn.Conv2d):
                 raise ValueError(
                     f"Target module {target} is not supported. "
-                    f"Currently, only `torch.nn.Linear` and `Conv1D` are supported."
+                    f"Currently, only `torch.nn.Linear`, `Conv1D`, and `torch.nn.Conv2d` are supported."
                 )
-            new_module = SVDLinear(target, adapter_name, config=lora_config, **kwargs)
+            if isinstance(target_base_layer, torch.nn.Conv2d):
+                new_module = SVDConv2d(target, adapter_name, config=lora_config, **kwargs)
+            else:
+                new_module = SVDLinear(target, adapter_name, config=lora_config, **kwargs)
 
         return new_module
 
