@@ -276,9 +276,9 @@ class TestModulesToSaveAttributeAccess:
 
 class TestModulesToSaveKwargsOnlyForward:
     """Regression test for #3191: modules listed in `modules_to_save` whose parent calls them with keyword arguments
-    only (e.g. Gemma's `vision_tower(pixel_values=...)`) used to crash with
-    `TypeError: forward() missing 1 required positional argument: 'x'` because the wrapper required a positional first
-    arg. The wrapper now forwards `*args, **kwargs` as-is.
+    only (e.g. Gemma's `vision_tower(pixel_values=...)`) used to crash with `TypeError: forward() missing 1 required
+    positional argument: 'x'` because the wrapper required a positional first arg. The wrapper now forwards `*args,
+    **kwargs` as-is.
     """
 
     @pytest.fixture
