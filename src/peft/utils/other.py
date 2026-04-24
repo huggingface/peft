@@ -403,12 +403,13 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         new_hook = old_hook_cls(**filtered_old_hook_attr)
         return new_hook
 
-    def _check_forward_args(self, x, *args, **kwargs):
+    def _check_forward_args(self, *args, **kwargs):
         """Check if the arguments are compatible with the configs and state of the model"""
         adapter_names = kwargs.get("adapter_names", None)
-        if adapter_names is None:
+        if adapter_names is None or not args:
             return
 
+        x = args[0]
         if len(x) != len(adapter_names):
             msg = (
                 "Length of `adapter_names` should be the same as the number of inputs, but got "
@@ -416,7 +417,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
             )
             raise ValueError(msg)
 
-    def _forward_wrapped(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def _forward_wrapped(self, *args: Any, **kwargs: Any) -> torch.Tensor:
         raise NotImplementedError
 
     def _forward_wrapped_mixed_batch(
@@ -424,7 +425,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
     ) -> torch.Tensor:
         raise NotImplementedError
 
-    def _forward_wrapped_passthrough(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def _forward_wrapped_passthrough(self, *args: Any, **kwargs: Any) -> torch.Tensor:
         """The forward call when no adapter is involved in the forward computation, only the base model"""
         raise NotImplementedError
 
@@ -462,16 +463,16 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
 
         return torch.stack(results)
 
-    def forward(self, x: torch.Tensor, *args, **kwargs):
-        self._check_forward_args(x, *args, **kwargs)
+    def forward(self, *args, **kwargs):
+        self._check_forward_args(*args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
 
         if self.disable_adapters or any(adapter not in self._adapters for adapter in self.active_adapters):
-            return self._forward_wrapped_passthrough(x, *args, **kwargs)
+            return self._forward_wrapped_passthrough(*args, **kwargs)
 
         if adapter_names is None:
-            return self._forward_wrapped(x, *args, **kwargs)
-        return self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
+            return self._forward_wrapped(*args, **kwargs)
+        return self._mixed_batch_forward(*args, adapter_names=adapter_names, **kwargs)
 
     def enable_adapters(self, enabled: bool):
         """Toggle the enabling and disabling of adapters
@@ -577,16 +578,16 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
     def _error_message_name(self):
         return "modules_to_save"
 
-    def _forward_wrapped(self, x, *args, **kwargs):
+    def _forward_wrapped(self, *args, **kwargs):
         if not self.active_adapters:
-            return self._forward_wrapped_passthrough(x, *args, **kwargs)
-        return self.modules_to_save[self.active_adapters[0]](x, *args, **kwargs)
+            return self._forward_wrapped_passthrough(*args, **kwargs)
+        return self.modules_to_save[self.active_adapters[0]](*args, **kwargs)
 
     def _forward_wrapped_mixed_batch(self, x, active_adapter, *args, **kwargs):
         return self.modules_to_save[active_adapter](x, *args, **kwargs)
 
-    def _forward_wrapped_passthrough(self, x, *args, **kwargs):
-        return self.original_module(x, *args, **kwargs)
+    def _forward_wrapped_passthrough(self, *args, **kwargs):
+        return self.original_module(*args, **kwargs)
 
     def _hasattr_wrapped(self, name, modules):
         # this method is only called if there is at least one active adapter
