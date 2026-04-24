@@ -165,9 +165,6 @@ class PveraModel(BaseTuner):
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "r": r,
-            "pvera_dropout": pvera_config.pvera_dropout,
-            "fan_in_fan_out": pvera_config.fan_in_fan_out,
-            "init_weights": pvera_config.init_weights,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -176,12 +173,10 @@ class PveraModel(BaseTuner):
         if isinstance(target, Linear):
             target.update_layer(
                 adapter_name,
-                self.pvera_A,
-                self.pvera_B,
-                r,
-                pvera_config.pvera_dropout,
-                pvera_config.init_weights,
-                d_initial=pvera_config.d_initial,
+                pvera_A=self.pvera_A,
+                pvera_B=self.pvera_B,
+                r=r,
+                config=pvera_config,
             )
         else:
             new_module = self._create_new_module(
@@ -221,7 +216,7 @@ class PveraModel(BaseTuner):
                     "index": target_base_layer.index,
                 }
             )
-            return Linear8bitLt(target, adapter_name, pvera_A, pvera_B, **eightbit_kwargs)
+            return Linear8bitLt(target, adapter_name, pvera_A, pvera_B, config=pvera_config, **eightbit_kwargs)
         elif loaded_in_4bit and isinstance(target_base_layer, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
@@ -231,21 +226,20 @@ class PveraModel(BaseTuner):
                     "quant_type": target_base_layer.weight.quant_type,
                 }
             )
-            return Linear4bit(target, adapter_name, pvera_A, pvera_B, **fourbit_kwargs)
+            return Linear4bit(target, adapter_name, pvera_A, pvera_B, config=pvera_config, **fourbit_kwargs)
         elif isinstance(target_base_layer, torch.nn.Linear):
-            if kwargs["fan_in_fan_out"]:
+            if pvera_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
-                kwargs["fan_in_fan_out"] = pvera_config.fan_in_fan_out = False
+                pvera_config.fan_in_fan_out = False
         elif isinstance(target_base_layer, Conv1D):
-            kwargs["is_target_conv_1d_layer"] = True
-            if not kwargs["fan_in_fan_out"]:
+            if not pvera_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
-                kwargs["fan_in_fan_out"] = pvera_config.fan_in_fan_out = True
+                pvera_config.fan_in_fan_out = True
         else:
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
@@ -262,9 +256,7 @@ class PveraModel(BaseTuner):
             pvera_A,
             pvera_B,
             adapter_name,
-            bias=bias,
-            d_initial=pvera_config.d_initial,
-            sample_at_inference=module_sample_at_inference,
+            config=pvera_config,
             **kwargs,
         )
 

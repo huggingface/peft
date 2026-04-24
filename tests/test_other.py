@@ -27,7 +27,7 @@ from transformers import (
 )
 
 from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model
-from peft.import_utils import is_transformers_ge_v5_1_0
+from peft.import_utils import is_transformers_ge_v5_1_0, is_transformers_ge_v5_6_0
 from peft.utils.other import ModulesToSaveWrapper, _get_module_names_tied_with_embedding, _get_no_split_modules
 
 from .testing_utils import hub_online_once
@@ -545,11 +545,30 @@ class TestGetNoSplitModules:
         if not is_transformers_ge_v5_1_0:
             # sanity check: just visiting the model itself is not enough:
             assert model._no_split_modules == []
-        else:
+            no_split_modules = _get_no_split_modules(model)
+            assert no_split_modules == {"CLIPEncoderLayer", "LlamaDecoderLayer"}
+        elif not is_transformers_ge_v5_6_0:
+            # TODO remove this once transformers <5.6.0 is not supported anymore
             assert model._no_split_modules == {"CLIPEncoderLayer", "LlamaDecoderLayer"}
-
-        no_split_modules = _get_no_split_modules(model)
-        assert no_split_modules == {"CLIPEncoderLayer", "LlamaDecoderLayer"}
+            no_split_modules = _get_no_split_modules(model)
+            assert no_split_modules == {"CLIPEncoderLayer", "LlamaDecoderLayer"}
+        else:
+            # in transformers > 5.5.0, the structure of the model was changed, see
+            # https://github.com/huggingface/transformers/pull/45361
+            # https://github.com/huggingface/transformers/pull/45448
+            assert model._no_split_modules == {
+                "CLIPEncoderLayer",
+                "CLIPTextEmbeddings",
+                "CLIPVisionEmbeddings",
+                "LlamaDecoderLayer",
+            }
+            no_split_modules = _get_no_split_modules(model)
+            assert no_split_modules == {
+                "CLIPEncoderLayer",
+                "CLIPTextEmbeddings",
+                "CLIPVisionEmbeddings",
+                "LlamaDecoderLayer",
+            }
 
 
 class TestGetModuleNamesTiedWithEmbedding:
@@ -633,6 +652,18 @@ class TestGetModuleNamesTiedWithEmbedding:
             modules = peft_model._get_module_names_tied_with_embedding()
 
             assert expected == modules
+
+    @pytest.mark.parametrize("tied_weights_type", ["list", "mapping"])
+    @pytest.mark.parametrize("model_id", model_ids)
+    def test_get_modules_tied_returns_empty_when_tying_disabled(self, model_id, tied_weights_type):
+        # When tie_word_embeddings=False, no tied modules should be reported even if _tied_weights_keys exists
+        # Linked to origin issue #2944
+        with self.patch_model(model_id, tied_weights_type) as (model, _):
+            # Model has _tied_weights_keys (architectural capability) but tying is disabled
+            model.config.tie_word_embeddings = False
+
+            modules = _get_module_names_tied_with_embedding(model)
+            assert modules == []
 
 
 # TODO for PEFT 0.20 remove this

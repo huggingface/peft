@@ -26,6 +26,8 @@ from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 from peft.utils.integrations import check_deepspeed_zero3_enabled, gather_params_ctx
 
+from .config import TrainableTokensConfig
+
 
 class TrainableTokensLayer(nn.Module, BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
@@ -38,7 +40,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         self,
         base_layer: nn.Module,
         adapter_name: str,
-        token_indices: list[int],
+        config: TrainableTokensConfig | dict | None = None,
         tied_adapter: Optional[TrainableTokensLayer] = None,
         **kwargs,
     ) -> None:
@@ -104,13 +106,23 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         dist.broadcast(token_weights, src=src_rank)
         return token_weights
 
-    def update_layer(self, adapter_name, **kwargs):
-        if kwargs.get("tied_adapter", None):
+    def update_layer(
+        self,
+        adapter_name,
+        config: TrainableTokensConfig | None = None,
+        tied_adapter: nn.Module | None = None,
+        **kwargs,
+    ):
+        # config can be None when update_layer is called through _set_trainable, in which case the relevant
+        # arguments should be in kwargs
+        if tied_adapter is not None:
             # as a tied adapter, we're just following whatever the adpater we're tied to does, we don't update anything.
             return
 
-        self.token_indices[adapter_name] = kwargs["token_indices"]
-        init_weights = kwargs.get("init_weights", True)
+        token_indices = config.token_indices if (config is not None) else kwargs["token_indices"]
+        init_weights = config.init_weights if (config is not None) else kwargs.get("init_weights", True)
+
+        self.token_indices[adapter_name] = token_indices
 
         # we initialize the delta embedding weights from the base embedding matrix and replace values instead of
         # adding/subtracting deltas. we do it this way and use `embedding.weight.index_copy()` to write the updated

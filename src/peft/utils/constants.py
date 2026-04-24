@@ -97,6 +97,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "gemma": ["q_proj", "v_proj"],
     "gemma2": ["q_proj", "v_proj"],
     "gemma3_text": ["q_proj", "v_proj"],
+    "gemma4": r".*language_model\..*\.(q_proj|v_proj)",
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
     "rwkv": ["key", "value", "receptance", "output"],
@@ -114,7 +115,10 @@ TRANSFORMERS_MODELS_TO_MISS_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA
 TRANSFORMERS_MODELS_TO_OFT_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_POLY_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
+TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
+TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING["vit"] = ["query", "value"]
 TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
+TRANSFORMERS_MODELS_TO_TINYLORA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_PSOFT_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_LILY_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_GRALORA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
@@ -261,6 +265,7 @@ TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
     "gemma": ["q_proj", "v_proj"],
     "gemma2": ["q_proj", "v_proj"],
     "gemma3_text": ["q_proj", "v_proj"],
+    "gemma4": r".*language_model\..*\.(q_proj|v_proj)",
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
 }
@@ -285,6 +290,7 @@ TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING = {
     "gemma": ["q_proj", "v_proj"],
     "gemma2": ["q_proj", "v_proj"],
     "gemma3_text": ["q_proj", "v_proj"],
+    "gemma4": r".*language_model\..*\.(q_proj|v_proj)",
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
 }
@@ -343,6 +349,7 @@ TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING = {
     "gemma": ["q_proj", "v_proj"],
     "gemma2": ["q_proj", "v_proj"],
     "gemma3_text": ["q_proj", "v_proj"],
+    "gemma4": r".*language_model\..*\.(q_proj|v_proj)",
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
 }
@@ -365,3 +372,7 @@ DUMMY_MODEL_CONFIG = {"model_type": "custom"}
 # otherwise there is no point in optimizing and there is a small chance of bugs in the optimization algorithm, so no
 # point in taking unnecessary risks. See #2045 for more context.
 MIN_TARGET_MODULES_FOR_OPTIMIZATION = 20
+# dtypes that are allowed to be used for adapter computation
+ALLOWED_COMPUTE_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
+# float dtypes that should be upcast in the adapter for computation
+UPCAST_DTYPES = ("float8_e4m3fn", "float8_e4m3fnuz", "float8_e5m2", "float8_e5m2fnuz", "float8_e8m0fnu")

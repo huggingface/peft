@@ -44,7 +44,7 @@ from transformers import (
 )
 
 import peft
-from peft import PeftConfig, get_peft_model, prepare_model_for_kbit_training
+from peft import PeftConfig, get_peft_model
 from peft.optimizers import create_lorafa_optimizer, create_loraplus_optimizer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 
@@ -80,6 +80,7 @@ class TrainConfig:
         max_steps: The maximum number of steps to train for
         eval_steps: The number of steps between evaluations
         compile: Whether to compile the model
+        use_gc: Whether to use gradient checkpointing.
         query_template: The template for the query
         seed: The random seed
         grad_norm_clip: The gradient norm clipping value (set to 0 to skip)
@@ -100,6 +101,7 @@ class TrainConfig:
     max_steps: int
     eval_steps: int
     compile: bool
+    use_gc: bool
     query_template: str
     seed: int
     grad_norm_clip: float  # set to 0 to skip
@@ -110,6 +112,7 @@ class TrainConfig:
     autocast_adapter_dtype: bool
     generation_kwargs: dict[str, Any]
     attn_implementation: Optional[str]
+    init_kv_cache_prefix: Optional[str]
 
     def __post_init__(self) -> None:
         if not isinstance(self.model_id, str):
@@ -209,6 +212,7 @@ def get_base_model(
     model_id: str,
     dtype: Literal["float32", "float16", "bfloat16", "int8", "int4"],
     attn_implementation: Optional[str],
+    use_gc: bool,
 ) -> PreTrainedModel:
     kwargs: dict[str, Any] = {
         "pretrained_model_name_or_path": model_id,
@@ -229,9 +233,9 @@ def get_base_model(
         raise ValueError(f"Invalid dtype: {dtype}")
 
     model = AutoModelForCausalLM.from_pretrained(**kwargs)
-
-    if dtype in ["int8", "int4"]:
-        model = prepare_model_for_kbit_training(model)
+    if use_gc:
+        model.enable_input_require_grads()
+        model.gradient_checkpointing_enable()
 
     return model
 
@@ -241,11 +245,12 @@ def get_model(
     model_id: str,
     dtype: Literal["float32", "float16", "bfloat16", "int8", "int4"],
     compile: bool,
+    use_gc: bool,
     attn_implementation: Optional[str],
     peft_config: Optional[PeftConfig],
     autocast_adapter_dtype: bool,
 ) -> nn.Module:
-    base_model = get_base_model(model_id=model_id, dtype=dtype, attn_implementation=attn_implementation)
+    base_model = get_base_model(model_id=model_id, dtype=dtype, attn_implementation=attn_implementation, use_gc=use_gc)
     if peft_config is None:
         model = base_model
     else:
@@ -337,6 +342,18 @@ class BucketIterator:
         if len(self.ds) % bucket_size != 0:
             bucket = self.ds[-(len(self.ds) % bucket_size) :]
             yield from self._batch_iterator(bucket)
+
+
+def upload_checkpoint_to_bucket(model: nn.Module, experiment_name: str, bucket_name: str):
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True, delete=True) as tmp_dir:
+            model.save_pretrained(tmp_dir)
+            huggingface_hub.batch_bucket_files(
+                bucket_name,
+                add=[(os.path.join(tmp_dir, fname), f"{experiment_name}/{fname}") for fname in os.listdir(tmp_dir)],
+            )
+    except Exception as exc:
+        print(f"Failed to upload model checkpoint to hub: {exc}")
 
 
 def get_file_size(

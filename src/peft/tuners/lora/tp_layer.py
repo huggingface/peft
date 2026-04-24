@@ -30,6 +30,13 @@ from .config import LoraConfig
 from .layer import LoraLayer
 
 
+def get_default_module_allowlist():
+    """Allowed module names that config.megatron_core can reference for import"""
+    return [
+        "megatron",
+    ]
+
+
 class LoraParallelLinear(nn.Module, LoraLayer):
     """
     When the target layer parallel_linear is RowParallelLinear, in order to keep the input and output shapes
@@ -313,6 +320,12 @@ def dispatch_megatron(
         target_base_layer = target
 
     if config.megatron_config:
+        if not any(config.megatron_core.startswith(f"{prefix}.") for prefix in get_default_module_allowlist()):
+            raise ValueError(
+                f"{config.megatron_core=} does not start with a valid prefix ({get_default_module_allowlist()}) "
+                "which is unsupported due to being a potential security risk. If you think it should be supported, "
+                "please raise an issue in PEFT."
+            )
         megatron_core = importlib.import_module(config.megatron_core)
     else:
         megatron_core = None

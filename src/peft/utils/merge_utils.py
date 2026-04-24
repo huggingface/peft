@@ -68,7 +68,7 @@ def random_pruning(tensor: torch.Tensor, density: float, rescale: bool) -> torch
     mask = torch.bernoulli(torch.full_like(input=tensor, fill_value=density))
     pruned_tensor = tensor * mask
     if rescale:
-        torch.div(input=pruned_tensor, other=density)
+        pruned_tensor = pruned_tensor / density
     return pruned_tensor
 
 

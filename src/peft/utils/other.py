@@ -43,6 +43,7 @@ from .constants import (
     INCLUDE_LINEAR_LAYERS_SHORTHAND,
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING,
@@ -66,6 +67,7 @@ from .constants import (
     TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_TINYLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING,
@@ -87,6 +89,7 @@ __all__ = [
     "INCLUDE_LINEAR_LAYERS_SHORTHAND",
     "SAFETENSORS_WEIGHTS_NAME",
     "TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING",
@@ -110,6 +113,7 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_TINYLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING",
@@ -1653,9 +1657,8 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     to the base model anyway. Non-transformer models have to provide a `_tied_weights_keys` attribute for this function
     to work.
 
-    Note that this function will not check if weight tying is disabled by the model's config. There can be the case
-    that the weight tying definition is present but the tying is disabled via `model_config.tie_word_embeddings=False`.
-    You have to check that yourself.
+    If the model's config has `tie_word_embeddings` set to `False`, this function returns an empty list, as weight
+    tying is explicitly disabled for that model checkpoint.
     """
     tied_weights: list[str] = []
 
@@ -1666,6 +1669,16 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     if hasattr(model, "tuner_layer_cls"):
         # unpack BaseTuner
         model = model.model
+
+    # `_tied_weights_keys` is architectural capability; `tie_word_embeddings=False` means tying is
+    # explicitly disabled for this checkpoint and must be respected.
+    model_config = getattr(model, "config", None)
+    if (
+        model_config is not None
+        and hasattr(model_config, "tie_word_embeddings")
+        and getattr(model_config, "tie_word_embeddings") is False
+    ):
+        return []
 
     if not hasattr(model, "_tied_weights_keys"):
         return []

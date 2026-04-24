@@ -13,25 +13,21 @@
 # limitations under the License.
 
 import copy
-import itertools
 import math
 import platform
 import re
 import warnings
-from collections import defaultdict
 from contextlib import contextmanager
 from copy import deepcopy
 from unittest.mock import patch
 
 import pytest
 import torch
-from datasets import Dataset
 from huggingface_hub import snapshot_download
 from safetensors.torch import load_file
 from scipy import stats
 from torch import nn
-from torch.utils.data import DataLoader
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM
 
 from peft import (
     AdaLoraConfig,
@@ -61,9 +57,7 @@ from peft import (
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
-    get_eva_state_dict,
     get_peft_model,
-    initialize_lora_eva_weights,
     inject_adapter_in_model,
     set_peft_model_state_dict,
 )
@@ -76,7 +70,7 @@ from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 from peft.utils.other import ModulesToSaveWrapper
 
-from .testing_utils import hub_online_once, load_dataset_english_quotes, require_deterministic_for_xpu
+from .testing_utils import hub_online_once, require_deterministic_for_xpu
 
 
 try:
@@ -3477,253 +3471,10 @@ class TestCordaInitialization:
 class TestEvaInitialization:
     """Tests for the EVA (Explained Variance Adaptation) initialization method.
 
-    This test suite verifies:
-    1. Consistency of initialization across different seeds
-    2. Proper error handling for invalid inputs
-    3. Compatibility with different model architectures
-    4. Reproducibility of results
-    5. Proper handling of edge cases
+    Only tests the config validation, as running EVA can be slow (see test_gpu_examples::TestEvaInitializationGPU for
+    more thorough tests)
+
     """
-
-    # Constants for test configuration
-    COSINE_SIMILARITY_THRESHOLD = 0.75
-    NUM_SEEDS = 2
-    BATCH_SIZE = 4
-    MAX_LENGTH = 256
-    LORA_DIM = 8
-    LORA_ALPHA = 1
-    DEVICE = infer_device()
-    # for caching purposes:
-    _dataset = load_dataset_english_quotes()["train"]
-
-    @pytest.fixture(scope="class")
-    def tokenizer(self):
-        tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2")
-        tokenizer.pad_token = tokenizer.eos_token
-        return tokenizer
-
-    @pytest.fixture(scope="class")
-    def dataset(self, tokenizer):
-        # concatenate examples
-        examples = []
-        example = ""
-        for data in self._dataset:
-            if len(example) >= self.MAX_LENGTH:
-                examples.append(example)
-                example = ""
-            example = example + " " + data["quote"]
-        dataset = Dataset.from_dict({"text": examples})
-        # tokenize
-        dataset = dataset.map(
-            lambda x: tokenizer(x["text"], padding="max_length", truncation=True, max_length=self.MAX_LENGTH),
-            batched=True,
-            remove_columns=dataset.column_names,
-        )
-        dataset.set_format(type="torch")
-        return dataset
-
-    @pytest.fixture
-    def model(self):
-        model_id = "openai-community/gpt2"
-        with hub_online_once(model_id):
-            model = AutoModelForCausalLM.from_pretrained(model_id)
-            model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
-            yield model.to(self.DEVICE)
-
-    @pytest.fixture
-    def peft_config(self):
-        return LoraConfig(
-            r=self.LORA_DIM,
-            lora_alpha=self.LORA_ALPHA,
-            target_modules=["c_attn"],
-            init_lora_weights="eva",
-            eva_config=EvaConfig(rho=2),
-        )
-
-    @staticmethod
-    def collate_fn(examples):
-        return {k: torch.stack([v[k] for v in examples], dim=0) for k in examples[0].keys()}
-
-    @staticmethod
-    def prepare_layer_inputs_fn(layer_input, model_input, layer_name):
-        return layer_input[0].view(-1, layer_input[0].size(-1))
-
-    def get_dataloader(self, dataset):
-        return DataLoader(
-            dataset,
-            batch_size=self.BATCH_SIZE,
-            collate_fn=self.collate_fn,
-            shuffle=False,
-        )
-
-    @pytest.mark.parametrize(
-        "prepare_layer_inputs_keys, expected_outcome",
-        [
-            (None, "success"),
-            (["transformer.h.0.attn.c_attn"], "success"),
-            (
-                ["transformer.h.0.attn.c_attn", "transformer.h.1.attn.c_attn", "transformer.h.2.attn.c_attn"],
-                "value_error",
-            ),
-        ],
-    )
-    def test_eva_state_dict_prepare_inputs_mapping(
-        self, model, dataset, peft_config, prepare_layer_inputs_keys, expected_outcome
-    ):
-        """
-        Tests for cases where prepare_layer_inputs_fn is a mapping. Checks that if not all target modules are present,
-        the prepare_layer_inputs_fn for the remaining modules is set to None. Also checks that if more keys than target
-        modules are present, a ValueError is raised.
-        """
-
-        def fn(x, *args):
-            return x[0].view(-1, x[0].size(-1))
-
-        if prepare_layer_inputs_keys is None:
-            prepare_layer_inputs_fn = fn
-        else:
-            prepare_layer_inputs_fn = {k: fn for k in prepare_layer_inputs_keys}
-
-        shuffled_dataset = dataset.shuffle(seed=0)
-        dataloader = self.get_dataloader(shuffled_dataset)
-        modified_peft_config = deepcopy(peft_config)
-        modified_peft_config.eva_config.tau = 0  # converge immediately
-        if expected_outcome == "success":
-            sd = get_eva_state_dict(
-                model,
-                dataloader,
-                modified_peft_config,
-                prepare_model_inputs_fn=None,
-                prepare_layer_inputs_fn=prepare_layer_inputs_fn,
-            )
-            assert len(sd) == 2
-            assert "transformer.h.0.attn.c_attn" in sd
-            assert "transformer.h.1.attn.c_attn" in sd
-        else:
-            with pytest.raises(
-                ValueError, match="prepare_layer_inputs_fn is a mapping but the following module names were not found"
-            ):
-                get_eva_state_dict(
-                    model,
-                    dataloader,
-                    modified_peft_config,
-                    prepare_model_inputs_fn=None,
-                    prepare_layer_inputs_fn=prepare_layer_inputs_fn,
-                )
-
-    @pytest.mark.parametrize(
-        "eva_config",
-        [EvaConfig(rho=2, adjust_scaling_factors=True)],
-    )
-    def test_eva_state_dict_adjust_scaling_factors(self, model, dataset, peft_config, eva_config):
-        """
-        Tests that the scaling factors are adjusted so that all LoRA gradients have the same scale regardless of their
-        rank.
-        """
-        modified_peft_config = deepcopy(peft_config)
-        modified_peft_config.eva_config = eva_config
-        dataloader = self.get_dataloader(dataset)
-        peft_model = get_peft_model(deepcopy(model), modified_peft_config)
-        scaling_factors_before = {}
-        for n, m in peft_model.named_modules():
-            if isinstance(m, LoraLayer):
-                scaling_factors_before[n] = m.scaling["default"]
-        initialize_lora_eva_weights(peft_model, dataloader)
-        for n, m in peft_model.named_modules():
-            if isinstance(m, LoraLayer):
-                assert m.scaling["default"] == scaling_factors_before[n]
-
-    @pytest.mark.parametrize(
-        "eva_config",
-        [
-            # note: lower tau to decrease number of iterations until convergence, as tests are slow on CPU
-            EvaConfig(rho=2, tau=0.9),
-            EvaConfig(rho=1, tau=0.9),
-            EvaConfig(rho=1, whiten=True, tau=0.9),
-            EvaConfig(rho=1.0001, tau=0.9),
-        ],
-    )
-    def test_eva_initialization_consistency(self, model, dataset, peft_config, eva_config):
-        """
-        Tests that the state dict returned by `get_eva_state_dict` is consistent across different seeds based on the
-        cosine similarity of the svd components.
-        """
-        modified_peft_config = deepcopy(peft_config)
-        modified_peft_config.eva_config = eva_config
-        state_dicts = []
-        for seed in range(self.NUM_SEEDS):
-            shuffled_dataset = dataset.shuffle(seed=seed)
-            dataloader = self.get_dataloader(shuffled_dataset)
-            sd = get_eva_state_dict(model, dataloader, modified_peft_config, show_progress_bar=False)
-            state_dicts.append(sd)
-
-        cos_sims = defaultdict(list)
-        for i, j in itertools.combinations(range(self.NUM_SEEDS), 2):
-            for k, v1 in state_dicts[i].items():
-                v2 = state_dicts[j][k]
-                min_size = min(v1.size(0), v2.size(0))
-                cos_sims[k].extend(torch.cosine_similarity(v1[:min_size].abs(), v2[:min_size].abs(), dim=1).tolist())
-
-        mean_cosine_similarities = {k: torch.tensor(v).mean() for k, v in cos_sims.items()}
-        for layer_name, mean_cosine_similarity in mean_cosine_similarities.items():
-            assert mean_cosine_similarity > self.COSINE_SIMILARITY_THRESHOLD, (
-                f"Mean absolute cosine similarity {mean_cosine_similarity:.4f} "
-                f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
-            )
-
-    @pytest.mark.parametrize("has_rank_zero", [True, False])
-    def test_load_eva_state_dict(self, model, dataset, peft_config, tmp_path, has_rank_zero):
-        """
-        Tests that the `eva_state_dict` argument in `initialize_lora_eva_weights` can be used to initialize a model
-        with EVA weights and that the initialized model can be saved and loaded correctly.
-        """
-        dataloader = self.get_dataloader(dataset)
-        peft_model = get_peft_model(deepcopy(model), peft_config)
-        sd = get_eva_state_dict(peft_model, dataloader)
-        if has_rank_zero:
-            k = "base_model.model.transformer.h.0.attn.c_attn"
-            sd[k] = sd[k][:0]
-        initialize_lora_eva_weights(peft_model, eva_state_dict=sd)
-        if has_rank_zero:
-            assert not isinstance(peft_model.model.transformer.h[0].attn.c_attn, LoraLayer)
-        else:
-            assert isinstance(peft_model.model.transformer.h[0].attn.c_attn, LoraLayer)
-        peft_model.save_pretrained(tmp_path)
-        peft_model = PeftModel.from_pretrained(model, tmp_path, torch_device=self.DEVICE, low_cpu_mem_usage=True)
-        peft_model(**{k: v.to(self.DEVICE) for k, v in next(iter(dataloader)).items()})
-
-    def test_missing_eva_inits(self, model, dataset, peft_config):
-        """
-        Tests that a warning is raised when some adapter modules were not initialized with EVA weights.
-        """
-        modified_peft_config = deepcopy(peft_config)
-        modified_peft_config.target_modules = ["wte"]
-        dataloader = self.get_dataloader(dataset)
-        peft_model = get_peft_model(deepcopy(model), modified_peft_config)
-        with pytest.warns(
-            UserWarning,
-            match="the following layers were initialized with init_lora_weights=True because they were not found in the eva state_dict:*",
-        ):
-            initialize_lora_eva_weights(peft_model, dataloader)
-
-    def test_load_eva_model(self, model, dataset, peft_config, tmp_path):
-        """
-        Tests that a model initialized with EVA weights can be loaded correctly.
-        """
-        dataloader = self.get_dataloader(dataset)
-        peft_model = get_peft_model(deepcopy(model), peft_config)
-        initialize_lora_eva_weights(peft_model, dataloader)
-        peft_model.save_pretrained(tmp_path)
-        peft_model = PeftModel.from_pretrained(model, tmp_path, torch_device=self.DEVICE, low_cpu_mem_usage=True)
-        peft_model(**{k: v.to(self.DEVICE) for k, v in next(iter(dataloader)).items()})
-
-    def test_eva_initialization_with_invalid_dataloader(self, model, peft_config):
-        """Test that appropriate error is raised when dataloader is empty."""
-        empty_dataset = Dataset.from_dict({"text": []})
-        dataloader = self.get_dataloader(empty_dataset)
-
-        with pytest.raises(ValueError, match="dataloader is empty"):
-            get_eva_state_dict(model, dataloader, peft_config)
 
     def test_eva_config_rho(self):
         """
@@ -4606,28 +4357,6 @@ class TestHotSwapping:
                 assert param.shape[0] == 10  # output shape of conv layer
 
 
-def test_import_peft_type_to_model_mapping_deprecation_warning(recwarn):
-    # This is for backwards compatibility: In #2282, PEFT_TYPE_TO_MODEL_MAPPING was removed as it was redundant with
-    # PEFT_TYPE_TO_TUNER_MAPPING. However, third party code could still use this mapping, e.g.:
-    # https://github.com/AutoGPTQ/AutoGPTQ/blob/6689349625de973b9ee3016c28c11f32acf7f02c/auto_gptq/utils/peft_utils.py#L8
-    # TODO: Remove after 2026-01
-
-    # first check that there is no warning under normal circumstances
-    from peft.peft_model import PeftModel  # noqa
-
-    expected = (
-        "PEFT_TYPE_TO_MODEL_MAPPING is deprecated, please use `from peft import PEFT_TYPE_TO_TUNER_MAPPING` instead"
-    )
-    warnings = (w.message.args[0] for w in recwarn.list)
-    assert not any(w.startswith(expected) for w in warnings)
-
-    from peft.peft_model import PEFT_TYPE_TO_MODEL_MAPPING  # noqa
-
-    # check that there is a warning with this message after importing the variable
-    warnings = (w.message.args[0] for w in recwarn.list)
-    assert any(w.startswith(expected) for w in warnings)
-
-
 class TestScaling:
     """Tests for scaling and unscaling
 
@@ -5288,15 +5017,26 @@ class TestWeightTying:
 
     torch_device = infer_device()
 
-    def get_lm_model(self, tie_weights=True):
+    def get_lm_model(self, tie_weights=True, config_tie_word_embeddings=None):
         # Mimicking a LM with embed_tokens and lm_head layers
         # to test weight tying of adapters
+
+        if config_tie_word_embeddings is None:
+            config_tie_word_embeddings = tie_weights
+
         class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()
 
                 self.embed_tokens = nn.Embedding(1000, 1000)
                 self.linear = nn.Linear(1000, 1000, bias=False)
+
+        class ModelConfig:
+            def __init__(self, tie_word_embeddings):
+                self.tie_word_embeddings = tie_word_embeddings
+
+            def to_dict(self):
+                return {"tie_word_embeddings": self.tie_word_embeddings}
 
         class CausalLM(nn.Module):
             if tie_weights:
@@ -5305,7 +5045,7 @@ class TestWeightTying:
             def __init__(self):
                 super().__init__()
                 self.model = MyModule()
-                self.config = {"tie_word_embeddings": tie_weights}
+                self.config = ModelConfig(tie_word_embeddings=config_tie_word_embeddings)
                 self.lm_head = nn.Linear(1000, 1000, bias=False)
 
                 if tie_weights:
@@ -5319,8 +5059,12 @@ class TestWeightTying:
 
         return CausalLM().eval().to(self.torch_device)
 
-    def get_seq2seq_lm_model(self, tie_weights=True):
+    def get_seq2seq_lm_model(self, tie_weights=True, config_tie_word_embeddings=None):
         # Mimicking a encoder-decoder LM with shared embeddings
+
+        if config_tie_word_embeddings is None:
+            config_tie_word_embeddings = tie_weights
+
         class Seq2SeqStack(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -5334,6 +5078,13 @@ class TestWeightTying:
                 self.encoder = Seq2SeqStack()
                 self.decoder = Seq2SeqStack()
 
+        class ModelConfig:
+            def __init__(self, tie_word_embeddings):
+                self.tie_word_embeddings = tie_word_embeddings
+
+            def to_dict(self):
+                return {"tie_word_embeddings": self.tie_word_embeddings}
+
         class Seq2SeqLM(nn.Module):
             if tie_weights:
                 _tied_weights_keys = {
@@ -5345,7 +5096,7 @@ class TestWeightTying:
             def __init__(self):
                 super().__init__()
                 self.model = MySeq2SeqModule()
-                self.config = {"tie_word_embeddings": tie_weights}
+                self.config = ModelConfig(tie_word_embeddings=config_tie_word_embeddings)
                 self.lm_head = nn.Linear(1000, 1000, bias=False)
 
                 if tie_weights:
@@ -5666,3 +5417,64 @@ class TestWeightTying:
         assert isinstance(model.base_model.model.model.encoder.embed_tokens, torch.nn.modules.sparse.Embedding)
         assert isinstance(model.base_model.model.model.decoder.embed_tokens, torch.nn.modules.sparse.Embedding)
         assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
+
+    @pytest.mark.parametrize("modules_to_save", [["lm_head"], ["embed_tokens"], ["lm_head", "embed_tokens"]])
+    def test_ensure_weight_tying_not_tying_when_model_config_tie_false(self, modules_to_save):
+        # When tie_word_embeddings=False, ensure_weight_tying=True should not tie weights.
+        # Regression test for issue #2944
+        model = self.get_lm_model(tie_weights=True, config_tie_word_embeddings=False)
+        config = LoraConfig(
+            modules_to_save=modules_to_save,
+            target_modules=["linear"],
+            ensure_weight_tying=True,
+        )
+
+        with pytest.warns(UserWarning, match="no tied modules were found in the model"):
+            model = get_peft_model(model, config)
+
+        if "embed_tokens" in modules_to_save:
+            assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper)
+        else:
+            assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
+
+        if "lm_head" in modules_to_save:
+            assert isinstance(model.base_model.model.lm_head, ModulesToSaveWrapper)
+        else:
+            assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
+
+        assert (
+            model.base_model.model.model.embed_tokens.weight.data_ptr()
+            != model.base_model.model.lm_head.weight.data_ptr()
+        )
+
+    @pytest.mark.parametrize("target_modules", [["lm_head"], ["embed_tokens"], ["lm_head", "embed_tokens"]])
+    def test_ensure_weight_tying_not_tying_when_model_config_tie_false_target_modules(self, target_modules):
+        # When tie_word_embeddings=False, ensure_weight_tying=True should not tie weights.
+        # Regression test for issue #2944
+        model = self.get_lm_model(tie_weights=True, config_tie_word_embeddings=False)
+        config = LoraConfig(
+            target_modules=["linear"] + target_modules,
+            ensure_weight_tying=True,
+        )
+
+        with pytest.warns(UserWarning, match="no tied modules were found in the model"):
+            model = get_peft_model(model, config)
+
+        if "embed_tokens" in target_modules:
+            assert isinstance(model.base_model.model.model.embed_tokens, LoraLayer)
+        else:
+            assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
+
+        if "lm_head" in target_modules:
+            assert isinstance(model.base_model.model.lm_head, LoraLayer)
+        else:
+            assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
+
+        if set(target_modules) == {"embed_tokens", "lm_head"}:
+            adapter_name = "default"
+            embed_lora_A = model.base_model.model.model.embed_tokens.lora_embedding_A[adapter_name]
+            embed_lora_B = model.base_model.model.model.embed_tokens.lora_embedding_B[adapter_name]
+            lm_lora_A = model.base_model.model.lm_head.lora_A[adapter_name].weight
+            lm_lora_B = model.base_model.model.lm_head.lora_B[adapter_name].weight
+            assert embed_lora_A.data_ptr() != lm_lora_B.data_ptr()
+            assert embed_lora_B.data_ptr() != lm_lora_A.data_ptr()

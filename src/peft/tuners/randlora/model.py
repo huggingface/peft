@@ -258,10 +258,7 @@ class RandLoraModel(BaseTuner):
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "r": r,
-            "randlora_alpha": randlora_config.randlora_alpha,
-            "randlora_dropout": randlora_config.randlora_dropout,
             "fan_in_fan_out": randlora_config.fan_in_fan_out,
-            "init_weights": randlora_config.init_weights,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -272,9 +269,7 @@ class RandLoraModel(BaseTuner):
                 self.randlora_A,
                 self.randlora_B,
                 r,
-                randlora_config.randlora_alpha,
-                randlora_config.randlora_dropout,
-                randlora_config.init_weights,
+                config=randlora_config,
             )
         else:
             new_module = self._create_new_module(
@@ -314,7 +309,14 @@ class RandLoraModel(BaseTuner):
                     "index": target_base_layer.index,
                 }
             )
-            return Linear8bitLt(target, adapter_name, randlora_A, randlora_B, **eightbit_kwargs)
+            return Linear8bitLt(
+                target,
+                adapter_name,
+                config=randlora_config,
+                randlora_A=randlora_A,
+                randlora_B=randlora_B,
+                **eightbit_kwargs,
+            )
         elif loaded_in_4bit and isinstance(target_base_layer, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
@@ -324,21 +326,28 @@ class RandLoraModel(BaseTuner):
                     "quant_type": target_base_layer.weight.quant_type,
                 }
             )
-            return Linear4bit(target, adapter_name, randlora_A, randlora_B, **fourbit_kwargs)
+            return Linear4bit(
+                target,
+                adapter_name,
+                config=randlora_config,
+                randlora_A=randlora_A,
+                randlora_B=randlora_B,
+                **fourbit_kwargs,
+            )
         elif isinstance(target_base_layer, torch.nn.Linear):
-            if kwargs["fan_in_fan_out"]:
+            if randlora_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
-                kwargs["fan_in_fan_out"] = randlora_config.fan_in_fan_out = False
+                randlora_config.fan_in_fan_out = False
         elif isinstance(target_base_layer, Conv1D):
             kwargs["is_target_conv_1d_layer"] = True
-            if not kwargs["fan_in_fan_out"]:
+            if not randlora_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
-                kwargs["fan_in_fan_out"] = randlora_config.fan_in_fan_out = True
+                randlora_config.fan_in_fan_out = True
         else:
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
@@ -349,6 +358,7 @@ class RandLoraModel(BaseTuner):
             randlora_A,
             randlora_B,
             adapter_name,
+            config=randlora_config,
             bias=bias,
             **kwargs,
         )

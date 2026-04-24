@@ -1,0 +1,10 @@
+{
+  "model_id": "meta-llama/Llama-3.2-3B",
+  "max_steps": 5000,
+  "batch_size": 4,
+  "eval_steps": 250,
+  "optimizer_kwargs": {
+    "lr": 1e-4,
+    "weight_decay": 0.1
+  }
+}
