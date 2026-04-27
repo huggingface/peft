@@ -21,7 +21,15 @@ from .layer import AdaLoraLayer, RankAllocator, SVDConv2d, SVDLinear
 from .model import AdaLoraModel
 
 
-__all__ = ["AdaLoraConfig", "AdaLoraLayer", "AdaLoraModel", "RankAllocator", "SVDConv2d", "SVDLinear", "SVDQuantLinear"]
+__all__ = [
+    "AdaLoraConfig",
+    "AdaLoraLayer",
+    "AdaLoraModel",
+    "RankAllocator",
+    "SVDConv2d",
+    "SVDLinear",
+    "SVDQuantLinear",
+]
 
 
 register_peft_method(
