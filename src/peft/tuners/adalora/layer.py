@@ -292,7 +292,8 @@ class SVDConv2d(nn.Module, AdaLoraLayer):
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         delta = (
-            self.lora_B[adapter] @ (self.lora_A[adapter] * self.lora_E[adapter])
+            self.lora_B[adapter]
+            @ (self.lora_A[adapter] * self.lora_E[adapter])
             * self.scaling[adapter]
             / (self.ranknum[adapter] + 1e-5)
         )
