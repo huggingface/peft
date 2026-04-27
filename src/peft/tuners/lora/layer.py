@@ -96,6 +96,17 @@ class LoraVariant:
         """
         raise NotImplementedError
 
+    @staticmethod
+    def update_requires_grad(module: LoraLayer, adapter_name: str) -> None:
+        """
+        Adjust `requires_grad` of the adapter parameters after the tuner's default trainability marking.
+
+        This hook is invoked from the LoRA model's `_mark_only_adapters_as_trainable` once for every adapter that uses
+        this variant. The default implementation is a no-op so existing variants keep their current behavior; variants
+        like MiCA override this to freeze a subset of the adapter parameters (e.g. `lora_B`).
+        """
+        return None
+
 
 class LoraLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
@@ -228,6 +239,9 @@ class LoraLayer(BaseTunerLayer):
         elif isinstance(init_lora_weights, str) and init_lora_weights.lower() == "olora":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.olora_init(adapter_name)
+        elif isinstance(init_lora_weights, str) and init_lora_weights.lower() == "mica":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.mica_init(adapter_name)
         elif init_lora_weights == "loftq":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.loftq_init(adapter_name, config)
@@ -391,6 +405,39 @@ class LoraLayer(BaseTunerLayer):
         weight = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
         weight = transpose(weight.to(dtype), self.fan_in_fan_out)
         self.get_base_layer().weight.data = weight
+
+    def mica_init(self, adapter_name):
+        """Minor Component Adaptation (MiCA) initialization (https://arxiv.org/abs/2604.01694).
+
+        Initializes `lora_B` from the `r` left singular vectors of the base weight associated with the smallest
+        singular values, and sets `lora_A` to zero. The `lora_B` matrix is frozen during training (see
+        `MiCALinearVariant.update_requires_grad`); only `lora_A` is updated. Because `lora_A == 0` at init, the adapter
+        contribution `B @ A == 0` and the base weight does not need to be modified to preserve the forward output.
+        """
+        # When the adapter is being created under `init_empty_weights` (e.g. low_cpu_mem_usage=True), its parameters
+        # live on the meta device and will be filled in from a checkpoint after creation. Skip the SVD in that case.
+        if self.lora_B[adapter_name].weight.device.type == "meta":
+            return
+        weight = self.get_base_layer().weight
+        dtype = weight.dtype
+        if dtype not in [torch.float32, torch.float16, torch.bfloat16]:
+            raise TypeError("Please initialize MiCA under float32, float16, or bfloat16.")
+        weight = transpose(weight.to(torch.float32), self.fan_in_fan_out)
+        # weight has shape (out_features, in_features) once transposed for fan_in_fan_out, matching nn.Linear.weight.
+        # SVD: weight = V @ diag(S) @ Uh, with V: (out, k), Uh: (k, in), S sorted descending.
+        # MiCA selects the LAST r left singular vectors (smallest singular values) for B and zeroes A.
+        r = self.r[adapter_name]
+        max_r = min(weight.shape)
+        if r > max_r:
+            raise ValueError(
+                f"MiCA requires `r` <= min(in_features, out_features) but got r={r} for a layer with "
+                f"weight shape {tuple(weight.shape)} (max usable r is {max_r})."
+            )
+        V, _, _ = torch.linalg.svd(weight.data, full_matrices=False)
+        lora_B = V[:, -r:].contiguous()
+        lora_A = torch.zeros(r, weight.shape[1], device=weight.device)
+        self.lora_B[adapter_name].weight.data = lora_B.to(dtype)
+        self.lora_A[adapter_name].weight.data = lora_A.to(dtype)
 
     def corda_init(self, adapter_name, init_lora_weights):
         linear = self.get_base_layer()
@@ -802,6 +849,11 @@ class Linear(nn.Module, LoraLayer):
             from .variants import BdLoraLinearVariant
 
             return BdLoraLinearVariant()
+
+        if isinstance(config.init_lora_weights, str) and config.init_lora_weights.lower() == "mica":
+            from .variants import MiCALinearVariant
+
+            return MiCALinearVariant()
 
         use_alora = config.alora_invocation_tokens is not None
         if not config.use_dora and not use_alora:

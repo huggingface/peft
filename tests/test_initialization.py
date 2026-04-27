@@ -387,6 +387,104 @@ class TestLoraInitialization:
         peft_model = get_peft_model(deepcopy(model), config)
         assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
 
+    def test_lora_mica_linear_init_default(self, data):
+        # MiCA initializes A=0 and B = bottom-r left singular vectors of W. Because A=0, the adapter contribution
+        # B @ A is zero at init, so the forward output must equal the base model's output exactly.
+        model = self.get_model()
+        output = model(data)[0]
+
+        config = LoraConfig(init_lora_weights="mica", target_modules=["linear"], r=8)
+        peft_model = get_peft_model(deepcopy(model), config)
+
+        weight_A = peft_model.base_model.linear.lora_A["default"].weight
+        weight_B = peft_model.base_model.linear.lora_B["default"].weight
+
+        # A must be zero
+        assert torch.all(weight_A == 0)
+        # B columns must be orthonormal (since they are left singular vectors)
+        eye = torch.eye(weight_B.shape[1], device=weight_B.device, dtype=weight_B.dtype)
+        assert torch.allclose(weight_B.t() @ weight_B, eye, atol=1e-4)
+        # Output at init equals the base output
+        assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
+
+    def test_lora_mica_uses_minor_components(self):
+        # Verify B equals the *minor* (smallest singular value) left singular vectors, not the major ones.
+        torch.manual_seed(0)
+        model = self.get_model()
+        r = 8
+
+        config = LoraConfig(init_lora_weights="mica", target_modules=["linear"], r=r)
+        peft_model = get_peft_model(deepcopy(model), config)
+        weight_B = peft_model.base_model.linear.lora_B["default"].weight.detach().cpu()
+
+        # Reference SVD of the original weight
+        W = model.linear.weight.detach().cpu().to(torch.float32)
+        U, S, _ = torch.linalg.svd(W, full_matrices=False)
+        minor_U = U[:, -r:]
+        major_U = U[:, :r]
+
+        # B should span the same subspace as `minor_U` (column spans match up to sign/orthogonal mixing within
+        # equal-singular-value groups). Equality of projectors is the right invariant.
+        proj_B = weight_B @ weight_B.t()
+        proj_minor = minor_U @ minor_U.t()
+        proj_major = major_U @ major_U.t()
+        assert torch.allclose(proj_B, proj_minor, atol=1e-4)
+        assert not torch.allclose(proj_B, proj_major, atol=1e-2)
+
+    def test_lora_mica_freezes_B(self):
+        model = self.get_model()
+        config = LoraConfig(init_lora_weights="mica", target_modules=["linear"], r=8)
+        peft_model = get_peft_model(deepcopy(model), config)
+
+        assert peft_model.base_model.linear.lora_A["default"].weight.requires_grad
+        assert not peft_model.base_model.linear.lora_B["default"].weight.requires_grad
+
+    def test_lora_mica_train_step_updates_only_A(self, data):
+        # After one optimizer step, lora_A must change but lora_B must stay exactly equal.
+        torch.manual_seed(0)
+        model = self.get_model()
+        config = LoraConfig(init_lora_weights="mica", target_modules=["linear"], r=8)
+        peft_model = get_peft_model(deepcopy(model), config)
+
+        A_before = peft_model.base_model.linear.lora_A["default"].weight.detach().clone()
+        B_before = peft_model.base_model.linear.lora_B["default"].weight.detach().clone()
+
+        opt = torch.optim.SGD([p for p in peft_model.parameters() if p.requires_grad], lr=1.0)
+        out = peft_model(data)[0]
+        loss = out.sum()
+        loss.backward()
+        opt.step()
+
+        A_after = peft_model.base_model.linear.lora_A["default"].weight.detach()
+        B_after = peft_model.base_model.linear.lora_B["default"].weight.detach()
+        assert not torch.equal(A_before, A_after)
+        assert torch.equal(B_before, B_after)
+
+    def test_lora_mica_save_and_load(self, data, tmp_path):
+        # Save then reload onto the same base weights and verify outputs match exactly.
+        torch.manual_seed(0)
+        model = self.get_model()
+
+        config = LoraConfig(init_lora_weights="mica", target_modules=["linear"], r=8)
+        peft_model = get_peft_model(deepcopy(model), config)
+        # mutate lora_A so the adapter is non-trivial
+        peft_model.base_model.linear.lora_A["default"].weight.data.normal_()
+        output_mica = peft_model(data)[0]
+
+        peft_model.save_pretrained(tmp_path / "mica-model")
+        model_loaded = PeftModel.from_pretrained(deepcopy(model), tmp_path / "mica-model")
+        output_loaded = model_loaded(data)[0]
+
+        assert torch.allclose(output_mica, output_loaded, atol=1e-6)
+
+    def test_lora_mica_unsupported_layer_raises(self):
+        # MiCA is currently only implemented for nn.Linear. Trying to apply it to a non-Linear layer (e.g. conv2d)
+        # should raise rather than silently fall through to a default init.
+        model = self.get_model()
+        config = LoraConfig(init_lora_weights="mica", target_modules=["conv2d"], r=4)
+        with pytest.raises(ValueError, match="Unknown initialization"):
+            get_peft_model(deepcopy(model), config)
+
     def test_lora_olora_linear_init_default(self, data):
         model = self.get_model()
         output = model(data)[0]

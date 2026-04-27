@@ -54,6 +54,19 @@ lora_config = LoraConfig(init_lora_weights="pissa_niter_[number of iters]", ...)
 ```
 For detailed instruction on using PiSSA, please follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/pissa_finetuning).
 
+### MiCA
+
+[MiCA](https://arxiv.org/abs/2604.01694) (Minor Component Adaptation) is a complement to PiSSA: instead of initializing from the *principal* singular components, MiCA uses the *minor* ones. Concretely, with `W = U Σ V^T`, MiCA sets `B = U[:, -r:]` (the `r` left singular vectors associated with the smallest singular values) and `A = 0`. During training, only `A` is updated; `B` is frozen. The intuition is that the minor singular directions are largely unused by the pretrained task and therefore offer a more "plastic" subspace for injecting new knowledge while preserving pretrained capabilities.
+
+Because `A == 0` at init, the adapter contribution `B · A == 0` and the model output is preserved exactly at step 0 — no residual subtraction on the base weight is needed (unlike PiSSA). Since only `A` is trainable, the trainable parameter count for matching `r` is roughly half that of LoRA.
+
+```python
+from peft import LoraConfig
+config = LoraConfig(init_lora_weights="mica", r=16, target_modules=["q_proj", "v_proj"], ...)
+```
+
+MiCA currently supports `nn.Linear` target modules only and requires `r <= min(in_features, out_features)` for every targeted layer. For detailed usage, see [these instructions](https://github.com/huggingface/peft/tree/main/examples/mica_finetuning).
+
 ### CorDA
 
 [CorDA](https://huggingface.co/papers/2406.05223) builds task-aware LoRA adapters from weight decomposition oriented by the context of downstream task to learn (instruction-previewed mode, IPM) or world knowledge to maintain (knowledge-preserved mode, KPM).

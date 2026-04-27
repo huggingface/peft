@@ -921,3 +921,50 @@ class BdLoraLinearVariant(LoraVariant):
     @staticmethod
     def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
         return orig_weight - BdLoraLinearVariant._get_bdlora_delta_weight(module, active_adapter)
+
+
+class MiCALinearVariant(LoraVariant):
+    """Variant for Minor Component Adaptation (MiCA), https://arxiv.org/abs/2604.01694.
+
+    The actual SVD-based initialization is performed in `LoraLayer.mica_init` (called from `update_layer`); this
+    variant only adds the freezing of `lora_B` after the tuner's default trainability marking. Forward and merge
+    semantics are identical to vanilla LoRA, since `delta_W = scaling * B @ A` and only `A` is updated.
+    """
+
+    @staticmethod
+    def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
+        # MiCA's adapter weights are populated in LoraLayer.mica_init before this hook runs; nothing to do here.
+        return None
+
+    @staticmethod
+    def update_requires_grad(module: Linear, adapter_name: str) -> None:
+        if adapter_name in module.lora_B:
+            module.lora_B[adapter_name].weight.requires_grad = False
+            if module.lora_B[adapter_name].bias is not None:
+                module.lora_B[adapter_name].bias.requires_grad = False
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return orig_weight + module.get_delta_weight(active_adapter).to(orig_weight.dtype)
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        orig_weight.data += module.get_delta_weight(active_adapter).to(orig_weight.dtype)
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return orig_weight - module.get_delta_weight(active_adapter).to(orig_weight.dtype)
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+        return result + lora_B(lora_A(dropout(x))) * scaling

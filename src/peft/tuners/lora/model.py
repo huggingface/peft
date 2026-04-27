@@ -333,6 +333,15 @@ class LoraModel(BaseTuner):
                     tp_size=self.model._tp_size,
                 )
 
+    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
+        super()._mark_only_adapters_as_trainable(model)
+        # Give each adapter's LoRA variant a chance to refine `requires_grad` after the default marking. Variants
+        # like MiCA override `update_requires_grad` to freeze a subset of the adapter parameters (e.g. lora_B).
+        for module in model.modules():
+            if isinstance(module, LoraLayer):
+                for adapter_name, variant in module.lora_variant.items():
+                    variant.update_requires_grad(module, adapter_name)
+
     def _replace_module(self, parent, child_name, new_module, child):
         # override in LoraModel to handle quantized weights properly
 
