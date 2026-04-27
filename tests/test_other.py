@@ -274,6 +274,57 @@ class TestModulesToSaveAttributeAccess:
             model.lin1.weight
 
 
+class TestModulesToSaveKwargsOnlyForward:
+    """Regression test for #3191: modules listed in `modules_to_save` whose parent calls them with keyword arguments
+    only (e.g. Gemma's `vision_tower(pixel_values=...)`) used to crash with `TypeError: forward() missing 1 required
+    positional argument: 'x'` because the wrapper required a positional first arg. The wrapper now forwards `*args,
+    **kwargs` as-is.
+    """
+
+    @pytest.fixture
+    def model(self):
+        class KwargsOnly(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(8, 8)
+
+            def forward(self, *, pixel_values):
+                return self.lin(pixel_values)
+
+        class Outer(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.trunk = nn.Linear(8, 8)
+                self.vision = KwargsOnly()
+
+            def forward(self, x):
+                return self.vision(pixel_values=self.trunk(x))
+
+        return Outer()
+
+    def test_kwargs_only_forward_active_adapter(self, model):
+        config = LoraConfig(target_modules=["trunk"], modules_to_save=["vision"])
+        peft_model = get_peft_model(model, config)
+        # would previously raise TypeError about missing positional 'x'
+        out = peft_model(torch.randn(2, 8))
+        assert out.shape == (2, 8)
+
+    def test_kwargs_only_forward_disabled_adapter(self, model):
+        config = LoraConfig(target_modules=["trunk"], modules_to_save=["vision"])
+        peft_model = get_peft_model(model, config)
+        with peft_model.disable_adapter():
+            out = peft_model(torch.randn(2, 8))
+        assert out.shape == (2, 8)
+
+    def test_kwargs_only_forward_multi_adapter(self, model):
+        config = LoraConfig(target_modules=["trunk"], modules_to_save=["vision"])
+        peft_model = get_peft_model(model, config)
+        peft_model.add_adapter("other", config)
+        peft_model.set_adapter("other")
+        out = peft_model(torch.randn(2, 8))
+        assert out.shape == (2, 8)
+
+
 class TestModulesToSaveNameSubstringBug:
     """Test a bug that could occur with multiple modules to save where one adapter's name is a substring of another
     adapter's name.

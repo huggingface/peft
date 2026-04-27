@@ -74,6 +74,7 @@ class GPTQOFTLinear(torch.nn.Module, OFTLayer):
 def dispatch_gptq(
     target: torch.nn.Module,
     adapter_name: str,
+    oft_config: OFTConfig,
     **kwargs: Any,
 ) -> Optional[torch.nn.Module]:
     new_module = None
@@ -87,7 +88,7 @@ def dispatch_gptq(
         from gptqmodel.nn_modules.qlinear import BaseQuantLinear
 
         if isinstance(target_base_layer, BaseQuantLinear):
-            new_module = GPTQOFTLinear(target, adapter_name, **kwargs)
+            new_module = GPTQOFTLinear(target, adapter_name, config=oft_config, **kwargs)
             target.qweight = target_base_layer.qweight
 
     return new_module
