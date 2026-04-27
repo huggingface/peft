@@ -1117,25 +1117,25 @@ TEST_CASES = [
         "Vanilla MLP 1 AdaLoRA",
         "MLP",
         AdaLoraConfig,
-        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True, "total_step": 1},
+        {"target_modules": ["lin0"], "init_lora_weights": False, "total_step": 1},
     ),
     (
         "Vanilla MLP 2 AdaLoRA",
         "MLP",
         AdaLoraConfig,
-        {"target_modules": ["lin0", "lin1"], "init_lora_weights": False, "inference_mode": True, "total_step": 1},
+        {"target_modules": ["lin0", "lin1"], "init_lora_weights": False, "total_step": 1},
     ),
     (
         "Conv2d 1 AdaLoRA",
         "Conv2d",
         AdaLoraConfig,
-        {"target_modules": ["conv2d"], "init_lora_weights": False, "inference_mode": True, "total_step": 1},
+        {"target_modules": ["conv2d"], "init_lora_weights": False, "total_step": 1},
     ),
     (
         "Conv2d 2 AdaLoRA",
         "Conv2d",
         AdaLoraConfig,
-        {"target_modules": ["conv2d", "lin0"], "init_lora_weights": False, "inference_mode": True, "total_step": 1},
+        {"target_modules": ["conv2d", "lin0"], "init_lora_weights": False, "total_step": 1},
     ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)

@@ -23,6 +23,7 @@ from torch import nn
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import check_adapters_to_merge
 from peft.utils import transpose
+from peft.utils.integrations import _skip_init_on_device
 
 from .config import AdaLoraConfig
 
@@ -70,8 +71,11 @@ class AdaLoraLayer(LoraLayer):
         self.lora_E[adapter_name] = nn.Parameter(torch.randn(r, 1))
         # Left singular vectors
         self.lora_B[adapter_name] = nn.Parameter(torch.randn(self.out_features, r))
-        # The current rank
-        self.ranknum[adapter_name] = nn.Parameter(torch.randn(1), requires_grad=False)
+        # The current rank. ranknum is deterministic (always set to float(r)) and is not saved
+        # in the adapter state_dict, so it must not be put on meta device under low_cpu_mem_usage=True
+        # — otherwise it would never be restored from a checkpoint and stay on meta forever.
+        with _skip_init_on_device():
+            self.ranknum[adapter_name] = nn.Parameter(torch.randn(1), requires_grad=False)
         self.ranknum[adapter_name].data.fill_(float(r))
         self.ranknum[adapter_name].requires_grad = False
         self.scaling[adapter_name] = lora_alpha if lora_alpha > 0 else float(r)
@@ -233,8 +237,9 @@ class SVDConv2d(nn.Module, AdaLoraLayer):
         self.lora_E[adapter_name] = nn.Parameter(torch.randn(r, 1))
         # Left singular vectors: (out_channels, r)
         self.lora_B[adapter_name] = nn.Parameter(torch.randn(self.out_features, r))
-        # Current rank
-        self.ranknum[adapter_name] = nn.Parameter(torch.randn(1), requires_grad=False)
+        # Current rank — see note in AdaLoraLayer.update_layer about _skip_init_on_device.
+        with _skip_init_on_device():
+            self.ranknum[adapter_name] = nn.Parameter(torch.randn(1), requires_grad=False)
         self.ranknum[adapter_name].data.fill_(float(r))
         self.ranknum[adapter_name].requires_grad = False
         self.scaling[adapter_name] = lora_alpha if lora_alpha > 0 else float(r)
@@ -321,7 +326,9 @@ class SVDConv2d(nn.Module, AdaLoraLayer):
                 x = self._cast_input_dtype(x, lora_A.dtype)
                 base = self.get_base_layer()
                 delta_w = (lora_B @ (lora_A * lora_E) * scaling / ranknum).reshape(base.weight.shape)
-                result = result + nn.functional.conv2d(
+                # Use in-place add so result keeps its original dtype (matches SVDLinear);
+                # otherwise result would be upcast to lora_A.dtype and break subsequent fp16/bf16 ops.
+                result += nn.functional.conv2d(
                     dropout(x),
                     delta_w,
                     stride=base.stride,
