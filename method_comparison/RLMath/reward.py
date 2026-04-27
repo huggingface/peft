@@ -357,7 +357,10 @@ def extract_gsm_answer(text: str) -> str:
 
 
 def math_reward_fn(completions: list[str], ground_truth: list[str], **kwargs) -> list[float]:
-    """Reward function for MATH-style tasks: extract \\boxed{} and grade with sympy."""
+    """Reward function for MATH-style tasks: extract \\boxed{} and grade with sympy.
+
+    Binary reward: 1.0 if correct, 0.0 otherwise.
+    """
     rewards = []
     for completion, gt in zip(completions, ground_truth):
         if isinstance(completion, list) and completion and isinstance(completion[0], dict):
@@ -370,4 +373,34 @@ def math_reward_fn(completions: list[str], ground_truth: list[str], **kwargs) ->
             rewards.append(0.0)
             continue
         rewards.append(1.0 if safe_grade(pred, gt) else 0.0)
+    return rewards
+
+
+def math_reward_fn_tinker(completions: list[str], ground_truth: list[str], **kwargs) -> list[float]:
+    """Reward function replicating tinker-cookbook math_env.
+
+    Formula: format_coef * (correct_format - 1) + correct_answer
+    with format_coef = 0.1.
+
+    Outcomes:
+      - valid format + correct answer: 1.0
+      - valid format + wrong answer:   0.0
+      - invalid format + correct:      0.9  (correct requires extraction, so unreachable)
+      - invalid format + wrong:       -0.1
+    """
+    format_coef = 0.1
+    rewards = []
+    for completion, gt in zip(completions, ground_truth):
+        if isinstance(completion, list) and completion and isinstance(completion[0], dict):
+            completion = completion[0].get("content", "")
+        if not isinstance(completion, str):
+            completion = str(completion)
+        try:
+            pred = extract_boxed(completion)
+            correct_format = 1.0
+        except ValueError:
+            pred = None
+            correct_format = 0.0
+        correct_answer = 1.0 if (pred is not None and safe_grade(pred, gt)) else 0.0
+        rewards.append(format_coef * (correct_format - 1) + correct_answer)
     return rewards

@@ -93,6 +93,33 @@ def load_rl_datasets(
         train = ds[train_split].shuffle(seed=seed)
         test = ds[test_split].shuffle(seed=seed)
         prep_fn = _prepare_gsm8k_row
+    elif dataset_name == "gsm8k_tinker":
+        # Replicates tinker-cookbook's Gsm8kDatasetBuilder + MathEnv.standard_fewshot_prefix.
+        # Reference: tinker-cookbook/tinker_cookbook/recipes/math_rl/math_env.py:22-73, 325-376
+        # - MathEnv.question_suffix: " Write your answer in \\boxed{} format."
+        # - standard_fewshot_prefix: single user/assistant turn showing \\boxed{} format
+        # - train split is shuffled, test split is NOT shuffled
+        # - Conversational prompts are applied via the model's chat template (TRL handles it)
+        ds = load_dataset("openai/gsm8k", "main")
+        train = ds[train_split].shuffle(seed=seed)
+        test = ds[test_split]  # tinker does NOT shuffle test set
+
+        STRAWBERRY_Q = "How many r's are in strawberry?" + MATH_SUFFIX
+        STRAWBERRY_A = (
+            "Let's spell the word out and number all the letters: 1) s 2) t 3) r 4) a 5) w "
+            "6) b 7) e 8) r 9) r 10) y. We have r's at positions 3, 8, and 9. \\boxed{3}"
+        )
+
+        def _prepare_gsm8k_tinker_row(example):
+            return {
+                "prompt": [
+                    {"role": "user", "content": STRAWBERRY_Q},
+                    {"role": "assistant", "content": STRAWBERRY_A},
+                    {"role": "user", "content": example["question"] + MATH_SUFFIX},
+                ],
+                "ground_truth": extract_gsm_answer(example["answer"]),
+            }
+        prep_fn = _prepare_gsm8k_tinker_row
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
 

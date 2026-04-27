@@ -71,6 +71,11 @@ class RLTrainConfig:
     vllm_gpu_memory_utilization: float = 0.3
     vllm_max_model_length: int | None = None
     vllm_enable_sleep_mode: bool = False
+    # Reward function selection: "binary" (default) or "tinker" (format-aware)
+    reward_type: str = "binary"
+    # Adam optimizer betas (tinker-cookbook uses beta2=0.95, HF default is 0.999)
+    adam_beta1: float = 0.9
+    adam_beta2: float = 0.999
 
 
 def load_train_config(exp_dir: str) -> RLTrainConfig:

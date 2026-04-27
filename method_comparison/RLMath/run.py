@@ -14,7 +14,7 @@ from typing import Any
 
 import torch
 from data import load_rl_datasets
-from reward import extract_boxed, math_reward_fn, safe_grade
+from reward import extract_boxed, math_reward_fn, math_reward_fn_tinker, safe_grade
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback, set_seed
 from trl import GRPOConfig, GRPOTrainer
 from utils import (
@@ -88,12 +88,20 @@ def evaluate_pass_at_1(
 
     prompts = [row["prompt"] for row in dataset]
     ground_truths = [row["ground_truth"] for row in dataset]
+    # Conversational prompts (list of dicts) need the chat template applied; plain strings don't.
+    is_conversational = bool(prompts) and isinstance(prompts[0], list)
 
     for i in range(0, len(prompts), batch_size):
         batch_prompts = prompts[i : i + batch_size]
         batch_gts = ground_truths[i : i + batch_size]
 
-        inputs = tokenizer(batch_prompts, return_tensors="pt", padding=True).to(model.device)
+        if is_conversational:
+            batch_texts = tokenizer.apply_chat_template(
+                batch_prompts, tokenize=False, add_generation_prompt=True
+            )
+            inputs = tokenizer(batch_texts, return_tensors="pt", padding=True).to(model.device)
+        else:
+            inputs = tokenizer(batch_prompts, return_tensors="pt", padding=True).to(model.device)
         outputs = model.generate(
             **inputs,
             do_sample=False,
@@ -323,6 +331,8 @@ def run_experiment(experiment_path: str, verbose: bool = False) -> str:
             learning_rate=cfg.learning_rate,
             lr_scheduler_type=cfg.lr_scheduler_type,
             warmup_ratio=cfg.warmup_ratio,
+            adam_beta1=cfg.adam_beta1,
+            adam_beta2=cfg.adam_beta2,
             per_device_train_batch_size=cfg.per_device_train_batch_size,
             gradient_accumulation_steps=cfg.gradient_accumulation_steps,
             gradient_checkpointing=cfg.gradient_checkpointing,
@@ -370,9 +380,10 @@ def run_experiment(experiment_path: str, verbose: bool = False) -> str:
         grpo_args.model_init_kwargs = {"dtype": cfg.dtype}
 
         is_adalora = bool((peft_cfg_dict or {}).get("peft_type", "").upper() == "ADALORA")
+        reward_fn = math_reward_fn_tinker if cfg.reward_type == "tinker" else math_reward_fn
         trainer = GRPOTrainer(
             model=cfg.model_id,
-            reward_funcs=math_reward_fn,
+            reward_funcs=reward_fn,
             args=grpo_args,
             train_dataset=train_ds,
             eval_dataset=None,
