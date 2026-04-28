@@ -360,7 +360,7 @@ class OFTLayer(BaseTunerLayer):
             # AQLM QuantLinear
             in_features, out_features = base_layer.in_features, base_layer.out_features
         elif is_gptqmodel_quant_linear(base_layer):
-            # GPTQ-Model quantized linears
+            # GPT-QModel quantized linears
             in_features, out_features = base_layer.in_features, base_layer.out_features
         elif base_layer.__class__.__name__ == "EetqLinear":
             # Eetq layers

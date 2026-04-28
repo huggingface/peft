@@ -1298,7 +1298,7 @@ def get_quantization_config(model: torch.nn.Module, method: str):
 
 def is_gptqmodel_quant_linear(module: Optional[torch.nn.Module]) -> bool:
     """
-    Check if a module is a GPTQ-Model quantized linear.
+    Check if a module is a GPT-QModel quantized linear.
     """
     if module is None or not is_gptqmodel_available():
         return False
@@ -1313,13 +1313,13 @@ def is_gptqmodel_quant_linear(module: Optional[torch.nn.Module]) -> bool:
 
 def is_gptqmodel_awq_layer(module: Optional[torch.nn.Module]) -> bool:
     """
-    Check if a module is a GPTQ-Model quantized linear that supports the AWQ method.
+    Check if a module is a GPT-QModel quantized linear that supports the AWQ method.
     """
     if not is_gptqmodel_quant_linear(module):
         return False
 
-    supported_methods = getattr(module, "SUPPORTS_METHODS", None) or ()
-    return any(getattr(method, "value", method) == "awq" for method in supported_methods)
+    supported_methods = getattr(module, "SUPPORTS_METHODS", [])
+    return any(method.value == "awq" for method in supported_methods)
 
 
 def get_gptqmodel_quant_linear(gptq_quantization_config, device_map=None):

@@ -2203,7 +2203,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 @require_optimum
 class PeftGPTQGPUTests(unittest.TestCase):
     r"""
-    GPTQ-Model + PEFT tests
+    GPT-QModel + PEFT tests
     """
 
     def setUp(self):

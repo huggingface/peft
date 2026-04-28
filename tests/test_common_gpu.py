@@ -522,7 +522,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_gptqmodel
     def test_lora_gptq_quantization_from_pretrained_safetensors(self):
         r"""
-        Tests that GPTQ-Model quantization using LoRA works as expected with safetensors weights.
+        Tests that GPT-QModel quantization using LoRA works as expected with safetensors weights.
         """
         from transformers import GPTQConfig
 

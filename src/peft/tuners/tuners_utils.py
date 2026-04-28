@@ -210,7 +210,7 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
         # AQLM QuantLinear
         in_features, out_features = module.in_features, module.out_features
     elif is_gptqmodel_quant_linear(module):
-        # GPTQ-Model quantized linears
+        # GPT-QModel quantized linears
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "EetqLinear":
         # Eetq layers
