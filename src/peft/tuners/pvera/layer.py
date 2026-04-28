@@ -89,6 +89,7 @@ class PveraLayer(BaseTunerLayer):
         else:
             pvera_dropout_layer = nn.Identity()
 
+        self.generator = config.generator
         self.pvera_dropout.update(nn.ModuleDict({adapter_name: pvera_dropout_layer}))
         # Actual trainable parameters
         self.pvera_lambda_b[adapter_name] = nn.Parameter(torch.ones(self.out_features), requires_grad=True)
@@ -143,10 +144,10 @@ class PveraLayer(BaseTunerLayer):
                 nn.init.zeros_(self.pvera_lambda_d[adapter_name]).fill_(d_initial)
                 nn.init.zeros_(self.pvera_lambda_b[adapter_name])
 
-    def _reparametrize(self, mu, logvar, sample_at_inference):
+    def _reparametrize(self, mu, logvar, sample_at_inference, generator=None):
         if self.training or (not self.training and sample_at_inference):
             std = torch.exp(0.5 * logvar)
-            eps = torch.randn_like(std)
+            eps = torch.randn_like(std, generator=self.generator)
             z = mu + eps * std
         else:
             z = mu
@@ -299,7 +300,7 @@ class Linear(nn.Linear, PveraLayer):
                 x = x.to(lambda_d.dtype)
                 mu, logvar = (lambda_d * F.linear(dropout(x), sliced_A)).chunk(2, dim=-1)
                 result = result + lambda_b * F.linear(
-                    self._reparametrize(mu, logvar, self.sample_at_inference), sliced_B
+                    self._reparametrize(mu, logvar, self.sample_at_inference, generator=self.generator), sliced_B
                 )
 
         result = result.to(previous_dtype)

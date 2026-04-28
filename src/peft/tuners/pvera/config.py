@@ -13,6 +13,7 @@
 # limitations under the License.
 from __future__ import annotations
 
+import torch
 import warnings
 from dataclasses import dataclass, field
 from typing import Optional, Union
@@ -75,6 +76,8 @@ class PveraConfig(PeftConfig):
             default for non-specified adapters). For example
             `sample_at_inference={'encoder.layer.0.attention.attention.query': True}` will only sample at inference for
             one specific adapter.
+        generator (`torch.Generator`, defaults to None):
+            Random generator for sampling from the learned distribution.
     """
 
     r: int = field(
@@ -187,6 +190,7 @@ class PveraConfig(PeftConfig):
             ),
         },
     )
+    generator: torch.Generator = field(default=None, metadata={"help": "Random generator for sampling from the learned distribution."})
 
     def __post_init__(self):
         super().__post_init__()
