@@ -94,7 +94,7 @@ class PveraLayer(BaseTunerLayer):
             self.generator.manual_seed(config.generator_seed)
         else:
             self.generator = None
-        
+
         self.pvera_dropout.update(nn.ModuleDict({adapter_name: pvera_dropout_layer}))
         # Actual trainable parameters
         self.pvera_lambda_b[adapter_name] = nn.Parameter(torch.ones(self.out_features), requires_grad=True)
