@@ -19,6 +19,7 @@ from .arrow import create_arrow_model
 from .config import ArrowConfig, BdLoraConfig, EvaConfig, LoftQConfig, LoraConfig, LoraGAConfig, LoraRuntimeConfig
 from .conversion import convert_to_lora, save_as_lora
 from .eva import get_eva_state_dict, initialize_lora_eva_weights
+from .fim import FimConfig, initialize_lora_fim_ranks
 from .gptq import GPTQLoraLinear
 from .layer import Conv2d, Conv3d, Embedding, Linear, LoraLayer, ParamWrapper
 from .loraga import preprocess_loraga
@@ -32,6 +33,7 @@ __all__ = [
     "Conv3d",
     "Embedding",
     "EvaConfig",
+    "FimConfig",
     "GPTQLoraLinear",
     "Linear",
     "LoftQConfig",
@@ -45,6 +47,7 @@ __all__ = [
     "create_arrow_model",
     "get_eva_state_dict",
     "initialize_lora_eva_weights",
+    "initialize_lora_fim_ranks",
     "preprocess_loraga",
     "save_as_lora",
 ]

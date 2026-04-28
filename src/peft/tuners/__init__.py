@@ -32,6 +32,7 @@ from .lora import (
     ArrowConfig,
     BdLoraConfig,
     EvaConfig,
+    FimConfig,
     LoftQConfig,
     LoraConfig,
     LoraGAConfig,
@@ -41,6 +42,7 @@ from .lora import (
     create_arrow_model,
     get_eva_state_dict,
     initialize_lora_eva_weights,
+    initialize_lora_fim_ranks,
     preprocess_loraga,
     save_as_lora,
 )
@@ -87,6 +89,7 @@ __all__ = [
     "DeloraConfig",
     "DeloraModel",
     "EvaConfig",
+    "FimConfig",
     "FourierFTConfig",
     "FourierFTModel",
     "GraloraConfig",
@@ -156,6 +159,7 @@ __all__ = [
     "create_arrow_model",
     "get_eva_state_dict",
     "initialize_lora_eva_weights",
+    "initialize_lora_fim_ranks",
     "preprocess_loraga",
     "save_as_lora",
 ]

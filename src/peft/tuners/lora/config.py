@@ -512,7 +512,17 @@ class LoraConfig(PeftConfig):
     )
     init_lora_weights: (
         bool
-        | Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "loftq", "orthogonal"]
+        | Literal[
+            "gaussian",
+            "eva",
+            "fim",
+            "olora",
+            "pissa",
+            "pissa_niter_[number of iters]",
+            "corda",
+            "loftq",
+            "orthogonal",
+        ]
     ) = field(
         default=True,
         metadata={
@@ -625,6 +635,16 @@ class LoraConfig(PeftConfig):
             "help": (
                 "The configuration of EVA. If this is passed, then EVA will be used to initialize the LoRA layers. "
                 "Also set `init_lora_weights='eva'` in this case. "
+            )
+        },
+    )
+    fim_config: Optional["FimConfig"] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The configuration for FIM-guided adaptive rank allocation. If this is passed, then a calibration "
+                "forward+backward pass will redistribute LoRA ranks according to per-layer Fisher Information Matrix "
+                "scores. Also set `init_lora_weights='fim'` and call `initialize_lora_fim_ranks` after wrapping."
             )
         },
     )
@@ -829,6 +849,14 @@ class LoraConfig(PeftConfig):
             self.eva_config = EvaConfig()
         elif self.init_lora_weights != "eva" and self.eva_config is not None:
             warnings.warn("`eva_config` specified but will be ignored when `init_lora_weights` is not 'eva'.")
+
+        elif self.init_lora_weights == "fim" and self.fim_config is None:
+            warnings.warn("`init_lora_weights` is 'fim' but `fim_config` is not specified. Using default FimConfig.")
+            from .fim import FimConfig
+
+            self.fim_config = FimConfig()
+        elif self.init_lora_weights != "fim" and self.fim_config is not None:
+            warnings.warn("`fim_config` specified but will be ignored when `init_lora_weights` is not 'fim'.")
 
         elif self.init_lora_weights == "corda" and self.corda_config is None:
             warnings.warn(

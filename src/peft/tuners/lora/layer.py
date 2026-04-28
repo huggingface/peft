@@ -263,9 +263,12 @@ class LoraLayer(BaseTunerLayer):
     def reset_lora_parameters(self, adapter_name, init_lora_weights):
         if init_lora_weights is not False:
             if adapter_name in self.lora_A.keys():
-                if init_lora_weights is True:
+                if init_lora_weights is True or (
+                    isinstance(init_lora_weights, str) and init_lora_weights.lower() == "fim"
+                ):
                     # initialize A the same way as the default for nn.Linear and B to zero
                     # https://github.com/microsoft/LoRA/blob/a0a92e0f26c067cf94747bdbf1ce73793fa44d19/loralib/layers.py#L124
+                    # For 'fim', rank redistribution happens post-construction via initialize_lora_fim_ranks
                     nn.init.kaiming_uniform_(self.lora_A[adapter_name].weight, a=math.sqrt(5))
                 elif init_lora_weights.lower() == "gaussian":
                     nn.init.normal_(self.lora_A[adapter_name].weight, std=1 / self.r[adapter_name])
