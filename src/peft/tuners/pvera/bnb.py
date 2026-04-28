@@ -227,7 +227,7 @@ if is_bnb_available():
                     x_temp = dropout(x.to(lambda_d.dtype))
                     mu, logvar = (lambda_d * F.linear(x_temp, sliced_A)).chunk(2, dim=-1)
                     adapter_output = lambda_b * F.linear(
-                        self._reparametrize(mu, logvar, self.sample_at_inference, generator=self.generator), sliced_B
+                        self._reparametrize(mu, logvar, self.sample_at_inference), sliced_B
                     )
 
                     if requires_conversion:
@@ -397,7 +397,7 @@ if is_bnb_4bit_available():
                     x_temp = dropout(x.to(lambda_d.dtype))
                     mu, logvar = (lambda_d * F.linear(x_temp, sliced_A)).chunk(2, dim=-1)
                     adapter_output = lambda_b * F.linear(
-                        self._reparametrize(mu, logvar, self.sample_at_inference, generator=self.generator), sliced_B
+                        self._reparametrize(mu, logvar, self.sample_at_inference), sliced_B
                     )
 
                     if requires_conversion:
