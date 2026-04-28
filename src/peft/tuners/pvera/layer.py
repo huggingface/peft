@@ -152,7 +152,6 @@ class PveraLayer(BaseTunerLayer):
     def _reparametrize(self, mu, logvar, sample_at_inference):
         if self.training or (not self.training and sample_at_inference):
             std = torch.exp(0.5 * logvar)
-            print(self.generator)
             eps = torch.randn_like(std, generator=self.generator)
             z = mu + eps * std
         else:
