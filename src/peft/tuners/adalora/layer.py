@@ -72,17 +72,21 @@ class AdaLoraLayer(LoraLayer):
         # Left singular vectors
         self.lora_B[adapter_name] = nn.Parameter(torch.randn(self.out_features, r))
         # The current rank. ranknum is deterministic (always set to float(r)) and is not saved
-        # in the adapter state_dict, so it must not be put on meta device under low_cpu_mem_usage=True
-        # — otherwise it would never be restored from a checkpoint and stay on meta forever.
+        # in the adapter state_dict, so under low_cpu_mem_usage=True it can't be restored from a
+        # checkpoint and must stay off the meta device. Two places need to skip the meta dispatch:
+        #   1) creation, otherwise the Parameter is registered on meta from the start;
+        #   2) the subsequent _move_adapter_to_device_of_base_layer call, because moving the
+        #      ParameterDict entry re-registers it via Module.__setattr__ → register_parameter,
+        #      which inside init_empty_weights would send the tensor back to meta.
         with _skip_init_on_device():
             self.ranknum[adapter_name] = nn.Parameter(torch.randn(1), requires_grad=False)
-        self.ranknum[adapter_name].data.fill_(float(r))
-        self.ranknum[adapter_name].requires_grad = False
-        self.scaling[adapter_name] = lora_alpha if lora_alpha > 0 else float(r)
-        if init_lora_weights:
-            self.reset_lora_parameters(adapter_name)
+            self.ranknum[adapter_name].data.fill_(float(r))
+            self.ranknum[adapter_name].requires_grad = False
+            self.scaling[adapter_name] = lora_alpha if lora_alpha > 0 else float(r)
+            if init_lora_weights:
+                self.reset_lora_parameters(adapter_name)
 
-        self._move_adapter_to_device_of_base_layer(adapter_name)
+            self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def reset_lora_parameters(self, adapter_name):
@@ -240,13 +244,13 @@ class SVDConv2d(nn.Module, AdaLoraLayer):
         # Current rank — see note in AdaLoraLayer.update_layer about _skip_init_on_device.
         with _skip_init_on_device():
             self.ranknum[adapter_name] = nn.Parameter(torch.randn(1), requires_grad=False)
-        self.ranknum[adapter_name].data.fill_(float(r))
-        self.ranknum[adapter_name].requires_grad = False
-        self.scaling[adapter_name] = lora_alpha if lora_alpha > 0 else float(r)
-        if init_lora_weights:
-            self.reset_lora_parameters(adapter_name)
+            self.ranknum[adapter_name].data.fill_(float(r))
+            self.ranknum[adapter_name].requires_grad = False
+            self.scaling[adapter_name] = lora_alpha if lora_alpha > 0 else float(r)
+            if init_lora_weights:
+                self.reset_lora_parameters(adapter_name)
 
-        self._move_adapter_to_device_of_base_layer(adapter_name)
+            self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:

@@ -1493,6 +1493,16 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
 def _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs):
     if (config_cls == LoraConfig) and config_kwargs.get("target_parameters"):
         pytest.skip("LoRA with multiple adapters with target_parameters is not supported")
+    if config_cls is AdaLoraConfig:
+        pytest.skip("AdaLoRA only supports a single trainable adapter")
+
+
+def _skip_if_adalora_without_total_step(config_cls):
+    # AdaLoraConfig requires total_step > 0 to be constructible. Tests parametrized only by
+    # config_cls (over ALL_PEFT_CONFIG_CLASSES) build configs with default kwargs and would
+    # therefore raise; skip them for AdaLoRA.
+    if config_cls is AdaLoraConfig:
+        pytest.skip("AdaLoRA requires total_step > 0; this test does not configure it")
 
 
 class MLP(nn.Module):
@@ -2323,14 +2333,20 @@ class TestPeftCustomModel(PeftCommonTester):
         else:
             expected_dtype = dtype
 
+        # AdaLoRA enforces a single trainable adapter, so the multi-adapter portion of this test
+        # is not applicable. target_parameters likewise disallows multiple adapters on the same
+        # parameter.
+        supports_multi_adapter = (
+            config_kwargs.get("target_parameters", None) is None and config_cls is not AdaLoraConfig
+        )
+
         model = self.transformers_class.from_pretrained(model_id, dtype=dtype).to(self.torch_device)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
         model = get_peft_model(model, config, autocast_adapter_dtype=autocast_adapter_dtype)
-        if config_kwargs.get("target_parameters", None) is None:
-            # target_parameters does not allow multiple adapters on the same parameter
+        if supports_multi_adapter:
             model.add_adapter("other", config, autocast_adapter_dtype=autocast_adapter_dtype)
         peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
         assert all(p.dtype == expected_dtype for p in peft_params)
@@ -2342,8 +2358,7 @@ class TestPeftCustomModel(PeftCommonTester):
         model = PeftModel.from_pretrained(
             model, tmp_path, autocast_adapter_dtype=autocast_adapter_dtype, low_cpu_mem_usage=low_cpu_mem_usage
         )
-        if config_kwargs.get("target_parameters", None) is None:
-            # target_parameters does not allow multiple adapters on the same parameter
+        if supports_multi_adapter:
             model.load_adapter(
                 tmp_path / "other",
                 adapter_name="other",
@@ -2430,6 +2445,8 @@ class TestPeftCustomModel(PeftCommonTester):
             lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high
         elif issubclass(config_cls, (VBLoRAConfig, RandLoraConfig, OSFConfig)):
             lr = 0.01  # otherwise we get nan
+        elif issubclass(config_cls, AdaLoraConfig):
+            lr = 1e-4  # AdaLoRA + init_lora_weights=False can blow up with multi-target SGD
         elif issubclass(
             config_cls, PveraConfig
         ):  # needs a very small lr to not get nan in pvera_lambda_b due to high input values in this test (up to 90)
@@ -2481,6 +2498,13 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, VBLoRAConfig):
             # Manually set the `vblora_vector_bank` to zero so that VB-LoRA functions as an identity operation.
             torch.nn.init.zeros_(model.vblora_vector_bank["default"])
+        if issubclass(config_cls, AdaLoraConfig):
+            # AdaLoRA test entries use init_lora_weights=False (needed for gradient flow tests),
+            # so reset_lora_parameters did not zero `lora_E`. Zero it here so the SVD product
+            # is an identity at init.
+            for module in model.modules():
+                if hasattr(module, "lora_E") and "default" in module.lora_E:
+                    torch.nn.init.zeros_(module.lora_E["default"])
         model.eval()
         outputs_before = model(**X)
         # OSF uses SVD reconstruction which introduces small numerical differences
@@ -2492,6 +2516,11 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, VBLoRAConfig):
             # initialize `vblora_vector_bank` so it can be trained
             model._init_vblora_vector_bank(config, "default")
+        if issubclass(config_cls, AdaLoraConfig):
+            # Re-randomize `lora_E` so the adapter can be trained.
+            for module in model.modules():
+                if hasattr(module, "lora_E") and "default" in module.lora_E:
+                    torch.nn.init.normal_(module.lora_E["default"])
         if issubclass(config_cls, TinyLoraConfig):
             # Re-initialize tinylora_v so it can be trained
             model.base_model._init_tinylora_v(config, "default")
@@ -2503,6 +2532,8 @@ class TestPeftCustomModel(PeftCommonTester):
             lr = 2.0
         if isinstance(config, PveraConfig):
             lr = 1e-4  # needs smaller lr to not get nan
+        if isinstance(config, AdaLoraConfig):
+            lr = 1e-4  # AdaLoRA can blow up with multi-target SGD; use a smaller lr to avoid nan
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -2559,12 +2590,22 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, VBLoRAConfig):
             # Manually set the `vblora_vector_bank` to zero so that VB-LoRA functions as an identity operation.
             torch.nn.init.zeros_(model.vblora_vector_bank["default"])
+        if issubclass(config_cls, AdaLoraConfig):
+            # See note in test_disable_adapters: zero `lora_E` to make AdaLoRA an identity at init.
+            for module in model.modules():
+                if hasattr(module, "lora_E") and "default" in module.lora_E:
+                    torch.nn.init.zeros_(module.lora_E["default"])
         model.eval()
         outputs_before = model(**X)
 
         if issubclass(config_cls, VBLoRAConfig):
             # initialize `vblora_vector_bank` so it can be trained
             model._init_vblora_vector_bank(config, "default")
+        if issubclass(config_cls, AdaLoraConfig):
+            # Re-randomize `lora_E` so the adapter can be trained.
+            for module in model.modules():
+                if hasattr(module, "lora_E") and "default" in module.lora_E:
+                    torch.nn.init.normal_(module.lora_E["default"])
         if issubclass(config_cls, TinyLoraConfig):
             # Re-initialize tinylora_v so it can be trained
             model.base_model._init_tinylora_v(config, "default")
@@ -2727,6 +2768,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # etc.
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Model has no embedding layer, skipping TrainableTokensConfig.")
+        _skip_if_adalora_without_total_step(config_cls)
 
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
@@ -2781,6 +2823,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # config1 would automatically activate the modules_to_save for 'other'
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
+        _skip_if_adalora_without_total_step(config_cls)
 
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
@@ -2878,6 +2921,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # module_to_save (unlike LoRA etc) is not additive.
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
+        _skip_if_adalora_without_total_step(config_cls)
 
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
@@ -2899,6 +2943,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # same test as the previous one, but targeting multiple modules_to_save, some of which overlap
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
+        _skip_if_adalora_without_total_step(config_cls)
 
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
@@ -2924,6 +2969,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # same test as the previous one but targeting distinct modules_to_save; this is fine
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
+        _skip_if_adalora_without_total_step(config_cls)
 
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
@@ -3183,6 +3229,7 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(
                 "TrainableTokensConfig has a separate test for set_requires_grad, as it needs a different model."
             )
+        _skip_if_adalora_without_total_step(config_cls)
 
         config_kwargs = {"target_modules": ["layers.0.lin0"]}
         if config_cls == IA3Config:
@@ -5858,6 +5905,7 @@ class TestRequiresGrad:
         # Test that when loading PeftModel and then loading another adapter, the requires_grad is set correctly and
         # is_trainable is respected.
         # See #2759
+        _skip_if_adalora_without_total_step(config_cls)
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
@@ -5903,6 +5951,7 @@ class TestRequiresGrad:
         # Same test as above, but with modules_to_save
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
+        _skip_if_adalora_without_total_step(config_cls)
 
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
