@@ -2760,12 +2760,12 @@ class TestPeftCustomModel(PeftCommonTester):
         # etc.
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Model has no embedding layer, skipping TrainableTokensConfig.")
+        if config_cls is AdaLoraConfig:
+            pytest.skip(reason="AdaLoRA supports only a single trainable adapter")
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
             extra_kwargs["feedforward_modules"] = []
-        if config_cls is AdaLoraConfig:
-            extra_kwargs["total_step"] = 1
         # target_modules overlap partially
         config0 = config_cls(target_modules=["layers.0.lin0", "layers.1.lin0"], **extra_kwargs)
         config1 = config_cls(target_modules=["layers.1.lin0", "layers.2.lin0"], **extra_kwargs)
@@ -2815,12 +2815,12 @@ class TestPeftCustomModel(PeftCommonTester):
         # config1 would automatically activate the modules_to_save for 'other'
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
+        if config_cls is AdaLoraConfig:
+            pytest.skip(reason="AdaLoRA supports only a single trainable adapter")
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
             extra_kwargs["feedforward_modules"] = []
-        if config_cls is AdaLoraConfig:
-            extra_kwargs["total_step"] = 1
         # targeting the same modules with modules_to_save:
         config0 = config_cls(target_modules=["layers.0.lin0"], **extra_kwargs)
         config1 = config_cls(target_modules=["layers.0.lin0"], modules_to_save=["layers.0.lin1"], **extra_kwargs)
@@ -2913,12 +2913,12 @@ class TestPeftCustomModel(PeftCommonTester):
         # module_to_save (unlike LoRA etc) is not additive.
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
+        if config_cls is AdaLoraConfig:
+            pytest.skip(reason="AdaLoRA supports only a single trainable adapter")
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
             extra_kwargs["feedforward_modules"] = []
-        if config_cls is AdaLoraConfig:
-            extra_kwargs["total_step"] = 1
         # targeting the same modules with modules_to_save:
         config0 = config_cls(target_modules=["layers.0.lin0"], modules_to_save=["layers.0.lin1"], **extra_kwargs)
         config1 = config_cls(target_modules=["layers.0.lin0"], modules_to_save=["layers.0.lin1"], **extra_kwargs)
@@ -2935,12 +2935,12 @@ class TestPeftCustomModel(PeftCommonTester):
         # same test as the previous one, but targeting multiple modules_to_save, some of which overlap
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
+        if config_cls is AdaLoraConfig:
+            pytest.skip(reason="AdaLoRA supports only a single trainable adapter")
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
             extra_kwargs["feedforward_modules"] = []
-        if config_cls is AdaLoraConfig:
-            extra_kwargs["total_step"] = 1
         # targeting the overlapping modules with modules_to_save:
         config0 = config_cls(
             target_modules=["layers.0.lin0"], modules_to_save=["layers.0.lin1", "layers.1.lin1"], **extra_kwargs
@@ -2961,12 +2961,12 @@ class TestPeftCustomModel(PeftCommonTester):
         # same test as the previous one but targeting distinct modules_to_save; this is fine
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
+        if config_cls is AdaLoraConfig:
+            pytest.skip(reason="AdaLoRA supports only a single trainable adapter")
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
             extra_kwargs["feedforward_modules"] = []
-        if config_cls is AdaLoraConfig:
-            extra_kwargs["total_step"] = 1
         # targeting the different modules with modules_to_save:
         config0 = config_cls(target_modules=["layers.0.lin0"], modules_to_save=["layers.0.lin1"], **extra_kwargs)
         config1 = config_cls(target_modules=["layers.0.lin0"], modules_to_save=["layers.1.lin1"], **extra_kwargs)
@@ -3221,11 +3221,11 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(
                 "TrainableTokensConfig has a separate test for set_requires_grad, as it needs a different model."
             )
+        if config_cls is AdaLoraConfig:
+            pytest.skip("AdaLoRA supports only a single trainable adapter")
         config_kwargs = {"target_modules": ["layers.0.lin0"]}
         if config_cls == IA3Config:
             config_kwargs["feedforward_modules"] = []
-        if config_cls is AdaLoraConfig:
-            config_kwargs["total_step"] = 1
         config0 = config_cls(**config_kwargs)
         model = DeepMLP(size=256)  # a size that works with all adapters
         model = get_peft_model(model, config0, adapter_name="adapter0").eval()
@@ -5917,6 +5917,10 @@ class TestRequiresGrad:
         # Test that when loading PeftModel and then loading another adapter, the requires_grad is set correctly and
         # is_trainable is respected.
         # See #2759
+        if config_cls is AdaLoraConfig and is_trainable:
+            # AdaLoRA's `ranknum` parameter is keyed by adapter name (so name contains ".default") and is intentionally
+            # requires_grad=False, which breaks the assert that all `.default` params are trainable.
+            pytest.skip("AdaLoRA's ranknum is intentionally non-trainable")
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
@@ -5964,6 +5968,10 @@ class TestRequiresGrad:
         # Same test as above, but with modules_to_save
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
+        if config_cls is AdaLoraConfig and is_trainable:
+            # See note in test_loading_model_requires_grad_set_correctly: AdaLoRA's `ranknum.default` is intentionally
+            # non-trainable.
+            pytest.skip("AdaLoRA's ranknum is intentionally non-trainable")
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
