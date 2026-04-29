@@ -1,0 +1,17 @@
+{
+  "base_model_name_or_path": "Qwen/Qwen3.5-4B",
+  "peft_type": "ADAMSS",
+  "r": 16,
+  "num_subspaces": 5,
+  "subspace_rank": 1,
+  "target_modules": [
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj",
+    "gate_proj",
+    "up_proj",
+    "down_proj"
+  ],
+  "task_type": "CAUSAL_LM"
+}

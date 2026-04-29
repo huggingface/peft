@@ -1,7 +1,7 @@
 {
   "run_info": {
-    "created_at": "2026-04-06T15:57:10.833510+00:00",
-    "total_time": 37.0488623441197,
+    "created_at": "2026-04-27T11:34:32.724389+00:00",
+    "total_time": 32.72589084506035,
     "experiment_name": "dora/grpo-qwen35-4b-gsm8k-lr5e-4",
     "peft_branch": "lora-comparison",
     "train_config": {
@@ -51,7 +51,10 @@
       "vllm_mode": "colocate",
       "vllm_gpu_memory_utilization": 0.5,
       "vllm_max_model_length": 1536,
-      "vllm_enable_sleep_mode": true
+      "vllm_enable_sleep_mode": true,
+      "reward_type": "binary",
+      "adam_beta1": 0.9,
+      "adam_beta2": 0.999
     },
     "peft_config": {
       "base_model_name_or_path": "Qwen/Qwen3.5-4B",
@@ -77,7 +80,7 @@
     "train_completed": false,
     "train_time": null,
     "metrics": [],
-    "last_update_at": "2026-04-06T15:57:47.958351+00:00",
+    "last_update_at": "2026-04-27T11:35:05.520389+00:00",
     "error": "The server socket has failed to listen on any local network address. port: 29500, useIpv6: false, code: -98, name: EADDRINUSE, message: address already in use"
   },
   "rl_eval_info": {},

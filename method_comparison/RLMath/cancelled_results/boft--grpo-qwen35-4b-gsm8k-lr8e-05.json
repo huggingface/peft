@@ -1,7 +1,7 @@
 {
   "run_info": {
-    "created_at": "2026-04-06T15:57:07.948676+00:00",
-    "total_time": 41.606670011999086,
+    "created_at": "2026-04-27T11:33:18.468542+00:00",
+    "total_time": 39.711279585026205,
     "experiment_name": "boft/grpo-qwen35-4b-gsm8k-lr8e-05",
     "peft_branch": "lora-comparison",
     "train_config": {
@@ -51,7 +51,10 @@
       "vllm_mode": "colocate",
       "vllm_gpu_memory_utilization": 0.5,
       "vllm_max_model_length": 1536,
-      "vllm_enable_sleep_mode": true
+      "vllm_enable_sleep_mode": true,
+      "reward_type": "binary",
+      "adam_beta1": 0.9,
+      "adam_beta2": 0.999
     },
     "peft_config": {
       "base_model_name_or_path": "Qwen/Qwen3.5-4B",
@@ -73,8 +76,8 @@
     "train_completed": false,
     "train_time": null,
     "metrics": [],
-    "last_update_at": "2026-04-06T15:57:49.642642+00:00",
-    "error": "The server socket has failed to listen on any local network address. port: 23456, useIpv6: false, code: -98, name: EADDRINUSE, message: address already in use"
+    "last_update_at": "2026-04-27T11:33:58.224475+00:00",
+    "error": "/mnt/data/data/kashif/miniconda3/envs/py312/lib/python3.12/site-packages/tilelang/lib/libcudart_stub.so: undefined symbol: cudaDeviceReset"
   },
   "rl_eval_info": {},
   "meta_info": {
