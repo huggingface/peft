@@ -3794,22 +3794,23 @@ class TestPeftCustomModel(PeftCommonTester):
 
     def test_pvera_reproducible(self):
         inputs = {"input_ids": torch.arange(10).view(-1, 1).to(self.torch_device)}
-        config = PveraConfig(r=4, sample_at_inference=True, generator_seed=0)
+        config = PveraConfig(init_weights=False, sample_at_inference=True, generator_seed=0)
         base_model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
-        model1 = get_peft_model(base_model, config).to(self.torch_device)
+        torch.manual_seed(0)
+        model = get_peft_model(base_model, config).to(self.torch_device)
+        torch.manual_seed(1)
+        output1 = model(**inputs).logits
 
-        optimizer = torch.optim.SGD(model1.parameters())
-        y_pred = model1(**inputs).logits
-        dummy_y = torch.randn_like(y_pred)
-        loss = (y_pred - dummy_y).abs().mean()
-        loss.backward()
-        optimizer.step()
+        del model
 
-        model2 = copy.deepcopy(model1)
+        config = PveraConfig(init_weights=False, sample_at_inference=True, generator_seed=0)
+        base_model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        torch.manual_seed(0)
+        model = get_peft_model(base_model, config).to(self.torch_device)
+        torch.manual_seed(2)
+        output2 = model(**inputs).logits
 
-        y1 = model1(**inputs).logits
-        y2 = model2(**inputs).logits
-        assert (y1 == y2).all()
+        assert (output1 == output2).all()
 
 
 class TestMultiRankAdapter:
