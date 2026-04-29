@@ -263,8 +263,8 @@ class MissLinear(nn.Module, MissLayer):
         W = orig_weight.reshape(orig_weight.size(0) // r, r, orig_weight.size(1) // r, r).permute(2, 0, 1, 3)
 
         if reverse:
-            I = torch.eye(r, device=miss_B.device, dtype=torch.float32)
-            inv_I_plus_miss_B = torch.inverse(I + miss_B.float()).to(miss_B.dtype)
+            eye = torch.eye(r, device=miss_B.device, dtype=torch.float32)
+            inv_I_plus_miss_B = torch.inverse(eye + miss_B.float()).to(miss_B.dtype)
             result = (W - miss_B) @ inv_I_plus_miss_B
         else:
             result = W @ miss_B + miss_B
