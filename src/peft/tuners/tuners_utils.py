@@ -49,6 +49,7 @@ from peft.utils.other import (
     _get_module_names_tied_with_embedding,
     _set_adapter,
     _set_layer_requires_grad,
+    is_gptqmodel_quant_linear,
     match_target_against_key,
     set_additional_trainable_modules,
 )
@@ -208,8 +209,8 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     elif hasattr(module, "codebooks") and module.__class__.__name__ == "QuantizedLinear":
         # AQLM QuantLinear
         in_features, out_features = module.in_features, module.out_features
-    elif hasattr(module, "bits") and module.__class__.__name__ == "AwqGEMMQuantLinear":
-        # Awq layers
+    elif is_gptqmodel_quant_linear(module):
+        # GPT-QModel quantized linears
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "EetqLinear":
         # Eetq layers
