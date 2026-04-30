@@ -3792,6 +3792,26 @@ class TestPeftCustomModel(PeftCommonTester):
         assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is True
         assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is True
 
+    def test_pvera_reproducible(self):
+        inputs = {"input_ids": torch.arange(10).view(-1, 1).to(self.torch_device)}
+        config = PveraConfig(init_weights=False, sample_at_inference=True, generator_seed=0)
+        base_model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        torch.manual_seed(0)
+        model = get_peft_model(base_model, config).to(self.torch_device)
+        torch.manual_seed(1)
+        output1 = model(**inputs).logits
+
+        del model
+
+        config = PveraConfig(init_weights=False, sample_at_inference=True, generator_seed=0)
+        base_model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        torch.manual_seed(0)
+        model = get_peft_model(base_model, config).to(self.torch_device)
+        torch.manual_seed(2)
+        output2 = model(**inputs).logits
+
+        assert (output1 == output2).all()
+
 
 class TestMultiRankAdapter:
     """Tests related to multirank LoRA adapters"""

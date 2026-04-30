@@ -18,6 +18,7 @@ import torch
 from peft.import_utils import is_gptqmodel_available
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.utils.other import is_gptqmodel_awq_layer
 
 from .config import LoraConfig
 
@@ -94,11 +95,8 @@ def dispatch_awq(
     else:
         target_base_layer = target
 
-    if is_gptqmodel_available():
-        from gptqmodel.nn_modules.qlinear.gemm_awq import AwqGEMMQuantLinear
-
-        if isinstance(target_base_layer, AwqGEMMQuantLinear):
-            new_module = AwqLoraLinear(target, adapter_name, config=config, **kwargs)
-            target.qweight = target_base_layer.qweight
+    if is_gptqmodel_available() and is_gptqmodel_awq_layer(target_base_layer):
+        new_module = AwqLoraLinear(target, adapter_name, config=config, **kwargs)
+        target.qweight = target_base_layer.qweight
 
     return new_module
