@@ -5953,6 +5953,11 @@ class TestRequiresGrad:
             assert all(not p.requires_grad for p in model.parameters())
 
         # load one more adapter; this adapter is not automatically activated
+        if config_cls is AdaLoraConfig and is_trainable:
+            # AdaLoRA structurally rejects a second trainable adapter; validate the error path.
+            with pytest.raises(ValueError, match="AdaLoraModel supports only 1 trainable adapter"):
+                model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
+            return
         model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
         if is_trainable:
             for name, param in model.named_parameters():
@@ -6001,6 +6006,11 @@ class TestRequiresGrad:
             assert all(not p.requires_grad for p in model.parameters())
 
         # load one more adapter
+        if config_cls is AdaLoraConfig and is_trainable:
+            # AdaLoRA structurally rejects a second trainable adapter; validate the error path.
+            with pytest.raises(ValueError, match="AdaLoraModel supports only 1 trainable adapter"):
+                model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
+            return
         model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
         if is_trainable:
             for name, param in model.named_parameters():
