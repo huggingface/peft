@@ -5917,10 +5917,9 @@ class TestRequiresGrad:
         # Test that when loading PeftModel and then loading another adapter, the requires_grad is set correctly and
         # is_trainable is respected.
         # See #2759
-        if config_cls is AdaLoraConfig and is_trainable:
-            # AdaLoRA's `ranknum` parameter is keyed by adapter name (so name contains ".default") and is intentionally
-            # requires_grad=False, which breaks the assert that all `.default` params are trainable.
-            pytest.skip("AdaLoRA's ranknum is intentionally non-trainable")
+        # AdaLoRA's `ranknum` parameter is keyed by adapter name (so name contains ".default") but is intentionally
+        # requires_grad=False, so we exclude it from the trainable-param check below.
+        skip_ranknum = config_cls is AdaLoraConfig
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
@@ -5944,6 +5943,8 @@ class TestRequiresGrad:
 
         if is_trainable:
             for name, param in model.named_parameters():
+                if skip_ranknum and "ranknum" in name:
+                    continue
                 if ".default" in name:
                     assert param.requires_grad
                 else:
@@ -5955,6 +5956,8 @@ class TestRequiresGrad:
         model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
         if is_trainable:
             for name, param in model.named_parameters():
+                if skip_ranknum and "ranknum" in name:
+                    continue
                 if ".default" in name:
                     assert param.requires_grad
                 else:
@@ -5968,10 +5971,9 @@ class TestRequiresGrad:
         # Same test as above, but with modules_to_save
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
-        if config_cls is AdaLoraConfig and is_trainable:
-            # See note in test_loading_model_requires_grad_set_correctly: AdaLoRA's `ranknum.default` is intentionally
-            # non-trainable.
-            pytest.skip("AdaLoRA's ranknum is intentionally non-trainable")
+        # See note in test_loading_model_requires_grad_set_correctly: AdaLoRA's `ranknum.default` is intentionally
+        # non-trainable, so we exclude it from the trainable-param check below.
+        skip_ranknum = config_cls is AdaLoraConfig
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
@@ -5989,6 +5991,8 @@ class TestRequiresGrad:
 
         if is_trainable:
             for name, param in model.named_parameters():
+                if skip_ranknum and "ranknum" in name:
+                    continue
                 if ".default" in name:
                     assert param.requires_grad
                 else:
@@ -6000,6 +6004,8 @@ class TestRequiresGrad:
         model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
         if is_trainable:
             for name, param in model.named_parameters():
+                if skip_ranknum and "ranknum" in name:
+                    continue
                 if ".default" in name:
                     assert param.requires_grad
                 else:
