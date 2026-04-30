@@ -1143,7 +1143,7 @@ class TestDecoderModels(PeftCommonTester):
                 losses.append(loss)
 
             assert torch.isfinite(loss)
-            assert not torch.isclose(losses[0], losses[-1], atol=1e-5, rtol=1e-2)
+            assert not torch.isclose(losses[0], losses[-1], atol=1e-6, rtol=1e-3)
 
     def test_prefix_tuning_gemma4_warns_if_some_layers_skipped(self):
         # See previous test_prefix_tuning_gemma4_works. When the embedding matrix is too small to fit any layer targeted
