@@ -313,8 +313,12 @@ class MissLinear(nn.Module, MissLayer):
             aligned_size = n_blocks * r
 
             W_aligned = orig_weight[:, :aligned_size].reshape(-1, n_blocks, r).permute(1, 2, 0)
-            orig_weight[:, :aligned_size] = (W_aligned + sign * miss_B).permute(2, 0, 1).reshape(*orig_weight[:, :aligned_size].shape)
-            orig_weight[:, aligned_size:] = orig_weight[:, aligned_size:] + sign * miss_B.transpose(0, 1)[:, :remainder]
+            orig_weight[:, :aligned_size] = (
+                (W_aligned + sign * miss_B).permute(2, 0, 1).reshape(*orig_weight[:, :aligned_size].shape)
+            )
+            orig_weight[:, aligned_size:] = (
+                orig_weight[:, aligned_size:] + sign * miss_B.transpose(0, 1)[:, :remainder]
+            )
             output_tensor = orig_weight
         else:
             W_blocks = orig_weight.reshape(-1, orig_weight.size(1) // r, r).permute(1, 2, 0)

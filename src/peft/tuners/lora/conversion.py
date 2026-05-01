@@ -51,8 +51,8 @@ def _convert_miss_module_to_lora(
 ) -> tuple[torch.Tensor, torch.Tensor, int]:
     """Convert a single MiSS layer to LoRA A and B matrices.
 
-    For standard and mini modes, the MiSS forward pass (reshape+sum @ miss) is already a rank-r
-    factorization, so the exact factors are returned directly without SVD.
+    For standard and mini modes, the MiSS forward pass (reshape+sum @ miss) is already a rank-r factorization, so the
+    exact factors are returned directly without SVD.
 
     For bat mode, the delta weight depends on the base weight, so SVD is used.
     """
