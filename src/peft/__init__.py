@@ -25,6 +25,7 @@ from .auto import (
     AutoPeftModelForTokenClassification,
 )
 from .config import PeftConfig, PromptLearningConfig
+from .helpers import find_kappa_target_modules
 from .mapping import (
     PEFT_TYPE_TO_CONFIG_MAPPING,
     PEFT_TYPE_TO_MIXED_MODEL_MAPPING,
@@ -158,7 +159,6 @@ from .utils import (
     shift_tokens_right,
 )
 
-from .helpers import find_kappa_target_modules
 
 __all__ = [
     "MODEL_TYPE_TO_PEFT_MODEL_MAPPING",
@@ -276,6 +276,7 @@ __all__ = [
     "compose_cartridge_adapters",
     "convert_to_lora",
     "create_arrow_model",
+    "find_kappa_target_modules",
     "get_eva_state_dict",
     "get_layer_status",
     "get_model_status",
