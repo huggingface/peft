@@ -598,6 +598,7 @@ class TestDoraCaching:
         assert torch.allclose(cached_result_permanent, dora_result, atol=atol, rtol=rtol)
         DoraCaching()(enabled=False)
 
+
 class TestKappaTuneSelector:
     """Tests for KappaTuneSelector and find_kappa_target_modules helper."""
 
@@ -626,9 +627,10 @@ class TestKappaTuneSelector:
 
     def test_kappatune_with_moe_layers(self):
         """Test support for fused MoE 3D parameters (target_parameters)."""
-        from peft.helpers import KappaTuneSelector, find_kappa_target_modules
         import torch
         import torch.nn as nn
+
+        from peft.helpers import KappaTuneSelector, find_kappa_target_modules
 
         # Create a minimal dummy MoE model with fused 3D weights
         class DummyMoE(nn.Module):
