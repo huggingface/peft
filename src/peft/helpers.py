@@ -17,10 +17,11 @@ from contextlib import contextmanager
 from copy import deepcopy
 from functools import update_wrapper
 from types import MethodType
+from typing import Optional
 
 import torch
 from torch import nn
-from typing import Dict, List, Optional, Tuple
+
 
 try:
     import bitsandbytes as bnb
@@ -301,23 +302,23 @@ class DoraCaching:
     def __call__(self, enabled: bool = True):
         dora.ENABLE_DORA_CACHING = enabled
 
+
 class KappaTuneSelector:
     """
-    Lightweight utility to compute per-module / per-parameter condition numbers
-    (κ = σ_max / σ_min) and return the best LoRA targets.
+    Lightweight utility to compute per-module / per-parameter condition numbers (Îº = Ïƒ_max / Ïƒ_min) and return the best
+    LoRA targets.
 
     Supports:
     - Classic nn.Linear modules (target_modules in LoraConfig)
-    - Modern fused MoE weights stored as 3D nn.Parameter (gate_up_proj / down_proj,
-      gate_proj / up_proj, etc.) used in Llama-4, Qwen2_MoE, Qwen3_MoE, Mixtral,
-      OLMoE and similar models. These are returned via target_parameters.
+    - Modern fused MoE weights stored as 3D nn.Parameter (gate_up_proj / down_proj, gate_proj / up_proj, etc.) used in
+      Llama-4, Qwen2_MoE, Qwen3_MoE, Mixtral, OLMoE and similar models. These are returned via target_parameters.
     """
 
     def __init__(
         self,
         model: nn.Module,
         max_dim_size_to_analyze: int = 16384,
-        moe_param_suffixes: Optional[Tuple[str, ...]] = None,
+        moe_param_suffixes: Optional[tuple[str, ...]] = None,
     ):
         self.model = model
         self.max_dim_size_to_analyze = max_dim_size_to_analyze
@@ -327,28 +328,24 @@ class KappaTuneSelector:
             ".gate_proj",
             ".up_proj",
         )
-        self._condition_numbers: Optional[Dict[str, float]] = None
-        self._parameter_condition_numbers: Optional[Dict[str, float]] = None
+        self._condition_numbers: Optional[dict[str, float]] = None
+        self._parameter_condition_numbers: Optional[dict[str, float]] = None
 
     def _compute_kappas(self) -> None:
         if self._condition_numbers is not None:
             return
 
         # === 1. nn.Linear modules ===
-        condition_numbers: Dict[str, float] = {}
+        condition_numbers: dict[str, float] = {}
         for module_name, module in self.model.named_modules():
             if not isinstance(module, nn.Linear):
                 continue
             weight = module.weight
             if bnb is not None:
                 if hasattr(weight, "quant_state"):  # 4-bit
-                    w = bnb.functional.dequantize_4bit(
-                        weight.data, weight.quant_state
-                    ).float()
+                    w = bnb.functional.dequantize_4bit(weight.data, weight.quant_state).float()
                 elif hasattr(weight, "state") and hasattr(weight.state, "CB"):  # int8
-                    w = bnb.functional.int8_vectorwise_dequant(
-                        weight.state.CB, weight.state.SCB
-                    ).float()
+                    w = bnb.functional.int8_vectorwise_dequant(weight.state.CB, weight.state.SCB).float()
                 else:
                     w = weight.data.detach().float()
             else:
@@ -364,7 +361,7 @@ class KappaTuneSelector:
         self._condition_numbers = condition_numbers
 
         # === 2. fused MoE parameters (3D nn.Parameter) ===
-        parameter_condition_numbers: Dict[str, float] = {}
+        parameter_condition_numbers: dict[str, float] = {}
         for param_name, param in self.model.named_parameters():
             if not any(param_name.endswith(s) for s in self.moe_param_suffixes):
                 continue
@@ -388,7 +385,9 @@ class KappaTuneSelector:
 
         self._parameter_condition_numbers = parameter_condition_numbers
 
-    def get_best_targets(self, top_p: Optional[float] = None, num_modules: Optional[int] = None, threshold: Optional[float] = None) -> List[str]:
+    def get_best_targets(
+        self, top_p: Optional[float] = None, num_modules: Optional[int] = None, threshold: Optional[float] = None
+    ) -> list[str]:
         self._compute_kappas()
         if not self._condition_numbers:
             return []
@@ -408,7 +407,9 @@ class KappaTuneSelector:
 
         return [name for name, _ in sorted_modules]
 
-    def get_best_target_parameters(self, top_p: Optional[float] = None, num_modules: Optional[int] = None, threshold: Optional[float] = None) -> List[str]:
+    def get_best_target_parameters(
+        self, top_p: Optional[float] = None, num_modules: Optional[int] = None, threshold: Optional[float] = None
+    ) -> list[str]:
         self._compute_kappas()
         if not self._parameter_condition_numbers:
             return []
@@ -433,8 +434,8 @@ def find_kappa_target_modules(
     model: nn.Module,
     top_p: float = 0.2,
     max_dim_size_to_analyze: int = 16384,
-    moe_param_suffixes: Optional[Tuple[str, ...]] = None,
-) -> Dict[str, Optional[List[str]]]:
+    moe_param_suffixes: Optional[tuple[str, ...]] = None,
+) -> dict[str, Optional[list[str]]]:
     """
     One-liner convenience function for KappaTune target selection.
 
@@ -442,8 +443,7 @@ def find_kappa_target_modules(
 
         targets = find_kappa_target_modules(model)
         config = LoraConfig(
-            target_modules=targets["target_modules"],
-            target_parameters=targets["target_parameters"],  # None for non-MoE models
+            target_modules=targets["target_modules"], target_parameters=targets["target_parameters"], # None for non-MoE models
             ...
         )
     """
