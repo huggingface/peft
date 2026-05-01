@@ -70,31 +70,29 @@ class TrainableTokensModel(BaseTuner):
                 matched_keys = [target_key for target_key in tied_weights_module_names if name.endswith(target_key)]
                 if matched_keys:
                     parent, target, target_name = _get_submodules(model, name)
+                    peft_config = self.peft_config[adapter_name]
 
                     # If the module is already a TrainableTokensLayer, we need to replace it with a tied version
                     # instead of just updating it. This handles the case where the user explicitly targeted
                     # both the embedding and tied layers in target_modules.
                     if isinstance(target, TrainableTokensLayer):
                         # Replace the existing layer with a new one that's tied to the embedding
-                        peft_config = self.peft_config[adapter_name].to_dict()
-                        peft_config["tied_adapter"] = self.model.get_input_embeddings()
-
+                        tied_adapter = self.model.get_input_embeddings()
                         new_module = self._create_new_module(
-                            peft_config, adapter_name, target.base_layer, **peft_config
+                            peft_config, adapter_name, target.base_layer, tied_adapter=tied_adapter
                         )
                         self._replace_module(parent, target_name, new_module, target.base_layer)
                     else:
                         # Module hasn't been wrapped yet, create and replace normally
-                        peft_config = self.peft_config[adapter_name].to_dict()
-                        peft_config["tied_adapter"] = self.model.get_input_embeddings()
-
-                        self._create_and_replace_dict(
+                        tied_adapter = self.model.get_input_embeddings()
+                        self._create_and_replace(
                             peft_config,
                             adapter_name,
                             target,
                             target_name,
                             parent,
                             matched_keys[0],
+                            tied_adapter=tied_adapter,
                         )
 
     def _get_tied_target_modules(self, *args, **kwargs):
@@ -104,27 +102,6 @@ class TrainableTokensModel(BaseTuner):
         # Therefore, we don't need the warning issued by returning the modules here.
         return []
 
-    def _create_and_replace_dict(
-        self,
-        peft_config: dict,
-        adapter_name: str,
-        target: nn.Module,
-        target_name: str,
-        parent: nn.Module,
-        current_key: str,
-    ) -> None:
-        """
-        The same as `_create_and_replace` but takes a dictionary instead of a peft config so that we can add keys that
-        are not present in the config, such as `tied_adapter`.
-        """
-        kwargs = peft_config
-
-        if isinstance(target, TrainableTokensLayer):
-            target.update_layer(adapter_name, **kwargs)
-        else:
-            new_module = self._create_new_module(peft_config, adapter_name, target, **kwargs)
-            self._replace_module(parent, target_name, new_module, target)
-
     def _create_and_replace(
         self,
         peft_config: PeftConfig,
@@ -133,21 +110,26 @@ class TrainableTokensModel(BaseTuner):
         target_name: str,
         parent: nn.Module,
         current_key: str,
+        tied_adapter: nn.Module | None = None,
     ) -> None:
-        """
-        A private method to create and replace the target module with the adapter module.
-        """
-        kwargs = peft_config.to_dict()
-        self._create_and_replace_dict(kwargs, adapter_name, target, target_name, parent, current_key)
+        if isinstance(target, TrainableTokensLayer):
+            target.update_layer(adapter_name, config=peft_config, tied_adapter=tied_adapter)
+        else:
+            new_module = self._create_new_module(peft_config, adapter_name, target, tied_adapter=tied_adapter)
+            self._replace_module(parent, target_name, new_module, target)
 
     @staticmethod
-    def _create_new_module(peft_config, adapter_name, target, **kwargs):
-        new_module = TrainableTokensLayer(target, adapter_name, **kwargs)
+    def _create_new_module(peft_config, adapter_name, target, tied_adapter: nn.Module | None):
+        new_module = TrainableTokensLayer(
+            target,
+            adapter_name,
+            config=peft_config,
+            tied_adapter=tied_adapter,
+        )
         new_module.update_layer(
             adapter_name,
-            init_weights=kwargs["init_weights"],
-            token_indices=kwargs["token_indices"],
-            tied_adapter=kwargs.get("tied_adapter", None),
+            config=peft_config,
+            tied_adapter=tied_adapter,
         )
 
         return new_module

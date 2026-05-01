@@ -206,7 +206,10 @@ def build_peft_weight_mapping(
         return []
 
     # strip "base_model.model" and add adapter name
-    new_weight_conversions = [WeightRenaming("base_model.model.model.", "model.")]
+    new_weight_conversions = [
+        WeightRenaming("base_model.model.model.", "model."),
+        WeightRenaming("base_model.model.", ""),
+    ]
 
     prefixes = set()
     from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
@@ -268,10 +271,10 @@ def build_peft_weight_mapping(
                 new_conversion = orig_conversion.__class__(
                     source_patterns=new_source_patterns,
                     target_patterns=new_target_patterns,
-                    distributed_operation=orig_conversion.distributed_operation,
-                    quantization_operation=orig_conversion.quantization_operation,
                     operations=peft_weight_operations,
                 )
+                new_conversion.distributed_operation = orig_conversion.distributed_operation
+                new_conversion.quantization_operation = orig_conversion.quantization_operation
                 new_weight_conversions.append(new_conversion)
 
         elif len(orig_conversion.target_patterns) == 1 and orig_conversion.target_patterns[0].endswith("down_proj"):
@@ -310,10 +313,10 @@ def build_peft_weight_mapping(
                 new_conversion = orig_conversion.__class__(
                     source_patterns=new_source_patterns,
                     target_patterns=new_target_patterns,
-                    distributed_operation=orig_conversion.distributed_operation,
-                    quantization_operation=orig_conversion.quantization_operation,
                     operations=peft_weight_operations,
                 )
+                new_conversion.distributed_operation = orig_conversion.distributed_operation
+                new_conversion.quantization_operation = orig_conversion.quantization_operation
                 new_weight_conversions.append(new_conversion)
 
     return new_weight_conversions

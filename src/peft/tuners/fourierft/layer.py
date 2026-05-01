@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import warnings
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -22,6 +22,8 @@ from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.other import transpose
+
+from .config import FourierFTConfig
 
 
 class FourierFTLayer(BaseTunerLayer):
@@ -52,9 +54,12 @@ class FourierFTLayer(BaseTunerLayer):
         else:
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
-    def update_layer(
-        self, adapter_name, n_frequency, scaling, init_weights, random_loc_seed, inference_mode: bool = False, **kwargs
-    ):
+    def update_layer(self, adapter_name: str, n_frequency: int, config: FourierFTConfig, **kwargs):
+        scaling = config.scaling
+        init_weights = config.init_weights
+        random_loc_seed = config.random_loc_seed
+        inference_mode = config.inference_mode
+
         if n_frequency <= 0:
             raise ValueError(f"`n_frequency` should be a positive integer value but the value passed is {n_frequency}")
         if n_frequency > self.in_features * self.out_features:
@@ -102,18 +107,15 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
         self,
         base_layer,
         adapter_name: str,
+        config: FourierFTConfig,
         n_frequency: int = 1000,
-        scaling: float = 150.0,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-        init_weights: Union[bool, str] = False,
-        random_loc_seed: int = 777,
         **kwargs,
     ) -> None:
         super().__init__()
         FourierFTLayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, n_frequency, scaling, init_weights, random_loc_seed)
+        self.update_layer(adapter_name, n_frequency, config=config)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """

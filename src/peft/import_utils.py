@@ -27,6 +27,8 @@ is_transformers_ge_v5_1_0 = packaging.version.parse(transformers.__version__) >=
 
 is_transformers_ge_v5_4_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.4.0")
 
+is_transformers_ge_v5_6_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.6.0.dev0")
+
 is_transformers_le_4_53 = packaging.version.parse(transformers.__version__) < packaging.version.parse("4.54.0.dev0")
 
 
@@ -48,7 +50,7 @@ def is_bnb_4bit_available() -> bool:
 @lru_cache
 def is_gptqmodel_available():
     if importlib.util.find_spec("gptqmodel") is not None:
-        GPTQMODEL_MINIMUM_VERSION = packaging.version.parse("5.6.12")
+        GPTQMODEL_MINIMUM_VERSION = packaging.version.parse("7.0.0")
         OPTIMUM_MINIMUM_VERSION = packaging.version.parse("1.24.0")
         version_gptqmodel = packaging.version.parse(importlib_metadata.version("gptqmodel"))
         if GPTQMODEL_MINIMUM_VERSION <= version_gptqmodel:
@@ -77,7 +79,7 @@ def is_gptqmodel_available():
         else:
             raise ImportError(
                 f"Found an incompatible version of gptqmodel. Found version `{version_gptqmodel}`, "
-                f"but only versions above `{GPTQMODEL_MINIMUM_VERSION}` are supported"
+                f"but only versions `{GPTQMODEL_MINIMUM_VERSION}` or higher are supported"
             )
 
 

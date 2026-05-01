@@ -6,6 +6,12 @@ RUN_SCRIPT := run.py
 EXPERIMENTS_DIR := experiments
 RESULTS_DIR := results
 
+OPTIONAL_FLAGS =
+
+ifdef UPLOAD_BUCKET
+	OPTIONAL_FLAGS += --bucket_name "${UPLOAD_BUCKET}"
+endif
+
 # --- Automatic Experiment and Result Discovery ---
 
 # 1. Find all experiment directories by looking for adapter_config.json files.
@@ -49,7 +55,7 @@ define EXPERIMENT_template
 $(call exp_to_res,$(1)): $(wildcard $(1)/adapter_config.json) $(wildcard $(1)/training_params.json)
 	@echo "---"
 	@echo "Running experiment: $(1)"
-	-$(PYTHON) $(RUN_SCRIPT) -v $(1)
+	-$(PYTHON) $(RUN_SCRIPT) $(OPTIONAL_FLAGS) -v $(1)
 	@echo "Finished: $$@"
 	@echo "---"
 

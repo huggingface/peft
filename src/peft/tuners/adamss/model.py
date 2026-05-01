@@ -100,11 +100,7 @@ class AdamssModel(BaseTuner):
             target.update_layer(
                 adapter_name,
                 adamss_config.r,
-                adamss_config.num_subspaces,
-                adamss_config.subspace_rank,
-                adamss_config.init_weights,
-                adamss_config.use_asa,
-                inference_mode=adamss_config.inference_mode,
+                config=adamss_config,
             )
             # set_adapter is called inside update_layer, but we need to handle
             # the case where adapter is not in active_adapters
@@ -113,9 +109,7 @@ class AdamssModel(BaseTuner):
                 target.set_adapter(self.active_adapters, inference_mode=adamss_config.inference_mode)
         else:
             # Create new Adamss layer
-            new_module = self._create_new_module(
-                adamss_config, adapter_name, target, inference_mode=adamss_config.inference_mode, **optional_kwargs
-            )
+            new_module = self._create_new_module(adamss_config, adapter_name, target, **optional_kwargs)
             self._record_asa_total_subspaces(adapter_name, adamss_config, new_module)
             # requires_grad is handled inside _create_new_module via set_adapter
             self._replace_module(parent, target_name, new_module, target)
@@ -150,12 +144,7 @@ class AdamssModel(BaseTuner):
                 target,
                 adapter_name,
                 r=adamss_config.r,
-                num_subspaces=adamss_config.num_subspaces,
-                subspace_rank=adamss_config.subspace_rank,
-                init_weights=adamss_config.init_weights,
-                use_asa=adamss_config.use_asa,
-                use_dynamic_rank=adamss_config.use_dynamic_rank,
-                svd_threshold=adamss_config.svd_threshold,
+                config=adamss_config,
                 **kwargs,
             )
         else:

@@ -23,6 +23,8 @@ import torch.nn as nn
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
+from .config import DeloraConfig
+
 
 class DeloraLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
@@ -88,9 +90,7 @@ class DeloraLayer(BaseTunerLayer):
         adapter_name: str,
         r: int,
         delora_lambda: float,
-        module_dropout: float,
-        init_weights: bool = True,
-        inference_mode: bool = False,
+        config: DeloraConfig,
         **kwargs: Any,
     ) -> None:
         """Internal function to create delora adapter
@@ -99,9 +99,12 @@ class DeloraLayer(BaseTunerLayer):
             adapter_name (`str`): Name for the adapter to add.
             r (`int`): Rank for the added adapter.
             delora_lambda (`float`): Boundary for the adapter's norm.
-            module_dropout (`float`): The dropout probability for disabling adapter during training.
-            init_weights (`bool`): Whether to initialize weights.
+            config (`DeloraConfig`): The adapter configuration for this layer.
         """
+        module_dropout = config.module_dropout
+        init_weights = config.init_weights
+        inference_mode = config.inference_mode
+
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -157,16 +160,15 @@ class DeloraLinear(nn.Module, DeloraLayer):
         self,
         base_layer,
         adapter_name: str,
+        config: DeloraConfig,
         r: int,
         delora_lambda: float,
-        module_dropout: float,
-        init_weights: bool = True,
         **kwargs,
     ) -> None:
         super().__init__()
         DeloraLayer.__init__(self, base_layer, **kwargs)
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, delora_lambda, module_dropout, init_weights)
+        self.update_layer(adapter_name, r, delora_lambda, config=config)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """

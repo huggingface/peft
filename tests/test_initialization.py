@@ -31,6 +31,7 @@ from transformers import AutoModelForCausalLM
 
 from peft import (
     AdaLoraConfig,
+    BeftConfig,
     C3AConfig,
     DeloraConfig,
     EvaConfig,
@@ -2379,6 +2380,42 @@ class TestPeanutInitialization:
         assert len(layer.peanut_decoders["default"]) == 1
         assert tuple(layer.peanut_encoders["default"][0].weight.shape) == (r, r)
         assert tuple(layer.peanut_decoders["default"][0].weight.shape) == (r, r)
+
+
+class TestBeftInitialization:
+    torch_device = infer_device()
+
+    def get_model(self, bias=True):
+        class MLP(nn.Module):
+            def __init__(self, bias=bias):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+
+            def forward(self, X):
+                return self.lin0(X)
+
+        return MLP(bias=bias).to(self.torch_device).eval()
+
+    def test_beft_initialization_no_bias_warning(self):
+        model = self.get_model(bias=False)
+        cfg = BeftConfig(target_modules=["lin0"])
+
+        with pytest.warns(UserWarning, match="Note you cannot merge the BEFT adapter into the base layer."):
+            model = get_peft_model(model, cfg)
+
+        assert model.lin0.base_layer.bias is None
+        assert "default" in model.lin0.beft_bias
+        assert model.lin0.get_base_layer().bias is None
+
+    def test_beft_merge_no_bias_raises_error(self):
+        model = self.get_model(bias=False)
+        cfg = BeftConfig(target_modules=["lin0"])
+        model = get_peft_model(model, cfg)
+
+        assert hasattr(model.lin0, "beft_bias")
+
+        with pytest.raises(ValueError, match="Base layer has no bias, cannot merge bias adapter"):
+            model.merge_and_unload()
 
 
 class TestNoInfiniteRecursionDeepspeed:
@@ -5017,15 +5054,26 @@ class TestWeightTying:
 
     torch_device = infer_device()
 
-    def get_lm_model(self, tie_weights=True):
+    def get_lm_model(self, tie_weights=True, config_tie_word_embeddings=None):
         # Mimicking a LM with embed_tokens and lm_head layers
         # to test weight tying of adapters
+
+        if config_tie_word_embeddings is None:
+            config_tie_word_embeddings = tie_weights
+
         class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()
 
                 self.embed_tokens = nn.Embedding(1000, 1000)
                 self.linear = nn.Linear(1000, 1000, bias=False)
+
+        class ModelConfig:
+            def __init__(self, tie_word_embeddings):
+                self.tie_word_embeddings = tie_word_embeddings
+
+            def to_dict(self):
+                return {"tie_word_embeddings": self.tie_word_embeddings}
 
         class CausalLM(nn.Module):
             if tie_weights:
@@ -5034,7 +5082,7 @@ class TestWeightTying:
             def __init__(self):
                 super().__init__()
                 self.model = MyModule()
-                self.config = {"tie_word_embeddings": tie_weights}
+                self.config = ModelConfig(tie_word_embeddings=config_tie_word_embeddings)
                 self.lm_head = nn.Linear(1000, 1000, bias=False)
 
                 if tie_weights:
@@ -5048,8 +5096,12 @@ class TestWeightTying:
 
         return CausalLM().eval().to(self.torch_device)
 
-    def get_seq2seq_lm_model(self, tie_weights=True):
+    def get_seq2seq_lm_model(self, tie_weights=True, config_tie_word_embeddings=None):
         # Mimicking a encoder-decoder LM with shared embeddings
+
+        if config_tie_word_embeddings is None:
+            config_tie_word_embeddings = tie_weights
+
         class Seq2SeqStack(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -5063,6 +5115,13 @@ class TestWeightTying:
                 self.encoder = Seq2SeqStack()
                 self.decoder = Seq2SeqStack()
 
+        class ModelConfig:
+            def __init__(self, tie_word_embeddings):
+                self.tie_word_embeddings = tie_word_embeddings
+
+            def to_dict(self):
+                return {"tie_word_embeddings": self.tie_word_embeddings}
+
         class Seq2SeqLM(nn.Module):
             if tie_weights:
                 _tied_weights_keys = {
@@ -5074,7 +5133,7 @@ class TestWeightTying:
             def __init__(self):
                 super().__init__()
                 self.model = MySeq2SeqModule()
-                self.config = {"tie_word_embeddings": tie_weights}
+                self.config = ModelConfig(tie_word_embeddings=config_tie_word_embeddings)
                 self.lm_head = nn.Linear(1000, 1000, bias=False)
 
                 if tie_weights:
@@ -5395,3 +5454,64 @@ class TestWeightTying:
         assert isinstance(model.base_model.model.model.encoder.embed_tokens, torch.nn.modules.sparse.Embedding)
         assert isinstance(model.base_model.model.model.decoder.embed_tokens, torch.nn.modules.sparse.Embedding)
         assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
+
+    @pytest.mark.parametrize("modules_to_save", [["lm_head"], ["embed_tokens"], ["lm_head", "embed_tokens"]])
+    def test_ensure_weight_tying_not_tying_when_model_config_tie_false(self, modules_to_save):
+        # When tie_word_embeddings=False, ensure_weight_tying=True should not tie weights.
+        # Regression test for issue #2944
+        model = self.get_lm_model(tie_weights=True, config_tie_word_embeddings=False)
+        config = LoraConfig(
+            modules_to_save=modules_to_save,
+            target_modules=["linear"],
+            ensure_weight_tying=True,
+        )
+
+        with pytest.warns(UserWarning, match="no tied modules were found in the model"):
+            model = get_peft_model(model, config)
+
+        if "embed_tokens" in modules_to_save:
+            assert isinstance(model.base_model.model.model.embed_tokens, ModulesToSaveWrapper)
+        else:
+            assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
+
+        if "lm_head" in modules_to_save:
+            assert isinstance(model.base_model.model.lm_head, ModulesToSaveWrapper)
+        else:
+            assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
+
+        assert (
+            model.base_model.model.model.embed_tokens.weight.data_ptr()
+            != model.base_model.model.lm_head.weight.data_ptr()
+        )
+
+    @pytest.mark.parametrize("target_modules", [["lm_head"], ["embed_tokens"], ["lm_head", "embed_tokens"]])
+    def test_ensure_weight_tying_not_tying_when_model_config_tie_false_target_modules(self, target_modules):
+        # When tie_word_embeddings=False, ensure_weight_tying=True should not tie weights.
+        # Regression test for issue #2944
+        model = self.get_lm_model(tie_weights=True, config_tie_word_embeddings=False)
+        config = LoraConfig(
+            target_modules=["linear"] + target_modules,
+            ensure_weight_tying=True,
+        )
+
+        with pytest.warns(UserWarning, match="no tied modules were found in the model"):
+            model = get_peft_model(model, config)
+
+        if "embed_tokens" in target_modules:
+            assert isinstance(model.base_model.model.model.embed_tokens, LoraLayer)
+        else:
+            assert isinstance(model.base_model.model.model.embed_tokens, torch.nn.modules.Embedding)
+
+        if "lm_head" in target_modules:
+            assert isinstance(model.base_model.model.lm_head, LoraLayer)
+        else:
+            assert isinstance(model.base_model.model.lm_head, torch.nn.modules.linear.Linear)
+
+        if set(target_modules) == {"embed_tokens", "lm_head"}:
+            adapter_name = "default"
+            embed_lora_A = model.base_model.model.model.embed_tokens.lora_embedding_A[adapter_name]
+            embed_lora_B = model.base_model.model.model.embed_tokens.lora_embedding_B[adapter_name]
+            lm_lora_A = model.base_model.model.lm_head.lora_A[adapter_name].weight
+            lm_lora_B = model.base_model.model.lm_head.lora_B[adapter_name].weight
+            assert embed_lora_A.data_ptr() != lm_lora_B.data_ptr()
+            assert embed_lora_B.data_ptr() != lm_lora_A.data_ptr()

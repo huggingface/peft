@@ -31,6 +31,7 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from peft import (
     AdaLoraConfig,
+    BeftConfig,
     BOFTConfig,
     C3AConfig,
     CartridgeConfig,
@@ -94,6 +95,13 @@ ALL_CONFIGS = [
             "task_type": "CAUSAL_LM",
             "target_modules": None,
             "total_step": 1,
+        },
+    ),
+    (
+        BeftConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
         },
     ),
     (
@@ -352,6 +360,7 @@ ALL_CONFIGS = [
 
 def _skip_if_not_conv1d_supported(model_id, config_cls):
     if "GPT2LMHeadModel" in model_id and config_cls in [
+        BeftConfig,
         BOFTConfig,
         HRAConfig,
         OFTConfig,
@@ -363,7 +372,7 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         DeloraConfig,
         PsoftConfig,
     ]:
-        pytest.skip("Skipping BOFT/HRA/OFT/Road/SHiRA/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel")
+        pytest.skip("Skipping Beft/BOFT/HRA/OFT/Road/SHiRA/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel")
 
 
 def _skip_alora_no_activation(config_cls, config_kwargs):
@@ -376,6 +385,19 @@ def _skip_osf_disable_adapter_test(config_cls):
         pytest.skip(
             "Skipping OSF for disable_adapter test because OSF uses exact SVD decomposition, so outputs are identical until training."
         )
+
+
+def check_beft_config(config_cls, model_id, config_kwargs):
+    if isinstance(config_cls, BeftConfig):
+        return
+    elif "gptj" in model_id.lower():
+        config_kwargs["target_modules"] = ["fc_out"]
+    elif "llama" in model_id.lower():
+        pytest.skip("Skip tests for Llama models because layers have no bias term")
+    elif "gemma3" in model_id.lower():
+        pytest.skip("Skip tests for Gemma3 models because layers have no bias term")
+    else:
+        return
 
 
 class TestDecoderModels(PeftCommonTester):
@@ -566,6 +588,7 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_merge_layers(self, model_id, config_cls, config_kwargs):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        check_beft_config(config_cls, model_id, config_kwargs)
         self._test_merge_layers(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
@@ -573,12 +596,14 @@ class TestDecoderModels(PeftCommonTester):
     def test_merge_layers_multi(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        check_beft_config(config_cls, model_id, config_kwargs)
         self._test_merge_layers_multi(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        check_beft_config(config_cls, model_id, config_kwargs)
         self._test_merge_layers_nan(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
@@ -613,6 +638,8 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
+        config_kwargs = config_kwargs.copy()
+        check_beft_config(config_cls, model_id, config_kwargs)
         self._test_merge_layers_fp16(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)

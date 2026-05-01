@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import functools
+import inspect
 import re
 
 import packaging.version
@@ -108,10 +110,88 @@ class TestInitEmptyWeights:
         assert all(p.device == expected for p in mlp1.parameters())
 
 
+# TODO Remove this once patch_moe_parameter_targeting is removed from Transformers
+@pytest.fixture(params=[False, True], ids=["without_transformers_moe_patch", "with_transformers_moe_patch"])
+def _transformers_moe_patch(request):
+    """Parametrize tests over the MoE parameter-targeting patch being active/inactive.
+
+    The transformers patch `patch_moe_parameter_targeting` could hide a bug in PEFT when it comes to detecting the
+    correct in_features/out_features of a 3-dim MoE parameter. The patch is applied by transformers when their
+    `load_adapter` method is being called. Therefore, the order in which the tests were executed could hide or surface
+    the bug.
+
+    With this fixture, we ensure that each test is run twice, once without and once with the patch. This should mirror
+    real world usage, where the patch may or may not be active. At fixture exit, the patch is always removed.
+
+    For details, see discussion in #3165
+
+    """
+    try:
+        from transformers.integrations.peft import patch_moe_parameter_targeting
+    except (ImportError, AttributeError):
+        patch_moe_parameter_targeting = None
+
+    should_patch = request.param
+
+    if should_patch and patch_moe_parameter_targeting is None:
+        pytest.skip(
+            "Transformers patch_moe_parameter_targeting no longer exists; skipping the 'patched' test variant."
+        )
+
+    is_patched = hasattr(lora.layer.ParamWrapper.update_layer, "__wrapped__")
+    orig_update_layer = inspect.unwrap(lora.layer.ParamWrapper.update_layer)
+
+    def new_update_layer(layer, *args, **kwargs):
+        # this is copied 1:1 from transformers:
+        # https://github.com/huggingface/transformers/blob/bc7ee236fca35e771b6b393178a192add1469243/src/transformers/integrations/peft.py#L394-L401
+        did_swap = getattr(layer, "_did_swap_in_out_features", False)
+        if not did_swap and layer.parameter_name in ("down_proj", "gate_up_proj"):
+            tmp_in_features = layer.in_features
+            layer.in_features = layer.out_features
+            layer.out_features = tmp_in_features
+            layer._did_swap_in_out_features = True
+        return orig_update_layer(layer, *args, **kwargs)
+
+    # 4 cases:
+    # should_patch | is_patched
+    #         true |       true
+    #         true |      false
+    #        false |       true
+    #        false |      false
+
+    if not should_patch and not is_patched:
+        yield
+        return
+
+    if not should_patch and is_patched:
+        lora.layer.ParamWrapper.update_layer = orig_update_layer
+        yield
+        return
+
+    if should_patch and is_patched:
+        try:
+            yield
+        finally:
+            lora.layer.ParamWrapper.update_layer = orig_update_layer
+        return
+
+    if should_patch and not is_patched:
+        try:
+            lora.layer.ParamWrapper.update_layer = functools.wraps(lora.layer.ParamWrapper.update_layer)(
+                new_update_layer
+            )
+            yield
+        finally:
+            lora.layer.ParamWrapper.update_layer = orig_update_layer
+        return
+    # this is unreachable
+
+
 @pytest.mark.skipif(
     packaging.version.parse(transformers.__version__) < packaging.version.parse("5.4.0"),
     reason="PEFT weight conversion is fixed in transformers 5.4.0",
 )
+@pytest.mark.usefixtures("_transformers_moe_patch")  # TODO remove once patch_moe_parameter_targeting is removed
 class TestTransformersV5:
     """Unit tests intended to test proper working of PEFT with Transformers v5"""
 

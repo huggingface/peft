@@ -25,6 +25,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check
 from peft.utils.other import transpose
 
 from .._buffer_dict import BufferDict
+from .config import TinyLoraConfig
 
 
 class TinyLoraLayer(BaseTunerLayer):
@@ -46,11 +47,12 @@ class TinyLoraLayer(BaseTunerLayer):
     adapter_layer_names = ("tinylora_v",)
     other_param_names = ("tinylora_A", "tinylora_B", "tinylora_P")
 
-    def __init__(self, base_layer: nn.Module, **kwargs):
+    def __init__(self, base_layer: nn.Module, layer_idx: int, **kwargs):
         self.base_layer = base_layer
         self.r = {}
         self.u = {}
         self.tinylora_dropout = nn.ModuleDict({})
+        self._layer_idx = layer_idx  # used for deterministic seeding of projection matrices
 
         # Reference to the model-level ModuleDict (set during update_layer).
         # PyTorch won't double-register the same ModuleDict object across layers.
@@ -72,9 +74,6 @@ class TinyLoraLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
-
-        # Track layer index for seeding
-        self._layer_idx: Optional[int] = None
 
         self.in_features, self.out_features = _get_in_out_features(self.get_base_layer())
         self.kwargs = kwargs
@@ -132,16 +131,9 @@ class TinyLoraLayer(BaseTunerLayer):
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         return True
 
-    def set_layer_idx(self, idx: int):
-        """Set the layer index, used for deterministic seeding of projection matrices."""
-        self._layer_idx = idx
-
     def _get_layer_seed(self, adapter_name: str, base_seed: int) -> int:
         """Get a deterministic seed for this layer's projection matrices."""
-        if self._layer_idx is not None:
-            return base_seed + self._layer_idx
-        # Fallback: use hash of the adapter name
-        return base_seed + hash(adapter_name) % 10000
+        return base_seed + self._layer_idx
 
     def update_layer(
         self,
@@ -149,9 +141,9 @@ class TinyLoraLayer(BaseTunerLayer):
         tinylora_v: nn.ModuleDict,
         v_key: str,
         r: int,
-        config,
+        config: TinyLoraConfig,
         **kwargs,
-    ):
+    ) -> None:
         """Initialize layer with SVD decomposition and projection tensors."""
         # Extract config values
         u = config.u
@@ -181,16 +173,15 @@ class TinyLoraLayer(BaseTunerLayer):
 
         # Compute truncated SVD of base weights (following LoRA-XS convention)
         # actual_r may be less than r if matrix dimensions are smaller
-        actual_r = self._init_svd(adapter_name, r, fan_in_fan_out)
-        self.r[adapter_name] = actual_r
+        self._init_svd(adapter_name, r, fan_in_fan_out)
 
         # Initialize random projection tensors P using the actual rank
-        self._init_projection(adapter_name, u, actual_r, projection_seed)
+        self._init_projection(adapter_name, u, projection_seed)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
-    def _init_svd(self, adapter_name: str, r: int, fan_in_fan_out: bool) -> int:
+    def _init_svd(self, adapter_name: str, r: int, fan_in_fan_out: bool) -> None:
         """
         Compute truncated SVD of base weights and store as frozen buffers.
 
@@ -200,10 +191,7 @@ class TinyLoraLayer(BaseTunerLayer):
         - We store: tinylora_B = U[:, :r] @ diag(sqrt(S[:r])) (shape: out_features x r)
 
         Distributing S equally avoids imbalanced norms between A and B. This allows: delta_W = tinylora_B @ R @
-        tinylora_A
-
-        Returns:
-            int: The actual rank used (may be less than r if matrix dimensions are smaller)
+        tinylora_A.
         """
         base_layer = self.get_base_layer()
         weight = base_layer.weight.data
@@ -234,20 +222,19 @@ class TinyLoraLayer(BaseTunerLayer):
         # Use .contiguous() to ensure tensors can be saved with safetensors
         self.tinylora_A[adapter_name] = (sqrt_S_r.unsqueeze(1) * V_r).contiguous()
         self.tinylora_B[adapter_name] = (U_r * sqrt_S_r.unsqueeze(0)).contiguous()
+        self.r[adapter_name] = actual_r
 
-        return actual_r
-
-    def _init_projection(self, adapter_name: str, u: int, r: int, base_seed: int):
+    def _init_projection(self, adapter_name: str, u: int, base_seed: int):
         """Initialize fixed random projection tensors P ∈ R^{u×r×r}."""
         seed = self._get_layer_seed(adapter_name, base_seed)
         gen = torch.Generator().manual_seed(seed)
+        r = self.r[adapter_name]
 
         # P has shape (u, r, r)
         # Note: The paper describes P as "fixed random matrices" but does not specify the distribution.
         # We sample from N(0, 1/r) which is standard for random projections
         # (see Johnson-Lindenstrauss lemma: https://en.wikipedia.org/wiki/Johnson-Lindenstrauss_lemma).
         P = torch.normal(mean=0.0, std=1.0 / (r**0.5), size=(u, r, r), generator=gen)
-
         self.tinylora_P[adapter_name] = P
 
     def _compute_R(self, adapter_name: str) -> torch.Tensor:
@@ -313,7 +300,7 @@ class Linear(nn.Linear, TinyLoraLayer):
         tinylora_v: nn.ModuleDict,
         v_key: str,
         adapter_name: str,
-        config,
+        config: TinyLoraConfig,
         **kwargs,
     ) -> None:
         # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__
@@ -440,7 +427,7 @@ class Embedding(nn.Module, TinyLoraLayer):
         tinylora_v: nn.ModuleDict,
         v_key: str,
         adapter_name: str,
-        config,
+        config: TinyLoraConfig,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -463,7 +450,7 @@ class Embedding(nn.Module, TinyLoraLayer):
         r: int,
         config,
         **kwargs,
-    ):
+    ) -> None:
         """Initialize layer with SVD decomposition and projection tensors."""
         # Extract config values
         u = config.u
@@ -491,16 +478,15 @@ class Embedding(nn.Module, TinyLoraLayer):
         self._tinylora_v_ref[adapter_name] = tinylora_v[adapter_name][v_key]
 
         # Compute truncated SVD of embedding weights
-        actual_r = self._init_svd_embedding(adapter_name, r)
-        self.r[adapter_name] = actual_r
+        self._init_svd_embedding(adapter_name, r)
 
         # Initialize random projection tensors P using the actual rank
-        self._init_projection(adapter_name, u, actual_r, projection_seed)
+        self._init_projection(adapter_name, u, projection_seed)
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
-    def _init_svd_embedding(self, adapter_name: str, r: int) -> int:
+    def _init_svd_embedding(self, adapter_name: str, r: int) -> None:
         """
         Compute truncated SVD of embedding weights and store as frozen buffers.
 
@@ -508,9 +494,6 @@ class Embedding(nn.Module, TinyLoraLayer):
         - W = U @ S @ V^T (full SVD)
         - tinylora_A = diag(sqrt(S[:r])) @ V[:r, :] (shape: r x embedding_dim)
         - tinylora_B = U[:, :r] @ diag(sqrt(S[:r])) (shape: num_embeddings x r)
-
-        Returns:
-            int: The actual rank used (may be less than r if dimensions are smaller)
         """
         base_layer = self.get_base_layer()
         weight = base_layer.weight.data  # (num_embeddings, embedding_dim)
@@ -534,8 +517,7 @@ class Embedding(nn.Module, TinyLoraLayer):
         # Distribute singular values equally to both A and B via sqrt(S_r)
         self.tinylora_A[adapter_name] = (sqrt_S_r.unsqueeze(1) * V_r).contiguous()
         self.tinylora_B[adapter_name] = (U_r * sqrt_S_r.unsqueeze(0)).contiguous()
-
-        return actual_r
+        self.r[adapter_name] = actual_r
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """Merge the active adapter weights into the base weights."""

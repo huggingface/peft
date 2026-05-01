@@ -217,7 +217,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             is_main_process (`bool`, *optional*):
                 Whether the process calling this is the main process or not. Will default to `True`. Will not save the
                 checkpoint if not on the main process, which is important for multi device setups (e.g. DDP).
-            path_initial_model_for_weight_conversion (`str, *optional*`):
+            path_initial_model_for_weight_conversion (`str`, *optional*):
                 The path to the initialized adapter, which is obtained after initializing the model with
                 PiSSA/CorDA/OLoRA and before performing any training. When `path_initial_model_for_weight_conversion`
                 is not None, the difference in adapter before and after fine-tuning is calculated. This difference can

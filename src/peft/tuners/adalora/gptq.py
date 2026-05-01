@@ -66,6 +66,6 @@ class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
             result += output
         return result
 
-        def __repr__(self) -> str:
-            rep = super().__repr__()
-            return "adalora." + rep
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "adalora." + rep

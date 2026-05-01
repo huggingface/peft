@@ -24,6 +24,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.other import transpose
 
 from .._buffer_dict import BufferDict
+from .config import VeraConfig
 
 
 class VeraLayer(BaseTunerLayer):
@@ -71,12 +72,14 @@ class VeraLayer(BaseTunerLayer):
         vera_A: BufferDict,
         vera_B: BufferDict,
         r,
-        vera_dropout,
-        init_weights,
-        d_initial: float = 0.1,
+        config: VeraConfig,
         inference_mode: bool = False,
         **kwargs,
     ):
+        vera_dropout = config.vera_dropout
+        init_weights = config.init_weights
+        d_initial = config.d_initial
+
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         self.r[adapter_name] = r
@@ -148,21 +151,18 @@ class Linear(nn.Linear, VeraLayer):
         vera_A: BufferDict,
         vera_B: BufferDict,
         adapter_name: str,
+        config: VeraConfig,
         r: int = 0,
-        vera_dropout: float = 0.0,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
-        init_weights: bool = True,
-        d_initial: float = 0.1,
         **kwargs,
     ) -> None:
         # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__, which should always be called
         super(nn.Linear, self).__init__()
         VeraLayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, vera_A, vera_B, r, vera_dropout, init_weights, d_initial=d_initial)
+        self.update_layer(adapter_name, vera_A, vera_B, r, config=config)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
