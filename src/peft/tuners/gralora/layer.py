@@ -364,7 +364,7 @@ class Linear(nn.Linear, GraloraLayer):
                     "bljr, jro -> bljo",
                     torch.einsum(
                         "blni, nir -> blnr",
-                        dropout(x.to(gralora_dtype)).view(B, L, N, in_features // N),
+                        dropout(self._cast_input_dtype(x, gralora_dtype)).view(B, L, N, in_features // N),
                         gralora_A,
                     )
                     .view(B, L, N, N, subblock_gralora_rank)
@@ -379,7 +379,7 @@ class Linear(nn.Linear, GraloraLayer):
 
                 result += scaling * output.to(torch_result_dtype)
                 if hybrid_r > 0:
-                    hybrid_output = gralora_B_general(gralora_A_general(dropout(x.to(gralora_dtype))))
+                    hybrid_output = gralora_B_general(gralora_A_general(dropout(self._cast_input_dtype(x, gralora_dtype))))
                     if x_is_2d:
                         hybrid_output = hybrid_output.squeeze(1)
                     result += scaling * hybrid_output.to(torch_result_dtype)
