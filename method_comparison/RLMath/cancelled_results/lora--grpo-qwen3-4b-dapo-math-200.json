@@ -1,7 +1,7 @@
 {
   "run_info": {
-    "created_at": "2026-04-27T11:37:09.649311+00:00",
-    "total_time": 0.000994466245174408,
+    "created_at": "2026-04-30T07:28:38.776251+00:00",
+    "total_time": 0.0010736417025327682,
     "experiment_name": "lora/grpo-qwen3-4b-dapo-math-200",
     "peft_branch": "lora-comparison",
     "train_config": {
@@ -86,7 +86,7 @@
     "train_completed": false,
     "train_time": null,
     "metrics": [],
-    "last_update_at": "2026-04-27T11:37:09.696397+00:00",
+    "last_update_at": "2026-04-30T07:28:38.833990+00:00",
     "error": "Unknown dataset: open-r1/DAPO-Math-17k-Processed"
   },
   "rl_eval_info": {},

@@ -239,6 +239,15 @@ def _load_eval_model(
 ):
     torch_dtype = _resolve_torch_dtype(dtype_name)
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # Workaround for Qwen3.5 composite config: AutoModelForCausalLM.from_pretrained passes
+    # the parent Qwen3_5Config to Qwen3_5ForCausalLM, but that class expects Qwen3_5TextConfig.
+    # Pre-build the text config and pass it explicitly when available.
+    from transformers import AutoConfig
+
+    auto_config = AutoConfig.from_pretrained(model_id)
+    load_config = getattr(auto_config, "text_config", None) or auto_config
+
     if peft_cfg is None:
         # Load the trained model.  For composite architectures (e.g. Qwen3.5)
         # the checkpoint may use different key names, so load base model and
@@ -247,7 +256,7 @@ def _load_eval_model(
 
         ckpt_file = os.path.join(checkpoint_dir, "model.safetensors")
         model = AutoModelForCausalLM.from_pretrained(
-            model_id, torch_dtype=torch_dtype, device_map=device
+            model_id, config=load_config, torch_dtype=torch_dtype, device_map=device
         )
         if os.path.exists(ckpt_file):
             trained = st.load_file(ckpt_file)
@@ -268,7 +277,7 @@ def _load_eval_model(
     else:
         _remap_adapter_keys(checkpoint_dir)
         base_model = AutoModelForCausalLM.from_pretrained(
-            model_id, torch_dtype=torch_dtype, device_map=device
+            model_id, config=load_config, torch_dtype=torch_dtype, device_map=device
         )
         model = PeftModel.from_pretrained(base_model, checkpoint_dir)
         try:

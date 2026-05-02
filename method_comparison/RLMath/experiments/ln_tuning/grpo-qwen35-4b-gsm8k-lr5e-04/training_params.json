@@ -1,5 +1,9 @@
 {
   "model_id": "Qwen/Qwen3.5-4B",
   "save_checkpoint": true,
-  "learning_rate": 0.0005
+  "learning_rate": 0.0005,
+  "use_vllm": false,
+  "gradient_checkpointing": true,
+  "num_generations": 4,
+  "generation_batch_size": 4
 }
