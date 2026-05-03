@@ -47,6 +47,10 @@ without modifying it. For example:
 
 to run the VBLoRA default experiment again.
 
+If you set `UPLOAD_BUCKET="your_user/bucket_name"` as an environment variable prior to starting experiments
+via `make`, all experiments will be called with the `--bucket_name $UPLOAD_BUCKET` parameter and therefore
+store the checkpoints in that bucket.
+
 ### `adapter_config.json`
 
 This must be a valid PEFT configuration. It is easiest to create it programmatically, e.g.:
@@ -94,7 +98,7 @@ From practical experiments, for a batch size of 4, a bucket size of 80 provides 
 
 ### Start a run
 
-Once everything is set up properly, start a run by using the `run.py` script. Pass `-v` for verbose output to the console (recommended if observing the progress is desired). As an example, for `experiments/lora/llama-3.2-3B-rank32/` the invocation would be:
+Once everything is set up properly, start a run by using the `run.py` script. Pass `-v` for verbose output to the console (recommended if observing the progress is desired). To save the resulting experiment checkpoints to a huggingface bucket, you can pass the bucket name via the `--bucket_name` parameter (e.g., `"user/my_bucket_name"`). As an example, for `experiments/lora/llama-3.2-3B-rank32/` the invocation would be:
 
 ```sh
 python run.py -v experiments/lora/llama-3.2-3B-rank32/

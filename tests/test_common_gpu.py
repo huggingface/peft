@@ -55,7 +55,7 @@ from peft import (
     get_peft_model,
     prepare_model_for_kbit_training,
 )
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_gptqmodel_available, is_xpu_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_xpu_available
 from peft.tuners.lora.config import LoraRuntimeConfig
 from peft.utils import infer_device
 
@@ -69,9 +69,6 @@ from .testing_utils import (
     require_torch_multi_accelerator,
 )
 
-
-if is_gptqmodel_available():
-    from gptqmodel import BACKEND
 
 if is_bnb_available():
     import bitsandbytes as bnb
@@ -522,38 +519,43 @@ class PeftGPUCommonTests(unittest.TestCase):
 
     @require_gptqmodel
     @pytest.mark.single_gpu_tests
+    @require_gptqmodel
     def test_lora_gptq_quantization_from_pretrained_safetensors(self):
         r"""
-        Tests that the autogptq quantization using LoRA works as expected with safetensors weights.
+        Tests that GPT-QModel quantization using LoRA works as expected with safetensors weights.
         """
         from transformers import GPTQConfig
 
         model_id = "marcsun13/opt-350m-gptq-4bit"
-        quantization_config = GPTQConfig(bits=4, backend=BACKEND.AUTO_TRAINABLE)
+        quantization_config = GPTQConfig(bits=4)
+        # Use explicit device instead of "auto" to ensure model stays on single device
+        # This avoids device mismatch issues when reloading the model
+        device_map = f"{self.device}:0"  # e.g., "cuda:0", "xpu:0"
         kwargs = {
             "pretrained_model_name_or_path": model_id,
             "dtype": torch.float16,
-            "device_map": "auto",
+            "device_map": device_map,
             "quantization_config": quantization_config,
         }
         model = AutoModelForCausalLM.from_pretrained(**kwargs)
+        device = model.device
         model = prepare_model_for_kbit_training(model)
 
         config = LoraConfig(task_type="CAUSAL_LM")
         peft_model = get_peft_model(model, config)
-        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(peft_model.device))
+        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(device))
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             peft_model.save_pretrained(tmp_dir)
             model = AutoModelForCausalLM.from_pretrained(**kwargs)
             model = PeftModel.from_pretrained(model, tmp_dir)
             model = prepare_model_for_kbit_training(model)
-            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(peft_model.device))
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(device))
 
             # loading a 2nd adapter works, #1239
             model.load_adapter(tmp_dir, "adapter2")
             model.set_adapter("adapter2")
-            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(peft_model.device))
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(device))
 
             # check that both adapters are in the same layer
             assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A

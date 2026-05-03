@@ -404,9 +404,8 @@ def hotswap_adapter_from_state_dict(
     # Ensure that all the keys of the new adapter correspond exactly to the keys of the old adapter, otherwise
     # hot-swapping is not possible
 
-    # _orig_mod is for torch.compile(model) and _compiled_call_impl is for model.compile() (not wrapped)
-    is_compiled = hasattr(model, "_orig_mod")
-    is_compiled_inplace = bool(getattr(model, "_compiled_call_impl", None))
+    # _orig_mod is for torch.compile(model)
+    is_compiled_wrapper = hasattr(model, "_orig_mod")
     # TODO: there is probably a more precise way to identify the adapter keys
     missing_keys = {k for k in model.state_dict() if (parameter_prefix in k) and (adapter_name in k)}
     unexpected_keys = []
@@ -419,7 +418,7 @@ def hotswap_adapter_from_state_dict(
             unexpected_keys.append(key)
             continue
 
-        if is_compiled:
+        if is_compiled_wrapper:
             missing_keys.remove("_orig_mod." + key)
         else:
             missing_keys.remove(key)
@@ -464,25 +463,22 @@ def hotswap_adapter_from_state_dict(
         old_val = attrgetter(key)(model)
         new_val = new_val.to(old_val.data.device)
 
-        # We try to detect if the model is compiled but it does not always work, e.g. if hotswapping is called from
-        # within the model itself. In this case, swap_tensors raises RuntimeError and should continue without
-        # swap_tensors.
-        if not is_compiled and not is_compiled_inplace:
-            try:
-                torch.utils.swap_tensors(old_val, new_val)
-                continue
-            except RuntimeError:
-                is_compiled = True
+        # 3 options:
+        # - shapes_match: the new adapter has the same rank as the current tensor (possibly because
+        #   prepare_model_for_compiled_hotswap padded the current tensor to match).
+        # - new_is_smaller: the new adapter has a smaller rank than the current tensor. This happens either
+        #   when the old adapter had a larger rank, or when the current tensor was padded to a larger
+        #   target_rank.
+        # - new_is_larger: the new adapter has a larger rank than the current tensor. The parameter shape
+        #   must change, which is only safe when no padded-shape invariant applies (i.e. the model was
+        #   not padded via prepare_model_for_compiled_hotswap). swap_tensors is the only option here.
+        shapes_match = old_val.shape == new_val.shape
+        new_is_smaller = (not shapes_match) and all(o >= n for o, n in zip(old_val.shape, new_val.shape))
+        new_is_larger = (not shapes_match) and not new_is_smaller
 
-        # Compiled models don't work with swap_tensors because there are weakrefs for the tensor. It is unclear if
-        # this workaround could not cause trouble but the tests indicate that it works.
-        if old_val.shape == new_val.shape:
-            # either
-            # - adapters had the same rank
-            # - adapters were padded with prepare_model_for_compiled_hotswap and 2nd adapter was larger
+        if shapes_match:
             old_val.data.copy_(new_val.data)
-        else:
-            # if 2nd adapter was smaller, ensure to fill up to adapter dimension and set the rest to zeros
+        elif new_is_smaller:
             if old_val.dim() not in (2, 4):
                 raise NotImplementedError(
                     f"Trying to hotswap an adapter whose weight has {old_val.dim()} dimensions, but only Conv2d and "
@@ -502,6 +498,21 @@ def hotswap_adapter_from_state_dict(
                     "ensure that all ranks are padded to the largest rank among all LoRA adapters by using "
                     "peft.utils.hotswap.prepare_model_for_compiled_hotswap."
                 )
+        elif new_is_larger:
+            try:
+                torch.utils.swap_tensors(old_val, new_val)
+            except RuntimeError:
+                # Fallback if swap_tensors is not permitted (e.g. tensor has weakrefs). This still
+                # rebinds storage and will break inductor if the model is compiled, but growing the
+                # rank of a compiled-and-padded model is already unsupported; the caller should have
+                # used prepare_model_for_compiled_hotswap with a sufficient target_rank.
+                old_val.data = new_val.data
+        else:
+            # should be unreachable
+            raise ValueError(
+                "Something went wrong during hotswapping, please open an issue on PEFT: "
+                "https://github.com/huggingface/peft/issues"
+            )
 
 
 def check_hotswap_configs_compatible(config0: PeftConfig, config1: PeftConfig) -> None:

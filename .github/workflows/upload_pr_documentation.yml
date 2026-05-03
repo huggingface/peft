@@ -10,7 +10,7 @@ permissions: {}
 
 jobs:
   build:
-    uses: huggingface/doc-builder/.github/workflows/upload_pr_documentation.yml@607843a35ee10949e5bea9ca2f206831b0305b4c  # main
+    uses: huggingface/doc-builder/.github/workflows/upload_pr_documentation.yml@9ad2de8582b56c017cb530c1165116d40433f1c6  # main
     with:
       package_name: peft
     secrets:

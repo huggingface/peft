@@ -41,16 +41,11 @@ class TorchaoLoraLinear(Linear):
 
     def _check_dtype_supported(self):
         # TODO: Not required once int4_weight_only is properly supported by torchao
+        from torchao.quantization import Int4Tensor
+
         base_layer = self.get_base_layer()
         weight = base_layer.weight
-        # pytest tests/test_gpu_examples.py::PeftTorchaoGPUTests::test_causal_lm_training_single_gpu_torchao_0_int8_weight_only
-        if (
-            # torchao 0.7.0+
-            (hasattr(weight, "tensor_impl") and (weight.tensor_impl.data.dtype != torch.int8))
-            or
-            # torchao < 0.7.0
-            (hasattr(weight, "layout_tensor") and (weight.layout_tensor.data.dtype != torch.int8))
-        ):
+        if isinstance(weight, Int4Tensor):
             raise ValueError(f"{type(self).__name__} only supports int8 weights for now.")
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -147,10 +142,9 @@ def dispatch_torchao(
     if not is_torchao_available():
         return new_module
 
-    from torchao.dtypes import AffineQuantizedTensor
-    from torchao.quantization import LinearActivationQuantizedTensor
+    from torchao.utils import TorchAOBaseTensor
 
-    if isinstance(target_base_layer.weight, (AffineQuantizedTensor, LinearActivationQuantizedTensor)):
+    if isinstance(target_base_layer.weight, TorchAOBaseTensor):
         new_module = TorchaoLoraLinear(target, adapter_name, config=config, **kwargs)
 
     return new_module

@@ -18,12 +18,14 @@ from typing import Optional
 
 import bitsandbytes as bnb
 import torch
+import torch.nn.functional as F
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import check_adapters_to_merge
 from peft.utils.integrations import dequantize_bnb_weight
 from peft.utils.other import transpose
 
+from .config import PveraConfig
 from .layer import PveraLayer
 
 
@@ -36,16 +38,14 @@ if is_bnb_available():
             adapter_name: str,
             pvera_A,
             pvera_B,
-            r: int = 0,
-            pvera_dropout: float = 0.0,
-            fan_in_fan_out: bool = False,
-            init_weights: bool = True,
-            d_initial: float = 0.1,
+            r: int,
+            config: PveraConfig,
             **kwargs,
         ) -> None:
             super().__init__()
             PveraLayer.__init__(self, base_layer)
-            self.fan_in_fan_out = fan_in_fan_out
+            self.fan_in_fan_out = config.fan_in_fan_out
+            self.sample_at_inference = config.sample_at_inference
 
             self._active_adapter = adapter_name
             self.update_layer(
@@ -53,9 +53,7 @@ if is_bnb_available():
                 pvera_A,
                 pvera_B,
                 r,
-                pvera_dropout=pvera_dropout,
-                init_weights=init_weights,
-                d_initial=d_initial,
+                config=config,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -227,9 +225,9 @@ if is_bnb_available():
                     sliced_B = pvera_B[: self.out_features, :].to(x.device)
 
                     x_temp = dropout(x.to(lambda_d.dtype))
-
-                    adapter_output = lambda_b * torch.nn.functional.linear(
-                        lambda_d * torch.nn.functional.linear(x_temp, sliced_A), sliced_B
+                    mu, logvar = (lambda_d * F.linear(x_temp, sliced_A)).chunk(2, dim=-1)
+                    adapter_output = lambda_b * F.linear(
+                        self._reparametrize(mu, logvar, self.sample_at_inference), sliced_B
                     )
 
                     if requires_conversion:
@@ -254,16 +252,14 @@ if is_bnb_4bit_available():
             adapter_name: str,
             pvera_A,
             pvera_B,
-            r: int = 0,
-            pvera_dropout: float = 0.0,
-            fan_in_fan_out: bool = False,
-            init_weights: bool = True,
-            d_initial: float = 0.1,
+            r: int,
+            config: PveraConfig,
             **kwargs,
         ) -> None:
             super().__init__()
             PveraLayer.__init__(self, base_layer)
-            self.fan_in_fan_out = fan_in_fan_out
+            self.fan_in_fan_out = config.fan_in_fan_out
+            self.sample_at_inference = config.sample_at_inference
 
             self._active_adapter = adapter_name
             self.update_layer(
@@ -271,9 +267,7 @@ if is_bnb_4bit_available():
                 pvera_A,
                 pvera_B,
                 r,
-                pvera_dropout=pvera_dropout,
-                init_weights=init_weights,
-                d_initial=d_initial,
+                config=config,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -401,9 +395,9 @@ if is_bnb_4bit_available():
                     sliced_B = pvera_B[: self.out_features, :].to(x.device)
 
                     x_temp = dropout(x.to(lambda_d.dtype))
-
-                    adapter_output = lambda_b * torch.nn.functional.linear(
-                        lambda_d * torch.nn.functional.linear(x_temp, sliced_A), sliced_B
+                    mu, logvar = (lambda_d * F.linear(x_temp, sliced_A)).chunk(2, dim=-1)
+                    adapter_output = lambda_b * F.linear(
+                        self._reparametrize(mu, logvar, self.sample_at_inference), sliced_B
                     )
 
                     if requires_conversion:

@@ -43,6 +43,8 @@ from .constants import (
     INCLUDE_LINEAR_LAYERS_SHORTHAND,
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_BEFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING,
@@ -67,6 +69,7 @@ from .constants import (
     TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_TINYLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING,
@@ -88,6 +91,8 @@ __all__ = [
     "INCLUDE_LINEAR_LAYERS_SHORTHAND",
     "SAFETENSORS_WEIGHTS_NAME",
     "TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_BEFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING",
@@ -112,6 +117,7 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_TINYLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING",
@@ -401,12 +407,13 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         new_hook = old_hook_cls(**filtered_old_hook_attr)
         return new_hook
 
-    def _check_forward_args(self, x, *args, **kwargs):
+    def _check_forward_args(self, *args, **kwargs):
         """Check if the arguments are compatible with the configs and state of the model"""
         adapter_names = kwargs.get("adapter_names", None)
-        if adapter_names is None:
+        if adapter_names is None or not args:
             return
 
+        x = args[0]
         if len(x) != len(adapter_names):
             msg = (
                 "Length of `adapter_names` should be the same as the number of inputs, but got "
@@ -414,7 +421,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
             )
             raise ValueError(msg)
 
-    def _forward_wrapped(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def _forward_wrapped(self, *args: Any, **kwargs: Any) -> torch.Tensor:
         raise NotImplementedError
 
     def _forward_wrapped_mixed_batch(
@@ -422,7 +429,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
     ) -> torch.Tensor:
         raise NotImplementedError
 
-    def _forward_wrapped_passthrough(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def _forward_wrapped_passthrough(self, *args: Any, **kwargs: Any) -> torch.Tensor:
         """The forward call when no adapter is involved in the forward computation, only the base model"""
         raise NotImplementedError
 
@@ -460,16 +467,16 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
 
         return torch.stack(results)
 
-    def forward(self, x: torch.Tensor, *args, **kwargs):
-        self._check_forward_args(x, *args, **kwargs)
+    def forward(self, *args, **kwargs):
+        self._check_forward_args(*args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
 
         if self.disable_adapters or any(adapter not in self._adapters for adapter in self.active_adapters):
-            return self._forward_wrapped_passthrough(x, *args, **kwargs)
+            return self._forward_wrapped_passthrough(*args, **kwargs)
 
         if adapter_names is None:
-            return self._forward_wrapped(x, *args, **kwargs)
-        return self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
+            return self._forward_wrapped(*args, **kwargs)
+        return self._mixed_batch_forward(*args, adapter_names=adapter_names, **kwargs)
 
     def enable_adapters(self, enabled: bool):
         """Toggle the enabling and disabling of adapters
@@ -575,16 +582,16 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
     def _error_message_name(self):
         return "modules_to_save"
 
-    def _forward_wrapped(self, x, *args, **kwargs):
+    def _forward_wrapped(self, *args, **kwargs):
         if not self.active_adapters:
-            return self._forward_wrapped_passthrough(x, *args, **kwargs)
-        return self.modules_to_save[self.active_adapters[0]](x, *args, **kwargs)
+            return self._forward_wrapped_passthrough(*args, **kwargs)
+        return self.modules_to_save[self.active_adapters[0]](*args, **kwargs)
 
     def _forward_wrapped_mixed_batch(self, x, active_adapter, *args, **kwargs):
         return self.modules_to_save[active_adapter](x, *args, **kwargs)
 
-    def _forward_wrapped_passthrough(self, x, *args, **kwargs):
-        return self.original_module(x, *args, **kwargs)
+    def _forward_wrapped_passthrough(self, *args, **kwargs):
+        return self.original_module(*args, **kwargs)
 
     def _hasattr_wrapped(self, name, modules):
         # this method is only called if there is at least one active adapter
@@ -1064,7 +1071,7 @@ def _set_trainable(
             # embeddings. If we replaced the tied weight (i.e. moved it to, say, `lm_head.token_adapter.base_layer`)
             # we'll get the new name whereas the old way was that we got `lm_head` regardless of whether it was modified
             # or not. We'll assume that we always have two levels of nesting and therefore do the same check as before
-            # but on the grandparent to accomodate for the new behavior.
+            # but on the grandparent to accommodate for the new behavior.
             if isinstance(grandparent, wrapper_cls):
                 grandparent.update(adapter_name, **wrapper_kwargs)
                 grandparent.set_adapter(grandparent.active_adapter, inference_mode=inference_mode)
@@ -1106,12 +1113,21 @@ def _set_adapter(model, adapter_name: str | list[str], inference_mode: bool = Fa
 
 
 def _prepare_prompt_learning_config(peft_config, model_config):
+    orig_model_config = model_config
+    if hasattr(model_config, "to_dict"):
+        model_config = model_config.to_dict()
+    else:
+        model_config = model_config
+
     # In case of VLM we focus on the language model portion of the model.
     if "text_config" in model_config:
         model_config = model_config["text_config"]
 
     if peft_config.num_layers is None:
-        if "num_hidden_layers" in model_config:
+        if hasattr(orig_model_config, "num_hidden_layers"):
+            # dict entry was removed in https://github.com/huggingface/transformers/pull/41250
+            num_layers = orig_model_config.num_hidden_layers
+        elif "num_hidden_layers" in model_config:
             num_layers = model_config["num_hidden_layers"]
         elif "num_layers" in model_config:
             num_layers = model_config["num_layers"]
@@ -1282,6 +1298,32 @@ def get_quantization_config(model: torch.nn.Module, method: str):
     ):
         return model.config.quantization_config
     return None
+
+
+def is_gptqmodel_quant_linear(module: Optional[torch.nn.Module]) -> bool:
+    """
+    Check if a module is a GPT-QModel quantized linear.
+    """
+    if module is None or not is_gptqmodel_available():
+        return False
+
+    try:
+        from gptqmodel.nn_modules.qlinear import BaseQuantLinear
+    except ImportError:
+        return False
+
+    return isinstance(module, BaseQuantLinear)
+
+
+def is_gptqmodel_awq_layer(module: Optional[torch.nn.Module]) -> bool:
+    """
+    Check if a module is a GPT-QModel quantized linear that supports the AWQ method.
+    """
+    if not is_gptqmodel_quant_linear(module):
+        return False
+
+    supported_methods = getattr(module, "SUPPORTS_METHODS", [])
+    return any(method.value == "awq" for method in supported_methods)
 
 
 def get_gptqmodel_quant_linear(gptq_quantization_config, device_map=None):
@@ -1646,9 +1688,8 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     to the base model anyway. Non-transformer models have to provide a `_tied_weights_keys` attribute for this function
     to work.
 
-    Note that this function will not check if weight tying is disabled by the model's config. There can be the case
-    that the weight tying definition is present but the tying is disabled via `model_config.tie_word_embeddings=False`.
-    You have to check that yourself.
+    If the model's config has `tie_word_embeddings` set to `False`, this function returns an empty list, as weight
+    tying is explicitly disabled for that model checkpoint.
     """
     tied_weights: list[str] = []
 
@@ -1659,6 +1700,16 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     if hasattr(model, "tuner_layer_cls"):
         # unpack BaseTuner
         model = model.model
+
+    # `_tied_weights_keys` is architectural capability; `tie_word_embeddings=False` means tying is
+    # explicitly disabled for this checkpoint and must be respected.
+    model_config = getattr(model, "config", None)
+    if (
+        model_config is not None
+        and hasattr(model_config, "tie_word_embeddings")
+        and getattr(model_config, "tie_word_embeddings") is False
+    ):
+        return []
 
     if not hasattr(model, "_tied_weights_keys"):
         return []
