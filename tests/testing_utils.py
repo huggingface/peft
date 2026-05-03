@@ -24,7 +24,6 @@ from datasets import load_dataset
 
 from peft import (
     AdaLoraConfig,
-    GloraConfig,
     IA3Config,
     LNTuningConfig,
     LoraConfig,
@@ -301,7 +300,7 @@ def set_init_weights_false(config_cls, kwargs):
 
     if issubclass(config_cls, PromptLearningConfig):
         return kwargs
-    if config_cls in (GloraConfig, LNTuningConfig, VBLoRAConfig):
+    if config_cls in (LNTuningConfig, VBLoRAConfig):
         return kwargs
 
     if config_cls in (LoraConfig, AdaLoraConfig):

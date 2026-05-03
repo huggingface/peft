@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
-from typing import ClassVar, Literal, Optional, Union
+from typing import Literal, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -48,11 +48,9 @@ class GloraConfig(PeftConfig):
         config_D_E (`str`): Parameterization for the D and E scalars (bias multiplicative and additive
             corrections). Does not support `lora` since D and E are bias-sized vectors, not matrices.
             Valid values: `vector`, `constant`, `none`.
+        init_weights (`bool`): If True (default), initialize GLoRA as a no-op (zeros). If False,
+            use kaiming initialization so the adapter is not a no-op.
     """
-
-    _VALID_A_B_CONFIGS: ClassVar[set[str]] = {"lora", "vector", "constant", "none"}
-    _VALID_C_CONFIGS: ClassVar[set[str]] = {"lora", "vector", "none"}
-    _VALID_D_E_CONFIGS: ClassVar[set[str]] = {"constant", "none", "vector"}
 
     r: int = field(
         default=8, metadata={"help": "Default rank of the LoRA matrices if the config contains lora parametrization."}
@@ -60,14 +58,16 @@ class GloraConfig(PeftConfig):
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
-            "help": "List of module names or regex expression of the module names to replace with Lora."
+            "help": "List of module names or regex expression of the module names to replace with Glora."
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
         },
     )
     bias: str = field(
         default="none",
         metadata={
-            "help": "Bias handling: 'none', 'all', or 'glora_only' (train bias on GLoRA layers when adapters are active)."
+            "help": (
+                "Bias handling: 'none', 'all', or 'glora_only' (train bias on GLoRA layers when adapters are active)."
+            )
         },
     )
     modules_to_save: Optional[list[str]] = field(
@@ -83,12 +83,12 @@ class GloraConfig(PeftConfig):
         default="lora",
         metadata={
             "help": (
-                "Parameterization for A and B (weight multiplicative and additive corrections: W_eff = W0 + W0*A + B). "
+                "Parameterization for A and B (weight multiplicative and additive corrections: "
+                "W_eff = W0 + W0*A + B). "
                 "'lora': low-rank Xd@Xu (out x r and r x in), r*(out+in) params, most expressive. "
                 "'vector': per-output-channel scalar (out params). "
                 "'constant': single scalar (1 param). "
                 "'none': disabled (0 params). "
-                f"Valid values: {', '.join(sorted(_VALID_A_B_CONFIGS))}. 'lora' is post-processed to lora_<rank>."
             )
         },
     )
@@ -101,7 +101,6 @@ class GloraConfig(PeftConfig):
                 "'lora': low-rank column Xd@Xu (in x r and r x 1), couples bias to a rank-r projection of W0. "
                 "'vector': single (in x 1) column, couples each bias element to a weighted sum of W0 rows. "
                 "'none': disabled (0 params). "
-                f"Valid values: {', '.join(sorted(_VALID_C_CONFIGS))}. 'lora' is post-processed to lora_<rank>."
             )
         },
     )
@@ -110,44 +109,25 @@ class GloraConfig(PeftConfig):
         default="constant",
         metadata={
             "help": (
-                "Parameterization for D and E (bias multiplicative and additive corrections: b_eff = b0 + b0*D + E). "
+                "Parameterization for D and E (bias multiplicative and additive corrections: "
+                "b_eff = b0 + b0*D + E). "
                 "'vector': per-output-channel value (out params). "
                 "'constant': single scalar shared across all bias elements (1 param). "
                 "'none': disabled (0 params). "
                 "Does not support 'lora' since D and E are bias-length vectors, not matrices. "
-                f"Valid values: {', '.join(sorted(_VALID_D_E_CONFIGS))}."
             )
         },
     )
 
-    def _validate_and_process_config(self, config_value: str, valid_configs: set, config_name: str) -> str:
-        """
-        Validate and process a configuration value.
-
-        Args:
-            config_value: The configuration value to validate
-            valid_configs: Set of valid configuration values
-            config_name: Name of the configuration (for error messages)
-
-        Returns:
-            Processed configuration value
-
-        Raises:
-            ValueError: If the configuration value is invalid
-        """
-        config_value = str(config_value).lower()
-
-        if "lora" in config_value:
-            if "lora" in valid_configs:
-                return f"lora_{self.r}"
-            raise ValueError(f"Invalid {config_name} value: {config_value}. lora is not supported for {config_name}.")
-
-        if config_value not in valid_configs:
-            raise ValueError(
-                f"Invalid {config_name} value: {config_value}. Valid values are: {', '.join(sorted(valid_configs))}."
+    init_weights: bool = field(
+        default=True,
+        metadata={
+            "help": (
+                "If True, initialize GLoRA as a no-op (zeros for down-projection). "
+                "If False, use kaiming initialization so the adapter output is not identity."
             )
-
-        return config_value
+        },
+    )
 
     def __post_init__(self):
         super().__post_init__()
@@ -156,11 +136,19 @@ class GloraConfig(PeftConfig):
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
 
-        # Validate and process each configuration
-        self.config_A_B = self._validate_and_process_config(self.config_A_B, self._VALID_A_B_CONFIGS, "config_A_B")  # type: ignore[assignment]
+        valid_A_B = {"lora", "vector", "constant", "none"}
+        valid_C = {"lora", "vector", "none"}
+        valid_D_E = {"vector", "constant", "none"}
 
-        self.config_C = self._validate_and_process_config(self.config_C, self._VALID_C_CONFIGS, "config_C")  # type: ignore[assignment]
-
-        self.config_D_E = self._validate_and_process_config(  # type: ignore[assignment]
-            self.config_D_E, self._VALID_D_E_CONFIGS, "config_D_E"
-        )
+        if self.config_A_B not in valid_A_B:
+            raise ValueError(
+                f"Invalid config_A_B value: {self.config_A_B!r}. Valid values are: {', '.join(sorted(valid_A_B))}."
+            )
+        if self.config_C not in valid_C:
+            raise ValueError(
+                f"Invalid config_C value: {self.config_C!r}. Valid values are: {', '.join(sorted(valid_C))}."
+            )
+        if self.config_D_E not in valid_D_E:
+            raise ValueError(
+                f"Invalid config_D_E value: {self.config_D_E!r}. Valid values are: {', '.join(sorted(valid_D_E))}."
+            )

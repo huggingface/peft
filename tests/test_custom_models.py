@@ -1579,14 +1579,14 @@ def _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config
 
 
 def _glora_init_down_factors_for_multiadapter_testing(peft_model, adapter_names=None):
-    """GLoRA keeps *d factors at zero for lora_* paths so A,B,C vanish at init; adapters then match each other."""
+    """GLoRA keeps Xd factors at zero at init so adapters are no-op; perturb them for testing."""
     with torch.no_grad():
         for module in peft_model.modules():
             if not isinstance(module, GloraLinear):
                 continue
-            names = adapter_names if adapter_names is not None else list(module.eval_config.keys())
+            names = adapter_names if adapter_names is not None else list(module.glora_A.keys())
             for adapter_name in names:
-                if adapter_name not in module.eval_config:
+                if adapter_name not in module.glora_A:
                     continue
                 for key in ("A", "B", "C"):
                     path_module = getattr(module, f"glora_{key}")[adapter_name]
@@ -4215,9 +4215,7 @@ class TestMultipleActiveAdapters:
 
         config_1 = config_cls(**config_kwargs_1)
         config_2 = config_cls(**config_kwargs_2)
-        if issubclass(config_cls, GloraConfig) and sorted(config_1.target_modules) == sorted(
-            config_2.target_modules
-        ):
+        if issubclass(config_cls, GloraConfig) and sorted(config_1.target_modules) == sorted(config_2.target_modules):
             pytest.skip(
                 "GLoRA on identical target_modules: sequentially merging two adapters into base weights does not "
                 "reproduce the multi-active forward (deltas are composed on the original W0, not on each merged W)."
