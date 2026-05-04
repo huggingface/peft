@@ -6460,7 +6460,7 @@ def _test_save_unsharded_weights(rank, world_size, port, tmp_dir_reference, tmp_
     Flow:
       1. Rank 0: create a plain (non-TP) PEFT model, save it as the reference.
       2. All ranks: load the TP base model, load the reference PEFT weights (shards on load), then save again.
-      3. Rank 0: compare the re-saved state dict against the original reference â€” they must match exactly.
+      3. Rank 0: compare the re-saved state dict against the original reference — they must match exactly.
     """
     if rank == 0:
         plain_model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID)
