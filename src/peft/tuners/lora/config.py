@@ -698,6 +698,32 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    use_sinelora: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Enable 'Sine Activated Low-Rank Adaptation' (Sine-LoRA). This technique applies a sine activation "
+                "on the low-rank adaptor. This can be beneficial for rank boosting for low-rank matrices and enhancing its "
+                "capacity. For more information, see https://huggingface.co/papers/2403.19243. "
+            )
+        },
+    )
+    sinelora_frequency: float = field(
+        default=200.0,
+        metadata={
+            "help": (
+                "The frequency factor for the sine activation. If not specified, it will be set to the default value of 200."
+            )
+        },
+    )
+    sinelora_scaling: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The scaling factor for the sine activation. If not specified, it will be set to the default value of sqrt(in_features)."
+            )
+        },
+    )
     # Enables replicating layers in a model to expand it to a larger model.
     layer_replication: Optional[list[tuple[int, int]]] = field(
         default=None,

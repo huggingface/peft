@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import collections
+import math
 import warnings
 from typing import Any, Optional
 
@@ -28,6 +29,110 @@ from .arrow import ArrowLoraLinearLayer
 from .config import LoraConfig, PeftConfig
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
 from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
+
+
+def _sinelora_linear_delta_weight(module: Linear, active_adapter: str) -> torch.Tensor:
+    """Compute the sine-transformed delta weight for a Linear layer: sin(freq * A^T @ B^T)^T / scaling * alpha."""
+    lora_A = module.lora_A[active_adapter]
+    lora_B = module.lora_B[active_adapter]
+    return (
+        torch.sin(module.sinelora_frequency * lora_A.weight.T @ lora_B.weight.T).T
+        / module.sinelora_scaling
+        * module.scaling[active_adapter]
+    )
+
+
+def _sinelora_embedding_delta_weight(module: Embedding, active_adapter: str) -> torch.Tensor:
+    """Compute the sine-transformed delta weight for an Embedding layer: sin(freq * A^T @ B^T) / scaling * alpha."""
+    lora_embedding_A = module.lora_embedding_A[active_adapter]
+    lora_embedding_B = module.lora_embedding_B[active_adapter]
+    return (
+        torch.sin(module.sinelora_frequency * lora_embedding_A.T @ lora_embedding_B.T)
+        / module.sinelora_scaling
+        * module.scaling[active_adapter]
+    )
+
+
+class SineLoraLinearVariant(LoraVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs) -> None:
+        module.sinelora_frequency = config.sinelora_frequency
+        module.sinelora_scaling = config.sinelora_scaling
+        if module.sinelora_scaling is None:
+            module.sinelora_scaling = math.sqrt(module.in_features)
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        delta_weight = _sinelora_linear_delta_weight(module, active_adapter).to(orig_weight.dtype)
+        return orig_weight - delta_weight
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        delta_weight = _sinelora_linear_delta_weight(module, active_adapter)
+        merged_weight = orig_weight + delta_weight
+        if not torch.isfinite(merged_weight).all():
+            raise ValueError(f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken")
+        module._cache_store(f"{active_adapter}-delta_weight", delta_weight)
+        return merged_weight.to(orig_weight.dtype)
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        delta_weight = _sinelora_linear_delta_weight(module, active_adapter)
+        module._cache_store(f"{active_adapter}-delta_weight", delta_weight)
+        orig_weight.data += delta_weight
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        delta_weight = _sinelora_linear_delta_weight(module, active_adapter)
+        result = result + x @ delta_weight.T
+        return result
+
+
+class SineLoraEmbeddingVariant(LoraVariant):
+    @staticmethod
+    def init(module: Embedding, adapter_name: str, config: LoraConfig, **kwargs) -> None:
+        module.sinelora_frequency = config.sinelora_frequency
+        module.sinelora_scaling = config.sinelora_scaling
+        if module.sinelora_scaling is None:
+            module.sinelora_scaling = math.sqrt(module.in_features)
+
+    @staticmethod
+    def unmerge(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        delta_weight = _sinelora_embedding_delta_weight(module, active_adapter).to(orig_weight.dtype)
+        return orig_weight - delta_weight
+
+    @staticmethod
+    def merge_safe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        delta_weight = _sinelora_embedding_delta_weight(module, active_adapter)
+        merged_weight = orig_weight + delta_weight
+        if not torch.isfinite(merged_weight).all():
+            raise ValueError(f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken")
+        module._cache_store(f"{active_adapter}-delta_weight", delta_weight)
+        return merged_weight.to(orig_weight.dtype)
+
+    @staticmethod
+    def merge_unsafe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        delta_weight = _sinelora_embedding_delta_weight(module, active_adapter)
+        module._cache_store(f"{active_adapter}-delta_weight", delta_weight)
+        orig_weight.data += delta_weight
+
+    @staticmethod
+    def forward(
+        module: Embedding,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        delta_weight = _sinelora_embedding_delta_weight(module, active_adapter)
+        result = result + module._embed(x, delta_weight)
+        return result
 
 
 class ArrowLinearVariant(LoraVariant):

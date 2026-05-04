@@ -28,6 +28,8 @@ from peft.tuners.lora.variants import (
     DoraConv2dVariant,
     DoraEmbeddingVariant,
     DoraLinearVariant,
+    SineLoraEmbeddingVariant,
+    SineLoraLinearVariant,
     calculate_alora_offsets,
     get_alora_offsets_for_forward,
     get_alora_offsets_for_generate,
@@ -112,6 +114,10 @@ VARIANT_MAP = {
     "alora": {
         LoraLinear: ALoraLinearVariant,
     },
+    "sinelora": {
+        LoraLinear: SineLoraLinearVariant,
+        LoraEmbedding: SineLoraEmbeddingVariant,
+    },
 }
 
 
@@ -125,6 +131,11 @@ TEST_CASES = [
         "alora",
         LoraConfig,
         {"target_modules": ["linear1", "linear2"], "alora_invocation_tokens": [1]},
+    ),
+    (
+        "sinelora",
+        LoraConfig,
+        {"target_modules": ["linear1", "linear2", "embedding"], "use_sinelora": True},
     ),
 ]
 

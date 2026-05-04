@@ -148,6 +148,7 @@ class LoraLayer(BaseTunerLayer):
         convention, and not here.
 
         """
+
         return None
 
     def update_layer(
@@ -804,13 +805,15 @@ class Linear(nn.Module, LoraLayer):
             return BdLoraLinearVariant()
 
         use_alora = config.alora_invocation_tokens is not None
-        if not config.use_dora and not use_alora:
+        if not config.use_dora and not use_alora and not config.use_sinelora:
             return None
 
-        from .variants import ALoraLinearVariant, DoraLinearVariant
+        from .variants import ALoraLinearVariant, DoraLinearVariant, SineLoraLinearVariant
 
         if use_alora:
             return ALoraLinearVariant()
+        elif config.use_sinelora:
+            return SineLoraLinearVariant()
         else:
             return DoraLinearVariant()
 
@@ -1050,12 +1053,16 @@ class Embedding(nn.Module, LoraLayer):
         )
 
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if not config.use_dora:
-            return None
+        if config.use_dora:
+            from .variants import DoraEmbeddingVariant
 
-        from .variants import DoraEmbeddingVariant
+            return DoraEmbeddingVariant()
+        elif config.use_sinelora:
+            from .variants import SineLoraEmbeddingVariant
 
-        return DoraEmbeddingVariant()
+            return SineLoraEmbeddingVariant()
+
+        return None
 
     def update_layer(
         self,

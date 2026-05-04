@@ -59,6 +59,17 @@ The abstract from the paper is:
 
 ## Variants
 
+### Sine-LoRA
+
+[Sine-LoRA](https://huggingface.co/papers/2403.19243) (Sine Activated Low-Rank Adaptation) applies a sine activation on the low-rank update, replacing the standard `B @ A` with `sin(freq * A^T @ B^T)`. This non-linear transformation boosts the effective rank of the adaptation, enhancing model capacity even at low ranks.
+
+#### Usage Tips
+
+- **Frequency**: The `sinelora_frequency` parameter controls the oscillation frequency of the sine activation. Default is 200.0.
+- **Scaling**: The `sinelora_scaling` parameter controls the divisor for the sine output. If not specified, defaults to `sqrt(in_features)`.
+- **Supported layers**: Linear and Embedding layers.
+- **Initialization**: Uses standard LoRA initialization (A with kaiming uniform, B with zeros), so the model starts unchanged at initialization.
+
 ### LoRA-GA
 
 [LoRA-GA](https://hf.co/papers/2407.05000) (Low-Rank Adaptation with Gradient Approximation) improves upon standard LoRA by using gradient information during initialization to achieve faster convergence. Instead of random initialization, LoRA-GA performs SVD on estimated gradients to initialize adapter weights in a direction that aligns with full fine-tuning, resulting in 2-4x faster convergence with the same final performance.

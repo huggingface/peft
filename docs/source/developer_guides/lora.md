@@ -235,6 +235,28 @@ Caching can thus make inference with DoRA significantly faster but it also requi
 - DoRA should work with weights quantized with bitsandbytes ("QDoRA"). However, issues have been reported when using QDoRA with DeepSpeed Zero2.
 
 
+### Sine Activated Low-Rank Adaptation (Sine-LoRA)
+
+This technique applies a sine activation on the low-rank update, computing `sin(freq * A^T @ B^T)` instead of `B @ A`. The non-linear transformation boosts the effective rank of the adaptation, enhancing the model's capacity even at low ranks. For more information, see https://huggingface.co/papers/2403.19243.
+
+```py
+from peft import LoraConfig
+
+config = LoraConfig(use_sinelora=True, ...)
+```
+
+The `sinelora_frequency` parameter controls the frequency of the sine activation (default: 200.0), and `sinelora_scaling` controls the scaling factor (default: `sqrt(in_features)`).
+
+```py
+config = LoraConfig(use_sinelora=True, sinelora_frequency=200.0, sinelora_scaling=None, ...)
+```
+
+#### Caveats
+
+- Sine-LoRA only supports linear and embedding layers at the moment.
+- LoRA-to-DoRA conversion is not supported for Sine-LoRA adapters.
+
+
 ## Training
 
 This section shows how to handle more complex training scenarios instead of only applying a low-rank adapter
