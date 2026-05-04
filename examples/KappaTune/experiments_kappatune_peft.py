@@ -90,7 +90,7 @@ def run_experiment(method_name):
     elif method_name == "KappaTune_LoRA":
         print(" [KappaTune] Selecting target modules using PEFT KappaTuneSelector...")
 
-        # Relative selection Ã¢â‚¬â€ works on any architecture
+        # Relative selection‚ works on any architecture
         stable_modules_dic = find_kappa_target_modules(model, top_p=0.2)
 
         lora_config = LoraConfig(
