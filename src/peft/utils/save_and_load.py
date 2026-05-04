@@ -821,6 +821,14 @@ def set_peft_model_state_dict(
     else:
         raise NotImplementedError
 
+    # Updating the state dict for Transformers weight conversion with convert_peft_adapter_state_dict_for_transformers
+    # can introduce the base model prefix, but when loading the state_dict directly into the model (i.e. no PeftModel,
+    # e.g. when using set_peft_model_state_dict), there is no prefix.
+    prefix = "base_model.model."
+    requires_prefix = any(n.startswith(prefix) for n, _ in model.named_parameters())
+    if not requires_prefix:
+        peft_model_state_dict = {k.removeprefix("base_model.model."): v for k, v in peft_model_state_dict.items()}
+
     peft_model_state_dict, mismatched_keys = _find_mismatched_keys(
         model, peft_model_state_dict, ignore_mismatched_sizes=ignore_mismatched_sizes
     )
