@@ -1167,7 +1167,8 @@ class BaseTuner(nn.Module, ABC):
             child = child.base_layer
 
         if not hasattr(new_module, "base_layer"):
-            new_module.weight = child.weight
+            if hasattr(child, "weight"):
+                new_module.weight = child.weight
             if hasattr(child, "bias"):
                 new_module.bias = child.bias
 
