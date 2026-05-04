@@ -437,15 +437,7 @@ def find_kappa_target_modules(
     moe_param_suffixes: Optional[tuple[str, ...]] = None,
 ) -> dict[str, Optional[list[str]]]:
     """
-    One-liner convenience function for KappaTune target selection.
-
-    Returns both target_modules and target_parameters so you can do:
-
-        targets = find_kappa_target_modules(model)
-        config = LoraConfig(
-            target_modules=targets["target_modules"], target_parameters=targets["target_parameters"], # None for non-MoE models
-            ...
-        )
+    One-liner convenience function for KappaTune target selection. Returns both target_modules and target_parameters.
     """
     selector = KappaTuneSelector(
         model,
