@@ -6568,7 +6568,7 @@ def _test_load_adapter_save(rank, world_size, port, tmp_dir_reference, tmp_dir_t
     Flow:
       1. Rank 0: create a plain (non-TP) model, load adapter from config, save state dict as reference.
       2. All ranks: load TP base model, load adapter from config, save state dict via get_peft_model_state_dict.
-      3. Rank 0: compare re-saved state dict against the reference â€” keys and values must match.
+      3. Rank 0: compare re-saved state dict against the reference — keys and values must match.
     """
     if rank == 0:
         plain_model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID)
