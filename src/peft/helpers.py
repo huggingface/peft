@@ -305,8 +305,8 @@ class DoraCaching:
 
 class KappaTuneSelector:
     """
-    Lightweight utility to compute per-module / per-parameter condition numbers (Îº = Ïƒ_max / Ïƒ_min) and return the best
-    LoRA targets.
+    Lightweight utility to compute per-module / per-parameter condition numbers (Îº = Ïƒ_max / Ïƒ_min) and return the
+    best LoRA targets.
 
     Supports:
     - Classic nn.Linear modules (target_modules in LoraConfig)
