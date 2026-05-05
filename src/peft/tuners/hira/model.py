@@ -14,15 +14,12 @@
 from __future__ import annotations
 
 import operator
-from contextlib import contextmanager
-from functools import partial
 
 import torch
 from torch import nn
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTuner
-from peft.utils import AuxiliaryTrainingWrapper
 from peft.utils.other import get_pattern_key
 
 from ...utils.constants import TRANSFORMERS_MODELS_TO_HIRA_TARGET_MODULES_MAPPING

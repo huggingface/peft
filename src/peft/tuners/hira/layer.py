@@ -788,6 +788,8 @@ def dispatch_default(
             warnings.warn(
                 "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
             )
-        new_module = Linear(target, adapter_name, config=hira_config, r=r, fan_in_fan_out=True, is_target_conv_1d_layer=True)
+        new_module = Linear(
+            target, adapter_name, config=hira_config, r=r, fan_in_fan_out=True, is_target_conv_1d_layer=True
+        )
 
     return new_module
