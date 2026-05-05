@@ -1132,7 +1132,7 @@ class TestDecoderModels(PeftCommonTester):
             # do mini training run
             torch.manual_seed(0)
             labels = torch.ones_like(inputs)
-            optim = torch.optim.SGD(model.parameters(), lr=1.0)
+            optim = torch.optim.SGD(model.parameters(), lr=100.0)
             losses = []
             for _ in range(5):
                 optim.zero_grad()
