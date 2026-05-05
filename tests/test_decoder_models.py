@@ -1113,7 +1113,7 @@ class TestDecoderModels(PeftCommonTester):
         # https://github.com/huggingface/transformers/blob/223fe5231b783fbfb25296bb0a243dad5d158cde/src/transformers/models/gemma4/modeling_gemma4.py#L1147
         # Prefix tuning could deal with different sizes, resulting in a size error
 
-        model_id = "google/gemma-4-E2B"
+        model_id = "peft-internal-testing/tiny-random-gemma4-E2B"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(
                 model_id,
@@ -1130,14 +1130,14 @@ class TestDecoderModels(PeftCommonTester):
             model(inputs)  # does not raise
 
             # do mini training run
-            optim = torch.optim.SGD(model.parameters(), lr=0.001)
+            torch.manual_seed(0)
+            labels = torch.ones_like(inputs)
+            optim = torch.optim.SGD(model.parameters(), lr=1.0)
             losses = []
             for _ in range(5):
                 optim.zero_grad()
-                outputs = model(inputs)
-                label = torch.zeros_like(outputs.logits)
-                label[:, :, 1] = 1
-                loss = torch.nn.functional.cross_entropy(outputs.logits, label)
+                outputs = model(inputs, labels=labels)
+                loss = outputs.loss
                 loss.backward()
                 optim.step()
                 losses.append(loss)
@@ -1148,7 +1148,7 @@ class TestDecoderModels(PeftCommonTester):
     def test_prefix_tuning_gemma4_warns_if_some_layers_skipped(self):
         # See previous test_prefix_tuning_gemma4_works. When the embedding matrix is too small to fit any layer targeted
         # by prefix tuning, raise an error
-        model_id = "google/gemma-4-E2B"
+        model_id = "peft-internal-testing/tiny-random-gemma4-E2B"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(
                 model_id,
@@ -1170,7 +1170,7 @@ class TestDecoderModels(PeftCommonTester):
     def test_prefix_tuning_gemma4_raises_if_all_layers_skipped(self):
         # See previous test_prefix_tuning_gemma4_works. When the embedding matrix is too small to fit any layer targeted
         # by prefix tuning, raise an error
-        model_id = "google/gemma-4-E2B"
+        model_id = "peft-internal-testing/tiny-random-gemma4-E2B"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(
                 model_id,
