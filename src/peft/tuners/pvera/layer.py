@@ -89,6 +89,12 @@ class PveraLayer(BaseTunerLayer):
         else:
             pvera_dropout_layer = nn.Identity()
 
+        if config.generator_seed is not None:
+            self.generator = torch.Generator()
+            self.generator.manual_seed(config.generator_seed)
+        else:
+            self.generator = None
+
         self.pvera_dropout.update(nn.ModuleDict({adapter_name: pvera_dropout_layer}))
         # Actual trainable parameters
         self.pvera_lambda_b[adapter_name] = nn.Parameter(torch.ones(self.out_features), requires_grad=True)
@@ -146,7 +152,7 @@ class PveraLayer(BaseTunerLayer):
     def _reparametrize(self, mu, logvar, sample_at_inference):
         if self.training or (not self.training and sample_at_inference):
             std = torch.exp(0.5 * logvar)
-            eps = torch.randn_like(std)
+            eps = torch.randn_like(std, generator=self.generator)
             z = mu + eps * std
         else:
             z = mu

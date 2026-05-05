@@ -31,6 +31,7 @@ from transformers import AutoModelForCausalLM
 
 from peft import (
     AdaLoraConfig,
+    BeftConfig,
     C3AConfig,
     DeloraConfig,
     EvaConfig,
@@ -2379,6 +2380,42 @@ class TestPeanutInitialization:
         assert len(layer.peanut_decoders["default"]) == 1
         assert tuple(layer.peanut_encoders["default"][0].weight.shape) == (r, r)
         assert tuple(layer.peanut_decoders["default"][0].weight.shape) == (r, r)
+
+
+class TestBeftInitialization:
+    torch_device = infer_device()
+
+    def get_model(self, bias=True):
+        class MLP(nn.Module):
+            def __init__(self, bias=bias):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+
+            def forward(self, X):
+                return self.lin0(X)
+
+        return MLP(bias=bias).to(self.torch_device).eval()
+
+    def test_beft_initialization_no_bias_warning(self):
+        model = self.get_model(bias=False)
+        cfg = BeftConfig(target_modules=["lin0"])
+
+        with pytest.warns(UserWarning, match="Note you cannot merge the BEFT adapter into the base layer."):
+            model = get_peft_model(model, cfg)
+
+        assert model.lin0.base_layer.bias is None
+        assert "default" in model.lin0.beft_bias
+        assert model.lin0.get_base_layer().bias is None
+
+    def test_beft_merge_no_bias_raises_error(self):
+        model = self.get_model(bias=False)
+        cfg = BeftConfig(target_modules=["lin0"])
+        model = get_peft_model(model, cfg)
+
+        assert hasattr(model.lin0, "beft_bias")
+
+        with pytest.raises(ValueError, match="Base layer has no bias, cannot merge bias adapter"):
+            model.merge_and_unload()
 
 
 class TestNoInfiniteRecursionDeepspeed:

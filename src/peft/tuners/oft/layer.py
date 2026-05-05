@@ -21,6 +21,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.utils.other import is_gptqmodel_quant_linear
 
 from .config import OFTConfig
 
@@ -358,8 +359,8 @@ class OFTLayer(BaseTunerLayer):
         elif hasattr(base_layer, "codebooks") and base_layer.__class__.__name__ == "QuantizedLinear":
             # AQLM QuantLinear
             in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif hasattr(base_layer, "bits") and base_layer.__class__.__name__ == "AwqGEMMQuantLinear":
-            # Awq layers
+        elif is_gptqmodel_quant_linear(base_layer):
+            # GPT-QModel quantized linears
             in_features, out_features = base_layer.in_features, base_layer.out_features
         elif base_layer.__class__.__name__ == "EetqLinear":
             # Eetq layers

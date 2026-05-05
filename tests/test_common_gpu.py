@@ -55,7 +55,7 @@ from peft import (
     get_peft_model,
     prepare_model_for_kbit_training,
 )
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_gptqmodel_available, is_xpu_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_xpu_available
 from peft.tuners.lora.config import LoraRuntimeConfig
 from peft.utils import infer_device
 
@@ -69,9 +69,6 @@ from .testing_utils import (
     require_torch_multi_accelerator,
 )
 
-
-if is_gptqmodel_available():
-    from gptqmodel import BACKEND
 
 if is_bnb_available():
     import bitsandbytes as bnb
@@ -522,14 +519,15 @@ class PeftGPUCommonTests(unittest.TestCase):
 
     @require_gptqmodel
     @pytest.mark.single_gpu_tests
+    @require_gptqmodel
     def test_lora_gptq_quantization_from_pretrained_safetensors(self):
         r"""
-        Tests that the autogptq quantization using LoRA works as expected with safetensors weights.
+        Tests that GPT-QModel quantization using LoRA works as expected with safetensors weights.
         """
         from transformers import GPTQConfig
 
         model_id = "marcsun13/opt-350m-gptq-4bit"
-        quantization_config = GPTQConfig(bits=4, backend=BACKEND.AUTO_TRAINABLE)
+        quantization_config = GPTQConfig(bits=4)
         # Use explicit device instead of "auto" to ensure model stays on single device
         # This avoids device mismatch issues when reloading the model
         device_map = f"{self.device}:0"  # e.g., "cuda:0", "xpu:0"

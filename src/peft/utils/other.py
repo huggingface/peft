@@ -44,6 +44,7 @@ from .constants import (
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_BEFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING,
@@ -90,6 +91,7 @@ __all__ = [
     "SAFETENSORS_WEIGHTS_NAME",
     "TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_BEFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING",
@@ -1294,6 +1296,32 @@ def get_quantization_config(model: torch.nn.Module, method: str):
     ):
         return model.config.quantization_config
     return None
+
+
+def is_gptqmodel_quant_linear(module: Optional[torch.nn.Module]) -> bool:
+    """
+    Check if a module is a GPT-QModel quantized linear.
+    """
+    if module is None or not is_gptqmodel_available():
+        return False
+
+    try:
+        from gptqmodel.nn_modules.qlinear import BaseQuantLinear
+    except ImportError:
+        return False
+
+    return isinstance(module, BaseQuantLinear)
+
+
+def is_gptqmodel_awq_layer(module: Optional[torch.nn.Module]) -> bool:
+    """
+    Check if a module is a GPT-QModel quantized linear that supports the AWQ method.
+    """
+    if not is_gptqmodel_quant_linear(module):
+        return False
+
+    supported_methods = getattr(module, "SUPPORTS_METHODS", [])
+    return any(method.value == "awq" for method in supported_methods)
 
 
 def get_gptqmodel_quant_linear(gptq_quantization_config, device_map=None):
