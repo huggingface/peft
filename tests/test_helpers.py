@@ -599,6 +599,32 @@ class TestDoraCaching:
         DoraCaching()(enabled=False)
 
 
+class _TinyLinearModel(nn.Module):
+    """Tiny module containing several Linear layers with common projection names."""
+
+    def __init__(self, d=16):
+        super().__init__()
+        # Common Transformer projection names
+        self.q_proj = nn.Linear(d, d, bias=False)
+        self.k_proj = nn.Linear(d, d, bias=False)
+        self.v_proj = nn.Linear(d, d, bias=False)
+        self.o_proj = nn.Linear(d, d, bias=False)
+        self.gate_proj = nn.Linear(d, d, bias=False)
+        self.up_proj = nn.Linear(d, d, bias=False)
+        self.down_proj = nn.Linear(d, d, bias=False)
+
+
+@pytest.fixture
+def small_model():
+    """
+    Small CPU-only model fixture for KappaTuneSelector tests.
+
+    Keeping this tiny ensures it runs quickly on CPU-only CI.
+    """
+    torch.manual_seed(0)
+    return _TinyLinearModel(d=16)
+
+
 class TestKappaTuneSelector:
     """Tests for KappaTuneSelector and find_kappa_target_modules helper."""
 
