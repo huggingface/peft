@@ -662,8 +662,8 @@ class TestKappaTuneSelector:
         class DummyMoE(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.gate_up_proj = nn.Parameter(torch.randn(8, 4096, 11008))
-                self.down_proj = nn.Parameter(torch.randn(8, 11008, 4096))
+                self.gate_up_proj = nn.Parameter(torch.randn(2, 16, 32))
+                self.down_proj = nn.Parameter(torch.randn(2, 32, 16))
 
         class DummyModel(nn.Module):
             def __init__(self):
