@@ -47,7 +47,7 @@ def _find_cutoff_index(S: torch.Tensor, threshold: float) -> int:
 
 @torch.no_grad()
 def _convert_miss_module_to_lora(
-    module, rank: int | float, adapter_name: str = "default"
+    module, rank: float, adapter_name: str = "default"
 ) -> tuple[torch.Tensor, torch.Tensor, int]:
     """Convert a single MiSS layer to LoRA A and B matrices.
 
