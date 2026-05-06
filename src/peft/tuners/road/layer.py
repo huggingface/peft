@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import warnings
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -78,11 +78,13 @@ class RoadLayer(BaseTunerLayer):
     def update_layer(
         self,
         adapter_name,
-        variant,
-        group_size,
-        init_weights,
+        config: RoadConfig,
         inference_mode: bool = False,
     ):
+        variant = config.variant
+        group_size = config.group_size
+        init_weights = config.init_weights
+
         self.variant[adapter_name] = variant
         self.group_size[adapter_name] = group_size
 
@@ -125,9 +127,7 @@ class Linear(nn.Module, RoadLayer):
         self,
         base_layer,
         adapter_name: str,
-        variant: RoadVariant = "road_1",
-        group_size: int = 64,
-        init_weights: Union[bool, str] = True,
+        config: RoadConfig,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -137,9 +137,7 @@ class Linear(nn.Module, RoadLayer):
 
         self.update_layer(
             adapter_name,
-            variant,
-            group_size,
-            init_weights=init_weights,
+            config=config,
         )
 
     def _check_forward_args(self, x, *args, **kwargs):
@@ -413,6 +411,6 @@ def dispatch_default(
         target_base_layer = target
 
     if isinstance(target_base_layer, torch.nn.Linear):
-        new_module = Linear(target, adapter_name, **kwargs)
+        new_module = Linear(target, adapter_name, config=road_config, **kwargs)
 
     return new_module

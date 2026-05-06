@@ -88,17 +88,9 @@ class HRAModel(BaseTuner):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
-        bias = hasattr(target, "bias") and target.bias is not None
-        kwargs = {
-            "r": hra_config.r,
-            "apply_GS": hra_config.apply_GS,
-            "init_weights": hra_config.init_weights,
-        }
-        kwargs["bias"] = bias
-
         # If it is not a HRALayer, create a new module, else update it with new adapters
         if not isinstance(target, HRALayer):
-            new_module = self._create_new_module(hra_config, adapter_name, target, **kwargs)
+            new_module = self._create_new_module(hra_config, adapter_name, target, r=hra_config.r)
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
@@ -107,8 +99,7 @@ class HRAModel(BaseTuner):
             target.update_layer(
                 adapter_name,
                 r=hra_config.r,
-                apply_GS=hra_config.apply_GS,
-                init_weights=hra_config.init_weights,
+                config=hra_config,
             )
 
     @staticmethod
@@ -119,9 +110,9 @@ class HRAModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            new_module = HRALinear(target, adapter_name, **kwargs)
+            new_module = HRALinear(target, adapter_name, config=hra_config, **kwargs)
         elif isinstance(target_base_layer, torch.nn.Conv2d):
-            new_module = HRAConv2d(target, adapter_name, **kwargs)
+            new_module = HRAConv2d(target, adapter_name, config=hra_config, **kwargs)
         else:
             raise ValueError(
                 f"Target module {target} is not supported. "

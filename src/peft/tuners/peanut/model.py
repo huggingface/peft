@@ -65,10 +65,7 @@ class PeanutModel(BaseTuner):
             target.update_layer(
                 adapter_name,
                 peanut_config.r,
-                depth=peanut_config.depth,
-                scaling=peanut_config.scaling,
-                act_fn=peanut_config.act_fn,
-                init_weights=peanut_config.init_weights,
+                config=peanut_config,
             )
         else:
             new_module = self._create_new_module(peanut_config, adapter_name, target)
@@ -88,10 +85,7 @@ class PeanutModel(BaseTuner):
                 target,
                 adapter_name,
                 r=peanut_config.r,
-                depth=peanut_config.depth,
-                scaling=peanut_config.scaling,
-                act_fn=peanut_config.act_fn,
-                init_weights=peanut_config.init_weights,
+                config=peanut_config,
             )
 
         raise NotImplementedError(f"PEANuT does not support target modules of type {type(target_base_layer)} yet.")

@@ -44,6 +44,7 @@ from peft.utils import (
     get_peft_model_state_dict,
     get_quantization_config,
 )
+from peft.utils.integrations import TpInfo
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 from peft.utils.other import get_pattern_key
 
@@ -288,20 +289,49 @@ class LoraModel(BaseTuner):
                 add_tensor_parallel_hooks_to_module,
             )
 
-            if tp_plan == "colwise":
-                tp_module = lora_module.lora_B[adapter_name]
-                tp_layer_name = (f"{current_key}.lora_B.{adapter_name}",)
-            else:  # rowwise
-                tp_module = lora_module.lora_A[adapter_name]
-                tp_layer_name = (f"{current_key}.lora_A.{adapter_name}",)
-            add_tensor_parallel_hooks_to_module(
-                self.model,
-                tp_module,
-                tp_plan,
-                tp_layer_name,
-                tp_plan,
-                device_mesh,
-            )
+            _SUPPORTED_TP_PLANS = ("colwise", "rowwise", "embedding_rowwise")
+
+            if tp_plan not in _SUPPORTED_TP_PLANS:
+                warnings.warn(
+                    f'TP plan "{tp_plan}" on the base layer is not supported for LoRA. '
+                    "LoRA adapters will be created without tensor parallel hooks."
+                )
+            else:
+                tp_plan_keys = []
+                tp_plans = []
+                generic_key = re.sub(r"\d+", "*", current_key)
+                if tp_plan in ["colwise", "rowwise"]:
+                    if tp_plan == "colwise":
+                        tp_plan_keys.append(f"{generic_key}.lora_B.{adapter_name}.weight")
+                        tp_module = lora_module.lora_B[adapter_name]
+                        tp_layer_name = (f"{current_key}.lora_B.{adapter_name}",)
+                    else:  # rowwise
+                        tp_plan_keys.append(f"{generic_key}.lora_A.{adapter_name}.weight")
+                        tp_module = lora_module.lora_A[adapter_name]
+                        tp_layer_name = (f"{current_key}.lora_A.{adapter_name}",)
+                    tp_plans.append(tp_plan)
+                    add_tensor_parallel_hooks_to_module(
+                        self.model,
+                        tp_module,
+                        tp_plan,
+                        tp_layer_name,
+                        device_mesh,
+                    )
+                else:  # embedding_rowwise
+                    # TP hooks are  handled in the `_embed` method in lora/layer.py where they are explicitely called.
+                    # Here we simply register the TP plans.
+                    tp_plan_keys.append(f"{generic_key}.base_layer.weight")
+                    tp_plan_keys.append(f"{generic_key}.lora_embedding_A.{adapter_name}")
+                    tp_plans.append(tp_plan)
+                    # Because lora_embedding_A is transposed compared to nn.Embedding, we set the TP plan
+                    # to embedding_colwise so that the gathering happens on the correct dimension at save time.
+                    tp_plans.append("embedding_colwise")
+
+                lora_module._tp_info = TpInfo(
+                    tp_plan=dict(zip(tp_plan_keys, tp_plans)),
+                    device_mesh=device_mesh,
+                    tp_size=self.model._tp_size,
+                )
 
     def _replace_module(self, parent, child_name, new_module, child):
         # override in LoraModel to handle quantized weights properly
@@ -530,8 +560,12 @@ class LoraModel(BaseTuner):
 
     def _prepare_adapter_config(self, peft_config, model_config):
         if peft_config.target_modules is None:
-            if model_config["model_type"] in self.target_module_mapping:
-                peft_config.target_modules = set(self.target_module_mapping[model_config["model_type"]])
+            target_modules = self.target_module_mapping.get(model_config["model_type"])
+            if target_modules is not None:
+                if isinstance(target_modules, str):
+                    peft_config.target_modules = target_modules
+                else:
+                    peft_config.target_modules = set(target_modules)
             elif not peft_config.target_parameters:
                 raise ValueError("Please specify `target_modules` or `target_parameters`in `peft_config`")
         return peft_config

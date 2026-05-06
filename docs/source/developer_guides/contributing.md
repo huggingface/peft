@@ -57,9 +57,9 @@ pytest tests/<test-file-name> -k <name-of-test>
 
 This should finish much quicker and allow for faster iteration.
 
-If your change is specific to a hardware setting (e.g., it requires CUDA), take a look at [tests/test_gpu_examples.py](https://github.com/huggingface/peft/blob/1c1c7fdaa6e6abaa53939b865dee1eded82ad032/tests/test_gpu_examples.py) and [tests/test_common_gpu.py](https://github.com/huggingface/peft/blob/1c1c7fdaa6e6abaa53939b865dee1eded82ad032/tests/test_common_gpu.py) to see if it makes sense to add tests there. If your change could have an effect on saving and loading models, please run the tests with the `--regression` flag to trigger regression tests.
+If your change is specific to a hardware setting (e.g., it requires CUDA), take a look at [`tests/test_gpu_examples.py`](https://github.com/huggingface/peft/blob/1c1c7fdaa6e6abaa53939b865dee1eded82ad032/tests/test_gpu_examples.py) and [`tests/test_common_gpu.py`](https://github.com/huggingface/peft/blob/1c1c7fdaa6e6abaa53939b865dee1eded82ad032/tests/test_common_gpu.py) to see if it makes sense to add tests there. If your change could have an effect on saving and loading models, please run the tests with the `--regression` flag to trigger regression tests.
 
-It can happen that while you’re working on your PR, the underlying code base changes due to other changes being merged. If that happens – especially when there is a merge conflict – please update your branch with the latest changes. This can be a merge or a rebase, and we'll squash and merge the PR once it’s ready. If possible, avoid force pushes to make reviews easier.
+It can happen that while you’re working on your PR, the underlying code base changes due to other changes being merged. If that happens – especially when there is a merge conflict – please update your branch with the latest changes. This can be a merge or a rebase, and we'll squash and merge the PR once it’s ready. If possible, **avoid force pushes** to make reviews easier.
 
 ## PR description
 
@@ -75,26 +75,43 @@ Ideally when a bugfix is provided, it should be accompanied by a test for the bu
 
 ## Documentation improvements
 
-We are happy to have fixes for broken links and missing or unclear documentation. Taking care of examples, making
-sure that they are up-to-date and running fine in this fast moving environment is also highly appreciated.
+We are happy to have fixes for broken links and missing or unclear documentation. Taking care of examples, making sure that they are up-to-date and running fine in this fast moving environment is also highly appreciated.
 
-Please refrain from sending pull requests that *only* correct typing errors as these generally create more work
-than they safe. Such changes are better combined with more substantial fixes (such as fixing broken links or
-extending/updating documentation).
+Please refrain from sending pull requests that *only* correct typing errors as these generally create more work than they safe. Such changes are better combined with more substantial fixes (such as fixing broken links or extending/updating documentation).
 
-## Add a new fine-tuning method
+## Add a new PEFT fine-tuning method
 
 New parameter-efficient fine-tuning methods are developed all the time. If you would like to add a new and promising method to PEFT, please follow these steps.
 
-1. Before you start to implement the new method, please open a [GitHub issue](https://github.com/huggingface/peft/issues) with your proposal. This way, the maintainers can give you some early feedback.
-2. Please add a link to the source (usually a paper) of the method. The paper should be in a final state to avoid changing requirements during development (e.g. due to reviewer feedback).
-3. When implementing the method, it makes sense to look for existing implementations that already exist as a guide. Moreover, when you structure your code, please take inspiration from the other PEFT methods. For example, if your method is similar to LoRA, it makes sense to structure your code similarly or even reuse some functions or classes where it makes sense (some code duplication is okay, but don’t overdo it).
-4. Ideally, in addition to the implementation of the new method, there should also be
-   - [examples](https://github.com/huggingface/peft/tree/main/examples) (notebooks, scripts)
-   - [documentation](https://github.com/huggingface/peft/tree/main/docs/source)
-   - [extensive test suite](https://github.com/huggingface/peft/tree/main/tests) that proves the method correctly integrates with PEFT
-   - [experimental setup](https://github.com/huggingface/peft/tree/main/method_comparison#creating-new-experiments) to run benchmarks
-5. Once you have something that seems to be working, don’t hesitate to create a draft PR even if it’s not in a mergeable state yet. The maintainers are happy to give you feedback and guidance along the way.
+1. If you're _not_ an author of the original paper, check for existing implementations and double check with the authors that they don't plan to submit a PR themselves.
+2. Start with the core integration work listed below.
+3. Check recent commits for new PEFT methods being added to take as inspiration.
+4. It can be useful to open a draft PR early once the method basically works and first tests pass, then ask for feedback.
+5. After working through reviewer feedback, ping the reviewer so that they know the PR is ready to review.
+
+### Core integration of a new PEFT method
+
+- [ ] Open a proposal issue on `huggingface/peft` before investing too much work.
+- [ ] Link the source of the method, usually the final paper or another stable primary reference. We want to avoid work that is still under review, as the implementation should be stable.
+- [ ] Add a new `PeftType` entry in `src/peft/utils/peft_types.py`.
+- [ ] Create a new tuner package under `src/peft/tuners/` with the files your method needs (typically:  `config.py`, `model.py`, `layer.py`, and `__init__.py`).
+- [ ] Register the method in the tuner `__init__.py` with `register_peft_method(...)`.
+- [ ] Export the new config/model from `src/peft/tuners/__init__.py` and `src/peft/__init__.py`.
+- [ ] If the method needs default target modules for Transformers models, add the mapping in `src/peft/utils/constants.py`.
+- [ ] Add the method to the test matrix in `tests/test_custom_models.py` as these are the broadest and quickest tests. Check that the tests pass with `pytest tests/test_custom_models.py -k <method-name> -v`, fix failures if any.
+- [ ] Run style/quality checks with `make style` before pushing.
+- [ ] In the PR description, explain the method, link the paper, summarize tradeoffs, and list what was added.
+
+### Full PR to add a new PEFT method
+
+- [ ] Ensure that the configuration arguments that are specific to the method are well named and explained, don't assume that the user knows the paper inside out.
+- [ ] Follow the naming and coding conventions of PEFT.
+- [ ] Ensure that you didn't accidentally check in unrelated changes, e.g. the code formatter changing unrelated files.
+- [ ] If some implementation choices are non-trivial, document them with a code comment.
+- [ ] Complete the full test suite (`test_config.py`, `test_decoder_models.py`, etc.) by adding the PEFT method to the test matrix. Ensure that the tests pass.
+- [ ] Add docs in `docs/source/package_reference/` with a short explanation, paper link, usage snippet, and autodoc blocks. Explain the pros and cons compared to other methods like LoRA. Register that doc page in `docs/source/_toctree.yml`.
+- [ ] Add a runnable example under `examples/` (can be a copy of an existing example), with a short `README.md`.
+- [ ] Check the benchmarks in `method_comparison/` and add experiment settings for your new method. This is a good place to sanity check that the PEFT method trains as expected. Include one or two reasonable benchmark configurations (one default, one optimized for the benchmark).
 
 ## Add other features
 

@@ -194,14 +194,10 @@ class VeraModel(BaseTuner):
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "r": r,
-            "vera_dropout": vera_config.vera_dropout,
-            "fan_in_fan_out": vera_config.fan_in_fan_out,
-            "init_weights": vera_config.init_weights,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
+            "bias": bias,
         }
-        kwargs["bias"] = bias
-        kwargs.update(get_quantization_kwargs(self.model))
 
         if isinstance(target, Linear):
             target.update_layer(
@@ -209,9 +205,7 @@ class VeraModel(BaseTuner):
                 self.vera_A,
                 self.vera_B,
                 r,
-                vera_config.vera_dropout,
-                vera_config.init_weights,
-                d_initial=vera_config.d_initial,
+                config=vera_config,
             )
         else:
             new_module = self._create_new_module(vera_config, self.vera_A, self.vera_B, adapter_name, target, **kwargs)
@@ -222,27 +216,25 @@ class VeraModel(BaseTuner):
 
     @staticmethod
     def _create_new_module(vera_config, vera_A, vera_B, adapter_name, target, **kwargs):
-        bias = kwargs.pop("bias", False)
-
         if isinstance(target, BaseTunerLayer):
             target_base_layer = target.get_base_layer()
         else:
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            if kwargs["fan_in_fan_out"]:
+            if vera_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
-                kwargs["fan_in_fan_out"] = vera_config.fan_in_fan_out = False
+                vera_config.fan_in_fan_out = False
         elif isinstance(target_base_layer, Conv1D):
             kwargs["is_target_conv_1d_layer"] = True
-            if not kwargs["fan_in_fan_out"]:
+            if not vera_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
-                kwargs["fan_in_fan_out"] = vera_config.fan_in_fan_out = True
+                vera_config.fan_in_fan_out = True
         else:
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
@@ -253,8 +245,7 @@ class VeraModel(BaseTuner):
             vera_A,
             vera_B,
             adapter_name,
-            bias=bias,
-            d_initial=vera_config.d_initial,
+            config=vera_config,
             **kwargs,
         )
 

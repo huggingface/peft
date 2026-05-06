@@ -22,6 +22,8 @@ from torch import nn
 
 from peft.tuners.tuners_utils import BaseTunerLayer
 
+from .config import LilyConfig
+
 
 class LilyLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
@@ -62,19 +64,18 @@ class LilyLayer(BaseTunerLayer):
 
     def update_layer(
         self,
-        adapter_name,
-        r,
-        scaling,
-        stride_A,
-        num_B,
+        adapter_name: str,
+        r: int,
+        config: LilyConfig,
         lily_A: Optional[nn.Linear] = None,
         lily_B: Optional[nn.Linear] = None,
-        init_weights: bool = True,
-        inference_mode: bool = False,
-    ):
+    ) -> None:
         # collect the kwargs
-        kwargs = locals().copy()
-        del kwargs["self"]
+        scaling = config.scaling
+        stride_A = config.stride_A
+        num_B = config.num_B
+        init_weights = config.init_weights
+        inference_mode = config.inference_mode
 
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -111,13 +112,10 @@ class Linear(nn.Module, LilyLayer):
         self,
         base_layer,
         adapter_name: str,
-        r: int = 32,
-        scaling: float = 1.0,
-        stride_A: int = 1,
-        num_B: int = 2,
-        lily_A: nn.Linear = None,
-        lily_B: nn.Linear = None,
-        init_weights: bool = True,
+        r: int,
+        config: LilyConfig,
+        lily_A: Optional[nn.Linear] = None,
+        lily_B: Optional[nn.Linear] = None,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -128,12 +126,9 @@ class Linear(nn.Module, LilyLayer):
         self.update_layer(
             adapter_name,
             r,
-            scaling=scaling,
+            config=config,
             lily_A=lily_A,
             lily_B=lily_B,
-            stride_A=stride_A,
-            num_B=num_B,
-            init_weights=init_weights,
         )
 
     def get_delta_weight(self, adapter) -> torch.Tensor:

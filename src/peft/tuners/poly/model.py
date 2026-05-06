@@ -40,7 +40,7 @@ class PolyModel(BaseTuner):
         **optional_kwargs: Any,
     ):
         if isinstance(target, PolyLayer):
-            target.update_layer(adapter_name, poly_config)
+            target.update_layer(adapter_name, config=poly_config)
         else:
             new_module = self._create_new_module(
                 poly_config,

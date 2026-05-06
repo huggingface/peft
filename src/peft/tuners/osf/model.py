@@ -50,10 +50,10 @@ class OSFModel(BaseTuner):
 
     def _prepare_adapter_config(self, peft_config, model_config):
         # If target_modules is unspecified, try mapping; else fall back to all linear layers for custom models
-        if getattr(peft_config, "target_modules", None) is None:
-            model_type = model_config.get("model_type")
-            if model_type in self.target_module_mapping:
-                peft_config.target_modules = set(self.target_module_mapping[model_type])
+        if peft_config.target_modules is None:
+            target_modules = self.target_module_mapping.get(model_config["model_type"])
+            if target_modules is not None:
+                peft_config = super()._prepare_adapter_config(peft_config, model_config)
             else:
                 from peft.utils.constants import INCLUDE_LINEAR_LAYERS_SHORTHAND
 
@@ -102,7 +102,7 @@ class OSFModel(BaseTuner):
 
         # Create a new or update an existing OSF layer in place
         if isinstance(target, OSFLayer):
-            target.update_layer(adapter_name, **kwargs)
+            target.update_layer(adapter_name, config=osf_config, **kwargs)
         else:
             new_module = dispatch_default(target, adapter_name, osf_config, **kwargs)
             if new_module is None:

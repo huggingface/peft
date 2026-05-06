@@ -50,11 +50,12 @@ from utils import (
     get_train_config,
     init_accelerator,
     log_results,
+    upload_checkpoint_to_bucket,
     validate_experiment_path,
 )
 
 from data import get_train_valid_test_datasets, get_wiki_small
-from peft import AdaLoraConfig, PeftConfig
+from peft import AdaLoraConfig, AdamssConfig, PeftConfig, initialize_kv_prefix_from_text
 from peft.utils import CONFIG_NAME, infer_device
 
 
@@ -119,7 +120,9 @@ def calculate_mean_per_token_loss(model, tokenizer, rows: list[str], batch_size:
         for logit, target, mask in zip(logits, batch["input_ids"], batch["attention_mask"]):
             # calculate loss per token so that the mean is not skewed by sequence length of sample, padding from left
             num_tokens = mask.sum()
-            token_losses = torch.nn.functional.cross_entropy(logit[-num_tokens:], target[-num_tokens:], reduction="none")
+            token_losses = torch.nn.functional.cross_entropy(
+                logit[-num_tokens:], target[-num_tokens:], reduction="none"
+            )
             losses.extend(loss.item() for loss in token_losses)
     return torch.tensor(losses).mean().item()
 
@@ -156,6 +159,8 @@ def train(
     lr_scheduler_arg: Optional[Literal["cosine"]],
     use_amp: bool,
     is_adalora: bool,
+    init_kv_cache_prefix: Optional[str],
+    is_adamss: bool,
 ) -> TrainResult:
     accelerator_memory_allocated_log = []
     accelerator_memory_reserved_log = []
@@ -182,6 +187,10 @@ def train(
         lr_scheduler_arg=lr_scheduler_arg,
         **optimizer_kwargs,
     )
+
+    if init_kv_cache_prefix is not None:
+        initialize_kv_prefix_from_text(model, tokenizer, text=init_kv_cache_prefix)
+
     # print this after getting the optimizer, in case it modifies requires_gard
     if hasattr(model, "get_nb_trainable_parameters"):
         num_trainable_params, num_params = model.get_nb_trainable_parameters()
@@ -256,7 +265,7 @@ def train(
             grad_scaler.update()
             lr_scheduler.step()
 
-            if is_adalora:
+            if is_adalora or is_adamss:
                 model.base_model.update_and_allocate(step)
 
             losses.append(loss.item())
@@ -397,7 +406,7 @@ def train(
     return train_result
 
 
-def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
+def main(*, path_experiment: str, experiment_name: str, clean: bool, bucket_name: Optional[str]) -> None:
     tic_total = time.perf_counter()
     start_date = dt.datetime.now(tz=dt.timezone.utc).replace(microsecond=0).isoformat()
 
@@ -430,6 +439,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         model_id=train_config.model_id,
         dtype=train_config.dtype,
         compile=train_config.compile,
+        use_gc=train_config.use_gc,
         attn_implementation=train_config.attn_implementation,
         peft_config=peft_config,
         autocast_adapter_dtype=train_config.autocast_adapter_dtype,
@@ -453,6 +463,8 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         lr_scheduler_arg=train_config.lr_scheduler,
         use_amp=train_config.use_amp,
         is_adalora=isinstance(peft_config, AdaLoraConfig),
+        init_kv_cache_prefix=train_config.init_kv_cache_prefix,
+        is_adamss=isinstance(peft_config, AdamssConfig),
     )
 
     if train_result.status == TrainStatus.FAILED:
@@ -465,6 +477,9 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         clean=clean,
         print_fn=print_verbose,
     )
+
+    if bucket_name is not None:
+        upload_checkpoint_to_bucket(model, experiment_name, bucket_name)
 
     time_total = time.perf_counter() - tic_total
     # log results: print and save to file
@@ -492,6 +507,7 @@ if __name__ == "__main__":
         action="store_true",
         help="Delete training artifacts after run finishes (logs are still saved)",
     )
+    parser.add_argument("--bucket_name", type=str, help="HF bucket to upload checkpoints to.")
     args = parser.parse_args()
 
     experiment_name = validate_experiment_path(args.path_experiment)
@@ -510,4 +526,5 @@ if __name__ == "__main__":
         path_experiment=args.path_experiment,
         experiment_name=experiment_name,
         clean=args.clean,
+        bucket_name=args.bucket_name,
     )

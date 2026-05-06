@@ -22,6 +22,8 @@ from transformers.activations import ACT2FN
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
+from .config import PeanutConfig
+
 
 class PeanutLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
@@ -64,14 +66,16 @@ class PeanutLayer(BaseTunerLayer):
 
     def update_layer(
         self,
-        adapter_name,
-        r,
-        depth,
-        scaling,
-        act_fn,
-        init_weights: bool = True,
-        inference_mode: bool = False,
-    ):
+        adapter_name: str,
+        r: int,
+        config: PeanutConfig,
+    ) -> None:
+        depth = config.depth
+        scaling = config.scaling
+        act_fn = config.act_fn
+        init_weights = config.init_weights
+        inference_mode = config.inference_mode
+
         self.r[adapter_name] = r
         self.depth[adapter_name] = depth
         self.res_num[adapter_name] = depth
@@ -110,11 +114,8 @@ class Linear(nn.Module, PeanutLayer):
         self,
         base_layer,
         adapter_name: str,
-        r: int = 32,
-        depth: int = 0,
-        scaling: float = 1.0,
-        act_fn: str = "relu",
-        init_weights: bool = True,
+        r: int,
+        config: PeanutConfig,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -122,14 +123,7 @@ class Linear(nn.Module, PeanutLayer):
 
         self._active_adapter = adapter_name
 
-        self.update_layer(
-            adapter_name,
-            r,
-            depth=depth,
-            scaling=scaling,
-            act_fn=act_fn,
-            init_weights=init_weights,
-        )
+        self.update_layer(adapter_name, r, config=config)
 
     def _compute_delta_weight(self, adapter: str, base_weight: torch.Tensor) -> torch.Tensor:
         if adapter not in self.peanut_A:

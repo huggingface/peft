@@ -13,8 +13,10 @@
 # limitations under the License.
 from __future__ import annotations
 
+import copy
 import math
 import warnings
+from collections.abc import Callable
 from contextlib import contextmanager
 from typing import Any, Optional, Union
 
@@ -25,8 +27,10 @@ import torch.nn.functional as F
 from torch import svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
+from peft.import_utils import is_transformers_ge_v5_4_0
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
+from peft.utils import ALLOWED_COMPUTE_DTYPES, UPCAST_DTYPES
 from peft.utils.integrations import (
     dequantize_module_weight,
     gather_params_ctx,
@@ -287,7 +291,13 @@ class LoraLayer(BaseTunerLayer):
             base_layer = self.get_base_layer()
             tp_plan = getattr(base_layer, "_hf_tp_plan", None)
             device_mesh = getattr(base_layer, "_hf_device_mesh", None)
-            if device_mesh is not None and tp_plan in ("colwise", "rowwise"):
+            if device_mesh is not None:
+                if tp_plan not in ["colwise", "rowwise", "embedding_rowwise"]:
+                    warnings.warn(
+                        f'tp_plan "{tp_plan}" found on the base layer is not supported for LoRA weight '
+                        'synchronization. Expected one of "colwise", "rowwise", "embedding_rowwise". '
+                        "LoRA weights may not be synchronized across ranks."
+                    )
                 pg = device_mesh.get_group()
                 src = dist.get_global_rank(pg, 0)
                 if tp_plan == "colwise" and adapter_name in self.lora_A:
@@ -298,6 +308,9 @@ class LoraLayer(BaseTunerLayer):
                     # The adapter weights need to be on device for broadcasting
                     self._move_adapter_to_device_of_base_layer(adapter_name)
                     dist.broadcast(self.lora_B[adapter_name].weight.data, src=src, group=pg)
+                elif tp_plan == "embedding_rowwise" and adapter_name in self.lora_embedding_B:
+                    self._move_adapter_to_device_of_base_layer(adapter_name)
+                    dist.broadcast(self.lora_embedding_B[adapter_name].data, src=src, group=pg)
 
     def olora_init(self, adapter_name):
         base_layer = self.get_base_layer()
@@ -976,6 +989,16 @@ class Linear(nn.Module, LoraLayer):
         return "lora." + rep
 
 
+class _LoraEmbeddingAHolder(nn.Module):
+    """
+    A "fake" module to hold the lora_embedding_A weights for the TP hooks.
+    """
+
+    def __init__(self, lora_embedding_A_weight):
+        super().__init__()
+        self.weight = lora_embedding_A_weight.T  # lora_embedding_A shape is (r, vocab_size)
+
+
 class Embedding(nn.Module, LoraLayer):
     # LoRA implemented in a Embedding layer
     def __init__(
@@ -995,6 +1018,28 @@ class Embedding(nn.Module, LoraLayer):
         super().__init__()
         LoraLayer.__init__(self, base_layer)
         self.fan_in_fan_out = config.fan_in_fan_out
+
+        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+
+        self.device_mesh = getattr(base_layer, "_hf_device_mesh", None)
+        self.tp_layer = None
+
+        self.input_fns = {}
+        self.output_fns = {}
+
+        if tp_plan is not None:
+            if not is_transformers_ge_v5_4_0:
+                raise RuntimeError("Tensor Parallel with LoRA is only supported for transformers v5.4.0 and above. ")
+
+            if tp_plan != "embedding_rowwise":
+                raise ValueError(
+                    f'Unsupported tensor parallel plan {tp_plan} for embedding layers. Only "embedding_rowwise" is '
+                    "supported."
+                )
+
+            from transformers.integrations.tensor_parallel import ALL_PARALLEL_STYLES
+
+            self.tp_layer = copy.deepcopy(ALL_PARALLEL_STYLES[tp_plan])
 
         self._active_adapter = adapter_name
         self.update_layer(
@@ -1072,6 +1117,19 @@ class Embedding(nn.Module, LoraLayer):
             self.lora_variant[adapter_name].init(self, adapter_name=adapter_name, config=config, **kwargs)
 
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
+
+        # If there is tensor parallelism, we register the hooks for `self._embed`.
+        if self.tp_layer is not None:
+            mod = _LoraEmbeddingAHolder(self.lora_embedding_A[adapter_name])
+
+            def input_fn(inputs):
+                return self.tp_layer._prepare_input_fn(mod, inputs, self.device_mesh)
+
+            def output_fn(outputs):
+                return self.tp_layer._prepare_output_fn(mod, outputs, self.device_mesh)
+
+            self.input_fns[adapter_name] = input_fn
+            self.output_fns[adapter_name] = output_fn
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -1209,9 +1267,17 @@ class Embedding(nn.Module, LoraLayer):
 
         return result
 
-    def _embed(self, input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+    def _embed(
+        self,
+        input: torch.Tensor,
+        weight: torch.Tensor,
+        input_fn: Callable[[tuple[torch.Tensor]], torch.Tensor] | None = None,
+        output_fn: Callable[[torch.Tensor], torch.Tensor] | None = None,
+    ) -> torch.Tensor:
         base_layer = self.get_base_layer()
-        return F.embedding(
+        if input_fn is not None:
+            input = input_fn((input,))
+        output = F.embedding(
             input,
             weight,
             padding_idx=base_layer.padding_idx,
@@ -1220,6 +1286,9 @@ class Embedding(nn.Module, LoraLayer):
             scale_grad_by_freq=base_layer.scale_grad_by_freq,
             sparse=base_layer.sparse,
         )
+        if output_fn is not None:
+            output = output_fn(output)
+        return output
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         # TODO: no dtype conversion here, unlike in Linear, is that correct?
@@ -1250,7 +1319,10 @@ class Embedding(nn.Module, LoraLayer):
                     embedding_A = self.lora_embedding_A[active_adapter].T
                     embedding_B = self.lora_embedding_B[active_adapter].T
                     scaling = self.scaling[active_adapter]
-                    after_A = self._embed(x, embedding_A)
+                    # input and ouput function hooks for TP support.
+                    input_fn = self.input_fns.get(active_adapter, None)
+                    output_fn = self.output_fns.get(active_adapter, None)
+                    after_A = self._embed(x, embedding_A, input_fn=input_fn, output_fn=output_fn)
                     adapter_output = (after_A @ embedding_B) * scaling
 
                     # Apply embed_scale to match the base layer's scaling
@@ -2004,7 +2076,28 @@ class _LoraParameterProxy(nn.Module):
         super().__init__()
         self.delta_weight = delta_weight
 
+    @staticmethod
+    def _low_prec_add(x, y):
+        # addition in fp8 is not directly supported, need to use a higher precision
+        orig_dtype = x.dtype
+        upcast_dtype = y.dtype
+        if upcast_dtype not in ALLOWED_COMPUTE_DTYPES:
+            raise RuntimeError(
+                f"There is an attempt to upcast the targeted parameter to {upcast_dtype} "
+                f"but the only supported are: {ALLOWED_COMPUTE_DTYPES}."
+            )
+
+        # this operation can be quite costly
+        x = x.to(upcast_dtype)
+        z = x + y
+        # clamp to valid range before casting down, as this is *not* performed automatically and can thus result in NANs
+        info = torch.finfo(orig_dtype)
+        z = z.clamp(min=info.min, max=info.max)
+        return z.to(orig_dtype)
+
     def forward(self, W):
+        if any(getattr(torch, dtype_name, None) == W.dtype for dtype_name in UPCAST_DTYPES):
+            return self._low_prec_add(W, self.delta_weight)
         return W + self.delta_weight
 
 
@@ -2057,6 +2150,7 @@ class ParamWrapper(nn.Module, LoraLayer):
             raise ValueError(f"lora.{self.__class__.__name__} does not work with is_target_conv_1d_layer=True.")
 
         self.fan_in_fan_out = config.fan_in_fan_out
+        self._did_swap_in_out_features = False  # ensure we swap only once
         self._active_adapter = adapter_name
         self.update_layer(
             adapter_name,
@@ -2103,6 +2197,13 @@ class ParamWrapper(nn.Module, LoraLayer):
         lora_variant = self.resolve_lora_variant(config=config)
         if lora_variant is not None:
             raise ValueError(f"lora.{self.__class__.__name__} does not work with LoRA variants like DoRA.")
+
+        # for some MoE layers, the order is (experts, out_features, in_features)
+        is_transposed = getattr(self.get_base_layer(), "is_transposed", False)
+        swap_in_out_features = (self.get_param().ndim == 3) and not is_transposed
+        if swap_in_out_features and not self._did_swap_in_out_features:
+            self.in_features, self.out_features = self.out_features, self.in_features
+            self._did_swap_in_out_features = True
 
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
@@ -2189,6 +2290,7 @@ class ParamWrapper(nn.Module, LoraLayer):
 
     def get_delta_weight(self, adapter_name, *args, **kwargs):
         if self.num_experts == 1:
+            # could actually be a normal layer or experts stacked block-diagonally, acting like a single layer
             delta_weight = Linear.get_delta_weight(self, adapter_name, *args, **kwargs)
         else:
             weight_A = self.lora_A[adapter_name].weight
@@ -2198,11 +2300,19 @@ class ParamWrapper(nn.Module, LoraLayer):
             # shape: out_features x rank x experts
             weight_B = weight_B.reshape(weight_B.shape[0], -1, self.num_experts)
             # fan_in_fan_out must be False, so no transpose call here
-            delta_weight = torch.einsum("o r e, e r i -> e i o", weight_B, weight_A) * self.scaling[adapter_name]
+            if not self._did_swap_in_out_features:
+                delta_weight = torch.einsum("o r e, e r i -> e i o", weight_B, weight_A) * self.scaling[adapter_name]
+            else:
+                # for some MoE layers, the order is (experts, out_features, in_features)
+                delta_weight = torch.einsum("o r e, e r i -> e o i", weight_B, weight_A) * self.scaling[adapter_name]
 
-        base_layer = self.get_base_layer()
         param = self.get_param()
-        delta_weight = delta_weight.to(param.device, param.dtype)
+        if param.dtype in ALLOWED_COMPUTE_DTYPES:
+            delta_weight = delta_weight.to(param.device, param.dtype)
+        else:
+            # don't cast dW to weight dtype if it is in torch.float8_e4m3fn etc. as these low precision dtypes because
+            # we want to perform the W+dW addition in high precision before downcasting, see _low_prec_add.
+            delta_weight = delta_weight.to(param.device)
         return delta_weight
 
     @contextmanager

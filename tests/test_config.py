@@ -22,7 +22,9 @@ import pytest
 
 from peft import (
     AdaLoraConfig,
+    AdamssConfig,
     AdaptionPromptConfig,
+    BeftConfig,
     BOFTConfig,
     C3AConfig,
     CartridgeConfig,
@@ -52,6 +54,7 @@ from peft import (
     RoadConfig,
     ShiraConfig,
     TaskType,
+    TinyLoraConfig,
     TrainableTokensConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -64,7 +67,9 @@ PEFT_MODELS_TO_TEST = [("peft-internal-testing/tiny-opt-lora-revision", "test")]
 # Config classes and their mandatory parameters
 ALL_CONFIG_CLASSES = (
     (AdaLoraConfig, {"total_step": 1}),
+    (AdamssConfig, {}),
     (AdaptionPromptConfig, {}),
+    (BeftConfig, {}),
     (BOFTConfig, {}),
     (C3AConfig, {}),
     (FourierFTConfig, {}),
@@ -88,6 +93,7 @@ ALL_CONFIG_CLASSES = (
     (PeanutConfig, {}),
     (RoadConfig, {}),
     (ShiraConfig, {}),
+    (TinyLoraConfig, {}),
     (TrainableTokensConfig, {}),
     (VeraConfig, {}),
     (VBLoRAConfig, {}),
@@ -290,7 +296,7 @@ class TestPeftConfig:
         assert str(record.list[0].message) == expected_msg
 
     @pytest.mark.parametrize(
-        "config_class", [LoHaConfig, LoraConfig, IA3Config, OFTConfig, BOFTConfig, HRAConfig, VBLoRAConfig]
+        "config_class", [LoHaConfig, LoraConfig, IA3Config, BeftConfig, OFTConfig, BOFTConfig, HRAConfig, VBLoRAConfig]
     )
     def test_save_pretrained_with_target_modules(self, config_class):
         # See #1041, #1045

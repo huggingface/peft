@@ -15,14 +15,16 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils import quantization_extra_repr, resolve_quantization_backend
+
+from .config import MissConfig
 
 
 class MissLayer(BaseTunerLayer):
@@ -57,9 +59,7 @@ class MissLayer(BaseTunerLayer):
         self,
         adapter_name: str,
         r: int,
-        mini_r: int,
-        miss_dropout,
-        init_weights: bool | str,
+        config: MissConfig,
         inference_mode: bool = False,
         **kwargs,
     ) -> None:
@@ -70,6 +70,10 @@ class MissLayer(BaseTunerLayer):
             r (`int`): Rank for the added adapter.
             init_weights (`bool`): Whether to initialize weights.
         """
+        mini_r = config.mini_r
+        miss_dropout = config.miss_dropout
+        init_weights = config.init_weights
+
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -149,17 +153,15 @@ class MissLinear(nn.Module, MissLayer):
         self,
         base_layer,
         adapter_name: str,
+        config: MissConfig,
         r: int = 0,
-        mini_r: int = 0,
-        miss_dropout: float = 0.0,
-        init_weights: Union[bool, str] = True,
         **kwargs,
     ) -> None:
         super().__init__()
         MissLayer.__init__(self, base_layer, **kwargs)
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, mini_r, miss_dropout, init_weights, **kwargs)
-        self.miss_fn = init_weights
+        self.update_layer(adapter_name, r, config=config, **kwargs)
+        self.miss_fn = config.init_weights
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -223,20 +225,23 @@ class MissLinear(nn.Module, MissLayer):
                 weight = self.get_base_weight()
                 orig_dtype = weight.dtype
                 if self.miss_fn == "bat":
-                    weight = self.get_delta_weight(active_adapter, weight, re=True)
-                else:  # mini
-                    weight = self.get_delta_weight_miss(active_adapter, weight, re=True)
-                self.set_base_weight(weight.to(orig_dtype))
+                    delta_weight = self.get_delta_weight(active_adapter, weight, reverse=True)
+                elif self.miss_fn == "mini":
+                    delta_weight = self.get_delta_weight_miss(active_adapter, weight, reverse=True)
+                else:
+                    delta_weight = self.get_delta_weight_miss(active_adapter, weight, reverse=True)
 
-    def get_delta_weight(self, adapter, orig_weight, re: bool = False) -> torch.Tensor:
+                base_layer.weight.data = weight.to(orig_dtype)
+
+    def get_delta_weight(self, adapter, orig_weight, reverse: bool = False) -> torch.Tensor:
         """
         Compute the delta weight for the given adapter.
 
         Args:
             adapter (`str`):
                 The name of the adapter for which the delta weight should be computed.
-            re (`bool`)
-                Pass `re=True` for unmerging. Returns the full weight, not the delta.
+            reverse (bool):
+                If True, reverse the merge (unmerge). If False, apply the merge (forward).
         """
         device = self.miss_block[adapter].device
         dtype = self.miss_block[adapter].dtype
@@ -245,46 +250,39 @@ class MissLinear(nn.Module, MissLayer):
         # (b)float16 because some CPUs have slow bf16/fp16 matmuls.
         cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
-        weight_miss = self.miss_block[adapter]
+        miss_B = self.miss_block[adapter]
 
         if cast_to_fp32:
-            weight_miss = weight_miss.float()
-        orig_weight = orig_weight.to(weight_miss.dtype)
+            miss_B = miss_B.float()
+        orig_weight = orig_weight.to(miss_B.dtype)
 
-        r = weight_miss.size(-1)
-        if re:
-            o = orig_weight.reshape(orig_weight.size(0) // r, r, orig_weight.size(1) // r, r).permute(2, 0, 1, 3)
-            one = torch.eye(weight_miss.size(-1)).to(weight_miss.device)
-            # inverse must be in float32, after that the dtype can be adjusted if needed
-            inv_I_plus_b = torch.inverse(one + weight_miss)
-            inv_I_plus_b = inv_I_plus_b.to(weight_miss.dtype)
-            w = (o - weight_miss) @ inv_I_plus_b
-            output_tensor = w.permute(1, 2, 0, 3).reshape(*orig_weight.shape)
+        r = miss_B.size(-1)
+        W = orig_weight.reshape(orig_weight.size(0) // r, r, orig_weight.size(1) // r, r).permute(2, 0, 1, 3)
+
+        if reverse:
+            eye = torch.eye(r, device=miss_B.device, dtype=torch.float32)
+            inv_I_plus_miss_B = torch.inverse(eye + miss_B.float()).to(miss_B.dtype)
+            result = (W - miss_B) @ inv_I_plus_miss_B
         else:
-            w = (
-                orig_weight.reshape(orig_weight.size(0) // r, r, orig_weight.size(1) // r, r).permute(2, 0, 1, 3)
-                @ weight_miss
-                + weight_miss
-            )
-            output_tensor = w.permute(1, 2, 0, 3).reshape(*orig_weight.shape)
+            result = W @ miss_B + miss_B
+
+        output_tensor = result.permute(1, 2, 0, 3).reshape(*orig_weight.shape)
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
-
-            # cast back the weights
-            self.miss_block[adapter].data = weight_miss.to(dtype)
+            self.miss_block[adapter].data = miss_B.to(dtype)
 
         return output_tensor
 
-    def get_delta_weight_miss(self, adapter, orig_weight, re: bool = False) -> torch.Tensor:
+    def get_delta_weight_miss(self, adapter, orig_weight, reverse: bool = False) -> torch.Tensor:
         """
         Compute the *full* weight for the given adapter (not the weight delta!)
 
         Args:
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
-            re (`bool`)
-                Pass `re=True` for unmerging.
+            reverse (bool):
+                If True, reverse the merge (unmerge). If False, apply the merge (forward).
         """
         device = self.miss_block[adapter].device
         dtype = self.miss_block[adapter].dtype
@@ -293,55 +291,39 @@ class MissLinear(nn.Module, MissLayer):
         # (b)float16 because some CPUs have slow bf16/fp16 matmuls.
         cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
-        weight_miss = self.miss_block[adapter]
+        miss_B = self.miss_block[adapter]
 
         if cast_to_fp32:
-            weight_miss = weight_miss.float()
+            miss_B = miss_B.float()
 
         in_features = orig_weight.size(-1)
         out_features = orig_weight.size(0)
-        r = weight_miss.size(0)
+        r = miss_B.size(0)
         if self.miss_fn == "mini":
-            weight_miss = weight_miss.repeat(1, out_features // self.miss_mini_r[adapter])
+            miss_B = miss_B.repeat(1, out_features // self.miss_mini_r[adapter])
+
+        sign = -1 if reverse else 1
 
         if in_features % r != 0:
-            last_size = in_features % r
-            n_block = in_features // r
-            n_block_size = n_block * r
+            remainder = in_features % r
+            n_blocks = in_features // r
+            aligned_size = n_blocks * r
 
-            if re:
-                orig_weight[:, :n_block_size] = (
-                    (orig_weight[:, :n_block_size].reshape(-1, n_block, r).permute(1, 2, 0) - weight_miss)
-                    .permute(2, 0, 1)
-                    .reshape(*orig_weight[:, :n_block_size].shape)
-                )
-                orig_weight[:, n_block_size:] = (
-                    orig_weight[:, n_block_size:] - (weight_miss.transpose(0, 1))[:, :last_size]
-                )
-            else:
-                orig_weight[:, :n_block_size] = (
-                    (orig_weight[:, :n_block_size].reshape(-1, n_block, r).permute(1, 2, 0) + weight_miss)
-                    .permute(2, 0, 1)
-                    .reshape(*orig_weight[:, :n_block_size].shape)
-                )
-                orig_weight[:, n_block_size:] = (
-                    orig_weight[:, n_block_size:] + (weight_miss.transpose(0, 1))[:, :last_size]
-                )
+            W_aligned = orig_weight[:, :aligned_size].reshape(-1, n_blocks, r).permute(1, 2, 0)
+            orig_weight[:, :aligned_size] = (
+                (W_aligned + sign * miss_B).permute(2, 0, 1).reshape(*orig_weight[:, :aligned_size].shape)
+            )
+            orig_weight[:, aligned_size:] = (
+                orig_weight[:, aligned_size:] + sign * miss_B.transpose(0, 1)[:, :remainder]
+            )
             output_tensor = orig_weight
-
         else:
-            if re:
-                w = orig_weight.reshape(-1, orig_weight.size(1) // r, r).permute(1, 2, 0) - weight_miss
-                output_tensor = w.permute(2, 0, 1).reshape(*orig_weight.shape)
-            else:
-                w = orig_weight.reshape(-1, orig_weight.size(1) // r, r).permute(1, 2, 0) + weight_miss
-                output_tensor = w.permute(2, 0, 1).reshape(*orig_weight.shape)
+            W_blocks = orig_weight.reshape(-1, orig_weight.size(1) // r, r).permute(1, 2, 0)
+            output_tensor = (W_blocks + sign * miss_B).permute(2, 0, 1).reshape(*orig_weight.shape)
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
-
-            # cast back the weights
-            self.miss_block[adapter].data = weight_miss.to(dtype)
+            self.miss_block[adapter].data = miss_B.to(dtype)
 
         return output_tensor
 
@@ -389,8 +371,7 @@ class MissLinear(nn.Module, MissLayer):
         return result
 
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
-        # only 'bat' can be converted in a straightforward way
-        return self.miss_fn == "bat"
+        return True
 
     def __repr__(self) -> str:
         rep = super().__repr__()

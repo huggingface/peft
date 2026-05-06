@@ -24,6 +24,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.other import transpose
 
 from .._buffer_dict import BufferDict
+from .config import PveraConfig
 
 
 class PveraLayer(BaseTunerLayer):
@@ -67,23 +68,32 @@ class PveraLayer(BaseTunerLayer):
 
     def update_layer(
         self,
-        adapter_name,
+        adapter_name: str,
         pvera_A: BufferDict,
         pvera_B: BufferDict,
-        r,
-        pvera_dropout,
-        init_weights,
-        d_initial: float = 0.1,
-        inference_mode: bool = False,
+        r: int,
+        config: PveraConfig,
         **kwargs,
-    ):
+    ) -> None:
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+
+        pvera_dropout = config.pvera_dropout
+        init_weights = config.init_weights
+        d_initial = config.d_initial
+        inference_mode = config.inference_mode
+
         self.r[adapter_name] = r
         if pvera_dropout > 0.0:
             pvera_dropout_layer = nn.Dropout(p=pvera_dropout)
         else:
             pvera_dropout_layer = nn.Identity()
+
+        if config.generator_seed is not None:
+            self.generator = torch.Generator()
+            self.generator.manual_seed(config.generator_seed)
+        else:
+            self.generator = None
 
         self.pvera_dropout.update(nn.ModuleDict({adapter_name: pvera_dropout_layer}))
         # Actual trainable parameters
@@ -139,6 +149,15 @@ class PveraLayer(BaseTunerLayer):
                 nn.init.zeros_(self.pvera_lambda_d[adapter_name]).fill_(d_initial)
                 nn.init.zeros_(self.pvera_lambda_b[adapter_name])
 
+    def _reparametrize(self, mu, logvar, sample_at_inference):
+        if self.training or (not self.training and sample_at_inference):
+            std = torch.exp(0.5 * logvar)
+            eps = torch.randn_like(std, generator=self.generator)
+            z = mu + eps * std
+        else:
+            z = mu
+        return z
+
 
 class Linear(nn.Linear, PveraLayer):
     # PVeRA implemented in a dense layer
@@ -148,23 +167,19 @@ class Linear(nn.Linear, PveraLayer):
         pvera_A: BufferDict,
         pvera_B: BufferDict,
         adapter_name: str,
-        r: int = 0,
-        pvera_dropout: float = 0.0,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+        r: int,
+        config: PveraConfig,
         is_target_conv_1d_layer: bool = False,
-        init_weights: bool = True,
-        d_initial: float = 0.1,
-        sample_at_inference: bool = False,
         **kwargs,
     ) -> None:
         # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__, which should always be called
         super(nn.Linear, self).__init__()
         PveraLayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
-        self.sample_at_inference = sample_at_inference
+        self.fan_in_fan_out = config.fan_in_fan_out
+        self.sample_at_inference = config.sample_at_inference
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, pvera_A, pvera_B, r, pvera_dropout, init_weights, d_initial=d_initial)
+        self.update_layer(adapter_name, pvera_A, pvera_B, r, config=config)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -258,15 +273,6 @@ class Linear(nn.Linear, PveraLayer):
             output_tensor = output_tensor.to(dtype=dtype)
 
         return output_tensor
-
-    def _reparametrize(self, mu, logvar, sample_at_inference):
-        if self.training or (not self.training and sample_at_inference):
-            std = torch.exp(0.5 * logvar)
-            eps = torch.randn_like(std)
-            z = mu + eps * std
-        else:
-            z = mu
-        return z
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
