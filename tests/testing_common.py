@@ -35,6 +35,7 @@ from peft import (
     BOFTConfig,
     CPTConfig,
     GraloraConfig,
+    HiraConfig,
     IA3Config,
     LilyConfig,
     LNTuningConfig,
@@ -781,7 +782,9 @@ class PeftCommonTester:
                 atol, rtol = 1e-3, 1e-3  # MLU
 
             conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
-            if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
+            if (
+                issubclass(config_cls, (IA3Config, LoraConfig, HiraConfig)) and model_id in conv_ids
+            ):  # more instability with Conv
                 atol, rtol = 1e-3, 1e-3
             elif issubclass(config_cls, PveraConfig):
                 atol, rtol = 1e-5, 1e-5
