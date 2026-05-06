@@ -26,6 +26,7 @@ from peft import (
     IA3Config,
     LoKrConfig,
     LoraConfig,
+    MissConfig,
     PeftModel,
     PrefixTuningConfig,
     convert_to_lora,
@@ -553,3 +554,140 @@ class TestLoraConversion:
 
         mse_converted = self.get_mse(output_converted, output_lokr)
         assert 0.0 < mse_converted < 0.1
+
+
+class TestMissLoraConversion:
+    """Test MiSS to LoRA conversion for standard, mini, and bat modes."""
+
+    model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+    torch_device = infer_device()
+    base_model = None
+
+    def get_base_model(self):
+        if self.base_model is None:
+            with hub_online_once(self.model_id):
+                self.base_model = AutoModelForCausalLM.from_pretrained(self.model_id).to(self.torch_device)
+        return copy.deepcopy(self.base_model)
+
+    @staticmethod
+    def get_mse(output1, output2):
+        return nn.functional.mse_loss(output1.hidden_states[-1], output2.hidden_states[-1]).item()
+
+    def _randomize_miss_blocks(self, model):
+        with torch.no_grad():
+            for m in model.modules():
+                if hasattr(m, "miss_block"):
+                    for p in m.miss_block.values():
+                        p.data.normal_(0, 0.01)
+
+    @pytest.fixture
+    def miss_model_standard(self):
+        torch.manual_seed(0)
+        config = MissConfig(r=4, init_weights=False, target_modules=["q_proj", "v_proj"])
+        return get_peft_model(self.get_base_model(), config)
+
+    @pytest.fixture
+    def miss_model_mini(self):
+        torch.manual_seed(0)
+        config = MissConfig(r=4, mini_r=2, init_weights="mini", target_modules=["q_proj", "v_proj"])
+        model = get_peft_model(self.get_base_model(), config)
+        self._randomize_miss_blocks(model)
+        return model
+
+    @pytest.fixture
+    def miss_model_bat(self):
+        torch.manual_seed(0)
+        config = MissConfig(r=4, init_weights="bat", target_modules=["q_proj", "v_proj"])
+        model = get_peft_model(self.get_base_model(), config)
+        self._randomize_miss_blocks(model)
+        return model
+
+    def test_miss_supports_lora_conversion(self, miss_model_standard, miss_model_mini, miss_model_bat):
+        assert miss_model_standard.supports_lora_conversion()
+        assert miss_model_mini.supports_lora_conversion()
+        assert miss_model_bat.supports_lora_conversion()
+
+    def test_miss_standard_exact_conversion(self, miss_model_standard):
+        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+        with torch.inference_mode():
+            output_miss = miss_model_standard(inputs, output_hidden_states=True)
+
+        lora_config, state_dict = convert_to_lora(miss_model_standard, rank=4)
+        base_model = self.get_base_model()
+        lora_model = get_peft_model(base_model, lora_config).eval()
+        load_result = set_peft_model_state_dict(lora_model, state_dict)
+        assert not load_result.unexpected_keys
+
+        with torch.inference_mode():
+            output_lora = lora_model(inputs, output_hidden_states=True)
+
+        mse = self.get_mse(output_lora, output_miss)
+        assert mse < 1e-5, f"Standard MiSS conversion should be exact, got mse={mse}"
+
+    def test_miss_mini_exact_conversion(self, miss_model_mini):
+        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+        with torch.inference_mode():
+            output_miss = miss_model_mini(inputs, output_hidden_states=True)
+
+        lora_config, state_dict = convert_to_lora(miss_model_mini, rank=4)
+        base_model = self.get_base_model()
+        lora_model = get_peft_model(base_model, lora_config).eval()
+        load_result = set_peft_model_state_dict(lora_model, state_dict)
+        assert not load_result.unexpected_keys
+
+        with torch.inference_mode():
+            output_lora = lora_model(inputs, output_hidden_states=True)
+
+        mse = self.get_mse(output_lora, output_miss)
+        assert mse < 1e-5, f"Mini MiSS conversion should be exact, got mse={mse}"
+
+    def test_miss_bat_approximate_conversion(self, miss_model_bat):
+        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+        with torch.inference_mode():
+            with miss_model_bat.disable_adapter():
+                output_base = miss_model_bat(inputs, output_hidden_states=True)
+            output_miss = miss_model_bat(inputs, output_hidden_states=True)
+
+        atol, rtol = 1e-4, 1e-4
+        assert not torch.allclose(output_base.logits, output_miss.logits, atol=atol, rtol=rtol)
+
+        lora_config, state_dict = convert_to_lora(miss_model_bat, rank=4)
+        base_model = self.get_base_model()
+        lora_model = get_peft_model(base_model, lora_config).eval()
+        load_result = set_peft_model_state_dict(lora_model, state_dict)
+        assert not load_result.unexpected_keys
+
+        with torch.inference_mode():
+            output_lora = lora_model(inputs, output_hidden_states=True)
+
+        mse = self.get_mse(output_lora, output_miss)
+        assert 0.0 < mse < 0.1
+
+    def test_miss_targeted_modules_identical(self, miss_model_standard):
+        lora_config, lora_state_dict = convert_to_lora(miss_model_standard, rank=4)
+        miss_state_dict = miss_model_standard.state_dict()
+
+        modules_miss = {k.rsplit(".", 2)[0] for k in miss_state_dict.keys() if ".miss_block" in k}
+        modules_lora = {k.rsplit(".", 2)[0] for k in lora_state_dict.keys() if ".lora" in k}
+        assert modules_miss == modules_lora
+
+    def test_miss_save_as_lora(self, miss_model_standard, tmp_path):
+        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+        atol, rtol = 1e-4, 1e-4
+
+        lora_config, state_dict = convert_to_lora(miss_model_standard, rank=4)
+        base_model = self.get_base_model()
+        lora_model = get_peft_model(base_model, lora_config).eval()
+        set_peft_model_state_dict(lora_model, state_dict)
+
+        with torch.inference_mode():
+            output_before = lora_model(inputs).logits
+
+        save_as_lora(tmp_path, miss_model_standard, rank=4)
+        base_model = self.get_base_model()
+        loaded_model = PeftModel.from_pretrained(base_model, tmp_path).to(self.torch_device)
+
+        with torch.inference_mode():
+            output_after = loaded_model(inputs).logits
+
+        assert torch.allclose(output_before, output_after, atol=atol, rtol=rtol)

@@ -1,0 +1,14 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "inference_mode": false,
+  "init_weights": true,
+  "modules_to_save": null,
+  "peft_type": "BEFT",
+  "peft_version": "0.19.2.dev0@UNKNOWN",
+  "revision": null,
+  "target_modules": [
+    "v_proj"
+  ],
+  "task_type": null
+}

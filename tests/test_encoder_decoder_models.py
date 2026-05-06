@@ -20,6 +20,7 @@ from transformers import AutoModelForSeq2SeqLM, AutoModelForTokenClassification
 from peft import (
     AdaLoraConfig,
     AdamssConfig,
+    BeftConfig,
     BOFTConfig,
     C3AConfig,
     DeloraConfig,
@@ -65,6 +66,13 @@ ALL_CONFIGS = [
         {
             "target_modules": None,
             "total_step": 1,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        BeftConfig,
+        {
+            "target_modules": None,
             "task_type": "SEQ_2_SEQ_LM",
         },
     ),
@@ -305,6 +313,16 @@ def _skip_osf_disable_adapter_test(config_cls):
         )
 
 
+def beft_tests(config_cls, model_id, config_kwargs):
+    config_name = config_cls.__name__.lower()
+    if config_name != "beftconfig":
+        return
+    elif "t5" in model_id.lower():
+        pytest.skip("Skip tests for T5 models because of no bias term")
+    else:
+        return
+
+
 class TestEncoderDecoderModels(PeftCommonTester):
     transformers_class = AutoModelForSeq2SeqLM
 
@@ -373,6 +391,7 @@ class TestEncoderDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_merge_layers(self, model_id, config_cls, config_kwargs):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        beft_tests(config_cls, model_id, config_kwargs)
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
