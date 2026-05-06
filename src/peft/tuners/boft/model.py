@@ -77,9 +77,11 @@ class BOFTModel(BaseTuner):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
+        kwargs = get_quantization_kwargs(self)
+
         # If it is not a BOFTLayer, create a new module, else update it with new adapters
         if not isinstance(target, BOFTLayer):
-            new_module = self._create_new_module(boft_config, adapter_name, target)
+            new_module = self._create_new_module(boft_config, adapter_name, target, **kwargs)
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)

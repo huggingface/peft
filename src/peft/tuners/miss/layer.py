@@ -191,8 +191,8 @@ class MissLinear(nn.Module, MissLayer):
                     orig_dtype = weight.dtype
                     if self.miss_fn == "bat":
                         weight += self.get_delta_weight(active_adapter, weight)
-                    else:  # mini
-                        weight = self.get_delta_weight_miss(active_adapter, weight)
+                    else:
+                        weight = self.get_delta_weight_miss(active_adapter, self.base_layer.weight.data)
 
                     if not torch.isfinite(weight).all():
                         raise ValueError(
@@ -205,7 +205,7 @@ class MissLinear(nn.Module, MissLayer):
                     orig_dtype = weight.dtype
                     if self.miss_fn == "bat":
                         weight += self.get_delta_weight(active_adapter, weight)
-                    else:  # mini
+                    else:
                         weight = self.get_delta_weight_miss(active_adapter, weight)
                     self.set_base_weight(weight.to(orig_dtype))
                 self.merged_adapters.append(active_adapter)

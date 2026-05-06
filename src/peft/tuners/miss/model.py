@@ -93,6 +93,8 @@ class MissModel(BaseTuner):
             "r": miss_config.r,
             "bias": bias,
         }
+        kwargs.update(get_quantization_kwargs(self))
+
         # If it is not a MissLayer, create a new module, else update it with new adapters
         if not isinstance(target, MissLayer):
             new_module = self._create_new_module(miss_config, adapter_name, target, **kwargs)

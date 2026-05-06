@@ -198,6 +198,7 @@ class VeraModel(BaseTuner):
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
             "bias": bias,
         }
+        kwargs.update(get_quantization_kwargs(self))
 
         if isinstance(target, Linear):
             target.update_layer(
