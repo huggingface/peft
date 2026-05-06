@@ -28,6 +28,13 @@ try:
 except ImportError:
     bnb = None
 
+
+try:
+    from tqdm.auto import tqdm
+    HAS_TQDM = True
+except ImportError:
+    HAS_TQDM = False
+
 from .peft_model import PeftConfig, PeftModel
 from .tuners.lora import LoraLayer, dora
 from .tuners.tuners_utils import BaseTunerLayer
@@ -319,9 +326,11 @@ class KappaTuneSelector:
         model: nn.Module,
         max_dim_size_to_analyze: int = 16384,
         moe_param_suffixes: Optional[tuple[str, ...]] = None,
+        show_progress: bool = True,
     ):
         self.model = model
         self.max_dim_size_to_analyze = max_dim_size_to_analyze
+        self.show_progress = show_progress and HAS_TQDM
         self.moe_param_suffixes = moe_param_suffixes or (
             ".gate_up_proj",
             ".down_proj",
@@ -337,9 +346,17 @@ class KappaTuneSelector:
 
         # === 1. nn.Linear modules ===
         condition_numbers: dict[str, float] = {}
-        for module_name, module in self.model.named_modules():
-            if not isinstance(module, nn.Linear):
-                continue
+        linear_modules = [
+            (module_name, module)
+            for module_name, module in self.model.named_modules()
+            if isinstance(module, nn.Linear)
+        ]
+        linear_iter = (
+            tqdm(linear_modules, desc="Computing SVD (linear layers)", unit="layer")
+            if self.show_progress
+            else linear_modules
+        )
+        for module_name, module in linear_iter:
             weight = module.weight
             if bnb is not None:
                 if hasattr(weight, "quant_state"):  # 4-bit
@@ -362,12 +379,17 @@ class KappaTuneSelector:
 
         # === 2. fused MoE parameters (3D nn.Parameter) ===
         parameter_condition_numbers: dict[str, float] = {}
-        for param_name, param in self.model.named_parameters():
-            if not any(param_name.endswith(s) for s in self.moe_param_suffixes):
-                continue
-            if param.dim() != 3:
-                continue
-
+        moe_params = [
+            (param_name, param)
+            for param_name, param in self.model.named_parameters()
+            if any(param_name.endswith(s) for s in self.moe_param_suffixes) and param.dim() == 3
+        ]
+        moe_iter = (
+            tqdm(moe_params, desc="Computing SVD (MoE parameters)", unit="param")
+            if self.show_progress and moe_params
+            else moe_params
+        )
+        for param_name, param in moe_iter:        
             w = param.data.detach().float()
             num_experts, *expert_shape = w.shape
 
@@ -435,6 +457,7 @@ def find_kappa_target_modules(
     top_p: float = 0.2,
     max_dim_size_to_analyze: int = 16384,
     moe_param_suffixes: Optional[tuple[str, ...]] = None,
+    show_progress: bool = True,
 ) -> dict[str, Optional[list[str]]]:
     """
     One-liner convenience function for KappaTune target selection. Returns both target_modules and target_parameters.
@@ -443,6 +466,7 @@ def find_kappa_target_modules(
         model,
         max_dim_size_to_analyze=max_dim_size_to_analyze,
         moe_param_suffixes=moe_param_suffixes,
+        show_progress=show_progress,
     )
 
     target_modules = selector.get_best_targets(top_p=top_p)
