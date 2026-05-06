@@ -426,8 +426,8 @@ class Embedding(nn.Module, HiraLayer):
             output_tensor = output_tensor.to(dtype=dtype)
 
             # cast back the weights
-            self.hira_embedding_A[adapter] = weight_A.to(dtype)
-            self.hira_embedding_B[adapter] = weight_B.to(dtype)
+            self.hira_embedding_A[adapter].data = weight_A.to(dtype)
+            self.hira_embedding_B[adapter].data = weight_B.to(dtype)
 
         return output_tensor
 
@@ -658,8 +658,8 @@ class _ConvNd(nn.Module, HiraLayer):
             output_tensor = output_tensor.to(dtype=dtype)
 
             # cast back the weights
-            self.hira_A[adapter].weight.data = weight_A.to(dtype)
-            self.hira_B[adapter].weight.data = weight_B.to(dtype)
+            self.hira_A[adapter].data = weight_A.to(dtype)
+            self.hira_B[adapter].data = weight_B.to(dtype)
 
         return output_tensor
 
