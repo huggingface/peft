@@ -55,6 +55,7 @@ from peft import (
     PsoftConfig,
     RoadConfig,
     VBLoRAConfig,
+    VeloraConfig,
     VeraConfig,
     WaveFTConfig,
     get_peft_model,
@@ -1831,6 +1832,40 @@ class TestVeraInitialization:
         msg = f"vera_A has a size of {rank0} but {rank1} or greater is required"
         with pytest.raises(ValueError, match=msg):
             model.add_adapter("other", config1)
+
+
+class TestVeloraInitialization:
+    @pytest.mark.parametrize(
+        "config_kwargs, msg",
+        [
+            pytest.param({"num_groups": 0}, "`num_groups` should be positive, got 0.", id="num-groups"),
+            pytest.param({"scale": 0.0}, "`scale` should be positive, got 0.0.", id="scale"),
+            pytest.param(
+                {"init_type": "unsupported"},
+                "Unsupported `init_type` 'unsupported'. Supported values are 'batch_average_once', "
+                "'batch_average', and 'random'.",
+                id="init-type",
+            ),
+            pytest.param(
+                {"target_modules": "linear", "layers_to_transform": [0]},
+                "`layers_to_transform` cannot be used when `target_modules` is a str.",
+                id="target-modules-str-with-layers-to-transform",
+            ),
+            pytest.param(
+                {"target_modules": "linear", "layers_pattern": "layers"},
+                "`layers_pattern` cannot be used when `target_modules` is a str.",
+                id="target-modules-str-with-layers-pattern",
+            ),
+            pytest.param(
+                {"layers_pattern": "layers"},
+                "When `layers_pattern` is specified, `layers_to_transform` must also be specified. ",
+                id="layers-pattern-without-layers-to-transform",
+            ),
+        ],
+    )
+    def test_velora_config_invalid_values_raise(self, config_kwargs, msg):
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            VeloraConfig(**config_kwargs)
 
 
 class TestVBLoraInitialization:

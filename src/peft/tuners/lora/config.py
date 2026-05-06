@@ -60,6 +60,7 @@ class VeloraConfig:
     Args:
         num_groups (`int`):
             Number of feature groups used by VeLoRA to split the input activation depth before compression.
+            Increase this parameter to reduce the reconstruction error of input activations at the cost of increased memory consumption.
         scale (`float`):
             Scale applied to the reconstructed activations in the VeLoRA backward pass.
         init_type (`str`):
@@ -77,7 +78,6 @@ class VeloraConfig:
         default=64,
         metadata={
             "help": "Number of feature groups used by VeLoRA to split the input activation depth before compression."
-            "Increase this parameter to reduce the reconstruction error of input activations at the cost of increased memory consumption."
         },
     )
     scale: float = field(
@@ -917,24 +917,6 @@ class LoraConfig(PeftConfig):
 
         if self.use_dora and self.megatron_config:
             raise ValueError("DoRA does not support megatron_core, please set `use_dora=False`.")
-
-        if self.use_velora:
-            incompatible_features = []
-            if self.use_dora:
-                incompatible_features.append("use_dora")
-            if self.alora_invocation_tokens is not None:
-                incompatible_features.append("alora_invocation_tokens")
-            if self.use_qalora:
-                incompatible_features.append("use_qalora")
-            if self.use_bdlora is not None:
-                incompatible_features.append("use_bdlora")
-            if self.arrow_config is not None:
-                incompatible_features.append("arrow_config")
-            if incompatible_features:
-                raise ValueError(
-                    "VeLoRA cannot be combined with other LoRA variants or routing features. "
-                    f"Found incompatible settings: {', '.join(incompatible_features)}."
-                )
 
         # handle init_lora_weights and loftq_config
         if self.init_lora_weights == "loftq":
