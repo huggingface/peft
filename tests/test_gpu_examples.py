@@ -5401,7 +5401,7 @@ class TestPrefixTuning:
     @require_torch_multi_accelerator
     def test_prefix_tuning_multiple_devices_encoder_decoder_model(self):
         # See issue 2134
-        model_id = "peft-internal-testing/tiny-random-T5Model"
+        model_id = "peft-internal-testing/tiny-random-t5"
         tokenizer = AutoTokenizer.from_pretrained(model_id, padding="left")
         inputs = tokenizer(["A list of colors: red, blue"], return_tensors="pt").to(self.device)
         device_map = {

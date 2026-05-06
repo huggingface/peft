@@ -44,6 +44,7 @@ from .constants import (
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_BEFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING,
@@ -90,6 +91,7 @@ __all__ = [
     "SAFETENSORS_WEIGHTS_NAME",
     "TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_BEFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING",
@@ -1159,11 +1161,19 @@ def _prepare_prompt_learning_config(peft_config, model_config):
 
     # For grouped-query attention, see #1901.
     if (peft_config.peft_type in {"PREFIX_TUNING", "CARTRIDGE"}) and ("num_key_value_heads" in model_config):
-        num_key_value_heads = model_config["num_key_value_heads"]
-        if model_config.get("head_dim", None) is not None:
+        # Models with heterogeneous attention (e.g. Gemma4) expose distinct shapes for global vs. sliding layers via
+        # `global_head_dim` / `num_global_key_value_heads`. Provision the prefix for the global-layer footprint; sliding
+        # layers whose KV shape doesn't match are skipped per-layer at injection time. Matches the default in
+        # google-deepmind/gemma#631.
+        if model_config.get("global_head_dim") is not None:
+            head_dim = model_config["global_head_dim"]
+            num_key_value_heads = model_config.get("num_global_key_value_heads") or model_config["num_key_value_heads"]
+        elif model_config.get("head_dim", None) is not None:
             head_dim = model_config["head_dim"]
+            num_key_value_heads = model_config["num_key_value_heads"]
         else:
             head_dim = peft_config.token_dim // peft_config.num_attention_heads
+            num_key_value_heads = model_config["num_key_value_heads"]
         peft_config.token_dim = head_dim * num_key_value_heads
         peft_config.num_attention_heads = num_key_value_heads
 

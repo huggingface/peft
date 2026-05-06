@@ -212,6 +212,28 @@ TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "qwen3": ["q_proj", "v_proj", "down_proj"],
 }
 
+TRANSFORMERS_MODELS_TO_BEFT_TARGET_MODULES_MAPPING = {
+    "t5": ["v"],
+    "mt5": ["v"],
+    "roberta": ["value"],
+    "opt": ["v_proj"],
+    "gptj": ["v_proj"],
+    "gpt_neo": ["v_proj"],
+    "bart": ["v_proj"],
+    "llama": ["v_proj"],
+    "llama4": ["v_proj"],
+    "mistral": ["v_proj"],
+    "mixtral": ["v_proj"],
+    "bert": ["value"],
+    "deberta-v2": ["value_proj"],
+    "phi": ["v_proj"],
+    "gemma": ["v_proj"],
+    "gemma2": ["v_proj"],
+    "gemma3_text": ["v_proj"],
+    "qwen2": ["v_proj"],
+    "qwen3": ["v_proj"],
+}
+
 TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
     "t5": ["wo"],
     "mt5": [],

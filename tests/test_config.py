@@ -24,6 +24,7 @@ from peft import (
     AdaLoraConfig,
     AdamssConfig,
     AdaptionPromptConfig,
+    BeftConfig,
     BOFTConfig,
     C3AConfig,
     CartridgeConfig,
@@ -68,6 +69,7 @@ ALL_CONFIG_CLASSES = (
     (AdaLoraConfig, {"total_step": 1}),
     (AdamssConfig, {}),
     (AdaptionPromptConfig, {}),
+    (BeftConfig, {}),
     (BOFTConfig, {}),
     (C3AConfig, {}),
     (FourierFTConfig, {}),
@@ -294,7 +296,7 @@ class TestPeftConfig:
         assert str(record.list[0].message) == expected_msg
 
     @pytest.mark.parametrize(
-        "config_class", [LoHaConfig, LoraConfig, IA3Config, OFTConfig, BOFTConfig, HRAConfig, VBLoRAConfig]
+        "config_class", [LoHaConfig, LoraConfig, IA3Config, BeftConfig, OFTConfig, BOFTConfig, HRAConfig, VBLoRAConfig]
     )
     def test_save_pretrained_with_target_modules(self, config_class):
         # See #1041, #1045

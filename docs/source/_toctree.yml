@@ -154,6 +154,8 @@
       title: Lily
     - local: package_reference/peanut
       title: PEANuT
+    - local: package_reference/beft
+      title: BEFT
 
     title: Adapters
   - sections:

@@ -11,7 +11,7 @@ permissions: {}
 
 jobs:
   build:
-    uses: huggingface/doc-builder/.github/workflows/build_pr_documentation.yml@98154fc40f6896c500b4b4aaf7f2757b4f9cb2ad  # main
+    uses: huggingface/doc-builder/.github/workflows/build_pr_documentation.yml@899185857f31747d2e8a3b5c6139920971997bd8  # main
     with:
       commit_sha: ${{ github.event.pull_request.head.sha }}
       pr_number: ${{ github.event.number }}

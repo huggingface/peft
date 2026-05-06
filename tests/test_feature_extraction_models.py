@@ -18,6 +18,7 @@ from transformers import AutoModel
 from peft import (
     AdaLoraConfig,
     AdamssConfig,
+    BeftConfig,
     BOFTConfig,
     C3AConfig,
     DeloraConfig,
@@ -63,6 +64,13 @@ ALL_CONFIGS = [
             "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
             "total_step": 1,
+        },
+    ),
+    (
+        BeftConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
         },
     ),
     (
@@ -290,6 +298,14 @@ def skip_deberta_lora_tests(config_cls, model_id):
         pytest.skip(f"Skip tests that use {config_name} for Deberta models")
 
 
+def deberta_beft_tests(config_cls, model_id, config_kwargs):
+    if "deberta" not in model_id.lower():
+        return
+    config_name = config_cls.__name__.lower()
+    if config_name == "beftconfig":
+        config_kwargs["target_modules"] = ["output.dense"]
+
+
 def skip_deberta_pt_tests(config_cls, model_id):
     if "deberta" not in model_id.lower():
         return
@@ -322,27 +338,32 @@ class TestPeftFeatureExtractionModel(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_attributes_parametrized(self, model_id, config_cls, config_kwargs):
+        deberta_beft_tests(config_cls, model_id, config_kwargs)
         self._test_model_attr(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_adapter_name(self, model_id, config_cls, config_kwargs):
+        deberta_beft_tests(config_cls, model_id, config_kwargs)
         self._test_adapter_name(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_prepare_for_training_parametrized(self, model_id, config_cls, config_kwargs):
+        deberta_beft_tests(config_cls, model_id, config_kwargs)
         self._test_prepare_for_training(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained(self, model_id, config_cls, config_kwargs):
+        deberta_beft_tests(config_cls, model_id, config_kwargs)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
+        deberta_beft_tests(config_cls, model_id, config_kwargs)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs)
 
@@ -352,17 +373,20 @@ class TestPeftFeatureExtractionModel(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_from_pretrained_config_construction(self, model_id, config_cls, config_kwargs):
+        deberta_beft_tests(config_cls, model_id, config_kwargs)
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_merge_layers(self, model_id, config_cls, config_kwargs):
+        deberta_beft_tests(config_cls, model_id, config_kwargs)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_training(self, model_id, config_cls, config_kwargs):
+        deberta_beft_tests(config_cls, model_id, config_kwargs)
         self._test_training(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
@@ -380,32 +404,38 @@ class TestPeftFeatureExtractionModel(PeftCommonTester):
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     @pytest.mark.parametrize("use_reentrant", [True, False])
     def test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs, use_reentrant):
+        deberta_beft_tests(config_cls, model_id, config_kwargs)
         skip_deberta_lora_tests(config_cls, model_id)
         self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs, use_reentrant=use_reentrant)
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_inference_safetensors(self, model_id, config_cls, config_kwargs):
+        deberta_beft_tests(config_cls, model_id, config_kwargs)
         self._test_inference_safetensors(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_peft_model_device_map(self, model_id, config_cls, config_kwargs):
+        deberta_beft_tests(config_cls, model_id, config_kwargs)
         self._test_peft_model_device_map(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_delete_adapter(self, model_id, config_cls, config_kwargs):
+        deberta_beft_tests(config_cls, model_id, config_kwargs)
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_delete_inactive_adapter(self, model_id, config_cls, config_kwargs):
+        deberta_beft_tests(config_cls, model_id, config_kwargs)
         self._test_delete_inactive_adapter(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("model_id", PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_unload_adapter(self, model_id, config_cls, config_kwargs):
+        deberta_beft_tests(config_cls, model_id, config_kwargs)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_unload_adapter(model_id, config_cls, config_kwargs)
 
