@@ -286,6 +286,13 @@ class TestQuantization:
 
         check_outputs_similar(out_before, out_unmerged)
 
+        model.merge_adapter(safe_merge=True)
+        with torch.inference_mode():
+            out_merged_safe = model(dummy_input).logits
+
+        check_outputs_similar(out_before, out_merged_safe)
+
+        model.unmerge_adapter()
         model = model.merge_and_unload()
         with torch.inference_mode():
             out_unloaded = model(dummy_input).logits
