@@ -28,12 +28,7 @@ try:
 except ImportError:
     bnb = None
 
-
-try:
-    from tqdm.auto import tqdm
-    HAS_TQDM = True
-except ImportError:
-    HAS_TQDM = False
+from tqdm.auto import tqdm
 
 from .peft_model import PeftConfig, PeftModel
 from .tuners.lora import LoraLayer, dora
@@ -330,7 +325,7 @@ class KappaTuneSelector:
     ):
         self.model = model
         self.max_dim_size_to_analyze = max_dim_size_to_analyze
-        self.show_progress = show_progress and HAS_TQDM
+        self.show_progress = show_progress
         self.moe_param_suffixes = moe_param_suffixes or (
             ".gate_up_proj",
             ".down_proj",
@@ -386,7 +381,7 @@ class KappaTuneSelector:
         ]
         moe_iter = (
             tqdm(moe_params, desc="Computing SVD (MoE parameters)", unit="param")
-            if self.show_progress and moe_params
+            if self.show_progress
             else moe_params
         )
         for param_name, param in moe_iter:        
