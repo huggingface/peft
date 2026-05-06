@@ -827,7 +827,7 @@ def set_peft_model_state_dict(
     prefix = "base_model.model."
     requires_prefix = any(n.startswith(prefix) for n, _ in model.named_parameters())
     if not requires_prefix:
-        peft_model_state_dict = {k.removeprefix("base_model.model."): v for k, v in peft_model_state_dict.items()}
+        peft_model_state_dict = {k.removeprefix(prefix): v for k, v in peft_model_state_dict.items()}
 
     peft_model_state_dict, mismatched_keys = _find_mismatched_keys(
         model, peft_model_state_dict, ignore_mismatched_sizes=ignore_mismatched_sizes
