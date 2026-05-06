@@ -11,7 +11,12 @@ from torch import nn
 
 from peft import LoraConfig, PeftType, VeloraConfig, get_peft_model
 from peft.tuners.lora import VeloraConfig as LoraVeloraConfig
-from peft.tuners.lora.velora import _compress_activations, _normalize_projection, _reconstruct_activations
+from peft.tuners.lora.velora import (
+    _compress_activations,
+    _normalize_projection,
+    _reconstruct_activations,
+    _reshape_to_grouped_subtokens,
+)
 from peft.utils import get_peft_model_state_dict
 
 
@@ -66,9 +71,9 @@ def _make_velora_lora_config(
         "target_modules": target_modules,
         "r": r,
         "velora_config": velora_config_cls(
-            velora_scale=velora_scale,
-            velora_init_type=init_type,
-            velora_num_groups=num_groups,
+            scale=velora_scale,
+            init_type=init_type,
+            num_groups=num_groups,
         ),
     }
     if lora_alpha is not None:
@@ -78,7 +83,7 @@ def _make_velora_lora_config(
     return LoraConfig(**kwargs)
 
 
-def test_top_level_velora_config_alias_matches_lora_module_config():
+def test_velora_config_alias_matches_lora_module_config():
     torch.manual_seed(0)
     lora_model = get_peft_model(
         copy.deepcopy(MLP()),
@@ -114,9 +119,9 @@ def test_top_level_velora_config_alias_matches_lora_module_config():
     assert alias_config.peft_type == PeftType.LORA
     assert lora_config.use_velora is True
     assert alias_config.use_velora is True
-    assert lora_config.velora_config.velora_num_groups == alias_config.velora_config.velora_num_groups == 8
-    assert lora_config.velora_config.velora_init_type == alias_config.velora_config.velora_init_type == "random"
-    assert lora_config.velora_config.velora_scale == alias_config.velora_config.velora_scale == 1.0
+    assert lora_config.velora_config.num_groups == alias_config.velora_config.num_groups == 8
+    assert lora_config.velora_config.init_type == alias_config.velora_config.init_type == "random"
+    assert lora_config.velora_config.scale == alias_config.velora_config.scale == 1.0
 
     lora_state = get_peft_model_state_dict(lora_model)
     alias_state = get_peft_model_state_dict(alias_model)
@@ -126,18 +131,59 @@ def test_top_level_velora_config_alias_matches_lora_module_config():
         assert torch.equal(lora_state[key], alias_state[key]), f"Mismatch for {key}"
 
 
-def test_velora_requires_group_divisibility():
+def test_velora_supports_non_divisible_groups():
     model = MLP()
     config = _make_velora_lora_config(target_modules=["lin0"], r=4, velora_scale=1.0, num_groups=7)
 
-    with pytest.raises(ValueError, match="divisible"):
-        _ = get_peft_model(model, config)
+    model = get_peft_model(model, config)
+    layer = model.base_model.model.lin0
+
+    assert layer.lora_velora_embed["default"].shape == (3,)
+
+    x = torch.randn(2, 16)
+    model.train()
+    output = model(x)
+    output.sum().backward()
+
+    assert output.shape == (2, 16)
+    assert layer.lora_A["default"].weight.grad is not None
 
 
-def test_velora_batch_average_once_initializes_projection_once():
-    """Check if the embed is being correctly initialised as the
-    batch average of the layer input (in this case the input to the network)
-    """
+def test_velora_grouping_pads_remainder_features():
+    x = torch.arange(10, dtype=torch.float32).reshape(2, 5)
+    grouped = _reshape_to_grouped_subtokens(x, num_groups=3)
+
+    expected = torch.tensor(
+        [
+            [[0, 1], [2, 3], [4, 0]],
+            [[5, 6], [7, 8], [9, 0]],
+        ],
+        dtype=torch.float32,
+    )
+    assert torch.equal(grouped, expected)
+
+    embed = torch.tensor([1.0, 0.0])
+    compressed = _compress_activations(x, embed, num_groups=3)
+    reconstructed = _reconstruct_activations(compressed, embed, in_features=5, velora_scale=1.0)
+
+    assert compressed.shape == (2, 3)
+    assert reconstructed.shape == x.shape
+
+
+def _expected_batch_average_embed(x: torch.Tensor, num_groups: int, target: torch.Tensor) -> torch.Tensor:
+    subtokens = _reshape_to_grouped_subtokens(x, num_groups)
+    embed = _normalize_projection(subtokens.reshape(-1, subtokens.shape[-1]).mean(dim=0))
+    return embed.to(target)
+
+
+@pytest.mark.parametrize(
+    "init_type, updates_every_forward",
+    [
+        ("batch_average_once", False),
+        ("batch_average", True),
+    ],
+)
+def test_velora_batch_average_update_policy(init_type, updates_every_forward):
     torch.manual_seed(0)
     model = get_peft_model(
         MLP(),
@@ -145,7 +191,7 @@ def test_velora_batch_average_once_initializes_projection_once():
             target_modules=["lin0"],
             r=4,
             velora_scale=1.0,
-            init_type="batch_average_once",
+            init_type=init_type,
             num_groups=8,
         ),
     )
@@ -155,17 +201,20 @@ def test_velora_batch_average_once_initializes_projection_once():
     model.train()
     _ = model(x0)
 
-    expected = _normalize_projection(x0.reshape(-1, 8, 2).reshape(-1, 2).mean(dim=0)).to(
-        layer.lora_velora_embed["default"]
-    )
+    expected0 = _expected_batch_average_embed(x0, num_groups=8, target=layer.lora_velora_embed["default"])
     assert bool(layer.lora_velora_initialized["default"].item()) is True
-    assert torch.allclose(layer.lora_velora_embed["default"], expected, atol=1e-6, rtol=1e-5)
+    assert torch.allclose(layer.lora_velora_embed["default"], expected0, atol=1e-6, rtol=1e-5)
 
     stored_embed = layer.lora_velora_embed["default"].clone()
-    x1 = torch.randn(2, 16)
+    x1 = torch.randn(2, 16) + 5
     _ = model(x1)
 
-    assert torch.allclose(layer.lora_velora_embed["default"], stored_embed, atol=1e-6, rtol=1e-5)
+    if updates_every_forward:
+        expected1 = _expected_batch_average_embed(x1, num_groups=8, target=layer.lora_velora_embed["default"])
+        assert torch.allclose(layer.lora_velora_embed["default"], expected1, atol=1e-6, rtol=1e-5)
+        assert not torch.allclose(layer.lora_velora_embed["default"], stored_embed, atol=1e-6, rtol=1e-5)
+    else:
+        assert torch.allclose(layer.lora_velora_embed["default"], stored_embed, atol=1e-6, rtol=1e-5)
 
 
 def test_velora_reduces_saved_activation_memory_vs_vanilla_lora():

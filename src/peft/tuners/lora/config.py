@@ -55,44 +55,74 @@ class LoraRuntimeConfig:
 class VeloraConfig:
     """
     This is the sub-configuration class to store the configuration for VeLoRA.
-
+    Original paper can be found <a href='https://arxiv.org/abs/2405.17991'>here</a>.
+    
     Args:
-        velora_num_groups (`int`):
+        num_groups (`int`):
             Number of feature groups used by VeLoRA to split the input activation depth before compression.
-        velora_scale (`float`):
+        scale (`float`):
             Scale applied to the reconstructed activations in the VeLoRA backward pass.
-        velora_init_type (`str`):
-            Projection initialization strategy for VeLoRA. Supported values are `'batch_average_once'` and `'random'`.
+        init_type (`str`):
+            Projection initialization strategy for VeLoRA. Supported values are `'batch_average_once'`,
+            `'batch_average'`, and `'random'`.
+        target_modules (`Optional[Union[list[str], str]]`):
+            Modules where VeLoRA should be applied. If `None`, all LoRA target modules use VeLoRA.
+        layers_to_transform (`Optional[Union[list[int], int]]`):
+            Layer indexes where VeLoRA should be applied.
+        layers_pattern (`Optional[Union[list[str], str]]`):
+            Layer pattern used with `layers_to_transform`.
     """
 
-    velora_num_groups: int = field(
-        default=32,
+    num_groups: int = field(
+        default=64,
         metadata={
             "help": "Number of feature groups used by VeLoRA to split the input activation depth before compression."
+            "Increase this parameter to reduce the reconstruction error of input activations at the cost of increased memory consumption."
         },
     )
-    velora_scale: float = field(
+    scale: float = field(
         default=1.0,
         metadata={"help": "Scale applied to the reconstructed activations in the VeLoRA backward pass."},
     )
-    velora_init_type: str = field(
-        default="batch_average_once",
+    init_type: Literal["batch_average", "batch_average_once", "random"]  = field(
+        default="batch_average",
         metadata={
             "help": "Projection initialization strategy for VeLoRA. Supported values are "
-            "`'batch_average_once'` and `'random'`."
+            "`'batch_average_once'`, `'batch_average'`, and `'random'`."
+            "batch_average uses the batch statistics during each forward pass for the projection."
+            "batch_average_once only updates the projection weights once in the first pass to reduce training time at the cost of less exact gradient approximations."
         },
+    )
+    target_modules: Optional[Union[list[str], str]] = field(
+        default=None,
+        metadata={"help": "Modules where VeLoRA should be applied. If None, all LoRA target modules use VeLoRA."},
+    )
+    layers_to_transform: Optional[Union[list[int], int]] = field(
+        default=None,
+        metadata={"help": "Layer indexes where VeLoRA should be applied."},
+    )
+    layers_pattern: Optional[Union[list[str], str]] = field(
+        default=None,
+        metadata={"help": "Layer pattern used with layers_to_transform."},
     )
 
     def __post_init__(self):
-        if self.velora_num_groups <= 0:
-            raise ValueError(f"`velora_num_groups` should be positive, got {self.velora_num_groups}.")
-        if self.velora_scale <= 0:
-            raise ValueError(f"`velora_scale` should be positive, got {self.velora_scale}.")
-        if self.velora_init_type not in {"batch_average_once", "random"}:
+        if self.num_groups <= 0:
+            raise ValueError(f"`num_groups` should be positive, got {self.num_groups}.")
+        if self.scale <= 0:
+            raise ValueError(f"`scale` should be positive, got {self.scale}.")
+        if self.init_type not in {"batch_average_once", "batch_average", "random"}:
             raise ValueError(
-                "Unsupported `velora_init_type` "
-                f"{self.velora_init_type!r}. Supported values are 'batch_average_once' and 'random'."
+                "Unsupported `init_type` "
+                f"{self.init_type!r}. Supported values are 'batch_average_once', "
+                "'batch_average', and 'random'."
             )
+        if isinstance(self.target_modules, str) and self.layers_to_transform is not None:
+            raise ValueError("`layers_to_transform` cannot be used when `target_modules` is a str.")
+        if isinstance(self.target_modules, str) and self.layers_pattern is not None:
+            raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
+        if self.layers_pattern and not self.layers_to_transform:
+            raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
 
 
 @dataclass
@@ -835,43 +865,9 @@ class LoraConfig(PeftConfig):
         rv.pop("runtime_config")
         return rv
 
-    @classmethod
-    def from_peft_type(cls, **kwargs):
-        use_velora = kwargs.pop("use_velora", False)
-        velora_num_groups = kwargs.pop("velora_num_groups", 32)
-        velora_scale = kwargs.pop("velora_scale", 1.0)
-        velora_init_type = kwargs.pop("velora_init_type", "batch_average_once")
-
-        if "velora_config" not in kwargs and use_velora:
-            kwargs["velora_config"] = {
-                "velora_num_groups": velora_num_groups,
-                "velora_scale": velora_scale,
-                "velora_init_type": velora_init_type,
-            }
-
-        return super().from_peft_type(**kwargs)
-
     @property
     def use_velora(self) -> bool:
         return self.velora_config is not None
-
-    @property
-    def velora_num_groups(self) -> int:
-        if self.velora_config is None:
-            return 32
-        return self.velora_config.velora_num_groups
-
-    @property
-    def velora_scale(self) -> float:
-        if self.velora_config is None:
-            return 1.0
-        return self.velora_config.velora_scale
-
-    @property
-    def velora_init_type(self) -> str:
-        if self.velora_config is None:
-            return "batch_average_once"
-        return self.velora_config.velora_init_type
 
     def __post_init__(self):
         super().__post_init__()
@@ -888,6 +884,18 @@ class LoraConfig(PeftConfig):
             self.target_modules_to_tie = None
 
         if isinstance(self.velora_config, dict):
+            if "velora_num_groups" in self.velora_config:
+                self.velora_config["num_groups"] = self.velora_config.pop("velora_num_groups")
+            if "velora_scale" in self.velora_config:
+                self.velora_config["scale"] = self.velora_config.pop("velora_scale")
+            if "velora_init_type" in self.velora_config:
+                self.velora_config["init_type"] = self.velora_config.pop("velora_init_type")
+            if "velora_target_modules" in self.velora_config:
+                self.velora_config["target_modules"] = self.velora_config.pop("velora_target_modules")
+            if "velora_layers_to_transform" in self.velora_config:
+                self.velora_config["layers_to_transform"] = self.velora_config.pop("velora_layers_to_transform")
+            if "velora_layers_pattern" in self.velora_config:
+                self.velora_config["layers_pattern"] = self.velora_config.pop("velora_layers_pattern")
             self.velora_config = VeloraConfig(**self.velora_config)
         elif self.velora_config is not None and not isinstance(self.velora_config, VeloraConfig):
             raise TypeError("`velora_config` must be a `VeloraConfig`, a dict, or None.")

@@ -20,8 +20,15 @@ import torch
 import torch.nn.functional as F
 
 
+def _get_group_dim(in_features: int, num_groups: int) -> int:
+    return (in_features + num_groups - 1) // num_groups
+
+
 def _reshape_to_grouped_subtokens(x: torch.Tensor, num_groups: int) -> torch.Tensor:
-    group_dim = x.shape[-1] // num_groups
+    group_dim = _get_group_dim(x.shape[-1], num_groups)
+    padded_features = num_groups * group_dim
+    if x.shape[-1] != padded_features:
+        x = F.pad(x, (0, padded_features - x.shape[-1]))
     return x.reshape(-1, num_groups, group_dim)
 
 
@@ -37,7 +44,8 @@ def _reconstruct_activations(
     velora_scale: float,
 ) -> torch.Tensor:
     grouped = compressed.unsqueeze(-1) * embed.view(1, 1, -1)
-    return grouped.reshape(-1, in_features) * velora_scale
+    reconstructed = grouped.reshape(-1, compressed.shape[-1] * embed.numel())
+    return reconstructed[:, :in_features] * velora_scale
 
 
 def _normalize_projection(embed: torch.Tensor) -> torch.Tensor:
@@ -47,13 +55,6 @@ def _normalize_projection(embed: torch.Tensor) -> torch.Tensor:
         embed = torch.ones_like(embed)
         norm = torch.linalg.vector_norm(embed)
     return embed / norm
-
-
-def _compute_dtype_for_backward(reference: torch.Tensor) -> torch.dtype:
-    dtype = reference.dtype
-    if reference.device.type == "cpu" and dtype in (torch.float16, torch.bfloat16):
-        return torch.float32
-    return dtype
 
 
 class VeloraFunction(torch.autograd.Function):
@@ -83,7 +84,7 @@ class VeloraFunction(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):
         compressed, weight, embed = ctx.saved_tensors
-        compute_dtype = _compute_dtype_for_backward(grad_output)
+        compute_dtype = grad_output.dtype
 
         grad_output_2d = grad_output.reshape(-1, grad_output.shape[-1]).to(compute_dtype)
         weight_compute = weight.to(compute_dtype)

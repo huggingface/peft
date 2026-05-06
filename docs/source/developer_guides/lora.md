@@ -244,21 +244,29 @@ from peft import LoraConfig, VeloraConfig
 config = LoraConfig(
     target_modules=["q_proj", "v_proj"],
     velora_config=VeloraConfig(
-        velora_num_groups=32,
-        velora_scale=1.0,
-        velora_init_type="batch_average_once",
+        num_groups=32,
+        scale=1.0,
+        init_type="batch_average_once",
     ),
 )
 ```
 
-`velora_num_groups` controls how the input activation depth is split before compression, `velora_scale` rescales the reconstructed activations during the backward pass, and `velora_init_type` chooses how the projection is initialized. Use `batch_average_once` to initialize the projection from the first training batch or `random` to initialize it immediately from a random normalized vector.
+`num_groups` controls how the input activation depth is split before compression. If the activation depth is not evenly divisible by `num_groups`, VeLoRA pads the grouped representation internally and removes the padding after reconstruction. `scale` rescales the reconstructed activations during the backward pass, and `init_type` chooses how the projection is initialized.
+
+Use `batch_average_once` to initialize the projection from the first training batch, `batch_average` to update it from every training forward pass, or `random` to initialize it immediately from a random normalized vector.
+
+Below are some results with the [MetaMathQA benchmark](https://github.com/huggingface/peft/tree/main/method_comparison/MetaMathQA). 
+
+| Variant | Test Accuracy | Max Memory (GiB) | Tokens/sec |
+|---|---:|---:|---:|
+| LoRA | 54.51% | 27.69 | 2366.2 |
+| LoRA + GC | 55.80% | 13.17 | 1671.8 |
+| LoRA+VeLoRA | 54.89% | 19.94 | 2057.6 |
 
 #### Caveats
 
 - VeLoRA is currently supported on standard LoRA linear layers only.
 - VeLoRA does not support embedding or convolutional LoRA layers.
-- VeLoRA cannot be combined with other LoRA variants or routing features in the same adapter configuration.
-
 
 ## Training
 
