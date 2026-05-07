@@ -39,7 +39,7 @@ class AqlmLoraLinear(torch.nn.Module, LoraLayer):
     ):
         if config.use_dora:
             raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
-        if config.use_velora:
+        if config.velora_config is not None:
             raise ValueError(f"{self.__class__.__name__} does not support VeLoRA yet, please set it to False")
 
         super().__init__()

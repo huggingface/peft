@@ -1846,21 +1846,6 @@ class TestVeloraInitialization:
                 "'batch_average', and 'random'.",
                 id="init-type",
             ),
-            pytest.param(
-                {"target_modules": "linear", "layers_to_transform": [0]},
-                "`layers_to_transform` cannot be used when `target_modules` is a str.",
-                id="target-modules-str-with-layers-to-transform",
-            ),
-            pytest.param(
-                {"target_modules": "linear", "layers_pattern": "layers"},
-                "`layers_pattern` cannot be used when `target_modules` is a str.",
-                id="target-modules-str-with-layers-pattern",
-            ),
-            pytest.param(
-                {"layers_pattern": "layers"},
-                "When `layers_pattern` is specified, `layers_to_transform` must also be specified. ",
-                id="layers-pattern-without-layers-to-transform",
-            ),
         ],
     )
     def test_velora_config_invalid_values_raise(self, config_kwargs, msg):

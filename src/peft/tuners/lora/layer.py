@@ -33,7 +33,6 @@ from peft.tuners.tuners_utils import (
     BaseTunerLayer,
     _get_in_out_features,
     check_adapters_to_merge,
-    check_target_module_exists,
 )
 from peft.utils import ALLOWED_COMPUTE_DTYPES, UPCAST_DTYPES
 from peft.utils.integrations import (
@@ -50,16 +49,6 @@ from .config import LoraConfig
 
 
 VARIANT_KWARG_KEYS = ["alora_offsets"]
-
-
-def _use_velora_for_target(config: LoraConfig, target_name: str) -> bool:
-    if not config.use_velora:
-        return False
-    velora_config = config.velora_config
-    assert velora_config is not None
-    if velora_config.target_modules is None:
-        return True
-    return bool(check_target_module_exists(velora_config, target_name))
 
 
 class LoraVariant:
@@ -165,9 +154,6 @@ class LoraLayer(BaseTunerLayer):
         """
         return None
 
-    def _use_velora_for_target(self, config: LoraConfig, target_name: str) -> bool:
-        return _use_velora_for_target(config, target_name)
-
     def update_layer(
         self,
         adapter_name: str,
@@ -198,7 +184,7 @@ class LoraLayer(BaseTunerLayer):
                 PeftWarning,
             )
 
-        lora_variant = self.resolve_lora_variant(config=config, target_name=target_name)
+        lora_variant = self.resolve_lora_variant(config=config)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -811,7 +797,7 @@ class Linear(nn.Module, LoraLayer):
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def resolve_lora_variant(self, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if self._use_velora_for_target(config, kwargs.get("target_name", "")):
+        if config.velora_config is not None:
             from .variants import VeloraLinearVariant
 
             return VeloraLinearVariant()
@@ -1073,7 +1059,7 @@ class Embedding(nn.Module, LoraLayer):
         )
 
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if self._use_velora_for_target(config, kwargs.get("target_name", "")):
+        if config.velora_config is not None:
             raise ValueError("VeLoRA does not support adapting embedding layers.")
         if not config.use_dora:
             return None
@@ -1099,7 +1085,7 @@ class Embedding(nn.Module, LoraLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        lora_variant = self.resolve_lora_variant(config=config, target_name=kwargs.get("target_name", ""))
+        lora_variant = self.resolve_lora_variant(config=config)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -1388,7 +1374,7 @@ class _ConvNd(nn.Module, LoraLayer):
         LoraLayer.__init__(self, base_layer)
         if kwargs.get("use_alora", False):
             raise ValueError("aLoRA does not support adapting conv layers.")
-        if _use_velora_for_target(config, kwargs.get("target_name", "")):
+        if config.velora_config is not None:
             raise ValueError("VeLoRA does not support adapting conv layers.")
         if base_layer.groups > 1:
             warnings.warn("LoRA adapter added to ConvNd layer with groups > 1. Merging is not supported.")
@@ -1434,7 +1420,7 @@ class _ConvNd(nn.Module, LoraLayer):
                 PeftWarning,
             )
 
-        lora_variant = self.resolve_lora_variant(config=config, target_name=kwargs.get("target_name", ""))
+        lora_variant = self.resolve_lora_variant(config=config)
         if lora_variant is not None:
             self.lora_variant[adapter_name] = lora_variant
 
@@ -1682,7 +1668,7 @@ class Conv2d(_ConvNd):
         self.conv_fn = F.conv2d
 
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if self._use_velora_for_target(config, kwargs.get("target_name", "")):
+        if config.velora_config is not None:
             raise ValueError("VeLoRA does not support adapting conv layers.")
         if not config.use_dora:
             return None
@@ -1701,7 +1687,7 @@ class Conv1d(_ConvNd):
         self.conv_fn = F.conv1d
 
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if self._use_velora_for_target(config, kwargs.get("target_name", "")):
+        if config.velora_config is not None:
             raise ValueError("VeLoRA does not support adapting conv layers.")
         if not config.use_dora:
             return None
@@ -1720,7 +1706,7 @@ class Conv3d(_ConvNd):
         self.conv_fn = F.conv3d
 
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if self._use_velora_for_target(config, kwargs.get("target_name", "")):
+        if config.velora_config is not None:
             raise ValueError("VeLoRA does not support adapting conv layers.")
         if not config.use_dora:
             return None
@@ -1765,7 +1751,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
         if config.use_dora:
             # TODO: probably not so hard to implement
             raise ValueError(f"{self.__class__.__name__} does not support DoRA (yet), please set use_dora to False")
-        if _use_velora_for_target(config, kwargs.get("target_name", "")):
+        if config.velora_config is not None:
             raise ValueError(f"{self.__class__.__name__} does not support VeLoRA, please set `velora_config=None`.")
         if kwargs.get("use_alora", False):
             raise ValueError(f"{self.__class__.__name__} does not support aLoRA (yet), please set use_alora to False")
@@ -2181,7 +2167,7 @@ class ParamWrapper(nn.Module, LoraLayer):
             raise ValueError(f"lora.{self.__class__.__name__} does not work with lora_bias=True.")
         if config.use_dora:
             raise ValueError(f"lora.{self.__class__.__name__} does not work with use_dora=True.")
-        if _use_velora_for_target(config, kwargs.get("target_name", "")):
+        if config.velora_config is not None:
             raise ValueError(f"lora.{self.__class__.__name__} does not work when `velora_config` is set.")
         if is_target_conv_1d_layer:
             raise ValueError(f"lora.{self.__class__.__name__} does not work with is_target_conv_1d_layer=True.")
@@ -2231,7 +2217,7 @@ class ParamWrapper(nn.Module, LoraLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        lora_variant = self.resolve_lora_variant(config=config, target_name=kwargs.get("target_name", ""))
+        lora_variant = self.resolve_lora_variant(config=config)
         if lora_variant is not None:
             raise ValueError(f"lora.{self.__class__.__name__} does not work with LoRA variants like DoRA.")
 

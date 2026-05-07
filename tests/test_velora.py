@@ -119,8 +119,8 @@ def test_velora_config_alias_matches_lora_module_config():
 
     assert lora_config.peft_type == PeftType.LORA
     assert alias_config.peft_type == PeftType.LORA
-    assert lora_config.use_velora is True
-    assert alias_config.use_velora is True
+    assert lora_config.velora_config is not None
+    assert alias_config.velora_config is not None
     assert lora_config.velora_config.num_groups == alias_config.velora_config.num_groups == 8
     assert lora_config.velora_config.init_type == alias_config.velora_config.init_type == "random"
     assert lora_config.velora_config.scale == alias_config.velora_config.scale == 1.0

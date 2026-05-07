@@ -107,29 +107,26 @@ TEST_CASES = [
         {"target_modules": "lin1", "use_dora": True, "lora_alpha": 32},
     ),
     (
-        "Vanilla MLP 10 LoRA with VeLoRA",
+        "Vanilla MLP 10 LoRA with VeLoRA random",
         "MLP",
         LoraConfig,
         {"target_modules": ["lin0"], "velora_config": VeloraConfig(num_groups=2, init_type="random")},
     ),
     (
-        "Vanilla MLP 11 LoRA with VeLoRA",
+        "Vanilla MLP 11 LoRA with VeLoRA batch_average",
         "MLP",
         LoraConfig,
         {
             "target_modules": ["lin0", "lin1"],
-            "velora_config": VeloraConfig(num_groups=2, init_type="random"),
+            "velora_config": VeloraConfig(num_groups=2, init_type="batch_average"),
         },
     ),
-    *[
-        (
-            f"Vanilla MLP LoRA with VeLoRA {init_type}",
-            "MLP",
-            LoraConfig,
-            {"target_modules": ["lin0"], "velora_config": VeloraConfig(num_groups=2, init_type=init_type)},
-        )
-        for init_type in ("batch_average", "batch_average_once")
-    ],
+    (
+        "Vanilla MLP 12 LoRA with VeLoRA batch_average_once",
+        "MLP",
+        LoraConfig,
+        {"target_modules": ["lin0"], "velora_config": VeloraConfig(num_groups=2, init_type="batch_average_once")},
+    ),
     ("Embedding + transformers Conv1D 1 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Embedding + transformers Conv1D 2 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
     ("Embedding + transformers Conv1D 3 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),

@@ -57,7 +57,7 @@ if is_hqq_available():
             )
 
         def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-            if config.use_velora:
+            if config.velora_config is not None:
                 raise ValueError(f"{self.__class__.__name__} does not support VeLoRA.")
             if not config.use_dora:
                 return None

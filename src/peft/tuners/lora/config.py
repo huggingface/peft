@@ -54,8 +54,7 @@ class LoraRuntimeConfig:
 @dataclass
 class VeloraConfig:
     """
-    This is the sub-configuration class to store the configuration for VeLoRA. Original paper can be found <a
-    href='https://arxiv.org/abs/2405.17991'>here</a>.
+    This is the sub-configuration class to store the configuration for VeLoRA. Original paper can be found [here](https://arxiv.org/abs/2405.17991).
 
     Args:
         num_groups (`int`):
@@ -67,12 +66,6 @@ class VeloraConfig:
         init_type (`str`):
             Projection initialization strategy for VeLoRA. Supported values are `'batch_average_once'`,
             `'batch_average'`, and `'random'`.
-        target_modules (`Optional[Union[list[str], str]]`):
-            Modules where VeLoRA should be applied. If `None`, all LoRA target modules use VeLoRA.
-        layers_to_transform (`Optional[Union[list[int], int]]`):
-            Layer indexes where VeLoRA should be applied.
-        layers_pattern (`Optional[Union[list[str], str]]`):
-            Layer pattern used with `layers_to_transform`.
     """
 
     num_groups: int = field(
@@ -94,18 +87,6 @@ class VeloraConfig:
             "batch_average_once only updates the projection weights once in the first pass to reduce training time at the cost of less exact gradient approximations."
         },
     )
-    target_modules: Optional[Union[list[str], str]] = field(
-        default=None,
-        metadata={"help": "Modules where VeLoRA should be applied. If None, all LoRA target modules use VeLoRA."},
-    )
-    layers_to_transform: Optional[Union[list[int], int]] = field(
-        default=None,
-        metadata={"help": "Layer indexes where VeLoRA should be applied."},
-    )
-    layers_pattern: Optional[Union[list[str], str]] = field(
-        default=None,
-        metadata={"help": "Layer pattern used with layers_to_transform."},
-    )
 
     def __post_init__(self):
         if self.num_groups <= 0:
@@ -118,12 +99,6 @@ class VeloraConfig:
                 f"{self.init_type!r}. Supported values are 'batch_average_once', "
                 "'batch_average', and 'random'."
             )
-        if isinstance(self.target_modules, str) and self.layers_to_transform is not None:
-            raise ValueError("`layers_to_transform` cannot be used when `target_modules` is a str.")
-        if isinstance(self.target_modules, str) and self.layers_pattern is not None:
-            raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
-        if self.layers_pattern and not self.layers_to_transform:
-            raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
 
 
 @dataclass
@@ -866,10 +841,6 @@ class LoraConfig(PeftConfig):
         rv.pop("runtime_config")
         return rv
 
-    @property
-    def use_velora(self) -> bool:
-        return self.velora_config is not None
-
     def __post_init__(self):
         super().__post_init__()
         self.peft_type = PeftType.LORA
@@ -885,18 +856,6 @@ class LoraConfig(PeftConfig):
             self.target_modules_to_tie = None
 
         if isinstance(self.velora_config, dict):
-            if "velora_num_groups" in self.velora_config:
-                self.velora_config["num_groups"] = self.velora_config.pop("velora_num_groups")
-            if "velora_scale" in self.velora_config:
-                self.velora_config["scale"] = self.velora_config.pop("velora_scale")
-            if "velora_init_type" in self.velora_config:
-                self.velora_config["init_type"] = self.velora_config.pop("velora_init_type")
-            if "velora_target_modules" in self.velora_config:
-                self.velora_config["target_modules"] = self.velora_config.pop("velora_target_modules")
-            if "velora_layers_to_transform" in self.velora_config:
-                self.velora_config["layers_to_transform"] = self.velora_config.pop("velora_layers_to_transform")
-            if "velora_layers_pattern" in self.velora_config:
-                self.velora_config["layers_pattern"] = self.velora_config.pop("velora_layers_pattern")
             self.velora_config = VeloraConfig(**self.velora_config)
         elif self.velora_config is not None and not isinstance(self.velora_config, VeloraConfig):
             raise TypeError("`velora_config` must be a `VeloraConfig`, a dict, or None.")

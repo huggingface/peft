@@ -251,7 +251,7 @@ config = LoraConfig(
 )
 ```
 
-`num_groups` controls how the input activation depth is split before compression. If the activation depth is not evenly divisible by `num_groups`, VeLoRA pads the grouped representation internally and removes the padding after reconstruction. `scale` rescales the reconstructed activations during the backward pass, and `init_type` chooses how the projection is initialized.
+VeLoRA is applied to every LoRA layer selected by `target_modules`. `num_groups` controls how the input activation depth is split before compression. If the activation depth is not evenly divisible by `num_groups`, VeLoRA pads the grouped representation internally and removes the padding after reconstruction. `scale` rescales the reconstructed activations during the backward pass, and `init_type` chooses how the projection is initialized.
 
 Use `batch_average_once` to initialize the projection from the first training batch, `batch_average` to update it from every training forward pass, or `random` to initialize it immediately from a random normalized vector.
 
@@ -266,7 +266,6 @@ Below are some results with the [MetaMathQA benchmark](https://github.com/huggin
 #### Caveats
 
 - VeLoRA is currently supported on standard LoRA linear layers only.
-- VeLoRA does not support embedding or convolutional LoRA layers.
 
 ## Training
 
