@@ -28,8 +28,11 @@ A collection of helper functions for PEFT.
 
 ## KappaTune target selection
 
-`KappaTuneSelector` and `find_kappa_target_modules` implement condition-number-based target selection from the [KappaTune paper](https://arxiv.org/abs/2506.16289). 
-This helps mitigate catastrophic forgetting by preferring well-conditioned (isotropic) weight matrices for LoRA adaptation.
+`KappaTuneSelector` and `find_kappa_target_modules` implement a general target selection process from the [KappaTune paper](https://arxiv.org/abs/2506.16289). 
+
+The method identifies modules with higher flexibility (higher output differential entropy) and lower specialization (lower sensitivity to specific input directions).
+
+These properties make the selected modules good candidates for mitigating catastrophic forgetting in any adaptation method that adds trainable parameters, including LoRA, DoRA, LoHa, AdaLoRA, and even direct fine-tuning of the original weights.
 
 [[autodoc]] helpers.KappaTuneSelector
     - all
