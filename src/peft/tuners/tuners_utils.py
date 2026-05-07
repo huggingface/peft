@@ -780,17 +780,16 @@ class BaseTuner(nn.Module, ABC):
         ###################################
         # PREPARATION OF MODEL AND CONFIG #
         ###################################
-        is_transformers_like_model = hasattr(getattr(model, "config", None), "model_type")
+        is_transformers_like_model = isinstance(getattr(getattr(model, "config", None), "model_type", None), str)
         if is_transformers_ge_v5 and is_transformers_like_model:
             # TODO remove once transformers < v5.0 is no longer supported
             # For Transformers v5, some architectures were changed compared to v4, e.g. the MoE layers of Mixtral. To
             # still make it possible to load adapters trained with v4, we have to update the PEFT config so that the
             # right layers are targeted. Call this first and overwrite the peft_config to be sure that changes are
             # applied.
-            from peft.utils.transformers_weight_conversion import (
-                convert_peft_config_for_transformers,
-                get_model_conversion_mapping,
-            )
+            from transformers.conversion_mapping import get_model_conversion_mapping
+
+            from peft.utils.transformers_weight_conversion import convert_peft_config_for_transformers
 
             weight_conversions = get_model_conversion_mapping(model)
             convert_peft_config_for_transformers(

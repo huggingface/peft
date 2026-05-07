@@ -1239,6 +1239,8 @@ class TestTrainableTokens:
                     "m1.decoder.embed_tokens.weight": "m1.encoder.embed_tokens.weight",
                     "m2.decoder.embed_tokens.weight": "m2.encoder.embed_tokens.weight",
                 }
+                # required for a check in transformers
+                self._named_pretrained_submodules = []
 
             def get_input_embeddings(self):
                 return self.m1.encoder.embed_tokens
@@ -1301,6 +1303,8 @@ class TestTrainableTokens:
                 )
                 self.m1 = BartModel(config)
                 self.config = config
+                # required for a check in transformers
+                self._named_pretrained_submodules = []
 
             def get_input_embeddings(self):
                 return self.m1.encoder.embed_tokens
