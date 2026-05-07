@@ -23,13 +23,27 @@ import torch.nn as nn
 from torch.nn.init import _calculate_correct_fan
 from transformers.pytorch_utils import Conv1D
 
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
-from peft.utils import TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING, get_quantization_kwargs
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, _get_in_out_features
+from peft.utils import (
+    TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
+    get_quantization_kwargs,
+    resolve_quantization_backend,
+)
 
 from .._buffer_dict import BufferDict
 from ..tuners_utils import _maybe_include_all_linear_layers
 from .config import VeraConfig
 from .layer import Linear, VeraLayer
+
+
+def _get_tuner_layer_class(target_base_layer: torch.nn.Module) -> type[VeraLayer] | None:
+    layer_cls: type[VeraLayer] | None = None
+    if isinstance(target_base_layer, (torch.nn.Linear, Conv1D)):
+        layer_cls = Linear
+    elif (quant_backend := resolve_quantization_backend(target_base_layer)) is not None:
+        layer_cls = {"linear": Linear}.get(quant_backend.layer_type)
+
+    return layer_cls
 
 
 def _kaiming_init(
@@ -111,13 +125,10 @@ class VeraModel(BaseTuner):
             if not self._check_target_module_exists(peft_config, key):
                 continue
 
-            if isinstance(module, nn.Linear):
-                module_shape = module.out_features, module.in_features
-            elif isinstance(module, Conv1D):
-                module_shape = module.weight.ds_shape if hasattr(module.weight, "ds_shape") else module.weight.shape
-                module_shape = module_shape[::-1]
-            else:
+            if _get_tuner_layer_class(module) is None:
                 continue
+            in_features, out_features = _get_in_out_features(module)
+            module_shape = (out_features, in_features)
 
             if largest_shape is None:
                 largest_shape = module_shape
@@ -222,26 +233,29 @@ class VeraModel(BaseTuner):
         else:
             target_base_layer = target
 
-        if isinstance(target_base_layer, torch.nn.Linear):
-            if vera_config.fan_in_fan_out:
-                warnings.warn(
-                    "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
-                    "Setting fan_in_fan_out to False."
-                )
-                vera_config.fan_in_fan_out = False
-        elif isinstance(target_base_layer, Conv1D):
+        layer_cls = _get_tuner_layer_class(target_base_layer)
+        if layer_cls is None:
+            raise TypeError(
+                f"Target module {target} is not supported. Currently, only `torch.nn.Linear` (optionally quantized) "
+                "and `transformers.pytorch_utils.Conv1D` are supported."
+            )
+
+        if isinstance(target_base_layer, Conv1D):
             kwargs["is_target_conv_1d_layer"] = True
             if not vera_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
                 vera_config.fan_in_fan_out = True
-        else:
-            raise ValueError(
-                f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                "`torch.nn.Linear`, `transformers.pytorch_utils.Conv1D`."
+        elif vera_config.fan_in_fan_out:
+            # nn.Linear or a quantized linear layer
+            warnings.warn(
+                "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
+                "Setting fan_in_fan_out to False."
             )
-        new_module = Linear(
+            vera_config.fan_in_fan_out = False
+
+        new_module = layer_cls(
             target,
             vera_A,
             vera_B,

@@ -15,7 +15,7 @@
 import copy
 import operator
 from abc import ABC
-from typing import Any
+from typing import Any, Literal
 
 import torch
 from torch import nn
@@ -33,6 +33,11 @@ from peft.import_utils import (
     is_torchao_available,
 )
 from peft.utils.integrations import dequantize_bnb_weight
+from peft.utils.other import is_gptqmodel_awq_layer
+
+
+# extend if needed
+LayerType = Literal["linear", "embedding", "conv2d"]
 
 
 class QuantizationBackend(ABC):
@@ -45,6 +50,9 @@ class QuantizationBackend(ABC):
     Subclasses must implement `get_base_weight` and `set_base_weight` if they support merging.
     """
 
+    # specify the type of layer intended for this backend; serves as a hint to the PEFT method to decide what tuner
+    # layer should be used
+    layer_type: LayerType
     # Whether this backend supports merge/unmerge operations
     supports_merge: bool = False
     # user readable name
@@ -95,6 +103,7 @@ class ForwardOnlyQuantizationBackend(QuantizationBackend):
     """
 
     supports_merge = False
+    layer_type = "linear"
 
     def __init__(self, backend_name: str = "") -> None:
         self.backend_name = backend_name
@@ -115,6 +124,7 @@ class Bnb8bitBackend(QuantizationBackend):
 
     supports_merge = True
     backend_name = "bnb 8bit"
+    layer_type = "linear"
 
     def get_base_weight(self, base_layer: nn.Module) -> torch.Tensor:
         weight = base_layer.weight
@@ -140,6 +150,7 @@ class Bnb4bitBackend(QuantizationBackend):
 
     supports_merge = True
     backend_name = "bnb 4bit"
+    layer_type = "linear"
 
     def get_base_weight(self, base_layer: nn.Module) -> torch.Tensor:
         weight = base_layer.weight
@@ -172,6 +183,7 @@ class HqqBackend(QuantizationBackend):
 
     supports_merge = True
     backend_name = "hqq"
+    layer_type = "linear"
 
     def get_base_weight(self, base_layer: nn.Module) -> torch.Tensor:
         return base_layer.dequantize()
@@ -201,6 +213,7 @@ class TorchaoBackend(QuantizationBackend):
 
     supports_merge = True
     backend_name = "torchao"
+    layer_type = "linear"
 
     def __init__(self, get_apply_tensor_subclass):
         self.get_apply_tensor_subclass = get_apply_tensor_subclass
@@ -251,6 +264,7 @@ def resolve_quantization_backend(base_layer: nn.Module, **kwargs) -> Quantizatio
         if isinstance(base_layer, bnb.nn.Linear8bitLt):
             return Bnb8bitBackend()
 
+    # bitsandbytes
     if is_bnb_4bit_available():
         import bitsandbytes as bnb
 
@@ -306,9 +320,7 @@ def resolve_quantization_backend(base_layer: nn.Module, **kwargs) -> Quantizatio
 
     # AWQ (via gptqmodel)
     if is_gptqmodel_available():
-        from gptqmodel.nn_modules.qlinear.gemm_awq import AwqGEMMQuantLinear
-
-        if isinstance(base_layer, AwqGEMMQuantLinear):
+        if is_gptqmodel_awq_layer(base_layer):
             return ForwardOnlyQuantizationBackend("awq")
 
     # INC (Intel Neural Compressor)
@@ -318,6 +330,7 @@ def resolve_quantization_backend(base_layer: nn.Module, **kwargs) -> Quantizatio
         if isinstance(base_layer, PatchedLinear):
             return ForwardOnlyQuantizationBackend("inc")
 
+    # TransformerEngine
     if is_te_pytorch_available():
         import transformer_engine as te
 

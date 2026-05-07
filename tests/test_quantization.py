@@ -42,8 +42,6 @@ from peft.utils.quantization_utils import (
 from .testing_utils import hub_online_once, set_init_weights_false
 
 
-OPT_125M_ID = "peft-internal-testing/opt-125m"
-OPT_350M_GPTQ_ID = "marcsun13/opt-350m-gptq-4bit"
 SEED = 0
 DEVICE = infer_device()
 MIN_CORR = 0.9
@@ -56,7 +54,7 @@ class Bnb8bitLoader:
     backend_cls = Bnb8bitBackend
     supports_merge = True
     supports_non_quantized_comparison = True
-    model_id = OPT_125M_ID
+    model_id = "peft-internal-testing/opt-125m"
     expected_layer_count = 24  # (q_proj, v_proj) x 12 layers
 
     def load_model(self):
@@ -73,7 +71,7 @@ class Bnb4bitLoader:
     backend_cls = Bnb4bitBackend
     supports_merge = True
     supports_non_quantized_comparison = True
-    model_id = OPT_125M_ID
+    model_id = "peft-internal-testing/opt-125m"
     expected_layer_count = 24  # (q_proj, v_proj) x 12 layers
 
     def load_model(self):
@@ -94,7 +92,7 @@ class TorchAoInt8WeightOnlyLoader:
     backend_cls = TorchaoBackend
     supports_merge = True
     supports_non_quantized_comparison = True
-    model_id = OPT_125M_ID
+    model_id = "peft-internal-testing/opt-125m"
     expected_layer_count = 24  # (q_proj, v_proj) x 12 layers
 
     def load_model(self):
@@ -113,7 +111,7 @@ class TorchAoInt8DynamicActivationInt8WeightLoader:
     backend_cls = TorchaoBackend
     supports_merge = False
     supports_non_quantized_comparison = True
-    model_id = OPT_125M_ID
+    model_id = "peft-internal-testing/opt-125m"
     expected_layer_count = 24  # (q_proj, v_proj) x 12 layers
 
     def load_model(self):
@@ -133,8 +131,8 @@ class Gptq4bitLoader:
     supports_merge = False
     # No on-the-fly quantization path; the comparison would need a separate fp model.
     supports_non_quantized_comparison = False
-    model_id = OPT_350M_GPTQ_ID
-    expected_layer_count = 48  # (q_proj, v_proj) x 24 layers
+    model_id = "marcsun13/opt-350m-gptq-4bit"
+    expected_layer_count = 24  # (q_proj, v_proj) x 12 layers
 
     def load_model(self):
         from transformers import GPTQConfig

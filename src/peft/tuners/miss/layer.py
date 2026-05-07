@@ -21,7 +21,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 from peft.utils import quantization_extra_repr, resolve_quantization_backend
 
 from .config import MissConfig
@@ -50,10 +50,10 @@ class MissLayer(BaseTunerLayer):
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
-        if isinstance(base_layer, nn.Linear):
-            self.in_features, self.out_features = base_layer.in_features, base_layer.out_features
-        else:
-            raise ValueError(f"Unsupported layer type {type(base_layer)}")
+        in_features, out_features = _get_in_out_features(base_layer)
+        if (in_features is None) or (out_features is None):
+            raise TypeError(f"Unsupported layer type {type(base_layer)}")
+        self.in_features, self.out_features = in_features, out_features
 
     def update_layer(
         self,
@@ -86,12 +86,8 @@ class MissLayer(BaseTunerLayer):
 
         self.miss_dropout[adapter_name] = miss_dropout_layer
 
-        # Determine shape of MiSS weights
-        base_layer = self.get_base_layer()
-        if isinstance(base_layer, nn.Linear):
-            self.miss_block[adapter_name] = nn.Parameter(torch.zeros(r, self.out_features), requires_grad=True)
-        else:
-            raise TypeError(f"MiSS is not implemented for base layers of type {type(base_layer).__name__}")
+        # Determine shape of MiSS weights; supportedness was already validated in __init__ and the model dispatcher.
+        self.miss_block[adapter_name] = nn.Parameter(torch.zeros(r, self.out_features), requires_grad=True)
 
         # Initialize weights
         if init_weights == "bat":

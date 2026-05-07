@@ -28,7 +28,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Function
 
-from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 from peft.utils import quantization_extra_repr, resolve_quantization_backend
 
 from .config import BOFTConfig
@@ -232,12 +232,9 @@ class BOFTLayer(BaseTunerLayer):
 
         base_layer = self.get_base_layer()
 
-        if isinstance(base_layer, nn.Linear):
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif isinstance(base_layer, nn.Conv2d):
-            in_features, out_features = base_layer.in_channels, base_layer.out_channels
-        else:
-            raise ValueError(f"Unsupported layer type {type(base_layer)}")
+        in_features, out_features = _get_in_out_features(base_layer)
+        if (in_features is None) or (out_features is None):
+            raise TypeError(f"Unsupported layer type {type(base_layer)}")
 
         self.in_features = in_features
         self.out_features = out_features
