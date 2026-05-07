@@ -192,7 +192,7 @@ class MissLinear(nn.Module, MissLayer):
                     if self.miss_fn == "bat":
                         weight += self.get_delta_weight(active_adapter, weight)
                     else:
-                        weight = self.get_delta_weight_miss(active_adapter, self.base_layer.weight.data)
+                        weight = self.get_delta_weight_miss(active_adapter, weight)
 
                     if not torch.isfinite(weight).all():
                         raise ValueError(
@@ -225,13 +225,13 @@ class MissLinear(nn.Module, MissLayer):
                 weight = self.get_base_weight()
                 orig_dtype = weight.dtype
                 if self.miss_fn == "bat":
-                    delta_weight = self.get_delta_weight(active_adapter, weight, reverse=True)
+                    weight = self.get_delta_weight(active_adapter, weight, reverse=True)
                 elif self.miss_fn == "mini":
-                    delta_weight = self.get_delta_weight_miss(active_adapter, weight, reverse=True)
+                    weight = self.get_delta_weight_miss(active_adapter, weight, reverse=True)
                 else:
-                    delta_weight = self.get_delta_weight_miss(active_adapter, weight, reverse=True)
+                    weight = self.get_delta_weight_miss(active_adapter, weight, reverse=True)
 
-                base_layer.weight.data = weight.to(orig_dtype)
+                self.set_base_weight(weight.to(orig_dtype))
 
     def get_delta_weight(self, adapter, orig_weight, reverse: bool = False) -> torch.Tensor:
         """
