@@ -244,9 +244,9 @@ from peft import LoraConfig, VeloraConfig
 config = LoraConfig(
     target_modules=["q_proj", "v_proj"],
     velora_config=VeloraConfig(
-        num_groups=32,
-        scale=1.0,
-        init_type="batch_average_once",
+        num_groups=64,
+        scale=0.2,
+        init_type="batch_average",
     ),
 )
 ```
@@ -263,7 +263,7 @@ Below are some results with the [MetaMathQA benchmark](https://github.com/huggin
 | LoRA + GC | 0.5426 | 13.17 | 1671.8 |
 | LoRA+VeLoRA | 0.5427 | 19.94 | 2057.6 |
 
-#### Caveats
+#### Usage
 
 - VeLoRA is currently supported on standard LoRA linear layers only.
 
