@@ -12,6 +12,7 @@ from torch import nn
 from peft import LoraConfig, PeftType, VeloraConfig, get_peft_model
 from peft.tuners.lora import VeloraConfig as LoraVeloraConfig
 from peft.tuners.lora.velora import (
+    VeloraFunction,
     _compress_activations,
     _normalize_projection,
     _reconstruct_activations,
@@ -170,7 +171,7 @@ def test_velora_grouping_pads_remainder_features():
     assert reconstructed.shape == x.shape
 
 
-def test_reshape_to_grouped_subtokens_pads_non_divisible_input_dim():
+def test_reshape_to_grouped_subtokens_pads_non_divisible_input_dim_and_velora_autograd():
     x = torch.arange(12, dtype=torch.float32).reshape(2, 2, 3)
     grouped = _reshape_to_grouped_subtokens(x, num_groups=2)
 
@@ -186,6 +187,23 @@ def test_reshape_to_grouped_subtokens_pads_non_divisible_input_dim():
 
     assert grouped.shape == (4, 2, 2)
     assert torch.equal(grouped, expected)
+
+    x = x.detach().requires_grad_(True)
+    weight = (torch.arange(15, dtype=torch.float32).reshape(5, 3) / 10).requires_grad_(True)
+    bias = (torch.arange(5, dtype=torch.float32) / 10).requires_grad_(True)
+    embed = _normalize_projection(torch.tensor([1.0, 2.0]))
+
+    output = VeloraFunction.apply(x, weight, bias, embed, 2, 0.5)
+    assert torch.allclose(output, F.linear(x, weight, bias))
+
+    output.sum().backward()
+
+    assert x.grad is not None
+    assert x.grad.shape == x.shape
+    assert weight.grad is not None
+    assert weight.grad.shape == weight.shape
+    assert bias.grad is not None
+    assert bias.grad.shape == bias.shape
 
 
 def _expected_batch_average_embed(x: torch.Tensor, num_groups: int, target: torch.Tensor) -> torch.Tensor:
