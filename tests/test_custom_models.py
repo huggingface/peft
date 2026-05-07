@@ -62,8 +62,8 @@ from peft import (
     TinyLoraConfig,
     TrainableTokensConfig,
     VBLoRAConfig,
-    VeraConfig,
     VeloraConfig,
+    VeraConfig,
     WaveFTConfig,
     get_peft_model,
 )

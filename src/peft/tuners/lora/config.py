@@ -54,13 +54,14 @@ class LoraRuntimeConfig:
 @dataclass
 class VeloraConfig:
     """
-    This is the sub-configuration class to store the configuration for VeLoRA.
-    Original paper can be found <a href='https://arxiv.org/abs/2405.17991'>here</a>.
-    
+    This is the sub-configuration class to store the configuration for VeLoRA. Original paper can be found <a
+    href='https://arxiv.org/abs/2405.17991'>here</a>.
+
     Args:
         num_groups (`int`):
-            Number of feature groups used by VeLoRA to split the input activation depth before compression.
-            Increase this parameter to reduce the reconstruction error of input activations at the cost of increased memory consumption.
+            Number of feature groups used by VeLoRA to split the input activation depth before compression. Increase
+            this parameter to reduce the reconstruction error of input activations at the cost of increased memory
+            consumption.
         scale (`float`):
             Scale applied to the reconstructed activations in the VeLoRA backward pass.
         init_type (`str`):
@@ -84,7 +85,7 @@ class VeloraConfig:
         default=1.0,
         metadata={"help": "Scale applied to the reconstructed activations in the VeLoRA backward pass."},
     )
-    init_type: Literal["batch_average", "batch_average_once", "random"]  = field(
+    init_type: Literal["batch_average", "batch_average_once", "random"] = field(
         default="batch_average",
         metadata={
             "help": "Projection initialization strategy for VeLoRA. Supported values are "
@@ -499,8 +500,8 @@ class LoraConfig(PeftConfig):
             LoRA, so it is recommended to merge weights for inference. For more information, see
             https://huggingface.co/papers/2402.09353.
         velora_config (`Optional[VeloraConfig]`):
-            Enable VeLoRA by providing a VeloraConfig. VeLoRA swaps in a custom backward pass for the LoRA A
-            projection that stores compressed activations instead of the full input activations.
+            Enable VeLoRA by providing a VeloraConfig. VeLoRA swaps in a custom backward pass for the LoRA A projection
+            that stores compressed activations instead of the full input activations.
         alora_invocation_tokens (`List[int]`):
             If not None, enable <a href='https://huggingface.co/papers/2504.12397'>'Activated LoRA' (aLoRA)</a>, with
             alora_invocation_tokens being the tokenized invocation string for the adapter (must be present in all model

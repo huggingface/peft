@@ -90,6 +90,7 @@ class PeftType(str, enum.Enum):
     PSOFT = "PSOFT"
     PEANUT = "PEANUT"
 
+
 class TaskType(str, enum.Enum):
     """
     Enum class for the different types of tasks supported by PEFT.
