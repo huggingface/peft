@@ -202,7 +202,7 @@ def test_velora_batch_average_update_policy(init_type, updates_every_forward):
     _ = model(x0)
 
     expected0 = _expected_batch_average_embed(x0, num_groups=8, target=layer.lora_velora_embed["default"])
-    assert bool(layer.lora_velora_initialized["default"].item()) is True
+    assert layer.lora_velora_initialized["default"] is True
     assert torch.allclose(layer.lora_velora_embed["default"], expected0, atol=1e-6, rtol=1e-5)
 
     stored_embed = layer.lora_velora_embed["default"].clone()
@@ -270,9 +270,7 @@ def test_velora_backward_matches_manual_reconstruction():
 
     embed = _normalize_projection(torch.tensor([1.0, 2.0, 3.0, 4.0]))
     layer.lora_velora_embed["default"] = embed.to(layer.lora_velora_embed["default"])
-    layer.lora_velora_initialized["default"] = torch.tensor(
-        True, device=layer.lora_velora_embed["default"].device, dtype=torch.bool
-    )
+    layer.lora_velora_initialized["default"] = True
     with torch.no_grad():
         layer.lora_A["default"].weight.copy_(torch.arange(64, dtype=torch.float32).reshape(4, 16) / 100)
         layer.lora_B["default"].weight.copy_(torch.arange(40, dtype=torch.float32).reshape(10, 4) / 50)

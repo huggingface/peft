@@ -779,7 +779,7 @@ class VeloraLinearVariant(LoraVariant):
         if not hasattr(module, "lora_velora_embed"):
             module.lora_velora_embed = BufferDict({}, persistent=True)
         if not hasattr(module, "lora_velora_initialized"):
-            module.lora_velora_initialized = BufferDict({}, persistent=True)
+            module.lora_velora_initialized = {}
         if not hasattr(module, "lora_velora_num_groups"):
             module.lora_velora_num_groups = {}
         if not hasattr(module, "lora_velora_init_type"):
@@ -815,9 +815,7 @@ class VeloraLinearVariant(LoraVariant):
             initialized = False
 
         module.lora_velora_embed[adapter_name] = embed
-        module.lora_velora_initialized[adapter_name] = torch.tensor(
-            initialized, device=device, dtype=torch.bool
-        )
+        module.lora_velora_initialized[adapter_name] = initialized
         module._move_adapter_to_device_of_base_layer(adapter_name)
 
     @staticmethod
@@ -846,7 +844,7 @@ class VeloraLinearVariant(LoraVariant):
             return
         if init_type == "batch_average_once":
             initialized = module.lora_velora_initialized[adapter_name]
-            if bool(initialized.item()):
+            if initialized:
                 return
 
         num_groups = module.lora_velora_num_groups[adapter_name]
@@ -856,7 +854,7 @@ class VeloraLinearVariant(LoraVariant):
             embed = _normalize_projection(subtokens.mean(dim=0))
             target = module.lora_velora_embed[adapter_name]
             module.lora_velora_embed[adapter_name] = embed.to(device=target.device, dtype=target.dtype)
-            module.lora_velora_initialized[adapter_name] = torch.tensor(True, device=target.device, dtype=torch.bool)
+            module.lora_velora_initialized[adapter_name] = True
 
     @staticmethod
     def forward(
