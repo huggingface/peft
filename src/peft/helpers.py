@@ -384,11 +384,9 @@ class KappaTuneSelector:
             if any(param_name.endswith(s) for s in self.moe_param_suffixes) and param.dim() == 3
         ]
         moe_iter = (
-            tqdm(moe_params, desc="Computing SVD (MoE parameters)", unit="param")
-            if self.show_progress
-            else moe_params
+            tqdm(moe_params, desc="Computing SVD (MoE parameters)", unit="param") if self.show_progress else moe_params
         )
-        for param_name, param in moe_iter:        
+        for param_name, param in moe_iter:
             w = param.data.detach().float()
             num_experts, *expert_shape = w.shape
 
@@ -460,7 +458,7 @@ def find_kappa_target_modules(
 ) -> dict[str, Optional[list[str]]]:
     """
     One-liner convenience function for KappaTune target selection. Returns both target_modules and target_parameters.
-    
+
     Args:
         model (nn.Module):
             Base model whose weights will be analyzed for condition numbers.
@@ -469,11 +467,11 @@ def find_kappa_target_modules(
         max_dim_size_to_analyze (int, optional):
             Upper bound on the maximum matrix dimension analyzed via SVD. Defaults to 16384.
         moe_param_suffixes (Optional[tuple[str, ...]], optional):
-            Parameter-name suffixes used to identify fused MoE tensors that should be returned via 
-            `target_parameters`. If None, sensible defaults are used.
+            Parameter-name suffixes used to identify fused MoE tensors that should be returned via `target_parameters`.
+            If None, sensible defaults are used.
         show_progress (bool, optional):
-            Whether to display a progress bar while computing condition numbers (SVD-based) across
-            candidate tensors/modules. Disable in CI or other non-interactive environments. Defaults to True.
+            Whether to display a progress bar while computing condition numbers (SVD-based) across candidate
+            tensors/modules. Disable in CI or other non-interactive environments. Defaults to True.
     """
     selector = KappaTuneSelector(
         model,
