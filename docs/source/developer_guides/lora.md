@@ -263,7 +263,7 @@ Below are some results with the [MetaMathQA benchmark](https://github.com/huggin
 | LoRA + GC | 0.5426 | 13.17 | 1671.8 |
 | LoRA+VeLoRA | 0.5427 | 19.94 | 2057.6 |
 
-#### Usage
+#### Caveats
 
 - VeLoRA is currently supported on standard LoRA linear layers only.
 
