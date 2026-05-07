@@ -24,15 +24,26 @@ from accelerate.utils.memory import clear_device_cache
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig, TorchAoConfig
 
 from peft import BOFTConfig, MissConfig, VeraConfig, get_peft_model
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_torchao_available
+from peft.import_utils import (
+    is_bnb_4bit_available,
+    is_bnb_available,
+    is_gptqmodel_available,
+    is_torchao_available,
+)
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import infer_device
-from peft.utils.quantization_utils import Bnb4bitBackend, Bnb8bitBackend, TorchaoBackend
+from peft.utils.quantization_utils import (
+    Bnb4bitBackend,
+    Bnb8bitBackend,
+    ForwardOnlyQuantizationBackend,
+    TorchaoBackend,
+)
 
 from .testing_utils import hub_online_once, set_init_weights_false
 
 
-MODEL_ID = "peft-internal-testing/opt-125m"
+OPT_125M_ID = "peft-internal-testing/opt-125m"
+OPT_350M_GPTQ_ID = "marcsun13/opt-350m-gptq-4bit"
 SEED = 0
 DEVICE = infer_device()
 MIN_CORR = 0.9
@@ -44,13 +55,15 @@ class Bnb8bitLoader:
     name = "bnb_8bit"
     backend_cls = Bnb8bitBackend
     supports_merge = True
+    supports_non_quantized_comparison = True
+    model_id = OPT_125M_ID
+    expected_layer_count = 24  # (q_proj, v_proj) x 12 layers
 
-    @staticmethod
-    def load_model():
+    def load_model(self):
         quant_config = BitsAndBytesConfig(load_in_8bit=True)
-        with hub_online_once(MODEL_ID):
+        with hub_online_once(self.model_id):
             return AutoModelForCausalLM.from_pretrained(
-                MODEL_ID, quantization_config=quant_config, device_map={"": DEVICE}
+                self.model_id, quantization_config=quant_config, device_map={"": DEVICE}
             )
 
 
@@ -59,17 +72,19 @@ class Bnb4bitLoader:
     name = "bnb_4bit"
     backend_cls = Bnb4bitBackend
     supports_merge = True
+    supports_non_quantized_comparison = True
+    model_id = OPT_125M_ID
+    expected_layer_count = 24  # (q_proj, v_proj) x 12 layers
 
-    @staticmethod
-    def load_model():
+    def load_model(self):
         quant_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_use_double_quant=False,
             bnb_4bit_compute_dtype=torch.float32,
         )
-        with hub_online_once(MODEL_ID):
+        with hub_online_once(self.model_id):
             return AutoModelForCausalLM.from_pretrained(
-                MODEL_ID, quantization_config=quant_config, device_map={"": DEVICE}
+                self.model_id, quantization_config=quant_config, device_map={"": DEVICE}
             )
 
 
@@ -78,15 +93,17 @@ class TorchAoInt8WeightOnlyLoader:
     name = "torchao_int8_weight_only"
     backend_cls = TorchaoBackend
     supports_merge = True
+    supports_non_quantized_comparison = True
+    model_id = OPT_125M_ID
+    expected_layer_count = 24  # (q_proj, v_proj) x 12 layers
 
-    @staticmethod
-    def load_model():
+    def load_model(self):
         from torchao.quantization import Int8WeightOnlyConfig
 
         quant_config = TorchAoConfig(quant_type=Int8WeightOnlyConfig())
-        with hub_online_once(MODEL_ID):
+        with hub_online_once(self.model_id):
             return AutoModelForCausalLM.from_pretrained(
-                MODEL_ID, quantization_config=quant_config, device_map={"": DEVICE}
+                self.model_id, quantization_config=quant_config, device_map={"": DEVICE}
             )
 
 
@@ -95,15 +112,40 @@ class TorchAoInt8DynamicActivationInt8WeightLoader:
     name = "torchao_int8_dynamic_activation_int8"
     backend_cls = TorchaoBackend
     supports_merge = False
+    supports_non_quantized_comparison = True
+    model_id = OPT_125M_ID
+    expected_layer_count = 24  # (q_proj, v_proj) x 12 layers
 
-    @staticmethod
-    def load_model():
+    def load_model(self):
         from torchao.quantization import Int8DynamicActivationInt8WeightConfig
 
         quant_config = TorchAoConfig(quant_type=Int8DynamicActivationInt8WeightConfig())
-        with hub_online_once(MODEL_ID):
+        with hub_online_once(self.model_id):
             return AutoModelForCausalLM.from_pretrained(
-                MODEL_ID, quantization_config=quant_config, device_map={"": DEVICE}
+                self.model_id, quantization_config=quant_config, device_map={"": DEVICE}
+            )
+
+
+@dataclass
+class Gptq4bitLoader:
+    name = "gptq_4bit"
+    backend_cls = ForwardOnlyQuantizationBackend
+    supports_merge = False
+    # No on-the-fly quantization path; the comparison would need a separate fp model.
+    supports_non_quantized_comparison = False
+    model_id = OPT_350M_GPTQ_ID
+    expected_layer_count = 48  # (q_proj, v_proj) x 24 layers
+
+    def load_model(self):
+        from transformers import GPTQConfig
+
+        quant_config = GPTQConfig(bits=4)
+        with hub_online_once(self.model_id):
+            return AutoModelForCausalLM.from_pretrained(
+                self.model_id,
+                quantization_config=quant_config,
+                dtype=torch.float16,
+                device_map={"": DEVICE},
             )
 
 
@@ -115,6 +157,8 @@ if is_bnb_4bit_available():
 if is_torchao_available():
     QUANTIZATION_BACKENDS.append(TorchAoInt8WeightOnlyLoader())
     QUANTIZATION_BACKENDS.append(TorchAoInt8DynamicActivationInt8WeightLoader())
+if is_gptqmodel_available():
+    QUANTIZATION_BACKENDS.append(Gptq4bitLoader())
 
 
 def _quant_id(backend):
@@ -199,7 +243,7 @@ class TestQuantization:
         quantized_layers = [
             m for m in model.modules() if isinstance(m, BaseTunerLayer) and m.quantization_backend is not None
         ]
-        assert len(quantized_layers) == 24  # (q_proj, v_proj) x 12 layers
+        assert len(quantized_layers) == quant.expected_layer_count
         for layer in quantized_layers:
             rep = repr(layer)
             assert "quantization_backend=" in rep
@@ -231,6 +275,9 @@ class TestQuantization:
         Both models use the same adapter config with non-identity init. The outputs won't match exactly due to
         quantization noise, but should be in the same ballpark.
         """
+        if not quant.supports_non_quantized_comparison:
+            pytest.skip(f"{quant.name} is pre-quantized; no on-the-fly non-quantized counterpart for comparison")
+
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
 
         # Quantized model
@@ -245,8 +292,8 @@ class TestQuantization:
         del model
 
         # Non-quantized model
-        with hub_online_once(MODEL_ID):
-            model = AutoModelForCausalLM.from_pretrained(MODEL_ID, device_map={"": DEVICE})
+        with hub_online_once(quant.model_id):
+            model = AutoModelForCausalLM.from_pretrained(quant.model_id, device_map={"": DEVICE})
         config = config_cls(**config_kwargs.copy())
         torch.manual_seed(SEED)
         model = get_peft_model(model, config).eval()
