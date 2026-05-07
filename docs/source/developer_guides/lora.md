@@ -257,11 +257,11 @@ Use `batch_average_once` to initialize the projection from the first training ba
 
 Below are some results with the [MetaMathQA benchmark](https://github.com/huggingface/peft/tree/main/method_comparison/MetaMathQA). 
 
-| Variant | Test Accuracy | Max Memory (GiB) | Tokens/sec |
+| Variant | Training Loss | Max Memory (GiB) | Tokens/sec |
 |---|---:|---:|---:|
-| LoRA | 54.51% | 27.69 | 2366.2 |
-| LoRA + GC | 55.80% | 13.17 | 1671.8 |
-| LoRA+VeLoRA | 54.89% | 19.94 | 2057.6 |
+| LoRA | 0.5427 | 27.69 | 2366.2 |
+| LoRA + GC | 0.5426 | 13.17 | 1671.8 |
+| LoRA+VeLoRA | 0.5427 | 19.94 | 2057.6 |
 
 #### Caveats
 

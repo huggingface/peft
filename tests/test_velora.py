@@ -170,6 +170,24 @@ def test_velora_grouping_pads_remainder_features():
     assert reconstructed.shape == x.shape
 
 
+def test_reshape_to_grouped_subtokens_pads_non_divisible_input_dim():
+    x = torch.arange(12, dtype=torch.float32).reshape(2, 2, 3)
+    grouped = _reshape_to_grouped_subtokens(x, num_groups=2)
+
+    expected = torch.tensor(
+        [
+            [[0, 1], [2, 0]],
+            [[3, 4], [5, 0]],
+            [[6, 7], [8, 0]],
+            [[9, 10], [11, 0]],
+        ],
+        dtype=torch.float32,
+    )
+
+    assert grouped.shape == (4, 2, 2)
+    assert torch.equal(grouped, expected)
+
+
 def _expected_batch_average_embed(x: torch.Tensor, num_groups: int, target: torch.Tensor) -> torch.Tensor:
     subtokens = _reshape_to_grouped_subtokens(x, num_groups)
     embed = _normalize_projection(subtokens.reshape(-1, subtokens.shape[-1]).mean(dim=0))
