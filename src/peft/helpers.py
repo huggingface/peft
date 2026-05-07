@@ -307,13 +307,17 @@ class DoraCaching:
 
 class KappaTuneSelector:
     """
-    Lightweight utility to compute per-module / per-parameter condition numbers (Îº = Ïƒ_max / Ïƒ_min) and return the
-    best LoRA targets.
+    Lightweight utility to compute per-module / per-parameter condition numbers and return the best LoRA targets.
 
     Supports:
     - Classic nn.Linear modules (target_modules in LoraConfig)
     - Modern fused MoE weights stored as 3D nn.Parameter (gate_up_proj / down_proj, gate_proj / up_proj, etc.) used in
       Llama-4, Qwen2_MoE, Qwen3_MoE, Mixtral, OLMoE and similar models. These are returned via target_parameters.
+
+    Notes:
+    - Condition-number computation requires running SVD and can take several minutes on very large models. A progress
+    bar can be shown/disabled via `show_progress`.
+
     """
 
     def __init__(
@@ -456,6 +460,20 @@ def find_kappa_target_modules(
 ) -> dict[str, Optional[list[str]]]:
     """
     One-liner convenience function for KappaTune target selection. Returns both target_modules and target_parameters.
+    
+    Args:
+        model (nn.Module):
+            Base model whose weights will be analyzed for condition numbers.
+        top_p (float, optional):
+            Select the top fraction of candidate modules/parameters with the lowest condition numbers.
+        max_dim_size_to_analyze (int, optional):
+            Upper bound on the maximum matrix dimension analyzed via SVD. Defaults to 16384.
+        moe_param_suffixes (Optional[tuple[str, ...]], optional):
+            Parameter-name suffixes used to identify fused MoE tensors that should be returned via 
+            `target_parameters`. If None, sensible defaults are used.
+        show_progress (bool, optional):
+            Whether to display a progress bar while computing condition numbers (SVD-based) across
+            candidate tensors/modules. Disable in CI or other non-interactive environments. Defaults to True.
     """
     selector = KappaTuneSelector(
         model,
