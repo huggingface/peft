@@ -236,7 +236,7 @@ Caching can thus make inference with DoRA significantly faster but it also requi
 
 ### VeLoRA
 
-[VeLoRA](https://huggingface.co/papers/2405.14174) is a LoRA variant that reduces training memory by compressing the activations saved for the LoRA in the forward pass and then reconstructing them in the backwards pass to implement the update rules. In PEFT, VeLoRA is configured as a LoRA variant through the `velora_config` argument on [`LoraConfig`].
+[VeLoRA](https://huggingface.co/papers/2405.17991) is a LoRA variant that reduces training memory by compressing the activations saved for the LoRA in the forward pass and then reconstructing them in the backwards pass to implement the update rules. In PEFT, VeLoRA is configured as a LoRA variant through the `velora_config` argument on [`LoraConfig`].
 
 ```py
 from peft import LoraConfig, VeloraConfig
