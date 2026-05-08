@@ -54,7 +54,8 @@ class LoraRuntimeConfig:
 @dataclass
 class VeloraConfig:
     """
-    This is the sub-configuration class to store the configuration for VeLoRA. Original paper can be found [here](https://arxiv.org/abs/2405.17991).
+    This is the sub-configuration class to store the configuration for VeLoRA. Original paper can be found
+    [here](https://arxiv.org/abs/2405.17991).
 
     Args:
         num_groups (`int`):
