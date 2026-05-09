@@ -19,6 +19,7 @@ ds["validation"] = ds["test"]
 del ds["test"]
 
 classes = ["negative", "neutral", "positive"]
+# Keep map in-process; num_proc=1 still uses multiprocessing and can trigger dill issues on some Python versions.
 ds = ds.map(
     lambda x: {"text_label": [classes[label] for label in x["label"]]},
     batched=True,
