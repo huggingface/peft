@@ -80,7 +80,13 @@ lr_scheduler = get_linear_schedule_with_warmup(
     num_training_steps=(len(train_dataloader) * num_epochs),
 )
 
-device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda" if torch.cuda.is_available() else "cpu"
+device = (
+    torch.accelerator.current_accelerator().type
+    if hasattr(torch, "accelerator")
+    else "cuda"
+    if torch.cuda.is_available()
+    else "cpu"
+)
 model = model.to(device)
 
 for epoch in range(num_epochs):
