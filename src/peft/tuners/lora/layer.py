@@ -795,33 +795,30 @@ class Linear(nn.Module, LoraLayer):
             **kwargs,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
-
+    
+    @property
+    def valid_variants(self):
+        from . import variants
+        return {
+            (): None,
+            ("use_dora",): variants.DoraLinearVariant,
+            ("arrow_config",): variants.ArrowLinearVariant,
+            ("use_bdlora",): variants.BdLoraLinearVariant,
+            ("alora_invocation_tokens",): variants.ALoraLinearVariant,
+            ("velora_config",): variants.VeloraLinearVariant,
+        }
     def resolve_lora_variant(self, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if config.velora_config is not None:
-            from .variants import VeloraLinearVariant
+        import dataclasses
+        from . import variants
 
-            return VeloraLinearVariant()
-
-        if config.arrow_config is not None:
-            from .variants import ArrowLinearVariant
-
-            return ArrowLinearVariant()
-
-        if config.use_bdlora is not None:
-            from .variants import BdLoraLinearVariant
-
-            return BdLoraLinearVariant()
-
-        use_alora = config.alora_invocation_tokens is not None
-        if not config.use_dora and not use_alora:
-            return None
-
-        from .variants import ALoraLinearVariant, DoraLinearVariant
-
-        if use_alora:
-            return ALoraLinearVariant()
-        else:
-            return DoraLinearVariant()
+        active = tuple(sorted(
+            f.name for f in dataclasses.fields(config)
+            if f.metadata.get("is_variant") and getattr(config, f.name)
+        ))
+        if active not in self.valid_variants:
+            raise ValueError(f"Invalid or unsupported variant combination: {active}")
+        variant_class = self.valid_variants[active]
+        return variant_class() if variant_class else None
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
