@@ -202,8 +202,6 @@ def _init_on_device(device: torch.device, include_buffers: bool = None):
     # adapted from accelerate.big_modeling.py
     old_register_parameter = nn.Module.register_parameter
     old_register_buffer = nn.Module.register_buffer
-    if include_buffers:
-        old_register_buffer = nn.Module.register_buffer
 
     def register_empty_parameter(module, name, param):
         # This works because torch first initializes the parameters with torch.empty, thus not assigning any new memory.
