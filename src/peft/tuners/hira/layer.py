@@ -18,8 +18,8 @@ import warnings
 from typing import Any, Optional
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
@@ -55,11 +55,7 @@ class HiraLayer(BaseTunerLayer):
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif isinstance(base_layer, nn.Conv1d):
-            in_features, out_features = base_layer.in_channels, base_layer.out_channels
-        elif isinstance(base_layer, nn.Conv2d):
-            in_features, out_features = base_layer.in_channels, base_layer.out_channels
-        elif isinstance(base_layer, nn.Conv3d):
+        elif isinstance(base_layer, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
             in_features, out_features = base_layer.in_channels, base_layer.out_channels
         elif isinstance(base_layer, nn.Embedding):
             in_features, out_features = base_layer.num_embeddings, base_layer.embedding_dim
@@ -649,9 +645,7 @@ class _ConvNd(nn.Module, HiraLayer):
         else:
             output_tensor = self.conv_fn(weight_A.transpose(0, 1), weight_B)
 
-            if self.get_base_layer().groups > 1:
-                output_tensor = output_tensor
-            else:
+            if self.get_base_layer().groups <= 1:
                 output_tensor = output_tensor.transpose(0, 1)
 
         if cast_to_fp32:

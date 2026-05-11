@@ -654,7 +654,7 @@ class TestKappaTuneSelector:
     def test_kappatune_with_moe_layers(self):
         """Test support for fused MoE 3D parameters (target_parameters)."""
         import torch
-        import torch.nn as nn
+        from torch import nn
 
         from peft.helpers import KappaTuneSelector, find_kappa_target_modules
 
