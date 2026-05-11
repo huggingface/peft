@@ -286,7 +286,7 @@ class _ConvNd(nn.Module, IA3Layer):
                 if not self.is_feedforward and (base_layer.bias is not None):
                     scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
                     orig_dtype = base_layer.bias.data.dtype
-                    base_layer.bias.data = torch.mul(base_layer.bias.data, scaling.data).to(orig_dtype)
+                    base_layer.bias.data = torch.div(base_layer.bias.data, scaling.data + 1e-8).to(orig_dtype)
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         dtype = previous_dtype = x.dtype

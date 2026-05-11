@@ -21,6 +21,7 @@ import torch
 from accelerate.utils.imports import is_xpu_available
 from torch import nn
 
+from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.lora.config import BdLoraConfig
 from peft.utils.other import transpose
 
@@ -28,6 +29,7 @@ from .arrow import ArrowLoraLinearLayer
 from .config import LoraConfig, PeftConfig
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
 from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
+from .velora import VeloraFunction, _get_group_dim, _normalize_projection, _reshape_to_grouped_subtokens
 
 
 class ArrowLinearVariant(LoraVariant):
@@ -768,6 +770,121 @@ def get_alora_offsets_for_generate(model: nn.module, *args, **kwargs):
 
             kwargs["alora_offsets"] = None
     return kwargs
+
+
+class VeloraLinearVariant(LoraVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
+        if not hasattr(module, "lora_velora_embed"):
+            module.lora_velora_embed = BufferDict({}, persistent=True)
+        if not hasattr(module, "lora_velora_initialized"):
+            module.lora_velora_initialized = {}
+        if not hasattr(module, "lora_velora_num_groups"):
+            module.lora_velora_num_groups = {}
+        if not hasattr(module, "lora_velora_init_type"):
+            module.lora_velora_init_type = {}
+        if not hasattr(module, "lora_velora_scale"):
+            module.lora_velora_scale = {}
+
+        velora_param_names = (
+            "lora_velora_embed",
+            "lora_velora_initialized",
+            "lora_velora_num_groups",
+            "lora_velora_init_type",
+            "lora_velora_scale",
+        )
+        for param_name in velora_param_names:
+            if param_name not in module.other_param_names:
+                module.other_param_names = module.other_param_names + (param_name,)
+
+        module.lora_velora_num_groups[adapter_name] = config.velora_config.num_groups
+        module.lora_velora_init_type[adapter_name] = config.velora_config.init_type
+        module.lora_velora_scale[adapter_name] = config.velora_config.scale
+
+        group_dim = _get_group_dim(module.in_features, config.velora_config.num_groups)
+        base_layer = module.get_base_layer()
+        dtype = base_layer.weight.dtype
+        device = base_layer.weight.device
+
+        if config.velora_config.init_type == "random":
+            embed = _normalize_projection(torch.randn(group_dim, device=device, dtype=dtype)).to(dtype=dtype)
+            initialized = True
+        else:
+            embed = torch.zeros(group_dim, device=device, dtype=dtype)
+            initialized = False
+
+        module.lora_velora_embed[adapter_name] = embed
+        module.lora_velora_initialized[adapter_name] = initialized
+        module._move_adapter_to_device_of_base_layer(adapter_name)
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+        return orig_weight + delta_weight.to(orig_dtype)
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        orig_weight.data += module.get_delta_weight(active_adapter)
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+        return orig_weight - delta_weight.to(orig_dtype)
+
+    @staticmethod
+    def _maybe_update_embed(module: Linear, adapter_name: str, x: torch.Tensor) -> None:
+        if adapter_name not in module.lora_velora_initialized:
+            return
+
+        init_type = module.lora_velora_init_type[adapter_name]
+        if init_type == "random":
+            return
+        if init_type == "batch_average_once":
+            initialized = module.lora_velora_initialized[adapter_name]
+            if initialized:
+                return
+
+        num_groups = module.lora_velora_num_groups[adapter_name]
+        with torch.no_grad():
+            subtokens = _reshape_to_grouped_subtokens(x.detach(), num_groups)
+            subtokens = subtokens.reshape(-1, subtokens.shape[-1])
+            embed = _normalize_projection(subtokens.mean(dim=0))
+            target = module.lora_velora_embed[adapter_name]
+            module.lora_velora_embed[adapter_name] = embed.to(device=target.device, dtype=target.dtype)
+            module.lora_velora_initialized[adapter_name] = True
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+
+        x = dropout(x)
+
+        if module.training and torch.is_grad_enabled():
+            VeloraLinearVariant._maybe_update_embed(module, active_adapter, x)
+            after_A = VeloraFunction.apply(
+                x,
+                lora_A.weight,
+                lora_A.bias,
+                module.lora_velora_embed[active_adapter],
+                module.lora_velora_num_groups[active_adapter],
+                module.lora_velora_scale[active_adapter],
+            )
+        else:
+            after_A = lora_A(x)
+
+        result = result + lora_B(after_A) * scaling
+        return result
 
 
 class BlockDiagonalLinear(nn.Module):

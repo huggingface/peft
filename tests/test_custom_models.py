@@ -38,6 +38,7 @@ from peft import (
     DeloraConfig,
     FourierFTConfig,
     GraloraConfig,
+    HiraConfig,
     HRAConfig,
     IA3Config,
     LilyConfig,
@@ -60,6 +61,7 @@ from peft import (
     TinyLoraConfig,
     TrainableTokensConfig,
     VBLoRAConfig,
+    VeloraConfig,
     VeraConfig,
     WaveFTConfig,
     get_peft_model,
@@ -102,6 +104,27 @@ TEST_CASES = [
         "MLP",
         LoraConfig,
         {"target_modules": "lin1", "use_dora": True, "lora_alpha": 32},
+    ),
+    (
+        "Vanilla MLP 10 LoRA with VeLoRA random",
+        "MLP",
+        LoraConfig,
+        {"target_modules": ["lin0"], "velora_config": VeloraConfig(num_groups=2, init_type="random")},
+    ),
+    (
+        "Vanilla MLP 11 LoRA with VeLoRA batch_average",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0", "lin1"],
+            "velora_config": VeloraConfig(num_groups=2, init_type="batch_average"),
+        },
+    ),
+    (
+        "Vanilla MLP 12 LoRA with VeLoRA batch_average_once",
+        "MLP",
+        LoraConfig,
+        {"target_modules": ["lin0"], "velora_config": VeloraConfig(num_groups=2, init_type="batch_average_once")},
     ),
     ("Embedding + transformers Conv1D 1 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Embedding + transformers Conv1D 2 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
@@ -1084,6 +1107,31 @@ TEST_CASES = [
         {"target_modules": ["lin0", "lin1"], "r": 2, "depth": 0, "act_fn": "relu"},
     ),
     ("Vanilla MLP 5 Peanut", "MLP", PeanutConfig, {"target_modules": "lin0", "r": 2, "depth": 1, "act_fn": "gelu"}),
+    #######
+    # HIRA #
+    #######
+    ("Vanilla MLP 1 HiRA", "MLP", HiraConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 HiRA", "MLP", HiraConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 HiRA", "MLP", HiraConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 HiRA", "MLP", HiraConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 HiRA", "MLP", HiraConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    (
+        "Vanilla MLP 6 HiRA",
+        "MLP",
+        HiraConfig,
+        {
+            "target_modules": ["lin0"],
+            "hira_dropout": 0.1,
+        },
+    ),
+    ("Embedding + transformers Conv1D 1 HiRA", "EmbConv1D", HiraConfig, {"target_modules": ["conv1d"]}),
+    ("Embedding + transformers Conv1D 2 HiRA", "EmbConv1D", HiraConfig, {"target_modules": ["emb"]}),
+    ("Embedding + transformers Conv1D 3 HiRA", "EmbConv1D", HiraConfig, {"target_modules": ["emb", "conv1d"]}),
+    ("Conv1d HiRA", "Conv1d", HiraConfig, {"target_modules": ["conv1d"]}),
+    ("Conv2d 1 HiRA", "Conv2d", HiraConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d 2 HiRA", "Conv2d", HiraConfig, {"target_modules": ["conv2d", "lin0"]}),
+    ("Conv3d 1 HiRA", "Conv3d", HiraConfig, {"target_modules": ["conv3d"]}),
+    ("Conv3d 2 HiRA", "Conv3d", HiraConfig, {"target_modules": ["conv3d", "lin0"]}),
     ##########
     # Adamss #
     ##########
@@ -1513,6 +1561,21 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "r": 2, "depth": 1, "act_fn": "relu", "init_weights": False},
         {"target_modules": ["lin1"], "r": 2, "depth": 1, "act_fn": "relu", "init_weights": False},
     ),
+    (
+        "HiRA Same",
+        "hira",
+        HiraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "HiRA Different",
+        "hira",
+        HiraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    # BD-LoRA different encounters issues as the adapter weights have different shapes then
     # for TinyLoRA, use uniform init, which allows the different adapters to be sufficiently different that they don't
     # produce identical results within allowed tolerance
     (
@@ -2427,6 +2490,7 @@ class TestPeftCustomModel(PeftCommonTester):
         if (
             (config_kwargs.get("use_dora") and model_id == "EmbConv1D")
             or issubclass(config_cls, VBLoRAConfig)
+            or issubclass(config_cls, HiraConfig)
             or issubclass(config_cls, LilyConfig)
             or issubclass(config_cls, AdamssConfig)
         ):
@@ -2473,7 +2537,7 @@ class TestPeftCustomModel(PeftCommonTester):
         model.train()
 
         lr = 0.5
-        if config_kwargs.get("use_dora"):
+        if config_kwargs.get("use_dora") or (config_cls == HiraConfig):
             lr = 0.1  # otherwise we get nan
         elif "mha" in model_id.lower():
             lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high

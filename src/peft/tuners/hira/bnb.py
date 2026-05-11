@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,61 +18,35 @@ from typing import Any, Optional
 
 import bitsandbytes as bnb
 import torch
+import torch.nn.functional as F
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.integrations import dequantize_bnb_weight
 from peft.utils.other import transpose
 
-from .config import LoraConfig
-from .layer import LoraLayer, LoraVariant
+from .config import HiraConfig
+from .layer import HiraLayer
 
-
-VARIANT_KWARG_KEYS = ["alora_offsets"]
 
 if is_bnb_available():
 
-    class Linear8bitLt(torch.nn.Module, LoraLayer):
-        # Lora implemented in a dense layer
+    class Linear8bitLt(torch.nn.Module, HiraLayer):
+        # HiRA implemented in a dense layer
         def __init__(
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
-            config: LoraConfig,
+            config: HiraConfig,
             r: int = 0,
-            lora_alpha: int = 1,
             **kwargs,
         ) -> None:
             super().__init__()
-            LoraLayer.__init__(self, base_layer)
+            HiraLayer.__init__(self, base_layer)
             self.fan_in_fan_out = False
 
             self._active_adapter = adapter_name
-            self.update_layer(
-                adapter_name,
-                r,
-                lora_alpha=lora_alpha,
-                config=config,
-            )
-
-        def resolve_lora_variant(self, *, config, **kwargs) -> Optional[LoraVariant]:
-            if config.velora_config is not None:
-                raise ValueError(f"{self.__class__.__name__} does not support VeLoRA.")
-            if config.arrow_config is not None:
-                from .variants import ArrowLinearVariant
-
-                return ArrowLinearVariant()
-
-            use_alora = config.alora_invocation_tokens is not None
-            if not config.use_dora and not use_alora:
-                return None
-
-            from .variants import ALoraLinearVariant, DoraLinearVariant
-
-            if use_alora:
-                return ALoraLinearVariant()
-            else:
-                return DoraLinearVariant()
+            self.update_layer(adapter_name, r, config=config)
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
@@ -93,11 +67,11 @@ if is_bnb_available():
                 return
 
             for active_adapter in adapter_names:
-                if active_adapter not in self.lora_A.keys():
+                if active_adapter not in self.hira_A.keys():
                     continue
 
                 warnings.warn(
-                    "Merge lora module to 8-bit linear may get different generations due to rounding errors."
+                    "Merge hira module to 8-bit linear may get different generations due to rounding errors."
                 )
 
                 weight = self.get_base_layer().weight
@@ -108,11 +82,9 @@ if is_bnb_available():
                 # Dequantize the result of identity matrix and int8 weight because bitsandbytes does not support int8
                 # dequantization directly
                 output = dequantize_bnb_weight(weight, state=state)
-                if active_adapter not in self.lora_variant:  # vanilla LoRA
-                    lora_data = self.get_delta_weight(active_adapter)
-                    w_data = output.to(lora_data.dtype).to(lora_data.device) + lora_data
-                else:
-                    w_data = self.lora_variant[active_adapter].merge_safe(self, active_adapter, output)
+                hira_data = self.get_delta_weight(active_adapter)
+                hira_data = output.to(hira_data.dtype).to(hira_data.device) * hira_data
+                w_data = output.to(hira_data.dtype).to(hira_data.device) + hira_data
 
                 if safe_merge and not torch.isfinite(w_data).all():
                     raise ValueError(
@@ -122,14 +94,6 @@ if is_bnb_available():
                 self.get_base_layer().weight = bnb.nn.Int8Params(
                     w_data.to("cpu"), requires_grad=False, has_fp16_weights=weight.has_fp16_weights
                 ).to(weight.device)
-
-                if self.lora_bias[active_adapter]:
-                    bias_data = self.get_base_layer().bias.data + self.lora_B[active_adapter].bias
-                    if safe_merge and not torch.isfinite(bias_data):
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
-                    self.get_base_layer().bias.data = bias_data
 
                 state.reset_grads()
                 self.merged_adapters.append(active_adapter)
@@ -144,10 +108,10 @@ if is_bnb_available():
 
             while len(self.merged_adapters) > 0:
                 active_adapter = self.merged_adapters.pop()
-                if active_adapter not in self.lora_A.keys():
+                if active_adapter not in self.hira_A.keys():
                     continue
                 warnings.warn(
-                    "Unmerge lora module to 8-bit linear may get different generations due to rounding errors."
+                    "Unmerge hira module to 8-bit linear may get different generations due to rounding errors."
                 )
 
                 weight = self.get_base_layer().weight
@@ -156,27 +120,18 @@ if is_bnb_available():
                     state.SCB = weight.SCB
                 output = dequantize_bnb_weight(weight, state=state)
 
-                if active_adapter not in self.lora_variant:  # vanilla LoRA
-                    lora_data = self.get_delta_weight(active_adapter)
-                    w_data = output.to(lora_data.dtype).to(lora_data.device) - lora_data
-                else:
-                    w_data = self.lora_variant[active_adapter].unmerge(self, active_adapter, output)
-
+                hira_data = self.get_delta_weight(active_adapter)
+                w_data = output.to(hira_data.dtype).to(hira_data.device) / (1 + hira_data)
                 self.get_base_layer().weight = bnb.nn.Int8Params(
                     w_data.to("cpu"), requires_grad=False, has_fp16_weights=weight.has_fp16_weights
                 ).to(weight.device)
 
-                if self.lora_bias[active_adapter]:
-                    self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias
                 state.reset_grads()
 
         def get_delta_weight(self, adapter):
-            return (
-                transpose(
-                    self.lora_B[adapter].weight @ self.lora_A[adapter].weight,
-                    False,
-                )
-                * self.scaling[adapter]
+            return transpose(
+                self.hira_B[adapter] @ self.hira_A[adapter],
+                False,
             )
 
         def _mixed_batch_forward(
@@ -184,7 +139,6 @@ if is_bnb_available():
         ) -> torch.Tensor:
             # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
             # extra argument that allows mixing different adapters in the same batch at inference time.
-            variant_kwargs = {k: kwargs.pop(k, None) for k in VARIANT_KWARG_KEYS}  # don't pass these to base_layer
             result = self.base_layer(x, *args, **kwargs)
 
             unique_adapters = set(adapter_names)
@@ -192,100 +146,92 @@ if is_bnb_available():
             for adapter in unique_adapters:
                 sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
 
+            # dequantitize
+            weight = self.get_base_layer().weight
+            state = self.get_base_layer().state
+            if state.SCB is None:
+                state.SCB = weight.SCB
+            # Dequantize the result of identity matrix and int8 weight because bitsandbytes does not support int8
+            # dequantization directly
+            dequant_w = dequantize_bnb_weight(weight, state=state)
             for i, active_adapter in enumerate(unique_adapters):
                 if active_adapter == "__base__":
                     continue
-                if active_adapter not in self.lora_A.keys():
+                if active_adapter not in self.hira_A.keys():
                     continue
 
-                lora_A = self.lora_A[active_adapter]
-                lora_B = self.lora_B[active_adapter]
-                dropout = self.lora_dropout[active_adapter]
-                scaling = self.scaling[active_adapter]
+                hira_A = self.hira_A[active_adapter]
+                hira_B = self.hira_B[active_adapter]
+                dropout = self.hira_dropout[active_adapter]
 
                 requires_conversion = not torch.is_autocast_enabled()
                 if requires_conversion:
                     expected_dtype = result.dtype
-                    x = self._cast_input_dtype(x, lora_A.weight.dtype)
+                    x = self._cast_input_dtype(x, hira_A.dtype)
 
-                # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
+                # getting the sub-batch, passing it to HiRA layers and updating the corresponding indices of the linear
                 # layer output
                 sub_batch = x[sub_batch_indices_list[i]]
-                if active_adapter not in self.lora_variant:  # vanilla LoRA:
-                    output = lora_B(lora_A(dropout(sub_batch))) * scaling
-                    if requires_conversion:
-                        output = output.to(expected_dtype)
-                    result[sub_batch_indices_list[i]] += output
-                else:
-                    alora_offsets = variant_kwargs.get("alora_offsets", None)
-                    if alora_offsets is not None:
-                        variant_kwargs["alora_offsets"] = [alora_offsets[j] for j in sub_batch_indices_list[i]]
-                    output = self.lora_variant[active_adapter].forward(
-                        self,
-                        active_adapter=active_adapter,
-                        x=sub_batch,
-                        result=result[sub_batch_indices_list[i]],
-                        **variant_kwargs,
-                        **kwargs,
-                    )
-                    if requires_conversion:
-                        output = output.to(expected_dtype)
-                    result[sub_batch_indices_list[i]] = output
+                sub_batch = dropout(sub_batch)
+                prod_AB = torch.mm(hira_A.T, hira_B.T)
+
+                eff_weight = transpose(dequant_w.to(prod_AB.dtype).to(prod_AB.device), self.fan_in_fan_out) * prod_AB.T
+                hira_out = F.linear(sub_batch, eff_weight)
+                if requires_conversion:
+                    hira_out = hira_out.to(expected_dtype)
+                result[sub_batch_indices_list[i]] += hira_out
 
             return result
 
         def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
             self._check_forward_args(x, *args, **kwargs)
             adapter_names = kwargs.pop("adapter_names", None)
-            variant_kwargs = {k: kwargs.pop(k, None) for k in VARIANT_KWARG_KEYS}  # don't pass these to base_layer
 
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
                 result = self.base_layer(x, *args, **kwargs)
             elif adapter_names is not None:
-                result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **variant_kwargs, **kwargs)
+                result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
             elif self.merged:
                 result = self.base_layer(x, *args, **kwargs)
             else:
+                # 2) now compute the HiRA “delta” in float32 and add it:
+                # dequantize once per forward
+                raw_weight = self.get_base_layer().weight
+                state = self.get_base_layer().state
+                dequant_w = dequantize_bnb_weight(raw_weight, state=state)  # float32 tensor [out, in]
                 result = self.base_layer(x, *args, **kwargs)
                 for active_adapter in self.active_adapters:
-                    if active_adapter not in self.lora_A.keys():
+                    if active_adapter not in self.hira_A.keys():
                         continue
-                    lora_A = self.lora_A[active_adapter]
-                    lora_B = self.lora_B[active_adapter]
-                    dropout = self.lora_dropout[active_adapter]
-                    scaling = self.scaling[active_adapter]
+                    hira_A = self.hira_A[active_adapter]
+                    hira_B = self.hira_B[active_adapter]
+                    dropout = self.hira_dropout[active_adapter]
 
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:
                         expected_dtype = result.dtype
-                        x = self._cast_input_dtype(x, lora_A.weight.dtype)
-
-                    if active_adapter not in self.lora_variant:  # vanilla LoRA
-                        output = lora_B(lora_A(dropout(x))) * scaling
-                        if requires_conversion:
-                            output = output.to(expected_dtype)
-                        result = result + output
-                    else:
-                        result = self.lora_variant[active_adapter].forward(
-                            self,
-                            active_adapter=active_adapter,
-                            x=x,
-                            result=result,
-                            **variant_kwargs,
-                            **kwargs,
-                        )
-                        if requires_conversion:
-                            result = result.to(expected_dtype)
+                        x = self._cast_input_dtype(x, hira_A.dtype)
+                    dropout_sub = dropout(x)
+                    # compute Δ = B @ A  → shape (out, in)
+                    prod_AB = hira_B @ hira_A
+                    # effective weight = W₀ ⊙ Δ
+                    eff_w = dequant_w * prod_AB
+                    hira_out = F.linear(dropout_sub, eff_w)
+                    if requires_conversion:
+                        hira_out = hira_out.to(expected_dtype)
+                    result = result + hira_out
+                    if requires_conversion:
+                        result = result.to(expected_dtype)
 
             return result
 
         def __repr__(self) -> str:
             rep = super().__repr__()
-            return "lora." + rep
+            return "hira." + rep
 
-    def dispatch_bnb_8bit(target: torch.nn.Module, adapter_name: str, config: LoraConfig, **kwargs):
+    def dispatch_bnb_8bit(target: torch.nn.Module, adapter_name: str, hira_config, **kwargs):
         new_module = None
 
         if isinstance(target, BaseTunerLayer):
@@ -303,54 +249,29 @@ if is_bnb_available():
                     "index": target.index,
                 }
             )
-            new_module = Linear8bitLt(target, adapter_name, config=config, **eightbit_kwargs)
+            new_module = Linear8bitLt(target, adapter_name, config=hira_config, **eightbit_kwargs)
 
         return new_module
 
 
 if is_bnb_4bit_available():
 
-    class Linear4bit(torch.nn.Module, LoraLayer):
-        # Lora implemented in a dense layer
+    class Linear4bit(torch.nn.Module, HiraLayer):
+        # HiRA implemented in a dense layer
         def __init__(
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
-            config: LoraConfig,
+            config: HiraConfig,
             r: int = 0,
-            lora_alpha: int = 1,
             **kwargs,
         ) -> None:
             super().__init__()
-            LoraLayer.__init__(self, base_layer)
+            HiraLayer.__init__(self, base_layer)
             self.fan_in_fan_out = False
 
             self._active_adapter = adapter_name
-            self.update_layer(
-                adapter_name,
-                r,
-                lora_alpha=lora_alpha,
-                config=config,
-            )
-
-        def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-            if config.velora_config is not None:
-                raise ValueError(f"{self.__class__.__name__} does not support VeLoRA.")
-            if config.arrow_config is not None:
-                from .variants import ArrowLinearVariant
-
-                return ArrowLinearVariant()
-
-            use_alora = config.alora_invocation_tokens is not None
-            if not config.use_dora and not use_alora:
-                return None
-
-            from .variants import ALoraLinearVariant, DoraLinearVariant
-
-            if use_alora:
-                return ALoraLinearVariant()
-            else:
-                return DoraLinearVariant()
+            self.update_layer(adapter_name, r, config=config)
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
@@ -371,22 +292,19 @@ if is_bnb_4bit_available():
                 return
 
             for active_adapter in adapter_names:
-                if active_adapter not in self.lora_A.keys():
+                if active_adapter not in self.hira_A.keys():
                     continue
 
                 warnings.warn(
-                    "Merge lora module to 4-bit linear may get different generations due to rounding errors."
+                    "Merge hira module to 4-bit linear may get different generations due to rounding errors."
                 )
                 # Refer to https://gist.github.com/ChrisHayduk/1a53463331f52dca205e55982baf9930
                 weight = self.get_base_layer().weight
                 kwargs = weight.__dict__
 
                 output = dequantize_bnb_weight(weight, state=weight.quant_state)
-                if active_adapter not in self.lora_variant:  # vanilla LoRA
-                    lora_data = self.get_delta_weight(active_adapter)
-                    w_data = output + lora_data
-                else:
-                    w_data = self.lora_variant[active_adapter].merge_safe(self, active_adapter, output)
+                hira_data = self.get_delta_weight(active_adapter)
+                w_data = output * (1 + hira_data)
 
                 if safe_merge and not torch.isfinite(w_data).all():
                     raise ValueError(
@@ -401,14 +319,6 @@ if is_bnb_4bit_available():
                 kwargs = {k: v for k, v in kwargs.items() if not k.startswith("_")}
                 self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
 
-                if self.lora_bias[active_adapter]:
-                    bias_data = self.get_base_layer().bias.data + self.lora_B[active_adapter].bias
-                    if safe_merge and not torch.isfinite(bias_data):
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
-                    self.get_base_layer().bias.data = bias_data
-
                 self.merged_adapters.append(active_adapter)
 
         def unmerge(self) -> None:
@@ -421,21 +331,18 @@ if is_bnb_4bit_available():
 
             while len(self.merged_adapters) > 0:
                 active_adapter = self.merged_adapters.pop()
-                if active_adapter not in self.lora_A.keys():
+                if active_adapter not in self.hira_A.keys():
                     continue
                 warnings.warn(
-                    "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
+                    "Unmerge hira module to 4-bit linear may get different generations due to rounding errors."
                 )
 
                 weight = self.get_base_layer().weight
                 kwargs = weight.__dict__
                 output = dequantize_bnb_weight(weight, state=weight.quant_state)
 
-                if active_adapter not in self.lora_variant:  # vanilla LoRA
-                    lora_data = self.get_delta_weight(active_adapter)
-                    w_data = output - lora_data
-                else:
-                    w_data = self.lora_variant[active_adapter].unmerge(self, active_adapter, output)
+                hira_data = self.get_delta_weight(active_adapter)
+                w_data = output / (1 + hira_data)
 
                 if "bnb_quantized" in kwargs:
                     kwargs["bnb_quantized"] = False
@@ -443,16 +350,10 @@ if is_bnb_4bit_available():
                 kwargs.pop("data", None)
                 self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
 
-                if self.lora_bias[active_adapter]:
-                    self.get_base_layer().bias.data -= self.lora_B[active_adapter].bias
-
         def get_delta_weight(self, adapter):
-            return (
-                transpose(
-                    self.lora_B[adapter].weight @ self.lora_A[adapter].weight,
-                    False,
-                )
-                * self.scaling[adapter]
+            return transpose(
+                self.hira_B[adapter] @ self.hira_A[adapter],
+                False,
             )
 
         def _mixed_batch_forward(
@@ -460,67 +361,52 @@ if is_bnb_4bit_available():
         ) -> torch.Tensor:
             # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
             # extra argument that allows mixing different adapters in the same batch at inference time.
-            variant_kwargs = {k: kwargs.pop(k, None) for k in VARIANT_KWARG_KEYS}  # don't pass these to base_layer
             result = self.base_layer(x, *args, **kwargs)
 
             unique_adapters = set(adapter_names)
             sub_batch_indices_list = []
             for adapter in unique_adapters:
                 sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
-
+            weight = self.get_base_layer().weight
+            dequant_w = dequantize_bnb_weight(weight, state=weight.quant_state)
             for i, active_adapter in enumerate(unique_adapters):
                 if active_adapter == "__base__":
                     continue
-                if active_adapter not in self.lora_A.keys():
+                if active_adapter not in self.hira_A.keys():
                     continue
 
-                lora_A = self.lora_A[active_adapter]
-                lora_B = self.lora_B[active_adapter]
-                dropout = self.lora_dropout[active_adapter]
-                scaling = self.scaling[active_adapter]
+                hira_A = self.hira_A[active_adapter]
+                hira_B = self.hira_B[active_adapter]
+                dropout = self.hira_dropout[active_adapter]
 
                 requires_conversion = not torch.is_autocast_enabled()
                 if requires_conversion:
                     expected_dtype = result.dtype
-                    x = self._cast_input_dtype(x, lora_A.weight.dtype)
+                    x = self._cast_input_dtype(x, hira_A.dtype)
 
-                # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
+                # getting the sub-batch, passing it to HiRA layers and updating the corresponding indices of the linear
                 # layer output
                 sub_batch = x[sub_batch_indices_list[i]]
-                if active_adapter not in self.lora_variant:  # vanilla LoRA
-                    output = lora_B(lora_A(dropout(sub_batch))) * scaling
-                    if requires_conversion:
-                        output = output.to(expected_dtype)
-                    result[sub_batch_indices_list[i]] += output
-                else:
-                    alora_offsets = variant_kwargs.get("alora_offsets", None)
-                    if alora_offsets is not None:
-                        variant_kwargs["alora_offsets"] = [alora_offsets[j] for j in sub_batch_indices_list[i]]
-                    output = self.lora_variant[active_adapter].forward(
-                        self,
-                        active_adapter=active_adapter,
-                        x=sub_batch,
-                        result=result[sub_batch_indices_list[i]],
-                        **variant_kwargs,
-                        **kwargs,
-                    )
-                    if requires_conversion:
-                        output = output.to(expected_dtype)
-                    result[sub_batch_indices_list[i]] = output
+                prod_AB = torch.mm(hira_A.T, hira_B.T)
+                sub_batch = dropout(sub_batch)
+                eff_weight = transpose(dequant_w.to(prod_AB.dtype).to(prod_AB.device), self.fan_in_fan_out) * prod_AB.T
+                hira_out = F.linear(sub_batch, eff_weight)
+                if requires_conversion:
+                    hira_out = hira_out.to(expected_dtype)
+                result[sub_batch_indices_list[i]] += hira_out
 
             return result
 
         def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
             self._check_forward_args(x, *args, **kwargs)
             adapter_names = kwargs.pop("adapter_names", None)
-            variant_kwargs = {k: kwargs.pop(k, None) for k in VARIANT_KWARG_KEYS}  # don't pass these to base_layer
 
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
                 result = self.base_layer(x, *args, **kwargs)
             elif adapter_names is not None:
-                result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **variant_kwargs, **kwargs)
+                result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
             elif self.merged:
                 result = self.base_layer(x, *args, **kwargs)
             else:
@@ -531,44 +417,40 @@ if is_bnb_4bit_available():
                 # newer PyTorch versions but this would need extensive testing to be
                 # sure.
                 result = result.clone()
-
+                # dequanted w
+                weight = self.get_base_layer().weight
+                dequant_w = dequantize_bnb_weight(weight, state=weight.quant_state)
                 for active_adapter in self.active_adapters:
-                    if active_adapter not in self.lora_A.keys():
+                    if active_adapter not in self.hira_A.keys():
                         continue
-                    lora_A = self.lora_A[active_adapter]
-                    lora_B = self.lora_B[active_adapter]
-                    dropout = self.lora_dropout[active_adapter]
-                    scaling = self.scaling[active_adapter]
+                    hira_A = self.hira_A[active_adapter]
+                    hira_B = self.hira_B[active_adapter]
+                    dropout = self.hira_dropout[active_adapter]
 
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:
                         expected_dtype = result.dtype
-                        x = self._cast_input_dtype(x, lora_A.weight.dtype)
+                        x = self._cast_input_dtype(x, hira_A.dtype)
 
-                    if active_adapter not in self.lora_variant:  # vanilla LoRA
-                        output = lora_B(lora_A(dropout(x))) * scaling
-                        if requires_conversion:
-                            output = output.to(expected_dtype)
-                        result = result + output
-                    else:
-                        result = self.lora_variant[active_adapter].forward(
-                            self,
-                            active_adapter=active_adapter,
-                            x=x,
-                            result=result,
-                            **variant_kwargs,
-                            **kwargs,
-                        )
-                        if requires_conversion:
-                            result = result.to(expected_dtype)
+                    dropout_sub = dropout(x)
+                    # compute Δ = B @ A  → shape (out, in)
+                    prod_AB = hira_B @ hira_A
+                    # effective weight = W₀ ⊙ Δ
+                    eff_w = dequant_w * prod_AB
+                    hira_out = F.linear(dropout_sub, eff_w)
+                    if requires_conversion:
+                        hira_out = hira_out.to(expected_dtype)
+                    result = result + hira_out
+                    if requires_conversion:
+                        result = result.to(expected_dtype)
 
             return result
 
         def __repr__(self) -> str:
             rep = super().__repr__()
-            return "lora." + rep
+            return "hira." + rep
 
-    def dispatch_bnb_4bit(target: torch.nn.Module, adapter_name: str, config: LoraConfig, **kwargs):
+    def dispatch_bnb_4bit(target: torch.nn.Module, adapter_name: str, hira_config, **kwargs):
         new_module = None
 
         if isinstance(target, BaseTunerLayer):
@@ -586,6 +468,6 @@ if is_bnb_4bit_available():
                     "quant_type": target_base_layer.weight.quant_type,
                 }
             )
-            new_module = Linear4bit(target, adapter_name, config=config, **fourbit_kwargs)
+            new_module = Linear4bit(target, adapter_name, config=hira_config, **fourbit_kwargs)
 
         return new_module

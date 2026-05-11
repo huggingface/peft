@@ -597,3 +597,89 @@ class TestDoraCaching:
         cached_result_permanent = self.get_output(model, inputs)
         assert torch.allclose(cached_result_permanent, dora_result, atol=atol, rtol=rtol)
         DoraCaching()(enabled=False)
+
+
+class _TinyLinearModel(nn.Module):
+    """Tiny module containing several Linear layers with common projection names."""
+
+    def __init__(self, d=16):
+        super().__init__()
+        # Common Transformer projection names
+        self.q_proj = nn.Linear(d, d, bias=False)
+        self.k_proj = nn.Linear(d, d, bias=False)
+        self.v_proj = nn.Linear(d, d, bias=False)
+        self.o_proj = nn.Linear(d, d, bias=False)
+        self.gate_proj = nn.Linear(d, d, bias=False)
+        self.up_proj = nn.Linear(d, d, bias=False)
+        self.down_proj = nn.Linear(d, d, bias=False)
+
+
+@pytest.fixture
+def small_model():
+    """
+    Small CPU-only model fixture for KappaTuneSelector tests.
+
+    Keeping this tiny ensures it runs quickly on CPU-only CI.
+    """
+    torch.manual_seed(0)
+    return _TinyLinearModel(d=16)
+
+
+class TestKappaTuneSelector:
+    """Tests for KappaTuneSelector and find_kappa_target_modules helper."""
+
+    def test_find_kappa_target_modules_returns_dict(self, small_model):
+        """Test the new return format of find_kappa_target_modules."""
+        from peft.helpers import find_kappa_target_modules
+
+        result = find_kappa_target_modules(small_model, top_p=0.5)
+
+        assert isinstance(result, dict)
+        assert "target_modules" in result
+        assert "target_parameters" in result
+        assert isinstance(result["target_modules"], list)
+        assert result["target_parameters"] is None
+
+    def test_find_kappa_target_modules_selects_modules(self, small_model):
+        """Basic functionality test on regular nn.Linear layers."""
+        from peft.helpers import find_kappa_target_modules
+
+        result = find_kappa_target_modules(small_model, top_p=0.3)
+
+        assert len(result["target_modules"]) > 0
+        # All returned modules should exist in the model
+        for name in result["target_modules"]:
+            assert any(name in module_name for module_name, _ in small_model.named_modules())
+
+    def test_kappatune_with_moe_layers(self):
+        """Test support for fused MoE 3D parameters (target_parameters)."""
+        import torch
+        import torch.nn as nn
+
+        from peft.helpers import KappaTuneSelector, find_kappa_target_modules
+
+        # Create a minimal dummy MoE model with fused 3D weights
+        class DummyMoE(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gate_up_proj = nn.Parameter(torch.randn(2, 16, 32))
+                self.down_proj = nn.Parameter(torch.randn(2, 32, 16))
+
+        class DummyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = nn.ModuleList([DummyMoE() for _ in range(2)])
+
+        model = DummyModel()
+
+        # Test selector directly
+        selector = KappaTuneSelector(model)
+        target_params = selector.get_best_target_parameters(top_p=0.5)
+        assert len(target_params) > 0
+        assert any("gate_up_proj" in name or "down_proj" in name for name in target_params)
+
+        # Test convenience function
+        result = find_kappa_target_modules(model, top_p=0.5)
+        assert isinstance(result["target_parameters"], list)
+        assert len(result["target_parameters"]) > 0
+        assert any("gate_up_proj" in name or "down_proj" in name for name in result["target_parameters"])

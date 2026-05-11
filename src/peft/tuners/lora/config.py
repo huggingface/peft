@@ -52,6 +52,57 @@ class LoraRuntimeConfig:
 
 
 @dataclass
+class VeloraConfig:
+    """
+    This is the sub-configuration class to store the configuration for VeLoRA. Original paper can be found
+    [here](https://arxiv.org/abs/2405.17991).
+
+    Args:
+        num_groups (`int`):
+            Number of feature groups used by VeLoRA to split the input activation depth before compression. Increase
+            this parameter to reduce the reconstruction error of input activations at the cost of increased memory
+            consumption.
+        scale (`float`):
+            Scale applied to the reconstructed activations in the VeLoRA backward pass.
+        init_type (`str`):
+            Projection initialization strategy for VeLoRA. Supported values are `'batch_average_once'`,
+            `'batch_average'`, and `'random'`.
+    """
+
+    num_groups: int = field(
+        default=64,
+        metadata={
+            "help": "Number of feature groups used by VeLoRA to split the input activation depth before compression."
+        },
+    )
+    scale: float = field(
+        default=1.0,
+        metadata={"help": "Scale applied to the reconstructed activations in the VeLoRA backward pass."},
+    )
+    init_type: Literal["batch_average", "batch_average_once", "random"] = field(
+        default="batch_average",
+        metadata={
+            "help": "Projection initialization strategy for VeLoRA. Supported values are "
+            "`'batch_average_once'`, `'batch_average'`, and `'random'`."
+            "batch_average uses the batch statistics during each forward pass for the projection."
+            "batch_average_once only updates the projection weights once in the first pass to reduce training time at the cost of less exact gradient approximations."
+        },
+    )
+
+    def __post_init__(self):
+        if self.num_groups <= 0:
+            raise ValueError(f"`num_groups` should be positive, got {self.num_groups}.")
+        if self.scale <= 0:
+            raise ValueError(f"`scale` should be positive, got {self.scale}.")
+        if self.init_type not in {"batch_average_once", "batch_average", "random"}:
+            raise ValueError(
+                "Unsupported `init_type` "
+                f"{self.init_type!r}. Supported values are 'batch_average_once', "
+                "'batch_average', and 'random'."
+            )
+
+
+@dataclass
 class LoftQConfig:
     """
     This is the sub-configuration class to store the configuration of a [`LoraModel`].
@@ -424,6 +475,9 @@ class LoraConfig(PeftConfig):
             ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger overhead than pure
             LoRA, so it is recommended to merge weights for inference. For more information, see
             https://huggingface.co/papers/2402.09353.
+        velora_config (`Optional[VeloraConfig]`):
+            Enable VeLoRA by providing a VeloraConfig. VeLoRA swaps in a custom backward pass for the LoRA A projection
+            that stores compressed activations instead of the full input activations.
         alora_invocation_tokens (`List[int]`):
             If not None, enable <a href='https://huggingface.co/papers/2504.12397'>'Activated LoRA' (aLoRA)</a>, with
             alora_invocation_tokens being the tokenized invocation string for the adapter (must be present in all model
@@ -658,6 +712,15 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    velora_config: Optional[Union[VeloraConfig, dict]] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Enable VeLoRA as a LoRA variant by providing a VeloraConfig. VeLoRA swaps in a custom backward pass "
+                "for the LoRA A projection that stores compressed activations instead of the full input activations."
+            )
+        },
+    )
     alora_invocation_tokens: Optional[list[int]] = field(
         default=None,
         metadata={
@@ -792,6 +855,11 @@ class LoraConfig(PeftConfig):
         if self.ensure_weight_tying:
             self.modules_to_tie = None
             self.target_modules_to_tie = None
+
+        if isinstance(self.velora_config, dict):
+            self.velora_config = VeloraConfig(**self.velora_config)
+        elif self.velora_config is not None and not isinstance(self.velora_config, VeloraConfig):
+            raise TypeError("`velora_config` must be a `VeloraConfig`, a dict, or None.")
 
         if isinstance(self.target_parameters, str):
             raise TypeError("`target_parameters` must be a list of strings or None.")

@@ -39,6 +39,7 @@ from peft import (
     DeloraConfig,
     FourierFTConfig,
     GraloraConfig,
+    HiraConfig,
     HRAConfig,
     IA3Config,
     LoraConfig,
@@ -166,6 +167,13 @@ ALL_CONFIGS = [
             "gralora_dropout": 0.05,
             "gralora_k": 4,
             "hybrid_r": 4,
+        },
+    ),
+    (
+        HiraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
         },
     ),
     (
