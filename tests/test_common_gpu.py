@@ -60,6 +60,7 @@ from peft.tuners.lora.config import LoraRuntimeConfig
 from peft.utils import infer_device
 
 from .testing_utils import (
+    DEVICE_MAP_MAP,
     device_count,
     load_cat_image,
     require_bitsandbytes,
@@ -834,11 +835,13 @@ class PeftGPUCommonTests(unittest.TestCase):
         )
 
         model = AutoModelForSeq2SeqLM.from_pretrained(
-            self.seq2seq_model_id, device_map="balanced", quantization_config=BitsAndBytesConfig(load_in_8bit=True)
+            self.seq2seq_model_id,
+            device_map=DEVICE_MAP_MAP[self.seq2seq_model_id],
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
         tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
 
-        assert set(model.hf_device_map.values()) == set(range(device_count))
+        assert set(model.hf_device_map.values()) == set(DEVICE_MAP_MAP[self.seq2seq_model_id].values())
 
         model = get_peft_model(model, lora_config)
         assert isinstance(model, PeftModel)
