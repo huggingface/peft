@@ -45,9 +45,11 @@ class BeftLayer(BaseTunerLayer):
     def update_layer(self, adapter_name: str, config: BeftConfig, **kwargs):
         base_layer = self.get_base_layer()
         if base_layer.bias is None:
-            warnings.warn(
-                "Detected that the base layer has no bias term. "
-                "Note you cannot merge the BEFT adapter into the base layer."
+            # Add a zero bias so that merge() can write the BEFT bias into it.
+            # The zero initialisation means this is a no-op until the adapter is trained.
+            base_layer.bias = nn.Parameter(
+                torch.zeros(self.out_features, device=base_layer.weight.device, dtype=base_layer.weight.dtype),
+                requires_grad=False,
             )
         init_weights = config.init_weights
         inference_mode = config.inference_mode
