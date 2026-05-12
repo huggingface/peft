@@ -21,6 +21,7 @@ extras = {}
 extras["quality"] = [
     "black",  # doc-builder has an implicit dependency on Black, see huggingface/doc-builder#434
     "hf-doc-builder",
+    # when upgrading this, also upgrade required version in pyproject.toml and pre-commit-config.yaml
     "ruff~=0.15.12",
 ]
 extras["docs_specific"] = [

@@ -7,6 +7,7 @@ target-version = ['py310']
 target-version = "py310"
 line-length = 119
 extend-exclude = ["*.ipynb"]
+required-version = "~=0.15.12"
 
 [tool.ruff.lint]
 preview = true
