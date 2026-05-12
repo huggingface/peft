@@ -2416,23 +2416,26 @@ class TestBeftInitialization:
 
         return MLP(bias=bias).to(self.torch_device).eval()
 
-    def test_beft_initialization_no_bias(self):
+    def test_beft_initialization_no_bias_warning(self):
         model = self.get_model(bias=False)
         cfg = BeftConfig(target_modules=["lin0"])
 
-        model = get_peft_model(model, cfg)
+        with pytest.warns(UserWarning, match="Note you cannot merge the BEFT adapter into the base layer."):
+            model = get_peft_model(model, cfg)
 
-        assert model.lin0.base_layer.bias is not None
+        assert model.lin0.base_layer.bias is None
         assert "default" in model.lin0.beft_bias
+        assert model.lin0.get_base_layer().bias is None
 
-    def test_beft_merge_no_bias(self):
+    def test_beft_merge_no_bias_raises_error(self):
         model = self.get_model(bias=False)
         cfg = BeftConfig(target_modules=["lin0"])
         model = get_peft_model(model, cfg)
 
         assert hasattr(model.lin0, "beft_bias")
-        merged_model = model.merge_and_unload()
-        assert merged_model.lin0.bias is not None
+
+        with pytest.raises(ValueError, match="Base layer has no bias, cannot merge bias adapter"):
+            model.merge_and_unload()
 
 
 class TestNoInfiniteRecursionDeepspeed:
