@@ -35,6 +35,7 @@ ignore = [
     "SIM117", # allow nesting of `with` statements: can be *more* readable of they are long
     "BLE001", # allow catching bare `Exception`
     "SIM102", # collapse multiple `if` statements: nice to have but requires too many changes
+    "PYI041", # considers type annotations like int|float as redundant and wants float only, but type can carry semantic meaning (e.g. total number vs fraction)
 ]
 
 [tool.ruff.lint.isort]
