@@ -14,6 +14,7 @@
 
 # NOTE: don't import from this module unless transformers v5+ is used
 import copy
+import itertools
 import re
 from typing import Any
 
@@ -349,13 +350,62 @@ _MOE_FUSED_TARGETS: dict[str, dict[str, set[str]]] = {
 }
 
 
-def _convert_peft_config_moe(peft_config, model_type: str) -> None:
+def _resolve_regex_moe_targets(peft_config, model, target_module_mapping: dict[str, str]) -> set[str]:
+    """Resolve which v4 ("old") MoE projection names a regex ``target_modules`` targets, using the model.
+
+    On a Transformers v5 model the pre-fusion expert projections (e.g. ``gate_proj``, ``up_proj``) no longer exist as
+    submodules -- they are fused into stacked parameters such as ``gate_up_proj`` -- so they cannot be discovered via
+    ``model.named_modules()``. We therefore probe the regex (via ``check_target_module_exists``, the same matcher used
+    during injection) against two sources of keys:
+
+      1. real module/parameter keys whose leaf name equals an old name -- this covers the router ``gate`` and the
+         ``down_proj`` parameter, which keep their name in v5, and
+      2. v4-style expert keys reconstructed from each fused parameter's container, i.e. ``{container}.{idx}.{old_name}``
+         -- this covers ``gate_proj``/``up_proj``, which were fused *and* renamed and so are absent from the v5 model.
+    """
+    from peft.tuners.tuners_utils import check_target_module_exists
+
+    module_keys = [name for name, _ in model.named_modules()]
+    param_keys = [name for name, _ in model.named_parameters()]
+    # new (fused) name -> container paths, used to reconstruct the pre-fusion expert keys
+    new_name_to_containers: dict[str, set[str]] = {}
+    for name in param_keys:
+        container, _, leaf = name.rpartition(".")
+        new_name_to_containers.setdefault(leaf, set()).add(container)
+
+    matched_old_names: set[str] = set()
+    for old_name, new_name in target_module_mapping.items():
+        # (1) a real module/parameter is named exactly `old_name`
+        if any(
+            key.rsplit(".", 1)[-1] == old_name and check_target_module_exists(peft_config, key)
+            for key in itertools.chain(module_keys, param_keys)
+        ):
+            matched_old_names.add(old_name)
+            continue
+        # (2) the projection was fused and renamed -> reconstruct the v4 expert keys from the fused parameter's
+        # container and probe those. A representative expert index (0/1) is enough for the regexes seen in practice.
+        for container in new_name_to_containers.get(new_name, ()):
+            candidates = (f"{container}.{old_name}", f"{container}.0.{old_name}", f"{container}.1.{old_name}")
+            if any(check_target_module_exists(peft_config, candidate) for candidate in candidates):
+                matched_old_names.add(old_name)
+                break
+    return matched_old_names
+
+
+def _convert_peft_config_moe(peft_config, model) -> None:
     """
     In-place convert the PEFT config of MoE models whose architecture changed from transformers v4 to v5.
 
     Since the model architecture changed, the targets have to updated accordingly. Moreover, when weights are fused, it
     requires updating the rank and alpha values of those parameters.
+
+    ``target_modules`` may be a list/set of names, the special string ``"all-linear"``, or a regex string (e.g. a
+    pattern produced by an upstream framework like ms-swift). ``"all-linear"`` is resolved against the model later by
+    ``_maybe_include_all_linear_layers`` and is left untouched here. For a regex, the targeted projections are resolved
+    against the model (see ``_resolve_regex_moe_targets``) and the regex itself is kept for the remaining, non-fused
+    targets such as attention projections.
     """
+    model_type = getattr(getattr(model, "config", None), "model_type", None)
     base_model_type = _MODEL_TO_CONVERSION_PATTERN.get(model_type, None)
     if base_model_type is None:
         return
@@ -368,33 +418,52 @@ def _convert_peft_config_moe(peft_config, model_type: str) -> None:
     if not fused_targets:
         return
 
-    peft_config.target_parameters = set(peft_config.target_parameters or [])
-    peft_config.target_modules = set(peft_config.target_modules or [])
+    from peft.utils.constants import INCLUDE_LINEAR_LAYERS_SHORTHAND
+
+    target_modules = peft_config.target_modules
+
+    # `"all-linear"` is a special shorthand matched by module *type*, resolved later against the model in
+    # `_maybe_include_all_linear_layers`. There is nothing to remap here, so leave it untouched.
+    if isinstance(target_modules, str) and target_modules.lower() == INCLUDE_LINEAR_LAYERS_SHORTHAND:
+        return
+
     if not hasattr(peft_config, "rank_pattern") or peft_config.rank_pattern is None:
         peft_config.rank_pattern = {}
     if not hasattr(peft_config, "alpha_pattern") or peft_config.alpha_pattern is None:
         peft_config.alpha_pattern = {}
+    peft_config.target_parameters = set(peft_config.target_parameters or [])
 
     new_target_parameters = peft_config.target_parameters.copy()
-    remaining_target_modules = set()
     matched_targets: dict[str, set[str]] = {new_name: set() for new_name in fused_targets}
 
-    for target in peft_config.target_modules:
-        mapped_new_name = None
-        mapped_old_name = None
-        for old_name, new_name in target_module_mapping.items():
-            if (target == old_name) or target.endswith(f".{old_name}"):
-                mapped_new_name = new_name
-                mapped_old_name = old_name
-                break
+    if isinstance(target_modules, str):
+        # Regex: resolve the targeted v4 projections against the model (the pre-fusion expert submodules don't exist on
+        # the v5 model, so they can't be found by iterating the string). Keep the regex for the remaining targets.
+        for old_name in _resolve_regex_moe_targets(peft_config, model, target_module_mapping):
+            new_name = target_module_mapping[old_name]
+            new_target_parameters.add(new_name)
+            if new_name in fused_targets:
+                matched_targets[new_name].add(old_name)
+        remaining_target_modules = target_modules
+    else:
+        peft_config.target_modules = set(target_modules or [])
+        remaining_target_modules = set()
+        for target in peft_config.target_modules:
+            mapped_new_name = None
+            mapped_old_name = None
+            for old_name, new_name in target_module_mapping.items():
+                if (target == old_name) or target.endswith(f".{old_name}"):
+                    mapped_new_name = new_name
+                    mapped_old_name = old_name
+                    break
 
-        if mapped_new_name is None:
-            remaining_target_modules.add(target)
-            continue
+            if mapped_new_name is None:
+                remaining_target_modules.add(target)
+                continue
 
-        new_target_parameters.add(mapped_new_name)
-        if mapped_new_name in fused_targets and mapped_old_name is not None:
-            matched_targets.setdefault(mapped_new_name, set()).add(mapped_old_name)
+            new_target_parameters.add(mapped_new_name)
+            if mapped_new_name in fused_targets and mapped_old_name is not None:
+                matched_targets.setdefault(mapped_new_name, set()).add(mapped_old_name)
 
     for new_name, required_old_targets in fused_targets.items():
         present_targets = matched_targets.get(new_name, set())
@@ -441,7 +510,7 @@ def convert_peft_config_for_transformers(peft_config, model: torch.nn.Module, co
 
     model_type = getattr(model.config, "model_type", None)
     if get_checkpoint_conversion_mapping(model_type) is not None:
-        _convert_peft_config_moe(peft_config, model_type)
+        _convert_peft_config_moe(peft_config, model)
 
 
 def _convert_to_peft_serialized_keys(
