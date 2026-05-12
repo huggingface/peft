@@ -508,7 +508,10 @@ def convert_peft_adapter_state_dict_for_transformers(
         # no architecture-level conversion registered for this model
         return adapter_state_dict
 
-    weight_conversions = get_model_conversion_mapping(model)
+    # pass the base model to get_model_conversion_mapping, as Transformers may not correctly deal with base_model.model
+    # prefix, see the introduction of scope_prefix in https://github.com/huggingface/transformers/pull/45661
+    base_model = model.get_base_model() if hasattr(model, "get_base_model") else model
+    weight_conversions = get_model_conversion_mapping(base_model)
     peft_weight_conversions = build_peft_weight_mapping(
         weight_conversions, adapter_name=adapter_name, peft_config=peft_config
     )
