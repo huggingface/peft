@@ -33,6 +33,7 @@ class BeftLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
+        self._beft_added_bias = False
 
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
@@ -51,6 +52,7 @@ class BeftLayer(BaseTunerLayer):
                 torch.zeros(self.out_features, device=base_layer.weight.device, dtype=base_layer.weight.dtype),
                 requires_grad=False,
             )
+            self._beft_added_bias = True
         init_weights = config.init_weights
         inference_mode = config.inference_mode
         weight = torch.randn((1, self.out_features))
@@ -141,6 +143,20 @@ class Linear(nn.Module, BeftLayer):
                 # minus BEFT bias.
                 beft_bias = self.beft_bias[active_adapter].data
                 base_layer.bias.data = (base_layer.bias.data - beft_bias.squeeze()).to(orig_dtype)
+
+    def unload_and_optionally_merge_module(
+        self,
+        merge: bool,
+        safe_merge: bool = False,
+        adapter_names: Optional[list[str]] = None,
+    ) -> nn.Module:
+        if merge:
+            self.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+        else:
+            base_layer = self.get_base_layer()
+            if self._beft_added_bias:
+                base_layer.bias = None
+        return self.get_base_layer()
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         if self.disable_adapters:
