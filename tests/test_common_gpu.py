@@ -358,12 +358,12 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
         model = PeftModel.from_pretrained(model, peft_model_id)
 
-        model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+        model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(model.device))
 
         # loading a 2nd adapter works, #1239
         model.load_adapter(peft_model_id, "adapter2")
         model.set_adapter("adapter2")
-        model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+        model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(model.device))
 
         # check that both adapters are in the same layer
         assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
@@ -388,19 +388,19 @@ class PeftGPUCommonTests(unittest.TestCase):
         config = AdaLoraConfig(task_type=TaskType.CAUSAL_LM, total_step=1)
         peft_model = get_peft_model(model, config)
         peft_model = prepare_model_for_kbit_training(peft_model)
-        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(peft_model.device))
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             peft_model.save_pretrained(tmp_dir)
             model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
             model = PeftModel.from_pretrained(model, tmp_dir)
             model = prepare_model_for_kbit_training(peft_model)
-            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(model.device))
 
             # loading a 2nd adapter works, #1239
             model.load_adapter(tmp_dir, "adapter2")
             model.set_adapter("adapter2")
-            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(model.device))
 
             # check that both adapters are in the same layer
             assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
@@ -425,19 +425,19 @@ class PeftGPUCommonTests(unittest.TestCase):
         config = VeraConfig(task_type=TaskType.CAUSAL_LM)
         peft_model = get_peft_model(model, config)
         peft_model = prepare_model_for_kbit_training(peft_model)
-        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(peft_model.device))
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             peft_model.save_pretrained(tmp_dir)
             model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
             model = PeftModel.from_pretrained(model, tmp_dir)
             model = prepare_model_for_kbit_training(model)
-            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(model.device))
 
             # loading a 2nd adapter works, #1239
             model.load_adapter(tmp_dir, "adapter2")
             model.set_adapter("adapter2")
-            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(model.device))
 
             # check that both adapters are in the same layer
             assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.vera_A
@@ -462,19 +462,19 @@ class PeftGPUCommonTests(unittest.TestCase):
         config = RandLoraConfig(task_type=TaskType.CAUSAL_LM)
         peft_model = get_peft_model(model, config)
         peft_model = prepare_model_for_kbit_training(peft_model)
-        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(peft_model.device))
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             peft_model.save_pretrained(tmp_dir)
             model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
             model = PeftModel.from_pretrained(model, tmp_dir)
             model = prepare_model_for_kbit_training(model)
-            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(model.device))
 
             # loading a 2nd adapter works, #1239
             model.load_adapter(tmp_dir, "adapter2")
             model.set_adapter("adapter2")
-            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(model.device))
 
             # check that both adapters are in the same layer
             assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.randlora_A
@@ -499,19 +499,19 @@ class PeftGPUCommonTests(unittest.TestCase):
         config = IA3Config(task_type=TaskType.CAUSAL_LM)
         peft_model = get_peft_model(model, config)
         peft_model = prepare_model_for_kbit_training(peft_model)
-        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(peft_model.device))
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             peft_model.save_pretrained(tmp_dir)
             model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
             model = PeftModel.from_pretrained(model, tmp_dir)
             model = prepare_model_for_kbit_training(model)
-            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(model.device))
 
             # loading a 2nd adapter works, #1239
             model.load_adapter(tmp_dir, "adapter2")
             model.set_adapter("adapter2")
-            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(model.device))
 
             # check that both adapters are in the same layer
             assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.ia3_l
