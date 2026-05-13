@@ -24,8 +24,8 @@ from contextlib import contextmanager
 from typing import Any, Optional
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 from torch.autograd import Function
 
 from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge

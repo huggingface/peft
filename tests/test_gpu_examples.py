@@ -68,6 +68,7 @@ from peft import (
     AdaLoraConfig,
     ArrowConfig,
     EvaConfig,
+    HiraConfig,
     LoftQConfig,
     LoraConfig,
     PeftModel,
@@ -340,8 +341,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = prepare_model_for_kbit_training(model)
 
-            setattr(model, "model_parallel", True)
-            setattr(model, "is_parallelizable", True)
+            model.model_parallel = True
+            model.is_parallelizable = True
 
             config = LoraConfig(
                 r=16,
@@ -551,8 +552,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
             model = prepare_model_for_kbit_training(model)
 
-            setattr(model, "model_parallel", True)
-            setattr(model, "is_parallelizable", True)
+            model.model_parallel = True
+            model.is_parallelizable = True
 
             config = LoraConfig(
                 r=16,
@@ -961,8 +962,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = prepare_model_for_kbit_training(model)
 
-            setattr(model, "model_parallel", True)
-            setattr(model, "is_parallelizable", True)
+            model.model_parallel = True
+            model.is_parallelizable = True
 
             config = LoraConfig(
                 r=16,
@@ -1079,8 +1080,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = prepare_model_for_kbit_training(model)
 
-            setattr(model, "model_parallel", True)
-            setattr(model, "is_parallelizable", True)
+            model.model_parallel = True
+            model.is_parallelizable = True
 
             config = LoraConfig(
                 r=16,
@@ -1435,8 +1436,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = prepare_model_for_kbit_training(model)
 
-            setattr(model, "model_parallel", True)
-            setattr(model, "is_parallelizable", True)
+            model.model_parallel = True
+            model.is_parallelizable = True
 
             config = VeraConfig(
                 r=16,
@@ -1495,8 +1496,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = prepare_model_for_kbit_training(model)
 
-            setattr(model, "model_parallel", True)
-            setattr(model, "is_parallelizable", True)
+            model.model_parallel = True
+            model.is_parallelizable = True
 
             config = PveraConfig(
                 r=16,
@@ -1555,8 +1556,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = prepare_model_for_kbit_training(model)
 
-            setattr(model, "model_parallel", True)
-            setattr(model, "is_parallelizable", True)
+            model.model_parallel = True
+            model.is_parallelizable = True
 
             config = VeraConfig(
                 r=16,
@@ -1615,8 +1616,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = prepare_model_for_kbit_training(model)
 
-            setattr(model, "model_parallel", True)
-            setattr(model, "is_parallelizable", True)
+            model.model_parallel = True
+            model.is_parallelizable = True
 
             config = PveraConfig(
                 r=16,
@@ -1783,8 +1784,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = prepare_model_for_kbit_training(model)
 
-            setattr(model, "model_parallel", True)
-            setattr(model, "is_parallelizable", True)
+            model.model_parallel = True
+            model.is_parallelizable = True
 
             config = RandLoraConfig(
                 r=16,
@@ -1843,8 +1844,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = prepare_model_for_kbit_training(model)
 
-            setattr(model, "model_parallel", True)
-            setattr(model, "is_parallelizable", True)
+            model.model_parallel = True
+            model.is_parallelizable = True
 
             config = RandLoraConfig(
                 r=16,
@@ -2007,8 +2008,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = prepare_model_for_kbit_training(model)
 
-            setattr(model, "model_parallel", True)
-            setattr(model, "is_parallelizable", True)
+            model.model_parallel = True
+            model.is_parallelizable = True
 
             config = RoadConfig(
                 variant="road_1",
@@ -2065,8 +2066,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model = prepare_model_for_kbit_training(model)
 
-            setattr(model, "model_parallel", True)
-            setattr(model, "is_parallelizable", True)
+            model.model_parallel = True
+            model.is_parallelizable = True
 
             config = RoadConfig(
                 variant="road_1",
@@ -2195,6 +2196,118 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert stat.st_size < emb_file_size
 
             # sanity check: assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_hira(self):
+        r"""
+        Test the CausalLM training on a single GPU device. This test is a converted version of
+        https://github.com/huggingface/peft/blob/main/examples/int8_training/Finetune_opt_bnb_peft.ipynb where we train
+        `opt-6.7b` on `english_quotes` dataset in few steps. The test would simply fail if the adapters are not set
+        correctly.
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+                device_map="auto",
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            model = prepare_model_for_kbit_training(model)
+
+            config = HiraConfig(
+                r=16,
+                target_modules=["q_proj", "v_proj"],
+                hira_dropout=0.05,
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset_english_quotes()
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_4bit_hira(self):
+        r"""
+        Test the CausalLM training on a single GPU device. This test is a converted version of
+        https://github.com/huggingface/peft/blob/main/examples/int8_training/Finetune_opt_bnb_peft.ipynb where we train
+        `opt-6.7b` on `english_quotes` dataset in few steps using 4bit base model. The test would simply fail if the
+        adapters are not set correctly.
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+                device_map="auto",
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            model = prepare_model_for_kbit_training(model)
+
+            config = HiraConfig(
+                r=16,
+                target_modules=["q_proj", "v_proj"],
+                hira_dropout=0.05,
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset_english_quotes()
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
@@ -2452,8 +2565,8 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
             model = prepare_model_for_kbit_training(model)
 
-            setattr(model, "model_parallel", True)
-            setattr(model, "is_parallelizable", True)
+            model.model_parallel = True
+            model.is_parallelizable = True
 
             config = LoraConfig(
                 r=16,
@@ -4046,13 +4159,13 @@ class PeftAwqGPUTests(unittest.TestCase):
                 quantization_config=self.quantization_config,
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
-            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+            assert set(model.hf_device_map.values()) == {0, 1}
+            assert {p.device.index for p in model.parameters()} == {0, 1}
 
             model = prepare_model_for_kbit_training(model)
 
-            setattr(model, "model_parallel", True)
-            setattr(model, "is_parallelizable", True)
+            model.model_parallel = True
+            model.is_parallelizable = True
 
             config = LoraConfig(
                 r=16,
@@ -4211,8 +4324,8 @@ class PeftEetqGPUTests(unittest.TestCase):
 
             model = prepare_model_for_kbit_training(model)
 
-            setattr(model, "model_parallel", True)
-            setattr(model, "is_parallelizable", True)
+            model.model_parallel = True
+            model.is_parallelizable = True
 
             config = LoraConfig(
                 r=16,
@@ -5156,7 +5269,7 @@ class TestEvaInitializationGPU:
                 )
 
         mean_cosine_similarities = {k: torch.tensor(v).mean() for k, v in cos_sims.items()}
-        for layer_name, mean_cosine_similarity in mean_cosine_similarities.items():
+        for mean_cosine_similarity in mean_cosine_similarities.values():
             assert mean_cosine_similarity > self.COSINE_SIMILARITY_THRESHOLD, (
                 f"Mean absolute cosine similarity {mean_cosine_similarity:.4f} "
                 f"is not greater than {self.COSINE_SIMILARITY_THRESHOLD}"
@@ -5499,8 +5612,8 @@ class TestHotSwapping:
     def reset_dynamo_cache(self):
         # It is critical that the dynamo cache is reset for each test. Otherwise, if the test re-uses the same model,
         # there will be recompilation errors, as torch caches the model when run in the same process.
-        yield
         torch._dynamo.reset()
+        yield
 
     #######
     # LLM #
@@ -6460,7 +6573,7 @@ def _test_save_unsharded_weights(rank, world_size, port, tmp_dir_reference, tmp_
     Flow:
       1. Rank 0: create a plain (non-TP) PEFT model, save it as the reference.
       2. All ranks: load the TP base model, load the reference PEFT weights (shards on load), then save again.
-      3. Rank 0: compare the re-saved state dict against the original reference — they must match exactly.
+      3. Rank 0: compare the re-saved state dict against the original reference, they must match exactly.
     """
     if rank == 0:
         plain_model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID)
@@ -6568,7 +6681,7 @@ def _test_load_adapter_save(rank, world_size, port, tmp_dir_reference, tmp_dir_t
     Flow:
       1. Rank 0: create a plain (non-TP) model, load adapter from config, save state dict as reference.
       2. All ranks: load TP base model, load adapter from config, save state dict via get_peft_model_state_dict.
-      3. Rank 0: compare re-saved state dict against the reference — keys and values must match.
+      3. Rank 0: compare re-saved state dict against the reference, keys and values must match.
     """
     if rank == 0:
         plain_model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID)
@@ -6654,3 +6767,37 @@ class TestLoraTensorParallel:
         tmp_dir_reference = tmp_path / "reference"
         tmp_dir_tp = tmp_path / "tp"
         self._spawn(_test_load_adapter_save, tmp_dir_reference, tmp_dir_tp, port_offset=6)
+
+
+@pytest.mark.single_gpu_tests
+@require_bitsandbytes
+def test_kappatune_with_4bit_model():
+    """Test that KappaTune works with 4-bit quantized models on GPU."""
+    import torch
+    from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+
+    from peft.helpers import find_kappa_target_modules
+
+    # Use a very small model for faster testing
+    quantization_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_compute_dtype=torch.float16,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_use_double_quant=True,
+    )
+
+    model = AutoModelForCausalLM.from_pretrained(
+        "hf-internal-testing/tiny-random-LlamaForCausalLM",
+        quantization_config=quantization_config,
+        device_map="cuda",
+        torch_dtype=torch.float16,
+    )
+
+    # Run KappaTune
+    targets = find_kappa_target_modules(model, top_p=0.3)
+
+    # Basic assertions
+    assert isinstance(targets, dict)
+    assert "target_modules" in targets
+    assert isinstance(targets["target_modules"], list)
+    assert len(targets["target_modules"]) > 0, "Should return at least some target modules"

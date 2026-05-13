@@ -24,6 +24,7 @@ from peft import (
     DeloraConfig,
     FourierFTConfig,
     GraloraConfig,
+    HiraConfig,
     HRAConfig,
     IA3Config,
     LilyConfig,
@@ -106,6 +107,13 @@ ALL_CONFIGS = [
     ),
     (
         GraloraConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+        },
+    ),
+    (
+        HiraConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
@@ -292,7 +300,7 @@ def skip_deberta_lora_tests(config_cls, model_id):
     if "deberta" not in model_id.lower():
         return
 
-    to_skip = ["lora", "ia3", "boft", "vera", "fourierft", "hra", "randlora"]
+    to_skip = ["lora", "ia3", "boft", "vera", "fourierft", "hira", "hra", "randlora"]
     config_name = config_cls.__name__.lower()
     if any(k in config_name for k in to_skip):
         pytest.skip(f"Skip tests that use {config_name} for Deberta models")

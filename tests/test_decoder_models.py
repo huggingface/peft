@@ -39,6 +39,7 @@ from peft import (
     DeloraConfig,
     FourierFTConfig,
     GraloraConfig,
+    HiraConfig,
     HRAConfig,
     IA3Config,
     LoraConfig,
@@ -166,6 +167,13 @@ ALL_CONFIGS = [
             "gralora_dropout": 0.05,
             "gralora_k": 4,
             "hybrid_r": 4,
+        },
+    ),
+    (
+        HiraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
         },
     ),
     (
@@ -760,7 +768,8 @@ class TestDecoderModels(PeftCommonTester):
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = LoraConfig(base_model_name_or_path=model_id, **config_kwargs)
 
-        assert len(model.model.layers), "Expected 2 layers in original model." == 2
+        assert len(model.model.layers) == 2, "Expected 2 layers in original model."
+
         model = get_peft_model(model, config)
         layers = model.base_model.model.model.layers
         assert len(layers) == 4, "Expected 4 layers in adapted model."

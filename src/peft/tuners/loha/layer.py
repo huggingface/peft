@@ -16,8 +16,8 @@ import math
 from typing import Any
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from peft.tuners.lycoris_utils import LycorisLayer
 
@@ -361,7 +361,7 @@ class Conv1d(LoHaLayer):
 
 class HadaWeight(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, w1a, w1b, w2a, w2b, scale=torch.tensor(1)):
+    def forward(ctx, w1a, w1b, w2a, w2b, scale=torch.tensor(1)):  # noqa: B008
         ctx.save_for_backward(w1a, w1b, w2a, w2b, scale)
         diff_weight = ((w1a @ w1b) * (w2a @ w2b)) * scale
         return diff_weight
@@ -384,7 +384,7 @@ class HadaWeight(torch.autograd.Function):
 
 class HadaWeightCP(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, t1, w1a, w1b, t2, w2a, w2b, scale=torch.tensor(1)):
+    def forward(ctx, t1, w1a, w1b, t2, w2a, w2b, scale=torch.tensor(1)):  # noqa: B008
         ctx.save_for_backward(t1, w1a, w1b, t2, w2a, w2b, scale)
 
         rebuild1 = torch.einsum("i j k l, j r, i p -> p r k l", t1, w1b, w1a)

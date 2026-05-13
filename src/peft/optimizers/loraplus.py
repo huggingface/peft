@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from operator import attrgetter
 
-import torch.nn as nn
+from torch import nn
 from torch.optim import Optimizer
 from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 from transformers.trainer_pt_utils import get_parameter_names

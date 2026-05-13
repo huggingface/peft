@@ -522,10 +522,10 @@ class LoraModel(BaseTuner):
                 # When there is beam search, the inputs are repeated n times, thus we repeat each adapter name n times and
                 # then flatten the nested list. For encoder-decoder models, this extended list should not be applied to the
                 # encoder part. Further below, the original argument is thus restored for the encoder.
-                adapter_names = sum(([n] * kwargs["num_beams"] for n in adapter_names), [])
+                adapter_names = [n for n in adapter_names for _ in range(kwargs["num_beams"])]
 
             for module in self.modules():
-                if isinstance(module, LoraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
+                if isinstance(module, (LoraLayer, AuxiliaryTrainingWrapper)):
                     pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
                     handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                     hook_handles.append(handle)
@@ -535,7 +535,7 @@ class LoraModel(BaseTuner):
                 # For encoder-decoder models, even when applying beam search, the encoder part of the model should not use
                 # the extended adapter_names. This is because the encoder still uses the original, non-extended samples.
                 for module in encoder.modules():
-                    if isinstance(module, LoraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
+                    if isinstance(module, (LoraLayer, AuxiliaryTrainingWrapper)):
                         # Add another hook to overwrite the kwargs with the original adapter names -- this is easier than
                         # trying to exclude the encoder.
                         pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=original_adapter_names)

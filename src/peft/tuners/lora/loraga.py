@@ -20,7 +20,7 @@ from collections.abc import Callable
 from typing import Any, Optional
 
 import torch
-import torch.nn as nn
+from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.lora.config import LoraConfig

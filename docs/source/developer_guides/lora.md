@@ -166,6 +166,31 @@ def train_step():
 preprocess_loraga(model, lora_config, train_step)
 ```
 
+### KappaTuneSelector
+
+KappaTune implements the condition-number-based target selection strategy from the [KappaTune paper](https://arxiv.org/abs/2506.16289). It scans every `nn.Linear` module and, for models where MoE expert weights are stored as fused 3D `nn.Parameter` tensors (e.g. Llama-4, Qwen3-MoE), also those parameters, computes the matrix condition number κ = σ_max / σ_min for each, and selects the most isotropic layers (lowest κ). These isotropic layers serve as ideal candidates for fine-tuning, since their high-entropy nature allows them to absorb new information more readily, leaving the specialized, anisotropic layers intact to mitigate catastrophic forgetting during continual learning.
+
+Use `find_kappa_target_modules` as a one-liner to get the optimal `target_modules` for `LoraConfig`:
+
+```python
+from peft import LoraConfig, get_peft_model
+from peft.helpers import find_kappa_target_modules
+
+model = AutoModelForCausalLM.from_pretrained("mistralai/Mixtral-8x7B-Instruct-v0.1")
+
+targets = find_kappa_target_modules(model, top_p=0.2)
+config = LoraConfig(
+    target_modules=targets["target_modules"],
+    target_parameters=targets["target_parameters"] if stable_modules_dic["target_parameters"] else None,
+    r=64,
+    lora_alpha=32,
+    task_type="CAUSAL_LM",
+)
+peft_model = get_peft_model(model, config)
+```
+
+See a complete example [here](https://github.com/huggingface/peft/blob/main/examples/KappaTune/experiments_kappatune_peft.py).
+
 ## Variants
 
 PEFT implements LoRA variants that improve upon the original LoRA.
@@ -234,6 +259,38 @@ Caching can thus make inference with DoRA significantly faster but it also requi
 - DoRA introduces a bigger overhead than pure LoRA, so it is recommended to merge weights for inference, see [`LoraModel.merge_and_unload`].
 - DoRA should work with weights quantized with bitsandbytes ("QDoRA"). However, issues have been reported when using QDoRA with DeepSpeed Zero2.
 
+### VeLoRA
+
+[VeLoRA](https://huggingface.co/papers/2405.17991) is a LoRA variant that reduces training memory by compressing the activations saved for the LoRA in the forward pass and then reconstructing them in the backwards pass to implement the update rules. In PEFT, VeLoRA is configured as a LoRA variant through the `velora_config` argument on [`LoraConfig`].
+
+```py
+from peft import LoraConfig, VeloraConfig
+
+config = LoraConfig(
+    target_modules=["q_proj", "v_proj"],
+    velora_config=VeloraConfig(
+        num_groups=64,
+        scale=0.2,
+        init_type="batch_average",
+    ),
+)
+```
+
+VeLoRA is applied to every LoRA layer selected by `target_modules`. `num_groups` controls how the input activation depth is split before compression. If the activation depth is not evenly divisible by `num_groups`, VeLoRA pads the grouped representation internally and removes the padding after reconstruction. `scale` rescales the reconstructed activations during the backward pass, and `init_type` chooses how the projection is initialized.
+
+Use `batch_average_once` to initialize the projection from the first training batch, `batch_average` to update it from every training forward pass, or `random` to initialize it immediately from a random normalized vector.
+
+Below are some results with the [MetaMathQA benchmark](https://github.com/huggingface/peft/tree/main/method_comparison/MetaMathQA). 
+
+| Variant | Training Loss | Max Memory (GiB) | Tokens/sec |
+|---|---:|---:|---:|
+| LoRA | 0.5427 | 27.69 | 2366.2 |
+| LoRA + GC | 0.5426 | 13.17 | 1671.8 |
+| LoRA+VeLoRA | 0.5427 | 19.94 | 2057.6 |
+
+#### Caveats
+
+- VeLoRA is currently supported on standard LoRA linear layers only.
 
 ## Training
 

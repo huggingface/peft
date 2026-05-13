@@ -17,8 +17,18 @@ from contextlib import contextmanager
 from copy import deepcopy
 from functools import update_wrapper
 from types import MethodType
+from typing import Optional
 
+import torch
 from torch import nn
+
+
+try:
+    import bitsandbytes as bnb
+except ImportError:
+    bnb = None
+
+from tqdm.auto import tqdm
 
 from .peft_model import PeftConfig, PeftModel
 from .tuners.lora import LoraLayer, dora
@@ -293,3 +303,191 @@ class DoraCaching:
 
     def __call__(self, enabled: bool = True):
         dora.ENABLE_DORA_CACHING = enabled
+
+
+class KappaTuneSelector:
+    """
+    Lightweight utility to compute per-module / per-parameter condition numbers and return the best LoRA targets.
+
+    Supports:
+    - Classic nn.Linear modules (target_modules in LoraConfig)
+    - Modern fused MoE weights stored as 3D nn.Parameter (gate_up_proj / down_proj, gate_proj / up_proj, etc.) used in
+      Llama-4, Qwen2_MoE, Qwen3_MoE, Mixtral, OLMoE and similar models. These are returned via target_parameters.
+
+    Notes:
+    - Condition-number computation requires running SVD and can take several minutes on very large models. A progress
+    bar can be shown/disabled via `show_progress`.
+
+    """
+
+    def __init__(
+        self,
+        model: nn.Module,
+        max_dim_size_to_analyze: int = 16384,
+        moe_param_suffixes: Optional[tuple[str, ...]] = None,
+        show_progress: bool = True,
+    ):
+        self.model = model
+        self.max_dim_size_to_analyze = max_dim_size_to_analyze
+        self.show_progress = show_progress
+        self.moe_param_suffixes = moe_param_suffixes or (
+            ".gate_up_proj",
+            ".down_proj",
+            ".gate_proj",
+            ".up_proj",
+        )
+        self._condition_numbers: Optional[dict[str, float]] = None
+        self._parameter_condition_numbers: Optional[dict[str, float]] = None
+
+    def _compute_kappas(self) -> None:
+        if self._condition_numbers is not None:
+            return
+
+        # === 1. nn.Linear modules ===
+        condition_numbers: dict[str, float] = {}
+        linear_modules = [
+            (module_name, module)
+            for module_name, module in self.model.named_modules()
+            if isinstance(module, nn.Linear)
+        ]
+        linear_iter = (
+            tqdm(linear_modules, desc="Computing SVD (linear layers)", unit="layer")
+            if self.show_progress
+            else linear_modules
+        )
+        for module_name, module in linear_iter:
+            weight = module.weight
+            if bnb is not None:
+                if hasattr(weight, "quant_state"):  # 4-bit
+                    w = bnb.functional.dequantize_4bit(weight.data, weight.quant_state).float()
+                elif hasattr(weight, "state") and hasattr(weight.state, "CB"):  # int8
+                    w = bnb.functional.int8_vectorwise_dequant(weight.state.CB, weight.state.SCB).float()
+                else:
+                    w = weight.data.detach().float()
+            else:
+                w = weight.data.detach().float()
+
+            if any(dim > self.max_dim_size_to_analyze for dim in w.shape):
+                continue
+
+            S = torch.linalg.svdvals(w.view(w.size(0), -1))
+            kappa = (S[0] / (S[-1] + 1e-8)).item()
+            condition_numbers[module_name] = kappa
+
+        self._condition_numbers = condition_numbers
+
+        # === 2. fused MoE parameters (3D nn.Parameter) ===
+        parameter_condition_numbers: dict[str, float] = {}
+        moe_params = [
+            (param_name, param)
+            for param_name, param in self.model.named_parameters()
+            if any(param_name.endswith(s) for s in self.moe_param_suffixes) and param.dim() == 3
+        ]
+        moe_iter = (
+            tqdm(moe_params, desc="Computing SVD (MoE parameters)", unit="param") if self.show_progress else moe_params
+        )
+        for param_name, param in moe_iter:
+            w = param.data.detach().float()
+            num_experts, *expert_shape = w.shape
+
+            if any(dim > self.max_dim_size_to_analyze for dim in expert_shape):
+                continue
+
+            kappas = []
+            for expert_idx in range(num_experts):
+                expert_w = w[expert_idx]
+                S = torch.linalg.svdvals(expert_w)
+                kappa = (S[0] / (S[-1] + 1e-8)).item()
+                kappas.append(kappa)
+            kappa = sum(kappas) / len(kappas)
+            parameter_condition_numbers[param_name] = kappa
+
+        self._parameter_condition_numbers = parameter_condition_numbers
+
+    def get_best_targets(
+        self, top_p: Optional[float] = None, num_modules: Optional[int] = None, threshold: Optional[float] = None
+    ) -> list[str]:
+        self._compute_kappas()
+        if not self._condition_numbers:
+            return []
+
+        sorted_modules = sorted(self._condition_numbers.items(), key=lambda x: x[1])
+
+        if num_modules is not None:
+            k = min(num_modules, len(sorted_modules))
+            return [name for name, _ in sorted_modules[:k]]
+
+        if top_p is not None:
+            k = max(1, int(len(sorted_modules) * top_p))
+            return [name for name, _ in sorted_modules[:k]]
+
+        if threshold is not None:
+            return [name for name, kappa in sorted_modules if kappa <= threshold]
+
+        return [name for name, _ in sorted_modules]
+
+    def get_best_target_parameters(
+        self, top_p: Optional[float] = None, num_modules: Optional[int] = None, threshold: Optional[float] = None
+    ) -> list[str]:
+        self._compute_kappas()
+        if not self._parameter_condition_numbers:
+            return []
+
+        sorted_params = sorted(self._parameter_condition_numbers.items(), key=lambda x: x[1])
+
+        if num_modules is not None:
+            k = min(num_modules, len(sorted_params))
+            return [name for name, _ in sorted_params[:k]]
+
+        if top_p is not None:
+            k = max(1, int(len(sorted_params) * top_p))
+            return [name for name, _ in sorted_params[:k]]
+
+        if threshold is not None:
+            return [name for name, kappa in sorted_params if kappa <= threshold]
+
+        return [name for name, _ in sorted_params]
+
+
+def find_kappa_target_modules(
+    model: nn.Module,
+    top_p: float = 0.2,
+    max_dim_size_to_analyze: int = 16384,
+    moe_param_suffixes: Optional[tuple[str, ...]] = None,
+    show_progress: bool = True,
+) -> dict[str, Optional[list[str]]]:
+    """
+    One-liner convenience function for KappaTune target selection. Returns both target_modules and target_parameters.
+
+    Args:
+        model (nn.Module):
+            Base model whose weights will be analyzed for condition numbers.
+        top_p (float, optional):
+            Select the top fraction of candidate modules/parameters with the lowest condition numbers.
+        max_dim_size_to_analyze (int, optional):
+            Upper bound on the maximum matrix dimension analyzed via SVD. Defaults to 16384.
+        moe_param_suffixes (Optional[tuple[str, ...]], optional):
+            Parameter-name suffixes used to identify fused MoE tensors that should be returned via `target_parameters`.
+            If None, sensible defaults are used.
+        show_progress (bool, optional):
+            Whether to display a progress bar while computing condition numbers (SVD-based) across candidate
+            tensors/modules. Disable in CI or other non-interactive environments. Defaults to True.
+    """
+    selector = KappaTuneSelector(
+        model,
+        max_dim_size_to_analyze=max_dim_size_to_analyze,
+        moe_param_suffixes=moe_param_suffixes,
+        show_progress=show_progress,
+    )
+
+    target_modules = selector.get_best_targets(top_p=top_p)
+    target_parameters = selector.get_best_target_parameters(top_p=top_p)
+
+    # Return None when there are no MoE layers (PEFT convention)
+    if not target_parameters:
+        target_parameters = None
+
+    return {
+        "target_modules": target_modules,
+        "target_parameters": target_parameters,
+    }

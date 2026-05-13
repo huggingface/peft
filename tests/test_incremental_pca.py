@@ -14,6 +14,8 @@
 
 # Adapted from https://github.com/scikit-learn/scikit-learn/blob/main/sklearn/decomposition/tests/test_incremental_pca.py
 
+from itertools import pairwise
+
 import pytest
 import torch
 from datasets import load_dataset
@@ -40,7 +42,7 @@ def test_incremental_pca(iris):
     X_transformed = ipca.transform(X)
 
     # PCA
-    U, S, Vh = torch.linalg.svd(X - torch.mean(X, dim=0))
+    _, S, Vh = torch.linalg.svd(X - torch.mean(X, dim=0))
     max_abs_rows = torch.argmax(torch.abs(Vh), dim=1)
     signs = torch.sign(Vh[range(Vh.shape[0]), max_abs_rows])
     Vh *= signs.view(-1, 1)
@@ -135,7 +137,7 @@ def test_incremental_pca_batch_signs():
         ipca = IncrementalPCA(n_components=None, batch_size=batch_size).fit(X)
         all_components.append(ipca.components_)
 
-    for i, j in zip(all_components[:-1], all_components[1:]):
+    for i, j in pairwise(all_components):
         assert_close(torch.sign(i), torch.sign(j), rtol=1e-6, atol=1e-6)
 
 
@@ -150,7 +152,7 @@ def test_incremental_pca_batch_values():
         ipca = IncrementalPCA(n_components=None, batch_size=batch_size).fit(X)
         all_components.append(ipca.components_)
 
-    for i, j in zip(all_components[:-1], all_components[1:]):
+    for i, j in pairwise(all_components):
         assert_close(i, j, rtol=1e-1, atol=1e-1)
 
 
@@ -168,7 +170,7 @@ def test_incremental_pca_partial_fit():
     pipca = IncrementalPCA(n_components=2, batch_size=batch_size)
     # Add one to make sure endpoint is included
     batch_itr = torch.arange(0, n + 1, batch_size)
-    for i, j in zip(batch_itr[:-1], batch_itr[1:]):
+    for i, j in pairwise(batch_itr):
         pipca.partial_fit(X[i:j, :])
     assert_close(ipca.components_, pipca.components_, rtol=1e-3, atol=1e-3)
 
