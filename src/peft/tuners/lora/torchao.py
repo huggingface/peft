@@ -29,9 +29,10 @@ from .layer import Linear
 class TorchaoLoraLinear(Linear):
     """LoRA layer implementation for Linear layers using torchao data"""
 
-    def __init__(self, *args, get_apply_tensor_subclass, **kwargs):
-        # this is not strictly necessary, as kwargs are stored either way, but we want to error early if
-        # get_apply_tensor_subclass is missing.
+    def __init__(self, *args, get_apply_tensor_subclass=None, **kwargs):
+        # `get_apply_tensor_subclass` may be omitted by callers that only need forward/training
+        # (e.g. `model.add_adapter(lora_config)` on a torchao-quantized base). It is required again
+        # at merge/unmerge time; we raise an actionable error there if it was not provided.
         if kwargs["config"].lora_bias:
             raise ValueError(f"{self.__class__.__name__} does not support lora_bias yet, set it to False")
 
@@ -55,6 +56,13 @@ class TorchaoLoraLinear(Linear):
         if not adapter_names:
             # no adapter to merge
             return
+
+        if self.get_apply_tensor_subclass is None:
+            raise ValueError(
+                f"{type(self).__name__} was instantiated without `get_apply_tensor_subclass`, which is "
+                "required to re-quantize the base layer after merging. Pass it via the adapter kwargs "
+                "(e.g. through `dispatch_torchao`) before calling merge()."
+            )
 
         self._check_dtype_supported()
 
@@ -91,6 +99,12 @@ class TorchaoLoraLinear(Linear):
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
+
+        if self.get_apply_tensor_subclass is None:
+            raise ValueError(
+                f"{type(self).__name__} was instantiated without `get_apply_tensor_subclass`, which is "
+                "required to re-quantize the base layer after unmerging."
+            )
 
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
