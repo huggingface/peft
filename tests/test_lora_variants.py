@@ -16,6 +16,7 @@ import pytest
 import torch
 from torch import nn
 from transformers import AutoModelForCausalLM
+from unittest.mock import PropertyMock, patch
 
 from peft import LoraConfig, TaskType, get_peft_model
 from peft.tuners.lora.layer import Conv1d as LoraConv1d
@@ -173,7 +174,20 @@ class TestLoraVariants:
 
         for layer in layer_names:
             assert getattr(peft_model.base_model.model, layer).lora_magnitude_vector["default"].weight.grad is not None
+    
+    def test_unregistered_variant_raises_error(self):
+            # 1. Create a config and dummy linear layer
+            config = LoraConfig()
+            base_layer = nn.Linear(10, 10)
+            layer = LoraLinear(base_layer, "default", config, r=8, lora_alpha=8)
 
+            # 2. Monkey-patch the lora_variants property to include a fake variant
+            with patch("peft.tuners.lora.layer.Linear.lora_variants", new_callable=PropertyMock) as mock_variants:
+                mock_variants.return_value = {("fake_unregistered_variant",): None}
+                
+                # 3. Assert that the sanity check catches it and throws the right error
+                with pytest.raises(ValueError, match="not tagged with 'is_lora_variant'"):
+                    layer.resolve_lora_variant(config=config)
 
 class TestActivatedLora:
     @pytest.mark.parametrize(

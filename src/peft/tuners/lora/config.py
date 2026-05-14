@@ -710,7 +710,7 @@ class LoraConfig(PeftConfig):
                 "especially at low ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger"
                 "overhead than pure LoRA, so it is recommended to merge weights for inference."
             ),
-            "is_variant": True,
+            "is_lora_variant": True,
         },
     )
     velora_config: Optional[Union[VeloraConfig, dict]] = field(
@@ -720,7 +720,7 @@ class LoraConfig(PeftConfig):
                 "Enable VeLoRA as a LoRA variant by providing a VeloraConfig. VeLoRA swaps in a custom backward pass "
                 "for the LoRA A projection that stores compressed activations instead of the full input activations."
             ),
-            "is_variant": True,
+            "is_lora_variant": True,
         },
     )
     alora_invocation_tokens: Optional[list[int]] = field(
@@ -738,7 +738,7 @@ class LoraConfig(PeftConfig):
                 "depending on the length of the shared context. Note that merging is not possible due to the selective "
                 "application of the weights."
             ),
-            "is_variant": True,
+            "is_lora_variant": True,
         },
     )
     use_qalora: bool = field(
@@ -820,12 +820,12 @@ class LoraConfig(PeftConfig):
                 "Enable BD-LoRA (Block-Diagonal LoRA) by providing a BdLoraConfig. This technique uses block-diagonal matrices for LoRA-A or LoRA-B "
                 "factors to enable faster multi-LoRA serving by eliminating communication overheads in distributed settings."
             ),
-            "is_variant": True,
+            "is_lora_variant": True,
         },
     )
     arrow_config: Optional[ArrowConfig] = field(
         default=None, metadata={"help": "The necessary config to apply arrow routing on the model.",
-            "is_variant": True,
+            "is_lora_variant": True,
         },
     )
     ensure_weight_tying: bool = field(
