@@ -28,6 +28,14 @@ ENABLE_DORA_CACHING = False
 """Whether to enable DoRA caching, which makes it faster at inference but requires more memory"""
 
 
+DORA_WEIGHT_NORM_EPS: float = 1e-6
+"""Lower bound applied to the row-wise L2 norm of the merged (base + scaled LoRA) weight in DoRA
+layers. Prevents the ``magnitude / weight_norm`` divide in ``forward`` from producing inf/NaN when
+the merged weight has zero or near-zero rows (real-world incidence: Llama-3.1 ``o_proj``, see
+issue #2049; Qwen3.5/3.6-MoE ``linear_attn.in_proj_qkv``). ``1e-6`` follows the bf16/fp16 convention
+from "Scaling DoRA" (arxiv:2603.22276); a smaller value (e.g. ``1e-12``) would also be safe for fp32."""
+
+
 def cache_decorator(cache_key: str):
     """Caching decorator for DoRA
 
@@ -84,11 +92,16 @@ class DoraLinearLayer(nn.Module):
 
     @cache_decorator("weight-norm")
     def get_weight_norm(self, weight, lora_weight, scaling, adapter_name: Optional[str] = None) -> torch.Tensor:
-        # calculate L2 norm of weight matrix, column-wise
+        # Row-wise L2 norm of (base + scaled LoRA). Upcast to fp32 for the norm to avoid bf16/fp16
+        # underflow on near-zero rows, and clamp the result at DORA_WEIGHT_NORM_EPS so the
+        # downstream `magnitude / weight_norm` divide in `forward` cannot produce inf/NaN on
+        # genuinely zero rows. See issue #2049 and "Scaling DoRA" (arxiv:2603.22276).
+        target_dtype = weight.dtype
         weight = transpose(weight, self.fan_in_fan_out)
-        weight = weight + scaling * lora_weight
-        weight_norm = torch.linalg.norm(weight, dim=1).to(weight.dtype)
-        return weight_norm
+        merged = weight.float() + scaling * lora_weight.float()
+        weight_norm = torch.linalg.norm(merged, dim=1)
+        weight_norm = torch.clamp(weight_norm, min=DORA_WEIGHT_NORM_EPS)
+        return weight_norm.to(target_dtype)
 
     @cache_decorator("lora-weight")
     def get_lora_weight(self, lora_A, lora_B, adapter_name: Optional[str] = None):
@@ -205,12 +218,14 @@ class DoraEmbeddingLayer(DoraLinearLayer):
 class _DoraConvNdLayer(DoraLinearLayer):
     @cache_decorator("weight-norm")
     def get_weight_norm(self, weight, lora_weight, scaling, adapter_name: Optional[str] = None) -> torch.Tensor:
-        # calculate L2 norm of weight matrix, column-wise
-        weight = weight + scaling * lora_weight
+        # Same fp32-upcast + clamp rationale as DoraLinearLayer.get_weight_norm (see #2049).
+        target_dtype = weight.dtype
+        merged = weight.float() + scaling * lora_weight.float()
         # the following is needed to have compatibility with the 4/5D weight tensors of Conv2D/3D
-        dim = tuple(range(1, weight.dim()))
-        weight_norm = weight.norm(p=2, dim=dim, keepdim=True).transpose(1, 0)
-        return weight_norm
+        dim = tuple(range(1, merged.dim()))
+        weight_norm = merged.norm(p=2, dim=dim, keepdim=True).transpose(1, 0)
+        weight_norm = torch.clamp(weight_norm, min=DORA_WEIGHT_NORM_EPS)
+        return weight_norm.to(target_dtype)
 
     @cache_decorator("lora-weight")
     def get_lora_weight(self, lora_A, lora_B, adapter_name: Optional[str] = None) -> torch.Tensor:
