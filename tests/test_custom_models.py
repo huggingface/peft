@@ -4058,6 +4058,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # In eval mode, `MontecloraSampler.get_variational_loss` returns (0.0, 0.0) for every sampler, so the
         # aggregated variational loss should be exactly zero.
         assert variational_loss == 0.0, "Variational loss should be 0 in eval mode"
+
     def test_pvera_reproducible(self):
         inputs = {"input_ids": torch.arange(10).view(-1, 1).to(self.torch_device)}
         config = PveraConfig(init_weights=False, sample_at_inference=True, generator_seed=0)

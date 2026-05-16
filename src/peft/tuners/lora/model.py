@@ -944,9 +944,7 @@ class LoraModel(BaseTuner):
 
         return tensors_lora
 
-    def _get_monteclora_loss(
-        self, adapter_names: Optional[Union[str, list[str]]] = None
-    ) -> torch.Tensor | float:
+    def _get_monteclora_loss(self, adapter_names: Optional[Union[str, list[str]]] = None) -> torch.Tensor | float:
         """
         Compute the MonteCLoRA variational regularization loss.
 
