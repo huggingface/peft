@@ -27,7 +27,7 @@ import torch
 import transformers
 from torch import nn
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_transformers_ge_v5_4_0
 from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
@@ -44,6 +44,7 @@ from peft.utils import (
     get_peft_model_state_dict,
     get_quantization_config,
 )
+from peft.utils.integrations import TpInfo
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 from peft.utils.other import get_pattern_key
 
@@ -255,6 +256,9 @@ class LoraModel(BaseTuner):
                 target_name=current_key,
                 config=lora_config,
             )
+
+            base_layer = target.get_base_layer()
+            lora_module = target
         else:
             if isinstance(target, ParamWrapper) and (parameter_name == target.parameter_name):
                 raise ValueError(
@@ -267,6 +271,67 @@ class LoraModel(BaseTuner):
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
+
+            base_layer = target
+            lora_module = new_module
+
+        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+        device_mesh = getattr(base_layer, "_hf_device_mesh", None)
+
+        # If the module has a tp_plan, we add hooks to the LoRA layers to make sure they respect the plan
+        if tp_plan is not None:
+            if not is_transformers_ge_v5_4_0:
+                raise RuntimeError(
+                    "The base model is tensor-parallel sharded but the installed version of Transformers does not "
+                    "support LoRA with Tensor Parallelism. Please upgrade to transformers >= 5.4.0."
+                )
+            from transformers.integrations.tensor_parallel import (
+                add_tensor_parallel_hooks_to_module,
+            )
+
+            _SUPPORTED_TP_PLANS = ("colwise", "rowwise", "embedding_rowwise")
+
+            if tp_plan not in _SUPPORTED_TP_PLANS:
+                warnings.warn(
+                    f'TP plan "{tp_plan}" on the base layer is not supported for LoRA. '
+                    "LoRA adapters will be created without tensor parallel hooks."
+                )
+            else:
+                tp_plan_keys = []
+                tp_plans = []
+                generic_key = re.sub(r"\d+", "*", current_key)
+                if tp_plan in ["colwise", "rowwise"]:
+                    if tp_plan == "colwise":
+                        tp_plan_keys.append(f"{generic_key}.lora_B.{adapter_name}.weight")
+                        tp_module = lora_module.lora_B[adapter_name]
+                        tp_layer_name = (f"{current_key}.lora_B.{adapter_name}",)
+                    else:  # rowwise
+                        tp_plan_keys.append(f"{generic_key}.lora_A.{adapter_name}.weight")
+                        tp_module = lora_module.lora_A[adapter_name]
+                        tp_layer_name = (f"{current_key}.lora_A.{adapter_name}",)
+                    tp_plans.append(tp_plan)
+                    add_tensor_parallel_hooks_to_module(
+                        self.model,
+                        tp_module,
+                        tp_plan,
+                        tp_layer_name,
+                        device_mesh,
+                    )
+                else:  # embedding_rowwise
+                    # TP hooks are  handled in the `_embed` method in lora/layer.py where they are explicitely called.
+                    # Here we simply register the TP plans.
+                    tp_plan_keys.append(f"{generic_key}.base_layer.weight")
+                    tp_plan_keys.append(f"{generic_key}.lora_embedding_A.{adapter_name}")
+                    tp_plans.append(tp_plan)
+                    # Because lora_embedding_A is transposed compared to nn.Embedding, we set the TP plan
+                    # to embedding_colwise so that the gathering happens on the correct dimension at save time.
+                    tp_plans.append("embedding_colwise")
+
+                lora_module._tp_info = TpInfo(
+                    tp_plan=dict(zip(tp_plan_keys, tp_plans)),
+                    device_mesh=device_mesh,
+                    tp_size=self.model._tp_size,
+                )
 
     def _replace_module(self, parent, child_name, new_module, child):
         # override in LoraModel to handle quantized weights properly
@@ -457,10 +522,10 @@ class LoraModel(BaseTuner):
                 # When there is beam search, the inputs are repeated n times, thus we repeat each adapter name n times and
                 # then flatten the nested list. For encoder-decoder models, this extended list should not be applied to the
                 # encoder part. Further below, the original argument is thus restored for the encoder.
-                adapter_names = sum(([n] * kwargs["num_beams"] for n in adapter_names), [])
+                adapter_names = [n for n in adapter_names for _ in range(kwargs["num_beams"])]
 
             for module in self.modules():
-                if isinstance(module, LoraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
+                if isinstance(module, (LoraLayer, AuxiliaryTrainingWrapper)):
                     pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
                     handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                     hook_handles.append(handle)
@@ -470,7 +535,7 @@ class LoraModel(BaseTuner):
                 # For encoder-decoder models, even when applying beam search, the encoder part of the model should not use
                 # the extended adapter_names. This is because the encoder still uses the original, non-extended samples.
                 for module in encoder.modules():
-                    if isinstance(module, LoraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
+                    if isinstance(module, (LoraLayer, AuxiliaryTrainingWrapper)):
                         # Add another hook to overwrite the kwargs with the original adapter names -- this is easier than
                         # trying to exclude the encoder.
                         pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=original_adapter_names)
@@ -495,8 +560,12 @@ class LoraModel(BaseTuner):
 
     def _prepare_adapter_config(self, peft_config, model_config):
         if peft_config.target_modules is None:
-            if model_config["model_type"] in self.target_module_mapping:
-                peft_config.target_modules = set(self.target_module_mapping[model_config["model_type"]])
+            target_modules = self.target_module_mapping.get(model_config["model_type"])
+            if target_modules is not None:
+                if isinstance(target_modules, str):
+                    peft_config.target_modules = target_modules
+                else:
+                    peft_config.target_modules = set(target_modules)
             elif not peft_config.target_parameters:
                 raise ValueError("Please specify `target_modules` or `target_parameters`in `peft_config`")
         return peft_config

@@ -71,10 +71,7 @@ class LilyModel(BaseTuner):
             target.update_layer(
                 adapter_name,
                 lily_config.r,
-                scaling=lily_config.scaling,
-                stride_A=lily_config.stride_A,
-                num_B=lily_config.num_B,
-                init_weights=lily_config.init_weights,
+                config=lily_config,
             )
         else:
             new_module = self._create_new_module(lily_config, adapter_name, target)
@@ -94,10 +91,7 @@ class LilyModel(BaseTuner):
                 target,
                 adapter_name,
                 r=lily_config.r,
-                scaling=lily_config.scaling,
-                stride_A=lily_config.stride_A,
-                num_B=lily_config.num_B,
-                init_weights=lily_config.init_weights,
+                config=lily_config,
             )
 
         raise NotImplementedError(f"Lily does not support target modules of type {type(target_base_layer)} yet.")

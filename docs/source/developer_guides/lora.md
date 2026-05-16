@@ -166,6 +166,31 @@ def train_step():
 preprocess_loraga(model, lora_config, train_step)
 ```
 
+### KappaTuneSelector
+
+KappaTune implements the condition-number-based target selection strategy from the [KappaTune paper](https://arxiv.org/abs/2506.16289). It scans every `nn.Linear` module and, for models where MoE expert weights are stored as fused 3D `nn.Parameter` tensors (e.g. Llama-4, Qwen3-MoE), also those parameters, computes the matrix condition number κ = σ_max / σ_min for each, and selects the most isotropic layers (lowest κ). These isotropic layers serve as ideal candidates for fine-tuning, since their high-entropy nature allows them to absorb new information more readily, leaving the specialized, anisotropic layers intact to mitigate catastrophic forgetting during continual learning.
+
+Use `find_kappa_target_modules` as a one-liner to get the optimal `target_modules` for `LoraConfig`:
+
+```python
+from peft import LoraConfig, get_peft_model
+from peft.helpers import find_kappa_target_modules
+
+model = AutoModelForCausalLM.from_pretrained("mistralai/Mixtral-8x7B-Instruct-v0.1")
+
+targets = find_kappa_target_modules(model, top_p=0.2)
+config = LoraConfig(
+    target_modules=targets["target_modules"],
+    target_parameters=targets["target_parameters"] if stable_modules_dic["target_parameters"] else None,
+    r=64,
+    lora_alpha=32,
+    task_type="CAUSAL_LM",
+)
+peft_model = get_peft_model(model, config)
+```
+
+See a complete example [here](https://github.com/huggingface/peft/blob/main/examples/KappaTune/experiments_kappatune_peft.py).
+
 ## Variants
 
 PEFT implements LoRA variants that improve upon the original LoRA.
@@ -286,6 +311,38 @@ class MontecloraTrainer(MontecloraTrainerMixin, Trainer):
 
 A complete working example is available at [`examples/monteclora_finetuning`](https://github.com/huggingface/peft/tree/main/examples/monteclora_finetuning).
 
+### VeLoRA
+
+[VeLoRA](https://huggingface.co/papers/2405.17991) is a LoRA variant that reduces training memory by compressing the activations saved for the LoRA in the forward pass and then reconstructing them in the backwards pass to implement the update rules. In PEFT, VeLoRA is configured as a LoRA variant through the `velora_config` argument on [`LoraConfig`].
+
+```py
+from peft import LoraConfig, VeloraConfig
+
+config = LoraConfig(
+    target_modules=["q_proj", "v_proj"],
+    velora_config=VeloraConfig(
+        num_groups=64,
+        scale=0.2,
+        init_type="batch_average",
+    ),
+)
+```
+
+VeLoRA is applied to every LoRA layer selected by `target_modules`. `num_groups` controls how the input activation depth is split before compression. If the activation depth is not evenly divisible by `num_groups`, VeLoRA pads the grouped representation internally and removes the padding after reconstruction. `scale` rescales the reconstructed activations during the backward pass, and `init_type` chooses how the projection is initialized.
+
+Use `batch_average_once` to initialize the projection from the first training batch, `batch_average` to update it from every training forward pass, or `random` to initialize it immediately from a random normalized vector.
+
+Below are some results with the [MetaMathQA benchmark](https://github.com/huggingface/peft/tree/main/method_comparison/MetaMathQA). 
+
+| Variant | Training Loss | Max Memory (GiB) | Tokens/sec |
+|---|---:|---:|---:|
+| LoRA | 0.5427 | 27.69 | 2366.2 |
+| LoRA + GC | 0.5426 | 13.17 | 1671.8 |
+| LoRA+VeLoRA | 0.5427 | 19.94 | 2057.6 |
+
+#### Caveats
+
+- VeLoRA is currently supported on standard LoRA linear layers only.
 
 ## Training
 
@@ -347,10 +404,11 @@ The same logic applies to `alpha_pattern`. If you're in doubt, don't try to get 
 
 ### Targeting `nn.Parameter` directly
 
-> [!WARNING]
-> This feature is experimental and subject to change.
-
 Generally, you should use `target_modules` to target the module (e.g. `nn.Linear`). However, in some circumstances, this is not possible. E.g., in many mixture of expert (MoE) layers in HF Transformers, instead of using `nn.Linear`, an `nn.Parameter` is used. PEFT normally overwrites the `forward` method for LoRA, but for `nn.Parameter`, there is none. Therefore, to apply LoRA to that parameter, it needs to be targeted with `target_parameters`. As an example, for [Llama4](https://huggingface.co/collections/meta-llama/llama-4-67f0c30d9fe03840bc9d0164), you can pass: `target_parameters=['feed_forward.experts.gate_up_proj', 'feed_forward.experts.down_proj]`.
+
+Note that when targeting expert parameters, PEFT can add a substantial runtime overhead. The reason is that PEFT always materializes the LoRA contribution for _each expert_ even if only a small amount of experts is required. During training, this is less relevant since, over the course of the sequence, typically a large fraction of experts is activated at least once. However, during inference, normally a KV cache is used and we thus need to only compute the last token, which means that only a small amount of experts is activated. Therefore, using LoRA on MoE layers can result in a substantial slowdown at inference time. The recommendation is thus to merge the weights (`model.merge_adapter()` or `model = model.merge_and_unload()`). This removes the PEFT overhead.
+
+A more detailed investigation of this issue can be found on this [pull request on MoE optimization](https://github.com/huggingface/peft/pull/3139).
 
 #### Caveats
 
@@ -439,6 +497,64 @@ To give a bit of an indication how much VRAM can be saved, a rudimentary compari
 | VRAM      |        15,562 MB |   15,581MB |     ~16,500MB    |
 | Influence |         6 tokens | all tokens |       all tokens |
 
+### Weight tying
+
+Many causal LMs use **weight tying**, where two or more weights share the same underlying parameters. In the most common case, the input embedding weights (`embed_tokens`) and output projection weights (`lm_head`) share the same tensor. This is because it reduces parameters and usually preserves model quality.
+
+It's not always obvious how PEFT deals with these tied weights when they are targeted for fine-tuning. For LoRA, the `ensure_weight_tying` on the [`LoraConfig`] controls whether PEFT should explicitly keep adapter-side updates tied for those layers. In practice, this can affect `modules_to_save`, `target_modules`, and `trainable_token_indices`. Note that this logic partially relies on convention when it comes to naming the layers (`"embed_tokens"`, `"lm_head"`) and proper working cannot be guaranteed if those conventions are not used.
+
+The tables below summarize expected behavior.
+
+#### `modules_to_save`
+
+| Base model weights tied | `ensure_weight_tying` | `LoraConfig` shape                                  | Behavior                                                     |
+|-------------------------|-----------------------|-----------------------------------------------------|--------------------------------------------------------------|
+| No                      | `False`               | `modules_to_save=["embed_tokens"]` or `["lm_head"]` | Add `ModulesToSaveWrapper` on selected layer only            |
+| No                      | `True`                | `modules_to_save=["embed_tokens"]` or `["lm_head"]` | Warn, then add `ModulesToSaveWrapper` on selected layer only |
+| Yes                     | `False`               | `modules_to_save=["embed_tokens"]` or `["lm_head"]` | Treat as separate                                            |
+| Yes                     | `True`                | `modules_to_save=["embed_tokens"]` or `["lm_head"]` | Wrap tied layers and keep wrappers tied                      |
+| No                      | `False`               | `modules_to_save=["embed_tokens", "lm_head"]`       | Treat as separate                                            |
+| No                      | `True`                | `modules_to_save=["embed_tokens", "lm_head"]`       | Warn, then treat as separate                                 |
+| Yes                     | `False`               | `modules_to_save=["embed_tokens", "lm_head"]`       | Warn, then treat as separate                                            |
+| Yes                     | `True`                | `modules_to_save=["embed_tokens", "lm_head"]`       | Keep `ModulesToSaveWrapper`s tied                            |
+
+#### `target_modules`
+
+| Base model weights tied | `ensure_weight_tying` | `LoraConfig` shape                                 | Behavior                                   |
+|-------------------------|-----------------------|----------------------------------------------------|--------------------------------------------|
+| No                      | `False`               | `target_modules=["embed_tokens"]` or `["lm_head"]` | Add LoRA on selected layer only            |
+| No                      | `True`                | `target_modules=["embed_tokens"]` or `["lm_head"]` | Warn, then add LoRA on selected layer only |
+| Yes                     | `False`               | `target_modules=["embed_tokens"]` or `["lm_head"]` | Treat as separate                          |
+| Yes                     | `True`                | `target_modules=["embed_tokens"]` or `["lm_head"]` | Keep LoRA adapters tied                    |
+| No                      | `False`               | `target_modules=["embed_tokens", "lm_head"]`       | Treat as separate                          |
+| No                      | `True`                | `target_modules=["embed_tokens", "lm_head"]`       | Warn, then treat as separate               |
+| Yes                     | `False`               | `target_modules=["embed_tokens", "lm_head"]`       | Warn, then treat as separate                          |
+| Yes                     | `True`                | `target_modules=["embed_tokens", "lm_head"]`       | Keep LoRA adapters tied                    |
+
+#### `trainable_token_indices`
+
+For trainable tokens, we have the additional complication that even if the LM head and embeddings are tied, as a user I may want to fine-tune *different* tokens on them. In the example table below, we thus differentiate between fine-tuning the same and fine-tuning different tokens.
+
+| Base model weights tied | `ensure_weight_tying` | `LoraConfig` shape                                                    | Behavior                                       |
+|-------------------------|-----------------------|-----------------------------------------------------------------------|------------------------------------------------|
+| No                      | `False`               | `trainable_token_indices=[1, 2, 3]`                                   | Trainable tokens on embeddings only            |
+| No                      | `True`                | `trainable_token_indices=[1, 2, 3]`                                   | Warn, then trainable tokens on embeddings only |
+| Yes                     | `False`               | `trainable_token_indices=[1, 2, 3]`                                   | Tied trainable tokens                          |
+| Yes                     | `True`                | `trainable_token_indices=[1, 2, 3]`                                   | Tied trainable tokens                          |
+| No                      | `False`               | `trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [1, 2]}` | Treat as separate                              |
+| No                      | `True`                | `trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [1, 2]}` | Warn, then treat as separate                   |
+| Yes                     | `False`               | `trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [1, 2]}` | Tied trainable tokens                          |
+| Yes                     | `True`                | `trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [1, 2]}` | Tied trainable tokens                          |
+| No                      | `False`               | `trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [3, 4]}` | Treat as separate                              |
+| No                      | `True`                | `trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [3, 4]}` | Warn, then treat as separate                   |
+| Yes                     | `False`               | `trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [3, 4]}` | Treat as separate                              |
+| Yes                     | `True`                | `trainable_token_indices={"lm_head": [1, 2], "embed_tokens": [3, 4]}` | Error                                          |
+
+For users, this means:
+
+- In general, if you want to fine-tune weights that are tied and want to keep them tied, pass `ensure_weight_tying=True`.
+- If your base model's weights are untied, `ensure_weight_tying=True` cannot force tying and only warns.
+- For `trainable_token_indices`, tied layers must use the same token indices when `ensure_weight_tying=True`.
 
 ## Optimizers
 
@@ -667,6 +783,26 @@ model = model.unload()
 # delete adapter
 model.delete_adapter("dpo")
 ```
+
+## Tensor Parallelism
+
+LoRA supports [Tensor Parallelism (TP)](https://huggingface.co/docs/transformers/main/en/perf_train_gpu_many#tensor-parallelism) as provided by Transformers. When a base model is loaded with a `tp_plan`, PEFT automatically detects the TP configuration of each target module and adds the appropriate hooks to the LoRA adapter weights so that they participate correctly in the tensor-parallel computation.
+
+> [!WARNING]
+> Tensor Parallelism support for LoRA requires `transformers >= 5.4.0`.
+
+Usage is identical to the standard LoRA workflow — simply load the base model with a `tp_plan` before wrapping it with PEFT:
+
+```py
+from transformers import AutoModelForCausalLM
+from peft import get_peft_model, LoraConfig
+
+model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.1-8B", tp_plan="auto")
+lora_config = LoraConfig(r=16, target_modules=["q_proj", "v_proj"])
+model = get_peft_model(model, lora_config)
+```
+
+Saving and loading work as usual via `save_pretrained` / `from_pretrained`. PEFT gathers the sharded adapter weights back to full tensors before saving, so checkpoints are portable and independent of the number of devices used during training.
 
 ## Inference
 

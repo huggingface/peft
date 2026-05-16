@@ -17,17 +17,21 @@ from transformers import AutoModelForSequenceClassification
 
 from peft import (
     AdaLoraConfig,
+    AdamssConfig,
+    BeftConfig,
     BOFTConfig,
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
     GraloraConfig,
+    HiraConfig,
     HRAConfig,
     IA3Config,
     LilyConfig,
     LoraConfig,
     MissConfig,
     OFTConfig,
+    PeanutConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
@@ -35,6 +39,7 @@ from peft import (
     PsoftConfig,
     RoadConfig,
     ShiraConfig,
+    TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -61,6 +66,13 @@ ALL_CONFIGS = [
             "task_type": "SEQ_CLS",
             "target_modules": None,
             "total_step": 1,
+        },
+    ),
+    (
+        BeftConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
         },
     ),
     (
@@ -96,6 +108,13 @@ ALL_CONFIGS = [
     ),
     (
         GraloraConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+        },
+    ),
+    (
+        HiraConfig,
         {
             "task_type": "SEQ_CLS",
             "target_modules": None,
@@ -189,6 +208,16 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PeanutConfig,
+        {
+            "r": 8,
+            "depth": 1,
+            "act_fn": "relu",
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+        },
+    ),
+    (
         RoadConfig,
         {
             "task_type": "SEQ_CLS",
@@ -229,6 +258,13 @@ ALL_CONFIGS = [
         },
     ),
     (
+        TinyLoraConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+        },
+    ),
+    (
         C3AConfig,
         {
             "task_type": "SEQ_CLS",
@@ -242,6 +278,14 @@ ALL_CONFIGS = [
             "task_type": "SEQ_CLS",
             "n_frequency": 8,
             "target_modules": None,
+        },
+    ),
+    (
+        AdamssConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "r": 8,
         },
     ),
 ]

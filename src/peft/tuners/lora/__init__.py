@@ -25,6 +25,7 @@ from .config import (
     LoraGAConfig,
     LoraRuntimeConfig,
     MontecloraConfig,
+    VeloraConfig,
 )
 from .conversion import convert_to_lora, save_as_lora
 from .eva import get_eva_state_dict, initialize_lora_eva_weights
@@ -51,6 +52,7 @@ __all__ = [
     "LoraRuntimeConfig",
     "MontecloraConfig",
     "ParamWrapper",
+    "VeloraConfig",
     "convert_to_lora",
     "create_arrow_model",
     "get_eva_state_dict",

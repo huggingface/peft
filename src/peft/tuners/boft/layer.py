@@ -21,14 +21,16 @@ import math
 import os
 import warnings
 from contextlib import contextmanager
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 from torch.autograd import Function
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+
+from .config import BOFTConfig
 
 
 _FBD_CUDA = None
@@ -231,7 +233,7 @@ class BOFTLayer(BaseTunerLayer):
         elif isinstance(base_layer, nn.Conv2d):
             in_features, out_features = base_layer.in_channels, base_layer.out_channels
         else:
-            raise ValueError(f"Unsupported layer type {type(base_layer)}")
+            raise TypeError(f"Unsupported layer type {type(base_layer)}")
 
         self.in_features = in_features
         self.out_features = out_features
@@ -262,18 +264,20 @@ class BOFTLayer(BaseTunerLayer):
 
     def update_layer(
         self,
-        adapter_name,
-        boft_block_size,
-        boft_block_num,
-        boft_n_butterfly_factor,
-        boft_dropout,
-        init_weights,
-        inference_mode: bool = False,
+        adapter_name: str,
+        config: BOFTConfig,
         **kwargs,
     ):
         """
         Update the linear layer with trainable BOFT weights. Override for other layer types.
         """
+        boft_block_size = config.boft_block_size
+        boft_block_num = config.boft_block_num
+        boft_n_butterfly_factor = config.boft_n_butterfly_factor
+        boft_dropout = config.boft_dropout
+        init_weights = config.init_weights
+        inference_mode = config.inference_mode
+
         # Attempt to load the CUDA extension during model initialization
         if not get_fbd_cuda():
             self.fbd_cuda_available = False
@@ -472,24 +476,17 @@ class Linear(nn.Module, BOFTLayer):
         self,
         base_layer,
         adapter_name: str,
-        boft_block_size: int = 8,
-        boft_block_num: int = 0,
-        boft_n_butterfly_factor: int = 0,
-        boft_dropout: float = 0.1,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-        init_weights: Union[bool, str] = True,
+        config: BOFTConfig,
         is_target_conv_1d_layer: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
         BOFTLayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
+        self.fan_in_fan_out = config.fan_in_fan_out
 
         self._active_adapter = adapter_name
 
-        self.update_layer(
-            adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
-        )
+        self.update_layer(adapter_name, config=config)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -674,35 +671,30 @@ class Conv2d(nn.Module, BOFTLayer):
         self,
         base_layer: nn.Module,
         adapter_name: str,
-        boft_block_size: int = 8,
-        boft_block_num: int = 0,
-        boft_n_butterfly_factor: int = 0,
-        boft_dropout: float = 0.1,
-        init_weights: Union[bool, str] = True,
+        config: BOFTConfig,
         **kwargs,
     ) -> None:
         super().__init__()
         BOFTLayer.__init__(self, base_layer)
 
         self._active_adapter = adapter_name
-        self.update_layer(
-            adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
-        )
+        self.update_layer(adapter_name, config=config)
 
     def update_layer(
         self,
-        adapter_name,
-        boft_block_size,
-        boft_block_num,
-        boft_n_butterfly_factor,
-        boft_dropout,
-        init_weights,
-        inference_mode: bool = False,
+        adapter_name: str,
+        config: BOFTConfig,
         **kwargs,
     ):
         """
         Update the conv2d layer with trainable BOFT weights.
         """
+        boft_block_size = config.boft_block_size
+        boft_block_num = config.boft_block_num
+        boft_n_butterfly_factor = config.boft_n_butterfly_factor
+        boft_dropout = config.boft_dropout
+        init_weights = config.init_weights
+        inference_mode = config.inference_mode
 
         # Attempt to load the CUDA extension during model initialization
         if not get_fbd_cuda():

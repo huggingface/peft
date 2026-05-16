@@ -87,10 +87,10 @@ class LNTuningModel(BaseTuner):
         adapter_name: str,
     ) -> Module:
         if not isinstance(target, LNTuningLayer):
-            new_module = LNTuningLayer(target, adapter_name)
+            new_module = LNTuningLayer(target, adapter_name, config=peft_config)
         else:
             new_module = target
-            new_module.update_layer(target.base_layer, adapter_name)
+            new_module.update_layer(target.base_layer, adapter_name, config=peft_config)
         return new_module
 
     def _unloading_checks(self, adapter_names: Optional[list[str]]):

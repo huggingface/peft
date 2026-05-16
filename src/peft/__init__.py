@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.18.2.dev0"
+__version__ = "0.19.2.dev0"
 
 from .auto import (
     MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
@@ -25,6 +25,7 @@ from .auto import (
     AutoPeftModelForTokenClassification,
 )
 from .config import PeftConfig, PromptLearningConfig
+from .helpers import find_kappa_target_modules
 from .mapping import (
     PEFT_TYPE_TO_CONFIG_MAPPING,
     PEFT_TYPE_TO_MIXED_MODEL_MAPPING,
@@ -48,10 +49,14 @@ from .peft_model import (
 from .tuners import (
     AdaLoraConfig,
     AdaLoraModel,
+    AdamssConfig,
+    AdamssModel,
     AdaptionPromptConfig,
     AdaptionPromptModel,
     ArrowConfig,
     BdLoraConfig,
+    BeftConfig,
+    BeftModel,
     BOFTConfig,
     BOFTModel,
     C3AConfig,
@@ -67,6 +72,8 @@ from .tuners import (
     FourierFTModel,
     GraloraConfig,
     GraloraModel,
+    HiraConfig,
+    HiraModel,
     HRAConfig,
     HRAModel,
     IA3Config,
@@ -93,6 +100,8 @@ from .tuners import (
     OFTModel,
     OSFConfig,
     OSFModel,
+    PeanutConfig,
+    PeanutModel,
     PolyConfig,
     PolyModel,
     PrefixEncoder,
@@ -113,10 +122,13 @@ from .tuners import (
     RoadModel,
     ShiraConfig,
     ShiraModel,
+    TinyLoraConfig,
+    TinyLoraModel,
     TrainableTokensConfig,
     TrainableTokensModel,
     VBLoRAConfig,
     VBLoRAModel,
+    VeloraConfig,
     VeraConfig,
     VeraModel,
     WaveFTConfig,
@@ -160,6 +172,8 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
     "AdaLoraConfig",
     "AdaLoraModel",
+    "AdamssConfig",
+    "AdamssModel",
     "AdaptionPromptConfig",
     "AdaptionPromptModel",
     "ArrowConfig",
@@ -173,6 +187,8 @@ __all__ = [
     "BOFTConfig",
     "BOFTModel",
     "BdLoraConfig",
+    "BeftConfig",
+    "BeftModel",
     "C3AConfig",
     "C3AModel",
     "CPTConfig",
@@ -188,6 +204,8 @@ __all__ = [
     "GraloraModel",
     "HRAConfig",
     "HRAModel",
+    "HiraConfig",
+    "HiraModel",
     "IA3Config",
     "IA3Model",
     "LNTuningConfig",
@@ -212,6 +230,8 @@ __all__ = [
     "OFTModel",
     "OSFConfig",
     "OSFModel",
+    "PeanutConfig",
+    "PeanutModel",
     "PeftConfig",
     "PeftMixedModel",
     "PeftModel",
@@ -245,11 +265,14 @@ __all__ = [
     "ShiraConfig",
     "ShiraModel",
     "TaskType",
+    "TinyLoraConfig",
+    "TinyLoraModel",
     "TrainableTokensConfig",
     "TrainableTokensModel",
     "VBLoRAConfig",
     "VBLoRAConfig",
     "VBLoRAModel",
+    "VeloraConfig",
     "VeraConfig",
     "VeraModel",
     "WaveFTConfig",
@@ -261,6 +284,7 @@ __all__ = [
     "compose_cartridge_adapters",
     "convert_to_lora",
     "create_arrow_model",
+    "find_kappa_target_modules",
     "get_eva_state_dict",
     "get_layer_status",
     "get_model_status",

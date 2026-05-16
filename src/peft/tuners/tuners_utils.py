@@ -33,8 +33,9 @@ from tqdm import tqdm
 from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
+from peft.import_utils import is_transformers_ge_v5
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
-from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
+from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, UPCAST_DTYPES
 from peft.utils.constants import (
     DUMMY_MODEL_CONFIG,
     DUMMY_TARGET_MODULES,
@@ -48,6 +49,7 @@ from peft.utils.other import (
     _get_module_names_tied_with_embedding,
     _set_adapter,
     _set_layer_requires_grad,
+    is_gptqmodel_quant_linear,
     match_target_against_key,
     set_additional_trainable_modules,
 )
@@ -105,7 +107,7 @@ def onload_layer(layer):
         ):
             # find the disk-offload index (maps modules to safetensors) from the `dataset` (OffloadedWeightsLoader object)
             index = layer.base_layer._hf_hook.weights_map.dataset.index
-            module_name = list(dict(layer.base_layer._hf_hook.weights_map.dataset).keys())[0]  # any module will do
+            module_name = next(iter(dict(layer.base_layer._hf_hook.weights_map.dataset).keys()))  # any module will do
             file_name = index[module_name]["safetensors_file"]
             base_name_arr = []
             # get effective dir name
@@ -174,11 +176,7 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
             out_features, in_features = module.weight.to_local().shape
         else:
             in_features, out_features = module.in_features, module.out_features
-    elif isinstance(module, nn.Conv1d):
-        in_features, out_features = module.in_channels, module.out_channels
-    elif isinstance(module, nn.Conv2d):
-        in_features, out_features = module.in_channels, module.out_channels
-    elif isinstance(module, nn.Conv3d):
+    elif isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
         in_features, out_features = module.in_channels, module.out_channels
     elif isinstance(module, nn.Embedding):
         in_features, out_features = module.num_embeddings, module.embedding_dim
@@ -207,8 +205,8 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     elif hasattr(module, "codebooks") and module.__class__.__name__ == "QuantizedLinear":
         # AQLM QuantLinear
         in_features, out_features = module.in_features, module.out_features
-    elif hasattr(module, "bits") and module.__class__.__name__ == "AwqGEMMQuantLinear":
-        # Awq layers
+    elif is_gptqmodel_quant_linear(module):
+        # GPT-QModel quantized linears
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "EetqLinear":
         # Eetq layers
@@ -341,7 +339,6 @@ class BaseTuner(nn.Module, ABC):
             adapter_name (`str`):
                 The adapter name.
         """
-        pass
 
     def _post_injection_hook(self, model: nn.Module, config: PeftConfig, adapter_name: str) -> None:
         r"""
@@ -356,7 +353,6 @@ class BaseTuner(nn.Module, ABC):
             adapter_name (`str`):
                 The adapter name.
         """
-        pass
 
     def _prepare_adapter_config(self, peft_config: PeftConfig, model_config: dict) -> PeftConfig:
         r"""
@@ -383,7 +379,10 @@ class BaseTuner(nn.Module, ABC):
             target_modules = self.target_module_mapping.get(model_config["model_type"])
             if target_modules is None:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = set(target_modules)
+            if isinstance(target_modules, str):
+                peft_config.target_modules = target_modules
+            else:
+                peft_config.target_modules = set(target_modules)
         return peft_config
 
     def _prepare_model(self, peft_config: PeftConfig, model: nn.Module):
@@ -398,7 +397,6 @@ class BaseTuner(nn.Module, ABC):
             model (`nn.Module`):
                 The model that is going to be adapted.
         """
-        pass
 
     @staticmethod
     def _check_tied_module_exists(peft_config: PeftConfig, key: str) -> bool | re.Match[str] | None:
@@ -664,6 +662,25 @@ class BaseTuner(nn.Module, ABC):
         if hasattr(self.model, "peft_config"):
             del self.model.peft_config
 
+        # If embeddings have diverged (e.g. after vocab resize), fix config to match actual state.
+        if merge:
+            model_config = self.get_model_config(self.model)
+            if model_config.get("tie_word_embeddings"):
+                try:
+                    out_emb = self.model.get_output_embeddings()
+                    in_emb = self.model.get_input_embeddings()
+                    if (out_emb is not None) and (in_emb is not None):
+                        out_w = getattr(out_emb, "weight", None)
+                        in_w = getattr(in_emb, "weight", None)
+                        if (out_w is not None) and (in_w is not None) and (out_w.data_ptr() != in_w.data_ptr()):
+                            self.model.config.tie_word_embeddings = False
+                            warnings.warn(
+                                "Input and output embeddings are no longer tied after merging. "
+                                "Setting `tie_word_embeddings=False` in the model config."
+                            )
+                except (NotImplementedError, AttributeError):
+                    pass
+
         return self.model
 
     def merge_and_unload(
@@ -756,6 +773,24 @@ class BaseTuner(nn.Module, ABC):
         ###################################
         # PREPARATION OF MODEL AND CONFIG #
         ###################################
+        is_transformers_like_model = hasattr(getattr(model, "config", None), "model_type")
+        if is_transformers_ge_v5 and is_transformers_like_model:
+            # TODO remove once transformers < v5.0 is no longer supported
+            # For Transformers v5, some architectures were changed compared to v4, e.g. the MoE layers of Mixtral. To
+            # still make it possible to load adapters trained with v4, we have to update the PEFT config so that the
+            # right layers are targeted. Call this first and overwrite the peft_config to be sure that changes are
+            # applied.
+            from peft.utils.transformers_weight_conversion import (
+                convert_peft_config_for_transformers,
+                get_model_conversion_mapping,
+            )
+
+            weight_conversions = get_model_conversion_mapping(model)
+            convert_peft_config_for_transformers(
+                self.peft_config[adapter_name],
+                model=model,
+                conversions=weight_conversions,
+            )
 
         peft_config = self.peft_config[adapter_name]
         excluded_modules = []
@@ -1777,9 +1812,9 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
         if isinstance(config.exclude_modules, str):
             if re.fullmatch(config.exclude_modules, key):
                 return _ExcludedModule()
-        elif key in config.exclude_modules:
-            return _ExcludedModule()
-        elif any(key.endswith(f".{exclude_key}") for exclude_key in config.exclude_modules):
+        elif key in config.exclude_modules or any(
+            key.endswith(f".{exclude_key}") for exclude_key in config.exclude_modules
+        ):
             return _ExcludedModule()
 
     # Adapters should never match on modules to save modules as it is a guarantee for conflicts of behavior
@@ -1885,7 +1920,7 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
         output_emb = model.get_output_embeddings()
         if output_emb is not None:
             # ignore the last classification head for text generation models
-            last_module_name = [name for name, module in model.named_modules() if module is output_emb][0]
+            last_module_name = next(name for name, module in model.named_modules() if module is output_emb)
             module_names_to_exclude.add(last_module_name)
         elif peft_config.task_type == TaskType.SEQ_CLS:
             # ignore classifier head for classification models (issue 2027)
@@ -1893,7 +1928,7 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
             for name in SEQ_CLS_HEAD_NAMES:
                 cls_head = getattr(model, name, None)
                 if cls_head is not None:
-                    last_module_name = [name for name, module in model.named_modules() if module is cls_head][0]
+                    last_module_name = next(name for name, module in model.named_modules() if module is cls_head)
                     module_names_to_exclude.add(last_module_name)
                     break
 
@@ -1921,7 +1956,7 @@ def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list
     if adapter_names is None:
         adapter_names = module.active_adapters
     if isinstance(adapter_names, str):
-        raise ValueError(f"adapter_names should be a list of strings, got {adapter_names!r}.")
+        raise TypeError(f"adapter_names should be a list of strings, got {adapter_names!r}.")
 
     if module.merged:
         merged_adapters = set(module.merged_adapters)
@@ -2111,7 +2146,7 @@ def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dty
     """
     A helper method to cast the adapter weights to the correct dtype.
 
-    Currently, this only upcasts float16 and bfloat16 to float32.
+    Currently, this only upcasts float dtypes to float32.
 
     Args:
         adapter_name (`str`):
@@ -2123,6 +2158,11 @@ def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dty
         return
 
     dtypes_to_convert_to_fp32 = {torch.float16, torch.bfloat16}
+    # Upcast lower precision floats like float8_e4m3fn; defensively only include dtypes that are actually found, as this
+    # could depend on torch version and platform
+    for name in UPCAST_DTYPES:
+        if (torch_dtype := getattr(torch, name, None)) is not None:
+            dtypes_to_convert_to_fp32.add(torch_dtype)
 
     for module in model.modules():
         if not isinstance(module, BaseTunerLayer):

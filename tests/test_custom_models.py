@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,6 +20,7 @@ import tempfile
 import time
 from contextlib import contextmanager
 from functools import partial
+from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -33,11 +31,14 @@ from transformers.pytorch_utils import Conv1D
 
 from peft import (
     AdaLoraConfig,
+    AdamssConfig,
+    BeftConfig,
     BOFTConfig,
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
     GraloraConfig,
+    HiraConfig,
     HRAConfig,
     IA3Config,
     LilyConfig,
@@ -49,6 +50,7 @@ from peft import (
     MontecloraConfig,
     OFTConfig,
     OSFConfig,
+    PeanutConfig,
     PeftModel,
     PeftWarning,
     PsoftConfig,
@@ -57,8 +59,10 @@ from peft import (
     RoadConfig,
     ShiraConfig,
     TaskType,
+    TinyLoraConfig,
     TrainableTokensConfig,
     VBLoRAConfig,
+    VeloraConfig,
     VeraConfig,
     WaveFTConfig,
     get_peft_model,
@@ -102,6 +106,27 @@ TEST_CASES = [
         "MLP",
         LoraConfig,
         {"target_modules": "lin1", "use_dora": True, "lora_alpha": 32},
+    ),
+    (
+        "Vanilla MLP 10 LoRA with VeLoRA random",
+        "MLP",
+        LoraConfig,
+        {"target_modules": ["lin0"], "velora_config": VeloraConfig(num_groups=2, init_type="random")},
+    ),
+    (
+        "Vanilla MLP 11 LoRA with VeLoRA batch_average",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0", "lin1"],
+            "velora_config": VeloraConfig(num_groups=2, init_type="batch_average"),
+        },
+    ),
+    (
+        "Vanilla MLP 12 LoRA with VeLoRA batch_average_once",
+        "MLP",
+        LoraConfig,
+        {"target_modules": ["lin0"], "velora_config": VeloraConfig(num_groups=2, init_type="batch_average_once")},
     ),
     ("Embedding + transformers Conv1D 1 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Embedding + transformers Conv1D 2 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
@@ -284,6 +309,24 @@ TEST_CASES = [
         "Conv3d",
         IA3Config,
         {"target_modules": ["conv3d", "lin0"], "feedforward_modules": ["conv3d", "lin0"]},
+    ),
+    ########
+    # BEFT #
+    ########
+    ("Vanilla MLP 1 BEFT", "MLP", BeftConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 BEFT", "MLP", BeftConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 BEFT", "MLP", BeftConfig, {"target_modules": ["lin1"]}),
+    (
+        "Vanilla MLP 4 BEFT",
+        "MLP",
+        BeftConfig,
+        {"target_modules": ["lin0", "lin1"]},
+    ),
+    (
+        "Vanilla MLP 5 BEFT",
+        "MLP",
+        BeftConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"]},
     ),
     ########
     # LoHa #
@@ -655,6 +698,38 @@ TEST_CASES = [
         VeraConfig,
         {"target_modules": ["conv1d"]},
     ),
+    ############
+    # TinyLoRA #
+    ############
+    ("Vanilla MLP 1 TinyLoRA", "MLP", TinyLoraConfig, {"target_modules": "lin0", "r": 2, "u": 16}),
+    ("Vanilla MLP 2 TinyLoRA", "MLP", TinyLoraConfig, {"target_modules": ["lin0"], "r": 2, "u": 16}),
+    ("Vanilla MLP 3 TinyLoRA", "MLP", TinyLoraConfig, {"target_modules": ["lin1"], "r": 2, "u": 16}),
+    ("Vanilla MLP 4 TinyLoRA", "MLP", TinyLoraConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "u": 32}),
+    (
+        "Vanilla MLP 5 TinyLoRA",
+        "MLP",
+        TinyLoraConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2, "u": 16},
+    ),
+    (
+        "Vanilla MLP TinyLoRA weight_tying",
+        "MLP",
+        TinyLoraConfig,
+        {"target_modules": ["lin0", "lin1"], "r": 2, "u": 8, "weight_tying": 1.0},
+    ),
+    (
+        "Embedding + transformers Conv1D 1 TinyLoRA",
+        "EmbConv1D",
+        TinyLoraConfig,
+        {"target_modules": ["conv1d"], "r": 2, "u": 16, "init_v_bound": 0.5},
+    ),
+    (
+        "Embedding + transformers Conv1D 2 TinyLoRA",
+        "EmbConv1D",
+        TinyLoraConfig,
+        {"target_modules": ["emb"], "r": 2, "u": 16},
+    ),
+    #############
     #########
     # PVERA #
     #########
@@ -1052,6 +1127,113 @@ TEST_CASES = [
         LilyConfig,
         {"target_modules": ["lin0"], "r": 4, "stride_A": 1, "num_B": 2},
     ),
+    ##########
+    # Peanut #
+    ##########
+    ("Vanilla MLP 1 Peanut", "MLP", PeanutConfig, {"target_modules": "lin0", "r": 2, "depth": 0, "act_fn": "relu"}),
+    ("Vanilla MLP 2 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin0"], "r": 2, "depth": 0, "act_fn": "relu"}),
+    ("Vanilla MLP 3 Peanut", "MLP", PeanutConfig, {"target_modules": ["lin1"], "r": 2, "depth": 0, "act_fn": "relu"}),
+    (
+        "Vanilla MLP 4 Peanut",
+        "MLP",
+        PeanutConfig,
+        {"target_modules": ["lin0", "lin1"], "r": 2, "depth": 0, "act_fn": "relu"},
+    ),
+    ("Vanilla MLP 5 Peanut", "MLP", PeanutConfig, {"target_modules": "lin0", "r": 2, "depth": 1, "act_fn": "gelu"}),
+    #######
+    # HIRA #
+    #######
+    ("Vanilla MLP 1 HiRA", "MLP", HiraConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 HiRA", "MLP", HiraConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 HiRA", "MLP", HiraConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 HiRA", "MLP", HiraConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 HiRA", "MLP", HiraConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    (
+        "Vanilla MLP 6 HiRA",
+        "MLP",
+        HiraConfig,
+        {
+            "target_modules": ["lin0"],
+            "hira_dropout": 0.1,
+        },
+    ),
+    ("Embedding + transformers Conv1D 1 HiRA", "EmbConv1D", HiraConfig, {"target_modules": ["conv1d"]}),
+    ("Embedding + transformers Conv1D 2 HiRA", "EmbConv1D", HiraConfig, {"target_modules": ["emb"]}),
+    ("Embedding + transformers Conv1D 3 HiRA", "EmbConv1D", HiraConfig, {"target_modules": ["emb", "conv1d"]}),
+    ("Conv1d HiRA", "Conv1d", HiraConfig, {"target_modules": ["conv1d"]}),
+    ("Conv2d 1 HiRA", "Conv2d", HiraConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d 2 HiRA", "Conv2d", HiraConfig, {"target_modules": ["conv2d", "lin0"]}),
+    ("Conv3d 1 HiRA", "Conv3d", HiraConfig, {"target_modules": ["conv3d"]}),
+    ("Conv3d 2 HiRA", "Conv3d", HiraConfig, {"target_modules": ["conv3d", "lin0"]}),
+    ##########
+    # Adamss #
+    ##########
+    ("Vanilla MLP 1 Adamss", "MLP", AdamssConfig, {"target_modules": "lin0", "r": 8}),
+    ("Vanilla MLP 2 Adamss", "MLP", AdamssConfig, {"target_modules": ["lin0"], "r": 8}),
+    ("Vanilla MLP 3 Adamss", "MLP", AdamssConfig, {"target_modules": ["lin1"], "r": 2}),
+    ("Vanilla MLP 4 Adamss", "MLP", AdamssConfig, {"target_modules": ["lin0", "lin1"], "r": 8}),
+    (
+        "Vanilla MLP 5 Adamss with custom params",
+        "MLP",
+        AdamssConfig,
+        {
+            "target_modules": ["lin0", "lin1"],
+            "r": 8,
+            "num_subspaces": 3,
+            "subspace_rank": 2,
+        },
+    ),
+    (
+        "Vanilla MLP 6 Adamss with ASA",
+        "MLP",
+        AdamssConfig,
+        {
+            "target_modules": ["lin0", "lin1"],
+            "r": 8,
+            "num_subspaces": 6,
+            "use_asa": True,
+            "asa_target_subspaces": 3,
+        },
+    ),
+    (
+        "Vanilla MLP 7 Adamss with dynamic rank",
+        "MLP",
+        AdamssConfig,
+        {
+            "target_modules": ["lin0"],
+            "r": 8,
+            "num_subspaces": 3,
+            "use_dynamic_rank": True,
+            "svd_threshold": 0.1,
+        },
+    ),
+    ###########
+    # AdaLoRA #
+    ###########
+    (
+        "Vanilla MLP 1 AdaLoRA",
+        "MLP",
+        AdaLoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": False, "total_step": 1},
+    ),
+    (
+        "Vanilla MLP 2 AdaLoRA",
+        "MLP",
+        AdaLoraConfig,
+        {"target_modules": ["lin0", "lin1"], "init_lora_weights": False, "total_step": 1},
+    ),
+    (
+        "Conv2d 1 AdaLoRA",
+        "Conv2d",
+        AdaLoraConfig,
+        {"target_modules": ["conv2d"], "init_lora_weights": False, "total_step": 1},
+    ),
+    (
+        "Conv2d 2 AdaLoRA",
+        "Conv2d",
+        AdaLoraConfig,
+        {"target_modules": ["conv2d", "lin0"], "init_lora_weights": False, "total_step": 1},
+    ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
 
@@ -1133,6 +1315,32 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
             "target_modules": ["lin1"],
             "feedforward_modules": ["lin1"],
             "init_ia3_weights": False,
+        },
+    ),
+    (
+        "BEFT Same",
+        "beft",
+        BeftConfig,
+        {
+            "target_modules": ["lin0"],
+            "init_weights": False,
+        },
+        {
+            "target_modules": ["lin0"],
+            "init_weights": False,
+        },
+    ),
+    (
+        "BEFT Different",
+        "beft",
+        BeftConfig,
+        {
+            "target_modules": ["lin0"],
+            "init_weights": False,
+        },
+        {
+            "target_modules": ["lin1"],
+            "init_weights": False,
         },
     ),
     (
@@ -1372,12 +1580,59 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "r": 2, "stride_A": 1, "num_B": 2, "init_weights": False},
         {"target_modules": ["lin1"], "r": 2, "stride_A": 1, "num_B": 2, "init_weights": False},
     ),
+    (
+        "Peanut Same",
+        "peanut",
+        PeanutConfig,
+        {"target_modules": ["lin0"], "r": 2, "depth": 1, "act_fn": "relu", "init_weights": False},
+        {"target_modules": ["lin0"], "r": 2, "depth": 1, "act_fn": "relu", "init_weights": False},
+    ),
+    (
+        "Peanut Different",
+        "peanut",
+        PeanutConfig,
+        {"target_modules": ["lin0"], "r": 2, "depth": 1, "act_fn": "relu", "init_weights": False},
+        {"target_modules": ["lin1"], "r": 2, "depth": 1, "act_fn": "relu", "init_weights": False},
+    ),
+    (
+        "HiRA Same",
+        "hira",
+        HiraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "HiRA Different",
+        "hira",
+        HiraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    # BD-LoRA different encounters issues as the adapter weights have different shapes then
+    # for TinyLoRA, use uniform init, which allows the different adapters to be sufficiently different that they don't
+    # produce identical results within allowed tolerance
+    (
+        "TinyLoRA Same",
+        "tinylora",
+        TinyLoraConfig,
+        {"target_modules": ["lin0"], "init_weights": "uniform"},
+        {"target_modules": ["lin0"], "init_weights": "uniform"},
+    ),
+    (
+        "TinyLoRA Different",
+        "tinylora",
+        TinyLoraConfig,
+        {"target_modules": ["lin0"], "init_weights": "uniform"},
+        {"target_modules": ["lin1"], "init_weights": "uniform"},
+    ),
 ]
 
 
 def _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs):
     if (config_cls == LoraConfig) and config_kwargs.get("target_parameters"):
         pytest.skip("LoRA with multiple adapters with target_parameters is not supported")
+    if config_cls is AdaLoraConfig:
+        pytest.skip("AdaLoRA only supports a single trainable adapter")
 
 
 class MLP(nn.Module):
@@ -2208,14 +2463,20 @@ class TestPeftCustomModel(PeftCommonTester):
         else:
             expected_dtype = dtype
 
+        # AdaLoRA enforces a single trainable adapter, so the multi-adapter portion of this test
+        # is not applicable. target_parameters likewise disallows multiple adapters on the same
+        # parameter.
+        supports_multi_adapter = (
+            config_kwargs.get("target_parameters", None) is None and config_cls is not AdaLoraConfig
+        )
+
         model = self.transformers_class.from_pretrained(model_id, dtype=dtype).to(self.torch_device)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
         model = get_peft_model(model, config, autocast_adapter_dtype=autocast_adapter_dtype)
-        if config_kwargs.get("target_parameters", None) is None:
-            # target_parameters does not allow multiple adapters on the same parameter
+        if supports_multi_adapter:
             model.add_adapter("other", config, autocast_adapter_dtype=autocast_adapter_dtype)
         peft_params = [p for n, p in model.named_parameters() if model.prefix in n]
         assert all(p.dtype == expected_dtype for p in peft_params)
@@ -2227,8 +2488,7 @@ class TestPeftCustomModel(PeftCommonTester):
         model = PeftModel.from_pretrained(
             model, tmp_path, autocast_adapter_dtype=autocast_adapter_dtype, low_cpu_mem_usage=low_cpu_mem_usage
         )
-        if config_kwargs.get("target_parameters", None) is None:
-            # target_parameters does not allow multiple adapters on the same parameter
+        if supports_multi_adapter:
             model.load_adapter(
                 tmp_path / "other",
                 adapter_name="other",
@@ -2242,7 +2502,14 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_only_params_are_updated(self, test_name, model_id, config_cls, config_kwargs):
         # An explicit test that when using an adapter on a custom model, only the adapter parameters are updated during
         # training
-        X = self.prepare_inputs_for_testing()
+        if issubclass(config_cls, AdamssConfig):
+            # AdaMSS initializes B=0 which blocks gradient flow to A parameters.
+            config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+            # Use random float inputs to avoid ReLU dead zones that block gradient to specific subspaces.
+            X = {"X": torch.randn(9, 10, device=self.torch_device)}
+        else:
+            X = self.prepare_inputs_for_testing()
+
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -2258,7 +2525,9 @@ class TestPeftCustomModel(PeftCommonTester):
         if (
             (config_kwargs.get("use_dora") and model_id == "EmbConv1D")
             or issubclass(config_cls, VBLoRAConfig)
+            or issubclass(config_cls, HiraConfig)
             or issubclass(config_cls, LilyConfig)
+            or issubclass(config_cls, AdamssConfig)
         ):
             # this high learning rate was found through testing to be necessary to avoid flakiness
             lr = 100
@@ -2312,12 +2581,14 @@ class TestPeftCustomModel(PeftCommonTester):
         model.train()
 
         lr = 0.5
-        if config_kwargs.get("use_dora"):
+        if config_kwargs.get("use_dora") or (config_cls == HiraConfig):
             lr = 0.1  # otherwise we get nan
         elif "mha" in model_id.lower():
             lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high
         elif issubclass(config_cls, (VBLoRAConfig, RandLoraConfig, OSFConfig)):
             lr = 0.01  # otherwise we get nan
+        elif issubclass(config_cls, AdaLoraConfig):
+            lr = 1e-4  # AdaLoRA + init_lora_weights=False can blow up with multi-target SGD
         elif issubclass(
             config_cls, PveraConfig
         ):  # needs a very small lr to not get nan in pvera_lambda_b due to high input values in this test (up to 90)
@@ -2373,6 +2644,13 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, VBLoRAConfig):
             # Manually set the `vblora_vector_bank` to zero so that VB-LoRA functions as an identity operation.
             torch.nn.init.zeros_(model.vblora_vector_bank["default"])
+        if issubclass(config_cls, AdaLoraConfig):
+            # AdaLoRA test entries use init_lora_weights=False (needed for gradient flow tests),
+            # so reset_lora_parameters did not zero `lora_E`. Zero it here so the SVD product
+            # is an identity at init.
+            for module in model.modules():
+                if hasattr(module, "lora_E") and "default" in module.lora_E:
+                    torch.nn.init.zeros_(module.lora_E["default"])
         model.eval()
         outputs_before = model(**X)
         # OSF uses SVD reconstruction which introduces small numerical differences
@@ -2384,6 +2662,14 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, VBLoRAConfig):
             # initialize `vblora_vector_bank` so it can be trained
             model._init_vblora_vector_bank(config, "default")
+        if issubclass(config_cls, AdaLoraConfig):
+            # Re-randomize `lora_E` so the adapter can be trained.
+            for module in model.modules():
+                if hasattr(module, "lora_E") and "default" in module.lora_E:
+                    torch.nn.init.normal_(module.lora_E["default"])
+        if issubclass(config_cls, TinyLoraConfig):
+            # Re-initialize tinylora_v so it can be trained
+            model.base_model._init_tinylora_v(config, "default")
         model.train()
         # EmbConv1D is slow to learn for some reason
         lr = 0.01 if model_id != "EmbConv1D" else 1.0
@@ -2392,6 +2678,8 @@ class TestPeftCustomModel(PeftCommonTester):
             lr = 2.0
         if isinstance(config, PveraConfig):
             lr = 1e-4  # needs smaller lr to not get nan
+        if isinstance(config, AdaLoraConfig):
+            lr = 1e-4  # AdaLoRA can blow up with multi-target SGD; use a smaller lr to avoid nan
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -2448,12 +2736,25 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, VBLoRAConfig):
             # Manually set the `vblora_vector_bank` to zero so that VB-LoRA functions as an identity operation.
             torch.nn.init.zeros_(model.vblora_vector_bank["default"])
+        if issubclass(config_cls, AdaLoraConfig):
+            # See note in test_disable_adapters: zero `lora_E` to make AdaLoRA an identity at init.
+            for module in model.modules():
+                if hasattr(module, "lora_E") and "default" in module.lora_E:
+                    torch.nn.init.zeros_(module.lora_E["default"])
         model.eval()
         outputs_before = model(**X)
 
         if issubclass(config_cls, VBLoRAConfig):
             # initialize `vblora_vector_bank` so it can be trained
             model._init_vblora_vector_bank(config, "default")
+        if issubclass(config_cls, AdaLoraConfig):
+            # Re-randomize `lora_E` so the adapter can be trained.
+            for module in model.modules():
+                if hasattr(module, "lora_E") and "default" in module.lora_E:
+                    torch.nn.init.normal_(module.lora_E["default"])
+        if issubclass(config_cls, TinyLoraConfig):
+            # Re-initialize tinylora_v so it can be trained
+            model.base_model._init_tinylora_v(config, "default")
         model.train()
         if isinstance(config_cls, LNTuningConfig):
             # LayerNorm tuning is slow to learn
@@ -2559,10 +2860,10 @@ class TestPeftCustomModel(PeftCommonTester):
         try:
             with pytest.warns(UserWarning) as cm:
                 run_with_disable(config_kwargs, bias="none")
-                # if we get here, it means there was no AssertionError, i.e. there are warnings -- let's check that they
-                # are not related to the bias setting
-                if any(warning.message.args[0].startswith(msg_start) for warning in cm.warnings):
-                    bias_warning_was_given = True
+            # if we get here, it means there was no AssertionError, i.e. there are warnings -- let's check that they
+            # are not related to the bias setting
+            if any(warning.message.args[0].startswith(msg_start) for warning in cm.warnings):
+                bias_warning_was_given = True
         except AssertionError:
             # This is good, there was an AssertionError, i.e. there was no warning
             pass
@@ -2613,7 +2914,8 @@ class TestPeftCustomModel(PeftCommonTester):
         # etc.
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Model has no embedding layer, skipping TrainableTokensConfig.")
-
+        if config_cls is AdaLoraConfig:
+            pytest.skip(reason="AdaLoRA supports only a single trainable adapter")
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
@@ -2667,7 +2969,8 @@ class TestPeftCustomModel(PeftCommonTester):
         # config1 would automatically activate the modules_to_save for 'other'
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
-
+        if config_cls is AdaLoraConfig:
+            pytest.skip(reason="AdaLoRA supports only a single trainable adapter")
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
@@ -2764,7 +3067,8 @@ class TestPeftCustomModel(PeftCommonTester):
         # module_to_save (unlike LoRA etc) is not additive.
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
-
+        if config_cls is AdaLoraConfig:
+            pytest.skip(reason="AdaLoRA supports only a single trainable adapter")
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
@@ -2785,7 +3089,8 @@ class TestPeftCustomModel(PeftCommonTester):
         # same test as the previous one, but targeting multiple modules_to_save, some of which overlap
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
-
+        if config_cls is AdaLoraConfig:
+            pytest.skip(reason="AdaLoRA supports only a single trainable adapter")
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
@@ -2810,7 +3115,8 @@ class TestPeftCustomModel(PeftCommonTester):
         # same test as the previous one but targeting distinct modules_to_save; this is fine
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
-
+        if config_cls is AdaLoraConfig:
+            pytest.skip(reason="AdaLoRA supports only a single trainable adapter")
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
@@ -3069,7 +3375,8 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(
                 "TrainableTokensConfig has a separate test for set_requires_grad, as it needs a different model."
             )
-
+        if config_cls is AdaLoraConfig:
+            pytest.skip("AdaLoRA supports only a single trainable adapter")
         config_kwargs = {"target_modules": ["layers.0.lin0"]}
         if config_cls == IA3Config:
             config_kwargs["feedforward_modules"] = []
@@ -3167,7 +3474,7 @@ class TestPeftCustomModel(PeftCommonTester):
         assert "other" in model.base_model.classifier.modules_to_save
 
     @pytest.mark.parametrize(
-        "config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig, MissConfig]
+        "config_cls", [IA3Config, BeftConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig, MissConfig]
     )
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
@@ -3198,7 +3505,9 @@ class TestPeftCustomModel(PeftCommonTester):
         model.set_adapter("other")
         model(**inputs)
 
-    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig])
+    @pytest.mark.parametrize(
+        "config_cls", [IA3Config, BeftConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig]
+    )
     def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
         # See issue 1574
         # Same test as test_multiple_adapters_mixed_modules_to_save, but this time the 2nd adapter has modules_to_save.
@@ -3287,7 +3596,9 @@ class TestPeftCustomModel(PeftCommonTester):
         with pytest.raises(ValueError, match=msg):
             model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
 
-    @pytest.mark.parametrize("config_cls", [IA3Config, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, MissConfig])
+    @pytest.mark.parametrize(
+        "config_cls", [IA3Config, BeftConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, MissConfig]
+    )
     def test_add_weighted_adapter_cat_with_rank_pattern(self, config_cls):
         # Fixes a bug described in #2512, which resulted from the rank_pattern not being taken into account
         config0 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 2})
@@ -3537,6 +3848,7 @@ class TestPeftCustomModel(PeftCommonTester):
             LoHaConfig(target_modules=["lin0"], init_weights=False),
             AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
+            BeftConfig(target_modules=["lin0"], init_weights=False),
             OFTConfig(target_modules=["lin0"], init_weights=False, r=2, oft_block_size=0),
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
             HRAConfig(target_modules=["lin0"], init_weights=False),
@@ -3746,6 +4058,25 @@ class TestPeftCustomModel(PeftCommonTester):
         # In eval mode, `MontecloraSampler.get_variational_loss` returns (0.0, 0.0) for every sampler, so the
         # aggregated variational loss should be exactly zero.
         assert variational_loss == 0.0, "Variational loss should be 0 in eval mode"
+    def test_pvera_reproducible(self):
+        inputs = {"input_ids": torch.arange(10).view(-1, 1).to(self.torch_device)}
+        config = PveraConfig(init_weights=False, sample_at_inference=True, generator_seed=0)
+        base_model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        torch.manual_seed(0)
+        model = get_peft_model(base_model, config).to(self.torch_device)
+        torch.manual_seed(1)
+        output1 = model(**inputs).logits
+
+        del model
+
+        config = PveraConfig(init_weights=False, sample_at_inference=True, generator_seed=0)
+        base_model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        torch.manual_seed(0)
+        model = get_peft_model(base_model, config).to(self.torch_device)
+        torch.manual_seed(2)
+        output2 = model(**inputs).logits
+
+        assert (output1 == output2).all()
 
 
 class TestMultiRankAdapter:
@@ -5786,10 +6117,15 @@ class TestRequiresGrad:
         # Test that when loading PeftModel and then loading another adapter, the requires_grad is set correctly and
         # is_trainable is respected.
         # See #2759
+        # AdaLoRA's `ranknum` parameter is keyed by adapter name (so name contains ".default") but is intentionally
+        # requires_grad=False, so we exclude it from the trainable-param check below.
+        skip_ranknum = config_cls is AdaLoraConfig
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
             extra_kwargs["feedforward_modules"] = []
+        if config_cls is AdaLoraConfig:
+            extra_kwargs["total_step"] = 1
         config = config_cls(target_modules=["layers.0.lin0"], **extra_kwargs)
 
         if config_cls == TrainableTokensConfig:  # TrainbleTokens requires a different base model and config
@@ -5807,6 +6143,8 @@ class TestRequiresGrad:
 
         if is_trainable:
             for name, param in model.named_parameters():
+                if skip_ranknum and "ranknum" in name:
+                    continue
                 if ".default" in name:
                     assert param.requires_grad
                 else:
@@ -5815,9 +6153,16 @@ class TestRequiresGrad:
             assert all(not p.requires_grad for p in model.parameters())
 
         # load one more adapter; this adapter is not automatically activated
+        if config_cls is AdaLoraConfig and is_trainable:
+            # AdaLoRA structurally rejects a second trainable adapter; validate the error path.
+            with pytest.raises(ValueError, match="AdaLoraModel supports only 1 trainable adapter"):
+                model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
+            return
         model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
         if is_trainable:
             for name, param in model.named_parameters():
+                if skip_ranknum and "ranknum" in name:
+                    continue
                 if ".default" in name:
                     assert param.requires_grad
                 else:
@@ -5831,11 +6176,15 @@ class TestRequiresGrad:
         # Same test as above, but with modules_to_save
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
-
+        # See note in test_loading_model_requires_grad_set_correctly: AdaLoRA's `ranknum.default` is intentionally
+        # non-trainable, so we exclude it from the trainable-param check below.
+        skip_ranknum = config_cls is AdaLoraConfig
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
             extra_kwargs["feedforward_modules"] = []
+        if config_cls is AdaLoraConfig:
+            extra_kwargs["total_step"] = 1
         # targeting the different modules with modules_to_save:
         config = config_cls(target_modules=["layers.0.lin0"], modules_to_save=["layers.0.lin1"], **extra_kwargs)
         model = get_peft_model(model, config)
@@ -5847,6 +6196,8 @@ class TestRequiresGrad:
 
         if is_trainable:
             for name, param in model.named_parameters():
+                if skip_ranknum and "ranknum" in name:
+                    continue
                 if ".default" in name:
                     assert param.requires_grad
                 else:
@@ -5855,9 +6206,16 @@ class TestRequiresGrad:
             assert all(not p.requires_grad for p in model.parameters())
 
         # load one more adapter
+        if config_cls is AdaLoraConfig and is_trainable:
+            # AdaLoRA structurally rejects a second trainable adapter; validate the error path.
+            with pytest.raises(ValueError, match="AdaLoraModel supports only 1 trainable adapter"):
+                model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
+            return
         model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
         if is_trainable:
             for name, param in model.named_parameters():
+                if skip_ranknum and "ranknum" in name:
+                    continue
                 if ".default" in name:
                     assert param.requires_grad
                 else:
@@ -6590,3 +6948,81 @@ class TestDynamicDispatch:
         # we should still get a warning message
         msg = "Unsupported layer type '<class 'torch.nn.modules.rnn.LSTM'>' encountered, proceed at your own risk."
         assert str(recwarn.list[-1].message) == msg
+
+
+class TestDefaultTargetModules:
+    """Tests that the default target_modules work as expected
+
+    Here we only test DeLoRA, LoRA, and OSF. DeLoRA was chosen since it uses the default implementation in BaseTuner
+    that the other PEFT methods share. Testing all PEFT methods would thus be wasteful and it would require some effort
+    to patch the correct target module mapping.
+
+    Only LoRA and OSF have custom implementations, thus they are tested here explicitly.
+    """
+
+    @pytest.mark.parametrize("config_cls", [DeloraConfig, LoraConfig])
+    def test_default_target_modules_not_set_raises(self, config_cls):
+        # With a custom model and without explicit target_modules, raise an error
+        model = MLP()
+        config = config_cls()  # no target modules
+        with pytest.raises(ValueError, match="Please specify `target_modules`"):
+            get_peft_model(model, config)
+
+    @pytest.mark.parametrize("config_cls", [DeloraConfig, LoraConfig])
+    def test_default_target_modules_not_set_model_type_set_raises(self, config_cls):
+        # With a transformers-like model but without default target modules, raise an error
+        model = MLP()
+        # create a mock model_config that mimics transformers
+        model_config = MagicMock(return_value="foobar")
+        model_config.to_dict.return_value = {"model_type": "foobar"}
+        model.config = model_config
+
+        peft_config = config_cls()  # no target modules
+        with pytest.raises(ValueError, match="Please specify `target_modules`"):
+            get_peft_model(model, peft_config)
+
+    @pytest.mark.parametrize("config_cls", [DeloraConfig, LoraConfig])
+    def test_default_target_modules_list_of_str(self, config_cls, monkeypatch):
+        # With a transformers-like model and with default target modules as list of str, it works
+        from peft.tuners.delora.model import TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING
+        from peft.tuners.lora.model import TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING
+
+        model = MLP()
+        # create a mock model_config that mimics transformers
+        model_config = MagicMock()
+        model_config.to_dict.return_value = {"model_type": "foobar"}
+        model.config = model_config
+        monkeypatch.setitem(TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING, "foobar", ["lin0"])
+        monkeypatch.setitem(TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING, "foobar", ["lin0"])
+
+        peft_config = config_cls()  # no target modules
+        model = get_peft_model(model, peft_config)
+        assert model.targeted_module_names == ["lin0"]
+        assert model.peft_config["default"].target_modules == {"lin0"}
+
+    @pytest.mark.parametrize("config_cls", [DeloraConfig, LoraConfig])
+    def test_default_target_modules_str(self, config_cls, monkeypatch):
+        # With a transformers-like model and with default target modules as a str, it works
+        from peft.tuners.delora.model import TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING
+        from peft.tuners.lora.model import TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING
+
+        model = MLP()
+        # create a mock model_config that mimics transformers
+        model_config = MagicMock()
+        model_config.to_dict.return_value = {"model_type": "foobar"}
+        model.config = model_config
+        monkeypatch.setitem(TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING, "foobar", "lin0")
+        monkeypatch.setitem(TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING, "foobar", "lin0")
+
+        peft_config = config_cls()  # no target modules
+        model = get_peft_model(model, peft_config)
+        assert model.targeted_module_names == ["lin0"]
+        assert model.peft_config["default"].target_modules == "lin0"
+
+    def test_default_target_modules_osf(self):
+        # OSF defaults to targeting all linear layers
+        model = MLP()
+        config = OSFConfig()  # no target modules
+        model = get_peft_model(model, config)
+        assert model.targeted_module_names == ["lin0", "lin1"]
+        assert model.peft_config["default"].target_modules == {"lin0", "lin1"}

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Training script for fine-tuning language models with QALoRA using GPTQ quantization.
 This script supports cached quantization to avoid repeating expensive quantization processes.

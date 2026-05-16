@@ -40,7 +40,7 @@ class PolyModel(BaseTuner):
         **optional_kwargs: Any,
     ):
         if isinstance(target, PolyLayer):
-            target.update_layer(adapter_name, poly_config)
+            target.update_layer(adapter_name, config=poly_config)
         else:
             new_module = self._create_new_module(
                 poly_config,
@@ -62,7 +62,7 @@ class PolyModel(BaseTuner):
         if isinstance(target_base_layer, torch.nn.Linear):
             return Linear(target, adapter_name, poly_config, **kwargs)
         else:
-            raise ValueError(
+            raise TypeError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`."
             )

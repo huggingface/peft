@@ -17,8 +17,7 @@ from collections.abc import Callable
 from typing import Any, Optional
 
 import torch
-import torch.nn as nn
-from torch import Tensor
+from torch import Tensor, nn
 
 from peft.tuners import lora
 
