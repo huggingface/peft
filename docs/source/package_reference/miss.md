@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # MiSS
 
-[MiSS (Matrix Shard Sharing)](https://huggingface.co/papers/2409.15371) is a PEFT method that achieves an excellent balance between model performance and computational efficiency. Unlike LoRA which uses two separate low-rank matrices (A and B), MiSS decomposes the weight matrix into multiple fragment matrices and uses a single shared trainable matrix across all fragments. This shard-sharing mechanism reduces the number of trainable parameters while maintaining strong adaptability, and significantly improves initialization speed and training throughput compared to LoRA and its variants.
+[MiSS (Matrix Shard Sharing)](https://arxiv.org/abs/2409.15371) is a PEFT method that achieves a good balance between model performance and computational efficiency. It requires only a single trainable matrix and introduces a shard-sharing mechanism distinct from LoRA.
 
 The abstract from the paper is:
 
@@ -26,9 +26,8 @@ The abstract from the paper is:
 
 MiSS is a good choice when:
 
-- You want faster initialization and higher training throughput than LoRA
-- You need to reduce memory usage while maintaining model performance
-- You are fine-tuning large language models where computational efficiency matters
+- You want higher training throughput than LoRA
+- You want faster initialization than LoRA variants that use more expensive initialization schemes like PiSSA, LoRA-GA, or OLoRA
 - You want a drop-in alternative to LoRA with minimal configuration changes
 
 If you need stronger expressiveness at the cost of some efficiency, consider the `bat` initialization variant (see below).
