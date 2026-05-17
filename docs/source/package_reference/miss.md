@@ -26,9 +26,8 @@ The abstract from the paper is:
 
 MiSS is a good choice when:
 
-- You want higher training throughput than LoRA
-- You want faster initialization than LoRA variants that use more expensive initialization schemes like PiSSA, LoRA-GA, or OLoRA
-- You want a drop-in alternative to LoRA with minimal configuration changes
+- You want faster initialization and higher training throughput than advanced LoRA initialization schemes that use expensive setups (such as PiSSA, LoRA-GA, or OLoRA).
+- You want a drop-in alternative to LoRA with minimal configuration changes.
 
 If you need stronger expressiveness at the cost of some efficiency, consider the `bat` initialization variant (see below).
 
