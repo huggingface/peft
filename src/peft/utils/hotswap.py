@@ -47,7 +47,7 @@ def _update_scaling(lora_module, adapter_name, scaling=None):
     elif isinstance(lora_module.scaling[adapter_name], (float, int)):
         lora_module.scaling[adapter_name] = scaling
     else:
-        raise ValueError(
+        raise TypeError(
             "Something went wrong when trying to set the new scale value, expected to find the old value to be of type "
             f"float or torch.Tensor, got {type(lora_module.scaling[adapter_name])} instead."
         )
@@ -73,7 +73,7 @@ def _convert_scalings_to_tensor(model) -> bool:
                 # no need to deal with dtype as scalars are coerced
                 scaling[key] = torch.tensor(val, device=module.weight.device)
             elif not isinstance(val, torch.Tensor):
-                raise ValueError(
+                raise TypeError(
                     "Something went wrong while trying to convert the scalings, expected to find values of type float "
                     f"but found {type(val)} instead."
                 )

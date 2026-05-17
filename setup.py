@@ -21,7 +21,8 @@ extras = {}
 extras["quality"] = [
     "black",  # doc-builder has an implicit dependency on Black, see huggingface/doc-builder#434
     "hf-doc-builder",
-    "ruff~=0.12.8",
+    # when upgrading this, also upgrade required version in pyproject.toml and pre-commit-config.yaml
+    "ruff~=0.15.12",
 ]
 extras["docs_specific"] = [
     "black",  # doc-builder has an implicit dependency on Black, see huggingface/doc-builder#434
@@ -43,12 +44,15 @@ extras["test"] = extras["dev"] + [
     "torchvision",
 ]
 
+with open("README.md", encoding="utf-8") as f:
+    long_description = f.read()
+
 setup(
     name="peft",
     version=VERSION,
     description="Parameter-Efficient Fine-Tuning (PEFT)",
     license_files=["LICENSE"],
-    long_description=open("README.md", encoding="utf-8").read(),
+    long_description=long_description,
     long_description_content_type="text/markdown",
     keywords="deep learning",
     license="Apache",

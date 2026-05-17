@@ -1116,9 +1116,6 @@ def _prepare_prompt_learning_config(peft_config, model_config):
     orig_model_config = model_config
     if hasattr(model_config, "to_dict"):
         model_config = model_config.to_dict()
-    else:
-        model_config = model_config
-
     # In case of VLM we focus on the language model portion of the model.
     if "text_config" in model_config:
         model_config = model_config["text_config"]
@@ -1235,18 +1232,16 @@ def fsdp_auto_wrap_policy(model):
             continue
         transformer_cls = get_module_class_from_name(model, layer_class)
         if transformer_cls is None:
-            raise Exception("Could not find the transformer layer class to wrap in the model.")
+            raise TypeError("Could not find the transformer layer class to wrap in the model.")
         else:
             transformer_cls_to_wrap.add(transformer_cls)
 
     def lambda_policy_fn(module):
-        if (
+        return (
             len(list(module.named_children())) == 0
             and getattr(module, "weight", None) is not None
             and module.weight.requires_grad
-        ):
-            return True
-        return False
+        )
 
     lambda_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=lambda_policy_fn)
     transformer_wrap_policy = functools.partial(
@@ -1715,7 +1710,7 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     if (
         model_config is not None
         and hasattr(model_config, "tie_word_embeddings")
-        and getattr(model_config, "tie_word_embeddings") is False
+        and model_config.tie_word_embeddings is False
     ):
         return []
 

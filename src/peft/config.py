@@ -208,7 +208,7 @@ class PeftConfigMixin(PushToHubMixin):
             # First check if the error is due to unexpected keyword arguments, we don't want to accidentally catch
             # other TypeErrors.
             if "got an unexpected keyword argument" not in str(exc):
-                raise exc
+                raise
 
             filtered_kwargs, unexpected_kwargs = _check_and_remove_unused_kwargs(config_cls, kwargs)
             if not MIN_EXPECTED_CONFIG_KEYS.issubset(set(filtered_kwargs.keys())):

@@ -49,7 +49,7 @@ class MissLayer(BaseTunerLayer):
         if isinstance(base_layer, nn.Linear):
             self.in_features, self.out_features = base_layer.in_features, base_layer.out_features
         else:
-            raise ValueError(f"Unsupported layer type {type(base_layer)}")
+            raise TypeError(f"Unsupported layer type {type(base_layer)}")
 
     def update_layer(
         self,

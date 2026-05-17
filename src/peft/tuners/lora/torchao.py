@@ -46,7 +46,7 @@ class TorchaoLoraLinear(Linear):
         base_layer = self.get_base_layer()
         weight = base_layer.weight
         if isinstance(weight, Int4Tensor):
-            raise ValueError(f"{type(self).__name__} only supports int8 weights for now.")
+            raise TypeError(f"{type(self).__name__} only supports int8 weights for now.")
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         from torchao import quantize_

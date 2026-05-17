@@ -153,7 +153,7 @@ class WaveFTModel(BaseTuner):
                 )
                 waveft_config.fan_in_fan_out = True
         else:
-            raise ValueError(
+            raise TypeError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`."
             )

@@ -166,7 +166,7 @@ try:
     print("✅ Test PASSED - AdaMSS example works correctly!")
     print("=" * 80)
 
-except Exception as e:  # noqa: BLE001
+except Exception as e:
     print("\n" + "=" * 80)
     print(f"❌ Test FAILED: {e}")
     print("=" * 80)

@@ -138,7 +138,7 @@ def get_layer_device_map(model):
     """
     Derive the device map for the layers of the model.
     """
-    main_device = [d for d in model.hf_device_map.values() if d not in ["cpu", "disk"]][0]
+    main_device = next(d for d in model.hf_device_map.values() if d not in ["cpu", "disk"])
 
     execution_device_map = {
         name: main_device if device in ["cpu", "disk"] else device for name, device in model.hf_device_map.items()
@@ -199,14 +199,14 @@ def map_cache_to_layer_device_map(model, cache) -> None:
 
 
 @contextmanager
-def init_empty_weights(include_buffers: bool = None):
+def init_empty_weights(include_buffers: bool | None = None):
     # adapted from accelerate.big_modeling.py
     with _init_on_device(torch.device("meta"), include_buffers=include_buffers) as f:
         yield f
 
 
 @contextmanager
-def _init_on_device(device: torch.device, include_buffers: bool = None):
+def _init_on_device(device: torch.device, include_buffers: bool | None = None):
     # adapted from accelerate.big_modeling.py
     old_register_parameter = nn.Module.register_parameter
     old_register_buffer = nn.Module.register_buffer

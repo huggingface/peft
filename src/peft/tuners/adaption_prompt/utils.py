@@ -15,7 +15,7 @@ import inspect
 from typing import Optional
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 
 def llama_rotate_half(x: torch.Tensor) -> torch.Tensor:

@@ -16,7 +16,7 @@ from __future__ import annotations
 import warnings
 
 import torch
-import torch.nn as nn
+from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
@@ -139,7 +139,7 @@ class VBLoRAModel(BaseTuner):
                 )
                 vblora_config.fan_in_fan_out = True
         else:
-            raise ValueError(
+            raise TypeError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`, `transformers.pytorch_utils.Conv1D`."
             )

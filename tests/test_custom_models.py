@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -2815,10 +2812,10 @@ class TestPeftCustomModel(PeftCommonTester):
         try:
             with pytest.warns(UserWarning) as cm:
                 run_with_disable(config_kwargs, bias="none")
-                # if we get here, it means there was no AssertionError, i.e. there are warnings -- let's check that they
-                # are not related to the bias setting
-                if any(warning.message.args[0].startswith(msg_start) for warning in cm.warnings):
-                    bias_warning_was_given = True
+            # if we get here, it means there was no AssertionError, i.e. there are warnings -- let's check that they
+            # are not related to the bias setting
+            if any(warning.message.args[0].startswith(msg_start) for warning in cm.warnings):
+                bias_warning_was_given = True
         except AssertionError:
             # This is good, there was an AssertionError, i.e. there was no warning
             pass

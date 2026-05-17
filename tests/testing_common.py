@@ -1232,9 +1232,9 @@ class PeftCommonTester:
                         "delta_embedding" in n
                     ):  # delta_embedding is the embedding that should be updated with grads in CPT
                         assert param.grad is not None
-                elif hasattr(model, "prefix") and (model.prefix in n):  # non-prompt tuning methods
-                    assert param.grad is not None
-                elif "trainable_tokens_" in n:  # trainable tokens layer
+                elif (
+                    hasattr(model, "prefix") and (model.prefix in n) or "trainable_tokens_" in n
+                ):  # non-prompt tuning methods
                     assert param.grad is not None
                 else:
                     assert param.grad is None

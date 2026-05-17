@@ -675,8 +675,7 @@ def calculate_alora_offsets(
                 idx = start_idx_tensor.item()
                 if idx + invocation_len <= seq_len:
                     if torch.equal(sequence[idx : idx + invocation_len], current_invocation_ids_tensor):
-                        if idx > best_match_start_idx:
-                            best_match_start_idx = idx
+                        best_match_start_idx = max(best_match_start_idx, idx)
 
             if best_match_start_idx != -1:
                 offset_val = seq_len - best_match_start_idx
@@ -896,12 +895,13 @@ class BlockDiagonalLinear(nn.Module):
         nblocks: int,
         init_zero: bool = False,
         dtype: torch.dtype = torch.float32,
-        device: torch.device = torch.device("cpu"),
+        device: torch.device | None = None,
     ):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.nblocks = nblocks
+        device = device or torch.device("cpu")
         if self.in_features % nblocks != 0 or self.out_features % nblocks != 0:
             raise ValueError(
                 f"self.in_features={self.in_features} or self.out_features={self.out_features} not divisible by {self.nblocks}"

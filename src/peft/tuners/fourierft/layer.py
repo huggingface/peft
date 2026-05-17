@@ -16,8 +16,8 @@ import warnings
 from typing import Any, Optional
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
@@ -52,7 +52,7 @@ class FourierFTLayer(BaseTunerLayer):
                 base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
             )
         else:
-            raise ValueError(f"Unsupported layer type {type(base_layer)}")
+            raise TypeError(f"Unsupported layer type {type(base_layer)}")
 
     def update_layer(self, adapter_name: str, n_frequency: int, config: FourierFTConfig, **kwargs):
         scaling = config.scaling
@@ -191,11 +191,9 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
         return result
 
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
-        if isinstance(self.get_base_layer(), Conv1D):
-            # get_delta_weight does not transpose Conv1D because it is used in forward, therefore, it has the wrong
-            # shape for conversion
-            return False
-        return True
+        # get_delta_weight does not transpose Conv1D because it is used in forward, therefore, it has the wrong
+        # shape for conversion
+        return not isinstance(self.get_base_layer(), Conv1D)
 
     def __repr__(self) -> str:
         rep = super().__repr__()

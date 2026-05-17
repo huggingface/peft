@@ -92,7 +92,7 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
     if trainer.args.should_save:
         cpu_state_dict = {key: value.cpu() for key, value in state_dict.items()}
         del state_dict
-        trainer._save(output_dir, state_dict=cpu_state_dict)  # noqa
+        trainer._save(output_dir, state_dict=cpu_state_dict)
 
 
 def smart_tokenizer_and_embedding_resize(
