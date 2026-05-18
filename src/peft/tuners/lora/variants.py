@@ -1052,7 +1052,7 @@ class MontecloraLinearVariant(LoraVariant):
     """
 
     @staticmethod
-    def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
         """
         Initialize Monteclora for a LoRA layer.
 
@@ -1062,10 +1062,9 @@ class MontecloraLinearVariant(LoraVariant):
         Args:
             module: The Linear LoRA layer to add Monteclora to
             adapter_name: Name of the adapter
-            **kwargs: Must contain 'config' (the `LoraConfig`) which carries the `monteclora_config`.
+            config: The `LoraConfig` which carries the `monteclora_config`.
         """
-        config = kwargs.get("config")
-        monteclora_config = getattr(config, "monteclora_config", None) if config is not None else None
+        monteclora_config = getattr(config, "monteclora_config", None)
         if monteclora_config is None:
             raise ValueError(
                 "MontecloraLinearVariant.init() requires `config.monteclora_config` to be set on the LoraConfig."

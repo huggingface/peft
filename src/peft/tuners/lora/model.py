@@ -950,12 +950,12 @@ class LoraModel(BaseTuner):
 
         Iterates over all `LoraLayer` modules in the model and, for each layer, collects the KL-divergence and entropy
         components from the `MontecloraSampler`s that correspond to the requested adapters. The aggregated loss is
-        normalized by the number of contributing samplers. Returns ``0.0`` if no matching MonteCLoRA samplers are
-        present (e.g. MonteCLoRA is not used, or none of the requested adapters use MonteCLoRA).
+        normalized by the number of contributing samplers. Returns `0.0` if no matching MonteCLoRA samplers are present
+        (e.g. MonteCLoRA is not used, or none of the requested adapters use MonteCLoRA).
 
-        Only samplers belonging to ``adapter_names`` are considered. This matters when multiple LoRA adapters are
+        Only samplers belonging to `adapter_names` are considered. This matters when multiple LoRA adapters are
         attached to the model but only a subset is active: the regularization loss is then computed only for those
-        adapters. By default (``adapter_names=None``) the model's currently active adapters are used.
+        adapters. By default (`adapter_names=None`) the model's currently active adapters are used.
 
         Typical usage during training (after computing the task loss):
 
@@ -967,11 +967,11 @@ class LoraModel(BaseTuner):
 
         Args:
             adapter_names (`str` or `list[str]`, *optional*):
-                Name(s) of the adapter(s) to include in the loss computation. If ``None`` (the default), the model's
-                currently active adapters (``self.active_adapters``) are used.
+                Name(s) of the adapter(s) to include in the loss computation. If `None` (the default), the model's
+                currently active adapters (`self.active_adapters`) are used.
 
         Returns:
-            The normalized variational loss as a tensor (or ``0.0`` if no matching MonteCLoRA samplers are present).
+            The normalized variational loss as a tensor (or `0.0` if no matching MonteCLoRA samplers are present).
         """
         if adapter_names is None:
             adapter_names = self.active_adapters

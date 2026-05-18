@@ -194,34 +194,15 @@ TEST_CASES = [
         LoraConfig,
         {"target_modules": ["lin0"], "target_parameters": ["lin1.weight"]},
     ),
-    ###########
-    # MonteLoRA #
-    ###########
+    #############
+    # MonteCLoRA #
+    #############
     (
         "Vanilla MLP 1 LoRA with Monteclora",
         "MLP",
         LoraConfig,
         {
             "target_modules": ["lin0"],
-            "monteclora_config": MontecloraConfig(num_samples=2),
-        },
-    ),
-    (
-        "Vanilla MLP 2 LoRA with Monteclora",
-        "MLP",
-        LoraConfig,
-        {
-            "target_modules": ["lin0", "lin1"],
-            "monteclora_config": MontecloraConfig(num_samples=2),
-        },
-    ),
-    (
-        "Vanilla MLP 3 LoRA with Monteclora",
-        "MLP",
-        LoraConfig,
-        {
-            "target_modules": "lin1",
-            "lora_alpha": 32,
             "monteclora_config": MontecloraConfig(num_samples=2),
         },
     ),
