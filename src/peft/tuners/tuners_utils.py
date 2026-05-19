@@ -1472,6 +1472,15 @@ class BaseTunerLayer(ABC):
         base_layer = self.get_base_layer()
         return base_layer.bias
 
+    @bias.setter
+    def bias(self, value) -> None:
+        # Forward assignment to the wrapped base layer so that modeling code
+        # which does ``module.bias = X`` (e.g. legacy Jamba modeling files that
+        # temporarily null out ``dt_proj.bias`` during the SSM forward) keeps
+        # working after the layer is wrapped by a PEFT tuner.
+        base_layer = self.get_base_layer()
+        base_layer.bias = value
+
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         raise NotImplementedError
 
