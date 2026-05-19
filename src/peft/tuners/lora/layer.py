@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import math
 import warnings
 from collections.abc import Callable
@@ -22,9 +23,8 @@ from typing import Any, Optional, Union
 
 import torch
 import torch.distributed as dist
-import torch.nn as nn
 import torch.nn.functional as F
-from torch import svd_lowrank
+from torch import nn, svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_transformers_ge_v5_4_0
@@ -139,7 +139,7 @@ class LoraLayer(BaseTunerLayer):
 
     def _get_in_out_features(self, module: nn.Module) -> tuple[int, int] | tuple[None, None]:
         return _get_in_out_features(module)
-    
+
     @property
     def lora_variants(self):
         """
@@ -154,23 +154,19 @@ class LoraLayer(BaseTunerLayer):
         to a specific composed variant class.
         """
         return {(): None}
-        
+
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-            import dataclasses
-            from . import variants
 
             # Safely fetch the dictionary (defaults to empty if a subclass forgot to define it)
             layer_variants = getattr(self, "lora_variants", {(): None})
+            lora_variants_configs = [f for f in dataclasses.fields(config) if f.metadata.get("is_lora_variant")]
 
             # 1. Gather all valid variant field names from the config
-            tagged_fields = {
-                f.name for f in dataclasses.fields(config)
-                if f.metadata.get("is_lora_variant")
-            }
+            tagged_fields = { f.name for f in lora_variants_configs }
 
             # 2. SANITY CHECK: Ensure all keys in the layer's dictionary actually exist in the config
-            for variant_combo in layer_variants.keys():
-                for variant_name in variant_combo:
+            for variant_keys in layer_variants.keys():
+                for variant_name in variant_keys:
                     if variant_name not in tagged_fields:
                         raise ValueError(
                             f"Variant '{variant_name}' found in lora_variants but it is not tagged with "
@@ -178,16 +174,16 @@ class LoraLayer(BaseTunerLayer):
                         )
 
             # 3. Figure out which variants are currently active
-            active = tuple(sorted(
-                f.name for f in dataclasses.fields(config)
-                if f.metadata.get("is_lora_variant") and getattr(config, f.name)
+            active_variants = tuple(sorted(
+                f.name for f in lora_variants_configs
+                if getattr(config, f.name)
             ))
-            
+
             # 4. Route to the correct variant class
-            if active not in layer_variants:
-                raise ValueError(f"Invalid or unsupported variant combination: {active}")
-            
-            variant_class = layer_variants[active]
+            if active_variants not in layer_variants:
+                raise ValueError(f"Invalid or unsupported variant combination: {active_variants}")
+
+            variant_class = layer_variants[active_variants]
             return variant_class() if variant_class else None
 
     def update_layer(
@@ -679,7 +675,7 @@ class LoraLayer(BaseTunerLayer):
         value = self._caches.pop(key)
         return value
 
-    def set_scale(self, adapter: str, scale: float | int) -> None:
+    def set_scale(self, adapter: str, scale: float) -> None:
         """Set the scale of the given adapter to the initial scale multiplied by the provided factor
 
         The initial scale is determined by the configured `r` (rank) and `lora_alpha`.
@@ -692,7 +688,7 @@ class LoraLayer(BaseTunerLayer):
         else:
             self.scaling[adapter] = scale * self.lora_alpha[adapter] / self.r[adapter]
 
-    def scale_layer(self, scale: float | int) -> None:
+    def scale_layer(self, scale: float) -> None:
         """Multiply the current scale of all active adapters by the provided factor"""
         if scale == 1:
             return
@@ -831,7 +827,7 @@ class Linear(nn.Module, LoraLayer):
             **kwargs,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
-    
+
     @property
     def lora_variants(self):
         from . import variants
