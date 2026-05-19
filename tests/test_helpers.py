@@ -20,8 +20,16 @@ from torch import nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import LoraConfig, get_peft_model
-from peft.helpers import DoraCaching, check_if_peft_model, disable_input_dtype_casting, rescale_adapter_scale
+from peft.helpers import (
+    DoraCaching,
+    MontecloraTrainerMixin,
+    check_if_peft_model,
+    disable_input_dtype_casting,
+    rescale_adapter_scale,
+)
+from peft.tuners.lora.config import MontecloraConfig
 from peft.tuners.lora.layer import LoraLayer
+from peft.tuners.lora.monteclora import MontecloraSampler
 from peft.utils import infer_device
 
 from .testing_utils import hub_online_once
@@ -683,3 +691,28 @@ class TestKappaTuneSelector:
         assert isinstance(result["target_parameters"], list)
         assert len(result["target_parameters"]) > 0
         assert any("gate_up_proj" in name or "down_proj" in name for name in result["target_parameters"])
+
+
+class TestMontecloraTrainerMixin:
+    def test_mixin_adds_variational_loss(self):
+        class DummyTrainer:
+            def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+                return model(inputs).sum()
+
+        class MontecloraTrainer(MontecloraTrainerMixin, DummyTrainer):
+            pass
+
+        torch.manual_seed(0)
+        base_model = nn.Sequential(nn.Linear(8, 16), nn.ReLU(), nn.Linear(16, 2))
+        config = LoraConfig(target_modules=["0", "2"], monteclora_config=MontecloraConfig(num_samples=2))
+        model = get_peft_model(base_model, config).train()
+        assert any(isinstance(m, MontecloraSampler) for m in model.modules())
+
+        inputs = torch.randn(2, 8)
+        torch.manual_seed(0)
+        task_loss = DummyTrainer().compute_loss(model, inputs)
+        torch.manual_seed(0)
+        total_loss = MontecloraTrainer().compute_loss(model, inputs)
+
+        assert total_loss.item() > task_loss.item()
+        total_loss.backward()

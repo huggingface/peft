@@ -1064,13 +1064,7 @@ class MontecloraLinearVariant(LoraVariant):
             adapter_name: Name of the adapter
             config: The `LoraConfig` which carries the `monteclora_config`.
         """
-        monteclora_config = getattr(config, "monteclora_config", None)
-        if monteclora_config is None:
-            raise ValueError(
-                "MontecloraLinearVariant.init() requires `config.monteclora_config` to be set on the LoraConfig."
-            )
-        if isinstance(monteclora_config, dict):
-            monteclora_config = MontecloraConfig(**monteclora_config)
+        monteclora_config = config.monteclora_config
 
         if not hasattr(module, "lora_monteclora_sampler"):
             module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_monteclora_sampler",)

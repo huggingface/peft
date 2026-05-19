@@ -71,23 +71,16 @@ class BufferedMontecloraSampler:
 
         self.index = 0
 
-    def get(self) -> Optional[dict[str, torch.Tensor]]:
+    def get(self) -> dict[str, torch.Tensor]:
         """
         Retrieves a single sample set from the buffer. Refills buffer if empty.
         """
-        try:
-            if self.index >= self.buffer_size:
-                self._refill_buffer()
+        if self.index >= self.buffer_size:
+            self._refill_buffer()
 
-            sample = self.buffer[self.index]
-            self.index += 1
-            return sample
-        except Exception as e:
-            print(f"Error getting sample from buffer. Returning None: {e}")
-            return None
-
-    def stop(self) -> None:
-        pass
+        sample = self.buffer[self.index]
+        self.index += 1
+        return sample
 
 
 class MontecloraSampler(nn.Module):
@@ -225,22 +218,9 @@ class MontecloraSampler(nn.Module):
         current_dtype = self.std_prior.dtype
 
         sample = self.sampler.get()
-
-        if sample is not None:
-            z_mvn = sample["z_mvn"].to(device=current_device, dtype=current_dtype)
-            z_wishart = sample["z_wishart"].to(device=current_device, dtype=current_dtype)
-            z_dirichlet = sample["z_dirichlet"].to(device=current_device, dtype=current_dtype)
-        else:
-            # Fallback if sampler fails
-            z_mvn = torch.randn(
-                (self.num_samples, self.in_features, self.out_features),
-                device=current_device,
-                dtype=current_dtype,
-            )
-            z_wishart = self.sampler.wish_sampler._bartlett_sampling(torch.Size()).to(
-                device=current_device, dtype=current_dtype
-            )
-            z_dirichlet = torch.randn(self.num_samples, device=current_device, dtype=current_dtype)
+        z_mvn = sample["z_mvn"].to(device=current_device, dtype=current_dtype)
+        z_wishart = sample["z_wishart"].to(device=current_device, dtype=current_dtype)
+        z_dirichlet = sample["z_dirichlet"].to(device=current_device, dtype=current_dtype)
 
         std = torch.diag(torch.exp(self.std_prior))
 
@@ -256,8 +236,3 @@ class MontecloraSampler(nn.Module):
         self.expert_weights = expert_weights
 
         return var, self.expert_weights
-
-    def eval(self):
-        if self.sampler:
-            self.sampler.stop()
-        return super().eval()
