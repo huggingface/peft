@@ -173,7 +173,7 @@ class LoraLayer(BaseTunerLayer):
                 for variant_name in variant_combo:
                     if variant_name not in tagged_fields:
                         raise ValueError(
-                            f"Variant '{variant_name}' found in lora_variants but not tagged with "
+                            f"Variant '{variant_name}' found in lora_variants but it is not tagged with "
                             f"'is_lora_variant' in LoraConfig."
                         )
 
