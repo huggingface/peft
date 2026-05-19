@@ -5402,8 +5402,7 @@ class TestEvaInitializationGPU:
     @pytest.mark.parametrize("use_label_mask", [True, False])
     def test_eva_label_mask(self, model, dataset, peft_config, use_label_mask):
         """
-        Tests that label masking works correctly in get_eva_state_dict.
-        Exercises the fix for the hasattr -> 'in' dict membership check.
+        Tests that label masking works correctly in get_eva_state_dict (see PR #3233).
         """
 
         def add_labels(x):
