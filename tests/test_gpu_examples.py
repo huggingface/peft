@@ -5414,13 +5414,14 @@ class TestEvaInitializationGPU:
                 )
             }
 
-        dataset_with_labels = dataset.map(add_labels)
         dataset_with_labels.set_format(type="torch")
         dataloader = self.get_dataloader(dataset_with_labels)
+
         modified_peft_config = deepcopy(peft_config)
         modified_peft_config.eva_config = EvaConfig(rho=2, use_label_mask=use_label_mask)
         sd = get_eva_state_dict(deepcopy(model), dataloader, modified_peft_config, show_progress_bar=False)
         assert len(sd) > 0
+
     def test_eva_initialization_with_invalid_dataloader(self, model, peft_config):
         """Test that appropriate error is raised when dataloader is empty."""
         empty_dataset = Dataset.from_dict({"text": []})
