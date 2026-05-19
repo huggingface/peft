@@ -5399,6 +5399,32 @@ class TestEvaInitializationGPU:
         peft_model = PeftModel.from_pretrained(model, tmp_path, torch_device=self.DEVICE, low_cpu_mem_usage=True)
         peft_model(**{k: v.to(self.DEVICE) for k, v in next(iter(dataloader)).items()})
 
+    @pytest.mark.parametrize("use_label_mask", [True, False])
+    def test_eva_label_mask(self, model, dataset, peft_config, use_label_mask):
+        """
+        Tests that label masking works correctly in get_eva_state_dict.
+        Exercises the fix for the hasattr -> 'in' dict membership check.
+        """
+
+        def add_labels(x):
+            return {
+                "labels": torch.where(
+                    x["attention_mask"].bool(),
+                    torch.ones_like(x["attention_mask"]),
+                    -100 * torch.ones_like(x["attention_mask"]),
+                )
+            }
+
+        dataset_with_labels = dataset.map(add_labels)
+        dataset_with_labels.set_format(type="torch")
+        dataloader = self.get_dataloader(dataset_with_labels)
+
+        modified_peft_config = deepcopy(peft_config)
+        modified_peft_config.eva_config = EvaConfig(rho=2, use_label_mask=use_label_mask)
+
+        sd = get_eva_state_dict(deepcopy(model), dataloader, modified_peft_config, show_progress_bar=False)
+        assert len(sd) > 0
+
     def test_eva_initialization_with_invalid_dataloader(self, model, peft_config):
         """Test that appropriate error is raised when dataloader is empty."""
         empty_dataset = Dataset.from_dict({"text": []})
@@ -5406,7 +5432,6 @@ class TestEvaInitializationGPU:
 
         with pytest.raises(ValueError, match="dataloader is empty"):
             get_eva_state_dict(model, dataloader, peft_config)
-
 
 class TestALoRAInferenceGPU:
     """GPU inference for Activated LoRA."""
