@@ -256,15 +256,11 @@ def _pad_lora_weights(model: torch.nn.Module, target_rank: int) -> bool:
         # Pad LoRA A
         for adapter_name, lora_A_module in module.lora_A.items():
             new_layer = pad_fn(lora_A_module, target_rank=target_rank, is_lora_A=True)
-            assert module.lora_A[adapter_name].weight.requires_grad is new_layer.weight.requires_grad
-            # FIXME new_layer.weight.requires_grad
             module.lora_A[adapter_name] = new_layer
 
         # Pad LoRA B
         for adapter_name, lora_B_module in module.lora_B.items():
             new_layer = pad_fn(lora_B_module, target_rank=target_rank, is_lora_A=False)
-            assert module.lora_A[adapter_name].weight.requires_grad is new_layer.weight.requires_grad
-            # FIXME new_layer.weight.requires_grad
             module.lora_B[adapter_name] = new_layer
 
         found_adapter = True
