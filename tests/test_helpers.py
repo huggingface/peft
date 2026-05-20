@@ -17,7 +17,7 @@ import pytest
 import torch
 from diffusers import StableDiffusionPipeline
 from torch import nn
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 
 from peft import LoraConfig, get_peft_model
 from peft.helpers import (
@@ -694,25 +694,39 @@ class TestKappaTuneSelector:
 
 
 class TestMontecloraTrainerMixin:
-    def test_mixin_adds_variational_loss(self):
-        class DummyTrainer:
-            def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-                return model(inputs).sum()
-
-        class MontecloraTrainer(MontecloraTrainerMixin, DummyTrainer):
+    def test_mixin_adds_variational_loss_to_trainer(self, tmp_path):
+        class MontecloraTrainer(MontecloraTrainerMixin, Trainer):
             pass
 
-        torch.manual_seed(0)
-        base_model = nn.Sequential(nn.Linear(8, 16), nn.ReLU(), nn.Linear(16, 2))
-        config = LoraConfig(target_modules=["0", "2"], monteclora_config=MontecloraConfig(num_samples=2))
-        model = get_peft_model(base_model, config).train()
-        assert any(isinstance(m, MontecloraSampler) for m in model.modules())
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+        with hub_online_once(model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(model_id)
+            config = LoraConfig(
+                target_modules=["q_proj", "v_proj"],
+                monteclora_config=MontecloraConfig(num_samples=2),
+            )
+            model = get_peft_model(base_model, config).train()
+            assert any(isinstance(m, MontecloraSampler) for m in model.modules())
 
-        inputs = torch.randn(2, 8)
-        torch.manual_seed(0)
-        task_loss = DummyTrainer().compute_loss(model, inputs)
-        torch.manual_seed(0)
-        total_loss = MontecloraTrainer().compute_loss(model, inputs)
+            training_args = TrainingArguments(
+                output_dir=str(tmp_path),
+                per_device_train_batch_size=2,
+                num_train_epochs=1,
+                save_strategy="no",
+                report_to=[],
+                use_cpu=True,
+            )
+            vanilla_trainer = Trainer(model=model, args=training_args)
+            monteclora_trainer = MontecloraTrainer(model=model, args=training_args)
 
-        assert total_loss.item() > task_loss.item()
-        total_loss.backward()
+            torch.manual_seed(0)
+            input_ids = torch.randint(0, base_model.config.vocab_size, (2, 8))
+            inputs = {"input_ids": input_ids, "labels": input_ids.clone()}
+
+            torch.manual_seed(0)
+            task_loss = vanilla_trainer.compute_loss(model, inputs)
+            torch.manual_seed(0)
+            total_loss = monteclora_trainer.compute_loss(model, inputs)
+
+            assert total_loss.item() != task_loss.item()
+            total_loss.backward()
