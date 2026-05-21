@@ -53,6 +53,7 @@ from peft import (
     VBLoRAConfig,
     VeraConfig,
     convert_to_lora,
+    get_base_model_state_dict,
     get_peft_model,
     get_peft_model_state_dict,
     inject_adapter_in_model,
@@ -1900,7 +1901,7 @@ class PeftCommonTester:
         )
         peft_model = get_peft_model(model, config)
 
-        extracted_state_dict = peft_model.get_base_model_state_dict()
+        extracted_state_dict = get_base_model_state_dict(peft_model)
         assert set(extracted_state_dict.keys()) == base_model_keys
 
         for key in original_state_dict:

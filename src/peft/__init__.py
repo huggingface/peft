@@ -155,10 +155,12 @@ from .utils import (
     TaskType,
     bloom_model_postprocess_past_key_value,
     cast_mixed_precision_params,
+    get_base_model_state_dict,
     get_peft_model_state_dict,
     load_peft_weights,
     prepare_model_for_kbit_training,
     replace_lora_weights_loftq,
+    set_base_model_state_dict,
     set_peft_model_state_dict,
     shift_tokens_right,
 )
@@ -285,6 +287,7 @@ __all__ = [
     "convert_to_lora",
     "create_arrow_model",
     "find_kappa_target_modules",
+    "get_base_model_state_dict",
     "get_eva_state_dict",
     "get_layer_status",
     "get_model_status",
@@ -301,6 +304,7 @@ __all__ = [
     "prompt_embeddings_from_past_key_values",
     "replace_lora_weights_loftq",
     "save_as_lora",
+    "set_base_model_state_dict",
     "set_peft_model_state_dict",
     "shift_tokens_right",
 ]

@@ -31,7 +31,9 @@ from peft import (
     TrainableTokensConfig,
     VBLoRAConfig,
     VeraConfig,
+    get_base_model_state_dict,
     get_peft_model,
+    set_base_model_state_dict,
 )
 from peft.utils import infer_device
 
@@ -92,7 +94,7 @@ class TestGetBaseModelStateDict:
 
         base_model_keys = set(base_model.state_dict().keys())
         peft_model = get_peft_model(base_model, peft_config)
-        extracted_keys = set(peft_model.get_base_model_state_dict().keys())
+        extracted_keys = set(get_base_model_state_dict(peft_model).keys())
         assert base_model_keys == extracted_keys, f"Key mismatch for {config_name} on {model_id}"
 
     @pytest.mark.parametrize("model_id", [CAUSAL_LM_MODEL_ID, SEQ2SEQ_MODEL_ID])
@@ -107,7 +109,7 @@ class TestGetBaseModelStateDict:
         original_state_dict = {k: v.clone() for k, v in base_model.state_dict().items()}
 
         peft_model = get_peft_model(base_model, peft_config)
-        extracted_state_dict = peft_model.get_base_model_state_dict()
+        extracted_state_dict = get_base_model_state_dict(peft_model)
 
         for key in original_state_dict:
             assert key in extracted_state_dict, f"Missing key {key} for {config_name}"
@@ -124,18 +126,18 @@ class TestGetBaseModelStateDict:
 
         peft_model = get_peft_model(base_model, peft_config)
 
-        original_base_state_dict = {k: v.clone() for k, v in peft_model.get_base_model_state_dict().items()}
+        original_base_state_dict = {k: v.clone() for k, v in get_base_model_state_dict(peft_model).items()}
 
         # Modify base weights by adding noise
         with torch.no_grad():
             for param in peft_model.base_model.model.parameters():
                 param.add_(torch.randn_like(param) * 0.1)
 
-        result = peft_model.set_base_model_state_dict(original_base_state_dict)
+        result = set_base_model_state_dict(peft_model, original_base_state_dict)
         assert len(result.missing_keys) == 0, f"Missing keys for {config_name}: {result.missing_keys}"
         assert len(result.unexpected_keys) == 0, f"Unexpected keys for {config_name}: {result.unexpected_keys}"
 
-        restored_state_dict = peft_model.get_base_model_state_dict()
+        restored_state_dict = get_base_model_state_dict(peft_model)
         for key in original_base_state_dict:
             assert torch.allclose(original_base_state_dict[key], restored_state_dict[key]), (
                 f"Roundtrip failed for key {key} in {config_name}"
@@ -154,7 +156,7 @@ class TestGetBaseModelStateDict:
 
         base_model_keys = set(base_model.state_dict().keys())
         peft_model = get_peft_model(base_model, peft_config)
-        extracted_keys = set(peft_model.get_base_model_state_dict().keys())
+        extracted_keys = set(get_base_model_state_dict(peft_model).keys())
         assert base_model_keys == extracted_keys, f"Key mismatch for {config_name}"
 
     @pytest.mark.parametrize(
@@ -171,7 +173,7 @@ class TestGetBaseModelStateDict:
         original_state_dict = {k: v.clone() for k, v in base_model.state_dict().items()}
         peft_model = get_peft_model(base_model, peft_config)
 
-        result = peft_model.set_base_model_state_dict(original_state_dict)
+        result = set_base_model_state_dict(peft_model, original_state_dict)
         assert len(result.missing_keys) == 0, f"Missing keys for {config_name}"
         assert len(result.unexpected_keys) == 0, f"Unexpected keys for {config_name}"
 
@@ -183,14 +185,14 @@ class TestGetBaseModelStateDict:
             base_model = AutoModelForCausalLM.from_pretrained(CAUSAL_LM_MODEL_ID).to(self.torch_device)
 
         peft_model = get_peft_model(base_model, peft_config)
-        state_dict = peft_model.get_base_model_state_dict()
-        removed_key = list(state_dict.keys())[0]
+        state_dict = get_base_model_state_dict(peft_model)
+        removed_key = next(iter(state_dict.keys()))
         del state_dict[removed_key]
 
         with pytest.raises(RuntimeError, match="Missing key"):
-            peft_model.set_base_model_state_dict(state_dict, strict=True)
+            set_base_model_state_dict(peft_model, state_dict, strict=True)
 
-        result = peft_model.set_base_model_state_dict(state_dict, strict=False)
+        result = set_base_model_state_dict(peft_model, state_dict, strict=False)
         assert removed_key in result.missing_keys, f"Missing key not reported for {config_name}"
 
     @pytest.mark.parametrize("config_name,peft_config", get_peft_configs(), ids=[c[0] for c in get_peft_configs()])
@@ -201,13 +203,13 @@ class TestGetBaseModelStateDict:
             base_model = AutoModelForCausalLM.from_pretrained(CAUSAL_LM_MODEL_ID).to(self.torch_device)
 
         peft_model = get_peft_model(base_model, peft_config)
-        state_dict = peft_model.get_base_model_state_dict()
+        state_dict = get_base_model_state_dict(peft_model)
         state_dict["unexpected.weight"] = torch.zeros(10)
 
         with pytest.raises(RuntimeError, match="Unexpected key"):
-            peft_model.set_base_model_state_dict(state_dict, strict=True)
+            set_base_model_state_dict(peft_model, state_dict, strict=True)
 
-        result = peft_model.set_base_model_state_dict(state_dict, strict=False)
+        result = set_base_model_state_dict(peft_model, state_dict, strict=False)
         assert "unexpected.weight" in result.unexpected_keys, f"Unexpected key not reported for {config_name}"
 
     def test_modules_to_save_get(self):
@@ -219,7 +221,7 @@ class TestGetBaseModelStateDict:
         lora_config = LoraConfig(r=4, lora_alpha=2, target_modules="all-linear", modules_to_save=["lm_head"])
         peft_model = get_peft_model(base_model, lora_config)
 
-        extracted_keys = set(peft_model.get_base_model_state_dict().keys())
+        extracted_keys = set(get_base_model_state_dict(peft_model).keys())
         assert base_model_keys == extracted_keys
 
     def test_modules_to_save_set(self):
@@ -231,7 +233,7 @@ class TestGetBaseModelStateDict:
         lora_config = LoraConfig(r=4, lora_alpha=2, target_modules="all-linear", modules_to_save=["lm_head"])
         peft_model = get_peft_model(base_model, lora_config)
 
-        result = peft_model.set_base_model_state_dict(original_state_dict)
+        result = set_base_model_state_dict(peft_model, original_state_dict)
         assert len(result.missing_keys) == 0
         assert len(result.unexpected_keys) == 0
 
@@ -246,7 +248,7 @@ class TestGetBaseModelStateDict:
 
         base_model_keys = set(base_model.state_dict().keys())
         peft_model = get_peft_model(base_model, peft_config)
-        extracted_keys = set(peft_model.get_base_model_state_dict().keys())
+        extracted_keys = set(get_base_model_state_dict(peft_model).keys())
         assert base_model_keys == extracted_keys, f"Key mismatch for {config_name}"
 
     @pytest.mark.parametrize(
@@ -260,7 +262,7 @@ class TestGetBaseModelStateDict:
 
         original_state_dict = {k: v.clone() for k, v in base_model.state_dict().items()}
         peft_model = get_peft_model(base_model, peft_config)
-        extracted_state_dict = peft_model.get_base_model_state_dict()
+        extracted_state_dict = get_base_model_state_dict(peft_model)
 
         for key in original_state_dict:
             assert key in extracted_state_dict, f"Missing key {key} for {config_name}"
@@ -278,17 +280,17 @@ class TestGetBaseModelStateDict:
             base_model = AutoModelForCausalLM.from_pretrained(CAUSAL_LM_MODEL_ID).to(self.torch_device)
 
         peft_model = get_peft_model(base_model, peft_config)
-        original_base_state_dict = {k: v.clone() for k, v in peft_model.get_base_model_state_dict().items()}
+        original_base_state_dict = {k: v.clone() for k, v in get_base_model_state_dict(peft_model).items()}
 
         with torch.no_grad():
             for param in peft_model.base_model.model.parameters():
                 param.add_(torch.randn_like(param) * 0.1)
 
-        result = peft_model.set_base_model_state_dict(original_base_state_dict)
+        result = set_base_model_state_dict(peft_model, original_base_state_dict)
         assert len(result.missing_keys) == 0, f"Missing keys for {config_name}: {result.missing_keys}"
         assert len(result.unexpected_keys) == 0, f"Unexpected keys for {config_name}: {result.unexpected_keys}"
 
-        restored_state_dict = peft_model.get_base_model_state_dict()
+        restored_state_dict = get_base_model_state_dict(peft_model)
         for key in original_base_state_dict:
             assert torch.allclose(original_base_state_dict[key], restored_state_dict[key]), (
                 f"Roundtrip failed for key {key} in {config_name}"
@@ -307,5 +309,5 @@ class TestGetBaseModelStateDict:
         lora_config_2 = LoraConfig(r=8, lora_alpha=4, target_modules=["k_proj", "out_proj"])
         peft_model.add_adapter("adapter2", lora_config_2)
 
-        extracted_keys = set(peft_model.get_base_model_state_dict().keys())
+        extracted_keys = set(get_base_model_state_dict(peft_model).keys())
         assert base_model_keys == extracted_keys

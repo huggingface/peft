@@ -1005,7 +1005,8 @@ def load_peft_weights(
 def _get_adapter_state_dict_key_prefixes(model) -> set[str]:
     """Collect state dict key prefixes for adapter parameters by inspecting the module tree.
 
-    For ``BaseTunerLayer`` modules this uses ``adapter_layer_names`` and ``other_param_names`` to build prefixes. For
+    For ``BaseTunerLayer`` modules every parameter/buffer is adapter-specific except those under ``base_layer`` (the
+    wrapped original module), so we collect every immediate child/parameter/buffer other than ``base_layer``. For
     ``AuxiliaryTrainingWrapper`` modules it queries ``adapter_state_dict_load_map`` (the canonical source of adapter
     keys) for each registered adapter, and falls back to ``other_param_names`` for non-saveable adapter attributes.
     """
@@ -1025,7 +1026,18 @@ def _get_adapter_state_dict_key_prefixes(model) -> set[str]:
                 prefix = f"{module_name}.{attr_name}" if module_name else attr_name
                 adapter_key_prefixes.add(prefix)
         elif isinstance(module, BaseTunerLayer):
-            for attr_name in module.adapter_layer_names + module.other_param_names:
+            # Everything on a tuner layer belongs to the adapter except the wrapped ``base_layer``. We enumerate the
+            # immediate children/parameters/buffers instead of relying on ``adapter_layer_names`` because some adapter
+            # parameters are registered dynamically and are not part of that static list (e.g. DoRA's
+            # ``lora_magnitude_vector``).
+            adapter_attr_names = (
+                [name for name, _ in module.named_children()]
+                + [name for name, _ in module.named_parameters(recurse=False)]
+                + [name for name, _ in module.named_buffers(recurse=False)]
+            )
+            for attr_name in adapter_attr_names:
+                if attr_name == "base_layer":
+                    continue
                 prefix = f"{module_name}.{attr_name}" if module_name else attr_name
                 adapter_key_prefixes.add(prefix)
     return adapter_key_prefixes
@@ -1041,6 +1053,13 @@ def _peft_key_to_original_key(model, peft_key: str) -> str:
 
     Walks the module tree to strip wrapper infixes (``base_layer``, ``original_module``, and internal tuner modules
     like ``token_adapter`` inside ``AuxiliaryTrainingWrapper``).
+
+    We walk the module tree rather than relying on a purely string-based transform (e.g. removing every
+    ``.base_layer.``/``.original_module.`` substring): the same token can legitimately be part of an original module
+    name and the infixes that need stripping depend on the *type* of the enclosing module (``BaseTunerLayer`` vs.
+    ``AuxiliaryTrainingWrapper`` vs. a regular module). By resolving each path component against the live module via
+    ``getattr`` we can check ``isinstance`` at every level and only strip a segment when it is genuinely a
+    PEFT-injected infix, which keeps this correct across the different (and weight-sharing) tuner structures.
     """
     from peft.tuners.tuners_utils import BaseTunerLayer
 
