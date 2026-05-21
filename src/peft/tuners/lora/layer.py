@@ -108,7 +108,7 @@ class LoraVariant:
         this variant. The default implementation is a no-op so existing variants keep their current behavior; variants
         like MiCA override this to freeze a subset of the adapter parameters (e.g. `lora_B`).
         """
-        return None
+        return
 
 
 class LoraLayer(BaseTunerLayer):

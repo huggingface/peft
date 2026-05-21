@@ -421,7 +421,7 @@ class TestLoraInitialization:
 
         # Reference SVD of the original weight
         W = model.linear.weight.detach().cpu().to(torch.float32)
-        U, S, _ = torch.linalg.svd(W, full_matrices=False)
+        U, _S, _ = torch.linalg.svd(W, full_matrices=False)
         minor_U = U[:, -r:]
         major_U = U[:, :r]
 
