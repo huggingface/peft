@@ -344,7 +344,6 @@ def hub_online_once(model_id: str):
     to wrapping the whole test in the context manager without explicitly writing it out, leading to unexpected
     `HF_HUB_OFFLINE` behavior in the test body.
     """
-    global _HUB_MODEL_ACCESSES
     override = {}
 
     try:

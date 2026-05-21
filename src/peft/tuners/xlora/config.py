@@ -86,7 +86,7 @@ class XLoraConfig(PeftConfig):
             self.hidden_size = 4096
         if self.adapters is None:
             warnings.warn(
-                "No value was provided for for `adapters`. This will be set to empty, please ensure that this is correct."
+                "No value was provided for `adapters`. This will be set to empty, please ensure that this is correct."
             )
             self.adapters = {}
 

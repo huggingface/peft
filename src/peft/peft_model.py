@@ -69,6 +69,28 @@ from .utils import (
 )
 
 
+def _get_layer_kv_target_shape(base_config, layer_idx: int) -> tuple[int, int] | None:
+    """Per-layer (num_kv_heads, head_dim) for prefix-tuning injection, or None for uniform models.
+
+    Models with heterogeneous attention (e.g. Gemma4) expose `global_head_dim` / `num_global_key_value_heads` alongside
+    the sliding-layer `head_dim` / `num_key_value_heads`. The provisioned prefix is sized for the global footprint;
+    this returns the shape each layer actually expects so the caller can slice down or skip layers that don't fit.
+    """
+    layer_types = getattr(base_config, "layer_types", None)
+    global_head_dim = getattr(base_config, "global_head_dim", None)
+    if not layer_types or global_head_dim is None:
+        return None
+
+    is_sliding = layer_types[layer_idx] == "sliding_attention"
+    head_dim = base_config.head_dim if is_sliding else global_head_dim
+    num_global_kv = getattr(base_config, "num_global_key_value_heads", None)
+    if not is_sliding and num_global_kv is not None:
+        num_kv_heads = num_global_kv
+    else:
+        num_kv_heads = base_config.num_key_value_heads
+    return num_kv_heads, head_dim
+
+
 class PeftModel(PushToHubMixin, torch.nn.Module):
     """
     Base model encompassing various Peft methods.
@@ -317,7 +339,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 # These are all the pointers of shared tensors.
                 shared_ptrs = {ptr: names for ptr, names in ptrs.items() if len(names) > 1}
 
-                for _, names in shared_ptrs.items():
+                for names in shared_ptrs.values():
                     # Here we just clone the shared tensors to avoid tensor aliasing which is
                     # not supported in safetensors.
                     for shared_tensor_name in names[1:]:
@@ -554,8 +576,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     ]
                     # Prepare a dict of adapter paths, which really just point to the hf id; we will use the subfolders
                     adapter_paths = {}
-                    for adapter_name in adapter_names:
-                        adapter_paths[adapter_name] = os.path.join(model_id, model_id)
+                    for loaded_adapter_name in adapter_names:
+                        adapter_paths[loaded_adapter_name] = os.path.join(model_id, model_id)
                     config.adapters = adapter_paths
                     config._subfolders = adapter_names
                 else:
@@ -594,14 +616,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # 2. Remove the prompt encoder, as it does not need to be part of the checkpoint
         # 3. Remove TinyLoRA layer-level tinylora_v references (they share with model-level tinylora_v)
         def is_expected_missing_key(k):
-            if "vblora_vector_bank" in k:
-                return False
-            if "prompt_encoder" in k:
-                return False
             # TinyLoRA: layer-level tinylora_v is a reference to model-level, exclude from warning
-            if ".tinylora_v." in k:
-                return False
-            return True
+            return not ("vblora_vector_bank" in k or "prompt_encoder" in k or ".tinylora_v." in k)
 
         missing_keys = [k for k in load_result.missing_keys if is_expected_missing_key(k)]
         if missing_keys:
@@ -785,7 +801,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING.get(self.config.model_type, None) is not None:
                 post_process_fn = TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING[self.config.model_type]
                 past_key_values = post_process_fn(past_key_values)
-            elif ("gemma2" in model_type) or ("gemma3_text" in model_type):
+            elif ("gemma2" in model_type) or ("gemma3_text" in model_type) or ("gemma4" in model_type):
                 # TODO: remove this logic once transformers < 4.56 is dropped
                 transformers_lt_4_56 = packaging.version.parse(transformers.__version__) < packaging.version.parse(
                     "4.56.0.dev0"
@@ -815,12 +831,54 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     # transformers 4.56+ uses DynamicCache for gemma
                     new_cache = DynamicCache(config=base_config)
                 cache_position = torch.arange(peft_config.num_virtual_tokens, device=past_key_values[0].device)
-                for layer_idx in range(peft_config.num_layers):
-                    key_states, value_states = past_key_values[0][layer_idx], past_key_values[1][layer_idx]
+                # Layers from `num_hidden_layers - num_kv_shared_layers` onward share KV with an earlier layer (no own
+                # k_proj/v_proj) and never call `cache.update`; the prefix reaches them transitively via the source
+                # layer.
+                num_kv_shared_layers = getattr(base_config, "num_kv_shared_layers", 0)
+                first_kv_shared_layer_idx = (
+                    getattr(base_config, "num_hidden_layers", peft_config.num_layers) - num_kv_shared_layers
+                )
+                injected_layers: list[int] = []
+                skipped_layers: list[int] = []
+                # past_key_values is a tuple of `num_layers` per-layer tensors each shaped
+                # [2, batch, num_heads, num_virtual_tokens, head_dim], where dim 0 stacks K and V.
+                for layer_idx, layer_past_key_values in enumerate(past_key_values):
+                    if num_kv_shared_layers > 0 and layer_idx >= first_kv_shared_layer_idx:
+                        skipped_layers.append(layer_idx)
+                        continue
+                    key_states, value_states = layer_past_key_values
+                    shape_or_none = _get_layer_kv_target_shape(base_config, layer_idx)
+                    if shape_or_none is not None:  # e.g. gemma 4
+                        n_h, d = shape_or_none
+                        # Provisioned shape: [batch, num_heads, num_virtual_tokens, head_dim]. If a layer's KV is wider
+                        # than what we provisioned, we cannot slice up; skip rather than silently truncating to a shape
+                        # the model won't accept.
+                        if n_h > key_states.shape[1] or d > key_states.shape[3]:
+                            skipped_layers.append(layer_idx)
+                            continue
+                        key_states = key_states[:, :n_h, :, :d]
+                        value_states = value_states[:, :n_h, :, :d]
                     new_cache.update(
                         key_states, value_states, layer_idx, cache_kwargs={"cache_position": cache_position}
                     )
+                    injected_layers.append(layer_idx)
                 past_key_values = new_cache
+
+                if not injected_layers:
+                    # raise if no layer was matched; similar logic as in target_modules not matching any layer
+                    raise ValueError(
+                        "Prefix tuning skipped every layer because no layer's KV shape matched the provisioned prefix "
+                        f"(num_attention_heads={peft_config.num_attention_heads}, "
+                        f"head_dim={peft_config.token_dim // peft_config.num_attention_heads}). Override `token_dim` "
+                        "and `num_attention_heads` in `PrefixTuningConfig` to match a layer that should receive the "
+                        "prefix."
+                    )
+                if skipped_layers:
+                    warnings.warn(
+                        f"Prefix tuning injected into layers {injected_layers}; skipped {skipped_layers} due to KV "
+                        "shape mismatch or shared-KV layers."
+                    )
+
             elif peft_config.num_transformer_submodules == 1:
                 # Dont' apply this to encoder-decoder models and not to models requiring special processing.
                 # TODO: remove from_legacy_cache once transformers < 4.56 is dropped
@@ -2053,7 +2111,7 @@ class PeftModelForCausalLM(PeftModel):
     def _cpt_forward(self, input_ids, inputs_embeds, peft_config, task_ids, batch_size, **kwargs):
         # Extract labels from kwargs
         labels = kwargs.pop("labels")
-        device = [i.device for i in [input_ids, inputs_embeds, labels] if i is not None][0]
+        device = next(i.device for i in [input_ids, inputs_embeds, labels] if i is not None)
         # Extract input_type_mask from kwargs and move it to the same device as labels
         if "input_type_mask" in kwargs.keys():
             input_type_mask = kwargs.pop("input_type_mask").to(device)
@@ -2175,7 +2233,7 @@ class PeftModelForCausalLM(PeftModel):
                             f"Expected a single attention mask, got {len(attention_mask)} instead, please open an "
                             "issue (https://github.com/huggingface/peft/issues) and report the error."
                         )
-                    attention_mask = list(attention_mask.values())[0]
+                    attention_mask = next(iter(attention_mask.values()))
 
                 size = model_kwargs["input_ids"].shape[0], peft_config.num_virtual_tokens
                 prefix_attention_mask = torch.ones(size).to(model_kwargs["input_ids"].device)

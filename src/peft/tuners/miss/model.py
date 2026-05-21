@@ -118,7 +118,7 @@ class MissModel(BaseTuner):
         if isinstance(target_base_layer, torch.nn.Linear):
             new_module = MissLinear(target, adapter_name, config=miss_config, **kwargs)
         else:
-            raise ValueError(
+            raise TypeError(
                 f"Target module {target} is not supported. Currently, only `torch.nn.Linear` is supported."
             )
 

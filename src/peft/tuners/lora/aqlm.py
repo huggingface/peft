@@ -39,6 +39,8 @@ class AqlmLoraLinear(torch.nn.Module, LoraLayer):
     ):
         if config.use_dora:
             raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
+        if config.velora_config is not None:
+            raise ValueError(f"{self.__class__.__name__} does not support VeLoRA yet, please set it to False")
 
         super().__init__()
         LoraLayer.__init__(self, base_layer)
@@ -81,12 +83,6 @@ class AqlmLoraLinear(torch.nn.Module, LoraLayer):
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "lora." + rep
-
-    # TODO: Check if it is better as suggested by users https://github.com/PanQiWei/AutoGPTQ/pull/102
-    # def reset_lora_parameters(self, adapter_name):
-    #     if adapter_name in self.lora_A.keys():
-    #         torch.nn.init.xavier_uniform_(self.lora_A[adapter_name].weight)
-    #         torch.nn.init.zeros_(self.lora_B[adapter_name].weight)
 
 
 def dispatch_aqlm(

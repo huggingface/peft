@@ -18,11 +18,13 @@ from transformers import AutoModelForSequenceClassification
 from peft import (
     AdaLoraConfig,
     AdamssConfig,
+    BeftConfig,
     BOFTConfig,
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
     GraloraConfig,
+    HiraConfig,
     HRAConfig,
     IA3Config,
     LilyConfig,
@@ -67,6 +69,13 @@ ALL_CONFIGS = [
         },
     ),
     (
+        BeftConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+        },
+    ),
+    (
         BOFTConfig,
         {
             "task_type": "SEQ_CLS",
@@ -99,6 +108,13 @@ ALL_CONFIGS = [
     ),
     (
         GraloraConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+        },
+    ),
+    (
+        HiraConfig,
         {
             "task_type": "SEQ_CLS",
             "target_modules": None,

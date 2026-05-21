@@ -93,7 +93,7 @@ class C3AModel(BaseTuner):
         if isinstance(target_base_layer, torch.nn.Linear):
             new_module = C3ALinear(target, adapter_name, config=c3a_config, **kwargs)
         else:
-            raise ValueError(
+            raise TypeError(
                 f"Target module {target} is not supported. Currently, only `torch.nn.Linear` is supported."
             )
 

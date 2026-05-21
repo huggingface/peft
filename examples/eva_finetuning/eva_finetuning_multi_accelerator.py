@@ -46,12 +46,12 @@ bf16 = True
 
 # Initialize distributed environment
 if torch.cuda.is_available():
-    local_rank = int(os.environ.get("LOCAL_RANK", -1))
+    local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
     torch.cuda.set_device(local_rank)
     dist.init_process_group("nccl")
     world_size = dist.get_world_size()
 elif torch.xpu.is_available():
-    local_rank = int(os.environ.get("LOCAL_RANK", -1))
+    local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
     torch.xpu.set_device(local_rank)
     dist.init_process_group("xccl")
     world_size = dist.get_world_size()

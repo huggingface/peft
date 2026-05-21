@@ -52,6 +52,57 @@ class LoraRuntimeConfig:
 
 
 @dataclass
+class VeloraConfig:
+    """
+    This is the sub-configuration class to store the configuration for VeLoRA. Original paper can be found
+    [here](https://arxiv.org/abs/2405.17991).
+
+    Args:
+        num_groups (`int`):
+            Number of feature groups used by VeLoRA to split the input activation depth before compression. Increase
+            this parameter to reduce the reconstruction error of input activations at the cost of increased memory
+            consumption.
+        scale (`float`):
+            Scale applied to the reconstructed activations in the VeLoRA backward pass.
+        init_type (`str`):
+            Projection initialization strategy for VeLoRA. Supported values are `'batch_average_once'`,
+            `'batch_average'`, and `'random'`.
+    """
+
+    num_groups: int = field(
+        default=64,
+        metadata={
+            "help": "Number of feature groups used by VeLoRA to split the input activation depth before compression."
+        },
+    )
+    scale: float = field(
+        default=1.0,
+        metadata={"help": "Scale applied to the reconstructed activations in the VeLoRA backward pass."},
+    )
+    init_type: Literal["batch_average", "batch_average_once", "random"] = field(
+        default="batch_average",
+        metadata={
+            "help": "Projection initialization strategy for VeLoRA. Supported values are "
+            "`'batch_average_once'`, `'batch_average'`, and `'random'`."
+            "batch_average uses the batch statistics during each forward pass for the projection."
+            "batch_average_once only updates the projection weights once in the first pass to reduce training time at the cost of less exact gradient approximations."
+        },
+    )
+
+    def __post_init__(self):
+        if self.num_groups <= 0:
+            raise ValueError(f"`num_groups` should be positive, got {self.num_groups}.")
+        if self.scale <= 0:
+            raise ValueError(f"`scale` should be positive, got {self.scale}.")
+        if self.init_type not in {"batch_average_once", "batch_average", "random"}:
+            raise ValueError(
+                "Unsupported `init_type` "
+                f"{self.init_type!r}. Supported values are 'batch_average_once', "
+                "'batch_average', and 'random'."
+            )
+
+
+@dataclass
 class LoftQConfig:
     """
     This is the sub-configuration class to store the configuration of a [`LoraModel`].
@@ -427,6 +478,9 @@ class LoraConfig(PeftConfig):
             ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger overhead than pure
             LoRA, so it is recommended to merge weights for inference. For more information, see
             https://huggingface.co/papers/2402.09353.
+        velora_config (`Optional[VeloraConfig]`):
+            Enable VeLoRA by providing a VeloraConfig. VeLoRA swaps in a custom backward pass for the LoRA A projection
+            that stores compressed activations instead of the full input activations.
         alora_invocation_tokens (`List[int]`):
             If not None, enable <a href='https://huggingface.co/papers/2504.12397'>'Activated LoRA' (aLoRA)</a>, with
             alora_invocation_tokens being the tokenized invocation string for the adapter (must be present in all model
@@ -674,6 +728,15 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    velora_config: Optional[Union[VeloraConfig, dict]] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Enable VeLoRA as a LoRA variant by providing a VeloraConfig. VeLoRA swaps in a custom backward pass "
+                "for the LoRA A projection that stores compressed activations instead of the full input activations."
+            )
+        },
+    )
     alora_invocation_tokens: Optional[list[int]] = field(
         default=None,
         metadata={
@@ -711,6 +774,17 @@ class LoraConfig(PeftConfig):
                 "Higher values provide more compression but may reduce model quality. "
                 "This parameter determines how many original features are averaged together to create "
                 "one pooled feature. Only used when `use_qalora=True`."
+            )
+        },
+    )
+
+    monteclora_config: Optional[MontecloraConfig] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The configuration of Monteclora (Monte Carlo Low-Rank Adaptation). If passed, Monteclora will be "
+                "used to add variational Monte Carlo sampling on top of the LoRA adapters. See `MontecloraConfig` "
+                "for details on the individual hyperparameters."
             )
         },
     )
@@ -798,6 +872,8 @@ class LoraConfig(PeftConfig):
     def __post_init__(self):
         super().__post_init__()
         self.peft_type = PeftType.LORA
+        if isinstance(self.monteclora_config, dict):
+            self.monteclora_config = MontecloraConfig(**self.monteclora_config)
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
@@ -808,6 +884,11 @@ class LoraConfig(PeftConfig):
         if self.ensure_weight_tying:
             self.modules_to_tie = None
             self.target_modules_to_tie = None
+
+        if isinstance(self.velora_config, dict):
+            self.velora_config = VeloraConfig(**self.velora_config)
+        elif self.velora_config is not None and not isinstance(self.velora_config, VeloraConfig):
+            raise TypeError("`velora_config` must be a `VeloraConfig`, a dict, or None.")
 
         if isinstance(self.target_parameters, str):
             raise TypeError("`target_parameters` must be a list of strings or None.")
@@ -947,3 +1028,92 @@ class LoraGAConfig:
         default="stable", metadata={"help": "Scaling strategy for initialization"}
     )
     stable_gamma: int = field(default=16, metadata={"help": "Gamma parameter for stable scaling"})
+
+
+@dataclass
+class MontecloraConfig:
+    """
+    This is the sub-configuration class to store the configuration for Monteclora (Monte Carlo Low-Rank Adaptation).
+    Monteclora introduces variational inference into LoRA by adding Monte Carlo sampling to the adapter weights.
+
+    In practice you can think of Monteclora as adding stochastic, learned perturbations on top of the LoRA weights to
+    obtain a better-calibrated and better-regularized adapter. The argments below let you trade off stability,
+    regularization strength, and compute cost.
+
+    Args:
+        num_samples (`int`):
+            Number of Monte Carlo samples to draw per forward pass. Higher values usually give smoother training and
+            better uncertainty estimates but increase compute and memory usage. Lower this if training is too slow or
+            memory constrained; increase it if training is stable and you want stronger Monte Carlo averaging.
+        use_entropy (`bool`):
+            Whether to add an entropy regularization term that keeps the Monte Carlo weights from collapsing to a
+            single sample. Turn this on if you observe the sampler becoming very peaky or want stronger regularization;
+            leave it off to mimic standard LoRA more closely.
+        dirichlet_prior (`float`):
+            Concentration parameter for the Dirichlet prior over sample/expert weights. Larger values push the weights
+            towards being more uniform (stronger regularization, less sparsity), while smaller positive values
+            encourage sparser, more peaked weights. Increase if the sampler overfits; decrease (but keep > 0) if it is
+            too conservative.
+        sample_scaler (`float`):
+            Overall scaling factor for the sampled perturbations applied to the LoRA weights. Increasing this makes the
+            Monte Carlo noise stronger (more regularization and exploration, but also more training instability);
+            decreasing it moves the behavior closer to standard deterministic LoRA. Setting it very close to 0 largely
+            disables the effect of Monteclora.
+        kl_loss_weight (`float`):
+            Weight of the KL-divergence term between the variational distribution and its prior. Larger values put more
+            emphasis on matching the prior (stronger regularization, potentially underfitting); smaller values rely
+            more on the data likelihood (weaker regularization, potentially overfitting). Tune this if you find
+            Monteclora over- or under-regularizing the adapter.
+        buffer_size (`int`):
+            Size of the internal buffer used by the Monte Carlo sampler (e.g. for storing recent statistics). Larger
+            values can stabilize the estimated variational parameters at the cost of additional memory; reduce this if
+            you are memory constrained.
+    """
+
+    num_samples: int = field(
+        default=8,
+        metadata={
+            "help": (
+                "Number of Monte Carlo samples to draw per forward pass. Higher values usually give smoother "
+                "training and better uncertainty estimates but increase compute and memory usage. Lower this if "
+                "training is too slow or memory constrained; increase it if training is stable and you want "
+                "stronger Monte Carlo averaging."
+            )
+        },
+    )
+    use_entropy: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Whether to add an entropy regularization term that keeps the Monte Carlo weights from collapsing "
+                "to a single sample. Turn this on if you observe the sampler becoming very peaky or want stronger "
+                "regularization."
+            )
+        },
+    )
+    dirichlet_prior: float = field(
+        default=0.1,
+        metadata={"help": "Prior parameter for Dirichlet distribution used in expert weight sampling."},
+    )
+    sample_scaler: float = field(
+        default=1e-4,
+        metadata={
+            "help": "Scaling factor for the Monte Carlo samples. Controls the magnitude of variational perturbations."
+        },
+    )
+    kl_loss_weight: float = field(
+        default=1e-5,
+        metadata={"help": "Weight for the KL divergence loss component in the variational objective."},
+    )
+    buffer_size: int = field(
+        default=150,
+        metadata={"help": "Size of the buffer for the Monte Carlo sampler."},
+    )
+
+    def __post_init__(self):
+        if self.num_samples <= 0:
+            raise ValueError("`num_samples` must be greater than 0.")
+        if self.dirichlet_prior <= 0:
+            raise ValueError("`dirichlet_prior` must be greater than 0.")
+        if self.buffer_size <= 0:
+            raise ValueError("`buffer_size` must be greater than 0.")

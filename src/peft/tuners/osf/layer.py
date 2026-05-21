@@ -18,8 +18,8 @@ from functools import partial
 from typing import Any, Optional
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -243,9 +243,7 @@ class Linear(nn.Module, OSFLayer):
         self.update_layer(adapter_name, effective_rank, config=config, **kwargs)
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-        if self.disable_adapters:
-            result = self.base_layer(x, *args, **kwargs)
-        elif self.merged:
+        if self.disable_adapters or self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
             # Use reconstructed weight for forward pass

@@ -528,7 +528,7 @@ class TestTrainableTokens:
         # same as test_stand_alone_raises_target_layer_not_found but tests the peft method integration
         with pytest.raises(ValueError) as e:
             model = get_peft_model(model, peft_config)
-        assert f"Target modules {{{repr(target_layer_name)}}} not found in the base model." in str(e)
+        assert f"Target modules {{{target_layer_name!r}}} not found in the base model." in str(e)
 
     def test_multiple_targets(self, model_multi_embedding):
         # tests the ability of targeting two modules with the same token indices
@@ -733,8 +733,8 @@ class TestTrainableTokens:
         peft_state_dict = get_peft_model_state_dict(peft_model)
 
         # the state dict or the peft model state dict must not include tied adapter weights
-        state_dict_keys = [n for n, _ in state_dict.items() if "tied_adapter." in n]
-        peft_state_dict_keys = [n for n, _ in peft_state_dict.items() if "tied_adapter." in n]
+        state_dict_keys = [n for n in state_dict.keys() if "tied_adapter." in n]
+        peft_state_dict_keys = [n for n in peft_state_dict.keys() if "tied_adapter." in n]
 
         assert not state_dict_keys
         assert not peft_state_dict_keys
