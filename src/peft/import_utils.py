@@ -25,6 +25,10 @@ is_transformers_ge_v5 = packaging.version.parse(transformers.__version__) >= pac
 
 is_transformers_ge_v5_1_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.1.0")
 
+is_transformers_ge_v5_4_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.4.0")
+
+is_transformers_ge_v5_6_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.6.0.dev0")
+
 is_transformers_le_4_53 = packaging.version.parse(transformers.__version__) < packaging.version.parse("4.54.0.dev0")
 
 
@@ -44,14 +48,23 @@ def is_bnb_4bit_available() -> bool:
 
 
 @lru_cache
-def is_gptqmodel_available():
+def is_gptqmodel_available() -> bool:
     if importlib.util.find_spec("gptqmodel") is not None:
-        GPTQMODEL_MINIMUM_VERSION = packaging.version.parse("5.6.12")
+        GPTQMODEL_MINIMUM_VERSION = packaging.version.parse("7.0.0")
         OPTIMUM_MINIMUM_VERSION = packaging.version.parse("1.24.0")
         version_gptqmodel = packaging.version.parse(importlib_metadata.version("gptqmodel"))
         if GPTQMODEL_MINIMUM_VERSION <= version_gptqmodel:
             if is_optimum_available():
-                version_optimum = packaging.version.parse(importlib_metadata.version("optimum"))
+                try:
+                    version_optimum = packaging.version.parse(importlib_metadata.version("optimum"))
+                except importlib_metadata.PackageNotFoundError:
+                    # Same idea as in diffusers:
+                    # https://github.com/huggingface/diffusers/blob/9f06a0d1a4a998ac6a463c5be728c892f95320a8/src/diffusers/utils/import_utils.py#L351-L357
+                    # It's not clear under what circumstances `importlib_metadata.version("optimum")` can raise an error
+                    # even though `importlib.util.find_spec("optimum") is not None` but it has been observed, so adding
+                    # this for precaution. If we cannot detect it, we just optimistically assume it's high enough.
+                    return True
+
                 if OPTIMUM_MINIMUM_VERSION <= version_optimum:
                     return True
                 else:
@@ -66,7 +79,7 @@ def is_gptqmodel_available():
         else:
             raise ImportError(
                 f"Found an incompatible version of gptqmodel. Found version `{version_gptqmodel}`, "
-                f"but only versions above `{GPTQMODEL_MINIMUM_VERSION}` are supported"
+                f"but only versions `{GPTQMODEL_MINIMUM_VERSION}` or higher are supported"
             )
 
 
@@ -76,7 +89,7 @@ def is_optimum_available() -> bool:
 
 
 @lru_cache
-def is_torch_tpu_available(check_device=True):
+def is_torch_tpu_available(check_device=True) -> bool:
     "Checks if `torch_xla` is installed and potentially if a TPU is in the environment"
     if importlib.util.find_spec("torch_xla") is not None:
         if check_device:
@@ -93,31 +106,31 @@ def is_torch_tpu_available(check_device=True):
 
 
 @lru_cache
-def is_aqlm_available():
+def is_aqlm_available() -> bool:
     return importlib.util.find_spec("aqlm") is not None
 
 
 @lru_cache
-def is_eetq_available():
+def is_eetq_available() -> bool:
     return importlib.util.find_spec("eetq") is not None
 
 
 @lru_cache
-def is_hqq_available():
+def is_hqq_available() -> bool:
     return importlib.util.find_spec("hqq") is not None
 
 
 @lru_cache
-def is_inc_available():
+def is_inc_available() -> bool:
     return importlib.util.find_spec("neural_compressor") is not None
 
 
 @lru_cache
-def is_torchao_available():
+def is_torchao_available() -> bool:
     if importlib.util.find_spec("torchao") is None:
         return False
 
-    TORCHAO_MINIMUM_VERSION = packaging.version.parse("0.4.0")
+    TORCHAO_MINIMUM_VERSION = packaging.version.parse("0.16.0")
     try:
         torchao_version = packaging.version.parse(importlib_metadata.version("torchao"))
     except importlib_metadata.PackageNotFoundError:
@@ -137,7 +150,7 @@ def is_torchao_available():
 
 
 @lru_cache
-def is_xpu_available(check_device=False):
+def is_xpu_available(check_device=False) -> bool:
     """
     Checks if XPU acceleration is available and potentially if a XPU is in the environment
     """
@@ -157,10 +170,20 @@ def is_xpu_available(check_device=False):
 
 
 @lru_cache
-def is_diffusers_available():
+def is_diffusers_available() -> bool:
     return importlib.util.find_spec("diffusers") is not None
 
 
 @lru_cache
-def is_te_available():
+def is_te_available() -> bool:
     return importlib.util.find_spec("transformer_engine") is not None
+
+
+@lru_cache
+def is_te_pytorch_available() -> bool:
+    if not is_te_available():
+        return False
+
+    import transformer_engine
+
+    return hasattr(transformer_engine, "pytorch")

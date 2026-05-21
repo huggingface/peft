@@ -7,6 +7,7 @@
   "max_steps": 5000,
   "eval_steps": 250,
   "compile": false,
+  "use_gc": false,
   "seed": 0,
   "grad_norm_clip": 1.0,
   "optimizer_type": "AdamW",
@@ -22,5 +23,6 @@
     "max_length": 800,
     "max_new_tokens": 300
   },
-  "query_template": "Question: {query} Think step by step.\nAnswer:"
+  "query_template": "Question: {query} Think step by step.\nAnswer:",
+  "init_kv_cache_prefix": null
 }

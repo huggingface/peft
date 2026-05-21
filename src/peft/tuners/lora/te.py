@@ -17,14 +17,14 @@ from typing import Any, Optional
 
 import torch
 
-from peft.import_utils import is_te_available
+from peft.import_utils import is_te_pytorch_available
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 
 from .config import LoraConfig
 
 
-if is_te_available():
+if is_te_pytorch_available():
     import transformer_engine as te
 
 
@@ -48,6 +48,10 @@ class TeLinear(torch.nn.Module, LoraLayer):
     ):
         if config.use_dora:
             raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
+        if config.velora_config is not None:
+            raise ValueError(
+                f"{self.__class__.__name__} does not support VeLoRA yet, please set `velora_config=None`."
+            )
 
         super().__init__()
         LoraLayer.__init__(self, base_layer=base_layer, **kwargs)
@@ -122,7 +126,7 @@ def dispatch_transformer_engine(
     else:
         target_base_layer = target
 
-    if is_te_available() and isinstance(
+    if is_te_pytorch_available() and isinstance(
         target_base_layer, (te.pytorch.LayerNormLinear, te.pytorch.LayerNormMLP, te.pytorch.Linear)
     ):
         new_module = TeLinear(target, adapter_name, config=config, **kwargs)

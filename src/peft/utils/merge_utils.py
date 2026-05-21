@@ -18,7 +18,7 @@ from typing import Literal
 import torch
 
 
-def reshape_weight_task_tensors(task_tensors, weights):
+def reshape_weight_task_tensors(task_tensors: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
     """
     Reshapes `weights` to match the shape of `task_tensors` by unsqeezing in the remaining dimenions.
 
@@ -68,7 +68,7 @@ def random_pruning(tensor: torch.Tensor, density: float, rescale: bool) -> torch
     mask = torch.bernoulli(torch.full_like(input=tensor, fill_value=density))
     pruned_tensor = tensor * mask
     if rescale:
-        torch.div(input=pruned_tensor, other=density)
+        pruned_tensor = pruned_tensor / density
     return pruned_tensor
 
 

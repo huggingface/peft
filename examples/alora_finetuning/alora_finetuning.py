@@ -159,7 +159,7 @@ def train_model(
     tokenizer.save_pretrained(output_dir)
 
 
-def model_inference(model_path: str, adapter_path: str, prompt: str = None, data_path: str = None):
+def model_inference(model_path: str, adapter_path: str, prompt: str | None = None, data_path: str | None = None):
     """
     Simple inference with the tuned aLoRA adapter. Optionally (reuse_cache = True) demonstrates
     that the aLoRA adapter can (but does not need to) use KV cache created by the base model,

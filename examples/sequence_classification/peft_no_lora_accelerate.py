@@ -110,7 +110,7 @@ def main():
         tokenizer_kwargs["padding_side"] = "right"
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, **tokenizer_kwargs)
-    if getattr(tokenizer, "pad_token_id") is None:
+    if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
     datasets = load_dataset("glue", task)

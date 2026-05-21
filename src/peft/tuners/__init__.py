@@ -13,7 +13,9 @@
 # limitations under the License.
 
 from .adalora import AdaLoraConfig, AdaLoraModel
+from .adamss import AdamssConfig, AdamssModel
 from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
+from .beft import BeftConfig, BeftModel
 from .boft import BOFTConfig, BOFTModel
 from .c3a import C3AConfig, C3AModel
 from .cartridge import CartridgeConfig, CartridgeEncoder
@@ -21,6 +23,7 @@ from .cpt import CPTConfig, CPTEmbedding
 from .delora import DeloraConfig, DeloraModel
 from .fourierft import FourierFTConfig, FourierFTModel
 from .gralora import GraloraConfig, GraloraModel
+from .hira import HiraConfig, HiraModel
 from .hra import HRAConfig, HRAModel
 from .ia3 import IA3Config, IA3Model
 from .lily import LilyConfig, LilyModel
@@ -36,6 +39,8 @@ from .lora import (
     LoraGAConfig,
     LoraModel,
     LoraRuntimeConfig,
+    MontecloraConfig,
+    VeloraConfig,
     convert_to_lora,
     create_arrow_model,
     get_eva_state_dict,
@@ -49,6 +54,7 @@ from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTu
 from .oft import OFTConfig, OFTModel
 from .osf import OSFConfig, OSFModel
 from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparameterizationType
+from .peanut import PeanutConfig, PeanutModel
 from .poly import PolyConfig, PolyModel
 from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
 from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
@@ -57,6 +63,7 @@ from .pvera import PveraConfig, PveraModel
 from .randlora import RandLoraConfig, RandLoraModel
 from .road import RoadConfig, RoadModel
 from .shira import ShiraConfig, ShiraModel
+from .tinylora import TinyLoraConfig, TinyLoraModel
 from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
 from .vblora import VBLoRAConfig, VBLoRAModel
 from .vera import VeraConfig, VeraModel
@@ -67,12 +74,16 @@ from .xlora import XLoraConfig, XLoraModel
 __all__ = [
     "AdaLoraConfig",
     "AdaLoraModel",
+    "AdamssConfig",
+    "AdamssModel",
     "AdaptionPromptConfig",
     "AdaptionPromptModel",
     "ArrowConfig",
     "BOFTConfig",
     "BOFTModel",
     "BdLoraConfig",
+    "BeftConfig",
+    "BeftModel",
     "C3AConfig",
     "C3AModel",
     "CPTConfig",
@@ -88,6 +99,8 @@ __all__ = [
     "GraloraModel",
     "HRAConfig",
     "HRAModel",
+    "HiraConfig",
+    "HiraModel",
     "IA3Config",
     "IA3Model",
     "LNTuningConfig",
@@ -106,6 +119,7 @@ __all__ = [
     "MissConfig",
     "MissModel",
     "MixedModel",
+    "MontecloraConfig",
     "MultitaskPromptEmbedding",
     "MultitaskPromptTuningConfig",
     "MultitaskPromptTuningInit",
@@ -113,6 +127,8 @@ __all__ = [
     "OFTModel",
     "OSFConfig",
     "OSFModel",
+    "PeanutConfig",
+    "PeanutModel",
     "PolyConfig",
     "PolyModel",
     "PrefixEncoder",
@@ -133,10 +149,13 @@ __all__ = [
     "RoadModel",
     "ShiraConfig",
     "ShiraModel",
+    "TinyLoraConfig",
+    "TinyLoraModel",
     "TrainableTokensConfig",
     "TrainableTokensModel",
     "VBLoRAConfig",
     "VBLoRAModel",
+    "VeloraConfig",
     "VeraConfig",
     "VeraModel",
     "WaveFTConfig",

@@ -16,10 +16,12 @@ import math
 from typing import Any
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from peft.tuners.lycoris_utils import LycorisLayer
+
+from .config import LoHaConfig
 
 
 class LoHaLayer(nn.Module, LycorisLayer):
@@ -103,11 +105,7 @@ class LoHaLayer(nn.Module, LycorisLayer):
         adapter_name: str,
         r: int,
         alpha: float,
-        rank_dropout: float,
-        module_dropout: float,
-        init_weights: bool,
-        use_effective_conv2d: bool = False,
-        inference_mode: bool = False,
+        config: LoHaConfig,
         **kwargs,
     ) -> None:
         """Internal function to create loha adapter
@@ -116,12 +114,14 @@ class LoHaLayer(nn.Module, LycorisLayer):
             adapter_name (`str`): Name for the adapter to add.
             r (`int`): Rank for the added adapter.
             alpha (`float`): Alpha for the added adapter.
-            rank_dropout (`float`): The dropout probability for rank dimension during training.
-            module_dropout (`float`): The dropout probability for disabling adapter during training.
-            init_weights (`bool`): Whether to initialize weights.
-            use_effective_conv2d (`bool`, *optional*, defaults to `False`):
-                Use parameter effective decomposition for Conv2d with ksize > 1.
+            config (`LoHaConfig`): The adapter configuration for this layer.
         """
+        rank_dropout = config.rank_dropout
+        module_dropout = config.module_dropout
+        init_weights = config.init_weights
+        use_effective_conv2d = config.use_effective_conv2d
+        inference_mode = config.inference_mode
+
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -250,19 +250,17 @@ class Linear(LoHaLayer):
     def __init__(
         self,
         base_layer: nn.Module,
-        adapter_name: str = "default",
+        adapter_name: str,
+        config: LoHaConfig,
         r: int = 0,
         alpha: float = 0.0,
-        rank_dropout: float = 0.0,
-        module_dropout: float = 0.0,
-        init_weights: bool = True,
         **kwargs,
     ):
         super().__init__(base_layer)
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, **kwargs)
+        self.update_layer(adapter_name, r, alpha, config=config, **kwargs)
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
@@ -286,22 +284,17 @@ class Conv2d(LoHaLayer):
     def __init__(
         self,
         base_layer: nn.Module,
-        adapter_name: str = "default",
+        adapter_name: str,
+        config: LoHaConfig,
         r: int = 0,
         alpha: float = 0.0,
-        rank_dropout: float = 0.0,
-        module_dropout: float = 0.0,
-        use_effective_conv2d: bool = False,
-        init_weights: bool = True,
         **kwargs,
     ):
         super().__init__(base_layer)
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(
-            adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
-        )
+        self.update_layer(adapter_name, r, alpha, config=config, **kwargs)
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
@@ -330,22 +323,17 @@ class Conv1d(LoHaLayer):
     def __init__(
         self,
         base_layer: nn.Module,
-        adapter_name: str = "default",
+        adapter_name: str,
+        config: LoHaConfig,
         r: int = 0,
         alpha: float = 0.0,
-        rank_dropout: float = 0.0,
-        module_dropout: float = 0.0,
-        use_effective_conv2d: bool = False,
-        init_weights: bool = True,
         **kwargs,
     ):
         super().__init__(base_layer)
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(
-            adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
-        )
+        self.update_layer(adapter_name, r, alpha, config=config, **kwargs)
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
@@ -373,7 +361,7 @@ class Conv1d(LoHaLayer):
 
 class HadaWeight(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, w1a, w1b, w2a, w2b, scale=torch.tensor(1)):
+    def forward(ctx, w1a, w1b, w2a, w2b, scale=torch.tensor(1)):  # noqa: B008
         ctx.save_for_backward(w1a, w1b, w2a, w2b, scale)
         diff_weight = ((w1a @ w1b) * (w2a @ w2b)) * scale
         return diff_weight
@@ -396,7 +384,7 @@ class HadaWeight(torch.autograd.Function):
 
 class HadaWeightCP(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, t1, w1a, w1b, t2, w2a, w2b, scale=torch.tensor(1)):
+    def forward(ctx, t1, w1a, w1b, t2, w2a, w2b, scale=torch.tensor(1)):  # noqa: B008
         ctx.save_for_backward(t1, w1a, w1b, t2, w2a, w2b, scale)
 
         rebuild1 = torch.einsum("i j k l, j r, i p -> p r k l", t1, w1b, w1a)

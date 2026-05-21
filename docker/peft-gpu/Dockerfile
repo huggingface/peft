@@ -26,7 +26,7 @@ RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
 
 # Stage 2
-FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS build-image
+FROM nvidia/cuda:13.2.1-cudnn-devel-ubuntu24.04 AS build-image
 COPY --from=compile-image /opt/conda /opt/conda
 ENV PATH=/opt/conda/bin:$PATH
 
@@ -41,19 +41,24 @@ SHELL ["/bin/bash", "-c"]
 
 RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum
 
-# GPTQmodel doesn't find torch without build isolation
-#
 # Note: we are hard-coding CUDA_ARCH_LIST here since `gptqmodel` requires either nvidia-smi
 # or CUDA_ARCH_LIST for compute capability information. Since the docker build is unlikely
 # to have compute hardware available we use the information from the CI runner (which hosts
 # a NVIDIA L4). So we fix the compute capability to 8.9. In the future we might extend this
 # to a list of compute capabilities (separated by ;).
-RUN CUDA_ARCH_LIST=8.9 conda run -n peft pip install --no-build-isolation gptqmodel
+RUN CUDA_ARCH_LIST=8.9 conda run -n peft pip install "gptqmodel>=7.0.0"
 
 RUN \
     # Add eetq for quantization testing; needs to run without build isolation since the setup
     # script directly imports torch from the environment which would fail with isolation.
-    conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
+    # Ninja should speed up build time.
+    conda run -n peft pip install ninja && conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
+
+# TODO: Importing TE results in: undefined symbol: cublasLtGroupedMatrixLayoutInit_internal, version libcublasLt.so.13
+# Reinstate TE when the issue is resolved (probably this one: https://github.com/NVIDIA/TransformerEngine/issues/2504)
+# RUN NVTE_BUILD_USE_NVIDIA_WHEELS=1 \
+#     CPATH="/usr/local/cuda/include:${CPATH}" \
+#     conda run -n peft pip install --no-build-isolation "transformer_engine[pytorch]"
 
 # Activate the conda env and install transformers + accelerate from source
 RUN conda run -n peft pip install -U --no-cache-dir \
@@ -61,7 +66,7 @@ RUN conda run -n peft pip install -U --no-cache-dir \
         "soundfile>=0.12.1" \
         scipy \
         torchao \
-        fbgemm-gpu-genai>=1.2.0 \
+        "fbgemm-gpu-genai>=1.2.0" \
         git+https://github.com/huggingface/transformers \
         git+https://github.com/huggingface/accelerate \
         peft[test]@git+https://github.com/huggingface/peft \

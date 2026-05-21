@@ -131,9 +131,6 @@ class OrthLayer(nn.Module):
         else:
             Q = self._skew_symmetric()
             orig_dtype = Q.dtype
-            cast_to_fp32 = (Q.device.type == "cpu") and (orig_dtype in (torch.float16, torch.bfloat16))
-            if cast_to_fp32:
-                Q = Q.float()
 
             id_mat = torch.eye(self.size, device=Q.device, dtype=Q.dtype)
 
@@ -157,6 +154,9 @@ class OrthLayer(nn.Module):
                         Q_power = Q_power @ Q
                         R.add_(Q_power)
             else:
+                cast_to_fp32 = orig_dtype in (torch.float16, torch.bfloat16)
+                if cast_to_fp32:
+                    Q = Q.float()  # solver requires float32
                 R = torch.linalg.solve(id_mat - Q, id_mat + Q, left=False)
 
         # Apply scaling vectors to R

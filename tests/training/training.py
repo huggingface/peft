@@ -40,12 +40,17 @@ def print_if_process_zero(*args, **kwargs):
     PartialState().print(*args, **kwargs)
 
 
-def main(model_id: str, quant: Literal["4bit", "8bit"] | None, target_modules: list[str] | None):
+def main(
+    model_id: str,
+    quant: Literal["4bit", "8bit"] | None,
+    target_modules: list[str] | None,
+    target_parameters: list[str] | None,
+):
     if target_modules == ["all-linear"]:
         target_modules = "all-linear"
 
     print_if_process_zero("=" * 50)
-    print_if_process_zero(f"{model_id=}, {quant=}, {target_modules=}")
+    print_if_process_zero(f"{model_id=}, {quant=}, {target_modules=} {target_parameters=}")
     print_if_process_zero("=" * 50)
 
     data = load_dataset("ybelkada/english_quotes_copy")
@@ -80,6 +85,7 @@ def main(model_id: str, quant: Literal["4bit", "8bit"] | None, target_modules: l
         r=16,
         lora_alpha=32,
         target_modules=target_modules,
+        target_parameters=target_parameters,
         lora_dropout=0.05,
         bias="none",
         task_type="CAUSAL_LM",
@@ -138,5 +144,18 @@ if __name__ == "__main__":
         default=None,
         help="List of target modules for LoRA adaptation",
     )
+    parser.add_argument(
+        "--target_parameters",
+        type=str,
+        nargs="+",
+        required=False,
+        default=None,
+        help="List of target modules for LoRA adaptation",
+    )
     args = parser.parse_args()
-    main(model_id=args.model_id, quant=args.quant, target_modules=args.target_modules)
+    main(
+        model_id=args.model_id,
+        quant=args.quant,
+        target_modules=args.target_modules,
+        target_parameters=args.target_parameters,
+    )

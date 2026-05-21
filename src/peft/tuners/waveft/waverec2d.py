@@ -82,7 +82,7 @@ def _outer(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
 
 def _check_if_tensor(array: Any) -> torch.Tensor:
     if not isinstance(array, torch.Tensor):
-        raise ValueError("First element of coeffs must be the approximation coefficient tensor.")
+        raise TypeError("First element of coeffs must be the approximation coefficient tensor.")
     return array
 
 
@@ -123,7 +123,7 @@ def _coeff_tree_map(coeffs, function):
         elif isinstance(element, torch.Tensor):
             result_lst.append(function(element))
         else:
-            raise ValueError(f"Unexpected input type {type(element)}")
+            raise TypeError(f"Unexpected input type {type(element)}")
     if not result_lst:
         return [approx] if isinstance(coeffs, list) else (approx,)
     elif isinstance(result_lst[0], torch.Tensor):

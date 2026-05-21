@@ -28,6 +28,7 @@ from peft import (
     LNTuningConfig,
     LoraConfig,
     PromptLearningConfig,
+    TinyLoraConfig,
     VBLoRAConfig,
 )
 from peft.import_utils import (
@@ -306,6 +307,8 @@ def set_init_weights_false(config_cls, kwargs):
         kwargs["init_lora_weights"] = False
     elif config_cls == IA3Config:
         kwargs["init_ia3_weights"] = False
+    elif config_cls == TinyLoraConfig:
+        kwargs["init_weights"] = "uniform"
     else:
         kwargs["init_weights"] = False
     return kwargs
@@ -341,7 +344,6 @@ def hub_online_once(model_id: str):
     to wrapping the whole test in the context manager without explicitly writing it out, leading to unexpected
     `HF_HUB_OFFLINE` behavior in the test body.
     """
-    global _HUB_MODEL_ACCESSES
     override = {}
 
     try:
