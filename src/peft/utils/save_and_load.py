@@ -273,6 +273,23 @@ def get_peft_model_state_dict(
                 )
             to_return["base_model.pvera_A." + adapter_name] = state_dict["base_model.pvera_A." + adapter_name]
             to_return["base_model.pvera_B." + adapter_name] = state_dict["base_model.pvera_B." + adapter_name]
+    elif config.peft_type == PeftType.FROD:
+        frod_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
+        projection_prefixes = ("base_model.frod_V.", "base_model.frod_s_indices.", "base_model.frod_s_size.")
+        layer_projection_parts = (".frod_V.", ".frod_s_indices.", ".frod_s_size.", ".frod_U.")
+        to_return = {
+            k: state_dict[k]
+            for k in state_dict
+            if (frod_prefix in k) and (adapter_name in k) and not any(part in k for part in layer_projection_parts)
+        }
+        if config.save_projection:
+            to_return.update(
+                {
+                    k: state_dict[k]
+                    for k in state_dict
+                    if k.startswith(projection_prefixes) and k.endswith(f".{adapter_name}")
+                }
+            )
     elif config.peft_type == PeftType.XLORA:
         to_return = {k: state_dict[k] for k in state_dict if "internal_xlora_classifier" in k}
     elif config.peft_type == PeftType.VBLORA:
@@ -715,6 +732,13 @@ def set_peft_model_state_dict(
                 new_key = k.replace(".tinylora_v.", f".tinylora_v.{adapter_name}.")
                 tinylora_v_state_dict[new_key] = state_dict.pop(k)
 
+        frod_projection_state_dict = {}
+        if config.peft_type == PeftType.FROD:
+            frod_projection_prefixes = ("base_model.frod_V.", "base_model.frod_s_indices.", "base_model.frod_s_size.")
+            frod_projection_keys = [k for k in state_dict if k.startswith(frod_projection_prefixes)]
+            for k in frod_projection_keys:
+                frod_projection_state_dict[f"{k}.{adapter_name}"] = state_dict.pop(k)
+
         peft_model_state_dict = _insert_adapter_name_into_state_dict(
             state_dict, adapter_name=adapter_name, parameter_prefix=parameter_prefix
         )
@@ -722,6 +746,8 @@ def set_peft_model_state_dict(
         # Add back the tinylora_v keys (now in the correct format)
         if config.peft_type == PeftType.TINYLORA:
             peft_model_state_dict.update(tinylora_v_state_dict)
+        elif config.peft_type == PeftType.FROD:
+            peft_model_state_dict.update(frod_projection_state_dict)
 
         if config.peft_type == PeftType.ADALORA:
             rank_pattern = config.rank_pattern
@@ -795,6 +821,21 @@ def set_peft_model_state_dict(
                     "Specified to not load pvera_A and pvera_B from state dictionary. This means we will be relying on"
                     " PRNG initialisation to restore these projections using `config.projection_prng_key`, which may"
                     " not be accurate on all system configurations."
+                )
+        elif config.peft_type == PeftType.FROD:
+            has_projection = any(
+                k.startswith(("base_model.frod_V.", "base_model.frod_s_indices.", "base_model.frod_s_size."))
+                for k in peft_model_state_dict
+            )
+            if config.save_projection and not has_projection:
+                raise ValueError(
+                    "Specified to load FRoD projection tensors from state dictionary however they were not present!"
+                )
+            elif not config.save_projection and has_projection:
+                warnings.warn(
+                    "Specified to not load FRoD projection tensors from state dictionary however they are present. "
+                    "Consider using them to ensure checkpoint loading is correct by setting "
+                    "`peft_config.save_projection = True`."
                 )
         elif config.peft_type == PeftType.LORA:
             # Here we take care of a refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a
