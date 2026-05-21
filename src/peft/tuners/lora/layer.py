@@ -806,6 +806,10 @@ class Linear(nn.Module, LoraLayer):
 
             return ArrowLinearVariant()
 
+        if config.monteclora_config is not None:
+            from .variants import MontecloraLinearVariant
+
+            return MontecloraLinearVariant()
         if config.use_bdlora is not None:
             from .variants import BdLoraLinearVariant
 

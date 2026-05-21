@@ -47,6 +47,7 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     MissConfig,
+    MontecloraConfig,
     OFTConfig,
     OSFConfig,
     PeanutConfig,
@@ -68,6 +69,7 @@ from peft import (
 )
 from peft.tuners import lora
 from peft.tuners.lora.config import BdLoraConfig
+from peft.tuners.lora.monteclora import MontecloraSampler
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
@@ -191,6 +193,18 @@ TEST_CASES = [
         "MLP",
         LoraConfig,
         {"target_modules": ["lin0"], "target_parameters": ["lin1.weight"]},
+    ),
+    #############
+    # MonteCLoRA #
+    #############
+    (
+        "Vanilla MLP 1 LoRA with Monteclora",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0"],
+            "monteclora_config": MontecloraConfig(num_samples=2),
+        },
     ),
     #######
     # IA³ #
@@ -2485,6 +2499,8 @@ class TestPeftCustomModel(PeftCommonTester):
         model = get_peft_model(model, config)
         model_before = copy.deepcopy(model)
 
+        is_monteclora = config_kwargs.get("monteclora_config", None) is not None
+
         model.train()
         lr = 0.5
         if (
@@ -2499,6 +2515,8 @@ class TestPeftCustomModel(PeftCommonTester):
         elif "mha" in model_id.lower():
             # we get exploding gradients with MHA when learning rate is too high
             lr = 1e-3
+        elif is_monteclora:
+            lr = 1e-3
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -2507,6 +2525,8 @@ class TestPeftCustomModel(PeftCommonTester):
             optimizer.zero_grad()
             y_pred = model(**X)
             loss = y_pred.sum()
+            if is_monteclora:
+                loss = loss + model._get_monteclora_loss()
             loss.backward()
             optimizer.step()
 
@@ -2517,6 +2537,10 @@ class TestPeftCustomModel(PeftCommonTester):
 
         for name, param_before in params_before.items():
             param_after = params_after[name]
+            if "monteclora" in name.lower():
+                # MonteCLoRA's variational parameters are stochastic by construction (they get optimized
+                # via Monte Carlo sampling), so we don't include them in the strict allclose check below.
+                continue
             if (model.prefix in name) or ("modules_to_save" in name) or ("token_adapter.trainable_tokens" in name):
                 # target_modules, modules_to_save and modules of `NewTokensWrapper` _are_ updated
                 assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
@@ -2533,6 +2557,7 @@ class TestPeftCustomModel(PeftCommonTester):
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
+        is_monteclora = config_kwargs.get("monteclora_config", None) is not None
         model = get_peft_model(model, config)
         model.train()
 
@@ -2549,6 +2574,8 @@ class TestPeftCustomModel(PeftCommonTester):
             config_cls, PveraConfig
         ):  # needs a very small lr to not get nan in pvera_lambda_b due to high input values in this test (up to 90)
             lr = 1e-6
+        elif is_monteclora:
+            lr = 1e-3
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -2557,6 +2584,8 @@ class TestPeftCustomModel(PeftCommonTester):
             optimizer.zero_grad()
             y_pred = model(**X)
             loss = y_pred.sum()
+            if is_monteclora:
+                loss = loss + model._get_monteclora_loss()
             loss.backward()
             optimizer.step()
 
@@ -3968,6 +3997,48 @@ class TestPeftCustomModel(PeftCommonTester):
         model.base_model.model.mha._restore_weights()
         assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is True
         assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is True
+
+    def test_monteclora_variational_loss_computation(self):
+        config = LoraConfig(
+            r=8,
+            lora_alpha=16,
+            target_modules=["lin0", "lin1"],
+            monteclora_config=MontecloraConfig(num_samples=4),
+        )
+        model = get_peft_model(MLP(), config)
+        model.train()
+
+        input_data = torch.randn(2, 10)
+        _ = model(input_data)
+
+        sampler_count = sum(1 for module in model.modules() if isinstance(module, MontecloraSampler))
+        variational_loss = model._get_monteclora_loss()
+
+        assert sampler_count > 0, "No Monteclora samplers found for variational loss computation"
+        assert variational_loss > 0, "Variational loss should be positive"
+        assert not torch.isnan(variational_loss), "Variational loss contains NaN"
+
+    def test_monteclora_variational_loss_computation_eval_mode(self):
+        config = LoraConfig(
+            r=8,
+            lora_alpha=16,
+            target_modules=["lin0", "lin1"],
+            monteclora_config=MontecloraConfig(num_samples=4),
+        )
+        model = get_peft_model(MLP(), config)
+        model.eval()
+
+        input_data = torch.randn(2, 10)
+        with torch.no_grad():
+            _ = model(input_data)
+
+        sampler_count = sum(1 for module in model.modules() if isinstance(module, MontecloraSampler))
+        variational_loss = model._get_monteclora_loss()
+
+        assert sampler_count > 0, "No Monteclora samplers found for variational loss computation"
+        # In eval mode, `MontecloraSampler.get_variational_loss` returns (0.0, 0.0) for every sampler, so the
+        # aggregated variational loss should be exactly zero.
+        assert variational_loss == 0.0, "Variational loss should be 0 in eval mode"
 
     def test_pvera_reproducible(self):
         inputs = {"input_ids": torch.arange(10).view(-1, 1).to(self.torch_device)}
