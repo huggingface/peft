@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -186,7 +185,7 @@ def main(args):
                 repo_name = get_full_repo_name(Path(args.output_dir).name, token=args.hub_token)
             else:
                 repo_name = args.hub_model_id
-            repo = Repository(args.output_dir, clone_from=repo_name)  # noqa: F841
+            repo = Repository(args.output_dir, clone_from=repo_name)
 
             with open(os.path.join(args.output_dir, ".gitignore"), "w+") as gitignore:
                 if "step_*" not in gitignore:
@@ -266,7 +265,7 @@ def main(args):
 
     if args.enable_xformers_memory_efficient_attention:
         if accelerator.device.type == "xpu":
-            logger.warn("XPU hasn't support xformers yet, ignore it.")
+            logger.warning("XPU hasn't support xformers yet, ignore it.")
         elif is_xformers_available():
             unet.enable_xformers_memory_efficient_attention()
         else:

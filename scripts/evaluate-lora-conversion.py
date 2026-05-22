@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright 2025-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -93,7 +92,7 @@ def evaluate_model(model, tokenizer, ds_test):
     print(f"Evaluation Time: {toc - tic:.0f} seconds".format(toc - tic))
 
 
-def main(path_peft_model: str, rank: int | float | None) -> None:
+def main(path_peft_model: str, rank: float | None) -> None:
     model_id = "meta-llama/Llama-3.2-3B"
     tokenizer = mm_utils.get_tokenizer(model_id=model_id, max_seq_length=768)
     _, _, ds_test = mm_data.get_train_valid_test_datasets(

@@ -64,7 +64,7 @@ class _Hook:
         elif isinstance(layer_input, (tuple, list)):
             layer_input = layer_input[0]
         else:
-            raise ValueError(
+            raise TypeError(
                 f"unsupported input type {type(layer_input)} for prepare_layer_inputs_fn in layer {layer_name}, "
                 "please provide a custom prepare_layer_inputs_fn"
             )
@@ -247,7 +247,7 @@ def prepare_model_inputs_fn_language_modeling(model_input, peft_config: LoraConf
         peft_config (LoraConfig): The configuration for the LoRA layers.
     """
     if not isinstance(model_input, dict):
-        raise ValueError("When using `prepare_model_inputs_fn_language_modeling` inputs must be a dictionary")
+        raise TypeError("When using `prepare_model_inputs_fn_language_modeling` inputs must be a dictionary")
     mask = model_input.get("attention_mask", torch.ones_like(model_input["input_ids"])).bool()
     if peft_config.eva_config.use_label_mask and hasattr(model_input, "labels"):
         mask = torch.logical_and(mask, model_input["labels"] != peft_config.eva_config.label_mask_value)
@@ -274,7 +274,7 @@ def prepare_layer_inputs_fn_language_modeling(layer_input, model_input, layer_na
     elif isinstance(layer_input, (tuple, list)):
         layer_input = layer_input[0]
     else:
-        raise ValueError(
+        raise TypeError(
             f"unsupported input type {type(layer_input)} for prepare_layer_inputs_fn in layer {layer_name}, "
             "please provide a custom prepare_layer_inputs_fn"
         )

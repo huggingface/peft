@@ -20,7 +20,7 @@ import warnings
 from contextlib import contextmanager
 from dataclasses import replace
 from functools import partial, reduce
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 import packaging.version
 import torch
@@ -522,10 +522,10 @@ class LoraModel(BaseTuner):
                 # When there is beam search, the inputs are repeated n times, thus we repeat each adapter name n times and
                 # then flatten the nested list. For encoder-decoder models, this extended list should not be applied to the
                 # encoder part. Further below, the original argument is thus restored for the encoder.
-                adapter_names = sum(([n] * kwargs["num_beams"] for n in adapter_names), [])
+                adapter_names = [n for n in adapter_names for _ in range(kwargs["num_beams"])]
 
             for module in self.modules():
-                if isinstance(module, LoraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
+                if isinstance(module, (LoraLayer, AuxiliaryTrainingWrapper)):
                     pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
                     handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                     hook_handles.append(handle)
@@ -535,7 +535,7 @@ class LoraModel(BaseTuner):
                 # For encoder-decoder models, even when applying beam search, the encoder part of the model should not use
                 # the extended adapter_names. This is because the encoder still uses the original, non-extended samples.
                 for module in encoder.modules():
-                    if isinstance(module, LoraLayer) or isinstance(module, AuxiliaryTrainingWrapper):
+                    if isinstance(module, (LoraLayer, AuxiliaryTrainingWrapper)):
                         # Add another hook to overwrite the kwargs with the original adapter names -- this is easier than
                         # trying to exclude the encoder.
                         pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=original_adapter_names)
@@ -943,6 +943,59 @@ class LoraModel(BaseTuner):
                 )
 
         return tensors_lora
+
+    def _get_monteclora_loss(self, adapter_names: Optional[Union[str, list[str]]] = None) -> torch.Tensor | float:
+        """
+        Compute the MonteCLoRA variational regularization loss.
+
+        Iterates over all `LoraLayer` modules in the model and, for each layer, collects the KL-divergence and entropy
+        components from the `MontecloraSampler`s that correspond to the requested adapters. The aggregated loss is
+        normalized by the number of contributing samplers. Returns `0.0` if no matching MonteCLoRA samplers are present
+        (e.g. MonteCLoRA is not used, or none of the requested adapters use MonteCLoRA).
+
+        Only samplers belonging to `adapter_names` are considered. This matters when multiple LoRA adapters are
+        attached to the model but only a subset is active: the regularization loss is then computed only for those
+        adapters. By default (`adapter_names=None`) the model's currently active adapters are used.
+
+        Typical usage during training (after computing the task loss):
+
+        ```py
+        task_loss = ...  # standard loss from the model
+        monteclora_loss = model._get_monteclora_loss()
+        total_loss = task_loss + monteclora_loss
+        ```
+
+        Args:
+            adapter_names (`str` or `list[str]`, *optional*):
+                Name(s) of the adapter(s) to include in the loss computation. If `None` (the default), the model's
+                currently active adapters (`self.active_adapters`) are used.
+
+        Returns:
+            The normalized variational loss as a tensor (or `0.0` if no matching MonteCLoRA samplers are present).
+        """
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+        elif isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+
+        var_loss_sum: torch.Tensor | float = 0.0
+        num_monte_layers = 0
+        for module in self.modules():
+            if not isinstance(module, LoraLayer):
+                continue
+            samplers = getattr(module, "lora_monteclora_sampler", None)
+            if samplers is None:
+                continue
+            for adapter_name in adapter_names:
+                if adapter_name not in samplers:
+                    continue
+                kl_loss, entropy_loss = samplers[adapter_name].get_variational_loss()
+                var_loss_sum = var_loss_sum + kl_loss + entropy_loss
+                num_monte_layers += 1
+
+        if num_monte_layers == 0:
+            return 0.0
+        return var_loss_sum / num_monte_layers
 
     def _add_modules_to_save_to_tie(self, peft_config: LoraConfig, tied_weight_keys: list[str]):
         """

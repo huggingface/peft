@@ -43,13 +43,13 @@ def train(
     lora_r: int = 32,
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
-    lora_target_modules: list[str] = None,
+    lora_target_modules: Optional[list[str]] = None,
     dtype: str = "float16",
     init_lora_weights="olora",
     seed: Optional[int] = None,
 ):
     # Set device_map to the right place when enabling DDP.
-    world_size = int(os.environ.get("WORLD_SIZE", 0)) or int(os.environ.get("PMI_SIZE", 0))
+    world_size = int(os.environ.get("WORLD_SIZE", "0")) or int(os.environ.get("PMI_SIZE", "0"))
     if world_size > 1 and device_map != "cpu":
         from accelerate import Accelerator
 

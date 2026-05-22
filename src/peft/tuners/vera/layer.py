@@ -16,8 +16,8 @@ import warnings
 from typing import Optional
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
@@ -103,8 +103,8 @@ class VeraLayer(BaseTunerLayer):
                     "The `vera_A` and `vera_B` buffers are empty. This should not happen. Please report this issue."
                 )
             # we can take any of the existing adapter's parameters, as they should all be identical
-            vera_A_param = list(self.vera_A.values())[0]
-            vera_B_param = list(self.vera_B.values())[0]
+            vera_A_param = next(iter(self.vera_A.values()))
+            vera_B_param = next(iter(self.vera_B.values()))
 
             error_tmpl = (
                 "{} has a size of {} but {} or greater is required; this probably happened because an additional VeRA "

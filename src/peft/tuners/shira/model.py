@@ -116,7 +116,7 @@ class ShiraModel(BaseTuner):
                 )
                 shira_config.fan_in_fan_out = False
         else:
-            raise ValueError(
+            raise TypeError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`."
             )

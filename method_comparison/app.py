@@ -14,6 +14,7 @@
 
 """Gradio app to show the results"""
 
+import logging
 import os
 import tempfile
 
@@ -22,6 +23,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 from processing import load_df
 from sanitizer import parse_and_filter
+
+
+logger = logging.getLogger(__name__)
 
 
 metric_preferences = {
@@ -248,7 +252,7 @@ def build_app(df):
             x_default = (
                 "accelerator_memory_max"
                 if "accelerator_memory_max" in metric_preferences
-                else list(metric_preferences.keys())[0]
+                else next(iter(metric_preferences.keys()))
             )
             y_default = (
                 "test_accuracy" if "test_accuracy" in metric_preferences else list(metric_preferences.keys())[1]
@@ -277,9 +281,9 @@ def build_app(df):
                     df_queried = filtered[mask]
                     if not df_queried.empty:
                         filtered = df_queried
-                except Exception:
+                except Exception as exc:
                     # invalid filter query
-                    pass
+                    logger.debug("Ignoring invalid filter query: %s", exc)
             return gr.update(choices=new_models, value=new_models[0] if new_models else None), format_df(filtered)
 
         task_dropdown.change(
@@ -292,8 +296,8 @@ def build_app(df):
                 try:
                     mask = parse_and_filter(filtered, current_filter)
                     filtered = filtered[mask]
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Ignoring invalid filter query: %s", exc)
             return format_df(filtered)
 
         model_dropdown.change(

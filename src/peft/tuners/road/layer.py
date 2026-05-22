@@ -16,7 +16,7 @@ import warnings
 from typing import Any, Optional
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
@@ -67,7 +67,7 @@ class RoadLayer(BaseTunerLayer):
         if isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
         else:
-            raise ValueError(f"Unsupported layer type '{type(base_layer)}' encountered, cannot apply RoAd adapter.")
+            raise TypeError(f"Unsupported layer type '{type(base_layer)}' encountered, cannot apply RoAd adapter.")
         self.in_features = in_features
         self.out_features = out_features
 

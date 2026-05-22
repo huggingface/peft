@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,7 +18,7 @@ import unittest
 
 import pytest
 import torch
-import torch.nn.init as init
+from torch.nn import init
 from transformers import AutoModelForCausalLM
 
 from peft import LoraConfig, PeftModel, get_peft_model, get_peft_model_state_dict

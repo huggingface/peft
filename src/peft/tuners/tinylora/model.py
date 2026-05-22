@@ -17,7 +17,7 @@ from __future__ import annotations
 import warnings
 
 import torch
-import torch.nn as nn
+from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
@@ -112,7 +112,7 @@ class TinyLoraModel(BaseTuner):
 
         save_projection_unique_values = sorted({c.save_projection for c in self.peft_config.values()})
         if len(save_projection_unique_values) > 1:
-            raise ValueError(
+            raise TypeError(
                 "TinyLoRA projection tensors must be saved for all adapters or none, but got multiple different values: "
                 f"{save_projection_unique_values}"
             )
@@ -247,7 +247,7 @@ class TinyLoraModel(BaseTuner):
                 **kwargs,
             )
         else:
-            raise ValueError(
+            raise TypeError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`, `torch.nn.Embedding`, `transformers.pytorch_utils.Conv1D`."
             )

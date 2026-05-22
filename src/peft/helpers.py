@@ -31,7 +31,7 @@ except ImportError:
 from tqdm.auto import tqdm
 
 from .peft_model import PeftConfig, PeftModel
-from .tuners.lora import LoraLayer, dora
+from .tuners.lora import LoraLayer, LoraModel, dora
 from .tuners.tuners_utils import BaseTunerLayer
 
 
@@ -259,6 +259,87 @@ def disable_input_dtype_casting(model: nn.Module, active: bool = True):
                 continue
             if name in original_values:
                 module.cast_input_dtype_enabled = original_values[name]
+
+
+class MontecloraTrainerMixin:
+    """
+    Mixin class for adding Monteclora variational loss to the Trainer's compute_loss method.
+
+    This mixin can be used with any Trainer class (e.g., Trainer, SFTTrainer) to add support for Monteclora's
+    variational regularization during training.
+
+    Example:
+        ```python
+        from transformers import Trainer
+        from peft import get_peft_model, LoraConfig
+        from peft.helpers import MontecloraTrainerMixin
+
+
+        # custom trainer that supports Monteclora
+        class MontecloraTrainer(MontecloraTrainerMixin, Trainer):
+            pass
+
+
+        # Configure LoRA with Monteclora
+        monteclora_config = MontecloraConfig(
+            num_samples=8,
+            sample_scaler=1e-4,
+            kl_loss_weight=1e-5,
+        )
+        lora_config = LoraConfig(
+            r=16,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"],
+            monteclora_config=monteclora_config,
+        )
+
+        # Get PEFT model and train
+        model = get_peft_model(base_model, lora_config)
+        trainer = MontecloraTrainer(model=model, args=training_args, ...)
+        trainer.train()
+        ```
+    """
+
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        """
+        Compute loss with Monteclora variational regularization.
+
+        This method extends the standard compute_loss by adding the variational loss (KL divergence + entropy) from
+        Monteclora samplers to the task loss.
+
+        Args:
+            model: The model being trained
+            inputs: Input batch
+            return_outputs: Whether to return model outputs along with loss
+            **kwargs: Additional arguments
+
+        Returns:
+            loss or (loss, outputs) depending on return_outputs
+        """
+        if return_outputs:
+            task_loss, outputs = super().compute_loss(model, inputs, return_outputs=True, **kwargs)
+        else:
+            task_loss = super().compute_loss(model, inputs, return_outputs=False, **kwargs)
+            outputs = None
+
+        # `_get_monteclora_loss` already normalizes by the number of samplers within a single LoraModel.
+        # In the typical case there is exactly one LoraModel (PeftModel.base_model) so this loop runs once
+        # and matches the original behavior. For unusual setups with multiple tuners we additionally average
+        # across the LoraModels so the regularization magnitude does not scale with the number of tuners.
+        # `_get_monteclora_loss` returns 0.0 when no MonteCLoRA samplers are present, so this is a no-op
+        # for plain LoRA training.
+        monteclora_loss = 0.0
+        num_lora_models = 0
+        for module in model.modules():
+            if isinstance(module, LoraModel):
+                monteclora_loss = monteclora_loss + module._get_monteclora_loss()
+                num_lora_models += 1
+        if num_lora_models > 1:
+            monteclora_loss = monteclora_loss / num_lora_models
+
+        total_loss = task_loss + monteclora_loss
+
+        return (total_loss, outputs) if return_outputs else total_loss
 
 
 class DoraCaching:
