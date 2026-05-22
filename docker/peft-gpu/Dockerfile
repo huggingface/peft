@@ -46,7 +46,8 @@ RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum
 # to have compute hardware available we use the information from the CI runner (which hosts
 # a NVIDIA L4). So we fix the compute capability to 8.9. In the future we might extend this
 # to a list of compute capabilities (separated by ;).
-RUN CUDA_ARCH_LIST=8.9 conda run -n peft pip install "gptqmodel>=7.0.0"
+# TODO pcre, which is used by gptqmodel, is resulting in a core dump, remove once it's resolved
+# RUN CUDA_ARCH_LIST=8.9 conda run -n peft pip install "gptqmodel>=7.0.0"
 
 RUN \
     # Add eetq for quantization testing; needs to run without build isolation since the setup
