@@ -65,7 +65,7 @@ from peft import (
 )
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.tuners.lokr.layer import LoKrLayer
-from peft.tuners.lora.config import CordaConfig
+from peft.tuners.lora.config import BdLoraConfig, CordaConfig
 from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
@@ -1232,6 +1232,23 @@ class TestLoraInitialization:
 
         with pytest.raises(ValueError, match="not divisible by"):
             get_peft_model(model, config)
+
+    def test_bdlora_default_nblocks_is_int(self):
+        # The default value of BdLoraConfig.nblocks must be the integer 1, not a wrapped field object. A misplaced
+        # trailing comma previously turned the default into a 1-tuple, which broke get_peft_model whenever the user
+        # did not pass nblocks explicitly.
+        assert BdLoraConfig().nblocks == 1
+
+    def test_bdlora_get_peft_model_with_default_nblocks(self):
+        # Building a BD-LoRA model without specifying nblocks must work and rely on the documented default of 1.
+        # This used to raise a TypeError because nblocks defaulted to a tuple instead of an int.
+        model = self.get_model()
+
+        bdlora_config = {"target_modules_bd_a": ["linear"], "target_modules_bd_b": []}
+        config = LoraConfig(target_modules=["linear"], use_bdlora=bdlora_config)
+        model = get_peft_model(model, config)
+
+        assert model.linear.lora_A["default"].nblocks == 1
 
     @pytest.fixture
     def mha_cls(self):
