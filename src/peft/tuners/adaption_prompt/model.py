@@ -13,7 +13,7 @@
 # limitations under the License.
 
 
-import torch.nn as nn
+from torch import nn
 
 from peft.utils import _freeze_adapter, _get_submodules
 

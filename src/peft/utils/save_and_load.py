@@ -587,7 +587,7 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
             # We transpose back because LoraEmbedding expects the weights to be of shape (rank, num_embeddings)
             sharded = sharded.T
         else:
-            raise ValueError(f"Unknown tensor parallel plan {tp_plan} for {module.__class__.__name__}.")
+            raise TypeError(f"Unknown tensor parallel plan {tp_plan} for {module.__class__.__name__}.")
 
         if weight is None:
             weight = state_dict[key]
@@ -670,9 +670,7 @@ def set_peft_model_state_dict(
                 # delete the old key from the previous `state_dict = peft_model_state_dict` statement.
                 del state_dict[lookup_key]
 
-    if config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT:
-        peft_model_state_dict = state_dict
-    elif config.peft_type == PeftType.XLORA:
+    if config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT or config.peft_type == PeftType.XLORA:
         peft_model_state_dict = state_dict
     elif config.peft_type in PEFT_TYPE_TO_PREFIX_MAPPING:
         peft_model_state_dict = {}

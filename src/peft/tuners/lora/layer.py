@@ -1778,7 +1778,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
                 **kwargs,
             )
         else:
-            raise ValueError(f"out_proj must be an instance of nn.Linear for {self.__class__.__name__}.")
+            raise TypeError(f"out_proj must be an instance of nn.Linear for {self.__class__.__name__}.")
 
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, lora_alpha=lora_alpha, config=config)

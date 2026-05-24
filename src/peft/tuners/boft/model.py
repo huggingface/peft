@@ -108,7 +108,7 @@ class BOFTModel(BaseTuner):
         elif isinstance(target_base_layer, torch.nn.Conv2d):
             new_module = Conv2d(target, adapter_name, config=boft_config, **kwargs)
         else:
-            raise ValueError(
+            raise TypeError(
                 f"Target module {target} is not supported. "
                 "Currently, only `torch.nn.Linear` and `torch.nn.Conv2d` are supported."
             )

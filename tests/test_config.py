@@ -63,6 +63,10 @@ from peft import (
 )
 
 
+class TestingCommitHashError(Exception):
+    pass
+
+
 PEFT_MODELS_TO_TEST = [("peft-internal-testing/tiny-opt-lora-revision", "test")]
 
 # Config classes and their mandatory parameters
@@ -195,7 +199,8 @@ class TestPeftConfig:
             # Also test with a runtime_config entry -- they should be ignored, even if they
             # were accidentally saved to disk
             config_from_json["runtime_config"] = {"ephemeral_gpu_offload": True}
-            json.dump(config_from_json, open(config_path, "w"))
+            with open(config_path, "w") as f:
+                json.dump(config_from_json, f)
 
             config_from_json = config_class.from_json_file(config_path)
             assert config.to_dict() == config_from_json
@@ -399,7 +404,6 @@ class TestPeftConfig:
             {"total_step": 10, "tinit": 20, "tfinal": 0},
             {"total_step": 10, "tinit": 0, "tfinal": 10},
             {"total_step": 10, "tinit": 10, "tfinal": 0},
-            {"total_step": 10, "tinit": 20, "tfinal": 0},
             {"total_step": 10, "tinit": 20, "tfinal": 20},
             {"total_step": 10, "tinit": 0, "tfinal": 20},
         ],
@@ -595,7 +599,7 @@ class TestPeftConfig:
         monkeypatch.setattr(config, "__version__", version)
 
         def fake_commit_hash_raises(pkg_name):
-            raise Exception("Error for testing purpose")
+            raise TestingCommitHashError("Error for testing purpose")
 
         monkeypatch.setattr(config, "_get_commit_hash", fake_commit_hash_raises)
 

@@ -17,7 +17,7 @@ from torch.fft import fft, ifft
 
 
 def get_circulant_fast(w):
-    m, n, b = w.shape
+    _, n, b = w.shape
     x = torch.eye(n * b, dtype=w.dtype, device=w.device)
     x = x.reshape(*x.shape[:-1], n, b)
     x = torch.einsum("...nb,mnb->...mb", ifft(x), fft(w))
@@ -28,7 +28,7 @@ def get_circulant_fast(w):
 class BlockCircularConvolution(Function):
     @staticmethod
     def forward(ctx, x, w):
-        m, n, b = w.shape
+        _, n, b = w.shape
         x = x.reshape(*x.shape[:-1], n, b)
         ctx.save_for_backward(x, w)
         x = torch.einsum("...nb,mnb->...mb", ifft(x), fft(w))
@@ -39,7 +39,7 @@ class BlockCircularConvolution(Function):
     @staticmethod
     def backward(ctx, grad_output):
         x, w = ctx.saved_tensors
-        m, n, b = w.shape
+        m, _, b = w.shape
         grad_output = grad_output.reshape(*grad_output.shape[:-1], m, b)
         grad_output_fft = fft(grad_output)
         x_grad = fft(torch.einsum("...mb,mnb->...nb", grad_output_fft, ifft(w))).real

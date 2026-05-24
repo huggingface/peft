@@ -24,6 +24,7 @@ from .config import (
     LoraConfig,
     LoraGAConfig,
     LoraRuntimeConfig,
+    MontecloraConfig,
     VeloraConfig,
 )
 from .conversion import convert_to_lora, save_as_lora
@@ -49,6 +50,7 @@ __all__ = [
     "LoraLayer",
     "LoraModel",
     "LoraRuntimeConfig",
+    "MontecloraConfig",
     "ParamWrapper",
     "VeloraConfig",
     "convert_to_lora",

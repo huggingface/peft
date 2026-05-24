@@ -53,7 +53,7 @@ Complete training examples are provided in the examples/shira/ directory.
 from typing import Optional
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 
 def random_mask(base_layer: nn.Module, r: int, random_seed: Optional[int] = None, **kwargs) -> torch.tensor:

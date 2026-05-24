@@ -664,7 +664,7 @@ class TestMissLoraConversion:
         assert 0.0 < mse < 0.1
 
     def test_miss_targeted_modules_identical(self, miss_model_standard):
-        lora_config, lora_state_dict = convert_to_lora(miss_model_standard, rank=4)
+        _, lora_state_dict = convert_to_lora(miss_model_standard, rank=4)
         miss_state_dict = miss_model_standard.state_dict()
 
         modules_miss = {k.rsplit(".", 2)[0] for k in miss_state_dict.keys() if ".miss_block" in k}

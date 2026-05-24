@@ -46,7 +46,7 @@ def train(
     Fine-tunes a causal language model with HiRA adapters on Alpaca-style instruction data.
     """
 
-    world_size = int(os.environ.get("WORLD_SIZE", 0)) or int(os.environ.get("PMI_SIZE", 0))
+    world_size = int(os.environ.get("WORLD_SIZE", "0")) or int(os.environ.get("PMI_SIZE", "0"))
     if world_size > 1 and device_map != "cpu":
         from accelerate import Accelerator
 

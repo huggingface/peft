@@ -339,7 +339,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 # These are all the pointers of shared tensors.
                 shared_ptrs = {ptr: names for ptr, names in ptrs.items() if len(names) > 1}
 
-                for _, names in shared_ptrs.items():
+                for names in shared_ptrs.values():
                     # Here we just clone the shared tensors to avoid tensor aliasing which is
                     # not supported in safetensors.
                     for shared_tensor_name in names[1:]:
@@ -576,8 +576,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     ]
                     # Prepare a dict of adapter paths, which really just point to the hf id; we will use the subfolders
                     adapter_paths = {}
-                    for adapter_name in adapter_names:
-                        adapter_paths[adapter_name] = os.path.join(model_id, model_id)
+                    for loaded_adapter_name in adapter_names:
+                        adapter_paths[loaded_adapter_name] = os.path.join(model_id, model_id)
                     config.adapters = adapter_paths
                     config._subfolders = adapter_names
                 else:
@@ -616,14 +616,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # 2. Remove the prompt encoder, as it does not need to be part of the checkpoint
         # 3. Remove TinyLoRA layer-level tinylora_v references (they share with model-level tinylora_v)
         def is_expected_missing_key(k):
-            if "vblora_vector_bank" in k:
-                return False
-            if "prompt_encoder" in k:
-                return False
             # TinyLoRA: layer-level tinylora_v is a reference to model-level, exclude from warning
-            if ".tinylora_v." in k:
-                return False
-            return True
+            return not ("vblora_vector_bank" in k or "prompt_encoder" in k or ".tinylora_v." in k)
 
         missing_keys = [k for k in load_result.missing_keys if is_expected_missing_key(k)]
         if missing_keys:
@@ -2117,7 +2111,7 @@ class PeftModelForCausalLM(PeftModel):
     def _cpt_forward(self, input_ids, inputs_embeds, peft_config, task_ids, batch_size, **kwargs):
         # Extract labels from kwargs
         labels = kwargs.pop("labels")
-        device = [i.device for i in [input_ids, inputs_embeds, labels] if i is not None][0]
+        device = next(i.device for i in [input_ids, inputs_embeds, labels] if i is not None)
         # Extract input_type_mask from kwargs and move it to the same device as labels
         if "input_type_mask" in kwargs.keys():
             input_type_mask = kwargs.pop("input_type_mask").to(device)
@@ -2239,7 +2233,7 @@ class PeftModelForCausalLM(PeftModel):
                             f"Expected a single attention mask, got {len(attention_mask)} instead, please open an "
                             "issue (https://github.com/huggingface/peft/issues) and report the error."
                         )
-                    attention_mask = list(attention_mask.values())[0]
+                    attention_mask = next(iter(attention_mask.values()))
 
                 size = model_kwargs["input_ids"].shape[0], peft_config.num_virtual_tokens
                 prefix_attention_mask = torch.ones(size).to(model_kwargs["input_ids"].device)

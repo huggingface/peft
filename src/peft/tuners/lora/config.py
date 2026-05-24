@@ -764,6 +764,17 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+
+    monteclora_config: Optional[MontecloraConfig] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The configuration of Monteclora (Monte Carlo Low-Rank Adaptation). If passed, Monteclora will be "
+                "used to add variational Monte Carlo sampling on top of the LoRA adapters. See `MontecloraConfig` "
+                "for details on the individual hyperparameters."
+            )
+        },
+    )
     # Enables replicating layers in a model to expand it to a larger model.
     layer_replication: Optional[list[tuple[int, int]]] = field(
         default=None,
@@ -851,6 +862,8 @@ class LoraConfig(PeftConfig):
     def __post_init__(self):
         super().__post_init__()
         self.peft_type = PeftType.LORA
+        if isinstance(self.monteclora_config, dict):
+            self.monteclora_config = MontecloraConfig(**self.monteclora_config)
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
@@ -1005,3 +1018,92 @@ class LoraGAConfig:
         default="stable", metadata={"help": "Scaling strategy for initialization"}
     )
     stable_gamma: int = field(default=16, metadata={"help": "Gamma parameter for stable scaling"})
+
+
+@dataclass
+class MontecloraConfig:
+    """
+    This is the sub-configuration class to store the configuration for Monteclora (Monte Carlo Low-Rank Adaptation).
+    Monteclora introduces variational inference into LoRA by adding Monte Carlo sampling to the adapter weights.
+
+    In practice you can think of Monteclora as adding stochastic, learned perturbations on top of the LoRA weights to
+    obtain a better-calibrated and better-regularized adapter. The argments below let you trade off stability,
+    regularization strength, and compute cost.
+
+    Args:
+        num_samples (`int`):
+            Number of Monte Carlo samples to draw per forward pass. Higher values usually give smoother training and
+            better uncertainty estimates but increase compute and memory usage. Lower this if training is too slow or
+            memory constrained; increase it if training is stable and you want stronger Monte Carlo averaging.
+        use_entropy (`bool`):
+            Whether to add an entropy regularization term that keeps the Monte Carlo weights from collapsing to a
+            single sample. Turn this on if you observe the sampler becoming very peaky or want stronger regularization;
+            leave it off to mimic standard LoRA more closely.
+        dirichlet_prior (`float`):
+            Concentration parameter for the Dirichlet prior over sample/expert weights. Larger values push the weights
+            towards being more uniform (stronger regularization, less sparsity), while smaller positive values
+            encourage sparser, more peaked weights. Increase if the sampler overfits; decrease (but keep > 0) if it is
+            too conservative.
+        sample_scaler (`float`):
+            Overall scaling factor for the sampled perturbations applied to the LoRA weights. Increasing this makes the
+            Monte Carlo noise stronger (more regularization and exploration, but also more training instability);
+            decreasing it moves the behavior closer to standard deterministic LoRA. Setting it very close to 0 largely
+            disables the effect of Monteclora.
+        kl_loss_weight (`float`):
+            Weight of the KL-divergence term between the variational distribution and its prior. Larger values put more
+            emphasis on matching the prior (stronger regularization, potentially underfitting); smaller values rely
+            more on the data likelihood (weaker regularization, potentially overfitting). Tune this if you find
+            Monteclora over- or under-regularizing the adapter.
+        buffer_size (`int`):
+            Size of the internal buffer used by the Monte Carlo sampler (e.g. for storing recent statistics). Larger
+            values can stabilize the estimated variational parameters at the cost of additional memory; reduce this if
+            you are memory constrained.
+    """
+
+    num_samples: int = field(
+        default=8,
+        metadata={
+            "help": (
+                "Number of Monte Carlo samples to draw per forward pass. Higher values usually give smoother "
+                "training and better uncertainty estimates but increase compute and memory usage. Lower this if "
+                "training is too slow or memory constrained; increase it if training is stable and you want "
+                "stronger Monte Carlo averaging."
+            )
+        },
+    )
+    use_entropy: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Whether to add an entropy regularization term that keeps the Monte Carlo weights from collapsing "
+                "to a single sample. Turn this on if you observe the sampler becoming very peaky or want stronger "
+                "regularization."
+            )
+        },
+    )
+    dirichlet_prior: float = field(
+        default=0.1,
+        metadata={"help": "Prior parameter for Dirichlet distribution used in expert weight sampling."},
+    )
+    sample_scaler: float = field(
+        default=1e-4,
+        metadata={
+            "help": "Scaling factor for the Monte Carlo samples. Controls the magnitude of variational perturbations."
+        },
+    )
+    kl_loss_weight: float = field(
+        default=1e-5,
+        metadata={"help": "Weight for the KL divergence loss component in the variational objective."},
+    )
+    buffer_size: int = field(
+        default=150,
+        metadata={"help": "Size of the buffer for the Monte Carlo sampler."},
+    )
+
+    def __post_init__(self):
+        if self.num_samples <= 0:
+            raise ValueError("`num_samples` must be greater than 0.")
+        if self.dirichlet_prior <= 0:
+            raise ValueError("`dirichlet_prior` must be greater than 0.")
+        if self.buffer_size <= 0:
+            raise ValueError("`buffer_size` must be greater than 0.")
