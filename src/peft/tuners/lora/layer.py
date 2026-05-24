@@ -157,34 +157,34 @@ class LoraLayer(BaseTunerLayer):
 
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
 
-            # Safely fetch the dictionary (defaults to empty if a subclass forgot to define it)
-            layer_variants = getattr(self, "lora_variants", {(): None})
-            lora_variants_configs = [f for f in dataclasses.fields(config) if f.metadata.get("is_lora_variant")]
+        # Safely fetch the dictionary (defaults to empty if a subclass forgot to define it)
+        layer_variants = getattr(self, "lora_variants", {(): None})
+        lora_variants_configs = [f for f in dataclasses.fields(config) if f.metadata.get("is_lora_variant")]
 
-            # 1. Gather all valid variant field names from the config
-            tagged_fields = { f.name for f in lora_variants_configs }
+        # 1. Gather all valid variant field names from the config
+        tagged_fields = { f.name for f in lora_variants_configs }
 
-            # 2. SANITY CHECK: Ensure all keys in the layer's dictionary actually exist in the config
-            for variant_keys in layer_variants.keys():
-                for variant_name in variant_keys:
-                    if variant_name not in tagged_fields:
-                        raise ValueError(
-                            f"Variant '{variant_name}' found in lora_variants but it is not tagged with "
-                            f"'is_lora_variant' in LoraConfig."
-                        )
+        # 2. SANITY CHECK: Ensure all keys in the layer's dictionary actually exist in the config
+        for variant_keys in layer_variants.keys():
+            for variant_name in variant_keys:
+                if variant_name not in tagged_fields:
+                    raise ValueError(
+                        f"Variant '{variant_name}' found in lora_variants but it is not tagged with "
+                        f"'is_lora_variant' in LoraConfig."
+                    )
 
-            # 3. Figure out which variants are currently active
-            active_variants = tuple(sorted(
-                f.name for f in lora_variants_configs
-                if getattr(config, f.name)
-            ))
+        # 3. Figure out which variants are currently active
+        active_variants = tuple(sorted(
+            f.name for f in lora_variants_configs
+            if getattr(config, f.name)
+        ))
 
-            # 4. Route to the correct variant class
-            if active_variants not in layer_variants:
-                raise ValueError(f"Invalid or unsupported variant combination: {active_variants}")
+        # 4. Route to the correct variant class
+        if active_variants not in layer_variants:
+            raise ValueError(f"Invalid or unsupported variant combination: {active_variants}")
 
-            variant_class = layer_variants[active_variants]
-            return variant_class() if variant_class else None
+        variant_class = layer_variants[active_variants]
+        return variant_class() if variant_class else None
 
     def update_layer(
         self,
