@@ -23,7 +23,7 @@ from peft.utils import PeftType
 @dataclass
 class AdaLoraConfig(LoraConfig):
     """
-    This is the configuration class to store the configuration of a [`~peft.AdaLora`].
+    This is the configuration class to store the configuration of a [`AdaLoraModel`].
 
     AdaLoRA has three phases defined by `tinit`, `tfinal` and `total_step`.
 
