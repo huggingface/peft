@@ -4675,6 +4675,45 @@ class TestPeftTorchao:
         with pytest.raises(NotImplementedError, match=msg):
             model.merge_adapter()
 
+    @pytest.mark.single_gpu_tests
+    def test_torchao_lora_warns_when_base_not_quantized_via_transformers(self):
+        # Manually quantizing the base model with torchao.quantize_ leaves PEFT without
+        # `get_apply_tensor_subclass`, so the LoRA torchao linear emits a warning at init
+        # to flag that merge()/unmerge() will not work. When the base model is loaded via
+        # `TorchAoConfig`, PEFT recovers the requantization subclass and no warning fires.
+        import warnings as _warnings
+
+        from torchao.quantization import Int8WeightOnlyConfig, quantize_
+        from transformers import TorchAoConfig
+
+        device = 0
+        lora_config = LoraConfig(
+            r=8,
+            lora_alpha=16,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        # Path 1: manual quantize_ -> warning expected.
+        model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device)
+        quantize_(model, Int8WeightOnlyConfig())
+        with pytest.warns(UserWarning, match="get_apply_tensor_subclass"):
+            get_peft_model(model, lora_config)
+        del model
+        clear_device_cache(garbage_collection=True)
+
+        # Path 2: TorchAoConfig -> no such warning.
+        quantization_config = TorchAoConfig(quant_type=Int8WeightOnlyConfig())
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
+        )
+        with _warnings.catch_warnings(record=True) as caught:
+            _warnings.simplefilter("always")
+            get_peft_model(model, lora_config)
+        assert not any("get_apply_tensor_subclass" in str(w.message) for w in caught)
+
 
 PRECISIONS = [(torch.float32), (torch.float16), (torch.bfloat16)]
 
