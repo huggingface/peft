@@ -29,6 +29,7 @@ from transformers import (
 from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model
 from peft.import_utils import is_transformers_ge_v5_1_0, is_transformers_ge_v5_6_0
 from peft.utils.other import ModulesToSaveWrapper, _get_module_names_tied_with_embedding, _get_no_split_modules
+from peft.utils.save_and_load import _maybe_shard_state_dict_for_tp
 
 from .testing_utils import hub_online_once
 
@@ -87,6 +88,18 @@ def test_modules_to_save_targets_module_dict_raises(cls):
     msg = "modules_to_save cannot be applied to modules of type"
     with pytest.raises(TypeError, match=msg):
         get_peft_model(model=model, peft_config=peft_config)
+
+
+def test_maybe_shard_state_dict_for_tp_noops_without_tp_layers():
+    model = get_peft_model(ModelWithModuleDict(), LoraConfig(target_modules=["other_layer"]))
+    model._tp_plan = {"other_layer": "colwise"}
+    weight = torch.rand(8, 10)
+    state_dict = {"other_layer.lora_A.weight": weight}
+
+    _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name="default")
+
+    assert list(state_dict) == ["other_layer.lora_A.weight"]
+    assert state_dict["other_layer.lora_A.weight"] is weight
 
 
 def test_get_peft_model_revision_warning(tmp_path):
