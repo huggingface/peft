@@ -15,6 +15,7 @@
 # NOTE: don't import from this module unless transformers v5+ is used
 import copy
 import re
+import warnings
 from typing import Any
 
 import torch
@@ -366,6 +367,23 @@ def _convert_peft_config_moe(peft_config, model_type: str) -> None:
 
     fused_targets = _MOE_FUSED_TARGETS.get(base_model_type, {})
     if not fused_targets:
+        return
+
+    # `target_modules` may be a regex string (e.g. when the user passes a pattern produced by an
+    # upstream framework like ms-swift's multimodal helper). In that case, iterating it would
+    # split the regex into individual characters, leading to a nonsense set like
+    # {'^', '(', 'q', '_', 'p', 'r', 'o', 'j', ...} and a downstream "Target modules not found"
+    # error. The MoE conversion below assumes module-name granularity, so it can't sensibly
+    # rewrite a regex; skip the conversion and leave the regex untouched.
+    if isinstance(peft_config.target_modules, str):
+        warnings.warn(
+            f"Skipping MoE target-module conversion for model_type={model_type!r}: "
+            "`target_modules` is a regex string and cannot be remapped automatically. "
+            "If this is a transformers v4 checkpoint loaded against a v5 architecture, "
+            "please update the regex to reference the v5 module names (e.g. `gate_up_proj`, "
+            "`down_proj`).",
+            stacklevel=2,
+        )
         return
 
     peft_config.target_parameters = set(peft_config.target_parameters or [])

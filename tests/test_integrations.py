@@ -391,3 +391,49 @@ class TestTransformersV5:
             # target up_proj and gate_proj
             config = LoraConfig(target_modules=["gate_proj", "up_proj", "down_proj", "score"])
             get_peft_model(model, config)  # does not raise
+
+    @pytest.mark.parametrize(
+        "model_type, regex",
+        [
+            # The kind of pattern ms-swift's `get_multimodal_target_regex` helper produces for Qwen3-Omni; see
+            # https://github.com/huggingface/peft/issues/3229 and
+            # https://github.com/modelscope/ms-swift/issues/9321.
+            (
+                "qwen3_omni_moe_thinker",
+                r"^(thinker\.model(?=\.).*\.(q_proj|k_proj|v_proj|gate_proj|up_proj|down_proj))$",
+            ),
+            # A simpler "ends with q_proj" pattern that still happens to contain MoE module names as substrings.
+            ("mixtral", r".*\.q_proj"),
+        ],
+    )
+    def test_moe_conversion_preserves_regex_target_modules(self, model_type, regex):
+        # Regression test for https://github.com/huggingface/peft/issues/3229. The MoE config conversion previously did
+        # `set(peft_config.target_modules or [])`, which when `target_modules` is a regex string splits the regex into
+        # its individual characters (yielding `{'^', '(', 'q', '_', ...}`). The resulting per-character "targets" then
+        # caused "Target modules ... not found in the base model" downstream.
+        from peft.utils.transformers_weight_conversion import _convert_peft_config_moe
+
+        config = LoraConfig(target_modules=regex, target_parameters=["foo.weight"])
+        assert isinstance(config.target_modules, str)  # sanity check on LoraConfig
+
+        with pytest.warns(UserWarning, match="`target_modules` is a regex string"):
+            _convert_peft_config_moe(config, model_type)
+
+        # The regex must be preserved verbatim — no `set(...)`-induced character splitting.
+        assert isinstance(config.target_modules, str)
+        assert config.target_modules == regex
+        # `target_parameters` is left untouched as well; the conversion is fully skipped.
+        assert config.target_parameters == ["foo.weight"]
+
+    def test_moe_conversion_remaps_list_target_modules(self):
+        # Defensive companion to test_moe_conversion_preserves_regex_target_modules: a list of module names should
+        # still go through the normal MoE conversion path and remap `gate_proj` + `up_proj` to the fused
+        # `gate_up_proj`.
+        from peft.utils.transformers_weight_conversion import _convert_peft_config_moe
+
+        config = LoraConfig(target_modules=["gate_proj", "up_proj"])
+        # list -> set in LoraConfig.__post_init__
+        assert isinstance(config.target_modules, set)
+        _convert_peft_config_moe(config, "qwen3_omni_moe_thinker")
+        # After conversion the original module names are remapped onto `gate_up_proj` via target_parameters.
+        assert "gate_up_proj" in config.target_parameters
