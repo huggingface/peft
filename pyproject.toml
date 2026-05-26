@@ -7,6 +7,7 @@ target-version = ['py310']
 target-version = "py310"
 line-length = 119
 extend-exclude = ["*.ipynb"]
+required-version = "~=0.15.12"
 
 [tool.ruff.lint]
 preview = true
@@ -28,6 +29,14 @@ ignore = [
     "UP007", # X | Y style Unions
     "C420", # dict.fromkeys
     "UP045", # don't force replacing Optional[X] with X | None
+    "SIM118", # `for key in dct.keys()` is allowed
+    "PLC0206", # allow iterating over dict keys and pulling values later, can be more consistent
+    "RUF012", # allow mutable default values, contrary to popular belief, not always evil
+    "B018", # a "useless expression" is not useless when it tests for an AttributeError
+    "SIM117", # allow nesting of `with` statements: can be *more* readable of they are long
+    "BLE001", # allow catching bare `Exception`
+    "SIM102", # collapse multiple `if` statements: nice to have but requires too many changes
+    "PYI041", # considers type annotations like int|float as redundant and wants float only, but type can carry semantic meaning (e.g. total number vs fraction)
 ]
 
 [tool.ruff.lint.isort]

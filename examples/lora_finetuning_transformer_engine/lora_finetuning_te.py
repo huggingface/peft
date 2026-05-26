@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Transformer Engine ESM2 LoRA fine-tuning example using Hugging Face Trainer.
 

@@ -44,6 +44,7 @@ from .constants import (
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_BEFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING,
@@ -90,6 +91,7 @@ __all__ = [
     "SAFETENSORS_WEIGHTS_NAME",
     "TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_BEFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING",
@@ -227,7 +229,7 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
 
 
 # copied from transformers.models.bart.modeling_bart
-def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start_token_id: int):
+def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start_token_id: int) -> torch.Tensor:
     """
     Shift input ids one token to the right.
 
@@ -403,12 +405,13 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         new_hook = old_hook_cls(**filtered_old_hook_attr)
         return new_hook
 
-    def _check_forward_args(self, x, *args, **kwargs):
+    def _check_forward_args(self, *args, **kwargs):
         """Check if the arguments are compatible with the configs and state of the model"""
         adapter_names = kwargs.get("adapter_names", None)
-        if adapter_names is None:
+        if adapter_names is None or not args:
             return
 
+        x = args[0]
         if len(x) != len(adapter_names):
             msg = (
                 "Length of `adapter_names` should be the same as the number of inputs, but got "
@@ -416,7 +419,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
             )
             raise ValueError(msg)
 
-    def _forward_wrapped(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def _forward_wrapped(self, *args: Any, **kwargs: Any) -> torch.Tensor:
         raise NotImplementedError
 
     def _forward_wrapped_mixed_batch(
@@ -424,7 +427,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
     ) -> torch.Tensor:
         raise NotImplementedError
 
-    def _forward_wrapped_passthrough(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def _forward_wrapped_passthrough(self, *args: Any, **kwargs: Any) -> torch.Tensor:
         """The forward call when no adapter is involved in the forward computation, only the base model"""
         raise NotImplementedError
 
@@ -462,16 +465,16 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
 
         return torch.stack(results)
 
-    def forward(self, x: torch.Tensor, *args, **kwargs):
-        self._check_forward_args(x, *args, **kwargs)
+    def forward(self, *args, **kwargs):
+        self._check_forward_args(*args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
 
         if self.disable_adapters or any(adapter not in self._adapters for adapter in self.active_adapters):
-            return self._forward_wrapped_passthrough(x, *args, **kwargs)
+            return self._forward_wrapped_passthrough(*args, **kwargs)
 
         if adapter_names is None:
-            return self._forward_wrapped(x, *args, **kwargs)
-        return self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
+            return self._forward_wrapped(*args, **kwargs)
+        return self._mixed_batch_forward(*args, adapter_names=adapter_names, **kwargs)
 
     def enable_adapters(self, enabled: bool):
         """Toggle the enabling and disabling of adapters
@@ -577,16 +580,16 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
     def _error_message_name(self):
         return "modules_to_save"
 
-    def _forward_wrapped(self, x, *args, **kwargs):
+    def _forward_wrapped(self, *args, **kwargs):
         if not self.active_adapters:
-            return self._forward_wrapped_passthrough(x, *args, **kwargs)
-        return self.modules_to_save[self.active_adapters[0]](x, *args, **kwargs)
+            return self._forward_wrapped_passthrough(*args, **kwargs)
+        return self.modules_to_save[self.active_adapters[0]](*args, **kwargs)
 
     def _forward_wrapped_mixed_batch(self, x, active_adapter, *args, **kwargs):
         return self.modules_to_save[active_adapter](x, *args, **kwargs)
 
-    def _forward_wrapped_passthrough(self, x, *args, **kwargs):
-        return self.original_module(x, *args, **kwargs)
+    def _forward_wrapped_passthrough(self, *args, **kwargs):
+        return self.original_module(*args, **kwargs)
 
     def _hasattr_wrapped(self, name, modules):
         # this method is only called if there is at least one active adapter
@@ -966,7 +969,7 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         return set(self.token_adapter.trainable_tokens_delta.keys())
 
 
-def _get_input_embeddings_name(model, default=None):
+def _get_input_embeddings_name(model: torch.nn.Module, default: Optional[str] = None) -> Optional[str]:
     if not hasattr(model, "get_input_embeddings"):
         return default
 
@@ -978,14 +981,16 @@ def _get_input_embeddings_name(model, default=None):
     return default
 
 
-def _get_submodules(model, key):
+def _get_submodules(model: torch.nn.Module, key: str) -> tuple[torch.nn.Module, torch.nn.Module, str]:
     parent = model.get_submodule(".".join(key.split(".")[:-1]))
     target_name = key.split(".")[-1]
     target = model.get_submodule(key)
     return parent, target, target_name
 
 
-def _get_submodules_with_grandparent(model, key):
+def _get_submodules_with_grandparent(
+    model: torch.nn.Module, key: str
+) -> tuple[torch.nn.Module, Optional[torch.nn.Module], torch.nn.Module, str]:
     parent = model.get_submodule(".".join(key.split(".")[:-1]))
     try:
         grandparent = model.get_submodule(".".join(key.split(".")[:-2]))
@@ -997,7 +1002,7 @@ def _get_submodules_with_grandparent(model, key):
     return parent, grandparent, target, target_name
 
 
-def _freeze_adapter(model, adapter_name):
+def _freeze_adapter(model: torch.nn.Module, adapter_name: str) -> None:
     for n, p in model.named_parameters():
         if adapter_name in n:
             p.requires_grad = False
@@ -1111,9 +1116,6 @@ def _prepare_prompt_learning_config(peft_config, model_config):
     orig_model_config = model_config
     if hasattr(model_config, "to_dict"):
         model_config = model_config.to_dict()
-    else:
-        model_config = model_config
-
     # In case of VLM we focus on the language model portion of the model.
     if "text_config" in model_config:
         model_config = model_config["text_config"]
@@ -1158,11 +1160,19 @@ def _prepare_prompt_learning_config(peft_config, model_config):
 
     # For grouped-query attention, see #1901.
     if (peft_config.peft_type in {"PREFIX_TUNING", "CARTRIDGE"}) and ("num_key_value_heads" in model_config):
-        num_key_value_heads = model_config["num_key_value_heads"]
-        if model_config.get("head_dim", None) is not None:
+        # Models with heterogeneous attention (e.g. Gemma4) expose distinct shapes for global vs. sliding layers via
+        # `global_head_dim` / `num_global_key_value_heads`. Provision the prefix for the global-layer footprint; sliding
+        # layers whose KV shape doesn't match are skipped per-layer at injection time. Matches the default in
+        # google-deepmind/gemma#631.
+        if model_config.get("global_head_dim") is not None:
+            head_dim = model_config["global_head_dim"]
+            num_key_value_heads = model_config.get("num_global_key_value_heads") or model_config["num_key_value_heads"]
+        elif model_config.get("head_dim", None) is not None:
             head_dim = model_config["head_dim"]
+            num_key_value_heads = model_config["num_key_value_heads"]
         else:
             head_dim = peft_config.token_dim // peft_config.num_attention_heads
+            num_key_value_heads = model_config["num_key_value_heads"]
         peft_config.token_dim = head_dim * num_key_value_heads
         peft_config.num_attention_heads = num_key_value_heads
 
@@ -1222,18 +1232,16 @@ def fsdp_auto_wrap_policy(model):
             continue
         transformer_cls = get_module_class_from_name(model, layer_class)
         if transformer_cls is None:
-            raise Exception("Could not find the transformer layer class to wrap in the model.")
+            raise TypeError("Could not find the transformer layer class to wrap in the model.")
         else:
             transformer_cls_to_wrap.add(transformer_cls)
 
     def lambda_policy_fn(module):
-        if (
+        return (
             len(list(module.named_children())) == 0
             and getattr(module, "weight", None) is not None
             and module.weight.requires_grad
-        ):
-            return True
-        return False
+        )
 
     lambda_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=lambda_policy_fn)
     transformer_wrap_policy = functools.partial(
@@ -1245,7 +1253,7 @@ def fsdp_auto_wrap_policy(model):
     return auto_wrap_policy
 
 
-def transpose(weight, fan_in_fan_out):
+def transpose(weight: torch.Tensor, fan_in_fan_out: bool) -> torch.Tensor:
     if not fan_in_fan_out:
         return weight
 
@@ -1254,7 +1262,7 @@ def transpose(weight, fan_in_fan_out):
     return weight.T
 
 
-def _is_valid_match(key: str, target_key: str):
+def _is_valid_match(key: str, target_key: str) -> bool:
     """
     Helper function to match module names target_key and key. Makes sure that either the key is exactly the target_key
     or the target_key is a submodule of key
@@ -1293,6 +1301,32 @@ def get_quantization_config(model: torch.nn.Module, method: str):
     ):
         return model.config.quantization_config
     return None
+
+
+def is_gptqmodel_quant_linear(module: Optional[torch.nn.Module]) -> bool:
+    """
+    Check if a module is a GPT-QModel quantized linear.
+    """
+    if module is None or not is_gptqmodel_available():
+        return False
+
+    try:
+        from gptqmodel.nn_modules.qlinear import BaseQuantLinear
+    except ImportError:
+        return False
+
+    return isinstance(module, BaseQuantLinear)
+
+
+def is_gptqmodel_awq_layer(module: Optional[torch.nn.Module]) -> bool:
+    """
+    Check if a module is a GPT-QModel quantized linear that supports the AWQ method.
+    """
+    if not is_gptqmodel_quant_linear(module):
+        return False
+
+    supported_methods = getattr(module, "SUPPORTS_METHODS", [])
+    return any(method.value == "awq" for method in supported_methods)
 
 
 def get_gptqmodel_quant_linear(gptq_quantization_config, device_map=None):
@@ -1361,7 +1395,7 @@ def id_tensor_storage(tensor: torch.Tensor) -> tuple[torch.device, int, int]:
     return tensor.device, unique_id, storage_size(tensor)
 
 
-def cast_mixed_precision_params(model, dtype):
+def cast_mixed_precision_params(model: torch.nn.Module, dtype: torch.dtype) -> None:
     """
     Cast all non-trainable parameters of the model to the given `dtype`. The `dtype` can be `torch.float16` or
     `torch.bfloat16` as per the mixed-precision training you are performing. The trainable parameters are cast to full
@@ -1424,7 +1458,7 @@ def check_file_exists_on_hf_hub(repo_id: str, filename: str, **kwargs) -> Option
     return exists
 
 
-def match_target_against_key(target_pattern: str, key: str):
+def match_target_against_key(target_pattern: str, key: str) -> Optional[re.Match[str]]:
     """Backing function for `target_modules` config parameter.
 
     Having this as its own function ensures that target key matching can be implemented in the same way everywhere.
@@ -1676,7 +1710,7 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     if (
         model_config is not None
         and hasattr(model_config, "tie_word_embeddings")
-        and getattr(model_config, "tie_word_embeddings") is False
+        and model_config.tie_word_embeddings is False
     ):
         return []
 

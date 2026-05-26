@@ -35,6 +35,7 @@ from peft import (
     BOFTConfig,
     CPTConfig,
     GraloraConfig,
+    HiraConfig,
     IA3Config,
     LilyConfig,
     LNTuningConfig,
@@ -781,7 +782,9 @@ class PeftCommonTester:
                 atol, rtol = 1e-3, 1e-3  # MLU
 
             conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
-            if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
+            if (
+                issubclass(config_cls, (IA3Config, LoraConfig, HiraConfig)) and model_id in conv_ids
+            ):  # more instability with Conv
                 atol, rtol = 1e-3, 1e-3
             elif issubclass(config_cls, PveraConfig):
                 atol, rtol = 1e-5, 1e-5
@@ -1229,9 +1232,9 @@ class PeftCommonTester:
                         "delta_embedding" in n
                     ):  # delta_embedding is the embedding that should be updated with grads in CPT
                         assert param.grad is not None
-                elif hasattr(model, "prefix") and (model.prefix in n):  # non-prompt tuning methods
-                    assert param.grad is not None
-                elif "trainable_tokens_" in n:  # trainable tokens layer
+                elif (
+                    hasattr(model, "prefix") and (model.prefix in n) or "trainable_tokens_" in n
+                ):  # non-prompt tuning methods
                     assert param.grad is not None
                 else:
                     assert param.grad is None

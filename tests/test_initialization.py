@@ -31,6 +31,7 @@ from transformers import AutoModelForCausalLM
 
 from peft import (
     AdaLoraConfig,
+    BeftConfig,
     C3AConfig,
     DeloraConfig,
     EvaConfig,
@@ -55,6 +56,7 @@ from peft import (
     PsoftConfig,
     RoadConfig,
     VBLoRAConfig,
+    VeloraConfig,
     VeraConfig,
     WaveFTConfig,
     get_peft_model,
@@ -1833,6 +1835,25 @@ class TestVeraInitialization:
             model.add_adapter("other", config1)
 
 
+class TestVeloraInitialization:
+    @pytest.mark.parametrize(
+        "config_kwargs, msg",
+        [
+            pytest.param({"num_groups": 0}, "`num_groups` should be positive, got 0.", id="num-groups"),
+            pytest.param({"scale": 0.0}, "`scale` should be positive, got 0.0.", id="scale"),
+            pytest.param(
+                {"init_type": "unsupported"},
+                "Unsupported `init_type` 'unsupported'. Supported values are 'batch_average_once', "
+                "'batch_average', and 'random'.",
+                id="init-type",
+            ),
+        ],
+    )
+    def test_velora_config_invalid_values_raise(self, config_kwargs, msg):
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            VeloraConfig(**config_kwargs)
+
+
 class TestVBLoraInitialization:
     torch_device = infer_device()
 
@@ -2379,6 +2400,42 @@ class TestPeanutInitialization:
         assert len(layer.peanut_decoders["default"]) == 1
         assert tuple(layer.peanut_encoders["default"][0].weight.shape) == (r, r)
         assert tuple(layer.peanut_decoders["default"][0].weight.shape) == (r, r)
+
+
+class TestBeftInitialization:
+    torch_device = infer_device()
+
+    def get_model(self, bias=True):
+        class MLP(nn.Module):
+            def __init__(self, bias=bias):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+
+            def forward(self, X):
+                return self.lin0(X)
+
+        return MLP(bias=bias).to(self.torch_device).eval()
+
+    def test_beft_initialization_no_bias_warning(self):
+        model = self.get_model(bias=False)
+        cfg = BeftConfig(target_modules=["lin0"])
+
+        with pytest.warns(UserWarning, match="Note you cannot merge the BEFT adapter into the base layer."):
+            model = get_peft_model(model, cfg)
+
+        assert model.lin0.base_layer.bias is None
+        assert "default" in model.lin0.beft_bias
+        assert model.lin0.get_base_layer().bias is None
+
+    def test_beft_merge_no_bias_raises_error(self):
+        model = self.get_model(bias=False)
+        cfg = BeftConfig(target_modules=["lin0"])
+        model = get_peft_model(model, cfg)
+
+        assert hasattr(model.lin0, "beft_bias")
+
+        with pytest.raises(ValueError, match="Base layer has no bias, cannot merge bias adapter"):
+            model.merge_and_unload()
 
 
 class TestNoInfiniteRecursionDeepspeed:
@@ -4186,6 +4243,48 @@ class TestHotSwapping:
                 assert param.shape[0] == new_rank
             elif "lora_B" in name:
                 assert param.shape[1] == new_rank
+
+    @pytest.mark.parametrize("previous_requires_grad", [False, True])
+    def test_prepare_model_for_compiled_hotswap_conserves_requires_grad(self, previous_requires_grad):
+        # check that preparing the LoRA weights does not change requires_grad
+        old_rank = 8
+        target_rank = old_rank + 1
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=old_rank)
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        # set requires_grad of LoRA weights
+        for name, param in model.named_parameters():
+            if "lora_" in name:
+                param.requires_grad_(previous_requires_grad)
+
+        prepare_model_for_compiled_hotswap(model, target_rank=target_rank)
+
+        # check requires_grad of LoRA weights
+        for name, param in model.named_parameters():
+            if "lora_" in name:
+                assert param.requires_grad is previous_requires_grad
+
+    @pytest.mark.parametrize("previous_requires_grad", [False, True])
+    def test_prepare_model_for_compiled_hotswap_conv2d_conserves_requires_grad(self, previous_requires_grad):
+        # check that preparing the LoRA weights does not change requires_grad
+        old_rank = 8
+        target_rank = old_rank + 1
+        config = LoraConfig(target_modules=["conv"], r=old_rank)
+        model = self.get_model_conv2d()
+        model = get_peft_model(model, config)
+
+        # set requires_grad of LoRA weights
+        for name, param in model.named_parameters():
+            if "lora_" in name:
+                param.requires_grad_(previous_requires_grad)
+
+        prepare_model_for_compiled_hotswap(model, target_rank=target_rank)
+
+        # check requires_grad of LoRA weights
+        for name, param in model.named_parameters():
+            if "lora_" in name:
+                assert param.requires_grad is previous_requires_grad
 
     def test_prepare_model_for_compiled_hotswap_model_already_compiled_raises(self):
         config = LoraConfig(target_modules=["lin0"])

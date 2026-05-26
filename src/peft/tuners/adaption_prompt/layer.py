@@ -16,8 +16,8 @@ import math
 from typing import Optional, Union
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from .config import TRANSFORMERS_MODEL_CONFIG
 
@@ -36,7 +36,7 @@ class _BaseAdaptedAttention(nn.Module):
             model: The original transformer attention module that is being wrapped.
         """
         if isinstance(model, _BaseAdaptedAttention):
-            raise ValueError("Unable to stack multiple adaption prompts")
+            raise TypeError("Unable to stack multiple adaption prompts")
         super().__init__()
         self.model_type = model_type
         self.model = model

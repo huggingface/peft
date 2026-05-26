@@ -16,7 +16,7 @@ import math
 from typing import Any
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 from peft.tuners.tuners_utils import BaseTunerLayer
 
@@ -46,7 +46,7 @@ class PolyLayer(BaseTunerLayer):
         if isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
         else:
-            raise ValueError(f"Unsupported layer type {type(base_layer)}")
+            raise TypeError(f"Unsupported layer type {type(base_layer)}")
 
         self.in_features = in_features
         self.out_features = out_features
@@ -144,7 +144,7 @@ class Linear(nn.Module, PolyLayer):
                 # Combine the output of LoRAs
                 # https://github.com/microsoft/mttl/blob/ce4ca51dbca73be656feb9b3e5233633e3c5dec7/mttl/models/poly.py#L293
                 mixing_weights = poly_router(task_ids=task_ids, input_ids=x)
-                bs, n_splits, n_skills = mixing_weights.size()
+                bs, _, _ = mixing_weights.size()
 
                 # A is    n_splits, n_skills, D // n_splits, rank
                 # we want bs,       n_splits, D // n_splits, rank

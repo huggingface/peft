@@ -19,7 +19,7 @@ from functools import partial
 from typing import Optional, Union
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.lora.model import LoraModel
@@ -339,16 +339,16 @@ class XLoraModel(BaseTuner):
 
             dummy_scalings = self.internal_xlora_classifier.make_dummy_scalings(*args_real, **kwargs_real)
 
-            for module in self.modules():
-                if isinstance(module, LoraLayer):
+            for xlora_module in self.modules():
+                if isinstance(xlora_module, LoraLayer):
                     pre_forward = partial(scalings_injection_hook, scalings=dummy_scalings)
-                    existing_hooks = getattr(module, "_forward_pre_hooks", {})
+                    existing_hooks = getattr(xlora_module, "_forward_pre_hooks", {})
                     if any(val is scalings_injection_hook for val in existing_hooks.values()):
                         # When calling generate, module.forward is called multiple times inside the forward hook
                         # context, resulting in multiple hooks being registered. Therefore, we check if the hooks is
                         # already present and skip it in that case.
                         continue
-                    handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                    handle = xlora_module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                     hook_handles.append(handle)
 
             with torch.no_grad():
@@ -367,17 +367,17 @@ class XLoraModel(BaseTuner):
                 finally:
                     self.lora_model.enable_adapter_layers()
 
-            xlora_scalings = self.internal_xlora_classifier(result=base_output, *args_real, **kwargs_real)
+            xlora_scalings = self.internal_xlora_classifier(*args_real, result=base_output, **kwargs_real)
             # Store computed scalings to fix get_latest_scalings() returning None
             self.internal_xlora_scalings = xlora_scalings
 
             # =========================== Real forward pass with calculated scalings ==================
 
             hook_handles = []
-            for module in self.modules():
-                if isinstance(module, LoraLayer):
+            for xlora_module in self.modules():
+                if isinstance(xlora_module, LoraLayer):
                     pre_forward = partial(scalings_injection_hook, scalings=xlora_scalings)
-                    handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                    handle = xlora_module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                     hook_handles.append(handle)
 
         if not self.disabled:

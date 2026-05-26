@@ -19,8 +19,8 @@ import warnings
 from typing import Any, Optional
 
 import torch
-import torch.nn as nn
-import torch.nn.init as init
+from torch import nn
+from torch.nn import init
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils import transpose
@@ -64,6 +64,10 @@ class LoraParallelLinear(nn.Module, LoraLayer):
 
         if config.use_dora:
             raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
+        if config.velora_config is not None:
+            raise ValueError(
+                f"{self.__class__.__name__} does not support VeLoRA yet, please set `velora_config=None`."
+            )
 
         self.backend = backend
         self.is_parallel_a = isinstance(base_layer, backend.RowParallelLinear)

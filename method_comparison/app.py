@@ -14,6 +14,7 @@
 
 """Gradio app to show the results"""
 
+import logging
 import os
 import tempfile
 
@@ -23,6 +24,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 from processing import load_df
 from sanitizer import parse_and_filter
+
+
+logger = logging.getLogger(__name__)
 
 
 _COMMON_METRIC_PREFERENCES = {
@@ -293,9 +297,9 @@ def build_app(df):
                     df_queried = filtered[mask]
                     if not df_queried.empty:
                         filtered = df_queried
-                except Exception:
+                except Exception as exc:
                     # invalid filter query
-                    pass
+                    logger.debug("Ignoring invalid filter query: %s", exc)
 
             prefs = get_metric_preferences(task_name)
             x_default, y_default = _TASK_PARETO_DEFAULTS.get(task_name, (list(prefs)[0], list(prefs)[1]))
@@ -322,8 +326,8 @@ def build_app(df):
                 try:
                     mask = parse_and_filter(filtered, current_filter)
                     filtered = filtered[mask]
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Ignoring invalid filter query: %s", exc)
             return format_df(filtered)
 
         model_dropdown.change(

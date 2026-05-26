@@ -27,7 +27,6 @@ from typing import Optional
 import bitsandbytes
 import torch
 import transformers
-from data import prepare_benchmark_prompts
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
 from utils import (
     BenchmarkConfig,
@@ -40,6 +39,7 @@ from utils import (
 )
 
 import peft
+from data import prepare_benchmark_prompts
 from peft import PeftConfig, get_peft_model
 
 
@@ -212,7 +212,7 @@ def run_benchmark(
             print_fn(f"Loaded PEFT config: {peft_config.peft_type}, with parameters: {vars(peft_config)}")
             model = get_peft_model(base_model, peft_config)
         except Exception as exc:
-            error_msg = f"Error loading PEFT config: {str(exc)}"
+            error_msg = f"Error loading PEFT config: {exc!s}"
             print_fn(error_msg)
 
         del base_model

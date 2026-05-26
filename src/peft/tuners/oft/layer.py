@@ -17,10 +17,11 @@ import warnings
 from typing import Any, Optional
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.utils.other import is_gptqmodel_quant_linear
 
 from .config import OFTConfig
 
@@ -191,7 +192,7 @@ class OFTRotationModule(nn.Module):
         Unfold with stride=1, padding=0 to preserve spatial dimensions. Only use kernel_size from base layer to define
         patch size.
         """
-        batch_size, in_channels, in_height, in_width = x.shape
+        batch_size, _, in_height, in_width = x.shape
 
         if isinstance(self.kernel_size, int):
             kernel_height, kernel_width = self.kernel_size, self.kernel_size
@@ -358,8 +359,8 @@ class OFTLayer(BaseTunerLayer):
         elif hasattr(base_layer, "codebooks") and base_layer.__class__.__name__ == "QuantizedLinear":
             # AQLM QuantLinear
             in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif hasattr(base_layer, "bits") and base_layer.__class__.__name__ == "AwqGEMMQuantLinear":
-            # Awq layers
+        elif is_gptqmodel_quant_linear(base_layer):
+            # GPT-QModel quantized linears
             in_features, out_features = base_layer.in_features, base_layer.out_features
         elif base_layer.__class__.__name__ == "EetqLinear":
             # Eetq layers

@@ -37,8 +37,6 @@ def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
 
 
 class RoadModel(BaseTuner):
-    """ """
-
     prefix: str = "road_"
     tuner_layer_cls = RoadLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING

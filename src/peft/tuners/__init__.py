@@ -15,6 +15,7 @@
 from .adalora import AdaLoraConfig, AdaLoraModel
 from .adamss import AdamssConfig, AdamssModel
 from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
+from .beft import BeftConfig, BeftModel
 from .boft import BOFTConfig, BOFTModel
 from .c3a import C3AConfig, C3AModel
 from .cartridge import CartridgeConfig, CartridgeEncoder
@@ -22,6 +23,7 @@ from .cpt import CPTConfig, CPTEmbedding
 from .delora import DeloraConfig, DeloraModel
 from .fourierft import FourierFTConfig, FourierFTModel
 from .gralora import GraloraConfig, GraloraModel
+from .hira import HiraConfig, HiraModel
 from .hra import HRAConfig, HRAModel
 from .ia3 import IA3Config, IA3Model
 from .lily import LilyConfig, LilyModel
@@ -37,6 +39,8 @@ from .lora import (
     LoraGAConfig,
     LoraModel,
     LoraRuntimeConfig,
+    MontecloraConfig,
+    VeloraConfig,
     convert_to_lora,
     create_arrow_model,
     get_eva_state_dict,
@@ -78,6 +82,8 @@ __all__ = [
     "BOFTConfig",
     "BOFTModel",
     "BdLoraConfig",
+    "BeftConfig",
+    "BeftModel",
     "C3AConfig",
     "C3AModel",
     "CPTConfig",
@@ -93,6 +99,8 @@ __all__ = [
     "GraloraModel",
     "HRAConfig",
     "HRAModel",
+    "HiraConfig",
+    "HiraModel",
     "IA3Config",
     "IA3Model",
     "LNTuningConfig",
@@ -111,6 +119,7 @@ __all__ = [
     "MissConfig",
     "MissModel",
     "MixedModel",
+    "MontecloraConfig",
     "MultitaskPromptEmbedding",
     "MultitaskPromptTuningConfig",
     "MultitaskPromptTuningInit",
@@ -146,6 +155,7 @@ __all__ = [
     "TrainableTokensModel",
     "VBLoRAConfig",
     "VBLoRAModel",
+    "VeloraConfig",
     "VeraConfig",
     "VeraModel",
     "WaveFTConfig",

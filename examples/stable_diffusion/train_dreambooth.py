@@ -557,7 +557,7 @@ def parse_args(input_args=None):
     else:
         args = parser.parse_args()
 
-    env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
+    env_local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
         args.local_rank = env_local_rank
 
@@ -685,7 +685,7 @@ class DreamBoothDataset(Dataset):
     def __getitem__(self, index):
         example = {}
         instance_image = Image.open(self.instance_images_path[index % self.num_instance_images])
-        if not instance_image.mode == "RGB":
+        if instance_image.mode != "RGB":
             instance_image = instance_image.convert("RGB")
         example["instance_images"] = self.image_transforms(instance_image)
         example["instance_prompt_ids"] = self.tokenizer(
@@ -698,7 +698,7 @@ class DreamBoothDataset(Dataset):
 
         if self.class_data_root:
             class_image = Image.open(self.class_images_path[index % self.num_class_images])
-            if not class_image.mode == "RGB":
+            if class_image.mode != "RGB":
                 class_image = class_image.convert("RGB")
             example["class_images"] = self.image_transforms(class_image)
             example["class_prompt_ids"] = self.tokenizer(
@@ -908,7 +908,7 @@ def main(args):
 
     if args.enable_xformers_memory_efficient_attention:
         if accelerator.device.type == "xpu":
-            logger.warn("XPU hasn't support xformers yet, ignore it.")
+            logger.warning("XPU hasn't support xformers yet, ignore it.")
         elif is_xformers_available():
             unet.enable_xformers_memory_efficient_attention()
         else:
@@ -916,7 +916,7 @@ def main(args):
 
     if args.gradient_checkpointing:
         unet.enable_gradient_checkpointing()
-        if args.train_text_encoder and not args.adapter != "full":
+        if args.train_text_encoder and args.adapter == "full":
             text_encoder.gradient_checkpointing_enable()
 
     # Enable TF32 for faster training on Ampere GPUs,
