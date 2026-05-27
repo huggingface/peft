@@ -150,7 +150,12 @@ def get_peft_model_state_dict(
                         to_return[bias_name] = state_dict[bias_name]
         else:
             raise NotImplementedError
-        to_return = {k: v for k, v in to_return.items() if (("lora_" in k and adapter_name in k) or ("bias" in k))}
+        adapter_key = f".{adapter_name}"
+        to_return = {
+            k: v
+            for k, v in to_return.items()
+            if ("lora_" in k and (f"{adapter_key}." in k or k.endswith(adapter_key))) or ("bias" in k)
+        }
         if config.peft_type == PeftType.ADALORA:
             rank_pattern = config.rank_pattern
             if rank_pattern is not None:
