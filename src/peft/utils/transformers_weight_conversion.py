@@ -368,8 +368,16 @@ def _convert_peft_config_moe(peft_config, model_type: str) -> None:
     if not fused_targets:
         return
 
-    peft_config.target_parameters = set(peft_config.target_parameters or [])
-    peft_config.target_modules = set(peft_config.target_modules or [])
+    peft_config.target_parameters = (
+        {peft_config.target_parameters}
+        if isinstance(peft_config.target_parameters, str)
+        else set(peft_config.target_parameters or [])
+    )
+    peft_config.target_modules = (
+        {peft_config.target_modules}
+        if isinstance(peft_config.target_modules, str)
+        else set(peft_config.target_modules or [])
+    )
     if not hasattr(peft_config, "rank_pattern") or peft_config.rank_pattern is None:
         peft_config.rank_pattern = {}
     if not hasattr(peft_config, "alpha_pattern") or peft_config.alpha_pattern is None:
