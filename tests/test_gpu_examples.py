@@ -19,6 +19,7 @@ import re
 import socket
 import tempfile
 import unittest
+import warnings
 from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
@@ -4681,8 +4682,6 @@ class TestPeftTorchao:
         # `get_apply_tensor_subclass`, so the LoRA torchao linear emits a warning at init
         # to flag that merge()/unmerge() will not work. When the base model is loaded via
         # `TorchAoConfig`, PEFT recovers the requantization subclass and no warning fires.
-        import warnings as _warnings
-
         from torchao.quantization import Int8WeightOnlyConfig, quantize_
         from transformers import TorchAoConfig
 
@@ -4696,12 +4695,18 @@ class TestPeftTorchao:
             task_type="CAUSAL_LM",
         )
 
-        # Path 1: manual quantize_ -> warning expected.
+        # Path 1: manual quantize_ -> warning expected, and merge() must raise.
         model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device)
         quantize_(model, Int8WeightOnlyConfig())
         with pytest.warns(UserWarning, match="get_apply_tensor_subclass"):
-            get_peft_model(model, lora_config)
-        del model
+            peft_model = get_peft_model(model, lora_config)
+        merge_msg = re.escape(
+            "was instantiated without `get_apply_tensor_subclass`, which is "
+            "required to re-quantize the base layer after merging."
+        )
+        with pytest.raises(ValueError, match=merge_msg):
+            peft_model.merge_adapter()
+        del peft_model, model
         clear_device_cache(garbage_collection=True)
 
         # Path 2: TorchAoConfig -> no such warning.
@@ -4709,8 +4714,8 @@ class TestPeftTorchao:
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
         )
-        with _warnings.catch_warnings(record=True) as caught:
-            _warnings.simplefilter("always")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
             get_peft_model(model, lora_config)
         assert not any("get_apply_tensor_subclass" in str(w.message) for w in caught)
 

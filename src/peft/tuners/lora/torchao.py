@@ -65,8 +65,7 @@ class TorchaoLoraLinear(Linear):
         if self.get_apply_tensor_subclass is None:
             raise ValueError(
                 f"{type(self).__name__} was instantiated without `get_apply_tensor_subclass`, which is "
-                "required to re-quantize the base layer after merging. Pass it via the adapter kwargs "
-                "(e.g. through `dispatch_torchao`) before calling merge()."
+                "required to re-quantize the base layer after merging."
             )
 
         self._check_dtype_supported()
