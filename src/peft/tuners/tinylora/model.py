@@ -180,7 +180,7 @@ class TinyLoraModel(BaseTuner):
                 tinylora_config, self.tinylora_v, v_key, adapter_name, target, layer_idx=layer_idx
             )
 
-            if adapter_name not in self.active_adapter:
+            if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
