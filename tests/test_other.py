@@ -29,7 +29,7 @@ from transformers import (
 from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model
 from peft.import_utils import is_transformers_ge_v5_1_0, is_transformers_ge_v5_6_0
 from peft.utils.other import ModulesToSaveWrapper, _get_module_names_tied_with_embedding, _get_no_split_modules
-from peft.utils.save_and_load import get_peft_model_state_dict, set_peft_model_state_dict
+from peft.utils.save_and_load import _maybe_shard_state_dict_for_tp
 
 from .testing_utils import hub_online_once
 
@@ -90,17 +90,16 @@ def test_modules_to_save_targets_module_dict_raises(cls):
         get_peft_model(model=model, peft_config=peft_config)
 
 
-def test_set_peft_model_state_dict_noops_tp_sharding_without_tp_layers(monkeypatch):
+def test_maybe_shard_state_dict_for_tp_noops_without_tp_layers():
     model = get_peft_model(ModelWithModuleDict(), LoraConfig(target_modules=["other_layer"]))
-    state_dict = get_peft_model_state_dict(model)
+    weight = torch.rand(8, 10)
+    state_dict = {"other_layer.lora_A.weight": weight}
 
-    monkeypatch.setattr(torch.distributed, "is_available", lambda: True)
-    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: True)
+    # Without TP metadata on the LoRA base layers, the helper should be a no-op.
+    _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name="default")
 
-    # Simulate DDP: distributed is initialized, but no LoRA base layer has TP metadata to shard.
-    load_result = set_peft_model_state_dict(model, state_dict)
-
-    assert not load_result.unexpected_keys
+    assert list(state_dict) == ["other_layer.lora_A.weight"]
+    assert state_dict["other_layer.lora_A.weight"] is weight
 
 
 def test_get_peft_model_revision_warning(tmp_path):
