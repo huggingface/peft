@@ -52,7 +52,7 @@ class IA3Model(BaseTuner):
 
         ```py
         >>> from transformers import AutoModelForSeq2SeqLM
-        >>> from peft import IA3Model, IA3Config
+        >>> from peft import IA3Config, get_peft_model
 
         >>> config = IA3Config(
         ...     peft_type="IA3",
@@ -62,7 +62,7 @@ class IA3Model(BaseTuner):
         ... )
 
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> ia3_model = IA3Model(model, config, "default")
+        >>> ia3_model = get_peft_model(model, config)
         ```
 
     **Attributes**:

@@ -51,7 +51,7 @@ class AdaLoraModel(LoraModel):
     Example:
         ```py
         >>> from transformers import AutoModelForSeq2SeqLM
-        >>> from peft import LoraConfig, AdaLoraModel, AdaLoraConfig
+        >>> from peft import AdaLoraConfig, get_peft_model
 
         >>> config = AdaLoraConfig(
         ...     peft_type="ADALORA",
@@ -63,7 +63,7 @@ class AdaLoraModel(LoraModel):
         ...     total_step=1000,
         ... )
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> model = AdaLoraModel(model, config, "default")
+        >>> adalora_model = get_peft_model(model, config)
         ```
 
     **Attributes**:
