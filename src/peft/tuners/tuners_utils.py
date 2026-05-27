@@ -545,7 +545,7 @@ class BaseTuner(nn.Module, ABC):
         Enable or disable gradients on the given adapter(s).
 
         Args:
-            adapter_name (`str` or `Sequence[str]`):
+            adapter_names (`str` or `Sequence[str]`):
                 The name of the adapter(s) whose gradients should be enabled/disabled.
             requires_grad (`bool`, *optional*)
                 Whether to enable (`True`, default) or disable (`False`).
@@ -1598,7 +1598,7 @@ class BaseTunerLayer(ABC):
         Enable or disable gradients on the given adapter(s).
 
         Args:
-            adapter_name (`str` or `Sequence[str]`):
+            adapter_names (`str` or `Sequence[str]`):
                 The name of the adapter(s) whose gradients should be enabled/disabled.
             requires_grad (`bool`, *optional*)
                 Whether to enable (`True`, default) or disable (`False`).
@@ -2196,8 +2196,8 @@ def set_requires_grad(model, adapter_names: str | Sequence[str], requires_grad: 
 
     Args:
         model (`nn.Module`):
-            The model from which the adapter should be deleted.
-        adapter_name (`str` or `Sequence[str]`):
+            The model whose adapter gradient requirements should be updated.
+        adapter_names (`str` or `Sequence[str]`):
             The name of the adapter(s) whose gradients should be enabled/disabled.
         requires_grad (`bool`, *optional*)
             Whether to enable (`True`, default) or disable (`False`).
