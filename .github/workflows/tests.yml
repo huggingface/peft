@@ -30,8 +30,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install .[dev]
-          python -m pip install pytest-reportlog
+          pip install .[dev]
       - name: Check quality
         run: |
           make quality
@@ -139,12 +138,6 @@ jobs:
           # is a scarce resource on the runners and tasks like model cache creation (further below)
           # fail if there's not enough space available.
           (rm -r "/tmp/pytest-of-$(id -u -n)" || true)
-      - name: Upload pytest report log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pytest-report-${{ matrix.os }}-${{ matrix.python-version }}
-          path: ci_tests.log
       - name: Dump cache content and diff
         # This is just debug info so that we can monitor if the model cache diverges substantially
         # over time and what the diverging model is.
