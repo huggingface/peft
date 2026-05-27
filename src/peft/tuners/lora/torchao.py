@@ -29,7 +29,7 @@ from .layer import Linear
 class TorchaoLoraLinear(Linear):
     """LoRA layer implementation for Linear layers using torchao data"""
 
-    def __init__(self, *args, get_apply_tensor_subclass, **kwargs):
+    def __init__(self, *args, get_apply_tensor_subclass=None, **kwargs):
         # this is not strictly necessary, as kwargs are stored either way, but we want to error early if
         # get_apply_tensor_subclass is missing.
         if kwargs["config"].lora_bias:
@@ -62,6 +62,11 @@ class TorchaoLoraLinear(Linear):
         weight = base_layer.weight
 
         for active_adapter in adapter_names:
+            if self.get_apply_tensor_subclass is None:
+                raise ValueError(
+                    f"Weights of type {type(weight).__name__} cannot be merged because `get_apply_tensor_subclass` is None. "
+                    "This usually happens when the model was quantized outside of Hugging Face/PEFT."
+                )
             try:
                 weight = weight.dequantize()
             except NotImplementedError as exc:
@@ -99,6 +104,8 @@ class TorchaoLoraLinear(Linear):
 
             base_layer = self.get_base_layer()
             weight = base_layer.weight
+            if self.get_apply_tensor_subclass is None:
+                raise ValueError("Cannot unmerge weights because `get_apply_tensor_subclass` is None.")
             try:
                 weight = weight.dequantize()
             except NotImplementedError as exc:
