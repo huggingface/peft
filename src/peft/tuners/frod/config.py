@@ -56,6 +56,12 @@ class FRODConfig(PeftConfig):
         layers_pattern (`Optional[Union[List[str], str]]`):
             The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
             `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
+        sparse_rate (`float`):
+            Fraction of off-diagonal entries in the sparse trainable rotation matrix. Higher values increase capacity
+            and trainable parameters; lower values are cheaper. Defaults to `0.01`.
+        regularization_alpha (`float`):
+            Small positive value used while building the shared basis from base weights. It stabilizes the matrix
+            inverse when layers in the same category have correlated weights. Defaults to `1e-3`.
     """
 
     target_modules: Optional[Union[list[str], str]] = field(
@@ -126,15 +132,27 @@ class FRODConfig(PeftConfig):
             )
         },
     )
-    sparse_rate: float = field(default=0.01, metadata={"help": "Sparse rate"})
+    sparse_rate: float = field(
+        default=0.01,
+        metadata={
+            "help": (
+                "Fraction of off-diagonal entries in the sparse trainable rotation matrix. Higher values increase "
+                "capacity and trainable parameters; lower values are cheaper."
+            )
+        },
+    )
     regularization_alpha: float = field(
         default=1e-3,
         metadata={
-            "help": ("Regularization parameter used when building the shared FRoD basis."),
+            "help": (
+                "Small positive value used while building the shared basis from base weights. It stabilizes matrix "
+                "inverses for correlated layers."
+            ),
         },
     )
 
     def __post_init__(self):
+        super().__post_init__()
         self.peft_type = PeftType.FROD
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules

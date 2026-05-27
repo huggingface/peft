@@ -73,6 +73,7 @@ def _projection_from_weights(matrices: list[np.ndarray], regularization_alpha: f
 
     dim = r_matrix.shape[1]
     t_pi = np.zeros((dim, dim), dtype=r_matrix.dtype)
+    # Layers of the same projection category can be highly correlated; this ridge term keeps the inverse stable.
     for q_slice in q_slices:
         q_term = q_slice.T @ q_slice + regularization_alpha * np.eye(dim, dtype=r_matrix.dtype)
         t_pi += np.linalg.inv(q_term)
@@ -144,6 +145,8 @@ class FRODModel(BaseTuner):
             mask_indices = torch.stack([rows.flatten(), cols.flatten()], dim=1)
             non_diag_indices = mask_indices[mask_indices[:, 0] != mask_indices[:, 1]]
             nnz = min(int(in_dim * in_dim * config.sparse_rate), non_diag_indices.shape[0])
+            if (config.sparse_rate > 0) and (non_diag_indices.shape[0] > 0):
+                nnz = max(1, nnz)
             if nnz:
                 perm = torch.randperm(non_diag_indices.shape[0], generator=generator)[:nnz]
                 indices = non_diag_indices[perm].t().contiguous()

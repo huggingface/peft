@@ -20,14 +20,42 @@ FRoD is a parameter-efficient fine-tuning method that combines a shared full-ran
 rotational degrees. The adapter update is expressed through fixed projection tensors and trainable coefficients, which
 allows FRoD to apply full-rank updates while keeping the number of trained parameters small.
 
+Paper: [Full-Rank Efficient Fine-Tuning with Rotational Degrees](https://doi.org/10.1609/aaai.v40i31.39813).
+
 When saving the adapter parameters, it is possible to avoid storing the projection tensors by setting
 `save_projection=False` on the `FRODConfig`. In that case, the projections are restored from the base model weights and
 the fixed random seed from `projection_prng_key`. This reduces checkpoint size, but the default is
 `save_projection=True` to make checkpoint loading independent of regeneration details.
 
+Compared to LoRA, FRoD can express a full-rank update in each adapted linear layer while training only the diagonal
+coefficients and a sparse set of off-diagonal rotation coefficients. This can be useful when a low-rank update is too
+restrictive. The trade-off is that FRoD computes fixed projection tensors from the base weights during adapter
+injection, which makes setup more expensive and the implementation less broadly supported than LoRA.
+
 FRoD currently has the following constraint:
 
 - Only `nn.Linear` and `transformers.pytorch_utils.Conv1D` layers are supported.
+
+## Quickstart
+
+```python
+from transformers import AutoModelForSequenceClassification
+
+from peft import FRODConfig, TaskType, get_peft_model
+
+model = AutoModelForSequenceClassification.from_pretrained("google-bert/bert-base-uncased", num_labels=2)
+
+peft_config = FRODConfig(
+    task_type=TaskType.SEQ_CLS,
+    target_modules=["query", "value"],
+    modules_to_save=["classifier"],
+    sparse_rate=0.02,
+    frod_dropout=0.0,
+)
+
+model = get_peft_model(model, peft_config)
+model.print_trainable_parameters()
+```
 
 ## FRODConfig
 

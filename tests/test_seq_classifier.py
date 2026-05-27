@@ -23,6 +23,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
+    FRODConfig,
     GraloraConfig,
     HiraConfig,
     HRAConfig,
@@ -104,6 +105,14 @@ ALL_CONFIGS = [
             "task_type": "SEQ_CLS",
             "n_frequency": 10,
             "target_modules": None,
+        },
+    ),
+    (
+        FRODConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "sparse_rate": 0.01,
         },
     ),
     (

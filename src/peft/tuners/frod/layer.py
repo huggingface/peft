@@ -29,7 +29,7 @@ from .._buffer_dict import BufferDict
 
 
 class FRODLayer(BaseTunerLayer):
-    adapter_layer_names = ("frod_lambda_s_values", "frod_lambda_l")
+    adapter_layer_names = ("frod_lambda_l", "frod_lambda_s_values")
     other_param_names = ("frod_V", "frod_U", "frod_s_indices", "frod_s_size")
 
     def __init__(self, base_layer: nn.Module, **kwargs):
@@ -38,8 +38,8 @@ class FRODLayer(BaseTunerLayer):
         self.frod_dropout = nn.ModuleDict({})
 
         # Sparse S is parameterized by its COO values only.
-        self.frod_lambda_s_values = nn.ParameterDict({})
         self.frod_lambda_l = nn.ParameterDict({})
+        self.frod_lambda_s_values = nn.ParameterDict({})
 
         self.frod_s_indices: Optional[BufferDict] = None
         self.frod_s_size: Optional[BufferDict] = None
@@ -74,13 +74,12 @@ class FRODLayer(BaseTunerLayer):
         frod_dropout,
         init_weights,
     ):
-        weight = self.get_base_layer().weight
-        device = weight.device
-        dtype = weight.dtype
+        base_layer = self.get_base_layer()
+        weight = base_layer.weight.T if isinstance(base_layer, Conv1D) else base_layer.weight
+        device = base_layer.weight.device
+        dtype = base_layer.weight.dtype
 
         param_dtype = dtype
-        if device.type == "cuda" and dtype == torch.float32:
-            param_dtype = torch.float16
 
         self.r[adapter_name] = self.out_features
         if frod_dropout > 0.0:
@@ -115,6 +114,11 @@ class FRODLayer(BaseTunerLayer):
         self.frod_lambda_l[adapter_name] = nn.Parameter(L, requires_grad=True)
         if init_weights:
             self.reset_frod_parameters(adapter_name)
+        else:
+            # PEFT convention: init_weights=False should produce a non-identity adapter for merge tests.
+            with torch.no_grad():
+                nn.init.normal_(self.frod_lambda_s_values[adapter_name], std=0.02)
+                self.frod_lambda_l[adapter_name].add_(torch.randn_like(self.frod_lambda_l[adapter_name]) * 0.02)
 
         self.frod_U[adapter_name] = U.cpu()
         self._move_adapter_to_device_of_base_layer(adapter_name)
