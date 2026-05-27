@@ -538,14 +538,29 @@ def convert_peft_adapter_state_dict_for_transformers(
 
     param_name_to_load: dict[str, WeightRenaming | WeightConverter] = {}
 
+    def str_rreplace(s, old, new, count=-1):
+        # this is the same as str.replace(...) but counting from the right side instead of left side
+        return new.join(s.rsplit(old, count))
+
     # Mirror transformers.core_model_loading flow: stable ordering + same rename logic.
     # https://github.com/huggingface/transformers/blob/1bd97f246318456c1b87cf8ef8dc043ec1a53fff/src/transformers/core_model_loading.py#L997
     state_items = sorted(lora_like_state_dict.items(), key=lambda kv: dot_natural_key(kv[0]))
     for original_key, tensor in state_items:
         renamed_key, source_pattern = rename_source_key(original_key, renamings, converters)
+        renamed_key_without_adapter_name = str_rreplace(renamed_key, f".{adapter_name}", "", count=1)
+        new_key_is_suffix_of_old_key = original_key.endswith(renamed_key_without_adapter_name)
 
+        # https://github.com/huggingface/transformers/pull/44396 introduced code to undo the renaming:
         # https://github.com/huggingface/transformers/blob/027d1a97025295a1346c2eb5c361259e69eedfe7/src/transformers/core_model_loading.py#L1361-L1365
-        if renamed_key not in adapter_state_dict and original_key in adapter_state_dict:
+        # This logic is copied here but with an extra caveat: We only undo the key renaming if it is due to a missing
+        # prefix, e.g. "text_model.foo.bar" => "foo.bar". This is why we check if the renamed key is a suffix of the
+        # original key. However, strictly checking for the suffix is not enough because the renamed key also introduces
+        # the adapater name, which is not in the original key. Therefore, we need to remove the adapter name first.
+        if (
+            (renamed_key not in adapter_state_dict)
+            and (original_key in adapter_state_dict)
+            and new_key_is_suffix_of_old_key
+        ):
             # Key should probably not have been renamed but we might need the `prefix` to be added.
             renamed_key, source_pattern = rename_source_key(
                 original_key, [], [], prefix=prefix, meta_state_dict=adapter_state_dict
