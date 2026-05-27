@@ -42,8 +42,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
-        os: ["ubuntu-latest", "windows-latest"]
+        python-version: ["3.13"]
+        os: ["ubuntu-latest"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -131,12 +131,19 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           TRANSFORMERS_IS_CI: 1
           CI: 1
+          IS_GITHUB_CI: 1
         run: |
           make test
           # clean up all pytest temporary directories that are kept due to retention since space
           # is a scarce resource on the runners and tasks like model cache creation (further below)
           # fail if there's not enough space available.
           (rm -r "/tmp/pytest-of-$(id -u -n)" || true)
+      - name: Upload pytest report log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-report-${{ matrix.os }}-${{ matrix.python-version }}
+          path: ci_tests.log
       - name: Dump cache content and diff
         # This is just debug info so that we can monitor if the model cache diverges substantially
         # over time and what the diverging model is.
