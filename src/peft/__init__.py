@@ -270,7 +270,6 @@ __all__ = [
     "TrainableTokensConfig",
     "TrainableTokensModel",
     "VBLoRAConfig",
-    "VBLoRAConfig",
     "VBLoRAModel",
     "VeloraConfig",
     "VeraConfig",
