@@ -19,7 +19,7 @@ import platform
 import re
 import warnings
 from collections import namedtuple
-from typing import Optional
+from typing import Literal, Optional
 
 import huggingface_hub
 import torch
@@ -74,8 +74,19 @@ def _get_tp_info(model) -> TpInfo | None:
     return None
 
 
+def _filter_state_dict_for_adapter_name(
+    state_dict: dict[str, torch.Tensor], adapter_name: str
+) -> dict[str, torch.Tensor]:
+    """Filter the state dict to only include keys that correspond to the given adapter"""
+    return {k: v for k, v in state_dict.items() if f".{adapter_name}." in k or k.endswith(f".{adapter_name}")}
+
+
 def get_peft_model_state_dict(
-    model, state_dict=None, adapter_name="default", unwrap_compiled=False, save_embedding_layers="auto"
+    model,
+    state_dict=None,
+    adapter_name: str = "default",
+    unwrap_compiled: bool = False,
+    save_embedding_layers: bool | Literal["auto"] = "auto",
 ):
     """
     Get the state dict of the given adapter of the PEFT model.
@@ -109,6 +120,8 @@ def get_peft_model_state_dict(
     config = model.peft_config[adapter_name]
     if state_dict is None:
         state_dict = model.state_dict()
+
+    state_dict = _filter_state_dict_for_adapter_name(state_dict, adapter_name)
 
     # If model was sharded with TP, gather full tensors for saving
     tp_info = _get_tp_info(model)
@@ -150,7 +163,7 @@ def get_peft_model_state_dict(
                         to_return[bias_name] = state_dict[bias_name]
         else:
             raise NotImplementedError
-        to_return = {k: v for k, v in to_return.items() if (("lora_" in k and adapter_name in k) or ("bias" in k))}
+        to_return = {k: v for k, v in to_return.items() if (("lora_" in k) or ("bias" in k))}
         if config.peft_type == PeftType.ADALORA:
             rank_pattern = config.rank_pattern
             if rank_pattern is not None:
@@ -222,6 +235,8 @@ def get_peft_model_state_dict(
                     to_return[f"{name}.shira_indices.{k}"] = (
                         v.to(torch.float32) if platform.system() == "Windows" else v
                     )
+                    # the above may contain other adapter names, so filter again
+                    to_return = _filter_state_dict_for_adapter_name(to_return, adapter_name)
 
     elif config.peft_type == PeftType.VERA:
         vera_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
@@ -300,7 +315,7 @@ def get_peft_model_state_dict(
         ]
     elif config.peft_type in list(PeftType):
         prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
-        to_return = {k: state_dict[k] for k in state_dict if prefix in k}
+        to_return = {k: v for k, v in state_dict.items() if prefix in k}
     else:
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 
