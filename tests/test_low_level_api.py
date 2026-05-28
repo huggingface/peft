@@ -546,6 +546,20 @@ class TestPeftStateDict:
             # assert that the module name was not stripped completely from the key
             assert ("v_proj" in key) or ("q_proj" in key) or ("lm_head") in key
 
+    def test_get_peft_model_state_dict_matches_adapter_name_exactly(self):
+        model = get_peft_model(DummyModel(), LoraConfig(target_modules=["linear", "embedding"]))
+        model.add_adapter("default_extended", LoraConfig(target_modules=["linear", "embedding"]))
+
+        sd = get_peft_model_state_dict(model, adapter_name="default")
+        
+        lora_keys = [k for k in sd.keys() if "lora_" in k]
+        assert len(lora_keys) > 0
+        
+        for key in lora_keys:
+            # "default" is stripped by get_peft_model_state_dict.
+            # "default_extended" should not be picked up by the state dict filter.
+            assert "default_extended" not in key
+
     def check_peft_model_weights_loaded_correctly(self, inner_model_cls, config, nested, adapter_name="default"):
         # Runs checks that a roundtrip of get_peft_model_state_dict and set_peft_model_state_dict results in the same
         # model (same outputs and same weights).
