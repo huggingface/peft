@@ -9,7 +9,7 @@ RESULTS_DIR := results
 OPTIONAL_FLAGS =
 
 ifdef UPLOAD_BUCKET
-	OPTIONAL_FLAGS += --bucket_name "${UPLOAD_BUCKET}"
+	OPTIONAL_FLAGS += --bucket_name "${UPLOAD_BUCKET_IMAGEGEN}"
 endif
 
 # --- Automatic Experiment and Result Discovery ---

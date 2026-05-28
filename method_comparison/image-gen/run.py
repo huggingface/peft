@@ -166,7 +166,8 @@ def evaluate(
     num_repeats: int = 1,
 ) -> float:
     with offload_models(pipeline.text_encoder, pipeline.vae, device=pipeline.transformer.device, offload=True):
-        seed = config.seed + 100_000  # don't use the same seed as in training just to be sure
+        # avoid reusing same seed as in training, which would bias samples toward memorized results
+        seed = config.seed + 100_000
         generator = torch.Generator(device=pipeline.transformer.device).manual_seed(seed)
         cosine_sim_scores = []
         iter_ = range(num_repeats) if num_repeats <= 1 else tqdm(range(num_repeats))
@@ -200,14 +201,15 @@ def measure_drift(*, pipeline, processor, dino_model, config: TrainConfig) -> fl
     if not isinstance(pipeline.transformer, PeftModel):
         # in case of full fine-tuning, the adapter cannot be disabled and thus the drift cannot be measured, return
         # dummy value
-        return 1.0
+        return float("nan")
 
     batch_size = config.batch_size_eval
     prompts = config.drift_image_prompts
     pbar = tqdm(total=len(prompts) * 2)
     with offload_models(pipeline.text_encoder, pipeline.vae, device=pipeline.transformer.device, offload=True):
         # without adapter
-        seed = config.seed + 100_000_000  # don't use the same seed as in training or eval just to be sure
+        # avoid reusing same seed as in training, which would bias samples toward memorized results
+        seed = config.seed + 100_000_000
         generator = torch.Generator(device=pipeline.transformer.device).manual_seed(seed)
         generated_base = []
         with pipeline.transformer.disable_adapter():
@@ -218,7 +220,8 @@ def measure_drift(*, pipeline, processor, dino_model, config: TrainConfig) -> fl
                 pbar.update(1)
 
         # with adapter
-        seed = config.seed + 100_000_000  # don't use the same seed as in training or eval just to be sure
+        # avoid reusing same seed as in training, which would bias samples toward memorized results
+        seed = config.seed + 100_000_000
         generator = torch.Generator(device=pipeline.transformer.device).manual_seed(seed)
         generated_adapter = []
         for i in range(0, len(prompts), batch_size):
@@ -230,8 +233,8 @@ def measure_drift(*, pipeline, processor, dino_model, config: TrainConfig) -> fl
     # calculate drift
     generated_embeddings = get_dino_embeddings(generated_adapter, processor, dino_model, batch_size=batch_size)
     reference_embeddings = get_dino_embeddings(generated_base, processor, dino_model, batch_size=batch_size)
-    cosine_sim = (generated_embeddings * reference_embeddings).sum(dim=-1)
-    drift = 1 - cosine_sim.mean().item()
+    cosine_sim = (generated_embeddings * reference_embeddings).sum(dim=-1)  # dino embeddings are L2-normalized
+    drift = (1 - cosine_sim.mean().item()) / 2.0  # cos sim is in [-1, 1], normalized to [0, 1]
     return drift
 
 
@@ -535,11 +538,10 @@ def generate_sample_images(
     train_config,
     sample_image_dir: str,
     file_stem: str,
-    print_verbose: Callable[..., None],
 ) -> None:
     target_device = pipeline.transformer.device
     with offload_models(pipeline.text_encoder, pipeline.vae, device=target_device, offload=True):
-        # don't use the same seed as in training just to be sure
+        # avoid reusing same seed as in training, which would bias samples toward memorized results
         seed = train_config.seed + 100_000
         generator = torch.Generator(device=target_device).manual_seed(seed)
         pbar = tqdm(
@@ -624,7 +626,6 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool, bucket_name
                 train_config=train_config,
                 sample_image_dir=sample_image_dir,
                 file_stem=file_stem,
-                print_verbose=print_verbose,
             )
             print_verbose(f"Stored sample images in {sample_image_dir}")
         except Exception as exc:
