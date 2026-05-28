@@ -23,7 +23,7 @@ allows FRoD to apply full-rank updates while keeping the number of trained param
 Paper: [Full-Rank Efficient Fine-Tuning with Rotational Degrees](https://doi.org/10.1609/aaai.v40i31.39813).
 
 When saving the adapter parameters, it is possible to avoid storing the projection tensors by setting
-`save_projection=False` on the `FRODConfig`. In that case, the projections are restored from the base model weights and
+`save_projection=False` on the `FrodConfig`. In that case, the projections are restored from the base model weights and
 the fixed random seed from `projection_prng_key`. This reduces checkpoint size, but the default is
 `save_projection=True` to make checkpoint loading independent of regeneration details.
 
@@ -41,11 +41,11 @@ FRoD currently has the following constraint:
 ```python
 from transformers import AutoModelForSequenceClassification
 
-from peft import FRODConfig, TaskType, get_peft_model
+from peft import FrodConfig, TaskType, get_peft_model
 
 model = AutoModelForSequenceClassification.from_pretrained("google-bert/bert-base-uncased", num_labels=2)
 
-peft_config = FRODConfig(
+peft_config = FrodConfig(
     task_type=TaskType.SEQ_CLS,
     target_modules=["query", "value"],
     modules_to_save=["classifier"],
@@ -57,10 +57,10 @@ model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
 ```
 
-## FRODConfig
+## FrodConfig
 
-[[autodoc]] tuners.frod.config.FRODConfig
+[[autodoc]] tuners.frod.config.FrodConfig
 
-## FRODModel
+## FrodModel
 
-[[autodoc]] tuners.frod.model.FRODModel
+[[autodoc]] tuners.frod.model.FrodModel

@@ -17,9 +17,7 @@ from __future__ import annotations
 import warnings
 from collections import defaultdict
 
-import numpy as np
 import torch
-from numpy.linalg import qr
 from torch import nn
 from transformers.pytorch_utils import Conv1D
 
@@ -28,8 +26,8 @@ from peft.utils import TRANSFORMERS_MODELS_TO_FROD_TARGET_MODULES_MAPPING
 
 from .._buffer_dict import BufferDict
 from ..tuners_utils import _maybe_include_all_linear_layers
-from .config import FRODConfig
-from .layer import FRODLayer, Linear
+from .config import FrodConfig
+from .layer import FrodLayer, Linear
 
 
 def _category_from_key(key: str) -> str:
@@ -57,13 +55,13 @@ def _layer_index_from_key(key: str, fallback: int) -> int:
     return fallback
 
 
-def _projection_from_weights(matrices: list[np.ndarray], regularization_alpha: float) -> np.ndarray:
-    stacked = np.vstack(matrices)
+def _projection_from_weights(matrices: list[torch.Tensor], regularization_alpha: float) -> torch.Tensor:
+    stacked = torch.cat(matrices, dim=0)
     if stacked.shape[0] < stacked.shape[1]:
-        _, _, vh = np.linalg.svd(stacked, full_matrices=True)
+        _, _, vh = torch.linalg.svd(stacked, full_matrices=True)
         return vh.T
 
-    q_matrix, r_matrix = qr(stacked)
+    q_matrix, r_matrix = torch.linalg.qr(stacked)
     q_slices = []
     start = 0
     for matrix in matrices:
@@ -72,23 +70,23 @@ def _projection_from_weights(matrices: list[np.ndarray], regularization_alpha: f
         start += rows
 
     dim = r_matrix.shape[1]
-    t_pi = np.zeros((dim, dim), dtype=r_matrix.dtype)
+    t_pi = torch.zeros((dim, dim), dtype=r_matrix.dtype)
     # Layers of the same projection category can be highly correlated; this ridge term keeps the inverse stable.
     for q_slice in q_slices:
-        q_term = q_slice.T @ q_slice + regularization_alpha * np.eye(dim, dtype=r_matrix.dtype)
-        t_pi += np.linalg.inv(q_term)
+        q_term = q_slice.T @ q_slice + regularization_alpha * torch.eye(dim, dtype=r_matrix.dtype)
+        t_pi += torch.linalg.inv(q_term)
     t_pi /= len(q_slices)
 
-    _, eigenvectors = np.linalg.eigh(t_pi)
+    _, eigenvectors = torch.linalg.eigh(t_pi)
     return r_matrix.T @ eigenvectors
 
 
-class FRODModel(BaseTuner):
+class FrodModel(BaseTuner):
     prefix: str = "frod_"
-    tuner_layer_cls = FRODLayer
+    tuner_layer_cls = FrodLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_FROD_TARGET_MODULES_MAPPING
 
-    def _init_frod_projections(self, config: FRODConfig, adapter_name: str) -> None:
+    def _init_frod_projections(self, config: FrodConfig, adapter_name: str) -> None:
         weights = defaultdict(dict)
         model_config = self.get_model_config(self.model)
         peft_config = self._prepare_adapter_config(config, model_config)
@@ -116,6 +114,8 @@ class FRODModel(BaseTuner):
                 "No layer types compatible with FRoD were found. Please check `peft_config.target_modules`."
             )
 
+        # BaseTuner.__init__() enters the pre-injection flow before a FrodModel subclass
+        # could assign ModuleDicts after super().__init__(), so create these containers lazily here.
         if not hasattr(self, "frod_V"):
             self.frod_V = nn.ModuleDict()
             self.frod_s_indices = nn.ModuleDict()
@@ -125,7 +125,7 @@ class FRODModel(BaseTuner):
         categories = {category for layer_dict in weights.values() for category in layer_dict}
         for category in sorted(categories):
             matrices = [
-                layer_dict[category].detach().to(torch.float32).cpu().numpy()
+                layer_dict[category].detach().to(torch.float32).cpu()
                 for _, layer_dict in sorted(weights.items())
                 if category in layer_dict
             ]
@@ -134,7 +134,7 @@ class FRODModel(BaseTuner):
 
             v_matrix = _projection_from_weights(matrices, config.regularization_alpha)
             example_weight = next(layer_dict[category] for layer_dict in weights.values() if category in layer_dict)
-            v_tensor = torch.from_numpy(v_matrix).to(dtype=example_weight.dtype, device="cpu")
+            v_tensor = v_matrix.to(dtype=example_weight.dtype, device="cpu")
 
             if category not in self.frod_V:
                 self.frod_V[category] = BufferDict({}, persistent=config.save_projection)
@@ -161,10 +161,10 @@ class FRODModel(BaseTuner):
                 self.frod_s_size[category] = BufferDict({}, persistent=config.save_projection)
             self.frod_s_size[category][adapter_name] = size
 
-    def _pre_injection_hook(self, model: nn.Module, config: FRODConfig, adapter_name: str) -> None:
+    def _pre_injection_hook(self, model: nn.Module, config: FrodConfig, adapter_name: str) -> None:
         self._init_frod_projections(config, adapter_name)
 
-    def _check_new_adapter_config(self, config: FRODConfig) -> None:
+    def _check_new_adapter_config(self, config: FrodConfig) -> None:
         super()._check_new_adapter_config(config)
 
         for existing_config in self.peft_config.values():
@@ -186,7 +186,7 @@ class FRODModel(BaseTuner):
 
     def _create_and_replace(
         self,
-        frod_config,
+        frod_config: FrodConfig,
         adapter_name,
         target,
         target_name,
@@ -201,12 +201,6 @@ class FRODModel(BaseTuner):
         if category not in self.frod_V:
             self._init_frod_projections(frod_config, adapter_name)
         bias = hasattr(target, "bias") and target.bias is not None
-        kwargs = {
-            "frod_dropout": frod_config.frod_dropout,
-            "fan_in_fan_out": frod_config.fan_in_fan_out,
-            "init_weights": frod_config.init_weights,
-            "bias": bias,
-        }
 
         if isinstance(target, Linear):
             target.update_layer(
@@ -214,8 +208,7 @@ class FRODModel(BaseTuner):
                 self.frod_V[category],
                 self.frod_s_indices[category],
                 self.frod_s_size[category],
-                frod_config.frod_dropout,
-                frod_config.init_weights,
+                config=frod_config,
             )
         else:
             new_module = self._create_new_module(
@@ -225,7 +218,7 @@ class FRODModel(BaseTuner):
                 self.frod_s_size[category],
                 adapter_name,
                 target,
-                **kwargs,
+                bias=bias,
             )
             if adapter_name not in self.active_adapters:
                 new_module.requires_grad_(False)
@@ -233,7 +226,7 @@ class FRODModel(BaseTuner):
 
     @staticmethod
     def _create_new_module(
-        frod_config,
+        frod_config: FrodConfig,
         frod_V,
         frod_s_indices,
         frod_s_size,
@@ -249,19 +242,19 @@ class FRODModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            if kwargs["fan_in_fan_out"]:
+            if frod_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
-                kwargs["fan_in_fan_out"] = frod_config.fan_in_fan_out = False
+                frod_config.fan_in_fan_out = False
         elif isinstance(target_base_layer, Conv1D):
             kwargs["is_target_conv_1d_layer"] = True
-            if not kwargs["fan_in_fan_out"]:
+            if not frod_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
-                kwargs["fan_in_fan_out"] = frod_config.fan_in_fan_out = True
+                frod_config.fan_in_fan_out = True
         else:
             raise TypeError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
@@ -274,6 +267,7 @@ class FRODModel(BaseTuner):
             frod_s_indices,
             frod_s_size,
             adapter_name,
+            config=frod_config,
             bias=bias,
             **kwargs,
         )

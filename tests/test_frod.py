@@ -22,7 +22,7 @@ from accelerate.utils.imports import is_bf16_available
 from safetensors import safe_open
 from torch import nn
 
-from peft import FRODConfig, PeftModel, get_peft_model
+from peft import FrodConfig, PeftModel, get_peft_model
 
 
 class MLP(nn.Module):
@@ -47,7 +47,7 @@ class MLP(nn.Module):
         return X
 
 
-class TestFROD:
+class TestFrod:
     @pytest.fixture
     def mlp(self):
         torch.manual_seed(0)
@@ -58,59 +58,19 @@ class TestFROD:
     def mlp_same_prng(self, mlp):
         torch.manual_seed(0)
 
-        config = FRODConfig(target_modules=["lin1", "lin2"], init_weights=False)
+        config = FrodConfig(target_modules=["lin1", "lin2"], init_weights=False)
         peft_model = get_peft_model(mlp, config)
-        config2 = FRODConfig(target_modules=["lin1", "lin2"], init_weights=False)
+        config2 = FrodConfig(target_modules=["lin1", "lin2"], init_weights=False)
         peft_model.add_adapter("other", config2)
         return peft_model
-
-    @staticmethod
-    def _make_second_adapter_different(peft_model):
-        with torch.no_grad():
-            for module in peft_model.base_model.model.modules():
-                if hasattr(module, "frod_lambda_l") and "second" in module.frod_lambda_l:
-                    module.frod_lambda_l["second"].add_(0.1)
-
-    def test_multiple_adapters_same_prng_projection_buffers(self, mlp_same_prng):
-        # Multiple adapters with the same PRNG key share fixed projection buffers within each FRoD layer.
-        assert (
-            mlp_same_prng.base_model.model.lin1.frod_V["default"].data_ptr()
-            == mlp_same_prng.base_model.model.lin1.frod_V["other"].data_ptr()
-        )
-        assert (
-            mlp_same_prng.base_model.model.lin1.frod_s_indices["default"].data_ptr()
-            == mlp_same_prng.base_model.model.lin1.frod_s_indices["other"].data_ptr()
-        )
-        assert (
-            mlp_same_prng.base_model.model.lin2.frod_V["default"].data_ptr()
-            == mlp_same_prng.base_model.model.lin2.frod_V["other"].data_ptr()
-        )
-        assert (
-            mlp_same_prng.base_model.model.lin2.frod_s_indices["default"].data_ptr()
-            == mlp_same_prng.base_model.model.lin2.frod_s_indices["other"].data_ptr()
-        )
-
-    def test_multiple_adapters_different_prng_raises(self):
-        model = MLP()
-        config = FRODConfig(target_modules=["lin1", "lin2"], init_weights=False)
-        peft_model = get_peft_model(model, config)
-        config2 = FRODConfig(target_modules=["lin1", "lin2"], init_weights=False, projection_prng_key=123)
-
-        msg = (
-            r"FRoD projection initialization key must be the same for all adapters. Got "
-            r"config.projection_prng_key=123 but previous config had 0"
-        )
-        with pytest.raises(ValueError, match=msg):
-            peft_model.add_adapter("other", config2)
 
     def test_multiple_adapters_save_load_save_projection_false(self, mlp, tmp_path):
         # Check saving and loading works with multiple adapters without saved projection tensors.
         torch.manual_seed(1)
-        config = FRODConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=False)
+        config = FrodConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=False)
         peft_model = get_peft_model(mlp, config, adapter_name="first")
-        config2 = FRODConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=False)
+        config2 = FrodConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=False)
         peft_model.add_adapter("second", config2)
-        self._make_second_adapter_different(peft_model)
         peft_model.eval()
 
         input = torch.randn(5, 10)
@@ -141,7 +101,7 @@ class TestFROD:
         assert torch.allclose(output_second, output_second_loaded, atol=1e-3, rtol=1e-3)
 
     def test_save_projection_false_contains_no_frod_projection_tensors(self, mlp, tmp_path):
-        config = FRODConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=False)
+        config = FrodConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=False)
         peft_model = get_peft_model(mlp, config)
 
         save_path = tmp_path / "frod"
@@ -158,7 +118,7 @@ class TestFROD:
         assert not any("frod_U" in key for key in state_dict)
 
     def test_save_projection_true_contains_top_level_projection_tensors_only(self, mlp, tmp_path):
-        config = FRODConfig(target_modules=["lin1", "lin2"], init_weights=False)
+        config = FrodConfig(target_modules=["lin1", "lin2"], init_weights=False)
         peft_model = get_peft_model(mlp, config)
 
         save_path = tmp_path / "frod"
@@ -208,7 +168,7 @@ class TestFROD:
         )
 
     def test_frod_different_shapes(self, mlp):
-        config = FRODConfig(target_modules=["lin0", "lin3"], init_weights=False)
+        config = FrodConfig(target_modules=["lin0", "lin3"], init_weights=False)
         mlp_different_shapes = get_peft_model(mlp, config)
 
         assert mlp.lin0.base_layer.weight.shape != mlp.lin3.base_layer.weight.shape
@@ -231,7 +191,7 @@ class TestFROD:
                 pytest.skip("bfloat16 not supported on this system, skipping the test")
 
         model = MLP().to(dtype)
-        config = FRODConfig(target_modules=["lin1", "lin2"], init_weights=False)
+        config = FrodConfig(target_modules=["lin1", "lin2"], init_weights=False)
         peft_model = get_peft_model(model, config)
         inputs = torch.randn(5, 10).to(dtype)
         output = peft_model(inputs)

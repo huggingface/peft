@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,9 +21,9 @@ from peft.utils import PeftType
 
 
 @dataclass
-class FRODConfig(PeftConfig):
+class FrodConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a [`FRODModel`].
+    This is the configuration class to store the configuration of a [`FrodModel`].
 
     Paper: https://doi.org/10.1609/aaai.v40i31.39813.
 

@@ -38,7 +38,7 @@ from peft import (
     CPTConfig,
     DeloraConfig,
     FourierFTConfig,
-    FRODConfig,
+    FrodConfig,
     GraloraConfig,
     HiraConfig,
     HRAConfig,
@@ -147,7 +147,7 @@ ALL_CONFIGS = [
         },
     ),
     (
-        FRODConfig,
+        FrodConfig,
         {
             "task_type": "CAUSAL_LM",
             "target_modules": None,

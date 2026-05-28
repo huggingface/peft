@@ -13,7 +13,7 @@ from transformers import (
     TrainingArguments,
 )
 
-from peft import FRODConfig, TaskType, get_peft_model
+from peft import FrodConfig, TaskType, get_peft_model
 
 
 MODEL_NAME = "google-bert/bert-base-uncased"
@@ -36,7 +36,7 @@ def main():
     tokenized = tokenized.rename_column("label", "labels")
 
     model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2)
-    peft_config = FRODConfig(
+    peft_config = FrodConfig(
         task_type=TaskType.SEQ_CLS,
         target_modules=["query", "value"],
         modules_to_save=["classifier"],

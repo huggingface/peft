@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,20 +15,18 @@
 import warnings
 from typing import Optional
 
-import numpy as np
 import torch
 import torch.nn.functional as F
-from numpy.linalg import inv
 from torch import nn
-from transformers.pytorch_utils import Conv1D
 
-from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 from peft.utils.other import transpose
 
 from .._buffer_dict import BufferDict
+from .config import FrodConfig
 
 
-class FRODLayer(BaseTunerLayer):
+class FrodLayer(BaseTunerLayer):
     adapter_layer_names = ("frod_lambda_l", "frod_lambda_s_values")
     other_param_names = ("frod_V", "frod_U", "frod_s_indices", "frod_s_size")
 
@@ -41,29 +39,16 @@ class FRODLayer(BaseTunerLayer):
         self.frod_lambda_l = nn.ParameterDict({})
         self.frod_lambda_s_values = nn.ParameterDict({})
 
-        self.frod_s_indices: Optional[BufferDict] = None
-        self.frod_s_size: Optional[BufferDict] = None
-        self.frod_V: Optional[BufferDict] = None
+        self.frod_s_indices: BufferDict = BufferDict({}, persistent=False)
+        self.frod_s_size: BufferDict = BufferDict({}, persistent=False)
+        self.frod_V: BufferDict = BufferDict({}, persistent=False)
         self.frod_U: BufferDict = BufferDict({}, persistent=False)
 
         self._disable_adapters = False
         self.merged_adapters = []
 
-        base_layer = self.get_base_layer()
-        if isinstance(base_layer, nn.Linear):
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif isinstance(base_layer, Conv1D):
-            in_features, out_features = (
-                base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
-            )
-
-        self.in_features = in_features
-        self.out_features = out_features
+        self.in_features, self.out_features = _get_in_out_features(self.get_base_layer())
         self.kwargs = kwargs
-
-    @property
-    def merged(self) -> bool:
-        return bool(self.merged_adapters)
 
     def update_layer(
         self,
@@ -71,15 +56,14 @@ class FRODLayer(BaseTunerLayer):
         frod_V: BufferDict,
         frod_s_indices: BufferDict,
         frod_s_size: BufferDict,
-        frod_dropout,
-        init_weights,
+        config: FrodConfig,
     ):
+        frod_dropout = config.frod_dropout
+        init_weights = config.init_weights
         base_layer = self.get_base_layer()
-        weight = base_layer.weight.T if isinstance(base_layer, Conv1D) else base_layer.weight
+        weight = transpose(base_layer.weight, self.fan_in_fan_out)
         device = base_layer.weight.device
         dtype = base_layer.weight.dtype
-
-        param_dtype = dtype
 
         self.r[adapter_name] = self.out_features
         if frod_dropout > 0.0:
@@ -87,30 +71,32 @@ class FRODLayer(BaseTunerLayer):
         else:
             frod_dropout_layer = nn.Identity()
 
-        self.frod_dropout.update(nn.ModuleDict({adapter_name: frod_dropout_layer}))
+        self.frod_dropout[adapter_name] = frod_dropout_layer
 
+        if frod_V is None or frod_s_indices is None or frod_s_size is None:
+            raise ValueError("The FRoD projection buffers are missing. This should not happen.")
         if adapter_name not in frod_V:
-            if not frod_V:
-                raise ValueError("The FRoD projection buffers are empty. This should not happen.")
-            frod_V[adapter_name] = next(iter(frod_V.values()))
-            frod_s_indices[adapter_name] = next(iter(frod_s_indices.values()))
-            frod_s_size[adapter_name] = next(iter(frod_s_size.values()))
+            # FRoD projection buffers are shared across adapters for the same module category.
+            reference_adapter = next(iter(frod_V))
+            frod_V[adapter_name] = frod_V[reference_adapter]
+            frod_s_indices[adapter_name] = frod_s_indices[reference_adapter]
+            frod_s_size[adapter_name] = frod_s_size[reference_adapter]
 
         nnz = frod_s_indices[adapter_name].shape[1]
-        self.frod_lambda_s_values[adapter_name] = nn.Parameter(torch.zeros(nnz, device=device, dtype=param_dtype))
+        self.frod_lambda_s_values[adapter_name] = nn.Parameter(torch.zeros(nnz, device=device, dtype=dtype))
 
-        self.__dict__["frod_V"] = frod_V
-        self.__dict__["frod_s_indices"] = frod_s_indices
-        self.__dict__["frod_s_size"] = frod_s_size
+        self.frod_V[adapter_name] = frod_V[adapter_name]
+        self.frod_s_indices[adapter_name] = frod_s_indices[adapter_name]
+        self.frod_s_size[adapter_name] = frod_s_size[adapter_name]
 
         # Keep cached projections on CPU and move them lazily in forward.
-        self.frod_V[adapter_name] = self.frod_V[adapter_name].to(dtype=param_dtype, device="cpu")
+        self.frod_V[adapter_name] = self.frod_V[adapter_name].to(dtype=dtype, device="cpu")
         self.frod_s_indices[adapter_name] = self.frod_s_indices[adapter_name].to(device="cpu", dtype=torch.long)
         self.frod_s_size[adapter_name] = self.frod_s_size[adapter_name].to(device="cpu", dtype=torch.long)
 
         U, L = self._calculate_frod_u_and_lambda(self.frod_V[adapter_name], weight)
-        U = U.to(param_dtype)
-        L = L.to(device=device, dtype=param_dtype)
+        U = U.to(dtype)
+        L = L.to(device=device, dtype=dtype)
         self.frod_lambda_l[adapter_name] = nn.Parameter(L, requires_grad=True)
         if init_weights:
             self.reset_frod_parameters(adapter_name)
@@ -125,18 +111,18 @@ class FRODLayer(BaseTunerLayer):
         self.set_adapter(self.active_adapters)
 
     def _calculate_frod_u_and_lambda(self, V, W):
-        w = W.detach().to(torch.float32).cpu().numpy()
-        v = V.detach().to(torch.float32).cpu().numpy()
+        w = W.detach().to(torch.float32).cpu()
+        v = V.detach().to(torch.float32).cpu()
         try:
-            v_inv_T = inv(v).T
-        except np.linalg.LinAlgError:
-            v_inv_T = np.linalg.pinv(v, rcond=1e-6).T
-        Bi = w @ v_inv_T
-        lambda_l = np.linalg.norm(Bi, axis=0)
-        u = np.divide(Bi, lambda_l, out=np.zeros_like(Bi), where=lambda_l > 1e-8)
-        U = torch.from_numpy(u).float()
-        L = torch.from_numpy(lambda_l).float()
-        return U, L
+            v_inv_T = torch.linalg.inv(v).T
+        except RuntimeError:
+            v_inv_T = torch.linalg.pinv(v, rtol=1e-6).T
+        bi = w @ v_inv_T
+        lambda_l = torch.linalg.norm(bi, dim=0)
+        u = torch.zeros_like(bi)
+        nonzero = lambda_l > 1e-8
+        u[:, nonzero] = bi[:, nonzero] / lambda_l[nonzero]
+        return u.float(), lambda_l.float()
 
     def reset_frod_parameters(self, adapter_name):
         if adapter_name in self.frod_lambda_s_values:
@@ -147,7 +133,7 @@ class FRODLayer(BaseTunerLayer):
                 nn.init.zeros_(self.frod_lambda_l[adapter_name])
 
 
-class Linear(nn.Linear, FRODLayer):
+class Linear(nn.Linear, FrodLayer):
     def __init__(
         self,
         base_layer,
@@ -155,18 +141,16 @@ class Linear(nn.Linear, FRODLayer):
         frod_s_indices: BufferDict,
         frod_s_size: BufferDict,
         adapter_name: str,
-        frod_dropout: float = 0.0,
-        fan_in_fan_out: bool = False,
+        config: FrodConfig,
         is_target_conv_1d_layer: bool = False,
-        init_weights: bool = True,
         **kwargs,
     ) -> None:
         super(nn.Linear, self).__init__()
-        FRODLayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
+        FrodLayer.__init__(self, base_layer, **kwargs)
+        self.fan_in_fan_out = config.fan_in_fan_out
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, frod_V, frod_s_indices, frod_s_size, frod_dropout, init_weights)
+        self.update_layer(adapter_name, frod_V, frod_s_indices, frod_s_size, config=config)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -206,11 +190,7 @@ class Linear(nn.Linear, FRODLayer):
         U = self.frod_U[adapter].to(device=device, dtype=dtype)
         V = self.frod_V[adapter].to(device=device, dtype=dtype)
         indices = self.frod_s_indices[adapter].to(device=U.device, dtype=torch.long)
-        size_tensor = self.frod_s_size[adapter]
-        if isinstance(size_tensor, torch.Tensor):
-            size = tuple(int(dim) for dim in size_tensor.tolist())
-        else:
-            size = tuple(int(dim) for dim in size_tensor)
+        size = tuple(int(dim) for dim in self.frod_s_size[adapter].tolist())
         values = self.frod_lambda_s_values[adapter].to(U.device, U.dtype).clone()
         lambda_l = self.frod_lambda_l[adapter].to(device=U.device, dtype=U.dtype)
 
@@ -239,11 +219,7 @@ class Linear(nn.Linear, FRODLayer):
                 V = self.frod_V[active_adapter].to(device=x.device, dtype=target_dtype)
                 U = self.frod_U[active_adapter].to(device=x.device, dtype=target_dtype)
                 indices = self.frod_s_indices[active_adapter].to(device=x.device, dtype=torch.long)
-                size_tensor = self.frod_s_size[active_adapter]
-                if isinstance(size_tensor, torch.Tensor):
-                    size = tuple(int(dim) for dim in size_tensor.tolist())
-                else:
-                    size = tuple(int(dim) for dim in size_tensor)
+                size = tuple(int(dim) for dim in self.frod_s_size[active_adapter].tolist())
                 values = self.frod_lambda_s_values[active_adapter].to(device=x.device, dtype=target_dtype)
                 lambda_l = self.frod_lambda_l[active_adapter].to(device=x.device, dtype=target_dtype)
 
@@ -254,6 +230,8 @@ class Linear(nn.Linear, FRODLayer):
                 h_flat = h.reshape(-1, h.shape[-1])
                 z_flat = torch.matmul(h_flat, V)
 
+                # This block computes the sparse FRoD update z @ S with torch.sparse.mm.
+                # CUDA sparse fp16/bf16 kernels are less reliable, so use fp32 here and cast the update back below.
                 matmul_dtype = z_flat.dtype
                 if z_flat.is_cuda and matmul_dtype in (torch.float16, torch.bfloat16):
                     matmul_dtype = torch.float32
@@ -279,6 +257,7 @@ class Linear(nn.Linear, FRODLayer):
         return result
 
     def __repr__(self) -> str:
+        # Match PEFT tuner convention so printed models show FRoD-wrapped layers as `frod.*`.
         rep = super().__repr__()
         return "frod." + rep
 

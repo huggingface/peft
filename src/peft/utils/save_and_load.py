@@ -829,7 +829,10 @@ def set_peft_model_state_dict(
             )
             if config.save_projection and not has_projection:
                 raise ValueError(
-                    "Specified to load FRoD projection tensors from state dictionary however they were not present!"
+                    "Specified to load FRoD projection tensors from state dictionary however they were not present. "
+                    "If this checkpoint was saved with `save_projection=False`, set `peft_config.save_projection` "
+                    "to `False` before loading so the projections are regenerated from the base model weights. "
+                    "Otherwise, re-save the adapter with `save_projection=True` to include these tensors."
                 )
             elif not config.save_projection and has_projection:
                 warnings.warn(

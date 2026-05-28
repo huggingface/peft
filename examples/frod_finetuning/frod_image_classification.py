@@ -9,7 +9,7 @@ import torch
 from datasets import load_dataset
 from transformers import AutoImageProcessor, AutoModelForImageClassification, Trainer, TrainingArguments
 
-from peft import FRODConfig, get_peft_model
+from peft import FrodConfig, get_peft_model
 
 
 MODEL_NAME = os.environ.get("FROD_IMAGE_MODEL_NAME", "google/vit-base-patch16-224")
@@ -61,7 +61,7 @@ def main():
         label2id=label2id,
         ignore_mismatched_sizes=True,
     )
-    peft_config = FRODConfig(
+    peft_config = FrodConfig(
         target_modules=["query", "value"],
         modules_to_save=["classifier"],
         frod_dropout=0.0,

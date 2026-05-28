@@ -25,7 +25,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
-    FRODConfig,
+    FrodConfig,
     GraloraConfig,
     HiraConfig,
     HRAConfig,
@@ -110,7 +110,7 @@ ALL_CONFIGS = [
         },
     ),
     (
-        FRODConfig,
+        FrodConfig,
         {
             "target_modules": None,
             "task_type": "SEQ_2_SEQ_LM",
