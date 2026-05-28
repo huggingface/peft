@@ -609,7 +609,7 @@ class PeftCommonTester:
                 atol, rtol = 1e-3, 1e-3
             if (config.peft_type in {"IA3", "LORA", "OFT"}) and (model_id in conv_ids):
                 # for some reason, the Conv introduces a larger error
-                atol, rtol = 0.3, 0.01
+                atol, rtol = 1e-2, 0.01
             if (config.peft_type == "OFT") and not is_decoder:
                 atol, rtol = 0.3, 0.01
             if model_id == "trl-internal-testing/tiny-Llama4ForCausalLM":
