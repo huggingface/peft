@@ -118,7 +118,7 @@ class XLoraLinearLayer(XLoraLayer):
                 lora_B = self.target.lora_B[active_adapter]
                 dropout = self.target.lora_dropout[active_adapter]
                 scaling = self.target.scaling[active_adapter]
-                x = x.to(lora_A.weight.dtype)  # type: ignore
+                x = self._cast_input_dtype(x, lora_A.weight.dtype)  # type: ignore
                 if scalings is not None:
                     x_mod = self.apply_scalings_to_x(x, xlora_scalings, adapter_n)
                     scaling_weight = self.config.global_scaling_weight
@@ -223,7 +223,7 @@ class XLoraConv2dLayer(XLoraLayer):
                 lora_B = self.target.lora_B[active_adapter]
                 dropout = self.target.lora_dropout[active_adapter]
                 scaling = self.target.scaling[active_adapter]
-                x = x.to(lora_A.weight.dtype)  # type: ignore
+                x = self._cast_input_dtype(x, lora_A.weight.dtype)  # type: ignore
                 if scalings is not None:
                     x_mod = self.apply_scalings_to_x(x, xlora_scalings, adapter_n)
                     scaling_weight = self.config.global_scaling_weight

@@ -638,7 +638,7 @@ class Linear(nn.Module, BOFTLayer):
                 boft_rotation = butterfly_oft_mat @ boft_rotation
                 boft_scale = boft_s * boft_scale
 
-            x = x.to(self.get_base_layer().weight.data.dtype)
+            x = self._cast_input_dtype(x, self.get_base_layer().weight.data.dtype)
 
             orig_weight = self.get_base_layer().weight.data
             orig_weight = torch.transpose(orig_weight, 0, 1)
@@ -969,7 +969,7 @@ class Conv2d(nn.Module, BOFTLayer):
                 boft_rotation = butterfly_oft_mat @ boft_rotation
                 boft_scale = boft_s * boft_scale
 
-            x = x.to(self.base_layer.weight.data.dtype)
+            x = self._cast_input_dtype(x, self.base_layer.weight.data.dtype)
 
             orig_weight = self.base_layer.weight.data
             orig_weight = orig_weight.view(

@@ -395,7 +395,7 @@ class Linear(nn.Module, AdamssLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             # Cast input to layer dtype
-            x = x.to(self.dtype)
+            x = self._cast_input_dtype(x, self.dtype)
 
             # Add bias column only when the base layer has a bias
             # (update_layer concatenates bias into newB only when bias is not None)

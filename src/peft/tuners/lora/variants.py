@@ -581,7 +581,7 @@ class ALoraLinearVariant(LoraVariant):
         lora_B = module.lora_B[active_adapter]
         dropout = module.lora_dropout[active_adapter]
         scaling = module.scaling[active_adapter]
-        x = x.to(lora_A.weight.dtype)
+        x = self._cast_input_dtype(x, lora_A.weight.dtype)
         result_shape = result.shape
         B = result_shape[0]  # batch
         if len(result_shape) == 3:
@@ -1195,7 +1195,7 @@ class MontecloraLinearVariant(LoraVariant):
             )
         sampler = module.lora_monteclora_sampler[active_adapter]
 
-        x = x.to(lora_A.weight.dtype)
+        x = self._cast_input_dtype(x, lora_A.weight.dtype)
         if isinstance(dropout, nn.Identity) or not module.training:
             x_dropped = x
         else:

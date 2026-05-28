@@ -2112,7 +2112,7 @@ class _LoraParameterProxy(nn.Module):
             )
 
         # this operation can be quite costly
-        x = x.to(upcast_dtype)
+        x = self._cast_input_dtype(x, upcast_dtype)
         z = x + y
         # clamp to valid range before casting down, as this is *not* performed automatically and can thus result in NANs
         info = torch.finfo(orig_dtype)

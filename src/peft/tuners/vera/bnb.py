@@ -214,12 +214,12 @@ if is_bnb_available():
                         expected_dtype = result.dtype
                         compute_dtype = lambda_d.dtype
                         if x.dtype != compute_dtype:
-                            x = x.to(compute_dtype)
+                            x = self._cast_input_dtype(x, compute_dtype)
 
                     sliced_A = vera_A[:, : self.in_features].to(x.device)
                     sliced_B = vera_B[: self.out_features, :].to(x.device)
 
-                    x_temp = dropout(x.to(lambda_d.dtype))
+                    x_temp = dropout(self._cast_input_dtype(x, lambda_d.dtype))
 
                     adapter_output = lambda_b * torch.nn.functional.linear(
                         lambda_d * torch.nn.functional.linear(x_temp, sliced_A), sliced_B
@@ -380,12 +380,12 @@ if is_bnb_4bit_available():
                         expected_dtype = result.dtype
                         compute_dtype = lambda_d.dtype
                         if x.dtype != compute_dtype:
-                            x = x.to(compute_dtype)
+                            x = self._cast_input_dtype(x, compute_dtype)
 
                     sliced_A = vera_A[:, : self.in_features].to(x.device)
                     sliced_B = vera_B[: self.out_features, :].to(x.device)
 
-                    x_temp = dropout(x.to(lambda_d.dtype))
+                    x_temp = dropout(self._cast_input_dtype(x, lambda_d.dtype))
 
                     adapter_output = lambda_b * torch.nn.functional.linear(
                         lambda_d * torch.nn.functional.linear(x_temp, sliced_A), sliced_B

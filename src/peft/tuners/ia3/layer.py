@@ -175,7 +175,7 @@ class Linear(nn.Module, IA3Layer):
                 ia3_scaling *= self.ia3_l[active_adapter].flatten()
 
             if self.is_feedforward:
-                x = x.to(dtype)
+                x = self._cast_input_dtype(x, dtype)
                 # TODO: weight.dtype can be != self.ia3_l[self.active_adapters].dtype
                 # e.g. bf16 vs fp32. Is that okay?
                 interm = (x * ia3_scaling).to(previous_dtype)
@@ -306,7 +306,7 @@ class _ConvNd(nn.Module, IA3Layer):
                 ia3_scaling *= self.ia3_l[active_adapter]
 
             if self.is_feedforward:
-                x = x.to(dtype)
+                x = self._cast_input_dtype(x, dtype)
                 # TODO: weight.dtype can be != self.ia3_l[self.active_adapters].dtype
                 # e.g. bf16 vs fp32. Is that okay?
                 interm = (x * ia3_scaling).to(self.get_base_layer().weight.dtype)

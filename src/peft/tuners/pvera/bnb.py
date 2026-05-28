@@ -219,12 +219,12 @@ if is_bnb_available():
                         expected_dtype = result.dtype
                         compute_dtype = lambda_d.dtype
                         if x.dtype != compute_dtype:
-                            x = x.to(compute_dtype)
+                            x = self._cast_input_dtype(x, compute_dtype)
 
                     sliced_A = pvera_A[:, : self.in_features].to(x.device)
                     sliced_B = pvera_B[: self.out_features, :].to(x.device)
 
-                    x_temp = dropout(x.to(lambda_d.dtype))
+                    x_temp = dropout(self._cast_input_dtype(x, lambda_d.dtype))
                     mu, logvar = (lambda_d * F.linear(x_temp, sliced_A)).chunk(2, dim=-1)
                     adapter_output = lambda_b * F.linear(
                         self._reparametrize(mu, logvar, self.sample_at_inference), sliced_B
@@ -389,12 +389,12 @@ if is_bnb_4bit_available():
                         expected_dtype = result.dtype
                         compute_dtype = lambda_d.dtype
                         if x.dtype != compute_dtype:
-                            x = x.to(compute_dtype)
+                            x = self._cast_input_dtype(x, compute_dtype)
 
                     sliced_A = pvera_A[:, : self.in_features].to(x.device)
                     sliced_B = pvera_B[: self.out_features, :].to(x.device)
 
-                    x_temp = dropout(x.to(lambda_d.dtype))
+                    x_temp = dropout(self._cast_input_dtype(x, lambda_d.dtype))
                     mu, logvar = (lambda_d * F.linear(x_temp, sliced_A)).chunk(2, dim=-1)
                     adapter_output = lambda_b * F.linear(
                         self._reparametrize(mu, logvar, self.sample_at_inference), sliced_B

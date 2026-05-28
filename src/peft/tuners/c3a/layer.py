@@ -190,13 +190,13 @@ class C3ALinear(nn.Module, C3ALayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
-            x = x.to(torch.float32)
+            x = self._cast_input_dtype(x, torch.float32)
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.c3a_kernel.keys():
                     continue
                 c3a_kernel = self.c3a_kernel[active_adapter].to(torch.float32)
                 x = BlockCircularConvolution.apply(x, c3a_kernel) / x.size(-1)
-                result += x.to(result.dtype)
+                result += self._cast_input_dtype(x, result.dtype)
 
         result = result.to(previous_dtype)
         return result

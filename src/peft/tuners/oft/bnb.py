@@ -159,7 +159,7 @@ if is_bnb_available():
 
                     x = oft_R(x)
                     if requires_conversion:
-                        x = x.to(expected_dtype)
+                        x = self._cast_input_dtype(x, expected_dtype)
 
                 result = self.base_layer(x, *args, **kwargs)
 
@@ -328,7 +328,7 @@ if is_bnb_4bit_available():
 
                     x = oft_R(x)
                     if requires_conversion:
-                        x = x.to(expected_dtype)
+                        x = self._cast_input_dtype(x, expected_dtype)
 
                 result = self.base_layer(x, *args, **kwargs)
 

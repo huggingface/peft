@@ -154,7 +154,7 @@ class Linear(nn.Module, PolyLayer):
                 A = A.reshape(bs, self.in_features, r)
                 B = B.transpose(1, 2).reshape(bs, r, self.out_features)
 
-                x = x.to(A.dtype)
+                x = self._cast_input_dtype(x, A.dtype)
                 result += x.bmm(A).bmm(B) / r
 
         result = result.to(previous_dtype)
