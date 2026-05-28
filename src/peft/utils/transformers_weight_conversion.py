@@ -508,6 +508,7 @@ def convert_peft_adapter_state_dict_for_transformers(
         # no architecture-level conversion registered for this model
         return adapter_state_dict
 
+    prefix: str = getattr(model, "base_model_prefix", "")
     weight_conversions = get_model_conversion_mapping(model)
     peft_weight_conversions = build_peft_weight_mapping(
         weight_conversions, adapter_name=adapter_name, peft_config=peft_config
@@ -539,6 +540,13 @@ def convert_peft_adapter_state_dict_for_transformers(
     state_items = sorted(lora_like_state_dict.items(), key=lambda kv: dot_natural_key(kv[0]))
     for original_key, tensor in state_items:
         renamed_key, source_pattern = rename_source_key(original_key, renamings, converters)
+
+        # https://github.com/huggingface/transformers/blob/027d1a97025295a1346c2eb5c361259e69eedfe7/src/transformers/core_model_loading.py#L1361-L1365
+        if renamed_key not in adapter_state_dict and original_key in adapter_state_dict:
+            # Key should probably not have been renamed but we might need the `prefix` to be added.
+            renamed_key, source_pattern = rename_source_key(
+                original_key, [], [], prefix=prefix, meta_state_dict=adapter_state_dict
+            )
 
         if source_pattern is not None:
             new_converter = copy.deepcopy(pattern_to_converter[source_pattern])
