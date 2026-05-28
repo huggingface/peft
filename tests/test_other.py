@@ -274,6 +274,37 @@ class TestModulesToSaveAttributeAccess:
             model.lin1.weight
 
 
+class TestModulesToSaveMergeAndUnload:
+    def test_merge_and_unload_without_weight(self):
+        # Regression test for #3213: merge_and_unload should not crash when modules_to_save
+        # targets a module without a weight attribute (e.g., a transformer encoder block)
+        class ModuleWithoutWeight(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = nn.Linear(1, 1)
+            
+            def forward(self, x):
+                return self.foo(x)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(1, 2)
+                self.mod1 = ModuleWithoutWeight()
+            
+            def forward(self, x):
+                return self.mod1(self.lin0(x))
+
+        from peft import LoraConfig, get_peft_model
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["mod1"])
+        model = get_peft_model(Model(), config)
+        
+        # This should not raise an AttributeError
+        merged = model.merge_and_unload()
+        assert not hasattr(merged.mod1, "weight")
+
+
+
 class TestModulesToSaveKwargsOnlyForward:
     """Regression test for #3191: modules listed in `modules_to_save` whose parent calls them with keyword arguments
     only (e.g. Gemma's `vision_tower(pixel_values=...)`) used to crash with `TypeError: forward() missing 1 required
