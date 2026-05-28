@@ -241,7 +241,7 @@ class Linear(nn.Linear, VBLoRALayer):
                 if active_adapter not in self.vblora_logits_A.keys():
                     continue
                 A, B = self._get_lora_matrices(active_adapter)
-                x = x.to(self.vblora_vector_bank[active_adapter].dtype)
+                x = self._cast_input_dtype(x, self.vblora_vector_bank[active_adapter].dtype)
                 dropout = self.vblora_dropout[active_adapter]
                 result = result + F.linear(F.linear(dropout(x), A), B)
         result = result.to(previous_dtype)

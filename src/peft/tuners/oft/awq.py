@@ -63,7 +63,7 @@ class AwqOFTLinear(torch.nn.Module, OFTLayer):
 
             x = oft_R(x)
             if requires_conversion:
-                x = x.to(expected_dtype)
+                x = self._cast_input_dtype(x, expected_dtype)
 
         result = self.quant_linear_module(x)
         return result

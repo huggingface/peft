@@ -339,7 +339,7 @@ class Linear(nn.Linear, RandLoraLayer):
                     continue
                 dropout = self.randlora_dropout[active_adapter]
                 update_B, update_A = self.get_scaled_bases(active_adapter, device=x.device)
-                x = x.to(update_A.dtype)
+                x = self._cast_input_dtype(x, update_A.dtype)
                 scaling = self.scaling[active_adapter]
                 result = result + F.linear(F.linear(dropout(x), update_B), update_A) * scaling
         result = result.to(previous_dtype)

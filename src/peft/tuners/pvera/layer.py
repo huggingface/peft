@@ -302,7 +302,7 @@ class Linear(nn.Linear, PveraLayer):
                 sliced_B = pvera_B[: self.out_features, :].to(x.device)
 
                 dropout = self.pvera_dropout[active_adapter]
-                x = x.to(lambda_d.dtype)
+                x = self._cast_input_dtype(x, lambda_d.dtype)
                 mu, logvar = (lambda_d * F.linear(dropout(x), sliced_A)).chunk(2, dim=-1)
                 result = result + lambda_b * F.linear(
                     self._reparametrize(mu, logvar, self.sample_at_inference), sliced_B

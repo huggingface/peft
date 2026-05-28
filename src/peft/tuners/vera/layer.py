@@ -280,7 +280,7 @@ class Linear(nn.Linear, VeraLayer):
                 sliced_B = vera_B[: self.out_features, :].to(x.device)
 
                 dropout = self.vera_dropout[active_adapter]
-                x = x.to(lambda_d.dtype)
+                x = self._cast_input_dtype(x, lambda_d.dtype)
                 result = result + lambda_b * F.linear(lambda_d * F.linear(dropout(x), sliced_A), sliced_B)
 
         result = result.to(previous_dtype)

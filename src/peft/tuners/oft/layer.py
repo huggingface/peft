@@ -251,7 +251,7 @@ class OFTRotationModule(nn.Module):
 
         required_dtype = x.dtype
         if required_dtype != self.weight.dtype:
-            x = x.to(self.weight.dtype)
+            x = self._cast_input_dtype(x, self.weight.dtype)
 
         orig_shape = x.shape
 
@@ -681,7 +681,7 @@ class Linear(nn.Module, OFTLayer):
                 x = self._cast_input_dtype(x, oft_R.weight.dtype)
                 x = oft_R(x)
 
-            result = self.base_layer(x.to(previous_dtype), *args, **kwargs)
+            result = self.base_layer(self._cast_input_dtype(x, previous_dtype), *args, **kwargs)
 
         result = result.to(previous_dtype)
         return result
@@ -934,7 +934,7 @@ class Conv2d(nn.Module, OFTLayer):
                 x = self._cast_input_dtype(x, oft_R.weight.dtype)
                 x = oft_R(x)
 
-            result = self.base_layer(x.to(previous_dtype), *args, **kwargs)
+            result = self.base_layer(self._cast_input_dtype(x, previous_dtype), *args, **kwargs)
 
         result = result.to(previous_dtype)
         return result

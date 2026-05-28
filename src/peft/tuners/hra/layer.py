@@ -261,7 +261,7 @@ class HRALinear(nn.Module, HRALayer):
             if self.cast_input_dtype_enabled:
                 x = self._cast_input_dtype(x, new_weight.dtype)
             else:
-                x = x.to(self.get_base_layer().weight.data.dtype)
+                x = self._cast_input_dtype(x, self.get_base_layer().weight.data.dtype)
             result = F.linear(input=x, weight=new_weight, bias=bias)
 
         result = result.to(previous_dtype)
@@ -445,7 +445,7 @@ class HRAConv2d(nn.Module, HRALayer):
             if self.cast_input_dtype_enabled:
                 x = self._cast_input_dtype(x, new_weight.dtype)
             else:
-                x = x.to(self.get_base_layer().weight.data.dtype)
+                x = self._cast_input_dtype(x, self.get_base_layer().weight.data.dtype)
             result = F.conv2d(
                 input=x,
                 weight=new_weight,

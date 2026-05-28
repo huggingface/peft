@@ -232,10 +232,10 @@ if is_bnb_available():
                         expected_dtype = result.dtype
                         compute_dtype = update_A.dtype
                         if x.dtype != compute_dtype:
-                            x = x.to(compute_dtype)
+                            x = self._cast_input_dtype(x, compute_dtype)
 
                     dropout = self.randlora_dropout[active_adapter]
-                    x_temp = dropout(x.to(update_A.dtype))
+                    x_temp = dropout(self._cast_input_dtype(x, update_A.dtype))
 
                     adapter_output = torch.nn.functional.linear(torch.nn.functional.linear(x_temp, update_B), update_A)
 
@@ -430,10 +430,10 @@ if is_bnb_4bit_available():
                         expected_dtype = result.dtype
                         compute_dtype = update_A.dtype
                         if x.dtype != compute_dtype:
-                            x = x.to(compute_dtype)
+                            x = self._cast_input_dtype(x, compute_dtype)
 
                     dropout = self.randlora_dropout[active_adapter]
-                    x_temp = dropout(x.to(update_A.dtype))
+                    x_temp = dropout(self._cast_input_dtype(x, update_A.dtype))
 
                     adapter_output = torch.nn.functional.linear(torch.nn.functional.linear(x_temp, update_B), update_A)
 

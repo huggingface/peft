@@ -184,7 +184,7 @@ if is_bnb_available():
                     )
 
                     if requires_conversion:
-                        x = x.to(expected_dtype)
+                        x = self._cast_input_dtype(x, expected_dtype)
 
             return result
 
@@ -374,7 +374,7 @@ if is_bnb_4bit_available():
                         result,
                     )
                     if requires_conversion:
-                        x = x.to(expected_dtype)
+                        x = self._cast_input_dtype(x, expected_dtype)
 
             return result
 
