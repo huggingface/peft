@@ -12,12 +12,18 @@ from transformers import AutoImageProcessor, AutoModelForImageClassification, Tr
 from peft import FrodConfig, get_peft_model
 
 
-MODEL_NAME = os.environ.get("FROD_IMAGE_MODEL_NAME", "google/vit-base-patch16-224")
-OUTPUT_DIR = os.environ.get("FROD_IMAGE_OUTPUT_DIR", "vit-base-patch16-224-frod-stanford-cars")
+MODEL_NAME = os.environ.get("FROD_IMAGE_MODEL_NAME", "openai/clip-vit-base-patch32")
+OUTPUT_DIR = os.environ.get("FROD_IMAGE_OUTPUT_DIR", "clip-vit-base-patch32-frod-stanford-cars")
 DATA_DIR = os.environ.get("FROD_STANFORD_CARS_DATA_DIR")
-FROD_LAMBDA_L_LR = 5e-4
-FROD_LAMBDA_S_LR = 5e-5
-CLASSIFIER_LR = 1e-4
+NUM_TRAIN_EPOCHS = int(os.environ.get("FROD_IMAGE_NUM_TRAIN_EPOCHS", "3"))
+TRAIN_BATCH_SIZE = int(os.environ.get("FROD_IMAGE_TRAIN_BATCH_SIZE", "64"))
+EVAL_BATCH_SIZE = int(os.environ.get("FROD_IMAGE_EVAL_BATCH_SIZE", "64"))
+SPARSE_RATE = float(os.environ.get("FROD_IMAGE_SPARSE_RATE", "0.01"))
+FROD_LAMBDA_L_LR = float(os.environ.get("FROD_IMAGE_LAMBDA_L_LR", "5e-4"))
+FROD_LAMBDA_S_LR = float(os.environ.get("FROD_IMAGE_LAMBDA_S_LR", "5e-5"))
+CLASSIFIER_LR = float(os.environ.get("FROD_IMAGE_CLASSIFIER_LR", "1e-4"))
+CLIP_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"]
+
 
 def main():
     if DATA_DIR:
@@ -62,10 +68,11 @@ def main():
         ignore_mismatched_sizes=True,
     )
     peft_config = FrodConfig(
-        target_modules=["query", "value"],
+        target_modules=CLIP_TARGET_MODULES,
         modules_to_save=["classifier"],
         frod_dropout=0.0,
-        sparse_rate=0.02,
+        sparse_rate=SPARSE_RATE,
+        projection_prng_key=3,
     )
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
@@ -102,13 +109,14 @@ def main():
     training_args = TrainingArguments(
         output_dir=OUTPUT_DIR,
         learning_rate=FROD_LAMBDA_L_LR,
-        per_device_train_batch_size=32,
-        per_device_eval_batch_size=64,
-        num_train_epochs=1,
+        per_device_train_batch_size=TRAIN_BATCH_SIZE,
+        per_device_eval_batch_size=EVAL_BATCH_SIZE,
+        num_train_epochs=NUM_TRAIN_EPOCHS,
         eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
         metric_for_best_model="accuracy",
+        lr_scheduler_type="constant",
         remove_unused_columns=False,
         report_to="none",
     )
