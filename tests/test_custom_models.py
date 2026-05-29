@@ -7008,3 +7008,49 @@ class TestDefaultTargetModules:
         model = get_peft_model(model, config)
         assert model.targeted_module_names == ["lin0", "lin1"]
         assert model.peft_config["default"].target_modules == {"lin0", "lin1"}
+
+    def test_default_target_modules_nemotron_h(self):
+        # Nemotron-H is a hybrid Mamba + MoE + Attention architecture. Defaults
+        # target the attention projections only (q/k/v/o_proj) and must avoid
+        # `out_proj` / `conv1d` which belong to the Mamba mixer and are blocked
+        # by the Mamba compatibility check (PR #2562).
+        from peft.utils.constants import (
+            TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
+            TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
+            TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
+            TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING,
+        )
+
+        expected = ["q_proj", "k_proj", "v_proj", "o_proj"]
+        for mapping in (
+            TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
+            TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
+            TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
+            TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING,
+        ):
+            assert mapping.get("nemotron_h") == expected
+
+        forbidden = {"out_proj", "conv1d"}
+        assert set(expected).isdisjoint(forbidden)
+
+    def test_nemotron_h_blocks_mamba_modules(self):
+        # nemotron_h must be in the Mamba forbidden-module check so applying
+        # LoRA to `out_proj` or `conv1d` raises (those belong to the Mamba
+        # mixer, not attention).
+        class FakeNemotronH(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.out_proj = nn.Linear(8, 8)
+
+            def forward(self, x):
+                return self.out_proj(x)
+
+        model = FakeNemotronH()
+        mock_config = MagicMock()
+        mock_config.to_dict.return_value = {"model_type": "nemotron_h"}
+        mock_config.model_type = "nemotron_h"
+        model.config = mock_config
+
+        peft_config = LoraConfig(target_modules=["out_proj"])
+        with pytest.raises(ValueError, match="incompatible with Mamba-based"):
+            get_peft_model(model, peft_config)
