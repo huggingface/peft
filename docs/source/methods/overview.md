@@ -20,14 +20,21 @@ rendered properly in your Markdown viewer.
 
 # Prompt-based methods
 
-A prompt can describe a task or provide an example of a task you want the model to learn. Instead of manually creating these prompts, soft prompting methods add learnable parameters to the input embeddings that can be optimized for a specific task while keeping the pretrained model's parameters frozen. This makes it both faster and easier to finetune large language models (LLMs) for new downstream tasks.
+ Prompting primes a frozen pretrained model for a specific downstream task by including a text prompt that describes the task or even demonstrates an example of the task. With prompting, you can avoid fully training a separate model for each downstream task, and use the same frozen pretrained model instead. This is a lot easier because you can use the same model for several different tasks, and it is significantly more efficient to train and store a smaller set of prompt parameters than to train all the model's parameters.
 
-The PEFT library supports several types of prompting methods (p-tuning, prefix tuning, prompt tuning) and you can learn more about how these methods work conceptually in the [Soft prompts](../conceptual_guides/prompting) guide. If you're interested in applying these methods to other tasks and use cases, take a look at our [notebook collection](https://huggingface.co/spaces/PEFT/soft-prompting)!
+There are two categories of prompting methods:
 
-This guide will show you how to train a causal language model - with a soft prompting method - to *generate a classification* for whether a tweet is a complaint or not.
+- hard prompts are manually handcrafted text prompts with discrete input tokens; the downside is that it requires a lot of effort to create a good prompt
+- soft prompts are learnable tensors concatenated with the input embeddings that can be optimized to a dataset; the downside is that they aren't human readable because you aren't matching these "virtual tokens" to the embeddings of a real word
+
+The PEFT library supports several types of prompting methods (p-tuning, prefix tuning, prompt tuning, ...), explore the table of contents for a full listing of soft prompt methods.
+If you're interested in applying these methods to other tasks and use cases, take a look at our [notebook collection](https://huggingface.co/spaces/PEFT/soft-prompting)!
 
 > [!TIP]
 > Some familiarity with the general process of training a causal language model would be really helpful and allow you to focus on the soft prompting methods. If you're new, we recommend taking a look at the [Causal language modeling](https://huggingface.co/docs/transformers/tasks/language_modeling) guide first from the Transformers documentation. When you're ready, come back and see how easy it is to drop PEFT in to your training!
+
+
+
 
 
 

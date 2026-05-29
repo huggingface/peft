@@ -16,6 +16,11 @@ rendered properly in your Markdown viewer.
 
 # Prompt tuning
 
+<div class="flex justify-center">
+    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/prompt-tuning.png"/>
+</div>
+<small>Only train and store a significantly smaller set of task-specific prompt parameters <a href="https://hf.co/papers/2104.08691">(image source)</a>.</small>
+
 [Prompt tuning](https://hf.co/papers/2104.08691) adds a task-specific, virtual prompt to the input that consists of trainable vectors in the embedding space. The virtual token parameters are updated independently of the pretrained model parameters which are frozen.
 
 The abstract from the paper is:

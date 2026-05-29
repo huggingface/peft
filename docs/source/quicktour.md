@@ -28,36 +28,7 @@ For any PEFT method, you'll need to create a configuration which contains all th
 > [!TIP]
 > Call the [`~PeftModel.print_trainable_parameters`] method to compare the number of trainable parameters of [`PeftModel`] versus the number of parameters in the base model!
 
-<hfoptions id="configurations">
-<hfoption id="p-tuning">
-</hfoption>
-<hfoption id="prefix tuning">
 
-</hfoption>
-<hfoption id="prompt tuning">
-
-[Prompt tuning](../conceptual_guides/prompting#prompt-tuning) formulates all tasks as a *generation* task and it adds a task-specific prompt to the input which is updated independently. The `prompt_tuning_init_text` parameter specifies how to finetune the model (in this case, it is classifying whether tweets are complaints or not). For the best results, the `prompt_tuning_init_text` should have the same number of tokens that should be predicted. To do this, you can set `num_virtual_tokens` to the number of tokens of the `prompt_tuning_init_text`.
-
-Create a [`PromptTuningConfig`] with the task type, the initial prompt tuning text to train the model with, the number of virtual tokens to add and learn, and a tokenizer.
-
-```py
-from peft import PromptTuningConfig, PromptTuningInit, get_peft_model
-
-prompt_tuning_init_text = "Classify if the tweet is a complaint or no complaint.\n"
-peft_config = PromptTuningConfig(
-    task_type="CAUSAL_LM",
-    prompt_tuning_init=PromptTuningInit.TEXT,
-    num_virtual_tokens=len(tokenizer(prompt_tuning_init_text)["input_ids"]),
-    prompt_tuning_init_text=prompt_tuning_init_text,
-    tokenizer_name_or_path="bigscience/bloomz-560m",
-)
-model = get_peft_model(model, peft_config)
-model.print_trainable_parameters()
-"trainable params: 8,192 || all params: 559,222,784 || trainable%: 0.0014648902430985358"
-```
-
-</hfoption>
-</hfoptions>
 
 
 ## Train

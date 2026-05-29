@@ -9,8 +9,6 @@
 
 - title: PEFT method guides
   sections:
-  - local: task_guides/prompt_based_methods
-    title: Prompt-based methods
   - local: task_guides/lora_based_methods
     title: LoRA methods
   - local: task_guides/ia3
@@ -49,14 +47,15 @@
   - local: developer_guides/checkpoint
     title: PEFT checkpoint format
 
-
+- title: Methods
+  sections:
+    - local: methods/overview
+      title: Overview
 
 - title: Conceptual guides
   sections:
   - local: conceptual_guides/adapter
     title: Adapters
-  - local: conceptual_guides/prompting
-    title: Soft prompts
   - local: conceptual_guides/ia3
     title: IA3
   - local: conceptual_guides/oft

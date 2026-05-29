@@ -22,6 +22,30 @@ The abstract from the paper is:
 
 *Prompt tuning, in which a base pretrained model is adapted to each task via conditioning on learned prompt vectors, has emerged as a promising approach for efficiently adapting large language models to multiple downstream tasks. However, existing methods typically learn soft prompt vectors from scratch, and it has not been clear how to exploit the rich cross-task knowledge with prompt vectors in a multitask learning setting. We propose multitask prompt tuning (MPT), which first learns a single transferable prompt by distilling knowledge from multiple task-specific source prompts. We then learn multiplicative low rank updates to this shared prompt to efficiently adapt it to each downstream target task. Extensive experiments on 23 NLP datasets demonstrate that our proposed approach outperforms the state-of-the-art methods, including the full finetuning baseline in some cases, despite only tuning 0.035% as many task-specific parameters*.
 
+<div class="flex justify-center">
+    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/mpt.png"/>
+</div>
+<small><a href="https://hf.co/papers/2303.02861">Multitask prompt tuning enables parameter-efficient transfer learning</a>.</small>
+
+MPT consists of two stages:
+
+1. source training - for each task, its soft prompt is decomposed into task-specific vectors. The task-specific vectors are multiplied together to form another matrix W, and the Hadamard product is used between W and a shared prompt matrix P to generate a task-specific prompt matrix. The task-specific prompts are distilled into a single prompt matrix that is shared across all tasks. This prompt is trained with multitask training.
+2. target adaptation - to adapt the single prompt for a target task, a target prompt is initialized and expressed as the Hadamard product of the shared prompt matrix and the task-specific low-rank prompt matrix.
+
+<div class="flex justify-center">
+    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/mpt-decomposition.png"/>
+</div>
+<small><a href="https://hf.co/papers/2103.10385">Prompt decomposition</a>.</small>
+
+## Benchmark overview
+
+There is no benchmark for MPT yet. Feel free to contribute an experiment
+configuration but make sure to first create an issue
+[here](https://github.com/huggingface/peft/issues).
+
+
+# API
+
 ## MultitaskPromptTuningConfig
 
 [[autodoc]] tuners.multitask_prompt_tuning.config.MultitaskPromptTuningConfig
