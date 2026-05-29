@@ -563,7 +563,7 @@ def convert_peft_adapter_state_dict_for_transformers(
         ):
             # Key should probably not have been renamed but we might need the `prefix` to be added.
             renamed_key, source_pattern = rename_source_key(
-                original_key, [], [], prefix=prefix, meta_state_dict=adapter_state_dict
+                original_key, [], [], prefix, adapter_state_dict
             )
 
         if source_pattern is not None:
