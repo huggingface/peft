@@ -52,7 +52,7 @@ RUN \
     # Add eetq for quantization testing; needs to run without build isolation since the setup
     # script directly imports torch from the environment which would fail with isolation.
     # Ninja should speed up build time.
-    conda run -n peft pip install ninja && conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
+    conda run -n peft pip install ninja kernels && conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
 
 # TODO: Importing TE results in: undefined symbol: cublasLtGroupedMatrixLayoutInit_internal, version libcublasLt.so.13
 # Reinstate TE when the issue is resolved (probably this one: https://github.com/NVIDIA/TransformerEngine/issues/2504)

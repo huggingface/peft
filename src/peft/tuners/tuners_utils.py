@@ -209,8 +209,13 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
         # GPT-QModel quantized linears
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "EetqLinear":
-        # Eetq layers
-        in_features, out_features = module.in_features, module.out_features
+        if hasattr(module, "in_features"):
+            # Eetq layers
+            in_features, out_features = module.in_features, module.out_features
+        else:
+            # Transformers Eetq layers
+            # https://github.com/huggingface/transformers/blob/c220ea9ecee9231927a47d97a63d5604a09d4c63/src/transformers/integrations/eetq.py#L74
+            in_features, out_features = module.weight.shape
     elif hasattr(module, "W_q") and module.__class__.__name__ == "HQQLinear":
         # HQQ layers
         in_features, out_features = module.in_features, module.out_features

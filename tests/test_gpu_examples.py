@@ -4235,12 +4235,6 @@ class PeftEetqGPUTests(unittest.TestCase):
         assert torch.isfinite(output.logits).all()
         model.train(training)
 
-    @pytest.mark.xfail(
-        reason="EETQ is not yet supported by Transformers v5",
-        condition=is_transformers_ge_v5,
-        strict=True,
-        raises=NotImplementedError,
-    )
     @pytest.mark.single_gpu_tests
     def test_causal_lm_training_eetq(self):
         r"""
@@ -4296,12 +4290,6 @@ class PeftEetqGPUTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
-    @pytest.mark.xfail(
-        reason="EETQ is not yet supported by Transformers v5",
-        condition=is_transformers_ge_v5,
-        strict=True,
-        raises=NotImplementedError,
-    )
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
     def test_causal_lm_training_multi_gpu_eetq(self):
