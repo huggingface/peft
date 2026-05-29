@@ -135,6 +135,26 @@ class TestFrod:
         assert not any(".model.lin1.frod_V" in key for key in keys)
         assert not any("frod_U" in key for key in keys)
 
+    def test_frod_default_initialization_reconstructs_base_weight(self, mlp):
+        torch.manual_seed(0)
+        mlp.eval()
+        inputs = torch.randn(5, 10)
+        expected = mlp(inputs)
+
+        config = FrodConfig(target_modules=["lin1", "lin2"])
+        peft_model = get_peft_model(mlp, config)
+        peft_model.eval()
+
+        actual = peft_model(inputs)
+        assert torch.allclose(actual, expected, atol=1e-4, rtol=1e-4)
+
+        for module in (peft_model.base_model.model.lin1, peft_model.base_model.model.lin2):
+            delta_weight = module.get_delta_weight("default")
+
+            assert module.frod_lambda_l["default"].norm() > 0
+            assert torch.count_nonzero(module.frod_lambda_s_values["default"]) == 0
+            assert torch.allclose(delta_weight, torch.zeros_like(delta_weight), atol=1e-4)
+
     def test_frod_projection_buffers_share_memory_with_layers(self, mlp_same_prng):
         frod_V_lin1 = mlp_same_prng.base_model.frod_V["lin1"]["default"]
         frod_s_indices_lin1 = mlp_same_prng.base_model.frod_s_indices["lin1"]["default"]

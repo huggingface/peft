@@ -46,6 +46,7 @@ class FrodLayer(BaseTunerLayer):
 
         self._disable_adapters = False
         self.merged_adapters = []
+        self._frod_merged_delta = {}
 
         self.in_features, self.out_features = _get_in_out_features(self.get_base_layer())
         self.kwargs = kwargs
@@ -103,24 +104,23 @@ class FrodLayer(BaseTunerLayer):
         else:
             # PEFT convention: init_weights=False should produce a non-identity adapter for merge tests.
             with torch.no_grad():
-                nn.init.normal_(self.frod_lambda_s_values[adapter_name], std=0.02)
-                self.frod_lambda_l[adapter_name].add_(torch.randn_like(self.frod_lambda_l[adapter_name]) * 0.02)
+                nn.init.normal_(self.frod_lambda_s_values[adapter_name], std=0.05)
+                self.frod_lambda_l[adapter_name].add_(torch.randn_like(self.frod_lambda_l[adapter_name]) * 0.05)
 
         self.frod_U[adapter_name] = U.cpu()
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
     def _calculate_frod_u_and_lambda(self, V, W):
-        w = W.detach().to(torch.float32).cpu()
-        v = V.detach().to(torch.float32).cpu()
+        w = W.detach().to(torch.float64).cpu()
+        v = V.detach().to(torch.float64).cpu()
         try:
-            v_inv_T = torch.linalg.inv(v).T
+            bi = torch.linalg.solve(v, w.T).T
         except RuntimeError:
-            v_inv_T = torch.linalg.pinv(v, rtol=1e-6).T
-        bi = w @ v_inv_T
+            bi = w @ torch.linalg.pinv(v, rtol=1e-6).T
         lambda_l = torch.linalg.norm(bi, dim=0)
         u = torch.zeros_like(bi)
-        nonzero = lambda_l > 1e-8
+        nonzero = lambda_l > 1e-12
         u[:, nonzero] = bi[:, nonzero] / lambda_l[nonzero]
         return u.float(), lambda_l.float()
 
@@ -128,9 +128,6 @@ class FrodLayer(BaseTunerLayer):
         if adapter_name in self.frod_lambda_s_values:
             with torch.no_grad():
                 nn.init.zeros_(self.frod_lambda_s_values[adapter_name])
-        if adapter_name in self.frod_lambda_l:
-            with torch.no_grad():
-                nn.init.zeros_(self.frod_lambda_l[adapter_name])
 
 
 class Linear(nn.Linear, FrodLayer):
@@ -158,19 +155,22 @@ class Linear(nn.Linear, FrodLayer):
         if not adapter_names:
             return
 
+        base_layer = self.get_base_layer()
+        base_weight = base_layer.weight.data.clone()
         for active_adapter in adapter_names:
             if active_adapter in self.frod_lambda_l.keys():
-                base_layer = self.get_base_layer()
+                delta_weight = self._get_delta_weight(active_adapter, base_weight=base_weight)
                 if safe_merge:
                     orig_weights = base_layer.weight.data.clone()
-                    orig_weights += self.get_delta_weight(active_adapter)
+                    orig_weights += delta_weight
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
                     base_layer.weight.data = orig_weights
                 else:
-                    base_layer.weight.data += self.get_delta_weight(active_adapter)
+                    base_layer.weight.data += delta_weight
+                self._frod_merged_delta[active_adapter] = delta_weight
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -181,12 +181,19 @@ class Linear(nn.Linear, FrodLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.frod_lambda_l.keys():
-                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
+                delta_weight = self._frod_merged_delta.pop(active_adapter, None)
+                if delta_weight is None:
+                    delta_weight = self.get_delta_weight(active_adapter)
+                self.get_base_layer().weight.data -= delta_weight
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
-        weight = self.get_base_layer().weight
+        return self._get_delta_weight(adapter)
+
+    def _get_delta_weight(self, adapter, base_weight: Optional[torch.Tensor] = None) -> torch.Tensor:
+        weight = self.get_base_layer().weight if base_weight is None else base_weight
         device = weight.device
         dtype = weight.dtype
+        base_weight = transpose(weight, self.fan_in_fan_out)
         U = self.frod_U[adapter].to(device=device, dtype=dtype)
         V = self.frod_V[adapter].to(device=device, dtype=dtype)
         indices = self.frod_s_indices[adapter].to(device=U.device, dtype=torch.long)
@@ -197,8 +204,11 @@ class Linear(nn.Linear, FrodLayer):
         S_sparse = torch.sparse_coo_tensor(indices, values, size).coalesce()
         S = S_sparse.to_dense()
         L = torch.diag_embed(lambda_l)
+        frod_weight = U @ (S + L) @ V.T
 
-        return transpose(U @ (S + L).T @ V.T, self.fan_in_fan_out)
+        # FRoD parameterizes the adapted weight itself. Return only the difference so PEFT merge/unmerge and
+        # disable-adapter behavior preserve the base model while the active adapter still replaces the base weight.
+        return transpose(frod_weight - base_weight, self.fan_in_fan_out)
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
@@ -230,7 +240,8 @@ class Linear(nn.Linear, FrodLayer):
                 h_flat = h.reshape(-1, h.shape[-1])
                 z_flat = torch.matmul(h_flat, V)
 
-                # This block computes the sparse FRoD update z @ S with torch.sparse.mm.
+                # This block computes the sparse FRoD update z @ S.T with torch.sparse.mm, matching
+                # F.linear(h, U @ (S + diag(lambda_l)) @ V.T).
                 # CUDA sparse fp16/bf16 kernels are less reliable, so use fp32 here and cast the update back below.
                 matmul_dtype = z_flat.dtype
                 if z_flat.is_cuda and matmul_dtype in (torch.float16, torch.bfloat16):
@@ -241,7 +252,7 @@ class Linear(nn.Linear, FrodLayer):
                 S_sparse = torch.sparse_coo_tensor(indices, values, size).coalesce()
                 if S_sparse.dtype != matmul_dtype:
                     S_sparse = S_sparse.to(dtype=matmul_dtype)
-                z_S_flat = torch.sparse.mm(S_sparse.t(), z_flat_mm.t()).t()
+                z_S_flat = torch.sparse.mm(S_sparse, z_flat_mm.t()).t()
 
                 lambda_l = lambda_l.to(device=z_flat.device, dtype=matmul_dtype)
                 z_L_flat = z_flat_mm * lambda_l
@@ -250,8 +261,12 @@ class Linear(nn.Linear, FrodLayer):
                 out_add_flat = F.linear(z_S_flat + z_L_flat, U_mm)
                 out_add_flat = out_add_flat.to(target_dtype)
                 out_add = out_add_flat.reshape(*batch_shape, out_add_flat.shape[-1])
+                base_weight = transpose(self.get_base_layer().weight, self.fan_in_fan_out).to(
+                    device=x.device, dtype=target_dtype
+                )
+                base_out = F.linear(x, base_weight)
 
-                result = result + out_add
+                result = result - base_out + out_add
 
         result = result.to(previous_dtype)
         return result
