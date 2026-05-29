@@ -11,8 +11,6 @@
   sections:
   - local: task_guides/lora_based_methods
     title: LoRA methods
-  - local: task_guides/ia3
-    title: IA3
 
 - title: Guides
   sections:
@@ -56,8 +54,6 @@
   sections:
   - local: conceptual_guides/adapter
     title: Adapters
-  - local: conceptual_guides/ia3
-    title: IA3
   - local: conceptual_guides/oft
     title: OFT/BOFT
 
