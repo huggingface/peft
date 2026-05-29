@@ -121,8 +121,6 @@ def get_peft_model_state_dict(
     if state_dict is None:
         state_dict = model.state_dict()
 
-    state_dict = _filter_state_dict_for_adapter_name(state_dict, adapter_name)
-
     # If model was sharded with TP, gather full tensors for saving
     tp_info = _get_tp_info(model)
     if tp_info is not None:
@@ -405,6 +403,7 @@ def get_peft_model_state_dict(
         else:
             save_embedding_layers = False
 
+    state_dict_embedding: dict[str, torch.Tensor] = {}
     if save_embedding_layers and hasattr(model, "get_input_embeddings"):
         for layer in [model.get_input_embeddings(), model.get_output_embeddings()]:
             # Either the layer is not targeted, then it must have been resized and needs saving. Or it is targeted and
@@ -412,9 +411,22 @@ def get_peft_model_state_dict(
             if not embedding_is_targeted or has_valid_embedding_base_layer(layer):
                 embedding_module_name = get_embedding_layer_name(model, layer, embedding_is_targeted)
                 if embedding_module_name:
-                    to_return.update({k: v for k, v in state_dict.items() if embedding_module_name in k})
+                    state_dict_embedding.update({k: v for k, v in state_dict.items() if embedding_module_name in k})
     elif save_embedding_layers:
         warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
+
+    # FILTER FOR ADAPTER NAME
+    if not config.is_prompt_learning:
+        # Prompt learning methods don't support multiple adapters and hence don't have the adapter name in the Parameter
+        # name.
+        to_return_filtered_for_adapter_name = _filter_state_dict_for_adapter_name(state_dict, adapter_name)
+        if len(to_return_filtered_for_adapter_name) > 0:
+            # If, after filtering the state dict for the adapter name, we end up with an empty state dict, it means that
+            # the adapter weights are not stored with the adapter name as suffix. This can happen e.g. for adaption
+            # prompt (which is not a prompt learning method).
+            to_return = to_return_filtered_for_adapter_name
+
+    to_return.update(state_dict_embedding)
 
     # REMOVE ADAPTER NAME
     # Ensure not to replace in the middle of the key because a module happens to have the same name as the adapter.
