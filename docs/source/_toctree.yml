@@ -7,13 +7,6 @@
   - local: install
     title: Installation
 
-- title: Tutorial
-  sections:
-  - local: tutorial/peft_model_config
-    title: Configurations and models
-  - local: tutorial/peft_integrations
-    title: Integrations
-
 - title: PEFT method guides
   sections:
   - local: task_guides/prompt_based_methods
@@ -23,8 +16,18 @@
   - local: task_guides/ia3
     title: IA3
 
-- title: Developer guides
+- title: Guides
   sections:
+  - local: guides/peft_model_config
+    title: Configurations and models
+  - local: guides/peft_integrations
+    title: Integrations
+  - sections:
+    - local: accelerate/deepspeed
+      title: DeepSpeed
+    - local: accelerate/fsdp
+      title: Fully Sharded Data Parallel
+    title: Distributed Training
   - local: developer_guides/model_merging
     title: Model merging
   - local: developer_guides/quantization
@@ -36,7 +39,7 @@
   - local: developer_guides/low_level_api
     title: Adapter injection
   - local: developer_guides/mixed_models
-    title: Mixed adapter types
+    title: Mixing PEFT methods
   - local: developer_guides/torch_compile
     title: torch.compile
   - local: developer_guides/contributing
@@ -46,12 +49,7 @@
   - local: developer_guides/checkpoint
     title: PEFT checkpoint format
 
-- title: 🤗 Accelerate integrations
-  sections:
-  - local: accelerate/deepspeed
-    title: DeepSpeed
-  - local: accelerate/fsdp
-    title: Fully Sharded Data Parallel
+
 
 - title: Conceptual guides
   sections:

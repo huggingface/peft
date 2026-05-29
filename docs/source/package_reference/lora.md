@@ -94,3 +94,14 @@ The abstract from the paper is:
 ## Intruder Dimension Reduction
 
 [[autodoc]] tuners.lora.intruders.reduce_intruder_dimension
+
+
+## Benchmark overview
+
+<iframe
+	src="https://hubnemo-peft-method-comparison-individual.hf.space/?highlight[type]=LORA"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
+

@@ -16,9 +16,16 @@ rendered properly in your Markdown viewer.
 
 # PEFT
 
-🤗 PEFT (Parameter-Efficient Fine-Tuning) is a library for efficiently adapting large pretrained models to various downstream applications without fine-tuning all of a model's parameters because it is prohibitively costly. PEFT methods only fine-tune a small number of (extra) model parameters - significantly decreasing computational and storage costs - while yielding performance comparable to a fully fine-tuned model. This makes it more accessible to train and store large language models (LLMs) on consumer hardware.
+🤗 PEFT (Parameter-Efficient Fine-Tuning) is a library for efficiently adapting large pretrained models to various downstream applications without fine-tuning all of a model's parameters because it is prohibitively costly. PEFT methods only fine-tune a small number of (extra) model parameters - significantly decreasing computational and storage costs - while yielding performance comparable to a fully fine-tuned model. This makes it more accessible to train and store large language models (LLMs) and other big models on consumer hardware.
 
 PEFT is integrated with the Transformers, Diffusers, and Accelerate libraries to provide a faster and easier way to load, train, and use large models for inference.
+
+<div class="flex justify-center">
+  <div class="flex flex-col basis-1/4">
+    There are numerous methods to "adapt" existing models, often extensively integrating into the model. PEFT can be thought of as a framework for arbitrary methods of model adaption (modifying weights, wrapping layers, manipulating KV-caches, ...) while also serving as a reference implementation for many fine-tuning methods.
+  </div>
+  <div class="flex flex-col basis-3/4 pl-10 pr-10"><img src="/docs/adapter_installation.svg" width="100%"></div>
+</div>
 
 <div class="mt-10">
   <div class="w-full flex flex-col space-y-4 md:space-y-0 md:grid md:grid-cols-2 md:gap-y-4 md:gap-x-5">
