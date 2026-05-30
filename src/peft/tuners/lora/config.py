@@ -772,7 +772,8 @@ class LoraConfig(PeftConfig):
                 "The configuration of Monteclora (Monte Carlo Low-Rank Adaptation). If passed, Monteclora will be "
                 "used to add variational Monte Carlo sampling on top of the LoRA adapters. See `MontecloraConfig` "
                 "for details on the individual hyperparameters."
-            )
+            ),
+            "is_lora_variant": True,
         },
     )
     # Enables replicating layers in a model to expand it to a larger model.

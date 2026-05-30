@@ -838,6 +838,7 @@ class Linear(nn.Module, LoraLayer):
             ("use_bdlora",): variants.BdLoraLinearVariant,
             ("alora_invocation_tokens",): variants.ALoraLinearVariant,
             ("velora_config",): variants.VeloraLinearVariant,
+            ("monteclora_config",): variants.MontecloraLinearVariant,
         }
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
