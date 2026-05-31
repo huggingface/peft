@@ -56,6 +56,7 @@ from peft import (
     PsoftConfig,
     RoadConfig,
     VBLoRAConfig,
+    VeloraConfig,
     VeraConfig,
     WaveFTConfig,
     get_peft_model,
@@ -1832,6 +1833,25 @@ class TestVeraInitialization:
         msg = f"vera_A has a size of {rank0} but {rank1} or greater is required"
         with pytest.raises(ValueError, match=msg):
             model.add_adapter("other", config1)
+
+
+class TestVeloraInitialization:
+    @pytest.mark.parametrize(
+        "config_kwargs, msg",
+        [
+            pytest.param({"num_groups": 0}, "`num_groups` should be positive, got 0.", id="num-groups"),
+            pytest.param({"scale": 0.0}, "`scale` should be positive, got 0.0.", id="scale"),
+            pytest.param(
+                {"init_type": "unsupported"},
+                "Unsupported `init_type` 'unsupported'. Supported values are 'batch_average_once', "
+                "'batch_average', and 'random'.",
+                id="init-type",
+            ),
+        ],
+    )
+    def test_velora_config_invalid_values_raise(self, config_kwargs, msg):
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            VeloraConfig(**config_kwargs)
 
 
 class TestVBLoraInitialization:
@@ -4223,6 +4243,48 @@ class TestHotSwapping:
                 assert param.shape[0] == new_rank
             elif "lora_B" in name:
                 assert param.shape[1] == new_rank
+
+    @pytest.mark.parametrize("previous_requires_grad", [False, True])
+    def test_prepare_model_for_compiled_hotswap_conserves_requires_grad(self, previous_requires_grad):
+        # check that preparing the LoRA weights does not change requires_grad
+        old_rank = 8
+        target_rank = old_rank + 1
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=old_rank)
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        # set requires_grad of LoRA weights
+        for name, param in model.named_parameters():
+            if "lora_" in name:
+                param.requires_grad_(previous_requires_grad)
+
+        prepare_model_for_compiled_hotswap(model, target_rank=target_rank)
+
+        # check requires_grad of LoRA weights
+        for name, param in model.named_parameters():
+            if "lora_" in name:
+                assert param.requires_grad is previous_requires_grad
+
+    @pytest.mark.parametrize("previous_requires_grad", [False, True])
+    def test_prepare_model_for_compiled_hotswap_conv2d_conserves_requires_grad(self, previous_requires_grad):
+        # check that preparing the LoRA weights does not change requires_grad
+        old_rank = 8
+        target_rank = old_rank + 1
+        config = LoraConfig(target_modules=["conv"], r=old_rank)
+        model = self.get_model_conv2d()
+        model = get_peft_model(model, config)
+
+        # set requires_grad of LoRA weights
+        for name, param in model.named_parameters():
+            if "lora_" in name:
+                param.requires_grad_(previous_requires_grad)
+
+        prepare_model_for_compiled_hotswap(model, target_rank=target_rank)
+
+        # check requires_grad of LoRA weights
+        for name, param in model.named_parameters():
+            if "lora_" in name:
+                assert param.requires_grad is previous_requires_grad
 
     def test_prepare_model_for_compiled_hotswap_model_already_compiled_raises(self):
         config = LoraConfig(target_modules=["lin0"])

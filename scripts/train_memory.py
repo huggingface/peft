@@ -162,7 +162,7 @@ def train(model_id, rank, dtype, monitor_tensors, max_seq_length, batch_size, ma
     losses = []
     sample = 0
     tic_total = time.perf_counter()
-    for i in range(0, max_steps):
+    for i in range(max_steps):
         storage.clear()
         tic = time.perf_counter()
         try:

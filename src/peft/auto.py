@@ -96,7 +96,7 @@ class _BaseAutoPeftModel:
         import_allowlist: Optional[list[str]] = None,
         **kwargs,
     ):
-        rf"""
+        r"""
         A wrapper around all the preprocessing steps a user needs to perform in order to load a PEFT model. The kwargs
         are passed along to `PeftConfig` that automatically takes care of filtering the kwargs of the Hub methods and
         the config object init.

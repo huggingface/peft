@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,7 +19,14 @@ import pytest
 import torch
 from diffusers import StableDiffusionPipeline
 from torch import nn
-from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoModelForSequenceClassification
+from transformers import (
+    AutoModel,
+    AutoModelForCausalLM,
+    AutoModelForSeq2SeqLM,
+    AutoModelForSequenceClassification,
+    CLIPTextModel,
+    CLIPTextModelWithProjection,
+)
 
 from peft import (
     AdaLoraConfig,
@@ -427,6 +431,74 @@ class TestInjectAdapterFromStateDict:
             assert sd_before.keys() == sd_after.keys()
             for key in sd_before.keys():
                 assert sd_before[key].shape == sd_after[key].shape
+
+    def test_inject_from_state_dict_low_cpu_mem_usage_with_weight_conversion(self):
+        # Tests if we can inject LoRA state dict with low_cpu_mem_usage for a model that uses Transformers weight
+        # conversion. This checks a regression reported by Sayak of this Diffusers test:
+        # tests/lora/test_lora_layers_flux.py::FluxLoRATests::test_low_cpu_mem_usage_with_injection
+        config = LoraConfig(target_modules=["q_proj", "v_proj"])
+        # must be a model with `get_checkpoint_conversion_mapping(model_type) != None`
+        model_id = "peft-internal-testing/tiny-clip-text-2"
+
+        with hub_online_once(model_id):
+            model = CLIPTextModel.from_pretrained(model_id)
+            inject_adapter_in_model(config, model, low_cpu_mem_usage=True)
+            assert all(p.device.type == "meta" for n, p in model.named_parameters() if "lora." in n)
+
+            state_dict = get_peft_model_state_dict(model)
+            state_dict_no_meta = {k: torch.randn(v.shape, dtype=v.dtype) for k, v in state_dict.items()}
+            set_peft_model_state_dict(model, state_dict_no_meta, low_cpu_mem_usage=True)
+            assert not any(p.device.type == "meta" for p in model.parameters())
+
+    def test_inject_from_state_dict_model_with_weight_conversion(self):
+        # similar test to test_inject_from_state_dict_low_cpu_mem_usage_with_weight_conversion but without
+        # low_cpu_mem_usage
+        config = LoraConfig(target_modules=["q_proj", "v_proj"])
+        # must be a model with `get_checkpoint_conversion_mapping(model_type) != None`
+        model_id = "peft-internal-testing/tiny-clip-text-2"
+
+        with hub_online_once(model_id):
+            model = CLIPTextModel.from_pretrained(model_id)
+            inject_adapter_in_model(config, model)
+            # sanity check:
+            assert (model.encoder.layers[0].self_attn.v_proj.lora_B.default.weight == 0).all()
+
+            state_dict = get_peft_model_state_dict(model)
+            state_dict = {k: torch.ones_like(v) * 555 for k, v in state_dict.items()}
+            load_result = set_peft_model_state_dict(model, state_dict)
+
+            assert not load_result.unexpected_keys
+            # base model weights may be missing, but LoRA weights should never be missing
+            assert not any("lora" in k for k in load_result.missing_keys)
+
+            # sanity check:
+            assert (model.encoder.layers[0].self_attn.v_proj.lora_B.default.weight == 555).all()
+
+    def test_prefix_removal_is_undone(self):
+        # See discussion starting here: https://github.com/huggingface/peft/pull/3212#issuecomment-4402677775.
+        # For some models like CLIPTextModelWithProjection, transformers would add a removal of the 'text_model.' prefix
+        # to the conversions, but this removal is incorrect. Therefore, there is a logic in transformers to undo the
+        # removal if there is not entry in the state_dict for the renamed key. This logic was missing in PEFT, resulting
+        # in missing and unexpected keys.
+        config = LoraConfig(target_modules=["q_proj", "v_proj"])
+        model_id = "peft-internal-testing/tiny-clip-text-2"
+
+        with hub_online_once(model_id):
+            model = CLIPTextModelWithProjection.from_pretrained(model_id)
+            inject_adapter_in_model(config, model)
+            # sanity check:
+            assert (model.text_model.encoder.layers[0].self_attn.v_proj.lora_B.default.weight == 0).all()
+
+            state_dict = get_peft_model_state_dict(model)
+            state_dict = {k: torch.ones_like(v) * 555 for k, v in state_dict.items()}
+            load_result = set_peft_model_state_dict(model, state_dict)
+
+            assert not load_result.unexpected_keys
+            # base model weights may be missing, but LoRA weights should never be missing
+            assert not any("lora" in k for k in load_result.missing_keys)
+
+            # sanity check:
+            assert (model.text_model.encoder.layers[0].self_attn.v_proj.lora_B.default.weight == 555).all()
 
 
 class TestPeftStateDict:

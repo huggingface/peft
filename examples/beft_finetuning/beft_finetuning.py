@@ -13,16 +13,16 @@ from transformers import (
 from peft import BeftConfig, get_peft_model
 
 
-ds = load_dataset("financial_phrasebank", "sentences_allagree", trust_remote_code=True)
+ds = load_dataset("gtfintechlab/financial_phrasebank_sentences_allagree", "5768")
 ds = ds["train"].train_test_split(test_size=0.1)
 ds["validation"] = ds["test"]
 del ds["test"]
 
-classes = ds["train"].features["label"].names
+classes = ["negative", "neutral", "positive"]
+# Keep map in-process; num_proc=1 still uses multiprocessing and can trigger dill issues on some Python versions.
 ds = ds.map(
     lambda x: {"text_label": [classes[label] for label in x["label"]]},
     batched=True,
-    num_proc=1,
 )
 
 text_column = "sentence"
@@ -46,7 +46,6 @@ def preprocess_function(examples):
 processed_ds = ds.map(
     preprocess_function,
     batched=True,
-    num_proc=1,
     remove_columns=ds["train"].column_names,
     load_from_cache_file=False,
     desc="Running tokenizer on dataset",
@@ -81,7 +80,13 @@ lr_scheduler = get_linear_schedule_with_warmup(
     num_training_steps=(len(train_dataloader) * num_epochs),
 )
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = (
+    torch.accelerator.current_accelerator().type
+    if hasattr(torch, "accelerator")
+    else "cuda"
+    if torch.cuda.is_available()
+    else "cpu"
+)
 model = model.to(device)
 
 for epoch in range(num_epochs):

@@ -116,7 +116,7 @@ class TrainConfig:
 
     def __post_init__(self) -> None:
         if not isinstance(self.model_id, str):
-            raise ValueError(f"Invalid model_id: {self.model_id}")
+            raise TypeError(f"Invalid model_id: {self.model_id}")
         if self.dtype not in ["float32", "float16", "bfloat16", "int8", "int4"]:
             raise ValueError(f"Invalid dtype: {self.dtype}")
         if self.max_seq_length < 0:
@@ -522,7 +522,7 @@ def get_git_hash(module) -> Optional[str]:
     if "site-packages" in module.__path__[0]:
         return None
 
-    return subprocess.check_output("git rev-parse HEAD".split(), cwd=os.path.dirname(module.__file__)).decode().strip()
+    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=os.path.dirname(module.__file__)).decode().strip()
 
 
 def get_package_info() -> dict[str, Optional[str]]:
@@ -574,7 +574,7 @@ def get_meta_info() -> MetaInfo:
 
 def get_peft_branch() -> str:
     return (
-        subprocess.check_output("git rev-parse --abbrev-ref HEAD".split(), cwd=os.path.dirname(peft.__file__))
+        subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=os.path.dirname(peft.__file__))
         .decode()
         .strip()
     )

@@ -231,7 +231,7 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
 
 
 # copied from transformers.models.bart.modeling_bart
-def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start_token_id: int):
+def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start_token_id: int) -> torch.Tensor:
     """
     Shift input ids one token to the right.
 
@@ -971,7 +971,7 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         return set(self.token_adapter.trainable_tokens_delta.keys())
 
 
-def _get_input_embeddings_name(model, default=None):
+def _get_input_embeddings_name(model: torch.nn.Module, default: Optional[str] = None) -> Optional[str]:
     if not hasattr(model, "get_input_embeddings"):
         return default
 
@@ -983,14 +983,16 @@ def _get_input_embeddings_name(model, default=None):
     return default
 
 
-def _get_submodules(model, key):
+def _get_submodules(model: torch.nn.Module, key: str) -> tuple[torch.nn.Module, torch.nn.Module, str]:
     parent = model.get_submodule(".".join(key.split(".")[:-1]))
     target_name = key.split(".")[-1]
     target = model.get_submodule(key)
     return parent, target, target_name
 
 
-def _get_submodules_with_grandparent(model, key):
+def _get_submodules_with_grandparent(
+    model: torch.nn.Module, key: str
+) -> tuple[torch.nn.Module, Optional[torch.nn.Module], torch.nn.Module, str]:
     parent = model.get_submodule(".".join(key.split(".")[:-1]))
     try:
         grandparent = model.get_submodule(".".join(key.split(".")[:-2]))
@@ -1002,7 +1004,7 @@ def _get_submodules_with_grandparent(model, key):
     return parent, grandparent, target, target_name
 
 
-def _freeze_adapter(model, adapter_name):
+def _freeze_adapter(model: torch.nn.Module, adapter_name: str) -> None:
     for n, p in model.named_parameters():
         if adapter_name in n:
             p.requires_grad = False
@@ -1116,9 +1118,6 @@ def _prepare_prompt_learning_config(peft_config, model_config):
     orig_model_config = model_config
     if hasattr(model_config, "to_dict"):
         model_config = model_config.to_dict()
-    else:
-        model_config = model_config
-
     # In case of VLM we focus on the language model portion of the model.
     if "text_config" in model_config:
         model_config = model_config["text_config"]
@@ -1163,11 +1162,19 @@ def _prepare_prompt_learning_config(peft_config, model_config):
 
     # For grouped-query attention, see #1901.
     if (peft_config.peft_type in {"PREFIX_TUNING", "CARTRIDGE"}) and ("num_key_value_heads" in model_config):
-        num_key_value_heads = model_config["num_key_value_heads"]
-        if model_config.get("head_dim", None) is not None:
+        # Models with heterogeneous attention (e.g. Gemma4) expose distinct shapes for global vs. sliding layers via
+        # `global_head_dim` / `num_global_key_value_heads`. Provision the prefix for the global-layer footprint; sliding
+        # layers whose KV shape doesn't match are skipped per-layer at injection time. Matches the default in
+        # google-deepmind/gemma#631.
+        if model_config.get("global_head_dim") is not None:
+            head_dim = model_config["global_head_dim"]
+            num_key_value_heads = model_config.get("num_global_key_value_heads") or model_config["num_key_value_heads"]
+        elif model_config.get("head_dim", None) is not None:
             head_dim = model_config["head_dim"]
+            num_key_value_heads = model_config["num_key_value_heads"]
         else:
             head_dim = peft_config.token_dim // peft_config.num_attention_heads
+            num_key_value_heads = model_config["num_key_value_heads"]
         peft_config.token_dim = head_dim * num_key_value_heads
         peft_config.num_attention_heads = num_key_value_heads
 
@@ -1227,18 +1234,16 @@ def fsdp_auto_wrap_policy(model):
             continue
         transformer_cls = get_module_class_from_name(model, layer_class)
         if transformer_cls is None:
-            raise Exception("Could not find the transformer layer class to wrap in the model.")
+            raise TypeError("Could not find the transformer layer class to wrap in the model.")
         else:
             transformer_cls_to_wrap.add(transformer_cls)
 
     def lambda_policy_fn(module):
-        if (
+        return (
             len(list(module.named_children())) == 0
             and getattr(module, "weight", None) is not None
             and module.weight.requires_grad
-        ):
-            return True
-        return False
+        )
 
     lambda_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=lambda_policy_fn)
     transformer_wrap_policy = functools.partial(
@@ -1250,7 +1255,7 @@ def fsdp_auto_wrap_policy(model):
     return auto_wrap_policy
 
 
-def transpose(weight, fan_in_fan_out):
+def transpose(weight: torch.Tensor, fan_in_fan_out: bool) -> torch.Tensor:
     if not fan_in_fan_out:
         return weight
 
@@ -1259,7 +1264,7 @@ def transpose(weight, fan_in_fan_out):
     return weight.T
 
 
-def _is_valid_match(key: str, target_key: str):
+def _is_valid_match(key: str, target_key: str) -> bool:
     """
     Helper function to match module names target_key and key. Makes sure that either the key is exactly the target_key
     or the target_key is a submodule of key
@@ -1392,7 +1397,7 @@ def id_tensor_storage(tensor: torch.Tensor) -> tuple[torch.device, int, int]:
     return tensor.device, unique_id, storage_size(tensor)
 
 
-def cast_mixed_precision_params(model, dtype):
+def cast_mixed_precision_params(model: torch.nn.Module, dtype: torch.dtype) -> None:
     """
     Cast all non-trainable parameters of the model to the given `dtype`. The `dtype` can be `torch.float16` or
     `torch.bfloat16` as per the mixed-precision training you are performing. The trainable parameters are cast to full
@@ -1455,7 +1460,7 @@ def check_file_exists_on_hf_hub(repo_id: str, filename: str, **kwargs) -> Option
     return exists
 
 
-def match_target_against_key(target_pattern: str, key: str):
+def match_target_against_key(target_pattern: str, key: str) -> Optional[re.Match[str]]:
     """Backing function for `target_modules` config parameter.
 
     Having this as its own function ensures that target key matching can be implemented in the same way everywhere.
@@ -1707,7 +1712,7 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     if (
         model_config is not None
         and hasattr(model_config, "tie_word_embeddings")
-        and getattr(model_config, "tie_word_embeddings") is False
+        and model_config.tie_word_embeddings is False
     ):
         return []
 

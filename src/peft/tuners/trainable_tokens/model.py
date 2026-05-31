@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-import torch.nn as nn
+from torch import nn
 
 from peft.config import PeftConfig
 from peft.tuners.tuners_utils import BaseTuner

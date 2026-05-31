@@ -47,7 +47,7 @@ def _update_scaling(lora_module, adapter_name, scaling=None):
     elif isinstance(lora_module.scaling[adapter_name], (float, int)):
         lora_module.scaling[adapter_name] = scaling
     else:
-        raise ValueError(
+        raise TypeError(
             "Something went wrong when trying to set the new scale value, expected to find the old value to be of type "
             f"float or torch.Tensor, got {type(lora_module.scaling[adapter_name])} instead."
         )
@@ -73,7 +73,7 @@ def _convert_scalings_to_tensor(model) -> bool:
                 # no need to deal with dtype as scalars are coerced
                 scaling[key] = torch.tensor(val, device=module.weight.device)
             elif not isinstance(val, torch.Tensor):
-                raise ValueError(
+                raise TypeError(
                     "Something went wrong while trying to convert the scalings, expected to find values of type float "
                     f"but found {type(val)} instead."
                 )
@@ -124,6 +124,7 @@ def _get_padded_linear(lora_module: torch.nn.Module, target_rank: int, is_lora_A
         padded = torch.zeros(out_features, target_rank, device=weight.device, dtype=weight.dtype)
         padded[:, :original_rank] = weight
         new_layer = torch.nn.Linear(target_rank, out_features, bias=lora_module.bias is not None)
+    new_layer.weight.requires_grad_(lora_module.weight.requires_grad)
 
     # Sanity check
     if new_layer.weight.shape != padded.shape:
@@ -204,6 +205,7 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
             bias=lora_module.bias is not None,
             groups=lora_module.groups,
         )
+    new_layer.weight.requires_grad_(lora_module.weight.requires_grad)
 
     # Sanity check
     if new_layer.weight.shape != padded.shape:

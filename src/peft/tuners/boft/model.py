@@ -43,17 +43,26 @@ class BOFTModel(BaseTuner):
     Returns:
         `torch.nn.Module`: The BOFT model.
 
-    Example::
+    Example:
+        ```py
+        >>> import transformers
+        >>> from peft import BOFTConfig, get_peft_model
 
-        >>> import transformers >>> from transformers import AutoModelForSeq2SeqLM, BOFTConfig >>> from peft import
-        BOFTConfig, get_peft_model
+        >>> config = BOFTConfig(
+        ...     boft_block_size=8,
+        ...     boft_n_butterfly_factor=1,
+        ...     target_modules=["query", "value", "key", "output.dense", "mlp.fc1", "mlp.fc2"],
+        ...     boft_dropout=0.1,
+        ...     bias="boft_only",
+        ...     modules_to_save=["classifier"],
+        ... )
 
-        >>> config = BOFTConfig( ... boft_block_size=8, ... boft_n_butterfly_factor=1, ... target_modules=["query",
-        "value", "key", "output.dense", "mlp.fc1", "mlp.fc2"], ... boft_dropout=0.1, ... bias="boft_only", ...
-        modules_to_save=["classifier"], ... )
-
-        >>> model = transformers.Dinov2ForImageClassification.from_pretrained( ... "facebook/dinov2-large", ...
-        num_labels=100, ... ) >>> boft_model = get_peft_model(model, config)
+        >>> model = transformers.Dinov2ForImageClassification.from_pretrained(
+        ...     "facebook/dinov2-large",
+        ...     num_labels=100,
+        ... )
+        >>> boft_model = get_peft_model(model, config)
+        ```
 
     **Attributes**:
         - **model** ([`transformers.PreTrainedModel`]) -- The model to be adapted.
@@ -108,7 +117,7 @@ class BOFTModel(BaseTuner):
         elif isinstance(target_base_layer, torch.nn.Conv2d):
             new_module = Conv2d(target, adapter_name, config=boft_config, **kwargs)
         else:
-            raise ValueError(
+            raise TypeError(
                 f"Target module {target} is not supported. "
                 "Currently, only `torch.nn.Linear` and `torch.nn.Conv2d` are supported."
             )

@@ -17,8 +17,8 @@ import warnings
 from typing import Any, Optional
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.other import is_gptqmodel_quant_linear
@@ -192,7 +192,7 @@ class OFTRotationModule(nn.Module):
         Unfold with stride=1, padding=0 to preserve spatial dimensions. Only use kernel_size from base layer to define
         patch size.
         """
-        batch_size, in_channels, in_height, in_width = x.shape
+        batch_size, _, in_height, in_width = x.shape
 
         if isinstance(self.kernel_size, int):
             kernel_height, kernel_width = self.kernel_size, self.kernel_size

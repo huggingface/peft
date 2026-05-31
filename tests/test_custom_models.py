@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -43,6 +40,7 @@ from peft import (
     FourierFTConfig,
     GloraConfig,
     GraloraConfig,
+    HiraConfig,
     HRAConfig,
     IA3Config,
     LilyConfig,
@@ -51,6 +49,7 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     MissConfig,
+    MontecloraConfig,
     OFTConfig,
     OSFConfig,
     PeanutConfig,
@@ -65,6 +64,7 @@ from peft import (
     TinyLoraConfig,
     TrainableTokensConfig,
     VBLoRAConfig,
+    VeloraConfig,
     VeraConfig,
     WaveFTConfig,
     get_peft_model,
@@ -72,6 +72,7 @@ from peft import (
 from peft.tuners import lora
 from peft.tuners.glora.layer import GloraLinear
 from peft.tuners.lora.config import BdLoraConfig
+from peft.tuners.lora.monteclora import MontecloraSampler
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
@@ -127,6 +128,27 @@ TEST_CASES = [
         "MLP",
         LoraConfig,
         {"target_modules": "lin1", "use_dora": True, "lora_alpha": 32},
+    ),
+    (
+        "Vanilla MLP 10 LoRA with VeLoRA random",
+        "MLP",
+        LoraConfig,
+        {"target_modules": ["lin0"], "velora_config": VeloraConfig(num_groups=2, init_type="random")},
+    ),
+    (
+        "Vanilla MLP 11 LoRA with VeLoRA batch_average",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0", "lin1"],
+            "velora_config": VeloraConfig(num_groups=2, init_type="batch_average"),
+        },
+    ),
+    (
+        "Vanilla MLP 12 LoRA with VeLoRA batch_average_once",
+        "MLP",
+        LoraConfig,
+        {"target_modules": ["lin0"], "velora_config": VeloraConfig(num_groups=2, init_type="batch_average_once")},
     ),
     ("Embedding + transformers Conv1D 1 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Embedding + transformers Conv1D 2 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
@@ -193,6 +215,18 @@ TEST_CASES = [
         "MLP",
         LoraConfig,
         {"target_modules": ["lin0"], "target_parameters": ["lin1.weight"]},
+    ),
+    #############
+    # MonteCLoRA #
+    #############
+    (
+        "Vanilla MLP 1 LoRA with Monteclora",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0"],
+            "monteclora_config": MontecloraConfig(num_samples=2),
+        },
     ),
     #######
     # IA³ #
@@ -1109,6 +1143,31 @@ TEST_CASES = [
         {"target_modules": ["lin0", "lin1"], "r": 2, "depth": 0, "act_fn": "relu"},
     ),
     ("Vanilla MLP 5 Peanut", "MLP", PeanutConfig, {"target_modules": "lin0", "r": 2, "depth": 1, "act_fn": "gelu"}),
+    #######
+    # HIRA #
+    #######
+    ("Vanilla MLP 1 HiRA", "MLP", HiraConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 HiRA", "MLP", HiraConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 HiRA", "MLP", HiraConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 HiRA", "MLP", HiraConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 HiRA", "MLP", HiraConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    (
+        "Vanilla MLP 6 HiRA",
+        "MLP",
+        HiraConfig,
+        {
+            "target_modules": ["lin0"],
+            "hira_dropout": 0.1,
+        },
+    ),
+    ("Embedding + transformers Conv1D 1 HiRA", "EmbConv1D", HiraConfig, {"target_modules": ["conv1d"]}),
+    ("Embedding + transformers Conv1D 2 HiRA", "EmbConv1D", HiraConfig, {"target_modules": ["emb"]}),
+    ("Embedding + transformers Conv1D 3 HiRA", "EmbConv1D", HiraConfig, {"target_modules": ["emb", "conv1d"]}),
+    ("Conv1d HiRA", "Conv1d", HiraConfig, {"target_modules": ["conv1d"]}),
+    ("Conv2d 1 HiRA", "Conv2d", HiraConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d 2 HiRA", "Conv2d", HiraConfig, {"target_modules": ["conv2d", "lin0"]}),
+    ("Conv3d 1 HiRA", "Conv3d", HiraConfig, {"target_modules": ["conv3d"]}),
+    ("Conv3d 2 HiRA", "Conv3d", HiraConfig, {"target_modules": ["conv3d", "lin0"]}),
     ##########
     # Adamss #
     ##########
@@ -1552,6 +1611,21 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "r": 2, "depth": 1, "act_fn": "relu", "init_weights": False},
         {"target_modules": ["lin1"], "r": 2, "depth": 1, "act_fn": "relu", "init_weights": False},
     ),
+    (
+        "HiRA Same",
+        "hira",
+        HiraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "HiRA Different",
+        "hira",
+        HiraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    # BD-LoRA different encounters issues as the adapter weights have different shapes then
     # for TinyLoRA, use uniform init, which allows the different adapters to be sufficiently different that they don't
     # produce identical results within allowed tolerance
     (
@@ -2477,11 +2551,14 @@ class TestPeftCustomModel(PeftCommonTester):
         model = get_peft_model(model, config)
         model_before = copy.deepcopy(model)
 
+        is_monteclora = config_kwargs.get("monteclora_config", None) is not None
+
         model.train()
         lr = 0.5
         if (
             (config_kwargs.get("use_dora") and model_id == "EmbConv1D")
             or issubclass(config_cls, VBLoRAConfig)
+            or issubclass(config_cls, HiraConfig)
             or issubclass(config_cls, LilyConfig)
             or issubclass(config_cls, AdamssConfig)
         ):
@@ -2493,6 +2570,8 @@ class TestPeftCustomModel(PeftCommonTester):
         elif issubclass(config_cls, GloraConfig):
             # GLoRA keeps some factors at zero at init; a higher LR helps all adapter tensors move within a few steps.
             lr = 50.0
+        elif is_monteclora:
+            lr = 1e-3
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -2502,6 +2581,8 @@ class TestPeftCustomModel(PeftCommonTester):
             optimizer.zero_grad()
             y_pred = model(**X)
             loss = y_pred.sum()
+            if is_monteclora:
+                loss = loss + model._get_monteclora_loss()
             loss.backward()
             optimizer.step()
 
@@ -2512,6 +2593,10 @@ class TestPeftCustomModel(PeftCommonTester):
 
         for name, param_before in params_before.items():
             param_after = params_after[name]
+            if "monteclora" in name.lower():
+                # MonteCLoRA's variational parameters are stochastic by construction (they get optimized
+                # via Monte Carlo sampling), so we don't include them in the strict allclose check below.
+                continue
             if (model.prefix in name) or ("modules_to_save" in name) or ("token_adapter.trainable_tokens" in name):
                 # target_modules, modules_to_save and modules of `NewTokensWrapper` _are_ updated
                 assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
@@ -2528,11 +2613,12 @@ class TestPeftCustomModel(PeftCommonTester):
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
+        is_monteclora = config_kwargs.get("monteclora_config", None) is not None
         model = get_peft_model(model, config)
         model.train()
 
         lr = 0.5
-        if config_kwargs.get("use_dora"):
+        if config_kwargs.get("use_dora") or (config_cls == HiraConfig):
             lr = 0.1  # otherwise we get nan
         elif "mha" in model_id.lower():
             lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high
@@ -2544,6 +2630,8 @@ class TestPeftCustomModel(PeftCommonTester):
             config_cls, PveraConfig
         ):  # needs a very small lr to not get nan in pvera_lambda_b due to high input values in this test (up to 90)
             lr = 1e-6
+        elif is_monteclora:
+            lr = 1e-3
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -2552,6 +2640,8 @@ class TestPeftCustomModel(PeftCommonTester):
             optimizer.zero_grad()
             y_pred = model(**X)
             loss = y_pred.sum()
+            if is_monteclora:
+                loss = loss + model._get_monteclora_loss()
             loss.backward()
             optimizer.step()
 
@@ -2807,10 +2897,10 @@ class TestPeftCustomModel(PeftCommonTester):
         try:
             with pytest.warns(UserWarning) as cm:
                 run_with_disable(config_kwargs, bias="none")
-                # if we get here, it means there was no AssertionError, i.e. there are warnings -- let's check that they
-                # are not related to the bias setting
-                if any(warning.message.args[0].startswith(msg_start) for warning in cm.warnings):
-                    bias_warning_was_given = True
+            # if we get here, it means there was no AssertionError, i.e. there are warnings -- let's check that they
+            # are not related to the bias setting
+            if any(warning.message.args[0].startswith(msg_start) for warning in cm.warnings):
+                bias_warning_was_given = True
         except AssertionError:
             # This is good, there was an AssertionError, i.e. there was no warning
             pass
@@ -3963,6 +4053,48 @@ class TestPeftCustomModel(PeftCommonTester):
         model.base_model.model.mha._restore_weights()
         assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is True
         assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is True
+
+    def test_monteclora_variational_loss_computation(self):
+        config = LoraConfig(
+            r=8,
+            lora_alpha=16,
+            target_modules=["lin0", "lin1"],
+            monteclora_config=MontecloraConfig(num_samples=4),
+        )
+        model = get_peft_model(MLP(), config)
+        model.train()
+
+        input_data = torch.randn(2, 10)
+        _ = model(input_data)
+
+        sampler_count = sum(1 for module in model.modules() if isinstance(module, MontecloraSampler))
+        variational_loss = model._get_monteclora_loss()
+
+        assert sampler_count > 0, "No Monteclora samplers found for variational loss computation"
+        assert variational_loss > 0, "Variational loss should be positive"
+        assert not torch.isnan(variational_loss), "Variational loss contains NaN"
+
+    def test_monteclora_variational_loss_computation_eval_mode(self):
+        config = LoraConfig(
+            r=8,
+            lora_alpha=16,
+            target_modules=["lin0", "lin1"],
+            monteclora_config=MontecloraConfig(num_samples=4),
+        )
+        model = get_peft_model(MLP(), config)
+        model.eval()
+
+        input_data = torch.randn(2, 10)
+        with torch.no_grad():
+            _ = model(input_data)
+
+        sampler_count = sum(1 for module in model.modules() if isinstance(module, MontecloraSampler))
+        variational_loss = model._get_monteclora_loss()
+
+        assert sampler_count > 0, "No Monteclora samplers found for variational loss computation"
+        # In eval mode, `MontecloraSampler.get_variational_loss` returns (0.0, 0.0) for every sampler, so the
+        # aggregated variational loss should be exactly zero.
+        assert variational_loss == 0.0, "Variational loss should be 0 in eval mode"
 
     def test_pvera_reproducible(self):
         inputs = {"input_ids": torch.arange(10).view(-1, 1).to(self.torch_device)}

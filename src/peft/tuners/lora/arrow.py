@@ -171,9 +171,7 @@ class ArrowLoraLinearLayer(nn.Module):
             lora_A : Matrices A in LoRA layer.
             lora_B : Matrices A in LoRA layer.
         """
-        if not self.use_gks:
-            return
-        elif self.gks_done and not self.gks_added_adapter_names:
+        if not self.use_gks or self.gks_done and not self.gks_added_adapter_names:
             return
         else:
             # 1) compute average A/B over gks_adapter_names
@@ -330,7 +328,7 @@ def ensure_adapters_target_linear_layers_only(model, adapter_names: list[str]):
     Validate that every module holding LoRA weights for any of `adapter_names` is Linear-like: nn.Linear,
     bitsandbytes.nn.Linear4bit, nn.Conv1d, or transformers.models.gpt2.modeling_gpt2.Conv1D. If not, raise.
     """
-    import torch.nn as nn
+    from torch import nn
 
     Linear4bit = None
     try:

@@ -587,7 +587,7 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
             # We transpose back because LoraEmbedding expects the weights to be of shape (rank, num_embeddings)
             sharded = sharded.T
         else:
-            raise ValueError(f"Unknown tensor parallel plan {tp_plan} for {module.__class__.__name__}.")
+            raise TypeError(f"Unknown tensor parallel plan {tp_plan} for {module.__class__.__name__}.")
 
         if weight is None:
             weight = state_dict[key]
@@ -670,9 +670,7 @@ def set_peft_model_state_dict(
                 # delete the old key from the previous `state_dict = peft_model_state_dict` statement.
                 del state_dict[lookup_key]
 
-    if config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT:
-        peft_model_state_dict = state_dict
-    elif config.peft_type == PeftType.XLORA:
+    if config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT or config.peft_type == PeftType.XLORA:
         peft_model_state_dict = state_dict
     elif config.peft_type in PEFT_TYPE_TO_PREFIX_MAPPING:
         peft_model_state_dict = {}
@@ -820,6 +818,14 @@ def set_peft_model_state_dict(
                 )
     else:
         raise NotImplementedError
+
+    # Updating the state dict for Transformers weight conversion with convert_peft_adapter_state_dict_for_transformers
+    # can introduce the base model prefix, but when loading the state_dict directly into the model (i.e. no PeftModel,
+    # e.g. when using set_peft_model_state_dict), there is no prefix.
+    prefix = "base_model.model."
+    requires_prefix = any(n.startswith(prefix) for n, _ in model.named_parameters())
+    if not requires_prefix:
+        peft_model_state_dict = {k.removeprefix(prefix): v for k, v in peft_model_state_dict.items()}
 
     peft_model_state_dict, mismatched_keys = _find_mismatched_keys(
         model, peft_model_state_dict, ignore_mismatched_sizes=ignore_mismatched_sizes

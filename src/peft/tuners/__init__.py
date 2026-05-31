@@ -24,6 +24,7 @@ from .delora import DeloraConfig, DeloraModel
 from .fourierft import FourierFTConfig, FourierFTModel
 from .glora import GloraConfig, GloraModel
 from .gralora import GraloraConfig, GraloraModel
+from .hira import HiraConfig, HiraModel
 from .hra import HRAConfig, HRAModel
 from .ia3 import IA3Config, IA3Model
 from .lily import LilyConfig, LilyModel
@@ -39,6 +40,8 @@ from .lora import (
     LoraGAConfig,
     LoraModel,
     LoraRuntimeConfig,
+    MontecloraConfig,
+    VeloraConfig,
     convert_to_lora,
     create_arrow_model,
     get_eva_state_dict,
@@ -99,6 +102,8 @@ __all__ = [
     "GraloraModel",
     "HRAConfig",
     "HRAModel",
+    "HiraConfig",
+    "HiraModel",
     "IA3Config",
     "IA3Model",
     "LNTuningConfig",
@@ -117,6 +122,7 @@ __all__ = [
     "MissConfig",
     "MissModel",
     "MixedModel",
+    "MontecloraConfig",
     "MultitaskPromptEmbedding",
     "MultitaskPromptTuningConfig",
     "MultitaskPromptTuningInit",
@@ -152,6 +158,7 @@ __all__ = [
     "TrainableTokensModel",
     "VBLoRAConfig",
     "VBLoRAModel",
+    "VeloraConfig",
     "VeraConfig",
     "VeraModel",
     "WaveFTConfig",

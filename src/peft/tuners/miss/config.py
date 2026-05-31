@@ -24,7 +24,7 @@ from peft.utils import PeftType
 @dataclass
 class MissConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a [`MiSSModel`].
+    This is the configuration class to store the configuration of a [`MissModel`].
 
     Args:
         r (`int`):
