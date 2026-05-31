@@ -770,7 +770,7 @@ class PeftCommonTester:
 
             atol, rtol = 1e-6, 1e-6  # default
             # Initializing with LN tuning cannot be configured to change the outputs (unlike init_lora_weights=False)
-            if not issubclass(config_cls, (LNTuningConfig,)):
+            if not issubclass(config_cls, LNTuningConfig):
                 # sanity check that the logits are different
                 assert not torch.allclose(logits_base, logits_peft, atol=atol, rtol=rtol)
 
