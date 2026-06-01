@@ -133,8 +133,7 @@ class GloraLayer(BaseTunerLayer):
         self._active_adapter: str | list[str] = []
         self.kwargs: dict[str, Any] = dict(kwargs)
 
-    def update_layer(self, adapter_name: str, r: int, config, **kwargs) -> None:
-        assert isinstance(config, GloraConfig)
+    def update_layer(self, adapter_name: str, r: int, config: GloraConfig, **kwargs) -> None:
         config_A_B = config.config_A_B
         config_C = config.config_C
         config_D_E = config.config_D_E
