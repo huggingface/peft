@@ -23,6 +23,8 @@ from torch import nn
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
+from .config import GloraConfig
+
 
 class GloraPath(nn.Module):
     def forward(self):
@@ -132,8 +134,6 @@ class GloraLayer(BaseTunerLayer):
         self.kwargs: dict[str, Any] = dict(kwargs)
 
     def update_layer(self, adapter_name: str, r: int, config, **kwargs) -> None:
-        from .config import GloraConfig
-
         assert isinstance(config, GloraConfig)
         config_A_B = config.config_A_B
         config_C = config.config_C
