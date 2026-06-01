@@ -1,6 +1,0 @@
-{
-  "optimizer_kwargs": {
-    "lr": 3e-3
-  },
-  "autocast_adapter_dtype": false
-}
