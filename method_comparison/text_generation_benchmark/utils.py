@@ -71,12 +71,8 @@ class BenchmarkResult:
             "duration": 0.0,
             "status": self.status.value,
             "hardware": {
-                "num_accelerators": torch_accelerator_module.device_count()
-                if torch_accelerator_module.is_available()
-                else 0,
-                "accelerator_type": torch_accelerator_module.get_device_name(0)
-                if torch_accelerator_module.is_available()
-                else "N/A",
+                "num_accelerators": torch_accelerator_module.device_count() if torch_accelerator_module.is_available() else 0,
+                "accelerator_type": torch_accelerator_module.get_device_name(0) if torch_accelerator_module.is_available() else "N/A",
                 "cuda_version": torch.version.cuda if torch.cuda.is_available() else "N/A",
                 "pytorch_version": torch.__version__,
             },
