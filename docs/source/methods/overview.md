@@ -1,4 +1,4 @@
-<!--Copyright 2024-present The HuggingFace Team. All rights reserved.
+<!--Copyright 2026-present The HuggingFace Team. All rights reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
 the License. You may obtain a copy of the License at
@@ -15,12 +15,41 @@ rendered properly in your Markdown viewer.
 -->
 
 
+# Parameter efficient fine-tuning methods
+
+Training a model parameter efficiently means to train as few parameters as possible to achieve comparable performance to training all parameters, i.e. full fine-tuning. There is, of course, no free lunch: by using fewer and therefore less expressive, parameters, it is not guaranteed that you will get the same performance! You may need to use a specific PEFT method to get optimal results for the model/task combination you want to train. But you will need less memory and possibly less compute during training and may gain features such as fast hot-swapping between trained expert models and less forgetting of previous knowledge compared to full fine-tuning.
+
+Giving general advice for training large models is hard but for generative
+models, especially language models, you can follow these steps:
+
+1. use prompting (few-shot examples in the prompt) to see if the model is
+   already capable of the task. If the model solves your problem, great! You can
+   now use [Prompt-based methods](#Prompt-based methods) to learn the prompt and
+   save precious tokens.
+2. If prompt-based methods are not sufficient you can use [layer tuning](#Layer tuning)
+   and [adapter methods](#Adapter methods). These methods are generally
+   more expressive than prompt-based methods and get closer to full-finetuning.
+3. Make sure to measure retention of already learnt knowledge since each
+   fine-tuning step is potentially unlearning past knowledege.
+
+The [PEFT method comparison suite](https://huggingface.co/spaces/peft-internal-testing/PEFT-method-comparison) aims to give a rough overview of (most) implemented methods on selected benchmarks and models.
 
 
+## Adapter methods
 
-# Prompt-based methods
+Adapter methods can be seen as ways of adding relatively small, trainable matrices to existing models for fine-tuning. The goal is to introduce few trainable parameters to steer the big model in the direction of the task that needs fine-tuning to save on resources, such as memory or compute.
 
- Prompting primes a frozen pretrained model for a specific downstream task by including a text prompt that describes the task or even demonstrates an example of the task. With prompting, you can avoid fully training a separate model for each downstream task, and use the same frozen pretrained model instead. This is a lot easier because you can use the same model for several different tasks, and it is significantly more efficient to train and store a smaller set of prompt parameters than to train all the model's parameters.
+A popular way to realize adapters is to insert smaller trainable matrices that are a low-rank decomposition of the adapted weight's layout to save on memory. There are several different ways to express the weight matrix as a low-rank decomposition, but [Low-Rank Adaptation (LoRA)](../package_resources/lora) is the most common method. The PEFT library supports several other variations of this formulation - some are direct variants of LoRA and are documented under LoRA, some are different enough to count as their own methods, such as [Low-Rank Hadamard Product (LoHa)](../package_resources/loha), [Low-Rank Kronecker Product (LoKr)](../package_resources/lokr), and [Adaptive Low-Rank Adaptation (AdaLoRA)](../conceptual_guides/adapter#adaptive-low-rank-adaptation-adalora).  If you're interested in applying these methods to other tasks and use cases like semantic segmentation, token classification, take a look at our [notebook collection](https://huggingface.co/collections/PEFT/notebooks-6573b28b33e5a4bf5b157fc1)!
+
+> [!TIP]
+> LoRA is one of the most popular PEFT methods and a good starting point if you're just getting started with PEFT. It was originally developed for large language models but it is a tremendously popular training method for diffusion models because of its efficiency and effectiveness.
+
+Low-rank adapters are only one possible adapter formualation, PEFT implements many other types of adapters as well. For example, Orthogonal Fine-Tuning methods ([OFT](../package_reference/oft), [BOFT](../package_reference/boft), ...) use orthogonal decompositions of the adapter weights to achieve small size. Methods like [MiSS](../package_reference/miss) shard matrices and share these shards to save on memory. [IA3](../package_reference/ia3) just introduces three trainable vectors to steer the original model.
+
+
+## Prompt-based methods
+
+Prompting primes a frozen pretrained model for a specific downstream task by including a text prompt that describes the task or even demonstrates an example of the task. With prompting, you can avoid fully training a separate model for each downstream task, and use the same frozen pretrained model instead. This is a lot easier because you can use the same model for several different tasks, and it is significantly more efficient to train and store a smaller set of prompt parameters than to train all the model's parameters.
 
 There are two categories of prompting methods:
 
@@ -33,69 +62,8 @@ If you're interested in applying these methods to other tasks and use cases, tak
 > [!TIP]
 > Some familiarity with the general process of training a causal language model would be really helpful and allow you to focus on the soft prompting methods. If you're new, we recommend taking a look at the [Causal language modeling](https://huggingface.co/docs/transformers/tasks/language_modeling) guide first from the Transformers documentation. When you're ready, come back and see how easy it is to drop PEFT in to your training!
 
+## Layer Tuning
 
-
-
-
-
-### PEFT configuration and model
-
-For any PEFT method, you'll need to create a configuration which contains all the parameters that specify how the PEFT method should be applied. Once the configuration is setup, pass it to the [`~peft.get_peft_model`] function along with the base model to create a trainable [`PeftModel`].
-
-> [!TIP]
-> Call the [`~PeftModel.print_trainable_parameters`] method to compare the number of trainable parameters of [`PeftModel`] versus the number of parameters in the base model!
-
-<hfoptions id="configurations">
-<hfoption id="p-tuning">
-
-[P-tuning](../conceptual_guides/prompting#p-tuning) adds a trainable embedding tensor where the prompt tokens can be added anywhere in the input sequence. Create a [`PromptEncoderConfig`] with the task type, the number of virtual tokens to add and learn, and the hidden size of the encoder for learning the prompt parameters.
-
-```py
-from peft import PromptEncoderConfig, get_peft_model
-
-peft_config = PromptEncoderConfig(task_type="CAUSAL_LM", num_virtual_tokens=20, encoder_hidden_size=128)
-model = get_peft_model(model, peft_config)
-model.print_trainable_parameters()
-"trainable params: 300,288 || all params: 559,514,880 || trainable%: 0.05366935013417338"
-```
-
-</hfoption>
-<hfoption id="prefix tuning">
-
-[Prefix tuning](../conceptual_guides/prompting#prefix-tuning) adds task-specific parameters in all of the model layers, which are optimized by a separate feed-forward network. Create a [`PrefixTuningConfig`] with the task type and number of virtual tokens to add and learn.
-
-```py
-from peft import PrefixTuningConfig, get_peft_model
-
-peft_config = PrefixTuningConfig(task_type="CAUSAL_LM", num_virtual_tokens=20)
-model = get_peft_model(model, peft_config)
-model.print_trainable_parameters()
-"trainable params: 983,040 || all params: 560,197,632 || trainable%: 0.1754809274167014"
-```
-
-</hfoption>
-<hfoption id="prompt tuning">
-
-[Prompt tuning](../conceptual_guides/prompting#prompt-tuning) formulates all tasks as a *generation* task and it adds a task-specific prompt to the input which is updated independently. The `prompt_tuning_init_text` parameter specifies how to finetune the model (in this case, it is classifying whether tweets are complaints or not). For the best results, the `prompt_tuning_init_text` should have the same number of tokens that should be predicted. To do this, you can set `num_virtual_tokens` to the number of tokens of the `prompt_tuning_init_text`.
-
-Create a [`PromptTuningConfig`] with the task type, the initial prompt tuning text to train the model with, the number of virtual tokens to add and learn, and a tokenizer.
-
-```py
-from peft import PromptTuningConfig, PromptTuningInit, get_peft_model
-
-prompt_tuning_init_text = "Classify if the tweet is a complaint or no complaint.\n"
-peft_config = PromptTuningConfig(
-    task_type="CAUSAL_LM",
-    prompt_tuning_init=PromptTuningInit.TEXT,
-    num_virtual_tokens=len(tokenizer(prompt_tuning_init_text)["input_ids"]),
-    prompt_tuning_init_text=prompt_tuning_init_text,
-    tokenizer_name_or_path="bigscience/bloomz-560m",
-)
-model = get_peft_model(model, peft_config)
-model.print_trainable_parameters()
-"trainable params: 8,192 || all params: 559,222,784 || trainable%: 0.0014648902430985358"
-```
-
-</hfoption>
-</hfoptions>
+Layer Tuning categorizes methods that target specific layers of a model such as [LayerNorm Tuning](../package_reference/layernorm_tuning)
+or targeting specific tokens in the embedding matrix via [TrainableTokens](../package_reference/trainable_tokens).
 

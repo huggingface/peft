@@ -16,6 +16,11 @@ rendered properly in your Markdown viewer.
 
 # IA3
 
+<div class="flex justify-center">
+    <img src="/docs/ia3.png"/>
+</div>
+<small>IA3 introduces three vectors, lv, lk and lff to scale value, key and feed-forward activations <a href="https://hf.co/papers/2205.05638">(image source)</a>.</small>
+
 Infused Adapter by Inhibiting and Amplifying Inner Activations, or [IA3](https://hf.co/papers/2205.05638), is a method that adds three learned vectors to rescale the keys and values of the self-attention and encoder-decoder attention layers, and the intermediate activation of the position-wise feed-forward network.
 
 The abstract from the paper is:
