@@ -150,3 +150,115 @@ def test_LoraFAOptimizer_step():
     for name, param in model.named_parameters():
         if "lora_B" in name:
             assert torch.any(param != 0), f"lora_B weights are still zero for {name}"
+
+
+def test_lorafa_weight_decay_decoupled_update():
+    """
+    Test that one optimizer step applies decoupled weight decay with the expected parameter scaling.
+    """
+    lora_rank = 16
+    lora_alpha = 32
+    # Stronger lr and weight_decay to make the decay effect more pronounced for testing
+    lr = 1e-2
+    weight_decay = 1.0
+    seed = 42
+
+    config = LoraConfig(
+        r=lora_rank,
+        lora_alpha=lora_alpha,
+        target_modules=["lin0", "lin1"],
+        bias="all",
+    )
+    torch.manual_seed(seed)
+    model_no_wd = get_peft_model(SimpleNet(), config).to(torch_device)
+    torch.manual_seed(seed)
+    model_wd = get_peft_model(SimpleNet(), config).to(torch_device)
+
+    # Sanity check: both models start from the same parameters
+    for (name_no_wd, param_no_wd), (name_wd, param_wd) in zip(
+        model_no_wd.named_parameters(), model_wd.named_parameters()
+    ):
+        assert name_no_wd == name_wd
+        assert torch.equal(param_no_wd, param_wd)
+
+    optimizer_no_wd = create_lorafa_optimizer(
+        model=model_no_wd,
+        r=lora_rank,
+        lora_alpha=lora_alpha,
+        lr=lr,
+        weight_decay=0.0,
+    )
+    optimizer_wd = create_lorafa_optimizer(
+        model=model_wd,
+        r=lora_rank,
+        lora_alpha=lora_alpha,
+        lr=lr,
+        weight_decay=weight_decay,
+    )
+    loss = torch.nn.CrossEntropyLoss()
+
+    # Save initial weights of lora_A with and without weight decay
+    initial_lora_A_weights_no_wd = {
+        name: param.clone() for name, param in model_no_wd.named_parameters() if "lora_A" in name
+    }
+    initial_lora_A_weights_wd = {
+        name: param.clone() for name, param in model_wd.named_parameters() if "lora_A" in name
+    }
+
+    # Generate random input and label using different seeds
+    torch.manual_seed(seed + 1)
+    x = torch.randint(100, (2, 4, 10)).to(torch_device)
+    output_no_wd = model_no_wd(x).permute(0, 3, 1, 2)
+    output_wd = model_wd(x).permute(0, 3, 1, 2)
+    torch.manual_seed(seed + 2)
+    label = torch.randint(16, (2, 4, 10)).to(torch_device)
+
+    # Calculate both losses and perform backward passes
+    loss_value_no_wd = loss(output_no_wd, label)
+    loss_value_no_wd.backward()
+    loss_value_wd = loss(output_wd, label)
+    loss_value_wd.backward()
+
+    params_no_wd = dict(model_no_wd.named_parameters())
+    params_wd = dict(model_wd.named_parameters())
+
+    non_lora_trainable_names = [
+        name
+        for name, param in params_no_wd.items()
+        if "lora" not in name and param.requires_grad and param.grad is not None
+    ]
+    # Sanity check: non-LoRA trainable parameters
+    assert non_lora_trainable_names, "Expected at least one non-LoRA trainable parameter with gradients"
+
+    # Perform both optimizer steps
+    optimizer_no_wd.step()
+    optimizer_wd.step()
+
+    params_no_wd = dict(model_no_wd.named_parameters())
+    params_wd = dict(model_wd.named_parameters())
+
+    # Check if lora_A weights have not changed
+    for name, param in params_no_wd.items():
+        if "lora_A" in name:
+            assert torch.equal(param, initial_lora_A_weights_no_wd[name]), f"lora_A weights changed for {name}"
+            assert torch.equal(params_wd[name], initial_lora_A_weights_wd[name]), f"lora_A weights changed for {name}"
+
+    # Compute the scaling factor for the expected relation of with and without weight decay
+    scale = 1.0 - lr * weight_decay
+
+    # Check if lora_B weights are non-zero and if they follow the expected relation
+    for name, param_no_wd in params_no_wd.items():
+        if "lora_B" in name:
+            assert torch.any(param_no_wd != 0), f"lora_B weights are still zero for {name}"
+            assert torch.allclose(params_wd[name], param_no_wd * scale, rtol=1e-5, atol=1e-6), (
+                f"lora_B weights for {name} do not match decoupled weight decay scaling"
+            )
+
+    # Check if all non-LoRA params also follow the expected relation
+    for name in non_lora_trainable_names:
+        assert torch.allclose(
+            params_wd[name],
+            params_no_wd[name] * scale,
+            rtol=1e-5,
+            atol=1e-6,
+        ), f"{name} does not match decoupled weight decay scaling"
