@@ -195,10 +195,10 @@ class GloraLayer(BaseTunerLayer):
             D = self.glora_D[adapter_name]().to(device=device, dtype=dtype)
             E = self.glora_E[adapter_name]().to(device=device, dtype=dtype)
 
-            w0 = weight.data.clone()
-            b0 = bias.data.clone() if bias is not None else None
             base_layer = self.get_base_layer()
             if safe_merge:
+                w0 = weight.data.clone()
+                b0 = bias.data.clone() if bias is not None else None
                 merged_weight = w0 + w0 * A + B
                 if not torch.isfinite(merged_weight).all():
                     raise ValueError(
@@ -213,9 +213,11 @@ class GloraLayer(BaseTunerLayer):
                         )
                     base_layer.bias.data = merged_bias
             else:
-                base_layer.weight.data += (w0 * A) + B
-                if bias is not None:
-                    base_layer.bias.data += (b0 * D) + E + torch.matmul(w0, C).squeeze(-1)
+                # we calculate the bias delta before mutating the weight
+                bias_delta = (bias.data * D) + E + torch.matmul(weight.data, C).squeeze(-1) if bias is not None else None
+                base_layer.weight.data += (weight.data * A) + B
+                if bias_delta is not None:
+                    base_layer.bias.data += bias_delta
             self.merged_adapters.append(adapter_name)
 
     def unmerge(self, adapter_names: Optional[list[str]] = None) -> None:
@@ -237,13 +239,11 @@ class GloraLayer(BaseTunerLayer):
             D = self.glora_D[adapter_name]().to(device=device, dtype=dtype)
             E = self.glora_E[adapter_name]().to(device=device, dtype=dtype)
 
-            w_merged = weight.data.clone()
-            b_merged = bias.data.clone() if bias is not None else None
-            w0 = (w_merged - B) / (1.0 + A)
             base_layer = self.get_base_layer()
+            w0 = (weight.data - B) / (1.0 + A)
             base_layer.weight.data = w0
             if bias is not None:
-                base_layer.bias.data = (b_merged - E - torch.matmul(w0, C).squeeze(-1)) / (1.0 + D)
+                base_layer.bias.data = (bias.data - E - torch.matmul(w0, C).squeeze(-1)) / (1.0 + D)
             self.merged_adapters.remove(adapter_name)
 
 
