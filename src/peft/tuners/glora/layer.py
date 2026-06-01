@@ -29,7 +29,7 @@ class GloraPath(nn.Module):
         raise NotImplementedError
 
 
-class GloraLoRAPath(GloraPath):
+class GloraLoraPath(GloraPath):
     def __init__(self, out_features, in_features, r, init_weights: bool = True):
         super().__init__()
         self.Xd = nn.Parameter(torch.zeros(out_features, r))
@@ -140,8 +140,8 @@ class GloraLayer(BaseTunerLayer):
         self.r[adapter_name] = r
 
         if config_A_B == "lora":
-            self.glora_A[adapter_name] = GloraLoRAPath(self.out_features, self.in_features, r, init_weights)
-            self.glora_B[adapter_name] = GloraLoRAPath(self.out_features, self.in_features, r, init_weights)
+            self.glora_A[adapter_name] = GloraLoraPath(self.out_features, self.in_features, r, init_weights)
+            self.glora_B[adapter_name] = GloraLoraPath(self.out_features, self.in_features, r, init_weights)
         elif config_A_B == "vector":
             self.glora_A[adapter_name] = GloraVectorPath(self.out_features, is_column=True, init_weights=init_weights)
             self.glora_B[adapter_name] = GloraVectorPath(self.out_features, is_column=True, init_weights=init_weights)
@@ -156,7 +156,7 @@ class GloraLayer(BaseTunerLayer):
         has_bias = getattr(base, "bias", None) is not None
 
         if has_bias and config_C == "lora":
-            self.glora_C[adapter_name] = GloraLoRAPath(self.in_features, 1, r, init_weights)
+            self.glora_C[adapter_name] = GloraLoraPath(self.in_features, 1, r, init_weights)
         elif has_bias and config_C == "vector":
             self.glora_C[adapter_name] = GloraVectorPath(self.in_features, is_column=True, init_weights=init_weights)
         else:
