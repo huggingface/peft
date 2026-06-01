@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from contextlib import contextmanager
+from functools import partial
 from typing import Any
 
 from torch import nn
@@ -22,6 +24,11 @@ from peft.utils import TRANSFORMERS_MODELS_TO_GLORA_TARGET_MODULES_MAPPING
 
 from .config import GloraConfig
 from .layer import GloraLinear
+
+
+def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
+    kwargs["adapter_names"] = adapter_names
+    return args, kwargs
 
 
 class GloraModel(BaseTuner):
@@ -75,3 +82,34 @@ class GloraModel(BaseTuner):
             )
 
         return GloraLinear(target, adapter_name, config=peft_config)
+
+    @contextmanager
+    def _enable_peft_forward_hooks(self, *args, **kwargs):
+        adapter_names = kwargs.pop("adapter_names", None)
+        if adapter_names is None:
+            yield
+            return
+
+        if self.training:
+            raise ValueError("Cannot pass `adapter_names` when the model is in training mode.")
+
+        expected_adapters = set()
+        for layer in self.modules():
+            if isinstance(layer, GloraLayer):
+                expected_adapters |= layer.glora_A.keys()
+        unique_adapters = {name for name in adapter_names if name != "__base__"}
+        unexpected_adapters = unique_adapters - expected_adapters
+        if unexpected_adapters:
+            raise ValueError(f"Trying to infer with non-existing adapter(s): {', '.join(sorted(unexpected_adapters))}")
+
+        hook_handles = []
+        for module in self.modules():
+            if isinstance(module, GloraLayer):
+                pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
+                handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                hook_handles.append(handle)
+
+        yield
+
+        for handle in hook_handles:
+            handle.remove()

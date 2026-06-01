@@ -256,6 +256,22 @@ class GloraLinear(nn.Module, GloraLayer):
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, config.r, config=config)
 
+    def _check_forward_args(self, x, *args, **kwargs):
+        adapter_names = kwargs.get("adapter_names", None)
+        if adapter_names is None:
+            return
+
+        if len(x) != len(adapter_names):
+            msg = (
+                "Length of `adapter_names` should be the same as the number of inputs, but got "
+                f"{len(adapter_names)} and {len(x)} respectively."
+            )
+            raise ValueError(msg)
+
+        if self.merged:
+            msg = "Cannot pass `adapter_names` when there are merged adapters, please call `unmerge_adapter` first."
+            raise ValueError(msg)
+
     def _mixed_batch_forward(
         self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
     ) -> torch.Tensor:
@@ -286,6 +302,7 @@ class GloraLinear(nn.Module, GloraLayer):
         return result
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
 
         if self.disable_adapters:

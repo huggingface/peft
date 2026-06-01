@@ -6377,6 +6377,11 @@ MIXED_ADAPTER_TEST_CASES = [
         RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
         RoadConfig(target_modules=["lin0"], group_size=2, variant="road_2", init_weights=False),
     ),
+    (
+        "GLoRA mixed adapter",
+        GloraConfig(target_modules=["lin0"], init_weights=False),
+        GloraConfig(target_modules=["lin0"], r=16, init_weights=False),
+    ),
 ]
 
 
@@ -6445,6 +6450,11 @@ class TestMixedAdapterBatches:
                 RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
                 RoadConfig(target_modules=["lin1"], group_size=2, init_weights=False),
             ),
+            (
+                "GLoRA mixed adapter with different target layers",
+                GloraConfig(target_modules=["lin0"], init_weights=False),
+                GloraConfig(target_modules=["lin1"], init_weights=False),
+            ),
         ],
     )
     def test_mixed_adapter_batches_different_target_layers(self, test_name, config0, config1):
@@ -6466,6 +6476,11 @@ class TestMixedAdapterBatches:
                 "RoAd mixed adapter with modules to save",
                 RoadConfig(target_modules=["lin0"], modules_to_save=["lin1"], group_size=2, init_weights=False),
                 RoadConfig(target_modules=["lin0"], modules_to_save=["lin1"], group_size=2, init_weights=False),
+            ),
+            (
+                "GLoRA mixed adapter with modules to save",
+                GloraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_weights=False),
+                GloraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_weights=False),
             ),
         ],
     )
@@ -6510,6 +6525,11 @@ class TestMixedAdapterBatches:
                 "RoAd mixed adapter with overlapping layers",
                 RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
                 RoadConfig(target_modules=["lin0", "lin1"], group_size=2, init_weights=False),
+            ),
+            (
+                "GLoRA mixed adapter with overlapping layers",
+                GloraConfig(target_modules=["lin0"], init_weights=False),
+                GloraConfig(target_modules=["lin0", "lin1"], init_weights=False),
             ),
         ],
     )
@@ -6656,6 +6676,10 @@ class TestMixedAdapterBatches:
             (
                 "RoAD mixed batch wrong adapter name",
                 RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
+            ),
+            (
+                "GLoRA mixed batch wrong adapter name",
+                GloraConfig(target_modules=["lin0"], init_weights=False),
             ),
         ],
     )
