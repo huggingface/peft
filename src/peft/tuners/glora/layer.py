@@ -28,6 +28,9 @@ class GloraPath(nn.Module):
     def forward(self):
         raise NotImplementedError
 
+    def reset_parameters(self, init_weights: bool = True):
+        raise NotImplementedError
+
 
 class GloraLoraPath(GloraPath):
     def __init__(self, out_features, in_features, r, init_weights: bool = True):
