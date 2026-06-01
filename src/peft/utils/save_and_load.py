@@ -497,14 +497,30 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
         state_dict (`dict`): The adapter state dict to shard in-place (as loaded from a checkpoint).
         adapter_name (`str`): The name of the adapter whose weights are being sharded.
     """
+    from ..tuners.lora.layer import LoraLayer  # lazy import to avoid circular import
+
+    tp_lora_modules = []
+    for name, module in model.named_modules():
+        if not isinstance(module, LoraLayer):
+            continue
+
+        base_layer = module.get_base_layer()
+        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+        device_mesh = getattr(base_layer, "_hf_device_mesh", None)
+        if tp_plan is None or device_mesh is None:
+            continue
+
+        tp_lora_modules.append((name, module, base_layer, tp_plan, device_mesh))
+
+    if not tp_lora_modules:
+        return
+
     from transformers.integrations.tensor_parallel import (
         ALL_PARALLEL_STYLES,
         ColwiseParallel,
         EmbeddingParallel,
         RowwiseParallel,
     )
-
-    from ..tuners.lora.layer import LoraLayer  # lazy import to avoid circular import
 
     should_check = True
     prefix_to_remove = None
@@ -513,16 +529,8 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
 
     possible_prefixes = ["base_model.model.", "base_model."]
 
-    for name, module in model.named_modules():
-        if not isinstance(module, LoraLayer):
-            continue
-        base_layer = module.get_base_layer()
+    for name, module, base_layer, tp_plan, device_mesh in tp_lora_modules:
         device = base_layer.weight.device
-        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
-        device_mesh = getattr(base_layer, "_hf_device_mesh", None)
-
-        if tp_plan is None or device_mesh is None:
-            continue
 
         # One time check to make sure we are adding / removing a potential prefix to get the proper key in the state
         # dict. Same thing for the adapter name.
