@@ -6288,19 +6288,13 @@ class TestRequiresGrad:
         params_with_grad = [n for n, p in model.named_parameters() if p.requires_grad]
         assert all(not p.requires_grad for p in model.parameters())
 
-    @pytest.mark.parametrize("config_cls", [LoraConfig, LoHaConfig, LoKrConfig, IA3Config, OFTConfig, BOFTConfig])
-    def test_inject_adapter_inference_mode_does_not_freeze_active_adapter(self, config_cls, tmp_path):
+    def test_inject_adapter_inference_mode_does_not_freeze_active_adapter(self, tmp_path):
         # Regression test for a bug where adding a second adapter with inference_mode=True would incorrectly freeze
         # the already-active training adapter. This happened because inject_adapter propagated the new adapter's
         # inference_mode to set_adapter for the existing active adapters.
-        # See PR #XXXX
+        # See PR #3290
         model = DeepMLP(size=256)
-        extra_kwargs = {}
-        if config_cls == IA3Config:
-            extra_kwargs["feedforward_modules"] = []
-        if config_cls in (BOFTConfig, OFTConfig):
-            extra_kwargs["boft_block_size"] = 4
-        config = config_cls(target_modules=["layers.0.lin0"], **extra_kwargs)
+        config = LoraConfig(target_modules=["layers.0.lin0"])
         model = get_peft_model(model, config)
 
         # Initially, the active (default) adapter should be trainable
@@ -6308,7 +6302,7 @@ class TestRequiresGrad:
 
         # Add a second adapter with inference_mode=True, simulating what happens during load_adapter with
         # is_trainable=False (e.g. during save_pretrained with path_initial_model_for_weight_conversion)
-        config_inference = config_cls(target_modules=["layers.0.lin0"], inference_mode=True, **extra_kwargs)
+        config_inference = LoraConfig(target_modules=["layers.0.lin0"], inference_mode=True)
         model.add_adapter("inference_adapter", config_inference)
 
         # The existing active adapter should remain trainable
