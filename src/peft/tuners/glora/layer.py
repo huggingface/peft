@@ -318,9 +318,11 @@ class GloraLinear(nn.Module, GloraLayer):
             torch_result_dtype = base_result.dtype
             result = base_result
             device, dtype = self.weight.device, self.weight.dtype
+            num_active_adapters = 0
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.glora_A:
                     continue
+                num_active_adapters += 1
                 A = self.glora_A[active_adapter]().to(device=device, dtype=dtype)
                 B = self.glora_B[active_adapter]().to(device=device, dtype=dtype)
                 C = self.glora_C[active_adapter]().to(device=device, dtype=dtype)
@@ -332,7 +334,9 @@ class GloraLinear(nn.Module, GloraLayer):
                     adapted = F.linear(x, weight_eff, bias=bias_eff)
                 else:
                     adapted = F.linear(x, weight_eff)
-                result = result + (adapted - base_result)
+                result = result + adapted
+            if num_active_adapters > 0:
+                result = result - num_active_adapters * base_result
             result = result.to(torch_result_dtype)
 
         return result
