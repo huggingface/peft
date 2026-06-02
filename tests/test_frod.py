@@ -21,6 +21,7 @@ import torch
 from accelerate.utils.imports import is_bf16_available
 from safetensors import safe_open
 from torch import nn
+from transformers import LlamaConfig, LlamaForCausalLM
 
 from peft import FrodConfig, PeftModel, get_peft_model
 
@@ -168,6 +169,24 @@ class TestFrod:
 
         # Different target categories have distinct projection buffers.
         assert frod_V_lin1.data_ptr() != mlp_same_prng.base_model.frod_V["lin2"]["default"].data_ptr()
+
+    def test_frod_categories_with_common_llama_targets(self):
+        model = LlamaForCausalLM(
+            LlamaConfig(
+                hidden_size=16,
+                intermediate_size=32,
+                num_attention_heads=4,
+                num_hidden_layers=2,
+                vocab_size=32,
+            )
+        )
+        config = FrodConfig(target_modules=["q_proj", "v_proj"])
+
+        peft_model = get_peft_model(model, config)
+
+        assert sorted(peft_model.base_model.frod_V.keys()) == ["self_attn_q_proj", "self_attn_v_proj"]
+        assert "default" in peft_model.base_model.frod_V["self_attn_q_proj"]
+        assert "default" in peft_model.base_model.frod_V["self_attn_v_proj"]
 
     def test_frod_lambda_dont_share_memory(self, mlp_same_prng):
         assert (
