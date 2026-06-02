@@ -31,6 +31,15 @@ from .layer import FrodLayer, Linear
 
 
 def _category_from_key(key: str) -> str:
+    """Infer the projection-sharing category from a dotted module key.
+
+    FRoD shares projection buffers across modules that play the same role in different transformer blocks. This helper
+    assumes keys follow the dotted paths returned by `named_modules()` and derives the role from the final path
+    components. For example, `encoder.layer.0.attention.self.query` maps to `self_query`, while
+    `vision_model.encoder.layers.0.self_attn.q_proj` maps to `self_attn_q_proj`. The BERT-style attention output key
+    `encoder.layer.0.attention.output.dense` is normalized to `attention_output` so it does not collide with MLP
+    `output.dense` modules.
+    """
     parts = key.split(".")
     if len(parts) == 1:
         return parts[0]
@@ -43,6 +52,13 @@ def _category_from_key(key: str) -> str:
 
 
 def _layer_index_from_key(key: str, fallback: int) -> int:
+    """Infer the transformer block index from a dotted module key.
+
+    Many decoder and vision models use paths like `model.layers.3.self_attn.q_proj`, so the first preference is the
+    integer immediately after a `layers` path component. Encoder models often use paths like
+    `encoder.layer.11.attention.self.query`; for those, the first numeric path component is used. If no numeric layer
+    id is present, e.g. for `classifier.dense`, `fallback` keeps the projection initialization order deterministic.
+    """
     parts = key.split(".")
     if "layers" in parts:
         try:
