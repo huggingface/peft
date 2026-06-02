@@ -295,6 +295,61 @@ class EvaConfig:
 
 
 @dataclass
+class KasaConfig:
+    """
+    This is the sub-configuration class to store the configuration for KaSA (Knowledge-aware Singular-value Adaptation,
+    [arXiv:2412.06071](https://huggingface.co/papers/2412.06071)).
+
+    KaSA is a LoRA variant that (1) refines the frozen base weight by discarding its `r` smallest ("noisy"/long-tail)
+    singular components via a one-time SVD truncation, and (2) parametrizes the trainable update in SVD form, inserting
+    a learnable diagonal of singular values `lora_diag` (`ΔΣ`) between the LoRA `A` and `B` factors, i.e. `ΔW = scaling
+    * B @ diag(ΔΣ) @ A`. The paper additionally trains with two auxiliary regularizers (a singular-value L2 penalty and
+    an orthogonal regularization on the adapter factors); these are exposed through
+    [`~peft.get_kasa_regularization_loss`] and must be added to the task loss by the user, since the PEFT variant API
+    has no channel to inject an extra loss term into the training loop.
+
+    Args:
+        beta (`float`):
+            Coefficient `β` for the L2 (singular-value) regularization `||ΔΣ||_F^2 = sum(lora_diag ** 2)` (paper Eq.
+            9-10). Only takes effect if the user adds [`~peft.get_kasa_regularization_loss`] to their loss. Defaults to
+            `1e-4` (the value used in the reference GLUE configs).
+        gamma (`float`):
+            Coefficient `γ` for the orthogonal regularization `||B^T B - I||_F + ||A A^T - I||_F` (paper Eq. 11), which
+            softly enforces the semi-orthogonality of `ΔU`/`ΔV` assumed by the SVD parametrization. Only takes effect
+            if the user adds [`~peft.get_kasa_regularization_loss`] to their loss. Defaults to `1e-3` (the reference
+            GLUE value).
+    """
+
+    beta: float = field(
+        default=1e-4,
+        metadata={
+            "help": (
+                "Coefficient `β` for the L2 (singular-value) regularization `sum(lora_diag ** 2)` (KaSA paper "
+                "Eq. 9-10). Only takes effect if the user adds `get_kasa_regularization_loss` to their training loss. "
+                "Defaults to 1e-4 (the reference GLUE value)."
+            )
+        },
+    )
+    gamma: float = field(
+        default=1e-3,
+        metadata={
+            "help": (
+                "Coefficient `γ` for the orthogonal regularization `||B^T B - I||_F + ||A A^T - I||_F` (KaSA paper "
+                "Eq. 11), which softly enforces the semi-orthogonality of the adapter factors assumed by the SVD "
+                "parametrization. Only takes effect if the user adds `get_kasa_regularization_loss` to their training "
+                "loss. Defaults to 1e-3 (the reference GLUE value)."
+            )
+        },
+    )
+
+    def __post_init__(self):
+        if self.beta < 0:
+            raise ValueError(f"`beta` must be non-negative, got {self.beta}.")
+        if self.gamma < 0:
+            raise ValueError(f"`gamma` must be non-negative, got {self.gamma}.")
+
+
+@dataclass
 class CordaConfig:
     """
     This is the sub-configuration class to store the configuration of a [`LoraModel`].
@@ -478,6 +533,10 @@ class LoraConfig(PeftConfig):
         velora_config (`Optional[VeloraConfig]`):
             Enable VeLoRA by providing a VeloraConfig. VeLoRA swaps in a custom backward pass for the LoRA A projection
             that stores compressed activations instead of the full input activations.
+        kasa_config (`Optional[KasaConfig]`):
+            Enable KaSA (Knowledge-aware Singular-value Adaptation) by providing a KasaConfig. KaSA truncates the `r`
+            smallest singular components of the frozen base weight via a one-time SVD and inserts a learnable diagonal
+            of singular values between the LoRA A and B factors. Currently only linear layers are supported.
         alora_invocation_tokens (`List[int]`):
             If not None, enable <a href='https://huggingface.co/papers/2504.12397'>'Activated LoRA' (aLoRA)</a>, with
             alora_invocation_tokens being the tokenized invocation string for the adapter (must be present in all model
@@ -833,6 +892,18 @@ class LoraConfig(PeftConfig):
     arrow_config: Optional[ArrowConfig] = field(
         default=None, metadata={"help": "The necessary config to apply arrow routing on the model."}
     )
+    kasa_config: Optional[KasaConfig] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Enable KaSA (Knowledge-aware Singular-value Adaptation) as a LoRA variant by providing a "
+                "`KasaConfig`. KaSA truncates the `r` smallest singular components of the frozen base weight via a "
+                "one-time SVD and parametrizes the trainable update with a learnable diagonal of singular values "
+                "(`lora_diag`) inserted between the LoRA A and B factors. Currently only linear layers are "
+                "supported. See `KasaConfig` for details on the individual hyperparameters."
+            )
+        },
+    )
     ensure_weight_tying: bool = field(
         default=False,
         metadata={
@@ -873,6 +944,11 @@ class LoraConfig(PeftConfig):
             self.velora_config = VeloraConfig(**self.velora_config)
         elif self.velora_config is not None and not isinstance(self.velora_config, VeloraConfig):
             raise TypeError("`velora_config` must be a `VeloraConfig`, a dict, or None.")
+
+        if isinstance(self.kasa_config, dict):
+            self.kasa_config = KasaConfig(**self.kasa_config)
+        elif self.kasa_config is not None and not isinstance(self.kasa_config, KasaConfig):
+            raise TypeError("`kasa_config` must be a `KasaConfig`, a dict, or None.")
 
         if isinstance(self.target_parameters, str):
             raise TypeError("`target_parameters` must be a list of strings or None.")
