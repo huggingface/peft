@@ -7,11 +7,6 @@
   - local: install
     title: Installation
 
-- title: PEFT method guides
-  sections:
-  - local: task_guides/lora_based_methods
-    title: LoRA methods
-
 - title: Guides
   sections:
   - local: guides/peft_model_config
@@ -143,8 +138,6 @@
 
 - title: Conceptual guides
   sections:
-  - local: conceptual_guides/adapter
-    title: Adapters
   - local: conceptual_guides/oft
     title: OFT/BOFT
 
