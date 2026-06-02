@@ -22,6 +22,23 @@ The abstract from the paper is:
 
 *Large foundation models are becoming ubiquitous, but training them from scratch is prohibitively expensive. Thus, efficiently adapting these powerful models to downstream tasks is increasingly important. In this paper, we study a principled finetuning paradigm -- Orthogonal Finetuning (OFT) -- for downstream task adaptation. Despite demonstrating good generalizability, OFT still uses a fairly large number of trainable parameters due to the high dimensionality of orthogonal matrices. To address this, we start by examining OFT from an information transmission perspective, and then identify a few key desiderata that enable better parameter-efficiency. Inspired by how the Cooley-Tukey fast Fourier transform algorithm enables efficient information transmission, we propose an efficient orthogonal parameterization using butterfly structures. We apply this parameterization to OFT, creating a novel parameter-efficient finetuning method, called Orthogonal Butterfly (BOFT). By subsuming OFT as a special case, BOFT introduces a generalized orthogonal finetuning framework. Finally, we conduct an extensive empirical study of adapting large vision transformers, large language models, and text-to-image diffusion models to various downstream tasks in vision and language*.
 
+BOFT focuses on preserving a pretrained model's generative capabilities while being significantly more parameter-efficient than standard [OFT](./oft). Like OFT, BOFT maintains the same cosine similarity (hyperspherical energy) between all pairwise neurons in a layer by applying an orthogonal transformation to the pretrained weight matrix, ensuring the semantic relationships among neurons are preserved.
+
+Instead of using a block-diagonal orthogonal matrix, BOFT factorizes the orthogonal transformation into a product of **sparse butterfly matrices** (originally introduced in the [Cooley–Tukey FFT](https://en.wikipedia.org/wiki/Cooley%E2%80%93Tukey_FFT_algorithm)). Unlike OFT's block-diagonal rotations, which only mix inputs within each block, the butterfly structure guarantees that every input can influence every output, producing a **dense connectivity** with just `O(d log d)` parameters. This factorization preserves expressivity while drastically reducing the parameter count compared to OFT (at the expense of computation time).
+
+In practice, BOFT multiplies each pretrained weight matrix by a sequence of butterfly-structured orthogonal factors, enabling efficient and expressive neuron rotations. This makes BOFT well-suited for controllable generation and tasks where maintaining the pretrained model's subject representation is critical, while also scaling to larger models with lower memory and compute overhead.
+
+## Benchmark overview
+
+<iframe
+	src="https://hubnemo-peft-method-comparison-individual.hf.space/?highlight[type]=BOFT"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
+
+# API
+
 ## BOFTConfig
 
 [[autodoc]] tuners.boft.config.BOFTConfig

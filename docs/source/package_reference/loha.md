@@ -18,11 +18,15 @@ rendered properly in your Markdown viewer.
 
 Low-Rank Hadamard Product ([LoHa](https://huggingface.co/papers/2108.06098)), is similar to LoRA except it approximates the large weight matrix with more low-rank matrices and combines them with the Hadamard product. This method is even more parameter-efficient than LoRA and achieves comparable performance. LoHa was originally proposed for federated learning (FedPara) but works well as a general-purpose PEFT method, and is especially popular for fine-tuning image generation models such as Stable Diffusion.
 
-> **Note:** LoHa is part of the [LyCORIS](./adapter_utils) family of adapters. Its close relative [LoKr](./lokr) uses the Kronecker product instead of the Hadamard product. For more background on how LoHa works conceptually, see the [Adapters guide](../conceptual_guides/adapter#low-rank-hadamard-product-loha).
+> **Note:** LoHa is part of the [LyCORIS](./adapter_utils) family of adapters. Its close relative [LoKr](./lokr) uses the Kronecker product instead of the Hadamard product.
 
 The abstract from the paper is:
 
 *In this work, we propose a communication-efficient parameterization, FedPara, for federated learning (FL) to overcome the burdens on frequent model uploads and downloads. Our method re-parameterizes weight parameters of layers using low-rank weights followed by the Hadamard product. Compared to the conventional low-rank parameterization, our FedPara method is not restricted to low-rank constraints, and thereby it has a far larger capacity. This property enables to achieve comparable performance while requiring 3 to 10 times lower communication costs than the model with the original layers, which is not achievable by the traditional low-rank methods. The efficiency of our method can be further improved by combining with other efficient FL optimizers. In addition, we extend our method to a personalized FL application, pFedPara, which separates parameters into global and local ones. We show that pFedPara outperforms competing personalized FL methods with more than three times fewer parameters.*
+
+Low-rank decomposition can impact performance because the weight updates are limited to the low-rank space, which can constrain a model's expressiveness. However, you don't necessarily want to use a larger rank because it increases the number of trainable parameters. To address this, LoHa was applied to diffusion models where the ability to generate diverse images is an important consideration. LoHa should also work with general model types, but support for embedding layers isn't currently implemented in PEFT.
+
+LoHa uses the [Hadamard product](https://en.wikipedia.org/wiki/Hadamard_product_(matrices)) (element-wise product) instead of the matrix product. $\Delta W$ is represented by four smaller matrices instead of two - like in LoRA - and each pair of these low-rank matrices are combined with the Hadamard product. As a result, $\Delta W$ can have the same number of trainable parameters but a higher rank and expressivity.
 
 ## When to use LoHa
 
@@ -34,7 +38,7 @@ LoHa is a good choice when:
 
 LoHa supports linear and Conv2d layers. For tasks that additionally require embedding layer adaptation, consider [LoRA](./lora) instead.
 
-## Quick start
+## Usage
 
 ```python
 from diffusers import StableDiffusionPipeline
@@ -60,6 +64,17 @@ pipeline = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1
 pipeline.unet = get_peft_model(pipeline.unet, config_unet)
 pipeline.unet.print_trainable_parameters()
 ```
+
+## Benchmark overview
+
+<iframe
+	src="https://hubnemo-peft-method-comparison-individual.hf.space/?highlight[type]=LOHA"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
+
+# API
 
 ## LoHaConfig
 

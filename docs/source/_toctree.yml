@@ -28,8 +28,6 @@
     title: Model merging
   - local: developer_guides/quantization
     title: Quantization
-  - local: developer_guides/lora
-    title: LoRA
   - local: developer_guides/custom_models
     title: Custom models
   - local: developer_guides/low_level_api
@@ -52,17 +50,29 @@
     - sections:
       - local: package_reference/layernorm_tuning
         title: LayerNorm Tuning
+      - local: package_reference/trainable_tokens
+        title: Trainable Tokens
       title: Layer Tuning
     - sections:
       - local: package_reference/p_tuning
         title: P-Tuning
+      - local: package_reference/cpt
+        title: CPT
+      - local: package_reference/prefix_tuning
+        title: Prefix tuning
+      - local: package_reference/cartridges
+        title: Cartridges
+      - local: package_reference/prompt_tuning
+        title: Prompt tuning
       title: Soft Prompting
     - sections:
+      - local: package_reference/adalora
+        title: AdaLoRA
+      - local: package_reference/adamss
+        title: AdaMSS
       - sections:
         - local: package_reference/lora
-          title: Overview
-        - local: package_reference/lora_initializations
-          title: Initializations
+          title: LoRA
         - sections:
           - local: package_reference/lora_variant_velora
             title: VeLoRA
@@ -70,10 +80,6 @@
             title: DoRA
           title: Variants
         title: LoRA
-      - local: package_reference/adalora
-        title: AdaLoRA
-      - local: package_reference/adamss
-        title: AdaMSS
       - local: package_reference/ia3
         title: IA3
       - local: package_reference/llama_adapter
@@ -110,8 +116,6 @@
         title: HiRA
       - local: package_reference/hra
         title: HRA
-      - local: package_reference/cpt
-        title: CPT
       - local: package_reference/randlora
         title: RandLora
       - local: package_reference/shira

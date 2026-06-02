@@ -77,6 +77,167 @@ model.print_trainable_parameters()
 ></iframe>
 
 
+## Initialization
+
+The initialization of LoRA weights is controlled by the parameter `init_lora_weights` in [`LoraConfig`]. By default, PEFT initializes LoRA weights with Kaiming-uniform for weight A and zeros for weight B resulting in an identity transform (same as the reference [implementation](https://github.com/microsoft/LoRA)).
+
+It is also possible to pass `init_lora_weights="gaussian"`. As the name suggests, this initializes weight A with a Gaussian distribution and zeros for weight B (this is how [Diffusers](https://huggingface.co/docs/diffusers/index) initializes LoRA weights).
+
+```py
+from peft import LoraConfig
+
+config = LoraConfig(init_lora_weights="gaussian", ...)
+```
+
+There is also an option to set `init_lora_weights=False` which is useful for debugging and testing. This should be the only time you use this option. When choosing this option, the LoRA weights are initialized such that they do *not* result in an identity transform.
+
+```py
+from peft import LoraConfig
+
+config = LoraConfig(init_lora_weights=False, ...)
+```
+
+<hfoptions id="initializations">
+<hfoption id="PiSSA">
+[PiSSA](https://huggingface.co/papers/2404.02948) initializes the LoRA adapter using the principal singular values and singular vectors. This straightforward modification allows PiSSA to converge more rapidly than LoRA and ultimately attain superior performance. Moreover, PiSSA reduces the quantization error compared to QLoRA, leading to further enhancements.
+
+Configure the initialization method to "pissa", which may take several minutes to execute SVD on the pre-trained model:
+```python
+from peft import LoraConfig
+config = LoraConfig(init_lora_weights="pissa", ...)
+```
+Alternatively, execute fast SVD, which takes only a few seconds. The number of iterations determines the trade-off between the error and computation time:
+```python
+lora_config = LoraConfig(init_lora_weights="pissa_niter_[number of iters]", ...)
+```
+For detailed instruction on using PiSSA, please follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/pissa_finetuning).
+</hfoption>
+
+<hfoption id="CorDA">
+[CorDA](https://huggingface.co/papers/2406.05223) builds task-aware LoRA adapters from weight decomposition oriented by the context of downstream task to learn (instruction-previewed mode, IPM) or world knowledge to maintain (knowledge-preserved mode, KPM).
+The KPM not only achieves better performance than LoRA on fine-tuning tasks, but also mitigates the catastrophic forgetting of pre-trained world knowledge.
+When preserving pre-trained knowledge is not a concern,
+the IPM is favored because it can further accelerate convergence and enhance the fine-tuning performance.
+
+You need to configure the initialization method to "corda", and specify the mode of IPM or KPM and the dataset to collect covariance matrices.
+
+```py
+@torch.no_grad()
+def run_model():
+    # Assume `model` and `dataset` is in context...
+    model.eval()
+    for batch in dataset:
+        model(**batch)
+
+
+corda_config = CordaConfig(
+    corda_method="kpm",
+)
+lora_config = LoraConfig(
+    init_lora_weights="corda",
+    corda_config=corda_config,
+)
+preprocess_corda(model, lora_config, run_model=run_model)
+peft_model = get_peft_model(model, lora_config)
+```
+
+For detailed instruction on using CorDA, please follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/corda_finetuning).
+</hfoption>
+
+<hfoption id="OLoRA">
+[OLoRA](https://huggingface.co/papers/2406.01775) utilizes QR decomposition to initialize the LoRA adapters. OLoRA translates the base weights of the model by a factor of their QR decompositions, i.e., it mutates the weights before performing any training on them. This approach significantly improves stability, accelerates convergence speed, and ultimately achieves superior performance.
+
+You just need to pass a single additional option to use OLoRA:
+```python
+from peft import LoraConfig
+config = LoraConfig(init_lora_weights="olora", ...)
+```
+For more advanced usage, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/olora_finetuning).
+</hfoption>
+
+<hfoption id="EVA">
+[EVA](https://huggingface.co/papers/2410.07170) performs SVD on the input activations of each layer and uses the right-singular vectors to initialize LoRA weights. It is therefore a data-driven initialization scheme. Furthermore EVA adaptively allocates ranks across layers based on their "explained variance ratio" - a metric derived from the SVD analysis.
+
+You can use EVA by setting `init_lora_weights="eva"` and defining [`EvaConfig`] in [`LoraConfig`]:
+```python
+from peft import LoraConfig, EvaConfig
+peft_config = LoraConfig(
+    init_lora_weights = "eva",
+    eva_config = EvaConfig(rho = 2.0),
+    ...
+)
+```
+The parameter `rho` (≥ 1.0) determines how much redistribution is allowed. When `rho=1.0` and `r=16`, LoRA adapters are limited to exactly 16 ranks, preventing any redistribution from occurring. A recommended value for EVA with redistribution is 2.0, meaning the maximum rank allowed for a layer is 2r.
+
+It is recommended to perform EVA initialization on an accelerator(e.g. CUDA GPU, Intel XPU) as it is much faster. To optimize the amount of available memory for EVA, you can use the `low_cpu_mem_usage` flag in [`get_peft_model`]:
+```python
+peft_model = get_peft_model(model, peft_config, low_cpu_mem_usage=True)
+```
+Then, call [`initialize_lora_eva_weights`] to initialize the EVA weights (in most cases the dataloader used for eva initialization can be the same as the one used for finetuning):
+```python
+initialize_lora_eva_weights(peft_model, dataloader)
+```
+EVA works out of the box with bitsandbytes. Simply initialize the model with `quantization_config` and call [`initialize_lora_eva_weights`] as usual.
+
+> [!TIP]
+> For further instructions on using EVA, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/eva_finetuning).
+</hfoption>
+
+<hfoption id="LoftQ">
+When quantizing the base model for QLoRA training, consider using the [LoftQ initialization](https://huggingface.co/papers/2310.08659), which has been shown to improve performance when training quantized models. The idea is that the LoRA weights are initialized such that the quantization error is minimized. To use LoftQ, follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/loftq_finetuning).
+
+> [!TIP]
+> Learn more about how PEFT works with quantization and how to use LoftQ in the [Quantization](../developer_guides/quantization) guide.
+</hfoption>
+
+<hfoption id="rsLoRA">
+Another way to initialize [`LoraConfig`] is with the [rank-stabilized LoRA (rsLoRA)](https://huggingface.co/papers/2312.03732) method. The LoRA architecture scales each adapter during every forward pass by a fixed scalar which is set at initialization and depends on the rank `r`. The scalar is given by `lora_alpha/r` in the original implementation, but rsLoRA uses `lora_alpha/math.sqrt(r)` which stabilizes the adapters and increases the performance potential from using a higher `r`.
+
+```py
+from peft import LoraConfig
+
+config = LoraConfig(use_rslora=True, ...)
+```
+</hfoption>
+
+<hfoption id="LoRA-GA">
+[LoRA-GA](https://hf.co/papers/2407.05000) (Low-Rank Adaptation with Gradient Approximation) initializes the adapter
+weights by performing SVD on estimated gradients, so that the weights are aligning closer to full-finetuning for faster
+convergence.
+
+This method requires an initialization function to estimate the gradients
+before beginning the actual training:
+
+```python
+from peft.tuners.lora import preprocess_loraga
+
+def train_step():
+    """Run forward and backward passes for gradient estimation."""
+    dataloader_iter = iter(grad_dataloader)
+    for _ in range(N):
+        batch = next(dataloader_iter)
+        batch = {k: v.to(device) for k, v in batch.items()}
+        outputs = model(**batch)
+        loss = outputs.loss
+        loss.backward()
+
+preprocess_loraga(model, lora_config, train_step)
+```
+
+#### Usage Tips
+
+- **Gradient Estimation**: LoRA-GA requires a gradient estimation phase before model initialization. Use `preprocess_loraga()` with a `train_step` callback to compute gradients over a small number of training batches (typically 64-128 batches).
+
+- **Initialization Strategies**: LoRA-GA supports four direction strategies (`direction`): `"ArBr"`, `"A2rBr"`, `"ArB2r"` (default), and `"random"`, and four scaling strategies (`scale`): `"stable"` (default), `"weight_svd"`, `"gd_scale"`, and `"unit"`. The default combination provides the best balance of convergence speed and stability.
+
+- **Base Weight Modification**: Unlike standard LoRA, LoRA-GA modifies the base model weights during initialization by subtracting a scaled version of the low-rank approximation. This enables better alignment with full fine-tuning gradients. Since base weights are modified, use `save_pretrained()` with the `save_embedding_layers` argument or `save_mutated_as_lora` pattern to properly save the adapter.
+
+- **Computational Overhead**: The gradient estimation adds a small overhead during initialization (typically 1-2 minutes for 64 batches), but this is quickly amortized by faster convergence during training.
+
+- **Compatibility**: LoRA-GA requires full-precision weights and does not support quantized models. Can be combined with other LoRA variants like DoRA.
+</hfoption>
+</hfoptions>
+
 ## Training
 
 This section shows how to handle more complex training scenarios instead of only applying a low-rank adapter
@@ -719,7 +880,7 @@ Using this feature has some drawbacks, namely:
 
 ### Composing and Reusing LoRA Adapters
 #### Arrow
-[Arrow](https://huggingface.co/papers/2405.11157) is a modular routing algorithm designed to combine multiple pre-trained task-specific LoRA adapters to solve a given task. Rather than merging all adapters naively, Arrow introduces a **gradient-free, token-wise mixture-of-experts (MoE) routing mechanism**. At inference time, it first computes a _prototype_ for each LoRA by extracting the top right singular vector from its SVD decomposition. Each token representation is then compared to these prototypes via cosine similarity to obtain routing coefficients. Tokens are assigned to the top-k most relevant LoRA adapters, with the coefficients normalized through softmax, and their outputs linearly combined. This allows effective reuse of existing LoRA modules for new tasks and leads to stronger zero-shot generalization.
+[Arrow](https://huggingface.co/papers/2405.11157) is a modular routing algorithm designed to combine multiple pre-trained task-specific LoRA adapters to solve a given task, similar to [Polytropon](polytropon) but without the need for fine-tuning. Rather than merging all adapters naively, Arrow introduces a **gradient-free, token-wise mixture-of-experts (MoE) routing mechanism**. At inference time, it first computes a _prototype_ for each LoRA by extracting the top right singular vector from its SVD decomposition. Each token representation is then compared to these prototypes via cosine similarity to obtain routing coefficients. Tokens are assigned to the top-k most relevant LoRA adapters, with the coefficients normalized through softmax, and their outputs linearly combined. This allows effective reuse of existing LoRA modules for new tasks and leads to stronger zero-shot generalization.
 
 In PEFT, Arrow is enabled through [`ArrowConfig]` and `create_arrow_model`. You can also configure parameters such as `top_k` (the number of LoRA adapters combined per token), `router_temperature` (the softmax temperature applied to the routing coefficients), and `rng_seed` (for reproducibility).
 
@@ -896,30 +1057,7 @@ To encode general knowledge, GenKnowSub subtracts the average of the provided ge
 [[autodoc]] tuners.lora.eva.get_eva_state_dict
 
 
-## Variants
-
-### LoRA-GA
-
-[LoRA-GA](https://hf.co/papers/2407.05000) (Low-Rank Adaptation with Gradient Approximation) improves upon standard LoRA by using gradient information during initialization to achieve faster convergence. Instead of random initialization, LoRA-GA performs SVD on estimated gradients to initialize adapter weights in a direction that aligns with full fine-tuning, resulting in 2-4x faster convergence with the same final performance.
-
-The abstract from the paper is:
-
-*Low-rank adaptation (LoRA) is a popular technique for parameter-efficient fine-tuning of large language models. However, LoRA's random initialization of adapter weights leads to slow convergence during the initial training phase. In this paper, we propose LoRA-GA (Low-Rank Adaptation with Gradient Approximation), a novel initialization method that leverages gradient information to initialize LoRA adapters. Specifically, we estimate gradients on a small set of training samples and perform singular value decomposition (SVD) to extract principal components. These components are used to initialize the adapter matrices, aligning the initial update direction with that of full fine-tuning. Our experiments across various tasks and model scales demonstrate that LoRA-GA achieves 2-4x faster convergence compared to standard LoRA while maintaining the same final performance. The method is orthogonal to existing LoRA variants and can be easily integrated with techniques like DoRA and LoRA+.*
-
-#### Usage Tips
-
-- **Gradient Estimation**: LoRA-GA requires a gradient estimation phase before model initialization. Use `preprocess_loraga()` with a `train_step` callback to compute gradients over a small number of training batches (typically 64-128 batches).
-
-
-- **Initialization Strategies**: LoRA-GA supports four direction strategies (`direction`): `"ArBr"`, `"A2rBr"`, `"ArB2r"` (default), and `"random"`, and four scaling strategies (`scale`): `"stable"` (default), `"weight_svd"`, `"gd_scale"`, and `"unit"`. The default combination provides the best balance of convergence speed and stability.
-
-- **Base Weight Modification**: Unlike standard LoRA, LoRA-GA modifies the base model weights during initialization by subtracting a scaled version of the low-rank approximation. This enables better alignment with full fine-tuning gradients. Since base weights are modified, use `save_pretrained()` with the `save_embedding_layers` argument or `save_mutated_as_lora` pattern to properly save the adapter.
-
-- **Computational Overhead**: The gradient estimation adds a small overhead during initialization (typically 1-2 minutes for 64 batches), but this is quickly amortized by faster convergence during training.
-
-- **Compatibility**: LoRA-GA requires full-precision weights and does not support quantized models. Can be combined with other LoRA variants like DoRA.
-
-#### LoraGAConfig
+### LoraGAConfig
 
 [[autodoc]] tuners.lora.config.LoraGAConfig
 
