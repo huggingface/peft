@@ -20,14 +20,7 @@ Adapter-based methods add extra trainable parameters after the attention and ful
 
 This guide will give you a brief overview of the adapter methods supported by PEFT (if you're interested in learning more details about a specific method, take a look at the linked paper).
 
-## Low-Rank Adaptation (LoRA)
 
-
-
-<div class="flex justify-center">
-    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/lora.png"/>
-</div>
-<small><a href="https://hf.co/papers/2103.10385">Navigating Text-To-Image Customization: From LyCORIS Fine-Tuning to Model Evaluation</a></small>
 
 ## Mixture of LoRA Experts (X-LoRA)
 
@@ -52,10 +45,6 @@ Ultimately, X-LoRA allows the model to reflect upon its knowledge because of the
 
 A set of learnable adaption prompts are prefixed to the input instruction tokens. These are inserted into the upper layers of the model because it is better to learn with the higher-level semantics of the pretrained model. The instruction-output tokens prefixed to the input guide the adaption prompt to generate a contextual response.
 
-<div class="flex justify-center">
-    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/llama-adapter.png"/>
-</div>
-<small><a href="https://hf.co/papers/2303.16199">LLaMA-Adapter: Efficient Fine-tuning of Language Models with Zero-init Attention</a></small>
 
 To avoid adding noise to the tokens, the adapter uses zero-initialized attention. On top of this, the adapter adds a learnable gating factor (initialized with zeros) to progressively add information to the model during training. This prevents overwhelming the model's pretrained knowledge with the newly learned instructions.
 

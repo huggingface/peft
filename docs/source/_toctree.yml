@@ -64,6 +64,8 @@
         title: Cartridges
       - local: package_reference/prompt_tuning
         title: Prompt tuning
+      - local: package_reference/llama_adapter
+        title: Llama-Adapter
       title: Soft Prompting
     - sections:
       - local: package_reference/adalora
@@ -82,8 +84,6 @@
         title: LoRA
       - local: package_reference/ia3
         title: IA3
-      - local: package_reference/llama_adapter
-        title: Llama-Adapter
       - local: package_reference/loha
         title: LoHa
       - local: package_reference/lokr

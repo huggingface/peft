@@ -16,6 +16,11 @@ rendered properly in your Markdown viewer.
 
 # LoHa
 
+<div class="flex justify-center">
+    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/lora.png"/>
+</div>
+<small><a href="https://hf.co/papers/2103.10385">Navigating Text-To-Image Customization: From LyCORIS Fine-Tuning to Model Evaluation</a></small>
+
 Low-Rank Hadamard Product ([LoHa](https://huggingface.co/papers/2108.06098)), is similar to LoRA except it approximates the large weight matrix with more low-rank matrices and combines them with the Hadamard product. This method is even more parameter-efficient than LoRA and achieves comparable performance. LoHa was originally proposed for federated learning (FedPara) but works well as a general-purpose PEFT method, and is especially popular for fine-tuning image generation models such as Stable Diffusion.
 
 > **Note:** LoHa is part of the [LyCORIS](./adapter_utils) family of adapters. Its close relative [LoKr](./lokr) uses the Kronecker product instead of the Hadamard product.

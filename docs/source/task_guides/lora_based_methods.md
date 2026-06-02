@@ -16,11 +16,7 @@ rendered properly in your Markdown viewer.
 
 # LoRA methods
 
-A popular way to efficiently train large models is to insert (typically in the attention blocks) smaller trainable matrices that are a low-rank decomposition of the delta weight matrix to be learnt during finetuning. The pretrained model's original weight matrix is frozen and only the smaller matrices are updated during training. This reduces the number of trainable parameters, reducing memory usage and training time which can be very expensive for large models.
 
-There are several different ways to express the weight matrix as a low-rank decomposition, but [Low-Rank Adaptation (LoRA)](../conceptual_guides/adapter#low-rank-adaptation-lora) is the most common method. The PEFT library supports several other LoRA variants, such as [Low-Rank Hadamard Product (LoHa)](../conceptual_guides/adapter#low-rank-hadamard-product-loha), [Low-Rank Kronecker Product (LoKr)](../conceptual_guides/adapter#low-rank-kronecker-product-lokr), and [Adaptive Low-Rank Adaptation (AdaLoRA)](../conceptual_guides/adapter#adaptive-low-rank-adaptation-adalora). You can learn more about how these methods work conceptually in the [Adapters](../conceptual_guides/adapter) guide. If you're interested in applying these methods to other tasks and use cases like semantic segmentation, token classification, take a look at our [notebook collection](https://huggingface.co/collections/PEFT/notebooks-6573b28b33e5a4bf5b157fc1)!
-
-Additionally, PEFT supports the [X-LoRA](../conceptual_guides/adapter#mixture-of-lora-experts-x-lora) Mixture of LoRA Experts method.
 
 This guide will show you how to quickly train an image classification model - with a low-rank decomposition method - to identify the class of food shown in an image.
 
@@ -153,23 +149,7 @@ Every PEFT method requires a configuration that holds all the parameters specify
 <hfoptions id="loras">
 <hfoption id="LoRA">
 
-[LoRA](../conceptual_guides/adapter#low-rank-adaptation-lora) decomposes the weight update matrix into *two* smaller matrices. The size of these low-rank matrices is determined by its *rank* or `r`. A higher rank means the model has more parameters to train, but it also means the model has more learning capacity. You'll also want to specify the `target_modules` which determine where the smaller matrices are inserted. For this guide, you'll target the *query* and *value* matrices of the attention blocks. Other important parameters to set are `lora_alpha` (scaling factor), `bias` (whether `none`, `all` or only the LoRA bias parameters should be trained), and `modules_to_save` (the modules apart from the LoRA layers to be trained and saved). All of these parameters - and more - are found in the [`LoraConfig`].
 
-```py
-from peft import LoraConfig, get_peft_model
-
-config = LoraConfig(
-    r=16,
-    lora_alpha=16,
-    target_modules=["query", "value"],
-    lora_dropout=0.1,
-    bias="none",
-    modules_to_save=["classifier"],
-)
-model = get_peft_model(model, config)
-model.print_trainable_parameters()
-"trainable params: 667,493 || all params: 86,543,818 || trainable%: 0.7712775047664294"
-```
 
 </hfoption>
 <hfoption id="LoHa">
@@ -192,56 +172,12 @@ model.print_trainable_parameters()
 ```
 
 </hfoption>
-<hfoption id="LoKr">
 
-[LoKr](../conceptual_guides/adapter#low-rank-kronecker-product-lokr) expresses the weight update matrix as a decomposition of a Kronecker product, creating a block matrix that is able to preserve the rank of the original weight matrix. The size of the smaller matrices are determined by its *rank* or `r`. You'll also want to specify the `target_modules` which determines where the smaller matrices are inserted. For this guide, you'll target the *query* and *value* matrices of the attention blocks. Other important parameters to set are `alpha` (scaling factor), and `modules_to_save` (the modules apart from the LoKr layers to be trained and saved). All of these parameters - and more - are found in the [`LoKrConfig`].
-
-```py
-from peft import LoKrConfig, get_peft_model
-
-config = LoKrConfig(
-    r=16,
-    alpha=16,
-    target_modules=["query", "value"],
-    module_dropout=0.1,
-    modules_to_save=["classifier"],
-)
-model = get_peft_model(model, config)
-model.print_trainable_parameters()
-"trainable params: 116,069 || all params: 87,172,042 || trainable%: 0.13314934162033282"
-```
-
-</hfoption>
-<hfoption id="AdaLoRA">
-
-[AdaLoRA](../conceptual_guides/adapter#adaptive-low-rank-adaptation-adalora) efficiently manages the LoRA parameter budget by assigning important weight matrices more parameters and pruning less important ones. In contrast, LoRA evenly distributes parameters across all modules. You can control the average desired *rank* or `r` of the matrices, and which modules to apply AdaLoRA to with `target_modules`. Other important parameters to set are `lora_alpha` (scaling factor), and `modules_to_save` (the modules apart from the AdaLoRA layers to be trained and saved). All of these parameters - and more - are found in the [`AdaLoraConfig`].
-
-```py
-from peft import AdaLoraConfig, get_peft_model
-
-config = AdaLoraConfig(
-    r=8,
-    init_r=12,
-    tinit=200,
-    tfinal=1000,
-    deltaT=10,
-    target_modules=["query", "value"],
-    modules_to_save=["classifier"],
-)
-model = get_peft_model(model, config)
-model.print_trainable_parameters()
-"trainable params: 520,325 || all params: 87,614,722 || trainable%: 0.5938785036606062"
-```
-
-</hfoption>
 </hfoptions>
 
 ### Training
 
 For training, let's use the [`~transformers.Trainer`] class from Transformers. The [`Trainer`] contains a PyTorch training loop, and when you're ready, call [`~transformers.Trainer.train`] to start training. To customize the training run, configure the training hyperparameters in the [`~transformers.TrainingArguments`] class. With LoRA-like methods, you can afford to use a higher batch size and learning rate.
-
-> [!WARNING]
-> AdaLoRA has an [`~AdaLoraModel.update_and_allocate`] method that should be called at each training step to update the parameter budget and mask, otherwise the adaptation step is not performed. This requires writing a custom training loop or subclassing the [`~transformers.Trainer`] to incorporate this method. As an example, take a look at this [custom training loop](https://github.com/huggingface/peft/blob/912ad41e96e03652cabf47522cd876076f7a0c4f/examples/conditional_generation/peft_adalora_seq2seq.py#L120).
 
 ```py
 from transformers import TrainingArguments, Trainer

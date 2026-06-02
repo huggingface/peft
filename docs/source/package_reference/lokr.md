@@ -16,6 +16,11 @@ rendered properly in your Markdown viewer.
 
 # LoKr
 
+<div class="flex justify-center">
+    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/lora.png"/>
+</div>
+<small><a href="https://hf.co/papers/2103.10385">Navigating Text-To-Image Customization: From LyCORIS Fine-Tuning to Model Evaluation</a></small>
+
 Low-Rank Kronecker Product ([LoKr](https://hf.co/papers/2309.14859)), is a LoRA-variant method that approximates the large weight matrix with two low-rank matrices and combines them with the [Kronecker product](https://en.wikipedia.org/wiki/Kronecker_product). LoKr also provides an optional third low-rank matrix to provide better control during fine-tuning. By expresseing the weight update matrix as a decomposition of a Kronecker product, creating a block matrix, LoKr is able to preserve the rank of the original weight matrix. The size of the smaller matrices are determined by its *rank* or `r`. Another benefit of the Kronecker product is that it can be vectorized by stacking the matrix columns. This can speed up the process because you're avoiding fully reconstructing ∆W.
 
 The abstract from the paper is:
