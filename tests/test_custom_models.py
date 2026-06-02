@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import copy
-import math
 import os
 import platform
 import re
@@ -70,7 +69,6 @@ from peft import (
     get_peft_model,
 )
 from peft.tuners import lora
-from peft.tuners.glora.layer import GloraLinear
 from peft.tuners.lora.config import BdLoraConfig
 from peft.tuners.lora.monteclora import MontecloraSampler
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -1392,15 +1390,15 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         "GLoRA Same",
         "glora",
         GloraConfig,
-        {"target_modules": ["lin0"]},
-        {"target_modules": ["lin0"]},
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
     ),
     (
         "GLoRA Different",
         "glora",
         GloraConfig,
-        {"target_modules": ["lin0"]},
-        {"target_modules": ["lin1"]},
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
     ),
     (
         "SHiRA Same",
@@ -1650,22 +1648,6 @@ def _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config
         pytest.skip("LoRA with multiple adapters with target_parameters is not supported")
     if config_cls is AdaLoraConfig:
         pytest.skip("AdaLoRA only supports a single trainable adapter")
-
-
-def _glora_init_down_factors_for_multiadapter_testing(peft_model, adapter_names=None):
-    """GLoRA keeps Xd factors at zero at init so adapters are no-op; perturb them for testing."""
-    with torch.no_grad():
-        for module in peft_model.modules():
-            if not isinstance(module, GloraLinear):
-                continue
-            names = adapter_names if adapter_names is not None else list(module.glora_A.keys())
-            for adapter_name in names:
-                if adapter_name not in module.glora_A:
-                    continue
-                for key in ("A", "B", "C"):
-                    path_module = getattr(module, f"glora_{key}")[adapter_name]
-                    if hasattr(path_module, "Xd"):
-                        nn.init.kaiming_uniform_(path_module.Xd, a=math.sqrt(5))
 
 
 class MLP(nn.Module):
@@ -4307,9 +4289,6 @@ class TestMultipleActiveAdapters:
                 peft_model.emb.token_adapter.trainable_tokens_delta["adapter_2"].data
             )
 
-        if issubclass(config_cls, GloraConfig):
-            _glora_init_down_factors_for_multiadapter_testing(peft_model)
-
         # set adapter_1
         peft_model.set_adapter("adapter_1")
         adapter_1_output = peft_model(**X)
@@ -4364,9 +4343,6 @@ class TestMultipleActiveAdapters:
         peft_model = get_peft_model(model, config_1, adapter_name="adapter_1").eval()
         peft_model.add_adapter("adapter_2", config_2)
 
-        if issubclass(config_cls, GloraConfig):
-            _glora_init_down_factors_for_multiadapter_testing(peft_model)
-
         # set ["adapter_1", "adapter_2"]
         self.set_multiple_active_adapters(peft_model, ["adapter_1", "adapter_2"])
         combined_output = peft_model(**X)
@@ -4410,9 +4386,6 @@ class TestMultipleActiveAdapters:
                 model.emb.token_adapter.trainable_tokens_delta["default"].data
             )
 
-        if issubclass(config_cls, GloraConfig):
-            _glora_init_down_factors_for_multiadapter_testing(model, ["default"])
-
         dummy_input = self.prepare_inputs_for_testing()
         model.eval()
 
@@ -4421,9 +4394,6 @@ class TestMultipleActiveAdapters:
 
         model.add_adapter("adapter-2", config_2)
         model.set_adapter("adapter-2")
-
-        if issubclass(config_cls, GloraConfig):
-            _glora_init_down_factors_for_multiadapter_testing(model, ["adapter-2"])
 
         # same as above but for adapter 2
         if "trainable_tokens" in tuner_method:
