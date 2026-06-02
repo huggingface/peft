@@ -45,7 +45,7 @@ Read the contribution guideline at `docs/source/developer_guides/contributing.md
 
 ### Testing
 
-Check the install instructions to ensure that your environment has the necessary packages to run the tests. Typically, running `pip install ".e[test]"` should be enough. If you need specific packages, e.g. `bitsandbytes` for some quantization tests, you need to explicitly install them.
+Check the install instructions to ensure that your environment has the necessary packages to run the tests. Typically, running `pip install ".[test]"` should be enough. If you need specific packages, e.g. `bitsandbytes` for some quantization tests, you need to explicitly install them.
 
 #### Test selection
 
@@ -60,6 +60,8 @@ Add further qualifiers if needed to reduce the amount of tests required to run. 
 ```sh
 pytest tests/ -k "lora and not adalora and not randlora and not [...]"
 ```
+
+Ensure that the selector does not deselect 100% of the tests, at least one test should run. If there are no corresponding tests, add them.
 
 #### Bug fixes
 
