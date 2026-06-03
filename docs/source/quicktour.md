@@ -49,7 +49,7 @@ peft_config = LoraConfig(target_modules=["q_proj"], task_type=TaskType.CAUSAL_LM
 ```
 
 > [!TIP]
-> See the [`LoraConfig`] reference for more details about other parameters you can adjust, such as the modules to target or the bias type.
+> See the [configuration guide](guides/peft_model_config) for more details on how the PEFT configuration works under the hood.
 
 Once the [`LoraConfig`] is set up, create a [`PeftModel`] with the [`get_peft_model`] function. It takes a base model - which you can (but don't have to) load from the Transformers library - and the [`LoraConfig`] containing the parameters for how to configure a model for training with LoRA.
 
