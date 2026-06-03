@@ -39,7 +39,7 @@ MPT consists of two stages:
 
 ## Benchmark overview
 
-There is no benchmark for MPT yet. Feel free to contribute an experiment
+There is no benchmark for this method yet. Feel free to contribute an experiment
 configuration but make sure to first create an issue
 [here](https://github.com/huggingface/peft/issues).
 
