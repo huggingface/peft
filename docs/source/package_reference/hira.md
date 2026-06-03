@@ -38,6 +38,31 @@ peft_model.print_trainable_parameters()
 # trainable params: 4,718,592 || all params: 129,957,888 || trainable%: 3.6309
 ```
 
+## Benchmark overview
+
+<iframe
+	src="https://hubnemo-peft-method-comparison-individual.hf.space/?highlight[type]=HIRA"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
+
+## Citation:
+
+If you found HiRA is useful, please cite HiRA as:
+```
+@inproceedings{
+huang2025hira,
+title={Hi{RA}: Parameter-Efficient Hadamard High-Rank Adaptation for Large Language Models},
+author={Qiushi Huang and Tom Ko and Zhan Zhuang and Lilian Tang and Yu Zhang},
+booktitle={The Thirteenth International Conference on Learning Representations},
+year={2025},
+url={https://openreview.net/forum?id=TwJrTz9cRS}
+}
+```
+
+# API
+
 ## HiraConfig
 
 [[autodoc]] tuners.hira.config.HiraConfig
@@ -61,15 +86,4 @@ peft_model.print_trainable_parameters()
 [[autodoc]] tuners.hira.layer.Conv1d [[autodoc]] tuners.hira.layer.Conv2d [[autodoc]] tuners.hira.layer.ConvNd
 
 
-## Citation:
-If you found HiRA is useful, please cite HiRA as:
-```
-@inproceedings{
-huang2025hira,
-title={Hi{RA}: Parameter-Efficient Hadamard High-Rank Adaptation for Large Language Models},
-author={Qiushi Huang and Tom Ko and Zhan Zhuang and Lilian Tang and Yu Zhang},
-booktitle={The Thirteenth International Conference on Learning Representations},
-year={2025},
-url={https://openreview.net/forum?id=TwJrTz9cRS}
-}
-```
+

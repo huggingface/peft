@@ -29,6 +29,17 @@ AdaMSS currently has the following constraints:
 
 If these constraints don't work for your use case, consider other methods instead.
 
+## Benchmark overview
+
+<iframe
+	src="https://hubnemo-peft-method-comparison-individual.hf.space/?highlight[type]=ADAMSS"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
+
+# API
+
 ## AdamssConfig
 
 [[autodoc]] tuners.adamss.config.AdamssConfig

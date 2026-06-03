@@ -67,7 +67,7 @@ model = AutoModelForCausalLM.from_pretrained(model_id)
 
 # Configure PSOFT
 config = PsoftConfig(
-    r=32,                                   # the dimension of trainable matrix R, 
+    r=32,                                   # the dimension of trainable matrix R,
     psoft_alpha=32,                         # scaling factor (typically set to r in PSOFT),
     target_modules=["q_proj", "v_proj"],    # target attention projection layers
     ab_svd_init="psoft_init",        # principal subspace initialization
@@ -119,6 +119,16 @@ config = PsoftConfig(psoft_orth=True,psoft_mag_a=True,psoft_mag_b=True)
 4. **SVD Initialization**: The `lowrank` option is more memory- and compute-efficient than `full`, making it more suitable for large models.
 5. **Cayley–Neumann Approximation**: When the rank is large, enabling the Cayley–Neumann approximation can significantly improve computational efficiency, while the benefit is less pronounced for small ranks. In practice, a small number of Neumann series terms (typically `5`) usually provides a good balance between accuracy and efficiency.
 
+## Benchmark overview
+
+<iframe
+	src="https://hubnemo-peft-method-comparison-individual.hf.space/?highlight[type]=PSOFT"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
+
+# API
 
 ## PsoftConfig
 

@@ -30,3 +30,21 @@ outperforms LoRA and other baselines, achieving up to +8.5% absolute gain in
 Pass@1 on HumanEval+. These improvements hold across model sizes and rank
 settings, making GraLoRA a scalable and robust solution for PEFT.*
 
+## Benchmark overview
+
+<iframe
+	src="https://hubnemo-peft-method-comparison-individual.hf.space/?highlight[type]=GRALORA"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
+
+# API
+
+## GraloraConfig
+
+[[autodoc]] tuners.gralora.config.GraloraConfig
+
+## GraloraModel
+
+[[autodoc]] tuners.gralora.model.GraloraModel
