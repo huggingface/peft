@@ -178,73 +178,106 @@ class GloraLayer(BaseTunerLayer):
         self.set_adapter(self.active_adapters, inference_mode=config.inference_mode)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+        # we unmerge any previously merged adapters and re-merge all active adapters
+        # check https://github.com/huggingface/peft/pull/3098#discussion_r3117924518
+        # for details on why we do this instead of merging directly on top of already merged weights
         adapter_names = check_adapters_to_merge(self, adapter_names)
         if not adapter_names:
             return
-        for adapter_name in adapter_names:
-            if adapter_name not in self.glora_A:
-                continue
 
-            weight = self.weight
-            bias = self.bias
-            device, dtype = weight.device, weight.dtype
+        # Unmerge any already-merged adapters so we start from the original W0,
+        # then re-merge them all together. This avoids the sequential composition
+        # problem where adapter 2's delta would be computed against the already-
+        # modified weight instead of the original W0.
+        previously_merged: list[str] = list(self.merged_adapters)
+        if previously_merged:
+            self.unmerge()
+        all_adapters = previously_merged + [name for name in adapter_names if name in self.glora_A]
 
+        base_layer = self.get_base_layer()
+        weight = self.weight
+        bias = self.bias
+        device, dtype = weight.device, weight.dtype
+
+        # we need a clone of the original weights to compute the merged weights
+        # before they get mutated by the merge process
+        w0 = weight.data.clone()
+        b0 = bias.data.clone() if bias is not None else None
+
+        for adapter_name in all_adapters:
             A = self.glora_A[adapter_name]().to(device=device, dtype=dtype)
             B = self.glora_B[adapter_name]().to(device=device, dtype=dtype)
-            C = self.glora_C[adapter_name]().to(device=device, dtype=dtype)
-            D = self.glora_D[adapter_name]().to(device=device, dtype=dtype)
-            E = self.glora_E[adapter_name]().to(device=device, dtype=dtype)
+            base_layer.weight.data += w0 * A + B
+            if b0 is not None:
+                C = self.glora_C[adapter_name]().to(device=device, dtype=dtype)
+                D = self.glora_D[adapter_name]().to(device=device, dtype=dtype)
+                E = self.glora_E[adapter_name]().to(device=device, dtype=dtype)
+                base_layer.bias.data += b0 * D + E + torch.matmul(w0, C).squeeze(-1)
 
-            base_layer = self.get_base_layer()
-            if safe_merge:
-                w0 = weight.data.clone()
-                b0 = bias.data.clone() if bias is not None else None
-                merged_weight = w0 + w0 * A + B
-                if not torch.isfinite(merged_weight).all():
-                    raise ValueError(
-                        f"NaNs detected in the merged weights. The adapter {adapter_name} seems to be broken"
-                    )
-                base_layer.weight.data = merged_weight
-                if bias is not None:
-                    merged_bias = b0 + b0 * D + E + torch.matmul(w0, C).squeeze(-1)
-                    if not torch.isfinite(merged_bias).all():
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {adapter_name} seems to be broken"
-                        )
-                    base_layer.bias.data = merged_bias
-            else:
-                # we calculate the bias delta before mutating the weight
-                bias_delta = (bias.data * D) + E + torch.matmul(weight.data, C).squeeze(-1) if bias is not None else None
-                base_layer.weight.data += (weight.data * A) + B
-                if bias_delta is not None:
-                    base_layer.bias.data += bias_delta
+        if safe_merge:
+            if not torch.isfinite(weight.data).all():
+                raise ValueError("NaNs detected in the merged weights. The adapter seems to be broken")
+            if bias is not None and not torch.isfinite(bias.data).all():
+                raise ValueError("NaNs detected in the merged weights. The adapter seems to be broken")
+
+        for adapter_name in all_adapters:
             self.merged_adapters.append(adapter_name)
 
     def unmerge(self, adapter_names: Optional[list[str]] = None) -> None:
         if adapter_names is None:
             adapter_names = list(self.merged_adapters)
-        for adapter_name in adapter_names:
-            if adapter_name not in self.merged_adapters:
-                continue
-            if adapter_name not in self.glora_A:
-                continue
 
-            weight = self.weight
-            bias = self.bias
-            device, dtype = weight.device, weight.dtype
+        adapters_to_unmerge = [name for name in adapter_names if name in self.merged_adapters and name in self.glora_A]
+        if not adapters_to_unmerge:
+            return
 
+        # Recover W0 by subtracting all merged adapter contributions.
+        # W_merged = W0 * (1 + sum(Ai)) + sum(Bi), so:
+        # W0 = (W_merged - sum(Bi)) / (1 + sum(Ai))
+        base_layer = self.get_base_layer()
+        weight = self.weight
+        bias = self.bias
+        device, dtype = weight.device, weight.dtype
+
+        all_merged = [name for name in self.merged_adapters if name in self.glora_A]
+        sum_A = torch.zeros_like(weight.data)
+        sum_B = torch.zeros_like(weight.data)
+        sum_D = torch.zeros_like(bias.data) if bias is not None else None
+        sum_E = torch.zeros_like(bias.data) if bias is not None else None
+        sum_WC = torch.zeros_like(bias.data) if bias is not None else None
+
+        for adapter_name in all_merged:
             A = self.glora_A[adapter_name]().to(device=device, dtype=dtype)
             B = self.glora_B[adapter_name]().to(device=device, dtype=dtype)
-            C = self.glora_C[adapter_name]().to(device=device, dtype=dtype)
-            D = self.glora_D[adapter_name]().to(device=device, dtype=dtype)
-            E = self.glora_E[adapter_name]().to(device=device, dtype=dtype)
+            sum_A += A
+            sum_B += B
 
-            base_layer = self.get_base_layer()
-            w0 = (weight.data - B) / (1.0 + A)
-            base_layer.weight.data = w0
-            if bias is not None:
-                base_layer.bias.data = (bias.data - E - torch.matmul(w0, C).squeeze(-1)) / (1.0 + D)
+        w0 = (weight.data - sum_B) / (1.0 + sum_A)
+
+        if bias is not None:
+            for adapter_name in all_merged:
+                C = self.glora_C[adapter_name]().to(device=device, dtype=dtype)
+                D = self.glora_D[adapter_name]().to(device=device, dtype=dtype)
+                E = self.glora_E[adapter_name]().to(device=device, dtype=dtype)
+                sum_D += D
+                sum_E += E
+                sum_WC += torch.matmul(w0, C).squeeze(-1)
+            b0 = (bias.data - sum_E - sum_WC) / (1.0 + sum_D)
+
+        # Set weights back to W0
+        base_layer.weight.data = w0
+        if bias is not None:
+            base_layer.bias.data = b0
+
+        for adapter_name in adapters_to_unmerge:
             self.merged_adapters.remove(adapter_name)
+
+        # Re-merge the remaining adapters against W0
+        remaining = [name for name in self.merged_adapters if name in self.glora_A]
+        if remaining:
+            # Clear merged_adapters and re-merge from scratch
+            self.merged_adapters.clear()
+            self.merge(adapter_names=remaining)
 
 
 class GloraLinear(nn.Module, GloraLayer):

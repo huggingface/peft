@@ -4326,11 +4326,6 @@ class TestMultipleActiveAdapters:
 
         config_1 = config_cls(**config_kwargs_1)
         config_2 = config_cls(**config_kwargs_2)
-        if issubclass(config_cls, GloraConfig) and sorted(config_1.target_modules) == sorted(config_2.target_modules):
-            pytest.skip(
-                "GLoRA on identical target_modules: sequentially merging two adapters into base weights does not "
-                "reproduce the multi-active forward (deltas are composed on the original W0, not on each merged W)."
-            )
 
         torch.manual_seed(0)
 
