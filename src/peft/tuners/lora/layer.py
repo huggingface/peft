@@ -157,8 +157,8 @@ class LoraLayer(BaseTunerLayer):
 
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
 
-        # Safely fetch the dictionary (defaults to empty if a subclass forgot to define it)
-        layer_variants = getattr(self, "lora_variants", {(): None})
+        # Fetch the dictionary of variants
+        layer_variants = self.lora_variants
         lora_variants_configs = [f for f in dataclasses.fields(config) if f.metadata.get("is_lora_variant")]
 
         # 1. Gather all valid variant field names from the config
