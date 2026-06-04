@@ -41,20 +41,9 @@ class SimpleNet(nn.Module):
         return X
 
 
-def _run_lorafa_weight_decay_step():
-    lora_rank = 16
-    lora_alpha = 32
-    # Stronger lr and weight_decay to make the decay effect more pronounced for testing
-    lr = 1e-2
-    weight_decay = 1.0
+def _run_lorafa_weight_decay_step(config: LoraConfig, lr: float, weight_decay: float):
     seed = 42
 
-    config = LoraConfig(
-        r=lora_rank,
-        lora_alpha=lora_alpha,
-        target_modules=["lin0", "lin1"],
-        bias="all",  # Include bias to also check non-LoRA trainable parameters
-    )
     torch.manual_seed(seed)
     model_no_wd = get_peft_model(SimpleNet(), config).to(torch_device)
     torch.manual_seed(seed)
@@ -69,15 +58,15 @@ def _run_lorafa_weight_decay_step():
 
     optimizer_no_wd = create_lorafa_optimizer(
         model=model_no_wd,
-        r=lora_rank,
-        lora_alpha=lora_alpha,
+        r=config.r,
+        lora_alpha=config.lora_alpha,
         lr=lr,
         weight_decay=0.0,
     )
     optimizer_wd = create_lorafa_optimizer(
         model=model_wd,
-        r=lora_rank,
-        lora_alpha=lora_alpha,
+        r=config.r,
+        lora_alpha=config.lora_alpha,
         lr=lr,
         weight_decay=weight_decay,
     )
@@ -112,15 +101,11 @@ def _run_lorafa_weight_decay_step():
     optimizer_no_wd.step()
     optimizer_wd.step()
 
-    # Compute the scaling factor for the expected relation of with and without weight decay
-    scale = 1.0 - lr * weight_decay
-
     return (
         dict(model_no_wd.named_parameters()),
         dict(model_wd.named_parameters()),
         initial_lora_A_weights,
         non_lora_trainable_names,
-        scale,
     )
 
 
@@ -239,7 +224,21 @@ def test_lorafa_weight_decay_decoupled_update_lora_b():
     """
     Test that one optimizer step applies decoupled weight decay to LoRA B weights.
     """
-    params_no_wd, params_wd, initial_lora_A_weights, _, scale = _run_lorafa_weight_decay_step()
+    lora_rank = 16
+    lora_alpha = 32
+    # Stronger lr and weight_decay to make the decay effect more pronounced for testing
+    lr = 1e-2
+    weight_decay = 1.0
+    config = LoraConfig(
+        r=lora_rank,
+        lora_alpha=lora_alpha,
+        target_modules=["lin0", "lin1"],
+        bias="none",
+    )
+    params_no_wd, params_wd, initial_lora_A_weights, _ = _run_lorafa_weight_decay_step(config, lr, weight_decay)
+
+    # Compute the scaling factor for the expected relation of with and without weight decay
+    scale = 1.0 - lr * weight_decay
 
     # Check if lora_A weights have not changed
     for name, param in params_no_wd.items():
@@ -259,7 +258,21 @@ def test_lorafa_weight_decay_decoupled_update_non_lora_params():
     """
     Test that one optimizer step applies decoupled weight decay to non-LoRA trainable parameters.
     """
-    params_no_wd, params_wd, _, non_lora_trainable_names, scale = _run_lorafa_weight_decay_step()
+    lora_rank = 16
+    lora_alpha = 32
+    # Stronger lr and weight_decay to make the decay effect more pronounced for testing
+    lr = 1e-2
+    weight_decay = 1.0
+    config = LoraConfig(
+        r=lora_rank,
+        lora_alpha=lora_alpha,
+        target_modules=["lin0", "lin1"],
+        bias="all",  # Include bias to check non-LoRA trainable parameters
+    )
+    params_no_wd, params_wd, _, non_lora_trainable_names = _run_lorafa_weight_decay_step(config, lr, weight_decay)
+
+    # Compute the scaling factor for the expected relation of with and without weight decay
+    scale = 1.0 - lr * weight_decay
 
     # Sanity check: non-LoRA trainable parameters
     assert non_lora_trainable_names, "Expected at least one non-LoRA trainable parameter with gradients"
