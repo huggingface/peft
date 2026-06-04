@@ -145,13 +145,11 @@ class LoraLayer(BaseTunerLayer):
         """
         A dictionary mapping the active LoRA variants to their respective classes.
 
-        To extend this, subclasses should override this property and return a dictionary 
-        where the keys are tuples of variant field names (from LoraConfig) and the 
-        values are the specific LoraVariant subclasses.
+        To extend this, subclasses should override this property and return a dictionary where the keys are tuples of
+        variant field names (from LoraConfig) and the values are the specific LoraVariant subclasses.
 
-        Tuples are used as keys because they are immutable and hashable, allowing us 
-        to safely map combinations of active variants (e.g., DoRA + another variant) 
-        to a specific composed variant class.
+        Tuples are used as keys because they are immutable and hashable, allowing us to safely map combinations of
+        active variants (e.g., DoRA + another variant) to a specific composed variant class.
         """
         return {(): None}
 
@@ -162,7 +160,7 @@ class LoraLayer(BaseTunerLayer):
         lora_variants_configs = [f for f in dataclasses.fields(config) if f.metadata.get("is_lora_variant")]
 
         # 1. Gather all valid variant field names from the config
-        tagged_fields = { f.name for f in lora_variants_configs }
+        tagged_fields = {f.name for f in lora_variants_configs}
 
         # 2. SANITY CHECK: Ensure all keys in the layer's dictionary actually exist in the config
         for variant_keys in layer_variants.keys():
@@ -174,10 +172,7 @@ class LoraLayer(BaseTunerLayer):
                     )
 
         # 3. Figure out which variants are currently active
-        active_variants = tuple(sorted(
-            f.name for f in lora_variants_configs
-            if getattr(config, f.name)
-        ))
+        active_variants = tuple(sorted(f.name for f in lora_variants_configs if getattr(config, f.name)))
 
         # 4. Route to the correct variant class
         if active_variants not in layer_variants:
@@ -831,6 +826,7 @@ class Linear(nn.Module, LoraLayer):
     @property
     def lora_variants(self):
         from . import variants
+
         return {
             (): None,
             ("use_dora",): variants.DoraLinearVariant,
@@ -1079,6 +1075,7 @@ class Embedding(nn.Module, LoraLayer):
     @property
     def lora_variants(self):
         from . import variants
+
         return {
             (): None,
             ("use_dora",): variants.DoraEmbeddingVariant,
@@ -1686,6 +1683,7 @@ class Conv2d(_ConvNd):
     @property
     def lora_variants(self):
         from . import variants
+
         return {
             (): None,
             ("use_dora",): variants.DoraConv2dVariant,
@@ -1703,6 +1701,7 @@ class Conv1d(_ConvNd):
     @property
     def lora_variants(self):
         from . import variants
+
         return {
             (): None,
             ("use_dora",): variants.DoraConv1dVariant,
@@ -1720,6 +1719,7 @@ class Conv3d(_ConvNd):
     @property
     def lora_variants(self):
         from . import variants
+
         return {
             (): None,
             ("use_dora",): variants.DoraConv3dVariant,

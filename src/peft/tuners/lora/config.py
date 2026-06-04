@@ -836,7 +836,9 @@ class LoraConfig(PeftConfig):
         },
     )
     arrow_config: Optional[ArrowConfig] = field(
-        default=None, metadata={"help": "The necessary config to apply arrow routing on the model.",
+        default=None,
+        metadata={
+            "help": "The necessary config to apply arrow routing on the model.",
             "is_lora_variant": True,
         },
     )
