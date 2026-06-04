@@ -92,6 +92,8 @@
       title: LoKr
     - local: package_reference/lora
       title: LoRA
+    - local: package_reference/unilora
+      title: UniLoRA
     - local: package_reference/osf
       title: OSF
     - local: package_reference/xlora

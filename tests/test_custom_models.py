@@ -61,6 +61,7 @@ from peft import (
     TaskType,
     TinyLoraConfig,
     TrainableTokensConfig,
+    UniLoraConfig,
     VBLoRAConfig,
     VeloraConfig,
     VeraConfig,
@@ -75,6 +76,18 @@ from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
 from .testing_common import PeftCommonTester, _skip_if_merging_not_supported
 from .testing_utils import get_state_dict, require_non_cpu, set_init_weights_false
+
+
+def _zero_unilora_theta_d(model, adapter_name="default"):
+    torch.nn.init.zeros_(model.unilora_theta_d[adapter_name])
+
+
+def _reset_unilora_theta_d(model, config, adapter_name="default"):
+    theta_d = model.unilora_theta_d[adapter_name]
+    if config.init_weights:
+        torch.nn.init.uniform_(theta_d, -config.init_theta_d_bound, config.init_theta_d_bound)
+    else:
+        torch.nn.init.normal_(theta_d)
 
 
 # MLP is a vanilla FF network with only linear layers
@@ -870,6 +883,30 @@ TEST_CASES = [
         RandLoraConfig,
         {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "randlora_alpha": 1},
     ),
+    ###########
+    # UniLora #
+    ###########
+    ("Vanilla MLP 1 UniLora", "MLP", UniLoraConfig, {"target_modules": "lin0", "theta_d_length": 101}),
+    ("Vanilla MLP 2 UniLora", "MLP", UniLoraConfig, {"target_modules": ["lin0"], "theta_d_length": 101}),
+    ("Vanilla MLP 3 UniLora", "MLP", UniLoraConfig, {"target_modules": ["lin1"], "theta_d_length": 101}),
+    (
+        "Vanilla MLP 4 UniLora",
+        "MLP",
+        UniLoraConfig,
+        {"target_modules": ["lin0", "lin1"], "theta_d_length": 101},
+    ),
+    (
+        "Vanilla MLP 5 UniLora",
+        "MLP",
+        UniLoraConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "theta_d_length": 101},
+    ),
+    (
+        "Embedding + transformers Conv1D 1 UniLora",
+        "EmbConv1D",
+        UniLoraConfig,
+        {"target_modules": ["conv1d"], "theta_d_length": 101},
+    ),
     #######
     # C3A #
     #######
@@ -1405,6 +1442,13 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         RandLoraConfig,
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "UniLora Same",
+        "unilora",
+        UniLoraConfig,
+        {"target_modules": ["lin0"], "theta_d_length": 101, "init_weights": False},
+        {"target_modules": ["lin0"], "theta_d_length": 101, "init_weights": False},
     ),
     (
         "HRA Same",
@@ -2488,6 +2532,9 @@ class TestPeftCustomModel(PeftCommonTester):
             config_kwargs = set_init_weights_false(config_cls, config_kwargs)
             # Use random float inputs to avoid ReLU dead zones that block gradient to specific subspaces.
             X = {"X": torch.randn(9, 10, device=self.torch_device)}
+        elif issubclass(config_cls, UniLoraConfig):
+            config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+            X = self.prepare_inputs_for_testing()
         else:
             X = self.prepare_inputs_for_testing()
 
@@ -2551,6 +2598,9 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_parameters_after_loading_model(self, test_name, model_id, config_cls, config_kwargs):
         # An explicit test that when loading a trained model, the parameters are loaded correctly
         # see issue #808
+        if issubclass(config_cls, UniLoraConfig):
+            config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
@@ -2566,7 +2616,7 @@ class TestPeftCustomModel(PeftCommonTester):
             lr = 0.1  # otherwise we get nan
         elif "mha" in model_id.lower():
             lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high
-        elif issubclass(config_cls, (VBLoRAConfig, RandLoraConfig, OSFConfig)):
+        elif issubclass(config_cls, (VBLoRAConfig, RandLoraConfig, UniLoraConfig, OSFConfig)):
             lr = 0.01  # otherwise we get nan
         elif issubclass(config_cls, AdaLoraConfig):
             lr = 1e-4  # AdaLoRA + init_lora_weights=False can blow up with multi-target SGD
@@ -2632,6 +2682,10 @@ class TestPeftCustomModel(PeftCommonTester):
             for module in model.modules():
                 if hasattr(module, "lora_E") and "default" in module.lora_E:
                     torch.nn.init.zeros_(module.lora_E["default"])
+        if issubclass(config_cls, UniLoraConfig):
+            # UniLora cannot use zero initialization by default because the adapter update is quadratic in theta_d.
+            # Zero it only for this identity check, then restore a trainable initialization before optimization.
+            _zero_unilora_theta_d(model)
         model.eval()
         outputs_before = model(**X)
         # OSF uses SVD reconstruction which introduces small numerical differences
@@ -2648,6 +2702,8 @@ class TestPeftCustomModel(PeftCommonTester):
             for module in model.modules():
                 if hasattr(module, "lora_E") and "default" in module.lora_E:
                     torch.nn.init.normal_(module.lora_E["default"])
+        if issubclass(config_cls, UniLoraConfig):
+            _reset_unilora_theta_d(model, config)
         if issubclass(config_cls, TinyLoraConfig):
             # Re-initialize tinylora_v so it can be trained
             model.base_model._init_tinylora_v(config, "default")
@@ -2722,6 +2778,8 @@ class TestPeftCustomModel(PeftCommonTester):
             for module in model.modules():
                 if hasattr(module, "lora_E") and "default" in module.lora_E:
                     torch.nn.init.zeros_(module.lora_E["default"])
+        if issubclass(config_cls, UniLoraConfig):
+            _zero_unilora_theta_d(model)
         model.eval()
         outputs_before = model(**X)
 
@@ -2733,6 +2791,8 @@ class TestPeftCustomModel(PeftCommonTester):
             for module in model.modules():
                 if hasattr(module, "lora_E") and "default" in module.lora_E:
                     torch.nn.init.normal_(module.lora_E["default"])
+        if issubclass(config_cls, UniLoraConfig):
+            _reset_unilora_theta_d(model, config)
         if issubclass(config_cls, TinyLoraConfig):
             # Re-initialize tinylora_v so it can be trained
             model.base_model._init_tinylora_v(config, "default")
