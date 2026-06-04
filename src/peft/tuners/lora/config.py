@@ -433,7 +433,7 @@ class LoraConfig(PeftConfig):
             even, only supported for linear layers for now). Passing `"mica"` results in the initialization of <a
             href='https://arxiv.org/abs/2604.01694' >Minor Component Adaptation (MiCA)</a>, which initializes B from
             the r left singular vectors of the base weight associated with the smallest singular values, sets A to
-            zero, and freezes B during training; only A is updated. Currently only supported for linear layers.
+            zero, and freezes B during training; only A is updated. Currently supported for linear and embedding layers.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the

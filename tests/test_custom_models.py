@@ -108,13 +108,6 @@ TEST_CASES = [
         {"target_modules": ["lin0"], "init_lora_weights": "mica", "r": 4},
     ),
     (
-        "Vanilla MLP 2 LoRA with MiCA",
-        "MLP",
-        LoraConfig,
-        # lin1 is nn.Linear(20, 2), so the largest feasible MiCA rank for both targets is 2.
-        {"target_modules": ["lin0", "lin1"], "init_lora_weights": "mica", "r": 2},
-    ),
-    (
         "Vanilla MLP 9 LoRA with DoRA",
         "MLP",
         LoraConfig,

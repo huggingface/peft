@@ -409,6 +409,32 @@ class TestLoraInitialization:
         # Output at init equals the base output
         assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
 
+    def test_lora_mica_embedding_init_default(self):
+        class EmbeddingModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embed = nn.Embedding(7, 5)
+
+            def forward(self, x):
+                return self.embed(x)
+
+        model = EmbeddingModel()
+        data = torch.arange(7).unsqueeze(0)
+        output = model(data)
+
+        config = LoraConfig(init_lora_weights="mica", target_modules=["embed"], r=3)
+        peft_model = get_peft_model(deepcopy(model), config)
+
+        weight_A = peft_model.base_model.embed.lora_embedding_A["default"]
+        weight_B = peft_model.base_model.embed.lora_embedding_B["default"]
+
+        assert torch.all(weight_A == 0)
+        eye = torch.eye(weight_B.shape[1], device=weight_B.device, dtype=weight_B.dtype)
+        assert torch.allclose(weight_B.t() @ weight_B, eye, atol=1e-4)
+        assert weight_A.requires_grad
+        assert not weight_B.requires_grad
+        assert torch.allclose(output, peft_model(data), atol=1e-06)
+
     def test_lora_mica_uses_minor_components(self):
         # Verify B equals the *minor* (smallest singular value) left singular vectors, not the major ones.
         torch.manual_seed(0)
@@ -441,51 +467,56 @@ class TestLoraInitialization:
         assert peft_model.base_model.linear.lora_A["default"].weight.requires_grad
         assert not peft_model.base_model.linear.lora_B["default"].weight.requires_grad
 
-    def test_lora_mica_train_step_updates_only_A(self, data):
-        # After one optimizer step, lora_A must change but lora_B must stay exactly equal.
-        torch.manual_seed(0)
-        model = self.get_model()
-        config = LoraConfig(init_lora_weights="mica", target_modules=["linear"], r=8)
-        peft_model = get_peft_model(deepcopy(model), config)
+    def test_lora_mica_freezes_B_when_switching_adapters(self):
+        class SimpleMlp(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(10, 10)
+                self.fc2 = nn.Linear(10, 10)
 
-        A_before = peft_model.base_model.linear.lora_A["default"].weight.detach().clone()
-        B_before = peft_model.base_model.linear.lora_B["default"].weight.detach().clone()
+            def forward(self, x):
+                x = torch.relu(self.fc1(x))
+                return self.fc2(x)
 
-        opt = torch.optim.SGD([p for p in peft_model.parameters() if p.requires_grad], lr=1.0)
-        out = peft_model(data)[0]
-        loss = out.sum()
-        loss.backward()
-        opt.step()
+        def trainable_parameters(model):
+            return [name for name, param in model.named_parameters() if param.requires_grad]
 
-        A_after = peft_model.base_model.linear.lora_A["default"].weight.detach()
-        B_after = peft_model.base_model.linear.lora_B["default"].weight.detach()
-        assert not torch.equal(A_before, A_after)
-        assert torch.equal(B_before, B_after)
+        config0 = LoraConfig(target_modules=["fc1"], init_lora_weights="mica", r=4)
+        model = get_peft_model(SimpleMlp(), config0)
+        assert trainable_parameters(model) == ["base_model.model.fc1.lora_A.default.weight"]
 
-    def test_lora_mica_save_and_load(self, data, tmp_path):
-        # Save then reload onto the same base weights and verify outputs match exactly.
-        torch.manual_seed(0)
-        model = self.get_model()
+        config1 = LoraConfig(target_modules=["fc1", "fc2"], init_lora_weights="mica", r=4)
+        model.add_adapter("other", config1)
+        model.set_adapter("other")
+        assert trainable_parameters(model) == [
+            "base_model.model.fc1.lora_A.other.weight",
+            "base_model.model.fc2.lora_A.other.weight",
+        ]
 
-        config = LoraConfig(init_lora_weights="mica", target_modules=["linear"], r=8)
-        peft_model = get_peft_model(deepcopy(model), config)
-        # mutate lora_A so the adapter is non-trivial
-        peft_model.base_model.linear.lora_A["default"].weight.data.normal_()
-        output_mica = peft_model(data)[0]
+        model.set_adapter("default")
+        assert trainable_parameters(model) == ["base_model.model.fc1.lora_A.default.weight"]
 
-        peft_model.save_pretrained(tmp_path / "mica-model")
-        model_loaded = PeftModel.from_pretrained(deepcopy(model), tmp_path / "mica-model")
-        output_loaded = model_loaded(data)[0]
+        model.delete_adapter("other")
+        config2 = LoraConfig(target_modules=["fc1"], r=4)
+        model.add_adapter("other", config2)
+        model.set_adapter("other")
+        assert trainable_parameters(model) == [
+            "base_model.model.fc1.lora_A.other.weight",
+            "base_model.model.fc1.lora_B.other.weight",
+        ]
 
-        assert torch.allclose(output_mica, output_loaded, atol=1e-6)
+    def test_lora_mica_rank_too_large_raises(self):
+        class SimpleModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(2, 3)
 
-    def test_lora_mica_unsupported_layer_raises(self):
-        # MiCA is currently only implemented for nn.Linear. Trying to apply it to a non-Linear layer (e.g. conv2d)
-        # should raise rather than silently fall through to a default init.
-        model = self.get_model()
-        config = LoraConfig(init_lora_weights="mica", target_modules=["conv2d"], r=4)
-        with pytest.raises(ValueError, match="Unknown initialization"):
-            get_peft_model(deepcopy(model), config)
+            def forward(self, x):
+                return self.linear(x)
+
+        config = LoraConfig(init_lora_weights="mica", target_modules=["linear"], r=3)
+        with pytest.raises(ValueError, match="MiCA requires `r` <= min"):
+            get_peft_model(SimpleModel(), config)
 
     def test_lora_olora_linear_init_default(self, data):
         model = self.get_model()

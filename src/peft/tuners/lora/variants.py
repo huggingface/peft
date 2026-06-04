@@ -1218,25 +1218,25 @@ class MontecloraLinearVariant(LoraVariant):
         return result
 
 
+def _register_frozen_peft_weight(module: Linear | Embedding, adapter_name: str, weight_name: str) -> None:
+    frozen_peft_weight_names = module.frozen_peft_weight_names.copy()
+    frozen_names = frozen_peft_weight_names.get(adapter_name, ())
+    frozen_peft_weight_names[adapter_name] = tuple(dict.fromkeys((*frozen_names, weight_name)))
+    module.frozen_peft_weight_names = frozen_peft_weight_names
+    module._freeze_declared_peft_weights(adapter_name)
+
+
 class MiCALinearVariant(LoraVariant):
     """Variant for Minor Component Adaptation (MiCA), https://arxiv.org/abs/2604.01694.
 
     The actual SVD-based initialization is performed in `LoraLayer.mica_init` (called from `update_layer`); this
-    variant only adds the freezing of `lora_B` after the tuner's default trainability marking. Forward and merge
-    semantics are identical to vanilla LoRA, since `delta_W = scaling * B @ A` and only `A` is updated.
+    variant declares `lora_B` as frozen. Forward and merge semantics are identical to vanilla LoRA, since
+    `delta_W = scaling * B @ A` and only `A` is updated.
     """
 
     @staticmethod
     def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
-        # MiCA's adapter weights are populated in LoraLayer.mica_init before this hook runs; nothing to do here.
-        return None
-
-    @staticmethod
-    def update_requires_grad(module: Linear, adapter_name: str) -> None:
-        if adapter_name in module.lora_B:
-            module.lora_B[adapter_name].weight.requires_grad = False
-            if module.lora_B[adapter_name].bias is not None:
-                module.lora_B[adapter_name].bias.requires_grad = False
+        _register_frozen_peft_weight(module, adapter_name, "lora_B")
 
     @staticmethod
     def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
@@ -1263,3 +1263,46 @@ class MiCALinearVariant(LoraVariant):
         dropout = module.lora_dropout[active_adapter]
         scaling = module.scaling[active_adapter]
         return result + lora_B(lora_A(dropout(x))) * scaling
+
+
+class MiCAEmbeddingVariant(LoraVariant):
+    """Embedding variant for Minor Component Adaptation (MiCA), https://arxiv.org/abs/2604.01694."""
+
+    @staticmethod
+    def init(module: Embedding, adapter_name: str, **kwargs: Any) -> None:
+        _register_frozen_peft_weight(module, adapter_name, "lora_embedding_B")
+
+    @staticmethod
+    def merge_safe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return orig_weight + module.get_delta_weight(active_adapter).to(orig_weight.dtype)
+
+    @staticmethod
+    def merge_unsafe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        orig_weight.data += module.get_delta_weight(active_adapter).to(orig_weight.dtype)
+
+    @staticmethod
+    def unmerge(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return orig_weight - module.get_delta_weight(active_adapter).to(orig_weight.dtype)
+
+    @staticmethod
+    def forward(
+        module: Embedding,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        embedding_A = module.lora_embedding_A[active_adapter].T
+        embedding_B = module.lora_embedding_B[active_adapter].T
+        scaling = module.scaling[active_adapter]
+        input_fn = module.input_fns.get(active_adapter, None)
+        output_fn = module.output_fns.get(active_adapter, None)
+
+        after_A = module._embed(x, embedding_A, input_fn=input_fn, output_fn=output_fn)
+        adapter_output = (after_A @ embedding_B) * scaling
+
+        embed_scale = module._get_embed_scale()
+        if embed_scale is not None:
+            adapter_output = adapter_output * embed_scale.to(adapter_output.dtype)
+
+        return result + adapter_output

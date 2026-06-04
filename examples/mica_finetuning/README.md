@@ -63,8 +63,8 @@ peft_model = PeftModel.from_pretrained(model, "mica-llama-2-7b")
 
 ## Notes and limitations
 
-- MiCA currently supports `nn.Linear` target modules only.
-- The chosen rank must satisfy `r <= min(in_features, out_features)` for every targeted layer; otherwise initialization raises `ValueError`.
+- MiCA currently supports `nn.Linear` and `nn.Embedding` target modules.
+- The chosen rank must satisfy `r <= min(in_features, out_features)` for linear layers and `r <= min(num_embeddings, embedding_dim)` for embedding layers; otherwise initialization raises `ValueError`.
 - MiCA performs a full SVD per target weight at initialization. For 7B-scale models this is a one-time cost of seconds; for substantially larger weight matrices (e.g. 70B-scale) the cost grows.
 - Combining MiCA with `use_dora=True` or other LoRA variants is not supported in this initial integration.
 

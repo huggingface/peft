@@ -65,7 +65,7 @@ from peft import LoraConfig
 config = LoraConfig(init_lora_weights="mica", r=16, target_modules=["q_proj", "v_proj"], ...)
 ```
 
-MiCA currently supports `nn.Linear` target modules only and requires `r <= min(in_features, out_features)` for every targeted layer. For detailed usage, see [these instructions](https://github.com/huggingface/peft/tree/main/examples/mica_finetuning).
+MiCA currently supports `nn.Linear` and `nn.Embedding` target modules. The chosen rank must satisfy `r <= min(in_features, out_features)` for linear layers and `r <= min(num_embeddings, embedding_dim)` for embedding layers. For detailed usage, see [these instructions](https://github.com/huggingface/peft/tree/main/examples/mica_finetuning).
 
 ### CorDA
 

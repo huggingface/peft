@@ -495,6 +495,10 @@ class BaseTuner(nn.Module, ABC):
             else:
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
 
+        for module in model.modules():
+            if isinstance(module, self.tuner_layer_cls):
+                module._freeze_declared_peft_weights()
+
     def _enable_adapter_layers(self, enabled: bool = True) -> None:
         for module in self.model.modules():
             if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
@@ -1385,6 +1389,8 @@ class BaseTunerLayer(ABC):
     adapter_layer_names: tuple[str, ...] = ()
     # All names of other parameters that may contain adapter-related parameters
     other_param_names: tuple[str, ...] = ()
+    # Mapping from adapter name to adapter layer names that should always stay frozen
+    frozen_peft_weight_names: dict[str, tuple[str, ...]] = {}
 
     # indicates whether all adapters should be disabled
     _disable_adapters: bool = False
@@ -1521,6 +1527,23 @@ class BaseTunerLayer(ABC):
                     _set_layer_requires_grad(layer, False)
             self._disable_adapters = True
 
+    def _freeze_declared_peft_weights(self, adapter_names: str | Sequence[str] | None = None) -> None:
+        if adapter_names is None:
+            adapter_names = self.frozen_peft_weight_names.keys()
+        elif isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+
+        for adapter_name in adapter_names:
+            for layer_name in self.frozen_peft_weight_names.get(adapter_name, ()):
+                if layer_name not in self.adapter_layer_names:
+                    continue
+
+                module_dict = getattr(self, layer_name)
+                if adapter_name not in module_dict:
+                    continue
+
+                _set_layer_requires_grad(module_dict[adapter_name], False)
+
     def set_adapter(self, adapter_names: str | list[str], inference_mode: bool = False) -> None:
         """Set the active adapter(s).
 
@@ -1543,6 +1566,7 @@ class BaseTunerLayer(ABC):
                 should_require_grad = (key in adapter_names) and (not inference_mode)
                 _set_layer_requires_grad(layer, should_require_grad)
 
+        self._freeze_declared_peft_weights(adapter_names)
         self._active_adapter = adapter_names
 
     def _all_available_adapter_names(self) -> list[str]:
@@ -1572,6 +1596,11 @@ class BaseTunerLayer(ABC):
         for attr in self.adapter_layer_names + self.other_param_names:
             if adapter_name in getattr(self, attr):
                 del getattr(self, attr)[adapter_name]
+
+        if adapter_name in self.frozen_peft_weight_names:
+            frozen_peft_weight_names = self.frozen_peft_weight_names.copy()
+            del frozen_peft_weight_names[adapter_name]
+            self.frozen_peft_weight_names = frozen_peft_weight_names
 
         if adapter_name in self.active_adapters:
             # choose a new active adapter
@@ -1613,6 +1642,9 @@ class BaseTunerLayer(ABC):
             for key, layer in module_dict.items():
                 if key in adapter_names_set:
                     _set_layer_requires_grad(layer, requires_grad)
+
+        if requires_grad:
+            self._freeze_declared_peft_weights(adapter_names_set)
 
     def _get_base_layer_device_and_dtype(self, base_layer):
         """
