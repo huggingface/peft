@@ -19,6 +19,8 @@
     - local: accelerate/fsdp
       title: Fully Sharded Data Parallel
     title: Distributed Training
+  - local: developer_guides/memory_efficient_training
+    title: Memory Efficient Training
   - local: developer_guides/model_merging
     title: Model merging
   - local: developer_guides/quantization
@@ -133,11 +135,6 @@
         title: BEFT
       title: Adapters
 
-
-- title: Conceptual guides
-  sections:
-  - local: conceptual_guides/oft
-    title: OFT/BOFT
 
 - sections:
   - sections:

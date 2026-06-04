@@ -24,10 +24,10 @@ models, especially language models, you can follow these steps:
 
 1. use prompting (few-shot examples in the prompt) to see if the model is
    already capable of the task. If the model solves your problem, great! You can
-   now use [Prompt-based methods](#Prompt-based methods) to learn the prompt and
+   now use [Prompt-based methods](#prompt-based-methods) to learn the prompt and
    save precious tokens.
-2. If prompt-based methods are not sufficient you can use [layer tuning](#Layer tuning)
-   and [adapter methods](#Adapter methods). These methods are generally
+2. If prompt-based methods are not sufficient you can use [layer tuning](#layer-tuning)
+   and [adapter methods](#adapter-methods). These methods are generally
    more expressive than prompt-based methods and get closer to full-finetuning.
 3. Make sure to measure retention of already learnt knowledge since each
    fine-tuning step is potentially unlearning past knowledege.
