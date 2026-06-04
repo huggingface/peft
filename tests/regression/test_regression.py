@@ -97,7 +97,7 @@ LORA_4BIT_FOLDER = "lora_opt-350m_bnb_4bit"
 
 
 @pytest.fixture(scope="session", autouse=True)
-def setup_tearndown():
+def setup_teardown():
     # Use a pytest session-scoped fixture to setup and teardown exactly once per session. AFAICT, unittest does not
     # provide such a feature
     yield
