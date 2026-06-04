@@ -436,7 +436,7 @@ class LoraLayer(BaseTunerLayer):
                 f"MiCA requires `r` <= min(in_features, out_features) but got r={r} for a layer with "
                 f"weight shape {tuple(weight.shape)} (max usable r is {max_r})."
             )
-        V, _, _ = torch.linalg.svd(weight.data, full_matrices=False)
+        U, _, _ = torch.linalg.svd(weight.data, full_matrices=False)
         lora_B = V[:, -r:].contiguous()
         lora_A = torch.zeros(r, weight.shape[1], device=weight.device)
         self.lora_B[adapter_name].weight.data = lora_B.to(dtype)
