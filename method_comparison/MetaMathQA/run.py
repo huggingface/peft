@@ -101,7 +101,7 @@ def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm: bool =
     return predictions, responses
 
 
-@torch.inference_mode  # type: ignore
+@torch.inference_mode()
 def calculate_mean_per_token_loss(model, tokenizer, rows: list[str], batch_size: int, max_length: int) -> float:
     """Calculate the mean loss per token on the given dataset.
 

@@ -19,6 +19,7 @@ import os
 import tempfile
 
 import gradio as gr
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from processing import load_df
@@ -28,18 +29,38 @@ from sanitizer import parse_and_filter
 logger = logging.getLogger(__name__)
 
 
-metric_preferences = {
+_COMMON_METRIC_PREFERENCES = {
     "accelerator_memory_reserved_avg": "lower",
     "accelerator_memory_max": "lower",
     "accelerator_memory_reserved_99th": "lower",
     "total_time": "lower",
     "train_time": "lower",
     "file_size": "lower",
-    "test_accuracy": "higher",
     "train_loss": "lower",
     "num_trainable_params": "lower",
-    "forgetting*": "lower",
 }
+
+_TASK_METRIC_PREFERENCES = {
+    "MetaMathQA": {
+        "test_accuracy": "higher",
+        "forgetting*": "lower",
+    },
+    "image-gen": {
+        "test_dino_similarity": "higher",
+        "drift*": "lower",
+    },
+}
+
+_TASK_PARETO_DEFAULTS = {
+    "MetaMathQA": ("accelerator_memory_max", "test_accuracy"),
+    "image-gen": ("accelerator_memory_max", "test_dino_similarity"),
+}
+
+
+def get_metric_preferences(task_name):
+    prefs = dict(_COMMON_METRIC_PREFERENCES)
+    prefs.update(_TASK_METRIC_PREFERENCES.get(task_name, {}))
+    return prefs
 
 
 def get_model_ids(task_name, df):
@@ -53,7 +74,7 @@ def filter_data(task_name, model_id, df):
 
 
 # Compute the Pareto frontier for two selected metrics.
-def compute_pareto_frontier(df, metric_x, metric_y):
+def compute_pareto_frontier(df, metric_x, metric_y, metric_preferences):
     if df.empty:
         return df
 
@@ -91,12 +112,12 @@ def compute_pareto_frontier(df, metric_x, metric_y):
     return pareto_df
 
 
-def generate_pareto_plot(df, metric_x, metric_y):
+def generate_pareto_plot(df, metric_x, metric_y, metric_preferences):
     if df.empty:
         return {}
 
     # Compute Pareto frontier and non-frontier points.
-    pareto_df = compute_pareto_frontier(df, metric_x, metric_y)
+    pareto_df = compute_pareto_frontier(df, metric_x, metric_y, metric_preferences)
     non_pareto_df = df.drop(pareto_df.index)
 
     # Create an empty figure.
@@ -192,6 +213,11 @@ def format_df(df):
 
 
 def build_app(df):
+    task_names = sorted(df["task_name"].unique())
+    initial_task = "MetaMathQA" if "MetaMathQA" in task_names else task_names[0]
+    initial_prefs = get_metric_preferences(initial_task)
+    initial_x, initial_y = _TASK_PARETO_DEFAULTS.get(initial_task, (list(initial_prefs)[0], list(initial_prefs)[1]))
+
     with gr.Blocks() as demo:
         gr.Markdown("# PEFT method comparison")
         gr.Markdown(
@@ -205,22 +231,21 @@ def build_app(df):
         with gr.Row():
             task_dropdown = gr.Dropdown(
                 label="Select Task",
-                choices=sorted(df["task_name"].unique()),
-                value=sorted(df["task_name"].unique())[0],
+                choices=task_names,
+                value=initial_task,
             )
-            model_dropdown = gr.Dropdown(
-                label="Select Model ID", choices=get_model_ids(sorted(df["task_name"].unique())[0], df)
-            )
+            model_dropdown = gr.Dropdown(label="Select Model ID", choices=get_model_ids(initial_task, df))
 
         # Make dataframe columns all equal in width so that they are good enough for numbers but don't
         # get hugely extended by columns like `train_config`.
-        column_widths = ["150px" for _ in df.columns]
-        column2index = dict(zip(df.columns, range(len(df.columns))))
-        column_widths[column2index['experiment_name']] = '300px'
+        initial_filtered = filter_data(initial_task, get_model_ids(initial_task, df)[0], df)
+        column_widths = ["150px" for _ in initial_filtered.columns]
+        column2index = dict(zip(initial_filtered.columns, range(len(initial_filtered.columns))))
+        column_widths[column2index["experiment_name"]] = "300px"
 
         data_table = gr.DataFrame(
             label="Results",
-            value=format_df(df),
+            value=format_df(initial_filtered),
             interactive=False,
             max_chars=100,
             wrap=False,
@@ -236,9 +261,8 @@ def build_app(df):
             apply_filter_button = gr.Button("Apply Filter")
             reset_filter_button = gr.Button("Reset Filter")
 
-        gr.Markdown(
-            "*forgetting: This is the reduction in CE loss on a sample of Wikipedia data and reflects how much the "
-            "model 'forgot' during training. The lower the number, the better."
+        metric_explanation = gr.Markdown(
+            _get_metric_explanation(initial_task),
         )
 
         gr.Markdown("## Pareto plot")
@@ -249,23 +273,15 @@ def build_app(df):
         )
 
         with gr.Row():
-            x_default = (
-                "accelerator_memory_max"
-                if "accelerator_memory_max" in metric_preferences
-                else next(iter(metric_preferences.keys()))
-            )
-            y_default = (
-                "test_accuracy" if "test_accuracy" in metric_preferences else list(metric_preferences.keys())[1]
-            )
             metric_x_dropdown = gr.Dropdown(
                 label="1st metric for Pareto plot",
-                choices=list(metric_preferences.keys()),
-                value=x_default,
+                choices=list(initial_prefs.keys()),
+                value=initial_x,
             )
             metric_y_dropdown = gr.Dropdown(
                 label="2nd metric for Pareto plot",
-                choices=list(metric_preferences.keys()),
-                value=y_default,
+                choices=list(initial_prefs.keys()),
+                value=initial_y,
             )
 
         pareto_plot = gr.Plot(label="Pareto Frontier Plot")
@@ -284,10 +300,24 @@ def build_app(df):
                 except Exception as exc:
                     # invalid filter query
                     logger.debug("Ignoring invalid filter query: %s", exc)
-            return gr.update(choices=new_models, value=new_models[0] if new_models else None), format_df(filtered)
+
+            prefs = get_metric_preferences(task_name)
+            x_default, y_default = _TASK_PARETO_DEFAULTS.get(task_name, (list(prefs)[0], list(prefs)[1]))
+            metric_choices = list(prefs.keys())
+            explanation = _get_metric_explanation(task_name)
+
+            return (
+                gr.update(choices=new_models, value=new_models[0] if new_models else None),
+                format_df(filtered),
+                gr.update(choices=metric_choices, value=x_default),
+                gr.update(choices=metric_choices, value=y_default),
+                explanation,
+            )
 
         task_dropdown.change(
-            fn=update_on_task, inputs=[task_dropdown, filter_state], outputs=[model_dropdown, data_table]
+            fn=update_on_task,
+            inputs=[task_dropdown, filter_state],
+            outputs=[model_dropdown, data_table, metric_x_dropdown, metric_y_dropdown, metric_explanation],
         )
 
         def update_on_model(task_name, model_id, current_filter):
@@ -305,16 +335,17 @@ def build_app(df):
         )
 
         def update_pareto_plot_and_summary(task_name, model_id, metric_x, metric_y, current_filter):
+            prefs = get_metric_preferences(task_name)
             filtered = filter_data(task_name, model_id, df)
             if current_filter.strip():
                 try:
                     mask = parse_and_filter(filtered, current_filter)
                     filtered = filtered[mask]
                 except Exception as e:
-                    return generate_pareto_plot(filtered, metric_x, metric_y), f"Filter error: {e}"
+                    return generate_pareto_plot(filtered, metric_x, metric_y, prefs), f"Filter error: {e}"
 
-            pareto_df = compute_pareto_frontier(filtered, metric_x, metric_y)
-            fig = generate_pareto_plot(filtered, metric_x, metric_y)
+            pareto_df = compute_pareto_frontier(filtered, metric_x, metric_y, prefs)
+            fig = generate_pareto_plot(filtered, metric_x, metric_y, prefs)
             summary = compute_pareto_summary(filtered, pareto_df, metric_x, metric_y)
             return fig, summary
 
@@ -326,6 +357,7 @@ def build_app(df):
             )
 
         def apply_filter(filter_query, task_name, model_id, metric_x, metric_y):
+            prefs = get_metric_preferences(task_name)
             filtered = filter_data(task_name, model_id, df)
             if filter_query.strip():
                 try:
@@ -336,12 +368,12 @@ def build_app(df):
                     return (
                         filter_query,
                         filtered,
-                        generate_pareto_plot(filtered, metric_x, metric_y),
+                        generate_pareto_plot(filtered, metric_x, metric_y, prefs),
                         f"Filter error: {e}",
                     )
 
-            pareto_df = compute_pareto_frontier(filtered, metric_x, metric_y)
-            fig = generate_pareto_plot(filtered, metric_x, metric_y)
+            pareto_df = compute_pareto_frontier(filtered, metric_x, metric_y, prefs)
+            fig = generate_pareto_plot(filtered, metric_x, metric_y, prefs)
             summary = compute_pareto_summary(filtered, pareto_df, metric_x, metric_y)
             return filter_query, format_df(filtered), fig, summary
 
@@ -352,9 +384,10 @@ def build_app(df):
         )
 
         def reset_filter(task_name, model_id, metric_x, metric_y):
+            prefs = get_metric_preferences(task_name)
             filtered = filter_data(task_name, model_id, df)
-            pareto_df = compute_pareto_frontier(filtered, metric_x, metric_y)
-            fig = generate_pareto_plot(filtered, metric_x, metric_y)
+            pareto_df = compute_pareto_frontier(filtered, metric_x, metric_y, prefs)
+            fig = generate_pareto_plot(filtered, metric_x, metric_y, prefs)
             summary = compute_pareto_summary(filtered, pareto_df, metric_x, metric_y)
             # Return empty strings to clear the filter state and textbox.
             return "", "", format_df(filtered), fig, summary
@@ -383,7 +416,34 @@ def build_app(df):
     return demo
 
 
-path = os.path.join(os.path.dirname(__file__), "MetaMathQA", "results")
-df = load_df(path, task_name="MetaMathQA")
+_METRIC_EXPLANATIONS = {
+    "MetaMathQA": (
+        "*forgetting: This is the reduction in CE loss on a sample of Wikipedia data and reflects how much the "
+        "model 'forgot' during training. The lower the number, the better."
+    ),
+    "image-gen": (
+        "*drift: This measures how much the generated images drift from the base model's outputs on unrelated "
+        "prompts, reflecting how much the model 'forgot' during training. The lower the number, the better."
+    ),
+}
+
+
+def _get_metric_explanation(task_name):
+    return _METRIC_EXPLANATIONS.get(task_name, "")
+
+
+base_dir = os.path.dirname(__file__)
+_TASK_CONFIGS = {
+    "MetaMathQA": os.path.join(base_dir, "MetaMathQA", "results"),
+    "image-gen": os.path.join(base_dir, "image-gen", "results"),
+}
+
+dfs = []
+for task_name, path in _TASK_CONFIGS.items():
+    if os.path.isdir(path):
+        task_df = load_df(path, task_name=task_name)
+        if not task_df.empty:
+            dfs.append(task_df)
+df = pd.concat(dfs, ignore_index=True)
 demo = build_app(df)
 demo.launch(theme=gr.themes.Soft())
