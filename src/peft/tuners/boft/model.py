@@ -23,9 +23,25 @@ from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
 )
-from peft.utils import TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING
+from peft.utils import (
+    TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING,
+    get_quantization_kwargs,
+    resolve_quantization_backend,
+)
 
 from .layer import BOFTLayer, Conv2d, Linear
+
+
+def _get_tuner_layer_class(target_base_layer: torch.nn.Module) -> type[BOFTLayer] | None:
+    layer_cls: type[BOFTLayer] | None = None
+    if isinstance(target_base_layer, torch.nn.Linear):
+        layer_cls = Linear
+    elif isinstance(target_base_layer, torch.nn.Conv2d):
+        layer_cls = Conv2d
+    elif (quant_backend := resolve_quantization_backend(target_base_layer)) is not None:
+        layer_cls = {"linear": Linear, "conv2d": Conv2d}.get(quant_backend.layer_type)
+
+    return layer_cls
 
 
 class BOFTModel(BaseTuner):
@@ -86,9 +102,11 @@ class BOFTModel(BaseTuner):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
+        kwargs = get_quantization_kwargs(self)
+
         # If it is not a BOFTLayer, create a new module, else update it with new adapters
         if not isinstance(target, BOFTLayer):
-            new_module = self._create_new_module(boft_config, adapter_name, target)
+            new_module = self._create_new_module(boft_config, adapter_name, target, **kwargs)
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
@@ -106,20 +124,18 @@ class BOFTModel(BaseTuner):
         else:
             target_base_layer = target
 
-        if isinstance(target_base_layer, torch.nn.Linear):
-            if boft_config.fan_in_fan_out:
-                warnings.warn(
-                    "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
-                    "Setting fan_in_fan_out to False."
-                )
-                boft_config.fan_in_fan_out = False
-            new_module = Linear(target, adapter_name, config=boft_config, **kwargs)
-        elif isinstance(target_base_layer, torch.nn.Conv2d):
-            new_module = Conv2d(target, adapter_name, config=boft_config, **kwargs)
-        else:
+        layer_cls = _get_tuner_layer_class(target_base_layer)
+        if layer_cls is None:
             raise TypeError(
-                f"Target module {target} is not supported. "
-                "Currently, only `torch.nn.Linear` and `torch.nn.Conv2d` are supported."
+                f"Target module {target} is not supported. Currently, only `torch.nn.Linear` and `torch.nn.Conv2d` (optionally quantized) "
+                "are supported."
             )
 
+        if (layer_cls == Linear) and boft_config.fan_in_fan_out:
+            warnings.warn(
+                "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
+                "Setting fan_in_fan_out to False."
+            )
+            boft_config.fan_in_fan_out = False
+        new_module = layer_cls(target, adapter_name, config=boft_config, **kwargs)
         return new_module

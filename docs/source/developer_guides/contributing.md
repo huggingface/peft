@@ -112,6 +112,7 @@ New parameter-efficient fine-tuning methods are developed all the time. If you w
 - [ ] Add docs in `docs/source/package_reference/` with a short explanation, paper link, usage snippet, and autodoc blocks. Explain the pros and cons compared to other methods like LoRA. Register that doc page in `docs/source/_toctree.yml`.
 - [ ] Add a runnable example under `examples/` (can be a copy of an existing example), with a short `README.md`.
 - [ ] Check the benchmarks in `method_comparison/` and add experiment settings for your new method. This is a good place to sanity check that the PEFT method trains as expected. Include one or two reasonable benchmark configurations (one default, one optimized for the benchmark).
+- [ ] Recommended: Add generic quantization support. Instead of having to explicitly add quantization layer types for each quantization method, support generic quantization. As an example, check how it's implemented in [BOFT](https://github.com/huggingface/peft/tree/main/src/peft/tuners/boft). Extend https://github.com/huggingface/peft/blob/main/tests/test_quantization.py by adding your PEFT method there. Ask maintainers for help if needed.
 
 ## Add other features
 
