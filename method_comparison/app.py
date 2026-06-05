@@ -19,97 +19,22 @@ import os
 import tempfile
 
 import gradio as gr
-import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from processing import load_df
+from processing import (
+    filter_data,
+    get_model_ids,
+    get_metric_preferences,
+    _get_metric_explanation,
+    _TASK_PARETO_DEFAULTS,
+    compute_pareto_frontier,
+    format_df,
+    load_task_results,
+)
 from sanitizer import parse_and_filter
 
 
 logger = logging.getLogger(__name__)
-
-
-_COMMON_METRIC_PREFERENCES = {
-    "accelerator_memory_reserved_avg": "lower",
-    "accelerator_memory_max": "lower",
-    "accelerator_memory_reserved_99th": "lower",
-    "total_time": "lower",
-    "train_time": "lower",
-    "file_size": "lower",
-    "train_loss": "lower",
-    "num_trainable_params": "lower",
-}
-
-_TASK_METRIC_PREFERENCES = {
-    "MetaMathQA": {
-        "test_accuracy": "higher",
-        "forgetting*": "lower",
-    },
-    "image-gen": {
-        "test_dino_similarity": "higher",
-        "drift*": "lower",
-    },
-}
-
-_TASK_PARETO_DEFAULTS = {
-    "MetaMathQA": ("accelerator_memory_max", "test_accuracy"),
-    "image-gen": ("accelerator_memory_max", "test_dino_similarity"),
-}
-
-
-def get_metric_preferences(task_name):
-    prefs = dict(_COMMON_METRIC_PREFERENCES)
-    prefs.update(_TASK_METRIC_PREFERENCES.get(task_name, {}))
-    return prefs
-
-
-def get_model_ids(task_name, df):
-    filtered = df[df["task_name"] == task_name]
-    return sorted(filtered["model_id"].unique())
-
-
-def filter_data(task_name, model_id, df):
-    filtered = df[(df["task_name"] == task_name) & (df["model_id"] == model_id)]
-    return filtered
-
-
-# Compute the Pareto frontier for two selected metrics.
-def compute_pareto_frontier(df, metric_x, metric_y, metric_preferences):
-    if df.empty:
-        return df
-
-    df = df.copy()
-    points = df[[metric_x, metric_y]].values
-    selected_indices = []
-
-    def dominates(a, b, metric_x, metric_y):
-        # Check for each metric whether b is as good or better than a
-        if metric_preferences[metric_x] == "higher":
-            cond_x = b[0] >= a[0]
-            better_x = b[0] > a[0]
-        else:
-            cond_x = b[0] <= a[0]
-            better_x = b[0] < a[0]
-        if metric_preferences[metric_y] == "higher":
-            cond_y = b[1] >= a[1]
-            better_y = b[1] > a[1]
-        else:
-            cond_y = b[1] <= a[1]
-            better_y = b[1] < a[1]
-        return cond_x and cond_y and (better_x or better_y)
-
-    for i, point in enumerate(points):
-        dominated = False
-        for j, other_point in enumerate(points):
-            if i == j:
-                continue
-            if dominates(point, other_point, metric_x, metric_y):
-                dominated = True
-                break
-        if not dominated:
-            selected_indices.append(i)
-    pareto_df = df.iloc[selected_indices]
-    return pareto_df
 
 
 def generate_pareto_plot(df, metric_x, metric_y, metric_preferences):
@@ -145,10 +70,12 @@ def generate_pareto_plot(df, metric_x, metric_y, metric_preferences):
             marker={"color": "rgba(128,128,128,0.5)", "size": 12},
             hoverinfo="text",
             text=non_pareto_df.apply(
-                lambda row: f"experiment_name: {row['experiment_name']}<br>"
-                f"peft_type: {row['peft_type']}<br>"
-                f"{metric_x}: {row[metric_x]}<br>"
-                f"{metric_y}: {row[metric_y]}",
+                lambda row: (
+                    f"experiment_name: {row['experiment_name']}<br>"
+                    f"peft_type: {row['peft_type']}<br>"
+                    f"{metric_x}: {row[metric_x]}<br>"
+                    f"{metric_y}: {row[metric_y]}"
+                ),
                 axis=1,
             ),
             showlegend=False,
@@ -206,10 +133,6 @@ def export_csv(df):
         tmp.write(csv_data)
         tmp_path = tmp.name
     return tmp_path
-
-
-def format_df(df):
-    return df.style.format(precision=3, thousands=",", decimal=".")
 
 
 def build_app(df):
@@ -416,34 +339,12 @@ def build_app(df):
     return demo
 
 
-_METRIC_EXPLANATIONS = {
-    "MetaMathQA": (
-        "*forgetting: This is the reduction in CE loss on a sample of Wikipedia data and reflects how much the "
-        "model 'forgot' during training. The lower the number, the better."
-    ),
-    "image-gen": (
-        "*drift: This measures how much the generated images drift from the base model's outputs on unrelated "
-        "prompts, reflecting how much the model 'forgot' during training. The lower the number, the better."
-    ),
-}
-
-
-def _get_metric_explanation(task_name):
-    return _METRIC_EXPLANATIONS.get(task_name, "")
-
-
 base_dir = os.path.dirname(__file__)
 _TASK_CONFIGS = {
     "MetaMathQA": os.path.join(base_dir, "MetaMathQA", "results"),
     "image-gen": os.path.join(base_dir, "image-gen", "results"),
 }
 
-dfs = []
-for task_name, path in _TASK_CONFIGS.items():
-    if os.path.isdir(path):
-        task_df = load_df(path, task_name=task_name)
-        if not task_df.empty:
-            dfs.append(task_df)
-df = pd.concat(dfs, ignore_index=True)
+df = load_task_results(_TASK_CONFIGS)
 demo = build_app(df)
 demo.launch(theme=gr.themes.Soft())
