@@ -22,7 +22,7 @@ PEFT offers parameter-efficient methods for finetuning large pretrained models. 
   <div class="flex flex-col basis-1/4">
     <i>PEFT can be thought of as a framework for adding trainable parameters to arbitrary places in existing models ("base models"). Specific PEFT methods arrange the trainable parameters in certain ways or modify the training process to achieve fine-tuning performance comparable to training all parameters of the base model.</i>
   </div>
-  <div class="flex flex-col basis-3/4 pl-10 pr-10"><img src="/docs/adapter_installation.svg" width="100%"></div>
+  <div class="flex flex-col basis-3/4 pl-10 pr-10"><img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/adapter_installation.png" width="100%"></div>
 </div>
 
 This quicktour will show you PEFT's main features and how you can train or run inference on large models that would typically be inaccessible on consumer devices.
@@ -75,11 +75,11 @@ Now wrap the base model and `peft_config` with the [`get_peft_model`] function t
     because PEFT searches for matching suffixes by default. Pass a string with a regular expression if you want to target more complex layer patterns.
     </p>
   </div>
-  <div class="flex flex-col basis-2/4 pl-10 pr-10"><img src="/docs/adapter_attention_targeting.svg" width="600px"></div>
+  <div class="flex flex-col basis-2/4 pl-10 pr-10"><img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/adapter_attention_targeting.png" width="600px"></div>
 </div>
 
 <div class="flex justify-center">
-  <div class="flex flex-col basis-2/4 pr-10"><img src="/docs/adapter_layer_wrapping.svg" width="1000px"></div>
+  <div class="flex flex-col basis-2/4 pr-10"><img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/adapter_layer_wrapping.png" width="1000px"></div>
   <div class="flex flex-col basis-2/4">
     <p>
     The base model's layer will be wrapped, retained and not trained while new, trainable weights are added and are combined.
@@ -203,7 +203,7 @@ PEFT supports installing multiple adapters (of the same kind, in this document t
     or serve different use-cases on top of one model.
     </p>
   </div>
-  <div class="flex flex-col basis-2/4 pl-10 pr-10"><img src="/docs/adapter_layer_wrapping_multi_adapter.svg" width="1000px"></div>
+  <div class="flex flex-col basis-2/4 pl-10 pr-10"><img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/adapter_layer_wrapping_multi_adapter.png" width="1000px"></div>
 </div>
 
 Just remember to call `peft_model.set_adapter(<adapter_name>)` first to enable the adapter.

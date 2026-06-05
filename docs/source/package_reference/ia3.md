@@ -17,7 +17,7 @@ rendered properly in your Markdown viewer.
 # IA3
 
 <div class="flex justify-center">
-    <img src="/docs/ia3.png"/>
+    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/ia3.png"/>
 </div>
 <small>IA3 introduces three vectors, lv, lk and lff to scale value, key and feed-forward activations <a href="https://hf.co/papers/2205.05638">(image source)</a>.</small>
 
