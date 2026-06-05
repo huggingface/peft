@@ -229,7 +229,7 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
 
 
 # copied from transformers.models.bart.modeling_bart
-def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start_token_id: int):
+def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start_token_id: int) -> torch.Tensor:
     """
     Shift input ids one token to the right.
 

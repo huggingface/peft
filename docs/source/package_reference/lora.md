@@ -294,6 +294,31 @@ Outer(
 
 The same logic applies to `alpha_pattern`. If you're in doubt, don't try to get fancy with regular expressions -- just pass the full name for each module with a different rank/alpha, preceded by the `^` prefix, and you should be good.
 
+### Automatically detect viable target modules
+
+[`peft.helpers.KappaTuneSelector`] implements the condition-number-based target selection strategy from the [KappaTune paper](https://arxiv.org/abs/2506.16289). It scans every `nn.Linear` module and, for models where MoE expert weights are stored as fused 3D `nn.Parameter` tensors (e.g. Llama-4, Qwen3-MoE), also those parameters, computes the matrix condition number κ = σ_max / σ_min for each, and selects the most isotropic layers (lowest κ). These isotropic layers serve as ideal candidates for fine-tuning, since their high-entropy nature allows them to absorb new information more readily, leaving the specialized, anisotropic layers intact to mitigate catastrophic forgetting during continual learning.
+
+Use [`peft.helpers.find_kappa_target_modules`] as a one-liner to get the optimal `target_modules` for `LoraConfig`:
+
+```python
+from peft import LoraConfig, get_peft_model
+from peft.helpers import find_kappa_target_modules
+
+model = AutoModelForCausalLM.from_pretrained("mistralai/Mixtral-8x7B-Instruct-v0.1")
+
+targets = find_kappa_target_modules(model, top_p=0.2)
+config = LoraConfig(
+    target_modules=targets["target_modules"],
+    target_parameters=targets["target_parameters"] if stable_modules_dic["target_parameters"] else None,
+    r=64,
+    lora_alpha=32,
+    task_type="CAUSAL_LM",
+)
+peft_model = get_peft_model(model, config)
+```
+
+See a complete example [here](https://github.com/huggingface/peft/blob/main/examples/KappaTune/experiments_kappatune_peft.py).
+
 ### Targeting `nn.Parameter` directly
 
 Generally, you should use `target_modules` to target the module (e.g. `nn.Linear`). However, in some circumstances, this is not possible. E.g., in many mixture of expert (MoE) layers in HF Transformers, instead of using `nn.Linear`, an `nn.Parameter` is used. PEFT normally overwrites the `forward` method for LoRA, but for `nn.Parameter`, there is none. Therefore, to apply LoRA to that parameter, it needs to be targeted with `target_parameters`. As an example, for [Llama4](https://huggingface.co/collections/meta-llama/llama-4-67f0c30d9fe03840bc9d0164), you can pass: `target_parameters=['feed_forward.experts.gate_up_proj', 'feed_forward.experts.down_proj]`.

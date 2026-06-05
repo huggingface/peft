@@ -124,6 +124,7 @@ def _get_padded_linear(lora_module: torch.nn.Module, target_rank: int, is_lora_A
         padded = torch.zeros(out_features, target_rank, device=weight.device, dtype=weight.dtype)
         padded[:, :original_rank] = weight
         new_layer = torch.nn.Linear(target_rank, out_features, bias=lora_module.bias is not None)
+    new_layer.weight.requires_grad_(lora_module.weight.requires_grad)
 
     # Sanity check
     if new_layer.weight.shape != padded.shape:
@@ -204,6 +205,7 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
             bias=lora_module.bias is not None,
             groups=lora_module.groups,
         )
+    new_layer.weight.requires_grad_(lora_module.weight.requires_grad)
 
     # Sanity check
     if new_layer.weight.shape != padded.shape:

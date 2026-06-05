@@ -109,7 +109,7 @@ class TestXlora:
 
     @pytest.fixture(scope="class")
     def tokenizer(self):
-        tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True, device_map=self.torch_device)
+        tokenizer = AutoTokenizer.from_pretrained(self.model_id, device_map=self.torch_device)
         return tokenizer
 
     @pytest.fixture(scope="function")

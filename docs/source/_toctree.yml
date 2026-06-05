@@ -77,6 +77,8 @@
             title: VeLoRA
           - local: package_reference/lora_variant_dora
             title: DoRA
+          - local: package_reference/lora_variant_monteclora
+            title: MonteCLoRA
           title: Variants
         title: LoRA
       - local: package_reference/ia3

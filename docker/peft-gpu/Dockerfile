@@ -54,9 +54,11 @@ RUN \
     # Ninja should speed up build time.
     conda run -n peft pip install ninja && conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
 
-RUN NVTE_BUILD_USE_NVIDIA_WHEELS=1 \
-    CPATH="/usr/local/cuda/include:${CPATH}" \
-    conda run -n peft pip install --no-build-isolation "transformer_engine[pytorch]"
+# TODO: Importing TE results in: undefined symbol: cublasLtGroupedMatrixLayoutInit_internal, version libcublasLt.so.13
+# Reinstate TE when the issue is resolved (probably this one: https://github.com/NVIDIA/TransformerEngine/issues/2504)
+# RUN NVTE_BUILD_USE_NVIDIA_WHEELS=1 \
+#     CPATH="/usr/local/cuda/include:${CPATH}" \
+#     conda run -n peft pip install --no-build-isolation "transformer_engine[pytorch]"
 
 # Activate the conda env and install transformers + accelerate from source
 RUN conda run -n peft pip install -U --no-cache-dir \
