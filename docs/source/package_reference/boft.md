@@ -33,7 +33,7 @@ BOFT can be applied to any subset of weight matrices in a neural network to redu
 ## Benchmark overview
 
 <iframe
-	src="https://hubnemo-peft-method-comparison-individual.hf.space/?highlight[type]=BOFT"
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=BOFT"
 	frameborder="0"
 	width="850"
 	height="1000"

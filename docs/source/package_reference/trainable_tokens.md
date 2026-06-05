@@ -43,7 +43,7 @@ This method can also be used in conjunction with LoRA layers! See [the LoRA docu
 ## Benchmark overview
 
 <iframe
-	src="https://hubnemo-peft-method-comparison-individual.hf.space/?highlight[type]=TRAINABLE_TOKENS"
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=TRAINABLE_TOKENS"
 	frameborder="0"
 	width="850"
 	height="1000"

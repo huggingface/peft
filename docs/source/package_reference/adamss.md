@@ -32,7 +32,7 @@ If these constraints don't work for your use case, consider other methods instea
 ## Benchmark overview
 
 <iframe
-	src="https://hubnemo-peft-method-comparison-individual.hf.space/?highlight[type]=ADAMSS"
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=ADAMSS"
 	frameborder="0"
 	width="850"
 	height="1000"

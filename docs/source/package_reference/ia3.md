@@ -61,7 +61,7 @@ peft_config = IA3Config(
 ## Benchmark overview
 
 <iframe
-	src="https://hubnemo-peft-method-comparison-individual.hf.space/?highlight[type]=IA3"
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=IA3"
 	frameborder="0"
 	width="850"
 	height="1000"

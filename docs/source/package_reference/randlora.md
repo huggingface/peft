@@ -39,7 +39,7 @@ This paper aims to answer this question by introducing RandLora, a parameter-eff
 ## Benchmark overview
 
 <iframe
-	src="https://hubnemo-peft-method-comparison-individual.hf.space/?highlight[type]=RANDLORA"
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=RANDLORA"
 	frameborder="0"
 	width="850"
 	height="1000"

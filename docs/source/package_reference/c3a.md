@@ -37,7 +37,7 @@ The abstract from the paper is:
 ## Benchmark overview
 
 <iframe
-	src="https://hubnemo-peft-method-comparison-individual.hf.space/?highlight[type]=C3A"
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=C3A"
 	frameborder="0"
 	width="850"
 	height="1000"

@@ -38,7 +38,7 @@ Training with AdaLoRA has three phases: the init phase, the budgeting phase and 
 ## Benchmark overview
 
 <iframe
-	src="https://hubnemo-peft-method-comparison-individual.hf.space/?highlight[type]=ADALORA"
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=ADALORA"
 	frameborder="0"
 	width="850"
 	height="1000"

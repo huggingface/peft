@@ -122,7 +122,7 @@ config = PsoftConfig(psoft_orth=True,psoft_mag_a=True,psoft_mag_b=True)
 ## Benchmark overview
 
 <iframe
-	src="https://hubnemo-peft-method-comparison-individual.hf.space/?highlight[type]=PSOFT"
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=PSOFT"
 	frameborder="0"
 	width="850"
 	height="1000"

@@ -73,7 +73,7 @@ pipeline.unet.print_trainable_parameters()
 ## Benchmark overview
 
 <iframe
-	src="https://hubnemo-peft-method-comparison-individual.hf.space/?highlight[type]=LOHA"
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=LOHA"
 	frameborder="0"
 	width="850"
 	height="1000"

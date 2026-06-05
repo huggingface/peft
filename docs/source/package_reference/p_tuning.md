@@ -51,7 +51,7 @@ model.print_trainable_parameters()
 ## Benchmark overview
 
 <iframe
-	src="https://hubnemo-peft-method-comparison-individual.hf.space/?highlight[type]=P_TUNING"
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=P_TUNING"
 	frameborder="0"
 	width="850"
 	height="1000"
