@@ -22,6 +22,17 @@ Finetuning with RoAd typically requires higher learning rate compared to LoRA or
 
 For running inference with different RoAd adapters in the same batch see [Inference with different LoRA adapters in the same batch](lora#inference-with-different-lora-adapters-in-the-same-batch).
 
+## Benchmark overview
+
+<iframe
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=ROAD"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
+
+# API
+
 ## RoadConfig
 
 [[autodoc]] tuners.road.config.RoadConfig
