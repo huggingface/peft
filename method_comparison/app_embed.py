@@ -35,20 +35,6 @@ from processing import (
 )
 
 
-metric_preferences = {
-    "accelerator_memory_reserved_avg": "lower",
-    "accelerator_memory_max": "lower",
-    "accelerator_memory_reserved_99th": "lower",
-    "total_time": "lower",
-    "train_time": "lower",
-    "file_size": "lower",
-    "test_accuracy": "higher",
-    "train_loss": "lower",
-    "num_trainable_params": "lower",
-    "forgetting*": "lower",
-}
-
-
 def generate_pareto_plot(df, metric_x, metric_y, metric_preferences, highlight_type=""):
     """Generates a pareto frontier plot for the given metrics.
     If there is no highlight by (PEFT) type is given, the frontier
