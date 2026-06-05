@@ -30,7 +30,7 @@ Using [`NLLLoss`](https://docs.pytorch.org/docs/stable/generated/torch.nn.NLLLos
 
 When using [TRL] you can either use the [Liger kernel integration](https://huggingface.co/docs/trl/liger_kernel_integration) or use [Chunked NLLLoss](https://huggingface.co/docs/trl/v1.5.1/en/reducing_memory_usage#chunked-cross-entropy-for-reducing-peak-memory-usage). The latter will split the sequence in chunks of size 256 to keep the maximum memory consumption constant.
 
-![NLL vs. Chunked NLL comparison](https://private-user-images.githubusercontent.com/45557362/585095978-246efe41-a013-4597-8b0b-b38b83c71bb5.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3ODA1NjkzMDUsIm5iZiI6MTc4MDU2OTAwNSwicGF0aCI6Ii80NTU1NzM2Mi81ODUwOTU5NzgtMjQ2ZWZlNDEtYTAxMy00NTk3LThiMGItYjM4YjgzYzcxYmI1LnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjA2MDQlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwNjA0VDEwMzAwNVomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPTRkMGQyZDMwMzkyMTk5MTE2MTBjM2U2OWM3OTUwZjZiMWYzOTJiOWY1OWYwM2RhZjFiYTVmZmE1OGE2ZmVhYmUmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0JnJlc3BvbnNlLWNvbnRlbnQtdHlwZT1pbWFnZSUyRnBuZyJ9.nfeb11_ztlkQbvDwRGOl7vgbvskx_TgdyKeVE4CoYPg)
+![NLL vs. Chunked NLL comparison](https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/chunked_nll.png)
 
 In case the default chunk size is not optimal for your setting, look in the [original TRL PR](https://github.com/huggingface/trl/pull/5575) for more information on how to tune the chunk size.
 
