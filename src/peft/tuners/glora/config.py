@@ -24,17 +24,15 @@ class GloraConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`GloraModel`].
 
-    Glora modifies a frozen linear layer W0 as:
-        W_eff = W0 + W0 * A + B
-        b_eff = b0 + b0 * D + E + W0 @ C
+    Glora modifies a frozen linear layer W0 as: `W_eff = W0 + W0 * A + B` and `b_eff = b0 + b0 * D + E + W0 @ C`.
 
-    Each matrix (A, B, C, D, E) can be parameterized independently. The config values control
-    how many parameters are used and what shapes they can express:
+    Each matrix (A, B, C, D, E) can be parameterized independently. The config values control how many parameters are
+    used and what shapes they can express:
 
-    - `lora`: Low-rank decomposition `Xd @ Xu` with shapes `(out, r)` and `(r, in)`. Uses
-      `r * (out + in)` parameters and can express any rank-r correction. Like standard LoRA.
-    - `vector`: A single column vector of shape `(out, 1)`, broadcast across the full matrix.
-      Uses `out` parameters; only per-output-channel scaling or shifts.
+    - `lora`: Low-rank decomposition `Xd @ Xu` with shapes `(out, r)` and `(r, in)`. Uses `r * (out + in)` parameters
+      and can express any rank-r correction. Like standard LoRA.
+    - `vector`: A single column vector of shape `(out, 1)`, broadcast across the full matrix. Uses `out` parameters;
+      only per-output-channel scaling or shifts.
     - `constant`: A single scalar shared across all elements. Uses 1 parameter; most constrained.
     - `none`: Zeros, no trainable parameters. Effectively disables this path.
 
@@ -46,8 +44,8 @@ class GloraConfig(PeftConfig):
         config_C (`str`): Parameterization for the C matrix (weight-to-bias coupling: b += W0 @ C).
             Valid values: `lora`, `vector`, `none`.
         config_D_E (`str`): Parameterization for the D and E scalars (bias multiplicative and additive
-            corrections). Does not support `lora` since D and E are bias-sized vectors, not matrices.
-            Valid values: `vector`, `constant`, `none`.
+            corrections). Does not support `lora` since D and E are bias-sized vectors, not matrices. Valid values:
+            `vector`, `constant`, `none`.
         init_weights (`bool`): If True (default), initialize GLoRA as a no-op (zeros). If False,
             use kaiming initialization so the adapter is not a no-op.
     """
