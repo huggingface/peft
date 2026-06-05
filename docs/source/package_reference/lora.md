@@ -42,8 +42,6 @@ In principle, LoRA can be applied to any subset of weight matrices in a neural n
 
 You can initialize the low-rank matrices with different use-cases in mind - task awareness (CoRDA, EVA), faster convergence (PiSSA), mitigating quantizations (LoftQ) - just to name a few use-cases. Read about the different initializations [below](#Initialization). The default initialization is for LoRA to be a no-op, to gradually learn new behavior without interfering much with the existing model.
 
-Since LoRA is a very popular method there are several incremental variations of LoRA that we call variants - they are often on-par or better-performing than LoRA and can be thought of as their own PEFT methods but based on LoRA. [Explore LoRA variants](../package_reference/lora_variants).
-
 ## Usage
 
 The size of the low-rank update matrices is determined by the *rank* or `r`. A higher rank means the model has more parameters to train, but it also means the model has more learning capacity. In the following example, you'll target the *query* and *value* matrices of the attention blocks. Other important parameters to set are `lora_alpha` (scaling factor), `bias` (whether `none`, `all` or only the LoRA bias parameters should be trained), and `modules_to_save` (the modules apart from the LoRA layers to be trained and saved). All of these parameters - and more - are found in the [`LoraConfig`].
@@ -67,8 +65,9 @@ model.print_trainable_parameters()
 
 ## Benchmark overview
 
+
 <iframe
-	src="https://hubnemo-peft-method-comparison-individual.hf.space/?highlight[type]=LORA"
+    src="http://127.0.0.1:7863/?highlight[type]=LORA"
 	frameborder="0"
 	width="850"
 	height="1000"
@@ -249,7 +248,7 @@ The default LoRA settings in PEFT add trainable weights to the query and value l
 config = LoraConfig(target_modules="all-linear", ...)
 ```
 
-For more information about how to apply quantization to PEFT adapters, refer to the [quantization guide](quantization).
+For more information about how to apply quantization to PEFT adapters, refer to the [quantization guide](../developer_guides/quantization).
 
 ### Memory efficient Layer Replication with LoRA
 
@@ -903,7 +902,7 @@ Using this feature has some drawbacks, namely:
 
 ### Composing and Reusing LoRA Adapters
 #### Arrow
-[Arrow](https://huggingface.co/papers/2405.11157) is a modular routing algorithm designed to combine multiple pre-trained task-specific LoRA adapters to solve a given task, similar to [Polytropon](polytropon) but without the need for fine-tuning. Rather than merging all adapters naively, Arrow introduces a **gradient-free, token-wise mixture-of-experts (MoE) routing mechanism**. At inference time, it first computes a _prototype_ for each LoRA by extracting the top right singular vector from its SVD decomposition. Each token representation is then compared to these prototypes via cosine similarity to obtain routing coefficients. Tokens are assigned to the top-k most relevant LoRA adapters, with the coefficients normalized through softmax, and their outputs linearly combined. This allows effective reuse of existing LoRA modules for new tasks and leads to stronger zero-shot generalization.
+[Arrow](https://huggingface.co/papers/2405.11157) is a modular routing algorithm designed to combine multiple pre-trained task-specific LoRA adapters to solve a given task, similar to [Polytropon](poly) but without the need for fine-tuning. Rather than merging all adapters naively, Arrow introduces a **gradient-free, token-wise mixture-of-experts (MoE) routing mechanism**. At inference time, it first computes a _prototype_ for each LoRA by extracting the top right singular vector from its SVD decomposition. Each token representation is then compared to these prototypes via cosine similarity to obtain routing coefficients. Tokens are assigned to the top-k most relevant LoRA adapters, with the coefficients normalized through softmax, and their outputs linearly combined. This allows effective reuse of existing LoRA modules for new tasks and leads to stronger zero-shot generalization.
 
 In PEFT, Arrow is enabled through [`ArrowConfig]` and `create_arrow_model`. You can also configure parameters such as `top_k` (the number of LoRA adapters combined per token), `router_temperature` (the softmax temperature applied to the routing coefficients), and `rng_seed` (for reproducibility).
 

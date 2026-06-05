@@ -32,7 +32,7 @@ This quicktour will show you PEFT's main features and how you can train or run i
 
 For any PEFT method, you'll need to create a configuration which contains all the parameters that specify how the PEFT method should be applied, most importantly which layers of the existing model to target with trainable parameters. Once the configuration is setup, pass it to the [`~peft.get_peft_model`] function along with the base model to create a trainable [`PeftModel`].
 
-Let's use [LoRA](../package_reference/lora) as an example but only discuss common parameters - you might want to use one of the [many other PEFT methods](../methods/overview).
+Let's use [LoRA](./package_reference/lora) as an example but only discuss common parameters - you might want to use one of the [many other PEFT methods](./methods/overview).
 The configuration usually entails this:
 
 - `target_modules`: which modules of the base model to adapt
@@ -67,7 +67,8 @@ Now wrap the base model and `peft_config` with the [`get_peft_model`] function t
   <div class="flex flex-col basis-2/4">
     <p>
     Wrapping means that PEFT replaces the targeted layers (here: all <code>q_proj</code> layers) with the adapter-specific layer for the target layer's type.
-    Since we're dealing with linear layers, it will be, in this case, a <code>lora.Linear</code> layer.
+    Since we're dealing with linear layers, it will be, in this case, a <code>lora.Linear</code> layer. <b>Note</b> that these changes are done in-place to
+    save memory, so your base model is now modified.
     </p>
     <p>
     Note that we've only specified <code>q_proj</code> but in actuality we are targeting all <code>model.layers[:].self_attn.q_proj</code> layers. This is
@@ -78,7 +79,7 @@ Now wrap the base model and `peft_config` with the [`get_peft_model`] function t
 </div>
 
 <div class="flex justify-center">
-  <div class="flex flex-col basis-2/4 pl-10 pr-10"><img src="/docs/adapter_layer_wrapping.svg" width="1000px"></div>
+  <div class="flex flex-col basis-2/4 pr-10"><img src="/docs/adapter_layer_wrapping.svg" width="1000px"></div>
   <div class="flex flex-col basis-2/4">
     <p>
     The base model's layer will be wrapped, retained and not trained while new, trainable weights are added and are combined.

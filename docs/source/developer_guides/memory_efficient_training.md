@@ -22,6 +22,8 @@ rendered properly in your Markdown viewer.
 
 Not every PEFT method is built equally and some formulations are easier to build in a memory efficient manner. If you are on a memory budget it makes sense to check out the [PEFT method comparison suite](https://huggingface.co/spaces/peft-internal-testing/PEFT-method-comparison) and filter for **maximum** accelerator memory usage. Average accelerator memory usage can be fairly equal across methods but not every method scales equally with activations and sequence length and is more prone to memory spikes than others.
 
+Especially when targeting large layers like language modeling heads or embedding layers to fine-tune specific tokens it might make sense to look into [using trainable tokens](troubleshooting#using-trainable-tokens).
+
 ## Chunked NLL loss
 
 Using [`NLLLoss`](https://docs.pytorch.org/docs/stable/generated/torch.nn.NLLLoss.html) is very common when training language models (or classification tasks, for that matter) but it is usually computed in one go, meaning you will allocate a matrix of size `batch × sequence × vocabulary`. With particularly long sequences or vocabularies this can get expensive fast.

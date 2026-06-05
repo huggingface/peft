@@ -119,7 +119,7 @@ peft_model = PeftModel.from_pretrained(base_model, peft_model_id)
 
 ### Randomly initialized layers
 
-For some tasks, it is important to correctly configure `modules_to_save` in the config to account for randomly initialized layers. 
+For some tasks, it is important to correctly configure `modules_to_save` in the config to account for randomly initialized layers.
 
 As an example, this is necessary if you use LoRA to fine-tune a language model for sequence classification because 🤗 Transformers adds a randomly initialized classification head on top of the model. If you do not add this layer to `modules_to_save`, the classification head won't be saved. The next time you load the model, you'll get a _different_ randomly initialized classification head, resulting in completely different results.
 
@@ -147,7 +147,7 @@ For many language fine-tuning tasks, extending the model's vocabulary is necessa
 
 #### Using trainable tokens
 
-Let's start with trainable tokens, in this case its [LoRA integration](../developer_guides/lora#efficiently-train-tokens-alongside-lora).  If you're interested in only training the new embeddings and nothing else, refer to the [standalone documentation](../package_reference/trainable_tokens).
+Let's start with trainable tokens, in this case its [LoRA integration](../package_reference/lora#efficiently-train-tokens-alongside-lora).  If you're interested in only training the new embeddings and nothing else, refer to the [standalone documentation](../package_reference/trainable_tokens).
 
 To enable selective token training of the embedding layer, you'll need to supply the token ids of your newly added tokens via the `trainable_token_indices` parameter.  Optionally you can specify which layer to target if there is more than one embedding layer. For a Mistral model this could look like this:
 
@@ -227,7 +227,7 @@ As always, it is best practice to ensure the model works correctly for inference
 
 ### Check layer and model status
 
-Sometimes a PEFT model can end up in a bad state, especially when handling multiple adapters. There can be some confusion around what adapters exist, which one is active, which one is merged, etc. To help investigate this issue, call the [`~peft.PeftModel.get_layer_status`] and the [`~peft.PeftModel.get_model_status`] methods. 
+Sometimes a PEFT model can end up in a bad state, especially when handling multiple adapters. There can be some confusion around what adapters exist, which one is active, which one is merged, etc. To help investigate this issue, call the [`~peft.PeftModel.get_layer_status`] and the [`~peft.PeftModel.get_model_status`] methods.
 
 The [`~peft.PeftModel.get_layer_status`] method gives you a detailed overview of each targeted layer's active, merged, and available adapters.
 

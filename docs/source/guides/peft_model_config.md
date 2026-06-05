@@ -170,7 +170,7 @@ from peft import AutoPeftModelForCausalLM
 lora_model = AutoPeftModelForCausalLM.from_pretrained("ybelkada/opt-350m-lora")
 ```
 
-Take a look at the [AutoPeftModel](package_reference/auto_class) API reference to learn more about the [`AutoPeftModel`] classes.
+Take a look at the [AutoPeftModel](../package_reference/auto_class) API reference to learn more about the [`AutoPeftModel`] classes.
 
 ## Next steps
 

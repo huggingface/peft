@@ -20,7 +20,7 @@ rendered properly in your Markdown viewer.
 
 Finetuning with RoAd typically requires higher learning rate compared to LoRA or similar methods, around 1e-3. Currently RoAd only supports linear layers and it can be used on models quantized with bitsandbytes (4-bit or 8-bit).
 
-For running inference with different RoAd adapters in the same batch see [Inference with different LoRA adapters in the same batch](../developer_guides/lora#inference-with-different-lora-adapters-in-the-same-batch).
+For running inference with different RoAd adapters in the same batch see [Inference with different LoRA adapters in the same batch](lora#inference-with-different-lora-adapters-in-the-same-batch).
 
 ## RoadConfig
 
