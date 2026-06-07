@@ -100,6 +100,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "gemma4": r".*language_model\..*\.(q_proj|v_proj)",
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
+    "nemotron_h": ["q_proj", "k_proj", "v_proj", "o_proj"],
     "rwkv": ["key", "value", "receptance", "output"],
     "rwkv7": ["r_proj", "k_proj", "v_proj", "o_proj", "key", "value"],
 }
@@ -293,6 +294,7 @@ TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
     "gemma4": r".*language_model\..*\.(q_proj|v_proj)",
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
+    "nemotron_h": ["q_proj", "k_proj", "v_proj", "o_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING = {
@@ -318,6 +320,7 @@ TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING = {
     "gemma4": r".*language_model\..*\.(q_proj|v_proj)",
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
+    "nemotron_h": ["q_proj", "k_proj", "v_proj", "o_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_OSF_TARGET_MODULES_MAPPING = {
@@ -377,6 +380,7 @@ TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING = {
     "gemma4": r".*language_model\..*\.(q_proj|v_proj)",
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
+    "nemotron_h": ["q_proj", "k_proj", "v_proj", "o_proj"],
 }
 
 ##################
