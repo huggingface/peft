@@ -1371,6 +1371,44 @@ class TestLoraInitialization:
                 # only layers targeted with target_modules
                 assert param.requires_grad is ("linear" in name) or ("conv2d" in name)
 
+    def test_lora_only_bias_is_saved_and_reloaded(self, tmp_path):
+        # See https://github.com/huggingface/peft/issues/3306: with bias="lora_only" the trained
+        # base_layer bias of targeted modules lives at "<module>.base_layer.bias" in the current
+        # tuner-layer structure. It must be included in the saved adapter, otherwise reloading does
+        # not reproduce the trained outputs.
+        from peft.utils import get_peft_model_state_dict
+
+        bias_key = "base_model.model.linear.base_layer.bias"
+
+        torch.manual_seed(0)
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear"], bias="lora_only")
+        model = get_peft_model(model, config)
+
+        # simulate training by perturbing every trainable parameter, including the base_layer bias
+        with torch.no_grad():
+            for _, param in model.named_parameters():
+                if param.requires_grad:
+                    param.add_(torch.randn_like(param) * 0.1)
+
+        state_dict = get_peft_model_state_dict(model)
+        assert bias_key in state_dict
+
+        data = torch.rand(10, 1000).to(self.torch_device)
+        with torch.no_grad():
+            output_before = model(data)[0]
+
+        model.save_pretrained(tmp_path)
+        saved = load_file(tmp_path / "adapter_model.safetensors")
+        assert bias_key in saved
+
+        # reload into a freshly initialized base model with identical base weights (same seed)
+        torch.manual_seed(0)
+        reloaded = PeftModel.from_pretrained(self.get_model(), tmp_path)
+        with torch.no_grad():
+            output_after = reloaded(data)[0]
+        assert torch.allclose(output_before, output_after)
+
     def test_lora_with_bias_extra_params(self):
         # lora with lora_bias=True
         model = self.get_model()
