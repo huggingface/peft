@@ -40,9 +40,9 @@ def _preprocess_common(row):
     dct = {
         "experiment_name": run_info["experiment_name"],
         "model_id": run_info["train_config"]["model_id"],
-        "train_config": run_info["train_config"],
+        "train_config": json.dumps(run_info["train_config"]),
         "peft_type": peft_type,
-        "peft_config": run_info["peft_config"],
+        "peft_config": json.dumps(run_info["peft_config"]),
         "accelerator_memory_reserved_avg": train_info["accelerator_memory_reserved_avg"],
         "accelerator_memory_max": train_info["accelerator_memory_max"],
         "accelerator_memory_reserved_99th": train_info["accelerator_memory_reserved_99th"],
@@ -57,8 +57,8 @@ def _preprocess_common(row):
         "transformers_version": meta_info["package_info"]["transformers-version"],
         "datasets_version": meta_info["package_info"]["datasets-version"],
         "torch_version": meta_info["package_info"]["torch-version"],
-        "package_info": meta_info["package_info"],
-        "system_info": meta_info["system_info"],
+        "package_info": json.dumps(meta_info["package_info"]),
+        "system_info": json.dumps(meta_info["system_info"]),
         "created_at": run_info["created_at"],
     }
     return dct, train_metrics
@@ -195,6 +195,19 @@ _TASK_IMPORTANT_COLUMNS = {
 }
 
 
+def get_task_columns(task_name):
+    """Return the columns relevant to a task, ordered for display.
+
+    The important columns (including the task's own metrics) come first, followed by the remaining columns. Columns
+    belonging to other tasks are excluded.
+    """
+    relevant = list(_COMMON_DTYPES) + list(_TASK_DTYPES.get(task_name, {}))
+    important = _TASK_IMPORTANT_COLUMNS.get(task_name, ["experiment_name", "peft_type"])
+    ordered = [col for col in important if col in relevant]
+    ordered += [col for col in relevant if col not in ordered]
+    return ordered
+
+
 def load_df(path, task_name, print_fn=print):
     jsons = load_jsons(path)
     preprocessed = preprocess(jsons, task_name=task_name, print_fn=print_fn)
@@ -209,9 +222,7 @@ def load_df(path, task_name, print_fn=print):
     df["total_time"] = df["total_time"].round().astype(int)
 
     # reorder columns for better viewing, pinned_columns arg in Gradio seems not to work correctly
-    important_columns = _TASK_IMPORTANT_COLUMNS.get(task_name, ["experiment_name", "peft_type"])
-    other_columns = [col for col in df if col not in important_columns]
-    df = df[important_columns + other_columns]
+    df = df[get_task_columns(task_name)]
 
     columns = ["experiment_name", "model_id", "peft_type", "created_at"]
     # we want to keep only the most recent run for each experiment
