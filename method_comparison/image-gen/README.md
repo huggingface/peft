@@ -45,7 +45,7 @@ The Makefile checks which experiments are missing a corresponding results file a
 make
 ```
 
-If you set `UPLOAD_BUCKET="your_user/bucket_name"` as an environment variable prior to starting experiments via `make`, all experiments will be called with the `--bucket_name $UPLOAD_BUCKET` parameter and therefore store the checkpoints and sample images in that bucket.
+If you set `UPLOAD_BUCKET_IMAGEGEN="your_user/bucket_name"` as an environment variable prior to starting experiments via `make`, all experiments will be called with the `--bucket_name $UPLOAD_BUCKET_IMAGEGEN` parameter and therefore store the checkpoints and sample images in that bucket. _For maintainers_: The default bucket name should be `"peft-internal-testing/image-gen-benchmark"`.
 
 List experiments to run:
 

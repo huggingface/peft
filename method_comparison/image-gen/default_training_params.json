@@ -37,14 +37,6 @@
   "instance_prompts": [
     "sks cat sitting on a chair in front of a box of chocolates",
     "sks cat playing on the Steam Deck",
-    "sks cat reading the newspaper with the title \"DIE BOX\"",
-    "sks cat being fed sushi",
-    "sks cat in front of a box of tomatoes",
-    "a gingerbread house in front of sks cat",
-    "sks cat is wearing a Wednesday Addams costume",
-    "sks cat looks skeptical as he reads a magazine depicting a black cat",
-    "sks cat wearing a striped scarf",
-    "sleepy sks cat lying in bed covered by a blue blanket",
     "sks cat wearing a necklace while sitting in a box on a sofa",
     "a box with four donuts in front of sks cat",
     "sks cat wearing a pink veil with flowers on it and a dagger made out of yellow cardboard",
@@ -54,7 +46,15 @@
     "sks cat opens a white door",
     "sks cat with a VIP \"all access\" pass",
     "sks cat in front of a monitor showing the video game \"RimWorld\"",
-    "sks cat reads a newspaper about cannabis"
+    "sks cat reads a newspaper about cannabis",
+    "sks cat reading the newspaper with the title \"DIE BOX\"",
+    "sks cat being fed sushi",
+    "sks cat in front of a box of tomatoes",
+    "a gingerbread house in front of sks cat",
+    "sks cat is wearing a Wednesday Addams costume",
+    "sks cat looks skeptical as he reads a magazine depicting a black cat",
+    "sks cat wearing a striped scarf",
+    "sleepy sks cat lying in bed covered by a blue blanket"
   ],
   "sample_image_prompts": [
     "a photo of sks cat",
