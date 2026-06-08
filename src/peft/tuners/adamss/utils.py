@@ -38,11 +38,21 @@ def slice_pca(tensor, r, device, dtype=torch.float32):
     UU = torch.zeros(B, C, H, effective_r, dtype=dtype, device=device)
     VVT = torch.zeros(B, C, effective_r, W, dtype=dtype, device=device)
 
-    for i in range(B):
-        for j in range(C):
-            U, _, V = torch.svd_lowrank(tensor[i, j, :, :], q=effective_r, niter=2, M=None)
-            UU[i, j, :, :] = U[:, 0:effective_r]
-            VVT[i, j, :, :] = V[:, 0:effective_r].T
+    # torch.svd_lowrank draws a random projection internally, so its result (and hence the
+    # downstream clustering and scatter_index) depends on the global RNG state. Because the
+    # AdaMSS adapter is rebuilt from the base weights when an adapter is loaded, a different
+    # RNG state at load time would produce a different scatter_index than at save time and the
+    # reloaded adapter would not reproduce its outputs. Seed a forked RNG so the decomposition
+    # is deterministic and reproducible across save/load; this matches the fixed seed already
+    # used for KMeans in clustering_Z and leaves the global RNG stream untouched.
+    fork_devices = [device] if torch.device(device).type == "cuda" else []
+    with torch.random.fork_rng(devices=fork_devices):
+        torch.manual_seed(0)
+        for i in range(B):
+            for j in range(C):
+                U, _, V = torch.svd_lowrank(tensor[i, j, :, :], q=effective_r, niter=2, M=None)
+                UU[i, j, :, :] = U[:, 0:effective_r]
+                VVT[i, j, :, :] = V[:, 0:effective_r].T
     # Return computed matrices (important: ensure callers receive VVT and UU)
     return VVT, UU
 
