@@ -41,3 +41,17 @@ jobs:
           git add .
           git commit -m "🚀 Deploy method comparison app from GH action"
           git push -f gradio-app HEAD:main
+
+      - name: Deploy embeddable method_comparison app to HF Spaces (for docs)
+        run: |
+          cd method_comparison
+          git init
+          # Spaces expect requirements.txt
+          mv requirements-app.txt requirements.txt
+          mv app_embed.py app.py
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add gradio-app https://huggingface.co/spaces/peft-internal-testing/PEFT-method-comparison-embed
+          git add .
+          git commit -m "🚀 Deploy method comparison app from GH action"
+          git push -f gradio-app HEAD:main
