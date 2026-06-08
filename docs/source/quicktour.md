@@ -36,7 +36,7 @@ Let's use [LoRA](./package_reference/lora) as an example but only discuss common
 The configuration usually entails this:
 
 - `target_modules`: which modules of the base model to adapt
-- `task_type` (default: `None`): the nature of the trained task; if provided may help to automatically save relevant (but untargeted) layers alongside the adapter weights or warn you about incompatibilities
+- `task_type` (default: `None`, see [available `TaskType`s](package_reference/peft_types#peft.TaskType)): the nature of the trained task; if provided may help to automatically save relevant layers alongside the adapter weights or warn you about incompatibilities
 - `inference_mode` (default: `False`): whether you're using the model for inference or not
 
 Depending on the PEFT method you choose you will add specific parameters that, for example, determine the size of the update matrices.
@@ -219,7 +219,7 @@ peft_model.set_adapter('new_adapter')
 
 Now that you've seen how to train a model with one of the PEFT methods, we encourage you to try out some of the other methods like prompt tuning. The steps are very similar to the ones shown in the quicktour:
 
-1. prepare a [`PeftConfig`] for a PEFT method
+1. prepare a [`PeftConfig`] for a PEFT method, e.g. a [`LoraConfig`] or some other config (see the [method overview](methods/overview))
 2. use the [`get_peft_model`] method to create a [`PeftModel`] from the configuration and base model
 
 Then you can train it however you like! To load a PEFT model for inference, you can use the [`AutoPeftModel`] class.

@@ -27,7 +27,7 @@ The PEFT library is designed to help you quickly train large models on free or l
 
 A configuration stores important parameters that specify how a particular PEFT method should be applied.
 
-For example, take a look at the following [`LoraConfig`](https://huggingface.co/ybelkada/opt-350m-lora/blob/main/adapter_config.json) for applying LoRA and [`PromptEncoderConfig`](https://huggingface.co/smangrul/roberta-large-peft-p-tuning/blob/main/adapter_config.json) for applying p-tuning (these configuration files are already JSON-serialized). Whenever you load a PEFT adapter, it is a good idea to check whether it has an associated adapter_config.json file which is required.
+For example, take a look at the following `LoraConfig` for applying LoRA and `PromptEncoderConfig` for applying p-tuning (these configuration files are already JSON-serialized). Whenever you load a PEFT adapter, it is a good idea to check whether it has an associated `adapter_config.json` file which is required.
 
 <hfoptions id="config">
 <hfoption id="LoraConfig">
