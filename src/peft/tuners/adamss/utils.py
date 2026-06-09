@@ -24,7 +24,7 @@ def slice_pca(tensor, r, device, dtype=torch.float32, random_seed=0):
         r: rank for low-rank approximation
         device: computation device
         dtype: data type
-        random_seed: seed for the random projection used by ``torch.svd_lowrank``, so the decomposition is
+        random_seed: seed for the random projection used by `torch.svd_lowrank`, so the decomposition is
             deterministic and reproducible across save/load
 
     Returns:
@@ -40,13 +40,10 @@ def slice_pca(tensor, r, device, dtype=torch.float32, random_seed=0):
     UU = torch.zeros(B, C, H, effective_r, dtype=dtype, device=device)
     VVT = torch.zeros(B, C, effective_r, W, dtype=dtype, device=device)
 
-    # torch.svd_lowrank draws a random projection internally, so its result (and hence the
-    # downstream clustering and scatter_index) depends on the RNG state. Because the AdaMSS
-    # adapter is rebuilt from the base weights when it is loaded, a different RNG state at load
-    # time would produce a different scatter_index than at save time and the reloaded adapter
-    # would not reproduce its outputs. Seed a forked RNG with the configurable ``random_seed`` so
-    # the decomposition is deterministic and reproducible across save/load (torch.svd_lowrank does
-    # not accept a generator argument); fork_rng leaves the global RNG stream untouched.
+    # torch.svd_lowrank draws a random projection internally, so its result (and hence the downstream
+    # clustering and scatter_index) depends on the RNG state. Seed a forked RNG with the configurable
+    # random_seed so the result is deterministic (torch.svd_lowrank does not accept a generator argument);
+    # fork_rng leaves the global RNG stream untouched.
     fork_devices = [device] if torch.device(device).type == "cuda" else []
     with torch.random.fork_rng(devices=fork_devices):
         torch.manual_seed(random_seed)

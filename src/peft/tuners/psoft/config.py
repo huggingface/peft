@@ -163,10 +163,9 @@ class PsoftConfig(PeftConfig):
         default=0,
         metadata={
             "help": (
-                "Seed for the random projection used by torch.svd_lowrank when psoft_svd='lowrank'. PSOFT rebuilds "
-                "its SVD-based A/B initialization from the base weights when an adapter is loaded, so a fixed seed is "
-                "required for the reloaded adapter to reproduce its trained outputs. The seed is stored in the adapter "
-                "config and reused on load. Only used when psoft_svd='lowrank'. Default: 0."
+                "Seed used to deterministically create and rebuild the adapter weights when psoft_svd='lowrank', so "
+                "that a saved adapter reproduces its outputs after loading. Only used when psoft_svd='lowrank'. "
+                "Default: 0."
             )
         },
     )

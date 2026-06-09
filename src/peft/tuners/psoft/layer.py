@@ -321,10 +321,8 @@ class PsoftLayer(BaseTunerLayer):
             Uhr = Vh[:r, :]  # (r, in)
         elif svd_mode == "lowrank":
             # torch.svd_lowrank uses a random projection, so the A/B initialization it produces depends on the
-            # RNG state. Because that initialization is rebuilt from the base weights when an adapter is loaded,
-            # seed a forked RNG with the configurable random_seed to make it deterministic and reproducible across
-            # save/load (torch.svd_lowrank does not accept a generator argument). fork_rng leaves the global RNG
-            # stream untouched.
+            # RNG state. Seed a forked RNG with the configurable random_seed to make it deterministic
+            # (torch.svd_lowrank does not accept a generator argument); fork_rng leaves the global RNG untouched.
             fork_devices = [weight.device] if weight.device.type == "cuda" else []
             with torch.random.fork_rng(devices=fork_devices):
                 torch.manual_seed(random_seed)

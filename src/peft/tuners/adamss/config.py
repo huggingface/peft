@@ -321,11 +321,8 @@ class AdamssConfig(PeftConfig):
         default=0,
         metadata={
             "help": (
-                "Seed for the random projection used by the SVD (torch.svd_lowrank) during initialization. "
-                "AdaMSS rebuilds its subspace decomposition from the base weights when an adapter is loaded, so a "
-                "fixed seed is required for the reloaded adapter to reproduce its trained outputs. The seed is stored "
-                "in the adapter config and reused on load; change it to obtain a different (but still reproducible) "
-                "subspace allocation. Default: 0."
+                "Seed used to deterministically create and rebuild the adapter weights, so that a saved adapter "
+                "reproduces its outputs after loading. Default: 0."
             )
         },
     )
