@@ -1589,7 +1589,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         Note: Not supported for prompt learning methods like prompt tuning.
 
         Args:
-            adapter_name (`str` or `Sequence[str]`):
+            adapter_names (`str` or `Sequence[str]`):
                 The name of the adapter(s) whose gradients should be enabled/disabled.
             requires_grad (`bool`, *optional*)
                 Whether to enable (`True`, default) or disable (`False`).
