@@ -46,8 +46,7 @@ jobs:
         run: |
           cd method_comparison
           git init
-          # Spaces expect requirements.txt
-          mv requirements-app.txt requirements.txt
+          # requirements.txt is already present from the previous step
           mv app_embed.py app.py
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
