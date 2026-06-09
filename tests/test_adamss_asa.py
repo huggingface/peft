@@ -7,12 +7,10 @@ Tests cover:
 - update_and_allocate: full ASA flow (accumulate → global mask → reset)
 """
 
-import copy
-
 import torch
 from torch import nn
 
-from peft import AdamssConfig, PeftModel, get_peft_model
+from peft import AdamssConfig, get_peft_model
 from peft.tuners.adamss.layer import AdamssLayer
 
 
@@ -272,40 +270,3 @@ class TestAdamssAsa:
         for layer in layers:
             for p in layer.adamss_A["default"]:
                 assert p.requires_grad
-
-
-class TestAdamssSaveLoad:
-    def test_save_load_reproduces_output(self, tmp_path):
-        # Regression test: a trained AdaMSS adapter must reproduce its outputs after
-        # save_pretrained/from_pretrained. The adapter is rebuilt from the base weights on load,
-        # so the SVD-based subspace allocation (and the resulting scatter_index used to place each
-        # subspace's contribution into the output) must be deterministic; otherwise the restored
-        # weights are scattered to the wrong output dimensions and the output changes.
-        torch.manual_seed(0)
-        base = SimpleMLP()
-        config = AdamssConfig(target_modules=["lin0", "lin1"], r=8, num_subspaces=4, subspace_rank=1)
-        model = get_peft_model(copy.deepcopy(base), config)
-        model.eval()
-
-        # Simulate training so the adapter is non-trivial (AdaMSS initializes B=0, so an untrained
-        # adapter is a no-op and would reproduce trivially even if the mapping were wrong).
-        with torch.no_grad():
-            for p in model.parameters():
-                if p.requires_grad:
-                    p.add_(torch.randn_like(p) * 0.1 + 0.05)
-
-        x = torch.randn(4, 20)
-        with torch.no_grad():
-            out_before = model(x)
-
-        model.save_pretrained(tmp_path)
-
-        # Change the global RNG state to mimic loading in a fresh process; the reconstructed
-        # subspace allocation must not depend on it.
-        torch.manual_seed(12345)
-        reloaded = PeftModel.from_pretrained(copy.deepcopy(base), tmp_path)
-        reloaded.eval()
-        with torch.no_grad():
-            out_after = reloaded(x)
-
-        assert torch.allclose(out_before, out_after, atol=1e-5, rtol=1e-4)

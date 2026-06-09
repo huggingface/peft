@@ -317,6 +317,18 @@ class AdamssConfig(PeftConfig):
             )
         },
     )
+    random_seed: int = field(
+        default=0,
+        metadata={
+            "help": (
+                "Seed for the random projection used by the SVD (torch.svd_lowrank) during initialization. "
+                "AdaMSS rebuilds its subspace decomposition from the base weights when an adapter is loaded, so a "
+                "fixed seed is required for the reloaded adapter to reproduce its trained outputs. The seed is stored "
+                "in the adapter config and reused on load; change it to obtain a different (but still reproducible) "
+                "subspace allocation. Default: 0."
+            )
+        },
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.ADAMSS

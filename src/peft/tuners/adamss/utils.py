@@ -15,7 +15,7 @@
 import torch
 
 
-def slice_pca(tensor, r, device, dtype=torch.float32):
+def slice_pca(tensor, r, device, dtype=torch.float32, random_seed=0):
     """
     Perform slice-wise PCA (SVD) on 4D tensor.
 
@@ -24,6 +24,8 @@ def slice_pca(tensor, r, device, dtype=torch.float32):
         r: rank for low-rank approximation
         device: computation device
         dtype: data type
+        random_seed: seed for the random projection used by ``torch.svd_lowrank``, so the decomposition is
+            deterministic and reproducible across save/load
 
     Returns:
         VVT: Right singular vectors (B, C, r, W) UU: Left singular vectors (B, C, H, r)
@@ -39,15 +41,15 @@ def slice_pca(tensor, r, device, dtype=torch.float32):
     VVT = torch.zeros(B, C, effective_r, W, dtype=dtype, device=device)
 
     # torch.svd_lowrank draws a random projection internally, so its result (and hence the
-    # downstream clustering and scatter_index) depends on the global RNG state. Because the
-    # AdaMSS adapter is rebuilt from the base weights when an adapter is loaded, a different
-    # RNG state at load time would produce a different scatter_index than at save time and the
-    # reloaded adapter would not reproduce its outputs. Seed a forked RNG so the decomposition
-    # is deterministic and reproducible across save/load; this matches the fixed seed already
-    # used for KMeans in clustering_Z and leaves the global RNG stream untouched.
+    # downstream clustering and scatter_index) depends on the RNG state. Because the AdaMSS
+    # adapter is rebuilt from the base weights when it is loaded, a different RNG state at load
+    # time would produce a different scatter_index than at save time and the reloaded adapter
+    # would not reproduce its outputs. Seed a forked RNG with the configurable ``random_seed`` so
+    # the decomposition is deterministic and reproducible across save/load (torch.svd_lowrank does
+    # not accept a generator argument); fork_rng leaves the global RNG stream untouched.
     fork_devices = [device] if torch.device(device).type == "cuda" else []
     with torch.random.fork_rng(devices=fork_devices):
-        torch.manual_seed(0)
+        torch.manual_seed(random_seed)
         for i in range(B):
             for j in range(C):
                 U, _, V = torch.svd_lowrank(tensor[i, j, :, :], q=effective_r, niter=2, M=None)

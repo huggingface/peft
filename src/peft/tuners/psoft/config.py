@@ -159,6 +159,17 @@ class PsoftConfig(PeftConfig):
             "help": "Number of power iterations used by torch.svd_lowrank when psoft_svd='lowrank'. Only used when psoft_svd='lowrank'. "
         },
     )
+    random_seed: int = field(
+        default=0,
+        metadata={
+            "help": (
+                "Seed for the random projection used by torch.svd_lowrank when psoft_svd='lowrank'. PSOFT rebuilds "
+                "its SVD-based A/B initialization from the base weights when an adapter is loaded, so a fixed seed is "
+                "required for the reloaded adapter to reproduce its trained outputs. The seed is stored in the adapter "
+                "config and reused on load. Only used when psoft_svd='lowrank'. Default: 0."
+            )
+        },
+    )
     psoft_orth: bool = field(
         default=True,
         metadata={
