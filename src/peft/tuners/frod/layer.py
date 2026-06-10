@@ -83,19 +83,19 @@ class FrodLayer(BaseTunerLayer):
             frod_s_indices[adapter_name] = frod_s_indices[reference_adapter]
             frod_s_size[adapter_name] = frod_s_size[reference_adapter]
 
-        nnz = frod_s_indices[adapter_name].shape[1]
+        frod_v = frod_V[adapter_name].to(dtype=dtype, device="cpu")
+        frod_s_index = frod_s_indices[adapter_name].to(device="cpu", dtype=torch.long)
+        frod_s_shape = frod_s_size[adapter_name].to(device="cpu", dtype=torch.long)
+
+        nnz = frod_s_index.shape[1]
         self.frod_lambda_s_values[adapter_name] = nn.Parameter(torch.zeros(nnz, device=device, dtype=dtype))
 
-        self.frod_V[adapter_name] = frod_V[adapter_name]
-        self.frod_s_indices[adapter_name] = frod_s_indices[adapter_name]
-        self.frod_s_size[adapter_name] = frod_s_size[adapter_name]
-
         # Keep cached projections on CPU and move them lazily in forward.
-        self.frod_V[adapter_name] = self.frod_V[adapter_name].to(dtype=dtype, device="cpu")
-        self.frod_s_indices[adapter_name] = self.frod_s_indices[adapter_name].to(device="cpu", dtype=torch.long)
-        self.frod_s_size[adapter_name] = self.frod_s_size[adapter_name].to(device="cpu", dtype=torch.long)
+        self.frod_V[adapter_name] = frod_v
+        self.frod_s_indices[adapter_name] = frod_s_index
+        self.frod_s_size[adapter_name] = frod_s_shape
 
-        U, L = self._calculate_frod_u_and_lambda(self.frod_V[adapter_name], weight)
+        U, L = self._calculate_frod_u_and_lambda(frod_v, weight)
         U = U.to(dtype)
         L = L.to(device=device, dtype=dtype)
         self.frod_lambda_l[adapter_name] = nn.Parameter(L, requires_grad=True)
@@ -157,6 +157,7 @@ class Linear(nn.Linear, FrodLayer):
 
         base_layer = self.get_base_layer()
         adapter_deltas = []
+        # FRoD deltas are computed against the current base weight, so compute all deltas before mutating it.
         for active_adapter in adapter_names:
             if active_adapter in self.frod_lambda_l.keys():
                 adapter_deltas.append((active_adapter, self.get_delta_weight(active_adapter)))
@@ -193,14 +194,7 @@ class Linear(nn.Linear, FrodLayer):
         device = weight.device
         dtype = weight.dtype
         base_weight = transpose(weight, self.fan_in_fan_out)
-        U = self.frod_U[adapter].to(device=device, dtype=dtype)
-        V = self.frod_V[adapter].to(device=device, dtype=dtype)
-        indices = self.frod_s_indices[adapter].to(device=U.device, dtype=torch.long)
-        size = tuple(int(dim) for dim in self.frod_s_size[adapter].tolist())
-        values = self.frod_lambda_s_values[adapter].to(U.device, U.dtype).clone()
-        lambda_l = self.frod_lambda_l[adapter].to(device=U.device, dtype=U.dtype)
-
-        S_sparse = torch.sparse_coo_tensor(indices, values, size).coalesce()
+        U, V, S_sparse, lambda_l = self._get_frod_tensors(adapter, device=device, dtype=dtype)
         S = S_sparse.to_dense()
         L = torch.diag_embed(lambda_l)
         frod_weight = U @ (S + L) @ V.T
@@ -208,6 +202,18 @@ class Linear(nn.Linear, FrodLayer):
         # FRoD parameterizes the adapted weight itself. Return only the difference so PEFT merge/unmerge and
         # disable-adapter behavior preserve the base model while the active adapter still replaces the base weight.
         return transpose(frod_weight - base_weight, self.fan_in_fan_out)
+
+    def _get_frod_tensors(
+        self, adapter: str, *, device: torch.device, dtype: torch.dtype
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        U = self.frod_U[adapter].to(device=device, dtype=dtype)
+        V = self.frod_V[adapter].to(device=device, dtype=dtype)
+        indices = self.frod_s_indices[adapter].to(device=device, dtype=torch.long)
+        size = tuple(int(dim) for dim in self.frod_s_size[adapter].tolist())
+        values = self.frod_lambda_s_values[adapter].to(device=device, dtype=dtype)
+        lambda_l = self.frod_lambda_l[adapter].to(device=device, dtype=dtype)
+        S_sparse = torch.sparse_coo_tensor(indices, values, size).coalesce()
+        return U, V, S_sparse, lambda_l
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
@@ -229,12 +235,9 @@ class Linear(nn.Linear, FrodLayer):
                 if active_adapter not in self.frod_lambda_s_values:
                     continue
 
-                V = self.frod_V[active_adapter].to(device=x.device, dtype=target_dtype)
-                U = self.frod_U[active_adapter].to(device=x.device, dtype=target_dtype)
-                indices = self.frod_s_indices[active_adapter].to(device=x.device, dtype=torch.long)
-                size = tuple(int(dim) for dim in self.frod_s_size[active_adapter].tolist())
-                values = self.frod_lambda_s_values[active_adapter].to(device=x.device, dtype=target_dtype)
-                lambda_l = self.frod_lambda_l[active_adapter].to(device=x.device, dtype=target_dtype)
+                U, V, S_sparse, lambda_l = self._get_frod_tensors(
+                    active_adapter, device=x.device, dtype=target_dtype
+                )
 
                 dropout = self.frod_dropout[active_adapter]
                 h = dropout(x)
@@ -250,9 +253,7 @@ class Linear(nn.Linear, FrodLayer):
                 if matmul_dtype in (torch.float16, torch.bfloat16):
                     matmul_dtype = torch.float32
 
-                values = values.to(device=z_flat.device, dtype=matmul_dtype)
                 z_flat_mm = z_flat.to(matmul_dtype)
-                S_sparse = torch.sparse_coo_tensor(indices, values, size).coalesce()
                 if S_sparse.dtype != matmul_dtype:
                     S_sparse = S_sparse.to(dtype=matmul_dtype)
                 z_S_flat = torch.sparse.mm(S_sparse, z_flat_mm.t()).t()
