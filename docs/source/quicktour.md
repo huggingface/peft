@@ -19,10 +19,10 @@ rendered properly in your Markdown viewer.
 PEFT offers parameter-efficient methods for finetuning large pretrained models. The traditional paradigm is to finetune all of a model's parameters for each downstream task, but this is becoming exceedingly costly and impractical because of the enormous number of parameters in models today. Instead, it is more efficient to train a smaller number of prompt parameters or use a reparametrization method like low-rank adaptation (LoRA) to reduce the number of trainable parameters.
 
 <div class="flex justify-center">
-  <div class="flex flex-col basis-1/4">
+  <div class="flex flex-col basis-1/4 pt-5">
     <i>PEFT can be thought of as a framework for adding trainable parameters to arbitrary places in existing models ("base models"). Specific PEFT methods arrange the trainable parameters in certain ways or modify the training process to achieve fine-tuning performance comparable to training all parameters of the base model.</i>
   </div>
-  <div class="flex flex-col basis-3/4 pl-10 pr-10"><img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/adapter_installation.png" width="100%"></div>
+  <div class="flex flex-col basis-3/4 pl-10 pr-10"><img style="border: 0;box-shadow: none;border-radius: 0;" src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/adapter_installation.png" width="100%"></div>
 </div>
 
 This quicktour will show you PEFT's main features and how you can train or run inference on large models that would typically be inaccessible on consumer devices.
@@ -72,11 +72,11 @@ Now wrap the base model and `peft_config` with the [`get_peft_model`] function t
     Note that we've only specified <code>q_proj</code> but in actuality we are targeting all <code>model.layers[:].self_attn.q_proj</code> layers. This is because PEFT searches for matching suffixes by default. Pass a string with a regular expression if you want to target more complex layer patterns.
     </p>
   </div>
-  <div class="flex flex-col basis-2/4 pl-10 pr-10"><img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/adapter_attention_targeting.png" width="600px"></div>
+  <div class="flex flex-col basis-2/4 pl-10 pr-10"><img style="border: 0;box-shadow: none;border-radius: 0;" src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/adapter_attention_targeting.png" width="600px"></div>
 </div>
 
 <div class="flex justify-center">
-  <div class="flex flex-col basis-2/4 pr-10"><img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/adapter_layer_wrapping.png" width="1000px"></div>
+  <div class="flex flex-col basis-2/4 pr-10"><img style="border: 0;box-shadow: none;border-radius: 0;" src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/adapter_layer_wrapping.png" width="1000px"></div>
   <div class="flex flex-col basis-2/4">
     <p>
     The base model's layer will be wrapped, retained and not trained while new, trainable weights are added and are combined.  How these new weights are structured and combined with the weights of the base model is a good portion of what sets the different PEFT methods apart.
@@ -196,7 +196,7 @@ PEFT supports installing multiple adapters (of the same kind, in this document t
     This works because the wrapped layer actually has a unique set of trainable weights for each adapter name. Not every adapter is active and trainable by default.  You have to explicitly enable adapters by name before they are active. This allows you to quickly swap between adapters where task-specific knowledge is needed or serve different use-cases on top of one model.
     </p>
   </div>
-  <div class="flex flex-col basis-2/4 pl-10 pr-10"><img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/adapter_layer_wrapping_multi_adapter.png" width="1000px"></div>
+  <div class="flex flex-col basis-2/4 pl-10 pr-10"><img style="border: 0;box-shadow: none;border-radius: 0;" src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/adapter_layer_wrapping_multi_adapter.png" width="1000px"></div>
 </div>
 
 Just remember to call `peft_model.set_adapter(<adapter_name>)` first to enable the adapter.

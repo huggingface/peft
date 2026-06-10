@@ -24,7 +24,7 @@ PEFT is integrated with the Transformers, Diffusers, and Accelerate libraries to
   <div class="flex flex-col basis-1/4">
     There are numerous methods to "adapt" existing models, often extensively integrating into the model. PEFT can be thought of as a framework for arbitrary methods of model adaption (modifying weights, wrapping layers, manipulating KV-caches, ...) while also serving as a reference implementation for many fine-tuning methods.
   </div>
-  <div class="flex flex-col basis-3/4 pl-10 pr-10"><img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/adapter_installation.png" width="100%"></div>
+  <div class="flex flex-col basis-3/4 pl-10 pr-10"><img style="border: 0;box-shadow: none;border-radius: 0;" src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/adapter_installation.png" width="100%"></div>
 </div>
 
 <div class="mt-10">
