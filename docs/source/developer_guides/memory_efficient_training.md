@@ -16,19 +16,19 @@ rendered properly in your Markdown viewer.
 
 # Memory Efficient Training
 
-🤗 PEFT provides you with methods for parameter efficient fine-tuning but that doesn't mean that your training process is memory efficient. This guide is a collection of tips that you can use to improve memory efficiency of your training process. This guide is mostly an overview page that will link you to the respective other guides and offer some tips for specific situations.
+🤗 PEFT makes fine-tuning parameter efficient, but not automatically memory efficient. This overview collects tips for cutting training memory and links to the detailed guides.
 
 ## Choosing the right method
 
-Not every PEFT method is built equally and some formulations are easier to build in a memory efficient manner. If you are on a memory budget it makes sense to check out the [PEFT method comparison suite](https://huggingface.co/spaces/peft-internal-testing/PEFT-method-comparison) and filter for **maximum** accelerator memory usage. Average accelerator memory usage can be fairly equal across methods but not every method scales equally with activations and sequence length and is more prone to memory spikes than others.
+Not every PEFT method is built equally and some formulations are easier to build in a memory efficient manner. If you are on a memory budget it makes sense to check out the [PEFT method comparison suite](https://huggingface.co/spaces/peft-internal-testing/PEFT-method-comparison) and filter for **maximum** accelerator memory usage. Average accelerator memory usage can be fairly equal across methods but not every method scales equally with activations and sequence length; some methods are more prone to memory spikes than others.
 
-Especially when targeting large layers like language modeling heads or embedding layers to fine-tune specific tokens it might make sense to look into [using trainable tokens](troubleshooting#using-trainable-tokens).
+Consider [using trainable tokens](troubleshooting#using-trainable-tokens) when targeting large layers like language modeling heads or embedding layers to fine-tune specific tokens.
 
 ## Chunked NLL loss
 
-Using [`NLLLoss`](https://docs.pytorch.org/docs/stable/generated/torch.nn.NLLLoss.html) is very common when training language models (or classification tasks, for that matter) but it is usually computed in one go, meaning you will allocate a matrix of size `batch × sequence × vocabulary`. With particularly long sequences or vocabularies this can get expensive fast.
+Using [`NLLLoss`](https://docs.pytorch.org/docs/stable/generated/torch.nn.NLLLoss.html) is very common when training language models (or classification tasks). You allocate a matrix of size `batch × sequence × vocabulary`. With particularly long sequences or vocabularies this can get expensive fast.
 
-When using [TRL] you can either use the [Liger kernel integration](https://huggingface.co/docs/trl/liger_kernel_integration) or use [Chunked NLLLoss](https://huggingface.co/docs/trl/v1.5.1/en/reducing_memory_usage#chunked-cross-entropy-for-reducing-peak-memory-usage). The latter will split the sequence in chunks of size 256 to keep the maximum memory consumption constant.
+When using [TRL](https://huggingface.co/docs/trl) you can either use the [Liger kernel integration](https://huggingface.co/docs/trl/liger_kernel_integration) or use [Chunked NLLLoss](https://huggingface.co/docs/trl/v1.5.1/en/reducing_memory_usage#chunked-cross-entropy-for-reducing-peak-memory-usage). The latter will split the sequence in chunks of size 256 to keep the maximum memory consumption constant.
 
 ![NLL vs. Chunked NLL comparison](https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/chunked_nll.png)
 
@@ -36,7 +36,7 @@ In case the default chunk size is not optimal for your setting, look in the [ori
 
 ## Quantization
 
-Quantization is one of the best ways to reduce memory consumption *of the base model* and will, depending on the employed quantization, also reduce activation memory. Since the PEFT methods will only take up a small portion of the total number of parameters, PEFT defaults to use a higher precision than the base model. This can also have the effect that adapters can mitigate some of the quality loss incured by quantization methods. Read the [PEFT quantization guide](quantization).
+Quantization is one of the best ways to reduce memory consumption *of the base model* and will, depending on the employed quantization, also reduce activation memory. Since the PEFT methods will only take up a small portion of the total number of parameters, PEFT defaults to use a higher precision than the base model. This can also have the effect that adapters can mitigate some of the quality loss incurred by quantization methods. Read the [PEFT quantization guide](quantization).
 
 ## Compilation
 
