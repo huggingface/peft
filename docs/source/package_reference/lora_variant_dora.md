@@ -16,6 +16,9 @@ rendered properly in your Markdown viewer.
 
 # Weight-Decomposed Low-Rank Adaptation (DoRA)
 
+> [!NOTE]
+> This is a variant of LoRA and therefore everything that is possible with LoRA is valid for this method except otherwise stated on this page.
+
 This technique decomposes the updates of the weights into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, especially at low ranks. For more information on DoRA, see  https://huggingface.co/papers/2402.09353.
 
 ```py

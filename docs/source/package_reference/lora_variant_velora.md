@@ -16,6 +16,9 @@ rendered properly in your Markdown viewer.
 
 ### VeLoRA
 
+> [!NOTE]
+> This is a variant of LoRA and therefore everything that is possible with LoRA is valid for this method except otherwise stated on this page.
+
 [VeLoRA](https://huggingface.co/papers/2405.17991) is a LoRA variant that reduces training memory by compressing the activations saved for the LoRA in the forward pass and then reconstructing them in the backwards pass to implement the update rules. In PEFT, VeLoRA is configured as a LoRA variant through the `velora_config` argument on [`LoraConfig`].
 
 ```py

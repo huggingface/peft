@@ -45,12 +45,6 @@
     - local: methods/overview
       title: Overview
     - sections:
-      - local: package_reference/layernorm_tuning
-        title: LayerNorm Tuning
-      - local: package_reference/trainable_tokens
-        title: Trainable Tokens
-      title: Layer Tuning
-    - sections:
       - local: package_reference/cartridges
         title: Cartridges
       - local: package_reference/cpt
@@ -65,12 +59,18 @@
         title: Prompt tuning
       title: Soft Prompting
     - sections:
+      - local: package_reference/beft
+        title: BEFT
+      - local: package_reference/layernorm_tuning
+        title: LayerNorm Tuning
+      - local: package_reference/trainable_tokens
+        title: Trainable Tokens
+      title: Layer Tuning
+    - sections:
       - local: package_reference/adalora
         title: AdaLoRA
       - local: package_reference/adamss
         title: AdaMSS
-      - local: package_reference/beft
-        title: BEFT
       - local: package_reference/boft
         title: BOFT
       - local: package_reference/c3a
@@ -96,14 +96,12 @@
       - sections:
         - local: package_reference/lora
           title: LoRA
-        - sections:
-          - local: package_reference/lora_variant_dora
-            title: DoRA
-          - local: package_reference/lora_variant_monteclora
-            title: MonteCLoRA
-          - local: package_reference/lora_variant_velora
-            title: VeLoRA
-          title: Variants
+        - local: package_reference/lora_variant_dora
+          title: Variant: DoRA
+        - local: package_reference/lora_variant_monteclora
+          title: Variant: MonteCLoRA
+        - local: package_reference/lora_variant_velora
+          title: Variant: VeLoRA
         title: LoRA
       - local: package_reference/miss
         title: MiSS

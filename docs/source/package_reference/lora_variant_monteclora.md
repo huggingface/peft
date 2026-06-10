@@ -1,5 +1,8 @@
 # MonteCLoRA (Monte Carlo Low-Rank Adaptation)
 
+> [!NOTE]
+> This is a variant of LoRA and therefore everything that is possible with LoRA is valid for this method except otherwise stated on this page.
+
 MonteCLoRA wraps a standard LoRA adapter with a small variational module that draws Monte Carlo samples of stochastic perturbations on top of the LoRA `A` matrix during training. Concretely, it learns variational parameters (a Wishart-based covariance, a per-sample multivariate-normal noise term, and a Dirichlet weighting over the samples) and adds the resulting averaged perturbation to `lora_A` at every forward pass. A KL-divergence + entropy term is added to the training loss to keep these variational parameters anchored to a sensible prior. At inference time the sampler is disabled and MonteCLoRA behaves exactly like a regular LoRA adapter, so there is **no extra inference cost or extra parameters to merge**. For the full method see https://huggingface.co/papers/2411.04358.
 
 You may want to consider MonteCLoRA when:

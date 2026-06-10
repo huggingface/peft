@@ -35,17 +35,6 @@ models, especially language models, you can follow these steps:
 The [PEFT method comparison suite](https://huggingface.co/spaces/peft-internal-testing/PEFT-method-comparison) aims to give a rough overview of (most) implemented methods on selected benchmarks and models.
 
 
-## Adapter methods
-
-Adapter methods can be seen as ways of adding relatively small, trainable matrices to existing models for fine-tuning. The goal is to introduce few trainable parameters to steer the big model in the direction of the task that needs fine-tuning to save on resources, such as memory or compute.
-
-A popular way to realize adapters is to insert smaller trainable matrices that are a low-rank decomposition of the adapted weight's layout to save on memory. There are several different ways to express the weight matrix as a low-rank decomposition, but [Low-Rank Adaptation (LoRA)](../package_reference/lora) is the most common method. The PEFT library supports several other variations of this formulation - some are direct variants of LoRA and are documented under LoRA, some are different enough to count as their own methods, such as [Low-Rank Hadamard Product (LoHa)](../package_reference/loha), [Low-Rank Kronecker Product (LoKr)](../package_reference/lokr), and [Adaptive Low-Rank Adaptation (AdaLoRA)](../package_reference/adalora). If you're interested in applying these methods to other tasks and use cases like semantic segmentation, token classification, take a look at our [notebook collection](https://huggingface.co/collections/PEFT/notebooks-6573b28b33e5a4bf5b157fc1)!
-
-> [!TIP]
-> LoRA is one of the most popular PEFT methods and a good starting point if you're just getting started with PEFT. It was originally developed for large language models but it is a tremendously popular training method for diffusion models because of its efficiency and effectiveness.
-
-Low-rank adapters are only one possible adapter formulation, PEFT implements many other types of adapters as well. For example, Orthogonal Fine-Tuning methods ([OFT](../package_reference/oft), [BOFT](../package_reference/boft), ...) use orthogonal decompositions of the adapter weights to achieve small size. Methods like [MiSS](../package_reference/miss) shard matrices and share these shards to save on memory. [IA3](../package_reference/ia3) introduces learned vectors that rescale the key, value, and feed-forward activations.
-
 ## Prompt-based methods
 
 Prompting primes a frozen pretrained model for a specific downstream task by including a text prompt that describes the task or even demonstrates an example of the task. With prompting, you can avoid fully training a separate model for each downstream task, and use the same frozen pretrained model instead. This is a lot easier because you can use the same model for several different tasks, and it is significantly more efficient to train and store a smaller set of prompt parameters than to train all the model's parameters.
@@ -63,6 +52,15 @@ If you're interested in applying these methods to other tasks and use cases, tak
 
 ## Layer Tuning
 
-Layer Tuning categorizes methods that target specific layers of a model such as [LayerNorm Tuning](../package_reference/layernorm_tuning)
-or targeting specific tokens in the embedding matrix via [TrainableTokens](../package_reference/trainable_tokens).
+Layer Tuning categorizes methods that target one type of layer or one aspect of a layer specifically, for example [LayerNorm Tuning](../package_reference/layernorm_tuning) targets only [`LayerNorm`](https://docs.pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html) layers and [TrainableTokens](../package_reference/trainable_tokens) only targets specific tokens in the embedding matrix. This contrasts prompt-based methods which work with the model input or adapter methods which extend the existing weights and are generally more independent of the layer type, targeting linear or convolutional layers.
 
+## Adapter methods
+
+Adapter methods can be seen as ways of adding relatively small, trainable matrices to existing models for fine-tuning. The goal is to introduce few trainable parameters to steer the big model in the direction of the task that needs fine-tuning to save on resources, such as memory or compute.
+
+A popular way to realize adapters is to insert smaller trainable matrices that are a low-rank decomposition of the adapted weight's layout to save on memory. There are several different ways to express the weight matrix as a low-rank decomposition, but [Low-Rank Adaptation (LoRA)](../package_reference/lora) is the most common method. The PEFT library supports several other variations of this formulation - some are direct variants of LoRA and are documented under LoRA, some are different enough to count as their own methods, such as [Low-Rank Hadamard Product (LoHa)](../package_reference/loha), [Low-Rank Kronecker Product (LoKr)](../package_reference/lokr), and [Adaptive Low-Rank Adaptation (AdaLoRA)](../package_reference/adalora). If you're interested in applying these methods to other tasks and use cases like semantic segmentation, token classification, take a look at our [notebook collection](https://huggingface.co/collections/PEFT/notebooks-6573b28b33e5a4bf5b157fc1)!
+
+> [!TIP]
+> LoRA is one of the most popular PEFT methods and a good starting point if you're just getting started with PEFT. It was originally developed for large language models but it is a tremendously popular training method for diffusion models because of its efficiency and effectiveness.
+
+Low-rank adapters are only one possible adapter formulation, PEFT implements many other types of adapters as well. For example, Orthogonal Fine-Tuning methods ([OFT](../package_reference/oft), [BOFT](../package_reference/boft), ...) use orthogonal decompositions of the adapter weights to achieve small size. Methods like [MiSS](../package_reference/miss) shard matrices and share these shards to save on memory. [IA3](../package_reference/ia3) introduces learned vectors that rescale the key, value, and feed-forward activations.
