@@ -193,7 +193,7 @@ model = AutoPeftModel.from_pretrained("smangrul/openai-whisper-large-v2-LORA-col
 
 ## Multiple adapters
 
-PEFT supports installing multiple adapters (of the same kind, in this document this would be LoRA) on top of a base model. When you call `get_peft_model` there is only one adapter named `"default"` but you can add as many additional adapters by calling `peft_model.add_adapter(adapter_name=...)`.
+PEFT supports installing multiple adapters (of the same kind, in this document this would be LoRA) on top of a base model. When you call `get_peft_model` there is only one adapter named `"default"` but you can add as many additional adapters as you want by calling `peft_model.add_adapter(adapter_name=...)`.
 
 <div class="flex justify-center">
   <div class="flex flex-col basis-2/4">
