@@ -19,21 +19,20 @@ rendered properly in your Markdown viewer.
 
 PEFT methods train as few parameters as possible while aiming for performance comparable to full fine-tuning. Fewer trainable parameters are less expressive, so the same performance isn't guaranteed. In exchange you use less memory, often less compute, and gain features like fast hot-swapping between expert adapters and less forgetting of prior knowledge.
 
-Giving general advice for training large models is hard but for generative
-models, especially language models, you can follow these steps:
+Giving general advice for training large models is hard but for generative models, especially language models, you can follow these steps:
 
-1. use prompting (e.g. few-shot examples in the prompt) to see if the model is
-   already capable of the task. If the model solves your problem, great! You can
-   now use [Prompt-based methods](#prompt-based-methods) to learn the prompt and
-   save precious tokens.
-2. If prompt-based methods are not sufficient you can use [layer tuning](#layer-tuning)
-   and [adapter methods](#adapter-methods). These methods are generally
-   more expressive than prompt-based methods and get closer to full-finetuning.
-3. Make sure to measure retention of already learnt knowledge since each
-   fine-tuning step is potentially unlearning past knowledge.
+1. use prompting (e.g. few-shot examples in the prompt) to see if the model is already capable of the task. If the model solves your problem, great! You can now use [Prompt-based methods](#prompt-based-methods) to learn the prompt and save precious tokens.
+2. If prompt-based methods are not sufficient you can use [layer tuning](#layer-tuning) and [adapter methods](#adapter-methods). These methods are generally more expressive than prompt-based methods and get closer to full-finetuning.
+3. Make sure to measure retention of already learnt knowledge since each fine-tuning step is potentially unlearning past knowledge.
 
 The [PEFT method comparison suite](https://huggingface.co/spaces/peft-internal-testing/PEFT-method-comparison) aims to give a rough overview of (most) implemented methods on selected benchmarks and models.
 
+> [!NOTE]
+> Not all PEFT methods are created equal and there are differences between capabilities:
+> * Quantization: not all methods support quantized base models
+> * Features: not all features are supported for all methods (e.g., multiple adapters, mixed adapter inference, merging/unmerging)
+> * Layer types: linear layers are generally supported, but not all adapter methods support embedding (important for extending vocabulary) or convolutional layers (important for some image models)
+> * Runtime: PEFT methods generally add runtime overhead but some of that can be mitigated (e.g., by [merging the adapter weights](../developer_guides/checkpoint#merge-the-weights))
 
 ## Prompt-based methods
 

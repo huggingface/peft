@@ -66,13 +66,10 @@ Now wrap the base model and `peft_config` with the [`get_peft_model`] function t
 <div class="flex justify-center">
   <div class="flex flex-col basis-2/4">
     <p>
-    Wrapping means that PEFT replaces the targeted layers (here: all <code>q_proj</code> layers) with the adapter-specific layer for the target layer's type.
-    Since we're dealing with linear layers, it will be, in this case, a <code>lora.Linear</code> layer. <b>Note</b> that these changes are done in-place to
-    save memory, so your base model is now modified.
+    Wrapping means that PEFT replaces the targeted layers (here: all <code>q_proj</code> layers) with the adapter-specific layer for the target layer's type.  Since we're dealing with linear layers, it will be, in this case, a <code>lora.Linear</code> layer. <b>Note</b> that these changes are done in-place to save memory, so your base model is now modified.
     </p>
     <p>
-    Note that we've only specified <code>q_proj</code> but in actuality we are targeting all <code>model.layers[:].self_attn.q_proj</code> layers. This is
-    because PEFT searches for matching suffixes by default. Pass a string with a regular expression if you want to target more complex layer patterns.
+    Note that we've only specified <code>q_proj</code> but in actuality we are targeting all <code>model.layers[:].self_attn.q_proj</code> layers. This is because PEFT searches for matching suffixes by default. Pass a string with a regular expression if you want to target more complex layer patterns.
     </p>
   </div>
   <div class="flex flex-col basis-2/4 pl-10 pr-10"><img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/adapter_attention_targeting.png" width="600px"></div>
@@ -82,9 +79,7 @@ Now wrap the base model and `peft_config` with the [`get_peft_model`] function t
   <div class="flex flex-col basis-2/4 pr-10"><img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/adapter_layer_wrapping.png" width="1000px"></div>
   <div class="flex flex-col basis-2/4">
     <p>
-    The base model's layer will be wrapped, retained and not trained while new, trainable weights are added and are combined.
-    How these new weights are structured and combined with the weights of the base model is a good portion of what sets
-    the different PEFT methods apart.
+    The base model's layer will be wrapped, retained and not trained while new, trainable weights are added and are combined.  How these new weights are structured and combined with the weights of the base model is a good portion of what sets the different PEFT methods apart.
     </p>
   </div>
 </div>
@@ -198,9 +193,7 @@ PEFT supports installing multiple adapters (of the same kind, in this document t
 <div class="flex justify-center">
   <div class="flex flex-col basis-2/4">
     <p>
-    This works because the wrapped layer actually has a unique set of trainable weights for each adapter name. Not every adapter is active and trainable by default.
-    You have to explicitly enable adapters by name before they are active. This allows you to quickly swap between adapters where task-specific knowledge is needed
-    or serve different use-cases on top of one model.
+    This works because the wrapped layer actually has a unique set of trainable weights for each adapter name. Not every adapter is active and trainable by default.  You have to explicitly enable adapters by name before they are active. This allows you to quickly swap between adapters where task-specific knowledge is needed or serve different use-cases on top of one model.
     </p>
   </div>
   <div class="flex flex-col basis-2/4 pl-10 pr-10"><img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/adapter_layer_wrapping_multi_adapter.png" width="1000px"></div>

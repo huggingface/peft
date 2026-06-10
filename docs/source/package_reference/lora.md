@@ -111,10 +111,7 @@ For detailed instruction on using PiSSA, please follow [these instructions](http
 </hfoption>
 
 <hfoption id="CorDA">
-[CorDA](https://huggingface.co/papers/2406.05223) builds task-aware LoRA adapters from weight decomposition oriented by the context of downstream task to learn (instruction-previewed mode, IPM) or world knowledge to maintain (knowledge-preserved mode, KPM).
-The KPM not only achieves better performance than LoRA on fine-tuning tasks, but also mitigates the catastrophic forgetting of pre-trained world knowledge.
-When preserving pre-trained knowledge is not a concern,
-the IPM is favored because it can further accelerate convergence and enhance the fine-tuning performance.
+[CorDA](https://huggingface.co/papers/2406.05223) builds task-aware LoRA adapters from weight decomposition oriented by the context of downstream task to learn (instruction-previewed mode, IPM) or world knowledge to maintain (knowledge-preserved mode, KPM).  The KPM not only achieves better performance than LoRA on fine-tuning tasks, but also mitigates the catastrophic forgetting of pre-trained world knowledge.  When preserving pre-trained knowledge is not a concern, the IPM is favored because it can further accelerate convergence and enhance the fine-tuning performance.
 
 You need to configure the initialization method to "corda", and specify the mode of IPM or KPM and the dataset to collect covariance matrices.
 
@@ -237,8 +234,7 @@ preprocess_loraga(model, lora_config, train_step)
 
 ## Training
 
-This section shows how to handle more complex training scenarios instead of only applying a low-rank adapter
-to the model and feed data.
+This section shows how to handle more complex training scenarios instead of only applying a low-rank adapter to the model and feed data.
 
 ### QLoRA-style training
 
@@ -358,9 +354,7 @@ config = LoraConfig(
 )
 ```
 
-This keeps the total LoRA parameter budget similar to dense layers (see
-[LoRA Without Regret](https://thinkingmachines.ai/blog/lora/) by Schulman et. al.).
-Non-expert modules use the default rank `r`.
+This keeps the total LoRA parameter budget similar to dense layers (see [LoRA Without Regret](https://thinkingmachines.ai/blog/lora/) by Schulman et. al.).  Non-expert modules use the default rank `r`.
 
 Accelerated inference with the fine-tuned model is possible with, for example, [vLLM](https://vllm.ai/) which supports fused MoE expert layers since v0.11.2.
 
@@ -638,13 +632,9 @@ print(outputs)
 
 ### Recovering base model performance via intruder dimension reduction
 
-The paper [LoRA vs Full Fine-tuning: An Illusion of Equivalence](https://huggingface.co/papers/2410.21228) argues
-that LoRA training introduces extra dimensions into the weights that have very little in common with the already
-learnt weights and lead to forgetting of already learned information. PEFT implements the suggested mitigation
-in [`peft.tuners.lora.intruders.reduce_intruder_dimension`].
+The paper [LoRA vs Full Fine-tuning: An Illusion of Equivalence](https://huggingface.co/papers/2410.21228) argues that LoRA training introduces extra dimensions into the weights that have very little in common with the already learnt weights and lead to forgetting of already learned information. PEFT implements the suggested mitigation in [`peft.tuners.lora.intruders.reduce_intruder_dimension`].
 
-The mitigation will take a PEFT model with a loaded LoRA and create a new, modified adapter that is loaded alongside
-the existing adapter and now the active adapter.
+The mitigation will take a PEFT model with a loaded LoRA and create a new, modified adapter that is loaded alongside the existing adapter and now the active adapter.
 
 Example usage:
 
@@ -661,15 +651,9 @@ reduce_intruder_dimension(
 peft_model.generate(...)
 ```
 
-There are a few hyper-parameters that can be used for tuning the effectiveness of the mitigation but, as evidenced
-in Figure 8 of the paper, it will always be a trade-off between task accuracy learned by the adapter and forgetting
-of the base model's knowledge. The mitigation will remove information from the adapter to reduce the impact on
-forgetting previous knowledge but this also means that some information about the task learned by the adapter is
-lost as well.
+There are a few hyper-parameters that can be used for tuning the effectiveness of the mitigation but, as evidenced in Figure 8 of the paper, it will always be a trade-off between task accuracy learned by the adapter and forgetting of the base model's knowledge. The mitigation will remove information from the adapter to reduce the impact on forgetting previous knowledge but this also means that some information about the task learned by the adapter is lost as well.
 
-While the defaults are set to deliver a good trade-off between the two factors it is not guaranteed that the defaults
-will hold for your adapter, your model and your data, therefore it is wise to have a benchmark ready to measure
-the effect.
+While the defaults are set to deliver a good trade-off between the two factors it is not guaranteed that the defaults will hold for your adapter, your model and your data, therefore it is wise to have a benchmark ready to measure the effect.
 
 ## Load adapters
 
