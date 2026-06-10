@@ -67,7 +67,7 @@ model.print_trainable_parameters()
 
 
 <iframe
-    src="https://peft-internal-testing-peft-method-comparison-embed.hf.space"
+    src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=LORA"
 	frameborder="0"
 	width="850"
 	height="1000"

@@ -97,11 +97,11 @@
         - local: package_reference/lora
           title: LoRA
         - local: package_reference/lora_variant_dora
-          title: Variant: DoRA
+          title: "Variant: DoRA"
         - local: package_reference/lora_variant_monteclora
-          title: Variant: MonteCLoRA
+          title: "Variant: MonteCLoRA"
         - local: package_reference/lora_variant_velora
-          title: Variant: VeLoRA
+          title: "Variant: VeLoRA"
         title: LoRA
       - local: package_reference/miss
         title: MiSS
