@@ -96,6 +96,8 @@
       - sections:
         - local: package_reference/lora
           title: LoRA
+        - local: package_reference/lora_variant_bdlora
+          title: "Variant: BD-LoRA"
         - local: package_reference/lora_variant_dora
           title: "Variant: DoRA"
         - local: package_reference/lora_variant_monteclora
