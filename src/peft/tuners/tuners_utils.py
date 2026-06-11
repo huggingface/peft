@@ -1875,11 +1875,13 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
             # TODO: It's still unclear how empty layers_pattern (None, [], or "") should behave
             # For now, empty layers_pattern means any layer pattern is ok
             if layers_pattern is None or len(layers_pattern) == 0:
-                layer_index = re.match(r".*\.[^.]*\.(\d+)\.", key)
+                # Lazy .*? matches the first numbered segment (the layer index), not the last one; a greedy .* would
+                # wrongly pick up nested indices such as the expert index in MoE models ("...layers.1.experts.0...").
+                layer_index = re.match(r".*?\.[^.]*\.(\d+)\.", key)
             else:
                 layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
                 for pattern in layers_pattern:
-                    layer_index = re.match(rf".*\.{pattern}\.(\d+)\.", key)
+                    layer_index = re.match(rf".*?\.{pattern}\.(\d+)\.", key)
                     if layer_index is not None:
                         break
 
