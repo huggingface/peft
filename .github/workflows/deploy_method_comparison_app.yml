@@ -45,6 +45,7 @@ jobs:
       - name: Deploy embeddable method_comparison app to HF Spaces (for docs)
         run: |
           cd method_comparison
+          rm -rf .git
           git init
           # requirements.txt is already present from the previous step
           mv app_embed.py app.py
