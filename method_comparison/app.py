@@ -269,6 +269,18 @@ def render_image_gallery(image_view, selected):
     )
 
 
+def load_gallery_deferred(task_name, image_view, selected):
+    """Populate the image gallery in a chained event.
+
+    Fetching the images can take a while, so the event handlers that update multiple components only clear the
+    gallery and the images are loaded here in a follow-up event. Otherwise, the other components (e.g. the results
+    table) would not be updated until the images are loaded.
+    """
+    if task_name != IMAGE_GEN_TASK:
+        return gr.update()
+    return render_image_gallery(image_view, selected)
+
+
 def build_app(df):
     task_names = sorted(df["task_name"].unique())
     initial_task = "MetaMathQA" if "MetaMathQA" in task_names else task_names[0]
@@ -341,10 +353,11 @@ def build_app(df):
                 value=DATASET_VIEW,
                 label="Image source",
             )
-            initial_gallery = get_dataset_images(DEFAULT_TRAIN_CONFIG_IMAGE_GEN) if initial_task == IMAGE_GEN_TASK else None
+            # The gallery starts empty and is populated by load_gallery_deferred on page load so that fetching the
+            # images doesn't block the app startup.
             sample_gallery = gr.Gallery(
                 label="Images",
-                value=initial_gallery,
+                value=None,
                 columns=3,
                 object_fit="contain",
             )
@@ -391,7 +404,6 @@ def build_app(df):
             explanation = _get_metric_explanation(task_name)
 
             is_image_gen = task_name == IMAGE_GEN_TASK
-            gallery = render_image_gallery(DATASET_VIEW, None) if is_image_gen else None
             return (
                 gr.update(choices=new_models, value=new_models[0] if new_models else None),
                 _get_task_info(task_name),
@@ -401,7 +413,7 @@ def build_app(df):
                 explanation,
                 gr.update(visible=is_image_gen),
                 gr.update(value=DATASET_VIEW),
-                gallery,
+                gr.update(value=None, label="Images"),
                 None,
             )
 
@@ -420,6 +432,10 @@ def build_app(df):
                 sample_gallery,
                 selected_state,
             ],
+        ).then(
+            fn=load_gallery_deferred,
+            inputs=[task_dropdown, image_view_radio, selected_state],
+            outputs=sample_gallery,
         )
 
         def update_on_model(task_name, model_id, current_filter):
@@ -430,13 +446,16 @@ def build_app(df):
                     filtered = filtered[mask]
                 except Exception as exc:
                     logger.debug("Ignoring invalid filter query: %s", exc)
-            gallery = render_image_gallery(DATASET_VIEW, None) if task_name == IMAGE_GEN_TASK else None
-            return format_df(filtered), gr.update(value=DATASET_VIEW), gallery, None
+            return format_df(filtered), gr.update(value=DATASET_VIEW), gr.update(value=None, label="Images"), None
 
         model_dropdown.change(
             fn=update_on_model,
             inputs=[task_dropdown, model_dropdown, filter_state],
             outputs=[data_table, image_view_radio, sample_gallery, selected_state],
+        ).then(
+            fn=load_gallery_deferred,
+            inputs=[task_dropdown, image_view_radio, selected_state],
+            outputs=sample_gallery,
         )
 
         def show_sample_images(task_name, model_id, evt: gr.SelectData):
@@ -548,6 +567,11 @@ def build_app(df):
             fn=update_pareto_plot_and_summary,
             inputs=[task_dropdown, model_dropdown, metric_x_dropdown, metric_y_dropdown, filter_state],
             outputs=[pareto_plot, summary_box],
+        )
+        demo.load(
+            fn=load_gallery_deferred,
+            inputs=[task_dropdown, image_view_radio, selected_state],
+            outputs=sample_gallery,
         )
 
     return demo
