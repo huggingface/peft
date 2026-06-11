@@ -247,10 +247,10 @@ def get_dataset_images(config: dict[str, Any]) -> list[tuple[Image.Image, str]]:
 
 
 def render_image_gallery(image_view, selected):
-    """Return the gallery contents for the selected experiment and image source view.
+    """Return a gallery update with the contents for the selected experiment and image source view.
 
     The dataset view falls back to the default dataset when no experiment is selected, so its images can be shown before
-    the user clicks a row.
+    the user clicks a row. When generated samples are shown, the gallery label names the selected experiment.
     """
     if image_view == DATASET_VIEW:
         if selected:
@@ -260,10 +260,13 @@ def render_image_gallery(image_view, selected):
                 config = {}
         else:
             config = DEFAULT_TRAIN_CONFIG_IMAGE_GEN
-        return get_dataset_images(config)
+        return gr.update(value=get_dataset_images(config), label="Images")
     if not selected:
-        return None
-    return get_sample_images(selected["experiment_name"])
+        return gr.update(value=None, label="Images")
+    return gr.update(
+        value=get_sample_images(selected["experiment_name"]),
+        label=f"Generated samples for {selected['experiment_name']}",
+    )
 
 
 def build_app(df):
@@ -338,7 +341,7 @@ def build_app(df):
                 value=DATASET_VIEW,
                 label="Image source",
             )
-            initial_gallery = render_image_gallery(DATASET_VIEW, None) if initial_task == IMAGE_GEN_TASK else None
+            initial_gallery = get_dataset_images(DEFAULT_TRAIN_CONFIG_IMAGE_GEN) if initial_task == IMAGE_GEN_TASK else None
             sample_gallery = gr.Gallery(
                 label="Images",
                 value=initial_gallery,
@@ -436,27 +439,25 @@ def build_app(df):
             outputs=[data_table, image_view_radio, sample_gallery, selected_state],
         )
 
-        def show_sample_images(task_name, model_id, current_filter, evt: gr.SelectData):
+        def show_sample_images(task_name, model_id, evt: gr.SelectData):
             if task_name != IMAGE_GEN_TASK or evt.index is None:
-                return None, gr.update(), None
-            filtered = filter_data(task_name, model_id, df)
-            if current_filter.strip():
-                try:
-                    mask = parse_and_filter(filtered, current_filter)
-                    filtered = filtered[mask]
-                except Exception as exc:
-                    logger.debug("Ignoring invalid filter query: %s", exc)
-            row_idx = evt.index[0]
-            if row_idx is None or row_idx >= len(filtered):
-                return None, gr.update(), None
-            row = filtered.iloc[row_idx]
+                return None, gr.update(), gr.update()
+            # Look up the clicked row by its experiment name (always the first column) instead of by the row index:
+            # sorting the table happens client-side only, so the row index refers to the displayed order, not the order
+            # of the dataframe on the server.
+            experiment_name = evt.row_value[0]
+            rows = filter_data(task_name, model_id, df)
+            rows = rows[rows["experiment_name"] == experiment_name]
+            if rows.empty:
+                return None, gr.update(), gr.update()
+            row = rows.iloc[0]
             selected = {"experiment_name": row["experiment_name"], "train_config": row["train_config"]}
             # Clicking a row switches the view to the experiment's generated samples.
             return selected, gr.update(value=GENERATED_VIEW), render_image_gallery(GENERATED_VIEW, selected)
 
         data_table.select(
             fn=show_sample_images,
-            inputs=[task_dropdown, model_dropdown, filter_state],
+            inputs=[task_dropdown, model_dropdown],
             outputs=[selected_state, image_view_radio, sample_gallery],
         )
 
