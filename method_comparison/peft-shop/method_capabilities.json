@@ -1,0 +1,2897 @@
+{
+  "schema_version": 1,
+  "peft_version": "0.19.2.dev0",
+  "methods": {
+    "ADALORA": {
+      "config_class": "AdaLoraConfig",
+      "model_class": "AdaLoraModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": true,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": true,
+            "nn.Parameter": true
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [
+            "bnb_4bit",
+            "bnb_8bit",
+            "gptq"
+          ],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": false,
+          "source": "probe",
+          "note": "ValueError: AdaLoraModel supports only 1 trainable adapter. When using multiple adapters, set inference_mode to True for all adapters except the one you want to train."
+        },
+        "mixed_adapter_batches": {
+          "value": true,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": true,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": false,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection",
+          "note": "explicitly disabled for this method"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": true
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [
+            "alpha_pattern",
+            "layer_replication",
+            "rank_pattern",
+            "use_dora",
+            "use_rslora"
+          ],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://openreview.net/forum?id=lq62uWRJjiY",
+          "source": "file_check",
+          "note": "from the model class docstring"
+        }
+      }
+    },
+    "ADAMSS": {
+      "config_class": "AdamssConfig",
+      "model_class": "AdamssModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": false,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": "unknown",
+          "source": "error",
+          "note": "AttributeError: 'tuple' object has no attribute '__module__'"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": "unknown",
+          "source": "error",
+          "note": "AttributeError: 'tuple' object has no attribute '__module__'"
+        },
+        "merging": {
+          "value": "unknown",
+          "source": "error",
+          "note": "AttributeError: 'tuple' object has no attribute '__module__'"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": false,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://openreview.net/forum?id=8ZdWmpYxT0",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "ADAPTION_PROMPT": {
+      "config_class": "AdaptionPromptConfig",
+      "model_class": "AdaptionPromptModel",
+      "features": {
+        "category": {
+          "value": "other",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "method does not wrap target layers"
+        },
+        "quantization_backends": {
+          "value": "unknown",
+          "source": "introspection",
+          "note": "no known quantization signal"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection",
+          "note": "only supported by layer-wrapping adapter methods"
+        },
+        "merging": {
+          "value": false,
+          "source": "introspection",
+          "note": "method does not implement merging"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "method does not wrap target layers"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": false,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2303.16199.",
+          "source": "file_check",
+          "note": "from the model class docstring"
+        }
+      }
+    },
+    "BEFT": {
+      "config_class": "BeftConfig",
+      "model_class": "BeftModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": false,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": true,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": false,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://arxiv.org/abs/2509.15974",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "BOFT": {
+      "config_class": "BOFTConfig",
+      "model_class": "BOFTModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": true,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": false,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [
+            "aqlm",
+            "awq",
+            "bnb_4bit",
+            "bnb_8bit",
+            "eetq",
+            "gptq",
+            "hqq",
+            "inc",
+            "torchao"
+          ],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": false,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": null,
+          "source": "file_check",
+          "note": "no unambiguous paper link in the docs intro or the config/model class docstrings"
+        }
+      }
+    },
+    "C3A": {
+      "config_class": "C3AConfig",
+      "model_class": "C3AModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": false,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": true,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2407.19342",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "CARTRIDGE": {
+      "config_class": "CartridgeConfig",
+      "model_class": "CartridgeEncoder",
+      "features": {
+        "category": {
+          "value": "prompt_learning",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "method does not wrap target layers"
+        },
+        "quantization_backends": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "prompt learning does not wrap target layers and generally works regardless of quantization"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection",
+          "note": "only supported by layer-wrapping adapter methods"
+        },
+        "merging": {
+          "value": false,
+          "source": "introspection",
+          "note": "virtual tokens cannot be merged into base weights"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "method does not wrap target layers"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": null,
+          "source": "file_check",
+          "note": "no unambiguous paper link in the docs intro or the config/model class docstrings"
+        }
+      }
+    },
+    "CPT": {
+      "config_class": "CPTConfig",
+      "model_class": "CPTEmbedding",
+      "features": {
+        "category": {
+          "value": "prompt_learning",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "method does not wrap target layers"
+        },
+        "quantization_backends": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "prompt learning does not wrap target layers and generally works regardless of quantization"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection",
+          "note": "only supported by layer-wrapping adapter methods"
+        },
+        "merging": {
+          "value": false,
+          "source": "introspection",
+          "note": "virtual tokens cannot be merged into base weights"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "method does not wrap target layers"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2410.17222",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "DELORA": {
+      "config_class": "DeloraConfig",
+      "model_class": "DeloraModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": false,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": true,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [
+            "rank_pattern"
+          ],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2503.18225",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "FOURIERFT": {
+      "config_class": "FourierFTConfig",
+      "model_class": "FourierFTModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": true,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": true,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2405.03003",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "GRALORA": {
+      "config_class": "GraloraConfig",
+      "model_class": "GraloraModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": true,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": true,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2505.20355",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "HIRA": {
+      "config_class": "HiraConfig",
+      "model_class": "HiraModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": true,
+            "Conv1d": true,
+            "Conv2d": true,
+            "Conv3d": true,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": true,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [
+            "bnb_4bit",
+            "bnb_8bit"
+          ],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": true,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": false,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [
+            "rank_pattern"
+          ],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": null,
+          "source": "file_check",
+          "note": "no unambiguous paper link in the docs intro or the config/model class docstrings"
+        }
+      }
+    },
+    "HRA": {
+      "config_class": "HRAConfig",
+      "model_class": "HRAModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": true,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": false,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": false,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2405.17484",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "IA3": {
+      "config_class": "IA3Config",
+      "model_class": "IA3Model",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": "unknown",
+          "source": "probe",
+          "note": "no layer type could be wrapped, probe presumably mis-configured; Linear: ValueError: Please specify `feedforward_modules` in `peft_config`"
+        },
+        "quantization_backends": {
+          "value": [
+            "bnb_4bit",
+            "bnb_8bit"
+          ],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": "unknown",
+          "source": "probe",
+          "note": "could not build probe model: ValueError: Please specify `feedforward_modules` in `peft_config`"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "introspection",
+          "note": "merge() is implemented, but probing failed: could not build probe model: ValueError: Please specify `feedforward_modules` in `peft_config`"
+        },
+        "peft_mixed_model": {
+          "value": true,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": false,
+          "source": "introspection",
+          "note": "based on presence of a supports_lora_conversion override; probing failed: could not build probe model: ValueError: Please specify `feedforward_modules` in `peft_config`"
+        },
+        "add_weighted_adapter": {
+          "value": true,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2205.05638",
+          "source": "file_check",
+          "note": "from the model class docstring"
+        }
+      }
+    },
+    "LILY": {
+      "config_class": "LilyConfig",
+      "model_class": "LilyModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": false,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": false,
+          "source": "probe",
+          "note": "NotImplementedError: This method is not supported for Lily."
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": false,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2407.09946",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "LN_TUNING": {
+      "config_class": "LNTuningConfig",
+      "model_class": "LNTuningModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": true,
+            "Conv1d": true,
+            "Conv2d": true,
+            "Conv3d": true,
+            "LayerNorm": true,
+            "MultiheadAttention": true,
+            "Conv1D (transformers)": true,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": false,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2312.11420",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "LOHA": {
+      "config_class": "LoHaConfig",
+      "model_class": "LoHaModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": true,
+            "Conv2d": true,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": false,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": true,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": true,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [
+            "alpha_pattern",
+            "rank_pattern"
+          ],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2108.06098",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "LOKR": {
+      "config_class": "LoKrConfig",
+      "model_class": "LoKrModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": true,
+            "Conv2d": true,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": false,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": true,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": true,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [
+            "alpha_pattern",
+            "rank_pattern"
+          ],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": null,
+          "source": "file_check",
+          "note": "no unambiguous paper link in the docs intro or the config/model class docstrings"
+        }
+      }
+    },
+    "LORA": {
+      "config_class": "LoraConfig",
+      "model_class": "LoraModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": true,
+            "Conv1d": true,
+            "Conv2d": true,
+            "Conv3d": true,
+            "LayerNorm": false,
+            "MultiheadAttention": true,
+            "Conv1D (transformers)": true,
+            "nn.Parameter": true
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [
+            "aqlm",
+            "awq",
+            "bnb_4bit",
+            "bnb_8bit",
+            "eetq",
+            "gptq",
+            "hqq",
+            "inc",
+            "torchao"
+          ],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": true,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": true,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": true,
+          "source": "introspection",
+          "note": "already a LoRA adapter"
+        },
+        "add_weighted_adapter": {
+          "value": true,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": true,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": true
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [
+            "alpha_pattern",
+            "layer_replication",
+            "rank_pattern",
+            "use_dora",
+            "use_rslora"
+          ],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2309.15223",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "MISS": {
+      "config_class": "MissConfig",
+      "model_class": "MissModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": false,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [
+            "aqlm",
+            "awq",
+            "bnb_4bit",
+            "bnb_8bit",
+            "eetq",
+            "gptq",
+            "hqq",
+            "inc",
+            "torchao"
+          ],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": true,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://arxiv.org/abs/2409.15371",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "MULTITASK_PROMPT_TUNING": {
+      "config_class": "MultitaskPromptTuningConfig",
+      "model_class": "MultitaskPromptEmbedding",
+      "features": {
+        "category": {
+          "value": "prompt_learning",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "method does not wrap target layers"
+        },
+        "quantization_backends": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "prompt learning does not wrap target layers and generally works regardless of quantization"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection",
+          "note": "only supported by layer-wrapping adapter methods"
+        },
+        "merging": {
+          "value": false,
+          "source": "introspection",
+          "note": "virtual tokens cannot be merged into base weights"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "method does not wrap target layers"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2303.02861",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "OFT": {
+      "config_class": "OFTConfig",
+      "model_class": "OFTModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": true,
+            "Conv1d": false,
+            "Conv2d": true,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": false,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [
+            "aqlm",
+            "awq",
+            "bnb_4bit",
+            "bnb_8bit",
+            "eetq",
+            "gptq",
+            "hqq",
+            "inc"
+          ],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": false,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2306.07280",
+          "source": "file_check",
+          "note": "from the model class docstring"
+        }
+      }
+    },
+    "OSF": {
+      "config_class": "OSFConfig",
+      "model_class": "OSFModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": false,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": false,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [
+            "rank_pattern"
+          ],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2504.07097",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "PEANUT": {
+      "config_class": "PeanutConfig",
+      "model_class": "PeanutModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": false,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": false,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://arxiv.org/abs/2410.01870",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "POLY": {
+      "config_class": "PolyConfig",
+      "model_class": "PolyModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": false,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": false,
+          "source": "introspection",
+          "note": "no tuner layer class implements merge()"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": false,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": null,
+          "source": "file_check",
+          "note": "no unambiguous paper link in the docs intro or the config/model class docstrings"
+        }
+      }
+    },
+    "PREFIX_TUNING": {
+      "config_class": "PrefixTuningConfig",
+      "model_class": "PrefixEncoder",
+      "features": {
+        "category": {
+          "value": "prompt_learning",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "method does not wrap target layers"
+        },
+        "quantization_backends": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "prompt learning does not wrap target layers and generally works regardless of quantization"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection",
+          "note": "only supported by layer-wrapping adapter methods"
+        },
+        "merging": {
+          "value": false,
+          "source": "introspection",
+          "note": "virtual tokens cannot be merged into base weights"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "method does not wrap target layers"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": null,
+          "source": "file_check",
+          "note": "no unambiguous paper link in the docs intro or the config/model class docstrings"
+        }
+      }
+    },
+    "PROMPT_TUNING": {
+      "config_class": "PromptTuningConfig",
+      "model_class": "PromptEmbedding",
+      "features": {
+        "category": {
+          "value": "prompt_learning",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "method does not wrap target layers"
+        },
+        "quantization_backends": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "prompt learning does not wrap target layers and generally works regardless of quantization"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection",
+          "note": "only supported by layer-wrapping adapter methods"
+        },
+        "merging": {
+          "value": false,
+          "source": "introspection",
+          "note": "virtual tokens cannot be merged into base weights"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "method does not wrap target layers"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": null,
+          "source": "file_check",
+          "note": "no unambiguous paper link in the docs intro or the config/model class docstrings"
+        }
+      }
+    },
+    "PSOFT": {
+      "config_class": "PsoftConfig",
+      "model_class": "PsoftModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": false,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": true,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://openreview.net/forum?id=FSHrinMArK.",
+          "source": "file_check",
+          "note": "from the config class docstring"
+        }
+      }
+    },
+    "PVERA": {
+      "config_class": "PveraConfig",
+      "model_class": "PveraModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": true,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [
+            "bnb_4bit",
+            "bnb_8bit"
+          ],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": false,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2512.07703",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "P_TUNING": {
+      "config_class": "PromptEncoderConfig",
+      "model_class": "PromptEncoder",
+      "features": {
+        "category": {
+          "value": "prompt_learning",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "method does not wrap target layers"
+        },
+        "quantization_backends": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "prompt learning does not wrap target layers and generally works regardless of quantization"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection",
+          "note": "only supported by layer-wrapping adapter methods"
+        },
+        "merging": {
+          "value": false,
+          "source": "introspection",
+          "note": "virtual tokens cannot be merged into base weights"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": "not_applicable",
+          "source": "introspection",
+          "note": "method does not wrap target layers"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": null,
+          "source": "file_check",
+          "note": "no unambiguous paper link in the docs intro or the config/model class docstrings"
+        }
+      }
+    },
+    "RANDLORA": {
+      "config_class": "RandLoraConfig",
+      "model_class": "RandLoraModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": true,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [
+            "bnb_4bit",
+            "bnb_8bit"
+          ],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": true,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": null,
+          "source": "file_check",
+          "note": "no unambiguous paper link in the docs intro or the config/model class docstrings"
+        }
+      }
+    },
+    "ROAD": {
+      "config_class": "RoadConfig",
+      "model_class": "RoadModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": false,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [
+            "bnb_4bit",
+            "bnb_8bit"
+          ],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": true,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": true,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": false,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2409.00119",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "SHIRA": {
+      "config_class": "ShiraConfig",
+      "model_class": "ShiraModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": false,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": true,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": false,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2406.13175",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "TINYLORA": {
+      "config_class": "TinyLoraConfig",
+      "model_class": "TinyLoraModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": true,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": true,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": true,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://arxiv.org/abs/2602.04118",
+          "source": "file_check",
+          "note": "from the config class docstring"
+        }
+      }
+    },
+    "TRAINABLE_TOKENS": {
+      "config_class": "TrainableTokensConfig",
+      "model_class": "TrainableTokensModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": true,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": false,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": false,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": false,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": null,
+          "source": "file_check",
+          "note": "no unambiguous paper link in the docs intro or the config/model class docstrings"
+        }
+      }
+    },
+    "VBLORA": {
+      "config_class": "VBLoRAConfig",
+      "model_class": "VBLoRAModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": true,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": true,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2405.15179",
+          "source": "file_check",
+          "note": "from the config class docstring"
+        }
+      }
+    },
+    "VERA": {
+      "config_class": "VeraConfig",
+      "model_class": "VeraModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": true,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [
+            "aqlm",
+            "awq",
+            "bnb_4bit",
+            "bnb_8bit",
+            "eetq",
+            "gptq",
+            "hqq",
+            "inc",
+            "torchao"
+          ],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": true,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2310.11454",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "WAVEFT": {
+      "config_class": "WaveFTConfig",
+      "model_class": "WaveFTModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": {
+            "Linear": true,
+            "Embedding": false,
+            "Conv1d": false,
+            "Conv2d": false,
+            "Conv3d": false,
+            "LayerNorm": false,
+            "MultiheadAttention": false,
+            "Conv1D (transformers)": true,
+            "nn.Parameter": false
+          },
+          "source": "probe",
+          "note": "nn.Parameter support is based on the presence of the target_parameters config option"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": true,
+          "source": "probe"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": true,
+          "source": "probe"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": true,
+          "source": "probe"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": true,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2505.12532",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    },
+    "XLORA": {
+      "config_class": "XLoraConfig",
+      "model_class": "XLoraModel",
+      "features": {
+        "category": {
+          "value": "adapter",
+          "source": "introspection"
+        },
+        "target_layer_types": {
+          "value": "unknown",
+          "source": "probe",
+          "note": "not probed: requires pre-trained LoRA adapter checkpoints to instantiate"
+        },
+        "quantization_backends": {
+          "value": [],
+          "source": "file_check"
+        },
+        "multiple_adapters": {
+          "value": "unknown",
+          "source": "probe",
+          "note": "not probed: requires pre-trained LoRA adapter checkpoints to instantiate"
+        },
+        "mixed_adapter_batches": {
+          "value": false,
+          "source": "introspection"
+        },
+        "merging": {
+          "value": false,
+          "source": "introspection",
+          "note": "no tuner layer class implements merge()"
+        },
+        "peft_mixed_model": {
+          "value": false,
+          "source": "introspection"
+        },
+        "lora_conversion": {
+          "value": false,
+          "source": "introspection",
+          "note": "based on presence of a supports_lora_conversion override; probing failed: not probed: requires pre-trained LoRA adapter checkpoints to instantiate"
+        },
+        "add_weighted_adapter": {
+          "value": false,
+          "source": "introspection"
+        },
+        "hotswapping": {
+          "value": false,
+          "source": "introspection"
+        },
+        "auxiliary_modules": {
+          "value": {
+            "modules_to_save": false,
+            "trainable_token_indices": false
+          },
+          "source": "introspection"
+        },
+        "extras": {
+          "value": [],
+          "source": "introspection"
+        },
+        "paper_url": {
+          "value": "https://huggingface.co/papers/2402.07148",
+          "source": "file_check",
+          "note": "from the docs intro"
+        }
+      }
+    }
+  }
+}
