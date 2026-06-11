@@ -144,10 +144,6 @@ def export_csv(df):
     return tmp_path
 
 
-def format_df(df):
-    return df.style.format(precision=3, thousands=",", decimal=".")
-
-
 IMAGE_GEN_TASK = "image-gen"
 SAMPLE_IMAGE_BUCKET = "peft-internal-testing/image-gen-benchmark"
 SAMPLE_IMAGE_BUCKET_DIR = f"hf://buckets/{SAMPLE_IMAGE_BUCKET}/sample-images/results"
@@ -575,22 +571,6 @@ def build_app(df):
         )
 
     return demo
-
-
-_METRIC_EXPLANATIONS = {
-    "MetaMathQA": (
-        "*forgetting: This is the reduction in CE loss on a sample of Wikipedia data and reflects how much the "
-        "model 'forgot' during training. The lower the number, the better."
-    ),
-    "image-gen": (
-        "*drift: This measures how much the generated images drift from the base model's outputs on unrelated "
-        "prompts, reflecting how much the model 'forgot' during training. The lower the number, the better."
-    ),
-}
-
-
-def _get_metric_explanation(task_name):
-    return _METRIC_EXPLANATIONS.get(task_name, "")
 
 
 _TASK_DESCRIPTIONS = {

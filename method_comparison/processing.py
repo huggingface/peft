@@ -290,7 +290,8 @@ def get_model_ids(task_name, df):
 
 def filter_data(task_name, model_id, df):
     filtered = df[(df["task_name"] == task_name) & (df["model_id"] == model_id)]
-    return filtered
+    # only show the columns relevant to the task, with the important ones first
+    return filtered[get_task_columns(task_name)]
 
 
 # Compute the Pareto frontier for two selected metrics.
