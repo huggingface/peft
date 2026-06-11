@@ -3828,13 +3828,11 @@ class TestHotSwapping:
         torch.manual_seed(0)
         return ConvModel().to(self.torch_device)
 
-    # this works with all adapters except prompt learning, but we don't test all
-    # as it is unnecessary and would be slow
     @pytest.mark.parametrize(
         "config",
         [
-            LoraConfig(init_lora_weights=0, target_modules=["lin0"]),
-            LoraConfig(init_lora_weights=0, target_modules=["lin0", "lin1"]),
+            LoraConfig(init_lora_weights=False, target_modules=["lin0"]),
+            LoraConfig(init_lora_weights=False, target_modules=["lin0", "lin1"]),
         ],
     )
     @pytest.mark.parametrize("do_compile", [False, True])
