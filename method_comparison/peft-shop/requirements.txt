@@ -1,1 +1,1 @@
-gradio>=5.0
+gradio>=6.2
