@@ -235,9 +235,7 @@ class Linear(nn.Linear, FrodLayer):
                 if active_adapter not in self.frod_lambda_s_values:
                     continue
 
-                U, V, S_sparse, lambda_l = self._get_frod_tensors(
-                    active_adapter, device=x.device, dtype=target_dtype
-                )
+                U, V, S_sparse, lambda_l = self._get_frod_tensors(active_adapter, device=x.device, dtype=target_dtype)
 
                 dropout = self.frod_dropout[active_adapter]
                 h = dropout(x)
