@@ -391,3 +391,112 @@ class TestTransformersV5:
             # target up_proj and gate_proj
             config = LoraConfig(target_modules=["gate_proj", "up_proj", "down_proj", "score"])
             get_peft_model(model, config)  # does not raise
+
+    @pytest.mark.parametrize(
+        "regex",
+        [
+            # The shape ms-swift's `get_multimodal_target_regex` helper produces (anchored, lookahead on the prefix);
+            # see https://github.com/huggingface/peft/issues/3229 and https://github.com/modelscope/ms-swift/issues/9321.
+            r"^(model(?=\.).*\.(q_proj|k_proj|v_proj|gate_proj|up_proj|down_proj))$",
+            # A plain "ends with one of these projections" pattern.
+            r".*\.(q_proj|k_proj|v_proj|gate_proj|up_proj|down_proj)",
+        ],
+    )
+    def test_qwen3_moe_regex_target_modules_works(self, regex):
+        # Regression test for https://github.com/huggingface/peft/issues/3229. The MoE config conversion did
+        # `set(peft_config.target_modules)`, which for a regex `target_modules` splits the string into its characters
+        # (`{'^', '(', 'q', '_', ...}`) and fails downstream with "Target modules ... not found in the base model".
+        # The fused expert projections (`gate_proj`/`up_proj`) don't exist as submodules on a v5 model, so the targeted
+        # projections are resolved against the model and moved to `target_parameters`; the regex stays for `q/k/v_proj`.
+        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            peft_model = get_peft_model(model, LoraConfig(target_modules=regex))  # does not raise
+
+        config = peft_model.peft_config["default"]
+        # the regex is preserved for the non-fused targets (q/k/v_proj)
+        assert config.target_modules == regex
+        # the fused experts are moved to target_parameters, with the rank/alpha doubled for the 2-way `gate_up_proj`
+        assert {"gate_up_proj", "down_proj"} <= set(config.target_parameters)
+        assert config.rank_pattern == {r".*\.gate_up_proj": config.r * 2}
+        # the experts are actually adapted, not just recorded in the config
+        assert any("experts" in name for name, _ in peft_model.named_modules() if name.endswith("lora_A.default"))
+
+    def test_qwen3_moe_regex_partial_fusion_raises(self):
+        # A regex that targets `up_proj` but not `gate_proj` cannot be converted, because the two are fused into
+        # `gate_up_proj` -- same contract as the list path in `test_qwen3_moe_error_message`.
+        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            msg = re.escape(
+                "Cannot convert PEFT target(s) up_proj without also targeting gate_proj because they are fused into "
+                "gate_up_proj."
+            )
+            with pytest.raises(ValueError, match=msg):
+                get_peft_model(model, LoraConfig(target_modules=r".*\.(up_proj|down_proj)"))
+
+    def test_qwen3_moe_regex_attention_only_no_moe_conversion(self):
+        # A regex that only matches attention projections must not trigger any MoE remap (no fused parameters added).
+        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            peft_model = get_peft_model(model, LoraConfig(target_modules=r".*\.(q_proj|v_proj)"))
+
+        config = peft_model.peft_config["default"]
+        assert not config.target_parameters
+        assert not config.rank_pattern
+
+    def test_qwen3_moe_all_linear_target_modules_works(self):
+        # `"all-linear"` is a special shorthand matched by module *type*, not a regex. The MoE conversion must leave it
+        # untouched so it still resolves via `_maybe_include_all_linear_layers` (previously `set("all-linear")`
+        # corrupted it into a set of characters and injection failed).
+        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            peft_model = get_peft_model(model, LoraConfig(target_modules="all-linear"))  # does not raise
+
+        config = peft_model.peft_config["default"]
+        adapted = {
+            name.rsplit(".lora_A", 1)[0].rsplit(".", 1)[-1]
+            for name, _ in peft_model.named_modules()
+            if name.endswith("lora_A.default")
+        }
+        # resolved to the actual linear modules (attention projections)
+        assert {"q_proj", "v_proj"} <= adapted
+        # the fused experts are nn.Parameters on v5, not nn.Linear, so "all-linear" does not pull them in and the MoE
+        # conversion adds nothing -- it must not be (mis)treated as a regex
+        assert not config.target_parameters
+        assert not config.rank_pattern
+
+    def test_qwen3_moe_regex_target_modules_save_load_roundtrip(self, tmp_path):
+        # Full lifecycle for a regex `target_modules` on a v5 MoE model: create the adapter, save it, and load it back.
+        # Reloading runs the config conversion a second time (now on the already-converted config), so this also guards
+        # against the conversion not being idempotent.
+        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+        model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
+        regex = r"^(model(?=\.).*\.(q_proj|k_proj|v_proj|gate_proj|up_proj|down_proj))$"
+
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+            peft_model = get_peft_model(model, LoraConfig(target_modules=regex))
+            # perturb the (zero-initialized) LoRA B weights so the adapter actually changes the output
+            with torch.no_grad():
+                for name, param in peft_model.named_parameters():
+                    if "lora_B" in name:
+                        param.add_(0.02)
+            with torch.inference_mode():
+                logits_before = peft_model(inputs).logits
+            peft_model.save_pretrained(tmp_path)
+            del model, peft_model
+
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+            reloaded = PeftModel.from_pretrained(model, tmp_path)
+            with torch.inference_mode():
+                logits_after = reloaded(inputs).logits
+
+        assert torch.allclose(logits_before, logits_after, atol=1e-5, rtol=1e-5)
+        # the second conversion (on load) is idempotent
+        reloaded_config = reloaded.peft_config["default"]
+        assert reloaded_config.target_modules == regex
+        assert {"gate_up_proj", "down_proj"} <= set(reloaded_config.target_parameters)
+        assert reloaded_config.rank_pattern == {r".*\.gate_up_proj": reloaded_config.r * 2}
