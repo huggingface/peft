@@ -196,16 +196,8 @@ def build_app(df):
             )
             model_dropdown = gr.Dropdown(label="Select Model ID", choices=get_model_ids(initial_task, df))
 
-        # Make dataframe columns all equal in width so that they are good enough for numbers but don't
-        # get hugely extended by columns like `train_config`.
-        initial_filtered = filter_data(initial_task, get_model_ids(initial_task, df)[0], df)
-        column_widths = ["150px" for _ in initial_filtered.columns]
-        column2index = dict(zip(initial_filtered.columns, range(len(initial_filtered.columns))))
-        column_widths[column2index["experiment_name"]] = "300px"
-
         def update_on_task(task_name):
             new_models = get_model_ids(task_name, df)
-            filtered = filter_data(task_name, new_models[0] if new_models else "", df)
 
             prefs = get_metric_preferences(task_name)
             x_default, y_default = _TASK_PARETO_DEFAULTS.get(task_name, (list(prefs)[0], list(prefs)[1]))
@@ -213,7 +205,6 @@ def build_app(df):
 
             return (
                 gr.update(choices=new_models, value=new_models[0] if new_models else None),
-                format_df(filtered),
                 gr.update(choices=metric_choices, value=x_default),
                 gr.update(choices=metric_choices, value=y_default),
             )
