@@ -9,7 +9,7 @@ emoji: 🛍️
 
 # PEFT Shop
 
-A Gradio app to browse PEFT methods like an online store: filter by capabilities (merging, multi-adapter support, quantization backends, targetable layer types, …) and check benchmark results — star ratings for the benchmark-specific metrics (test accuracy and forgetting for MetaMathQA, DINO similarity and drift for image generation) as well as peak memory, checkpoint size, and train time, switchable between the benchmarks of the method comparison suite. Methods can be added to a cart 🛒, which shows usage code snippets and a feature comparison table for the collected methods — and checkout is, of course, free.
+A Gradio app to browse PEFT methods like an online store: filter by capabilities (merging, multi-adapter support, quantization backends, targetable layer types, …) or by minimum customer rating ("★★★☆☆ & up"), and check benchmark results — star ratings for the benchmark-specific metrics (test accuracy and forgetting for MetaMathQA, DINO similarity and drift for image generation) as well as peak memory, checkpoint size, and train time, switchable between the benchmarks of the method comparison suite. Methods can be added to a cart 🛒, which shows usage code snippets and a feature comparison table for the collected methods — and checkout is, of course, free.
 
 ## Running
 

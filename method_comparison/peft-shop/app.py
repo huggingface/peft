@@ -14,11 +14,11 @@
 """The PEFT shop: a Gradio app to browse PEFT methods like an online store.
 
 Users can filter methods by their capabilities (merging, multi-adapter support, quantization backends, targetable
-layer types, ...), check benchmark results (switchable between the benchmarks of the method comparison suite, e.g.
-MetaMathQA or image generation), and jump to the PEFT docs. The app has two tabs: one to browse the shop, one for the
-cart, which shows usage code snippets and a feature comparison table for the collected methods. In keeping with the
-shop theme, every method has a (crossed-out) price tag, benchmark results double as customer star ratings, and
-checkout is free.
+layer types, ...) and by minimum star ratings, check benchmark results (switchable between the benchmarks of the
+method comparison suite, e.g. MetaMathQA or image generation), and jump to the PEFT docs. The app has two tabs: one
+to browse the shop, one for the cart, which shows usage code snippets and a feature comparison table for the
+collected methods. In keeping with the shop theme, every method has a (crossed-out) price tag, benchmark results
+double as customer star ratings, and checkout is free.
 
 The app reads a single `data.json` file. If that file does not exist (or --rebuild is passed), it is built by merging
 three sources from the PEFT repository checkout:
@@ -51,6 +51,7 @@ import json
 import logging
 import math
 import re
+import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -509,8 +510,8 @@ def _stars_span(n_stars: int, title: str) -> str:
     return f'<span class="stars" title="{esc(title)}">{"★" * n_stars}{"☆" * (5 - n_stars)}</span>'
 
 
-def benchmark_stars(spec: BenchmarkSpec, field: str, value: float, title: str, lower_is_better: bool = False) -> str:
-    """A benchmark metric as a customer star rating, based on quantiles among the benchmarked PEFT methods.
+def star_rating(spec: BenchmarkSpec, field: str, value: float, lower_is_better: bool = False) -> int:
+    """The customer star rating of one benchmark metric value, based on quantiles among the benchmarked PEFT methods.
 
     The best 20% of the methods get five stars, the next 20% four, and so on; even the worst method keeps one star.
     Quantiles are used instead of e.g. min-max scaling so that a single outlier cannot compress everyone else's
@@ -519,8 +520,35 @@ def benchmark_stars(spec: BenchmarkSpec, field: str, value: float, title: str, l
     """
     values = [info["benchmarks"][spec.key][field] for info in METHODS.values() if spec.key in info["benchmarks"]]
     rank = sum(other < value if lower_is_better else other > value for other in values)
-    n_stars = 5 - int(5 * rank / len(values))
-    return _stars_span(n_stars, title)
+    return 5 - int(5 * rank / len(values))
+
+
+def benchmark_stars(spec: BenchmarkSpec, field: str, value: float, title: str, lower_is_better: bool = False) -> str:
+    """A benchmark metric as a customer star rating (see star_rating), rendered as a hoverable span."""
+    return _stars_span(star_rating(spec, field, value, lower_is_better), title)
+
+
+def rated_metrics(spec: BenchmarkSpec) -> list[tuple[str, str, bool]]:
+    """(field, label, lower_is_better) of every star-rated metric of a benchmark, in card-row order.
+
+    This is the single source of truth for the rated rows: the cards, the rating filters, and their labels all
+    derive from it.
+    """
+    rows = [(metric.field, metric.label, not metric.higher_is_better) for metric in spec.metrics]
+    rows += [
+        ("peak_memory_bytes", "max memory allocated", True),
+        ("adapter_file_size_bytes", "checkpoint size", True),
+        ("train_time_sec", "train time", True),
+    ]
+    return rows
+
+
+# The five clickable stars of a minimum-rating filter (a gr.Radio restyled into a star bar via the .star-filter
+# CSS). Every choice renders as one star, the value is the minimum rating ("n stars & up"). The default of 1 filters
+# nothing, as even the worst-rated method keeps one star.
+RATING_CHOICES = [("★", n) for n in range(1, 6)]
+# Number of rating filter slots; for benchmarks with fewer rated metrics, the surplus slots are hidden.
+N_RATING_SLOTS = max(len(rated_metrics(spec)) for spec in BENCHMARKS)
 
 
 def badge(value: bool | None, label: str, title: str | None = None) -> str:
@@ -559,55 +587,30 @@ def render_card(method: str, spec: BenchmarkSpec) -> str:
             else ""
         )
 
-        # per row: field in the benchmark entry, display label, formatted value, description for the hover text,
-        # whether lower values are better, and an optional reference note
-        bench_rows = [
-            (
-                metric.field,
-                metric.label,
-                fmt_metric(metric, bench[metric.field]),
-                f"{metric.label} on the PEFT {spec.label} benchmark",
-                not metric.higher_is_better,
-                reference if metric is score else "",
-            )
-            for metric in spec.metrics
-        ]
-        bench_rows += [
-            (
-                "peak_memory_bytes",
-                "max memory allocated",
-                fmt_bytes(bench["peak_memory_bytes"]),
-                f"Peak accelerator memory while training on the PEFT {spec.label} benchmark",
-                True,
-                "",
-            ),
-            (
-                "adapter_file_size_bytes",
-                "checkpoint size",
-                fmt_megabytes(bench["adapter_file_size_bytes"]),
-                f"Size of the saved checkpoint on the PEFT {spec.label} benchmark",
-                True,
-                "",
-            ),
-            (
-                "train_time_sec",
-                "train time",
-                fmt_minutes(bench["train_time_sec"]),
-                f"Training time on the PEFT {spec.label} benchmark",
-                True,
-                "",
-            ),
-        ]
+        # per-field value formatting and hover-text description; the rows themselves come from rated_metrics
+        formatters = {metric.field: (lambda v, metric=metric: fmt_metric(metric, v)) for metric in spec.metrics}
+        formatters |= {
+            "peak_memory_bytes": fmt_bytes,
+            "adapter_file_size_bytes": fmt_megabytes,
+            "train_time_sec": fmt_minutes,
+        }
+        descriptions = {metric.field: f"{metric.label} on the PEFT {spec.label} benchmark" for metric in spec.metrics}
+        descriptions |= {
+            "peak_memory_bytes": f"Peak accelerator memory while training on the PEFT {spec.label} benchmark",
+            "adapter_file_size_bytes": f"Size of the saved checkpoint on the PEFT {spec.label} benchmark",
+            "train_time_sec": f"Training time on the PEFT {spec.label} benchmark",
+        }
         # the hover text sits on the whole row (and, redundantly, on the stars span inside it), so hovering the
         # metric name or the value explains the metric as well
         row_html = []
-        for field, label, value, description, lower_is_better, ref in bench_rows:
+        for field, label, lower_is_better in rated_metrics(spec):
             direction = "lower is better" if lower_is_better else "higher is better"
-            title = f"{description}; {direction}{ref}. Stars rank the method among the other PEFT methods."
+            ref = reference if field == score.field else ""
+            title = f"{descriptions[field]}; {direction}{ref}. Stars rank the method among the other PEFT methods."
             stars = benchmark_stars(spec, field, bench[field], title, lower_is_better=lower_is_better)
             row_html.append(
                 f'<div class="bench-row" title="{esc(title)}"><span>{stars} {esc(label)}:</span>'
-                f"<strong>{esc(value)}</strong></div>"
+                f"<strong>{esc(formatters[field](bench[field]))}</strong></div>"
             )
         bench_html = f"""
         <div class="bench" title="Best of {bench["num_runs"]} run(s): {esc(bench["experiment_name"])}">
@@ -616,17 +619,20 @@ def render_card(method: str, spec: BenchmarkSpec) -> str:
     else:
         bench_html = f'<div class="bench muted">No reviews yet (no {esc(spec.label)} benchmark results).</div>'
 
-    # The description is clamped to three lines by CSS. Texts long enough to likely be clamped get a button that
-    # shows the full text in an overlay, using the native HTML popover API -- a real centered overlay with backdrop
-    # and click-outside dismissal, without any JS or Gradio event machinery.
+    # Overlong descriptions are truncated and get a "Show more" toggle that expands them in place, like overlong
+    # YouTube comments: a hidden checkbox placed before the paragraph selects which of the two text spans is shown,
+    # and the toggle's text, through CSS sibling selectors (see the .more-toggle rules) -- no JS or Gradio event
+    # machinery needed. Truncating by character count server-side (instead of a CSS line clamp) keeps the toggle
+    # and the truncation in sync: the toggle exists if and only if there is hidden text to reveal.
     description = info["description"]
+    desc_html = esc(description)
+    toggle_html = ""
     more_html = ""
-    if len(description) > 160:
-        more_html = (
-            f'<button class="more-link" popovertarget="desc-{esc(method)}">Show full description</button>'
-            f'<div popover id="desc-{esc(method)}" class="desc-popover">'
-            f"<h4>{esc(method)}</h4><p>{esc(description)}</p></div>"
-        )
+    if len(description) > 200:
+        short = textwrap.shorten(description, width=160, placeholder=" …")
+        desc_html = f'<span class="desc-short">{esc(short)}</span><span class="desc-full">{esc(description)}</span>'
+        toggle_html = f'<input type="checkbox" id="more-{esc(method)}" class="more-toggle">'
+        more_html = f'<label for="more-{esc(method)}" class="more-link"></label>'
 
     paper_url = info.get("paper_url")  # .get: tolerate a data.json built before paper links were added
     paper_html = (
@@ -638,7 +644,8 @@ def render_card(method: str, spec: BenchmarkSpec) -> str:
     return f"""
     <article class="card">
       {banner_html(method)}
-      <p class="description">{esc(description)}</p>
+      {toggle_html}
+      <p class="description">{desc_html}</p>
       {more_html}
       <div class="badges"><span class="chip category">{esc(CATEGORY_LABELS.get(category, category))}</span>{badges}</div>
       <div class="quant-row">{quant_html}</div>
@@ -660,6 +667,7 @@ def matches_filters(
     quant: list[str],
     benchmarked_only: bool,
     bench_key: str,
+    min_stars: tuple[int, ...],
 ) -> bool:
     """Filter semantics ("e-commerce" style):
 
@@ -669,6 +677,8 @@ def matches_filters(
     - across filter groups: AND
     - values reported as "unknown" by the capability script never match a positive filter: users filtering for a
       feature should only see methods where support is established.
+    - min_stars holds the minimum-rating filters, one per rated metric (in rated_metrics order, 1 = no minimum);
+      they apply to the selected benchmark, so methods without results on it cannot match.
     """
     info = METHODS[method]
     if search:
@@ -689,6 +699,15 @@ def matches_filters(
 
     if quant and not any(supports_quant(method, backend) for backend in quant):
         return False
+
+    if any(minimum > 1 for minimum in min_stars):
+        bench = info["benchmarks"].get(bench_key)
+        if bench is None:
+            return False
+        spec = BENCHMARKS_BY_KEY[bench_key]
+        for (field, _, lower_is_better), minimum in zip(rated_metrics(spec), min_stars):
+            if star_rating(spec, field, bench[field], lower_is_better) < minimum:
+                return False
 
     return not (benchmarked_only and bench_key not in info["benchmarks"])
 
@@ -717,19 +736,24 @@ ADD_TO_CART_LABEL = "🛒 Add to cart"
 IN_CART_LABEL = "✅ In cart"
 
 
-def update_cards(search, categories, capabilities, layers, quant, benchmarked_only, bench_key, sort_by, cart):
+def update_cards(
+    search, categories, capabilities, layers, quant, benchmarked_only, bench_key, sort_by, cart, *min_stars
+):
     """Assign the filtered, sorted methods to the fixed pool of card slots.
 
-    Returns the count markdown followed by (visibility, card HTML, method name, add button) for every slot; the
-    button label shows whether the slot's method is already in the cart. Slots beyond the number of matching methods
-    are hidden and get an empty method name, which add_to_cart treats as a no-op.
+    The trailing arguments are the values of the rating filter slots (in rated_metrics order). Returns the count
+    markdown followed by (visibility, card HTML, method name, add button) for every slot; the button label shows
+    whether the slot's method is already in the cart. Slots beyond the number of matching methods are hidden and get
+    an empty method name, which add_to_cart treats as a no-op.
     """
     spec = BENCHMARKS_BY_KEY[bench_key]
     cart = cart or []
     selected = [
         method
         for method in METHODS
-        if matches_filters(method, search, categories, capabilities, layers, quant, benchmarked_only, bench_key)
+        if matches_filters(
+            method, search, categories, capabilities, layers, quant, benchmarked_only, bench_key, min_stars
+        )
     ]
     selected.sort(key=sort_key(sort_by, bench_key))
     count = f"**{len(selected)} of {len(METHODS)} items** — all free, all in stock"
@@ -754,7 +778,17 @@ def reset_filters():
 
     Programmatically resetting the components triggers their change listeners, which re-render the cards.
     """
-    return "", [], [], [], [], False, BENCHMARKS[0].key, "name"
+    return ("", [], [], [], [], False, BENCHMARKS[0].key, "name") + (1,) * N_RATING_SLOTS
+
+
+def update_rating_filters(bench_key):
+    """Relabel the rating filter slots to the selected benchmark's rated metrics; surplus slots are hidden and
+    reset, so that a stale minimum cannot keep filtering invisibly."""
+    rows = rated_metrics(BENCHMARKS_BY_KEY[bench_key])
+    return [
+        gr.update(label=rows[i][1], visible=True) if i < len(rows) else gr.update(value=1, visible=False)
+        for i in range(N_RATING_SLOTS)
+    ]
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -784,7 +818,7 @@ config = XLoraConfig(
 model = get_peft_model(base_model, config)""",
 }
 
-EMPTY_CART_SNIPPET = '# Your cart is empty - add PEFT methods in the "Browse methods" tab to see how to use them.'
+EMPTY_CART_SNIPPET = '# Your cart is empty - add PEFT methods in the "Browse the shop" tab to see how to use them.'
 
 
 def usage_snippet(method: str) -> str:
@@ -878,8 +912,8 @@ def build_comparison(methods: list[str]) -> str:
 
 
 def build_receipt(methods: list[str]) -> str:
-    """The order confirmation opened by the pay button: a floating window (the same native popover mechanism as the
-    full-description overlays on the cards) showing a shop-style receipt with the crossed-out fantasy prices."""
+    """The order confirmation opened by the pay button: a floating window (a native HTML popover, rendered in the
+    browser's top layer) showing a shop-style receipt with the crossed-out fantasy prices."""
     if methods:
         rows = "".join(
             f"<tr><td>{esc(method)}</td><td><s>${fantasy_price(method):.2f}</s></td>"
@@ -943,11 +977,10 @@ CSS = """
    inline per method) */
 .explorer .banner { min-height: 3.2rem; border-radius: 8px; display: flex; align-items: center; gap: 0.6rem;
   padding: 0.4rem 0.7rem; }
-.explorer .monogram { width: 2.2rem; height: 2.2rem; flex-shrink: 0; border-radius: 8px; display: flex; align-items: center;
-  justify-content: center; color: #fff; font-weight: 800; font-size: 0.95rem;
+.explorer .monogram { width: 2.2rem; height: 2.2rem; flex-shrink: 0; border-radius: 8px; display: flex;
+  align-items: center; justify-content: center; color: #fff; font-weight: 800; font-size: 0.95rem;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25); }
-.explorer .description { margin: 0; color: var(--x-muted); font-size: 0.86rem; display: -webkit-box;
-  -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.explorer .description { margin: 0; color: var(--x-muted); font-size: 0.86rem; }
 .explorer .badges, .explorer .quant-row { display: flex; flex-wrap: wrap; gap: 0.3rem; }
 .explorer .badge { font-size: 0.74rem; padding: 0.12rem 0.45rem; border-radius: 999px; white-space: nowrap; }
 .explorer .badge.yes { color: var(--x-yes); background: var(--x-yes-bg); }
@@ -969,25 +1002,27 @@ CSS = """
 .explorer .cta.secondary { background: var(--x-surface-2); color: var(--x-text);
   border: 1px solid var(--x-border); }
 
-/* "show full description" button and its overlay (native HTML popover, rendered in the browser's top layer) */
-.explorer .more-link { background: none; border: none; color: var(--x-accent); cursor: pointer; padding: 0;
-  font-size: 0.8rem; text-align: left; }
-.explorer .desc-popover { max-width: min(540px, 90vw); padding: 1.2rem 1.4rem; border: 1px solid var(--x-border);
-  border-radius: 12px; background: var(--x-surface); color: var(--x-text); }
-.explorer .desc-popover h4 { margin: 0 0 0.6rem; font-size: 1.3rem; }
-.explorer .desc-popover p { margin: 0; line-height: 1.55; }
-.explorer .desc-popover::backdrop { background: rgba(0, 0, 0, 0.45); }
+/* The "Show more" toggle of overlong descriptions: a hidden checkbox before the description paragraph selects
+   which of the two text spans (truncated or full) is shown, and the label's text flips between "Show more" and
+   "Show less", like overlong YouTube comments. The checkbox is hidden via our own CSS instead of the `hidden`
+   attribute, which does not survive Gradio's HTML handling. */
+.explorer .more-toggle { display: none !important; }
+.explorer .more-link { color: var(--x-accent); cursor: pointer; font-size: 0.8rem; }
+.explorer .more-link::after { content: "Show more"; }
+.explorer .more-toggle:checked ~ .more-link::after { content: "Show less"; }
+.explorer .desc-full { display: none; }
+.explorer .more-toggle:checked ~ .description .desc-short { display: none; }
+.explorer .more-toggle:checked ~ .description .desc-full { display: inline; }
 
-/* The pay button's order receipt -- like the description overlay, a native popover in the browser's top layer.
-   Both popovers are re-centered explicitly: the browser stylesheet would center them via `margin: auto`, but
-   Gradio's styles interfere with that, leaving the popover stuck at the viewport edge. Centering via
-   top/left/transform (with !important) depends on fewer properties and survives the interference. */
-.explorer .desc-popover, .explorer .receipt-popover { position: fixed !important; top: 50% !important;
-  left: 50% !important; bottom: auto !important; right: auto !important; margin: 0 !important;
-  transform: translate(-50%, -50%); max-height: 85vh; overflow-y: auto; }
-.explorer .receipt-popover { min-width: min(480px, 92vw); padding: 1.6rem 2rem; border: 1px solid var(--x-border);
-  border-radius: 14px; background: var(--x-surface); color: var(--x-text); font-size: 1rem;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.4); }
+/* The pay button's order receipt, a native popover in the browser's top layer. It is re-centered explicitly: the
+   browser stylesheet would center it via `margin: auto`, but Gradio's styles interfere with that, leaving the
+   popover stuck at the viewport edge. Centering via top/left/transform (with !important) depends on fewer
+   properties and survives the interference. */
+.explorer .receipt-popover { position: fixed !important; top: 50% !important; left: 50% !important;
+  bottom: auto !important; right: auto !important; margin: 0 !important; transform: translate(-50%, -50%);
+  max-height: 85vh; overflow-y: auto; min-width: min(480px, 92vw); padding: 1.6rem 2rem;
+  border: 1px solid var(--x-border); border-radius: 14px; background: var(--x-surface); color: var(--x-text);
+  font-size: 1rem; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.4); }
 .explorer .receipt-popover::backdrop { background: rgba(0, 0, 0, 0.55); }
 .explorer .receipt-popover h4 { margin: 0 0 1rem; font-size: 1.5rem; }
 .explorer .receipt-popover s { color: var(--x-muted); }
@@ -1022,7 +1057,19 @@ CSS = """
    hidden, independently of whether Gradio applies the visible=False update to the column. */
 .method-card:not(:has(.card)) { display: none !important; }
 
-/* Enlarge the tab labels (Browse methods / Cart) so they are hard to miss. Tab buttons carry the ARIA role "tab";
+/* The minimum-rating filters: a gr.Radio restyled into a clickable star bar. The radio circles are hidden and every
+   choice renders as one star; the stars up to the selected one stay gold, the ones after it are dimmed -- clicking
+   the n-th star therefore reads as "n stars & up". */
+.star-filter .wrap { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 0.15rem; }
+.star-filter label { background: none !important; border: none !important; box-shadow: none !important;
+  padding: 0 !important; margin: 0 !important; cursor: pointer; }
+.star-filter label span { font-size: 1.5rem; line-height: 1; color: #f5b50a; padding: 0;
+  display: inline-block; transition: transform 0.1s ease; }
+.star-filter label:hover span { transform: scale(1.2); }
+.star-filter input[type="radio"] { display: none; }
+.star-filter label:has(input:checked) ~ label span { color: #9ca3af; opacity: 0.45; }
+
+/* Enlarge the tab labels (Browse the shop / Cart) so they are hard to miss. Tab buttons carry the ARIA role "tab";
    the .tab-nav fallback covers Gradio versions that don't set it. */
 button[role="tab"], .tab-nav button { font-size: 1.3rem !important; font-weight: 600 !important;
   padding: 0.5rem 1.4rem !important; }
@@ -1068,6 +1115,25 @@ def build_demo() -> gr.Blocks:
                         quant = gr.CheckboxGroup(
                             choices=sorted(quant_names), label="Quantization (any selected backend)"
                         )
+                        # one minimum-rating filter per star-rated card row, like a shop's "customer rating" filter;
+                        # the labels follow the selected benchmark (see update_rating_filters)
+                        with gr.Accordion("⭐ Minimum customer rating", open=False):
+                            gr.Markdown(
+                                "<small>Click the lowest acceptable rating ('n stars & up'). Ratings refer to the "
+                                "selected benchmark; with a minimum above one star, methods without results on it "
+                                "are filtered out.</small>"
+                            )
+                            default_rows = rated_metrics(BENCHMARKS[0])
+                            rating_filters = [
+                                gr.Radio(
+                                    choices=RATING_CHOICES,
+                                    value=1,
+                                    label=default_rows[i][1] if i < len(default_rows) else "",
+                                    visible=i < len(default_rows),
+                                    elem_classes="star-filter",
+                                )
+                                for i in range(N_RATING_SLOTS)
+                            ]
                         benchmarked_only = gr.Checkbox(label="Only methods with results on the selected benchmark")
                     with gr.Column(scale=3):
                         with gr.Row():
@@ -1119,10 +1185,12 @@ def build_demo() -> gr.Blocks:
             "each method shows its best run on the selected benchmark.</small>"
         )
 
-        filter_inputs = [search, categories, capabilities, layers, quant, benchmarked_only, benchmark, sort_by]
-        # the cart is an extra input to the card rendering (for the "in cart" button labels) but deliberately not
-        # part of filter_inputs: resetting the filters must not clear the cart
-        card_inputs = filter_inputs + [cart_select]
+        basic_filters = [search, categories, capabilities, layers, quant, benchmarked_only, benchmark, sort_by]
+        filter_inputs = basic_filters + rating_filters
+        # The cart is an extra input to the card rendering (for the "in cart" button labels) but deliberately not
+        # part of filter_inputs: resetting the filters must not clear the cart. It sits between the basic filters
+        # and the rating filters so that update_cards can take the latter as its variadic tail.
+        card_inputs = basic_filters + [cart_select] + rating_filters
         slot_outputs = [count_md]
         for slot_column, slot_html, slot_method, slot_button in slots:
             slot_outputs.extend([slot_column, slot_html, slot_method, slot_button])
@@ -1145,6 +1213,8 @@ def build_demo() -> gr.Blocks:
                     trigger_mode="always_last",
                 )
         demo.load(update_cards, inputs=card_inputs, outputs=slot_outputs, show_progress="hidden")
+        # the rating filters are labeled after the selected benchmark's metrics
+        benchmark.change(update_rating_filters, inputs=benchmark, outputs=rating_filters, show_progress="hidden")
 
         for _, _, slot_method, slot_button in slots:
             slot_button.click(
