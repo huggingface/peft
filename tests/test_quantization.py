@@ -23,7 +23,7 @@ import torch
 from accelerate.utils.memory import clear_device_cache
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig, TorchAoConfig
 
-from peft import BOFTConfig, MissConfig, VeraConfig, get_peft_model
+from peft import BOFTConfig, MissConfig, ShiraConfig, VeraConfig, get_peft_model
 from peft.import_utils import (
     is_bnb_4bit_available,
     is_bnb_available,
@@ -175,6 +175,10 @@ TEST_CASES = [
     (
         MissConfig,
         {"r": 2, "init_weights": "bat"},
+    ),
+    (
+        ShiraConfig,
+        {"r": 8},
     ),
     (
         VeraConfig,
