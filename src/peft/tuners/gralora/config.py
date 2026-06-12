@@ -13,10 +13,10 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -69,6 +69,13 @@ class GraloraConfig(PeftConfig):
             not in the common layers pattern. This only works when target_modules is a list of str. This should target
             the `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "GRALORA": Paper(
+            title="GraLoRA: Granular Low-Rank Adaptation for Parameter-Efficient Fine-Tuning",
+            url="https://huggingface.co/papers/2505.20355",
+        ),
+    }
 
     r: int = field(
         default=32,

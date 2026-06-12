@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import ClassVar, Literal, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 from .mask_functions import random_mask
 
@@ -56,6 +56,13 @@ class ShiraConfig(PeftConfig):
         modules_to_save (`List[str]`):
             List of modules apart from SHiRA layers to be set as trainable and saved in the final checkpoint.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "SHIRA": Paper(
+            title="Sparse High Rank Adapters",
+            url="https://huggingface.co/papers/2406.13175",
+        ),
+    }
 
     r: int = field(
         default=32,

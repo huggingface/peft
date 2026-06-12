@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -40,6 +40,13 @@ class BeftConfig(PeftConfig):
             Whether to initialize the vectors in the BEFT layers, defaults to `True`. Setting this to `False` is
             discouraged.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "BEFT": Paper(
+            title="BEFT: Bias-Efficient Fine-Tuning of Language Models in Low-Data Regimes",
+            url="https://huggingface.co/papers/2509.15974",
+        ),
+    }
 
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,

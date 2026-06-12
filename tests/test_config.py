@@ -61,6 +61,7 @@ from peft import (
     VeraConfig,
     XLoraConfig,
 )
+from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING
 
 
 class TestingCommitHashError(Exception):
@@ -149,8 +150,6 @@ class TestPeftConfig:
         Test if the config is correctly loaded using:
         - from_peft_type
         """
-        from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING
-
         for peft_type in PeftType:
             expected_cls = PEFT_TYPE_TO_CONFIG_MAPPING[peft_type]
             mandatory_config_kwargs = {}
@@ -162,6 +161,33 @@ class TestPeftConfig:
 
             config = PeftConfig.from_peft_type(peft_type=peft_type, **mandatory_config_kwargs)
             assert type(config) is expected_cls
+
+    @pytest.mark.parametrize("peft_type, config_class", PEFT_TYPE_TO_CONFIG_MAPPING.items())
+    def test_all_methods_declare_papers(self, peft_type, config_class):
+        r"""
+        Test that each registered PEFT method declares the papers associated with it on its config class.
+
+        The `papers` class attribute maps a short display name to a `Paper` entry; the entry for the method itself is
+        keyed with the `PeftType` value, variants use their display name. Methods without an associated paper declare
+        an empty dict. Inherited attributes don't count, e.g. `AdaLoraConfig` must not rely on the `papers` declared by
+        `LoraConfig`.
+        """
+        assert "papers" in vars(config_class), f"{config_class.__name__} does not declare a `papers` attribute"
+        papers = vars(config_class)["papers"]
+        assert isinstance(papers, dict)
+        if config_class == TrainableTokensConfig:
+            # no paper associated with that method
+            return
+
+        assert peft_type.value in papers, (
+            f"The `papers` of {config_class.__name__} contains no entry for the method itself, which should "
+            f"be keyed '{peft_type.value}'"
+        )
+
+        for name, paper in papers.items():
+            assert name, f"{config_class.__name__} has a `papers` entry with an empty key"
+            assert paper.title, f"The '{name}' paper of {config_class.__name__} has no title"
+            assert paper.url.startswith("https://"), f"The '{name}' paper of {config_class.__name__} has no valid URL"
 
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
     def test_from_pretrained(self, config_class, mandatory_kwargs):
@@ -185,6 +211,9 @@ class TestPeftConfig:
 
             config_from_pretrained = config_class.from_pretrained(tmp_dirname)
             assert config.to_dict() == config_from_pretrained.to_dict()
+            # don't want the papers in the adapter_config.json
+            assert hasattr(config, "papers")
+            assert "papers" not in config.to_dict()
 
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
     def test_from_json_file(self, config_class, mandatory_kwargs):

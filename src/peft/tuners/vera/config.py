@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -66,6 +66,13 @@ class VeraConfig(PeftConfig):
             The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
             `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "VERA": Paper(
+            title="VeRA: Vector-based Random Matrix Adaptation",
+            url="https://huggingface.co/papers/2310.11454",
+        ),
+    }
 
     r: int = field(default=256, metadata={"help": "Vera attention dimension"})
 

@@ -72,7 +72,7 @@ from .other import (
     shift_tokens_right,
     transpose,
 )
-from .peft_types import PeftType, TaskType, register_peft_method
+from .peft_types import Paper, PeftType, TaskType, register_peft_method
 from .quantization_utils import get_quantization_kwargs, quantization_extra_repr, resolve_quantization_backend
 from .save_and_load import get_peft_model_state_dict, load_peft_weights, set_peft_model_state_dict
 from .warning import PeftWarning
@@ -117,6 +117,7 @@ __all__ = [
     "WEIGHTS_NAME",
     "AuxiliaryTrainingWrapper",
     "ModulesToSaveWrapper",
+    "Paper",
     "PeftType",
     "PeftWarning",
     "TaskType",

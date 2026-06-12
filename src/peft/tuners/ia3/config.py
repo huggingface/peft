@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -52,6 +52,13 @@ class IA3Config(PeftConfig):
             Whether to initialize the vectors in the (IA)³ layers, defaults to `True`. Setting this to `False` is
             discouraged.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "IA3": Paper(
+            title="Few-Shot Parameter-Efficient Fine-Tuning is Better and Cheaper than In-Context Learning",
+            url="https://huggingface.co/papers/2205.05638",
+        ),
+    }
 
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,

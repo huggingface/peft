@@ -14,10 +14,10 @@
 
 import enum
 from dataclasses import dataclass, field
-from typing import Union
+from typing import ClassVar, Union
 
 from peft.config import PromptLearningConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 class PromptEncoderReparameterizationType(str, enum.Enum):
@@ -37,6 +37,13 @@ class PromptEncoderConfig(PromptLearningConfig):
         encoder_num_layers (`int`): The number of layers of the prompt encoder.
         encoder_dropout (`float`): The dropout probability of the prompt encoder.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "P_TUNING": Paper(
+            title="GPT Understands, Too",
+            url="https://huggingface.co/papers/2103.10385",
+        ),
+    }
 
     encoder_reparameterization_type: Union[str, PromptEncoderReparameterizationType] = field(
         default=PromptEncoderReparameterizationType.MLP,

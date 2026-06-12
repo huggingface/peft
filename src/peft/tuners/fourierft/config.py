@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -79,6 +79,13 @@ class FourierFTConfig(PeftConfig):
             The initialization of the Fourier weights. Set this to False (the default) if the spectrum are initialized
             to a standard normal distribution. Set this to True if the spectrum are initialized to zeros.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "FOURIERFT": Paper(
+            title="Parameter-Efficient Fine-Tuning with Discrete Fourier Transform",
+            url="https://huggingface.co/papers/2405.03003",
+        ),
+    }
 
     n_frequency: int = field(
         default=1000,

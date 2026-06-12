@@ -14,10 +14,10 @@
 
 import enum
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from peft.tuners.prompt_tuning import PromptTuningConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 class MultitaskPromptTuningInit(str, enum.Enum):
@@ -35,6 +35,13 @@ class MultitaskPromptTuningInit(str, enum.Enum):
 
 @dataclass
 class MultitaskPromptTuningConfig(PromptTuningConfig):
+    papers: ClassVar[dict[str, Paper]] = {
+        "MULTITASK_PROMPT_TUNING": Paper(
+            title="Multitask Prompt Tuning Enables Parameter-Efficient Transfer Learning",
+            url="https://huggingface.co/papers/2303.02861",
+        ),
+    }
+
     prompt_tuning_init: Union[MultitaskPromptTuningInit, str] = field(
         default=MultitaskPromptTuningInit.RANDOM,
         metadata={

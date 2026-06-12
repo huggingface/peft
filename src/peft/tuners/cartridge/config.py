@@ -13,9 +13,10 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 from peft.config import PromptLearningConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -49,6 +50,13 @@ class CartridgeConfig(PromptLearningConfig):
             recommends freezing the first token as an attention sink for stability (set this to `1`), as many LLMs use
             early tokens as attention sinks and changing them can harm training.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "CARTRIDGE": Paper(
+            title="Cartridges: Lightweight and general-purpose long context representations via self-study",
+            url="https://huggingface.co/papers/2506.06266",
+        ),
+    }
 
     num_frozen_tokens: int = field(
         default=1,

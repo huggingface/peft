@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # LoRA
 
-Low-Rank Adaptation ([LoRA](https://huggingface.co/papers/2309.15223)) is a PEFT method that decomposes a large matrix into two smaller low-rank matrices in the attention layers. This drastically reduces the number of parameters that need to be fine-tuned.
+Low-Rank Adaptation ([LoRA](https://huggingface.co/papers/2106.09685)) is a PEFT method that decomposes a large matrix into two smaller low-rank matrices in the attention layers. This drastically reduces the number of parameters that need to be fine-tuned.
 
 The abstract from the paper is:
 

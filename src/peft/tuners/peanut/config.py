@@ -14,12 +14,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from transformers.activations import ACT2FN
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -76,6 +76,13 @@ class PeanutConfig(PeftConfig):
         is applied over the base weight's output dimension, so `A` has shape `(out_dim -> r)` rather than the usual
         `(in_dim -> r)` used by LoRA-like methods.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "PEANUT": Paper(
+            title="PEANuT: Parameter-Efficient Adaptation with Weight-aware Neural Tweakers",
+            url="https://huggingface.co/papers/2410.01870",
+        ),
+    }
 
     r: int = field(
         default=32,
