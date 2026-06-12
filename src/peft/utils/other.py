@@ -186,6 +186,10 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
                 (param.dtype == torch.float16) or (param.dtype == torch.bfloat16)
             ) and param.__class__.__name__ != "Params4bit":
                 param.data = param.data.to(torch.float32)
+        # Release CUDA allocator cache after bulk fp16→fp32 casts to avoid
+        # ~1 GB of reserved-but-unused memory that breaks 8 GB devices (issue #3265)
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     if (
         loaded_in_kbit
