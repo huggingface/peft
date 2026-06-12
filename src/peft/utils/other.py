@@ -148,6 +148,15 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
         head to fp32 4- Freezing the base model layers to ensure they are not updated during training
 
+    <Tip warning={true}>
+
+    Memory note: the layernorm/RMSNorm fp32 upcast performed for non-quantized and bnb 4bit/8bit paths can
+    grow CUDA reserved memory by roughly 0.5–1 GB for 7B-class models in addition to the allocated bytes,
+    because the CUDA caching allocator holds the transient buffers from the upcast op. On 8 GB consumer or
+    edge accelerators (Jetson Orin Nano, Apple Silicon unified memory, RTX 4060 8 GB, …) this overhead can
+    be the difference between a recipe that fits and one that OOMs — budget for it explicitly.
+
+    </Tip>
 
     Args:
         model (`transformers.PreTrainedModel`):
