@@ -1,0 +1,7 @@
+{
+  "base_model_name_or_path": "Qwen/Qwen3.5-4B",
+  "peft_type": "ADAPTION_PROMPT",
+  "adapter_len": 10,
+  "adapter_layers": 30,
+  "task_type": "CAUSAL_LM"
+}

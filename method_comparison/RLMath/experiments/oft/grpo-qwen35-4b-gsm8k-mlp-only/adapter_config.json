@@ -1,0 +1,11 @@
+{
+  "base_model_name_or_path": "Qwen/Qwen3.5-4B",
+  "peft_type": "OFT",
+  "oft_block_size": 32,
+  "target_modules": [
+    "gate_proj",
+    "up_proj",
+    "down_proj"
+  ],
+  "task_type": "CAUSAL_LM"
+}

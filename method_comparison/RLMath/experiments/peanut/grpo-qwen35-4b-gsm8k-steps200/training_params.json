@@ -1,0 +1,9 @@
+{
+  "model_id": "Qwen/Qwen3.5-4B",
+  "save_checkpoint": true,
+  "max_steps": 200,
+  "use_vllm": false,
+  "gradient_checkpointing": true,
+  "num_generations": 4,
+  "generation_batch_size": 4
+}
