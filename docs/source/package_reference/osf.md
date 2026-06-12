@@ -105,7 +105,7 @@ config = OSFConfig(
         "gate_proj": 4     # Lower rank for gate projection
     }
 )
- 
+
 # Fractional preserved rank is supported (interpreted per-target as fraction * min_dim)
 config = OSFConfig(effective_rank=0.8)  # preserve 80% of min_dim; train remaining 20%
 config = OSFConfig(rank_pattern={"q_proj": 0.5})  # preserve 50% on q_proj, others use global/default
@@ -144,7 +144,7 @@ train_task(model, task_3_data)
 When training on a known sequence of n tasks, one effective strategy is to progressively allocate model capacity to balance learning new tasks while preserving previous knowledge:
 
 - **Task 1**: Use full capacity (train everything)
-- **Task 2**: Freeze 1/n of model capacity, train remaining (n-1)/n capacity  
+- **Task 2**: Freeze 1/n of model capacity, train remaining (n-1)/n capacity
 - **Task 3**: Freeze 2/n of model capacity, train remaining (n-2)/n capacity
 - **Task n**: Freeze (n-1)/n of model capacity, use 1/n capacity for final task
 
@@ -221,6 +221,17 @@ optimizer = torch.optim.AdamW([
     {"params": [p for n, p in model.named_parameters() if "V_low" in n], "weight_decay": 0.01},
 ], lr=1e-4)
 ```
+
+## Benchmark overview
+
+<iframe
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=OSF"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
+
+# API
 
 ## OSFConfig
 
