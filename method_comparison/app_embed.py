@@ -58,6 +58,10 @@ def generate_pareto_plot(df, metric_x, metric_y, metric_preferences, highlight_t
     # Create an empty figure.
     fig = go.Figure()
 
+    pareto_line_kwargs = {}
+    if highlight_type:
+        pareto_line_kwargs = {"showlegend": False}
+
     # Draw the line connecting Pareto frontier points.
     if not pareto_df.empty:
         # Sort the Pareto frontier points by metric_x for a meaningful connection.
@@ -68,6 +72,7 @@ def generate_pareto_plot(df, metric_x, metric_y, metric_preferences, highlight_t
             mode="lines",
             line={"color": "rgba(0,0,255,0.1)", "width": 4},
             name="Pareto Frontier",
+            **pareto_line_kwargs,
         )
         fig.add_trace(line_trace)
 
