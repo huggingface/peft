@@ -45,11 +45,9 @@ Usage examples:
 
 Tasks are collected up-front before any of them runs (see `collect_tasks`). This makes `--dry-run` trivial and leaves
 the door open to run independent tasks in parallel later, should runtime ever become an issue.
-
 """
 
 import argparse
-import ast
 import dataclasses
 import enum
 import inspect
@@ -57,7 +55,6 @@ import json
 import logging
 import re
 import sys
-import textwrap
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -274,13 +271,10 @@ class ProbeContext:
     probe receives a deepcopy so that probes cannot contaminate each other.
     """
 
-    def __init__(self, enabled: bool = True) -> None:
-        self.enabled = enabled
+    def __init__(self) -> None:
         self._tiny_lm: nn.Module | None = None
 
     def make_config(self, method: MethodInfo, **kwargs: Any) -> PeftConfig:
-        if not self.enabled:
-            raise ProbeError("probing disabled via --skip-probes")
         if method.peft_type in PROBE_SKIP:
             raise ProbeError(f"not probed: {PROBE_SKIP[method.peft_type]}")
         kwargs = PROBE_CONFIG_OVERRIDES.get(method.peft_type, {}) | kwargs
@@ -311,8 +305,6 @@ class ProbeContext:
 
     def transformer_model(self, method: MethodInfo) -> nn.Module:
         """Return a PEFT model on a tiny transformer, for methods that require one (prompt learning etc.)."""
-        if not self.enabled:
-            raise ProbeError("probing disabled via --skip-probes")
         if self._tiny_lm is None:
             torch.manual_seed(0)
             tiny_config = LlamaConfig(
@@ -572,21 +564,30 @@ class LoraConversionTask(Task):
 
 class WeightedAdapterTask(Task):
     feature = "add_weighted_adapter"
-    description = "whether several adapters can be combined into a new one via add_weighted_adapter"
+    description = "whether several adapters can be combined into a new one, probed via add_weighted_adapter"
 
     def check(self) -> Finding:
-        func = getattr(self.method.model_cls, "add_weighted_adapter", None)
-        if func is None:
+        # Methods without the API don't support the feature; methods that inherit it but override it with a stub
+        # that raises (e.g. AdaLoRA) are caught by the probe below.
+        if getattr(self.method.model_cls, "add_weighted_adapter", None) is None:
             return Finding(value=False, source=Source.INTROSPECTION)
-        # Some methods inherit the method but override it with a stub that raises (e.g. AdaLoRA). Detect this by
-        # checking whether the first statement of the function body (after the docstring) is a bare raise.
-        func_def = ast.parse(textwrap.dedent(inspect.getsource(func))).body[0]
-        body = func_def.body
-        if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
-            body = body[1:]  # skip docstring
-        if body and isinstance(body[0], ast.Raise):
-            return Finding(value=False, source=Source.INTROSPECTION, note="explicitly disabled for this method")
-        return Finding(value=True, source=Source.INTROSPECTION)
+
+        model, _ = self.probe.adapter_model(self.method)
+        # combining several adapters requires loading several adapters in the first place; methods that already fail
+        # here cannot support add_weighted_adapter either
+        try:
+            model.add_adapter("second", self.probe.second_config(self.method))
+        except Exception as exc:
+            return Finding(
+                value=False,
+                source=Source.PROBE,
+                note=f"a second adapter could not be added: {_format_exception(exc)}",
+            )
+        try:
+            model.add_weighted_adapter(adapters=["default", "second"], weights=[0.5, 0.5], adapter_name="combined")
+        except Exception as exc:
+            return Finding(value=False, source=Source.PROBE, note=_format_exception(exc))
+        return Finding(value=True, source=Source.PROBE)
 
 
 class HotswapTask(Task):
@@ -734,11 +735,6 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--dry-run", action="store_true", help="only list the checks that would run")
     parser.add_argument(
-        "--skip-probes",
-        action="store_true",
-        help="skip all probing; probe-based checks report 'unknown' or fall back to static introspection",
-    )
-    parser.add_argument(
         "--docs-dir",
         type=Path,
         default=PaperLinkTask.docs_dir,
@@ -749,7 +745,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")  # logs to stderr
 
     methods = collect_methods(args.methods)
-    probe = ProbeContext(enabled=not args.skip_probes)
+    probe = ProbeContext()
     tasks = collect_tasks(methods, probe)
 
     if args.dry_run:
