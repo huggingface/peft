@@ -1049,7 +1049,13 @@ class BaseTuner(nn.Module, ABC):
         # It's important to set the adapter here (again), because otherwise it can happen that if a 2nd adapter is
         # added, and it targets different layer(s) than the first adapter (which is active), then those different
         # layers will be activated, which we don't want.
-        self.set_adapter(self.active_adapters, inference_mode=peft_config.inference_mode)
+        # Only pass inference_mode when the new adapter is the active adapter (first-time injection). For subsequent
+        # adapters, preserve the existing active adapter's trainability state — otherwise, adding an adapter with
+        # inference_mode=True would incorrectly freeze the active training adapter.
+        if adapter_name in self.active_adapters:
+            self.set_adapter(self.active_adapters, inference_mode=peft_config.inference_mode)
+        else:
+            self.set_adapter(self.active_adapters)
         self._mark_only_adapters_as_trainable(model)
 
         if self.peft_config[adapter_name].inference_mode:

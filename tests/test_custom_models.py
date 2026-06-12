@@ -6248,10 +6248,9 @@ class TestRequiresGrad:
     def test_loading_model_requires_grad_set_correctly_switch_inference_mode(self, config_cls, tmp_path):
         # Same as test_loading_model_requires_grad_set_correctly but this time we first load with is_trainable=False and
         # then with is_trainable=True. Loading the second adapter should not affect the requires_grad of the first
-        # adapter, but it does. The reason is that is_training/inference_mode is taken from the current PEFT config, but
-        # that config does not necessarily belong to the active adapter, creating a mismatch.
-        # When/If this is fixed, the check can be integrated into test_loading_model_requires_grad_set_correctly and
-        # this test can be deleted.
+        # adapter, but it does. The reason is that set_adapter itself always sets requires_grad=True for the active
+        # adapter, which is still coupled to the active adapter selection. A proper fix would require decoupling these
+        # two concerns in set_adapter.
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         config = config_cls(target_modules=["layers.0.lin0"])
@@ -6279,8 +6278,6 @@ class TestRequiresGrad:
         # When adding a new adapter with model.add_adapter, through the set_adapter call in update_layer, we activate
         # the gradients of the first adapter, even if it's not desired. Since there is no is_trainable argument on
         # add_adapter, there is no way to disable that at the moment.
-        # When/If this is fixed, the check can be integrated into test_loading_model_requires_grad_set_correctly and
-        # this test can be deleted.
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         config = config_cls(target_modules=["layers.0.lin0"])
@@ -6296,6 +6293,33 @@ class TestRequiresGrad:
         model.add_adapter(adapter_name="other", peft_config=config)
         params_with_grad = [n for n, p in model.named_parameters() if p.requires_grad]
         assert all(not p.requires_grad for p in model.parameters())
+
+    def test_inject_adapter_inference_mode_does_not_freeze_active_adapter(self, tmp_path):
+        # Regression test for a bug where adding a second adapter with inference_mode=True would incorrectly freeze
+        # the already-active training adapter. This happened because inject_adapter propagated the new adapter's
+        # inference_mode to set_adapter for the existing active adapters.
+        # See PR #3290
+        model = DeepMLP(size=256)
+        config = LoraConfig(target_modules=["layers.0.lin0"])
+        model = get_peft_model(model, config)
+
+        # Initially, the active (default) adapter should be trainable
+        assert any(p.requires_grad for n, p in model.named_parameters() if ".default" in n)
+
+        # Add a second adapter with inference_mode=True, simulating what happens during load_adapter with
+        # is_trainable=False (e.g. during save_pretrained with path_initial_model_for_weight_conversion)
+        config_inference = LoraConfig(target_modules=["layers.0.lin0"], inference_mode=True)
+        model.add_adapter("inference_adapter", config_inference)
+
+        # The existing active adapter should remain trainable
+        assert any(p.requires_grad for n, p in model.named_parameters() if ".default" in n), (
+            "Adding an adapter with inference_mode=True should not freeze the active adapter"
+        )
+
+        # The inference adapter should be frozen
+        assert all(not p.requires_grad for n, p in model.named_parameters() if ".inference_adapter" in n), (
+            "The inference adapter's parameters should be frozen"
+        )
 
 
 # this is for PEFT methods that support mixed adapter batches.
