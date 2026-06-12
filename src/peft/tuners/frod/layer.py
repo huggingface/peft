@@ -265,7 +265,7 @@ class Linear(nn.Linear, FrodLayer):
                 out_add = out_add_flat.reshape(*batch_shape, out_add_flat.shape[-1])
                 # FRoD reconstructs the adapted weight directly, so subtract the base-weight contribution and only
                 # accumulate the adapter delta.
-                if isinstance(dropout, nn.Identity):
+                if isinstance(dropout, nn.Identity) or not dropout.training:
                     if base_out is None:
                         base_out = F.linear(x, base_weight)
                     adapter_base_out = base_out
