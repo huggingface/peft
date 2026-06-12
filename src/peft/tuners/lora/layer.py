@@ -136,6 +136,10 @@ class LoraLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
+    def delete_adapter(self, adapter_name: str) -> None:
+        super().delete_adapter(adapter_name)
+        self.lora_variant.pop(adapter_name, None)
+
     def _get_in_out_features(self, module: nn.Module) -> tuple[int, int] | tuple[None, None]:
         return _get_in_out_features(module)
 
@@ -231,6 +235,9 @@ class LoraLayer(BaseTunerLayer):
         elif isinstance(init_lora_weights, str) and init_lora_weights.lower() == "olora":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.olora_init(adapter_name)
+        elif isinstance(init_lora_weights, str) and init_lora_weights.lower() == "mica":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.mica_init(adapter_name)
         elif init_lora_weights == "loftq":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.loftq_init(adapter_name, config)
@@ -394,6 +401,41 @@ class LoraLayer(BaseTunerLayer):
         weight = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
         weight = transpose(weight.to(dtype), self.fan_in_fan_out)
         self.get_base_layer().weight.data = weight
+
+    def mica_init(self, adapter_name):
+        """Minor Component Adaptation (MiCA) initialization (https://arxiv.org/abs/2604.01694).
+
+        Initializes `lora_B` from the `r` left singular vectors of the base weight associated with the smallest
+        singular values, and sets `lora_A` to zero. The `lora_B` matrix is frozen during training (see
+        `MiCALinearVariant.init`); only `lora_A` is updated. Because `lora_A == 0` at init, the adapter
+        contribution `B @ A == 0` and the base weight does not need to be modified to preserve the forward output.
+        """
+        # When the adapter is being created under `init_empty_weights` (e.g. low_cpu_mem_usage=True), its parameters
+        # live on the meta device and will be filled in from a checkpoint after creation. Skip the SVD in that case.
+        if self.lora_B[adapter_name].weight.device.type == "meta":
+            return
+
+        weight = self.get_base_layer().weight
+        dtype = weight.dtype
+        if dtype not in [torch.float32, torch.float16, torch.bfloat16]:
+            raise TypeError("Please initialize MiCA under float32, float16, or bfloat16.")
+
+        weight = transpose(weight.to(torch.float32), self.fan_in_fan_out)
+        # weight has shape (out_features, in_features) once transposed for fan_in_fan_out, matching nn.Linear.weight.
+        # SVD: weight = U @ diag(S) @ Vh, with U: (out, k), Vh: (k, in), S sorted descending.
+        # MiCA selects the LAST r left singular vectors (smallest singular values) for B and zeroes A.
+        r = self.r[adapter_name]
+        max_r = min(weight.shape)
+        if r > max_r:
+            raise ValueError(
+                f"MiCA requires `r` <= min(in_features, out_features) but got r={r} for a layer with "
+                f"weight shape {tuple(weight.shape)} (max usable r is {max_r})."
+            )
+        U, _, _ = torch.linalg.svd(weight.data, full_matrices=False)
+        lora_B = U[:, -r:].contiguous()
+        lora_A = torch.zeros(r, weight.shape[1], device=weight.device)
+        self.lora_B[adapter_name].weight.data = lora_B.to(dtype)
+        self.lora_A[adapter_name].weight.data = lora_A.to(dtype)
 
     def corda_init(self, adapter_name, init_lora_weights):
         linear = self.get_base_layer()
@@ -815,6 +857,11 @@ class Linear(nn.Module, LoraLayer):
 
             return BdLoraLinearVariant()
 
+        if isinstance(config.init_lora_weights, str) and config.init_lora_weights.lower() == "mica":
+            from .variants import MiCALinearVariant
+
+            return MiCALinearVariant()
+
         use_alora = config.alora_invocation_tokens is not None
         if not config.use_dora and not use_alora:
             return None
@@ -1064,6 +1111,10 @@ class Embedding(nn.Module, LoraLayer):
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
         if config.velora_config is not None:
             raise ValueError("VeLoRA does not support adapting embedding layers.")
+        if isinstance(config.init_lora_weights, str) and config.init_lora_weights.lower() == "mica":
+            from .variants import MiCAEmbeddingVariant
+
+            return MiCAEmbeddingVariant()
         if not config.use_dora:
             return None
 
@@ -1116,7 +1167,10 @@ class Embedding(nn.Module, LoraLayer):
 
         self.use_dora[adapter_name] = config.use_dora
 
-        if init_lora_weights == "loftq":
+        if isinstance(init_lora_weights, str) and init_lora_weights.lower() == "mica":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.mica_init(adapter_name)
+        elif init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
         elif init_lora_weights == "lora_ga":
             # Embedding layers don't support LoRA-GA, fall back to standard initialization
@@ -1144,6 +1198,36 @@ class Embedding(nn.Module, LoraLayer):
 
             self.input_fns[adapter_name] = input_fn
             self.output_fns[adapter_name] = output_fn
+
+    def mica_init(self, adapter_name):
+        """Minor Component Adaptation (MiCA) initialization for embedding layers.
+
+        The effective embedding projection has shape `(embedding_dim, num_embeddings)`, so MiCA initializes
+        `lora_embedding_B` from the minor left singular vectors of `base_layer.weight.T` and sets
+        `lora_embedding_A` to zero.
+        """
+        if self.lora_embedding_B[adapter_name].device.type == "meta":
+            return
+
+        weight = self.get_base_layer().weight
+        dtype = weight.dtype
+        if dtype not in [torch.float32, torch.float16, torch.bfloat16]:
+            raise TypeError("Please initialize MiCA under float32, float16, or bfloat16.")
+
+        weight = weight.to(torch.float32).T
+        r = self.r[adapter_name]
+        max_r = min(weight.shape)
+        if r > max_r:
+            raise ValueError(
+                f"MiCA requires `r` <= min(num_embeddings, embedding_dim) but got r={r} for an embedding layer with "
+                f"weight shape {tuple(self.get_base_layer().weight.shape)} (max usable r is {max_r})."
+            )
+
+        U, _, _ = torch.linalg.svd(weight.data, full_matrices=False)
+        lora_embedding_B = U[:, -r:].contiguous()
+        lora_embedding_A = torch.zeros(r, weight.shape[1], device=weight.device)
+        self.lora_embedding_B[adapter_name].data = lora_embedding_B.to(dtype)
+        self.lora_embedding_A[adapter_name].data = lora_embedding_A.to(dtype)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
