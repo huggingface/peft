@@ -14,9 +14,9 @@
 """Generate a machine-readable capability matrix of all PEFT methods.
 
 For each registered PEFT method, a fixed set of checks ("tasks") determines which user-facing features the method
-supports, e.g. which quantization backends it integrates with, which layer types it can target, or whether its
-adapters can be merged into the base weights. The result is written as JSON and is intended as a generic data source,
-e.g. for documentation pages or the PEFT shop app (method_comparison/method_explorer).
+supports, e.g. which quantization backends it integrates with, which layer types it can target, or whether its adapters
+can be merged into the base weights. The result is written as JSON and is intended as a generic data source, e.g. for
+documentation pages or the PEFT shop app (method_comparison/peft-shop).
 
 Each value is annotated with the *source* of the information:
 
@@ -26,8 +26,8 @@ Each value is annotated with the *source* of the information:
 - "error":         the check itself failed; the value is "unknown" and the note contains the reason
 
 Values are never guessed: if a check cannot determine a feature, the value is reported as "unknown" together with a
-note. In particular, probing a method requires that its config can be instantiated with default arguments; methods
-that need more than that must have an entry in PROBE_CONFIG_OVERRIDES.
+note. In particular, probing a method requires that its config can be instantiated with default arguments; methods that
+need more than that must have an entry in PROBE_CONFIG_OVERRIDES.
 
 The script requires PEFT to be installed (e.g. `pip install -e .`), runs on CPU, downloads nothing, and is idempotent:
 running it twice on the same environment produces identical output.
@@ -45,6 +45,7 @@ Usage examples:
 
 Tasks are collected up-front before any of them runs (see `collect_tasks`). This makes `--dry-run` trivial and leaves
 the door open to run independent tasks in parallel later, should runtime ever become an issue.
+
 """
 
 import argparse

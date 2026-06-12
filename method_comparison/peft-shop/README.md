@@ -20,14 +20,14 @@ The app consumes a single data file, `data.json`, which it builds itself when mi
 python scripts/generate_method_capabilities.py --output method_capabilities.json
 
 # 2. launch the app; data.json is built on first run (--rebuild refreshes it, --build-only skips launching)
-python method_comparison/method_explorer/app.py
+python method_comparison/peft-shop/app.py
 ```
 
-The directory can be deployed as-is as a Gradio Space; only `app.py`, `data.json`, and `requirements.txt` are needed.
+The directory can be deployed as-is as a Gradio Space; only `app.py`, `README.md` (the frontmatter is the Space config), `data.json`, and `requirements.txt` are needed. The official Space is deployed by `.github/workflows/deploy_peft_shop_app.yml`, which generates `method_capabilities.json` and `data.json` at deploy time.
 
 ## Updating
 
-Whenever new PEFT methods are added or new benchmark results land in `method_comparison/<benchmark>/results/`, regenerate the capability matrix and run `python app.py --rebuild`. Filter options and tile contents are derived from the data and update automatically.
+The deployment workflow redeploys the Space whenever the app, the benchmark results in `method_comparison/<benchmark>/results/`, or the capability script change on `main`; a monthly schedule and manual dispatch pick up everything else (e.g. newly added PEFT methods). Filter options and tile contents are derived from the data and update automatically — the steps above are only needed for local development (`--rebuild` refreshes a stale local `data.json`).
 
 To add a new benchmark, append a `BenchmarkSpec` entry to `BENCHMARKS` in `app.py` (pointing at the results directory and listing its metrics, the first of which serves as the headline score) and rebuild — the benchmark dropdown, the star ratings, and the cart's comparison table all derive from the spec. The only requirement is that the result files follow the common JSON layout of the method comparison suite.
 

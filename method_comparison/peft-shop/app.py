@@ -59,7 +59,7 @@ from typing import Any
 import gradio as gr
 
 
-logger = logging.getLogger("method_explorer")
+logger = logging.getLogger("peft-shop")
 
 HERE = Path(__file__).parent
 
