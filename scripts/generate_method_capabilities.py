@@ -15,8 +15,8 @@
 
 For each registered PEFT method, a fixed set of checks ("tasks") determines which user-facing features the method
 supports, e.g. which quantization backends it integrates with, which layer types it can target, or whether its
-adapters can be merged into the base weights. The result is written as JSON and is intended to serve as the data
-source for a documentation page.
+adapters can be merged into the base weights. The result is written as JSON and is intended as a generic data source,
+e.g. for documentation pages or the PEFT shop app (method_comparison/method_explorer).
 
 Each value is annotated with the *source* of the information:
 
@@ -124,6 +124,8 @@ GENERIC_QUANT_BACKENDS: tuple[str, ...] = (
 PROBE_CONFIG_OVERRIDES: dict[PeftType, dict[str, Any]] = {
     # total_step is a required argument
     PeftType.ADALORA: {"total_step": 10},
+    # IA3 needs feedforward_modules
+    PeftType.IA3: {"feedforward_modules": []},
     # the default block_size of 256 does not divide HIDDEN_DIM
     PeftType.C3A: {"block_size": 16},
     # token_indices defaults to an empty list, which trains nothing
@@ -547,9 +549,7 @@ class LoraConversionTask(Task):
         if self.method.peft_type == PeftType.LORA:
             return Finding(value=True, source=Source.INTROSPECTION, note="already a LoRA adapter")
         if self.method.category != "adapter":
-            return Finding(
-                value=NOT_APPLICABLE, source=Source.INTROSPECTION, note="method does not wrap target layers"
-            )
+            return Finding(value=False, source=Source.INTROSPECTION, note="method does not wrap target layers")
 
         try:
             model, _ = self.probe.adapter_model(self.method)
