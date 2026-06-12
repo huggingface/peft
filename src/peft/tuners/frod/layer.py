@@ -230,7 +230,8 @@ class Linear(nn.Linear, FrodLayer):
             base_weight = transpose(self.get_base_layer().weight, self.fan_in_fan_out).to(
                 device=x.device, dtype=target_dtype
             )
-            base_out = None
+            bias = self.get_base_layer().bias
+            base_out = result if bias is None else result - bias
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.frod_lambda_s_values:
                     continue
