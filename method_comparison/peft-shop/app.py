@@ -13,12 +13,13 @@
 # limitations under the License.
 """The PEFT shop: a Gradio app to browse PEFT methods like an online store.
 
-Users can filter methods by their capabilities (merging, multi-adapter support, quantization backends, targetable
-layer types, ...) and by minimum star ratings, check benchmark results (switchable between the benchmarks of the
-method comparison suite, e.g. MetaMathQA or image generation), and jump to the PEFT docs. The app has two tabs: one
-to browse the shop, one for the cart, which shows usage code snippets and a feature comparison table for the
-collected methods. In keeping with the shop theme, every method has a (crossed-out) price tag, benchmark results
-double as customer star ratings, and checkout is free.
+Users can filter methods by their capabilities (merging, multi-adapter support, quantization backends, targetable layer
+types, ...) and by minimum star ratings, check benchmark results (switchable between the benchmarks of the method
+comparison suite, e.g. MetaMathQA or image generation), and jump to the PEFT docs. The app has three tabs: one to browse
+the shop, one for the cart, which shows usage code snippets and a feature comparison table for the collected methods,
+and an "About" page that puts the shop theme into perspective and calls for benchmark contributions. In keeping with the
+shop theme, every method has a (crossed-out) price tag, benchmark results double as customer star ratings, and checkout
+is free.
 
 The app reads a single `data.json` file. If that file does not exist (or --rebuild is passed), it is built by merging
 three sources from the PEFT repository checkout:
@@ -33,9 +34,9 @@ three sources from the PEFT repository checkout:
    avoids drift; DESCRIPTION_OVERRIDES exists for cases where the extracted text reads poorly.
 
 A deployed Space therefore only needs `app.py`, `data.json`, and gradio, while a repository checkout can rebuild the
-data on the fly. The method cards live in a fixed pool of slots created once at startup, each consisting of a card
-body (HTML, since a catalog-style card look is not achievable with Gradio's native components) and a real gr.Button
-to add the method to the cart; filtering and sorting update the slots' content and visibility.
+data on the fly. The method cards live in a fixed pool of slots created once at startup, each consisting of a card body
+(HTML, since a catalog-style card look is not achievable with Gradio's native components) and a real gr.Button to add
+the method to the cart; filtering and sorting update the slots' content and visibility.
 
 Usage:
 
@@ -64,10 +65,6 @@ logger = logging.getLogger("peft-shop")
 HERE = Path(__file__).parent
 
 GIB = 1024**3
-
-# ---------------------------------------------------------------------------------------------------------------
-# data building
-# ---------------------------------------------------------------------------------------------------------------
 
 # Version of the data.json layout produced by build_data; to be bumped when the layout changes, so that loading a
 # stale data.json fails loudly instead of crashing the app in odd places.
@@ -103,7 +100,7 @@ class BenchmarkSpec:
     metrics: tuple[MetricSpec, ...]
 
 
-BENCHMARKS = (
+BENCHMARKS: tuple[BenchmarkSpec, ...] = (
     BenchmarkSpec(
         key="metamathqa",
         label="MetaMathQA",
@@ -172,9 +169,9 @@ def load_benchmark_results(
 ) -> tuple[dict[str, dict[str, Any]], dict[str, Any] | None]:
     """Aggregate one benchmark's runs to one entry per PEFT method.
 
-    Per method, the run with the best headline score is kept: a benchmark can contain multiple hyper-parameter
-    settings per method and users browsing methods are interested in what a method can achieve, not in its worst
-    setting. The full fine-tuning run is returned separately as a baseline for comparison.
+    Per method, the run with the best headline score is kept: a benchmark can contain multiple hyper-parameter settings
+    per method and users browsing methods are interested in what a method can achieve, not in its worst setting. The
+    full fine-tuning run is returned separately as a baseline for comparison.
     """
     score_field = spec.metrics[0].field
     best_per_method: dict[str, dict[str, Any]] = {}
@@ -186,6 +183,7 @@ def load_benchmark_results(
         train_info = result["train_info"]
         if train_info.get("status") != "success":
             continue
+
         metrics = train_info.get("metrics") or []
         last = metrics[-1] if metrics else {}
         if last.get(score_field) is None:
@@ -195,8 +193,8 @@ def load_benchmark_results(
         entry = {"experiment_name": run_info["experiment_name"]}
         for metric in spec.metrics:
             value = last.get(metric.field)
-            # e.g. the drift metric of the image generation benchmark is NaN for the full fine-tuning run; store
-            # null instead so that data.json remains valid JSON
+            # e.g. the drift metric of the image generation benchmark is NaN for the full fine-tuning run; store null
+            # instead so that data.json remains valid JSON
             if isinstance(value, float) and math.isnan(value):
                 value = None
             entry[metric.field] = value
@@ -274,10 +272,6 @@ def build_data(capabilities_path: Path, benchmarks_dir: Path, docs_dir: Path) ->
     }
 
 
-# ---------------------------------------------------------------------------------------------------------------
-# data access
-# ---------------------------------------------------------------------------------------------------------------
-
 # Populated once at startup by _set_data; module-level state keeps the many small helpers below free of an explicit
 # `data` parameter.
 DATA: dict[str, Any] = {}
@@ -319,8 +313,8 @@ SHORT_BADGES = [
     ("hotswap", "hotswapping"),
 ]
 
-# Plain-language explanations of the capabilities, shown when hovering over the badges. Per capability: the text for
-# a supporting method, the text for a non-supporting method, and a neutral "whether ..." phrase for unknown support.
+# Plain-language explanations of the capabilities, shown when hovering over the badges. Per capability: the text for a
+# supporting method, the text for a non-supporting method, and a neutral "whether ..." phrase for unknown support.
 CAPABILITY_EXPLAINERS: dict[str, tuple[str, str, str]] = {
     "merging": (
         "This method's adapter weights can be merged into the base model, eliminating the adapter's inference "
@@ -423,8 +417,8 @@ def layer_types(method: str) -> dict[str, bool] | None:
 def quant_backends(method: str) -> list[str] | None:
     """The supported quantization backends; None means "any".
 
-    Prompt learning methods report quantization as "not_applicable" because they don't wrap layers at all and
-    therefore work with (almost) any quantized base model -- treat that as supporting every backend.
+    Prompt learning methods report quantization as "not_applicable" because they don't wrap layers at all and therefore
+    work with (almost) any quantized base model -- treat that as supporting every backend.
     """
     value = feature(method, "quantization_backends")["value"]
     if value == "not_applicable":
@@ -435,11 +429,6 @@ def quant_backends(method: str) -> list[str] | None:
 def supports_quant(method: str, backend: str) -> bool:
     backends = quant_backends(method)
     return True if backends is None else backend in backends
-
-
-# ---------------------------------------------------------------------------------------------------------------
-# rendering
-# ---------------------------------------------------------------------------------------------------------------
 
 
 def fmt_bytes(num: float) -> str:
@@ -466,11 +455,11 @@ def fmt_metric(metric: MetricSpec, value: float) -> str:
     return f"{100 * value:.1f}%" if metric.is_percent else f"{value:.3f}"
 
 
-# Deterministic tile "branding": separate bytes of a hash of the method name pick the colors and the gradient angle
-# of the card's product-image banner and its logo-like monogram. md5 is used instead of the builtin hash(), which is
-# salted per process and would not be stable between sessions. All colors are mid-tone so they work on light and
-# dark backgrounds; the banner applies them with low alpha, the monogram at full strength.
-TILE_COLORS = ("#e74c3c", "#e67e22", "#d4a017", "#10b981", "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899")
+# Deterministic tile "branding": separate bytes of a hash of the method name pick the colors and the gradient angle of
+# the card's product-image banner and its logo-like monogram. md5 is used instead of the builtin hash(), which is salted
+# per process and would not be stable between sessions. All colors are mid-tone so they work on light and dark
+# backgrounds; the banner applies them with low alpha, the monogram at full strength.
+TILE_COLORS: tuple[str, ...] = ("#e74c3c", "#e67e22", "#d4a017", "#10b981", "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899")
 
 
 def monogram(method: str) -> str:
@@ -478,6 +467,8 @@ def monogram(method: str) -> str:
     parts = method.split("_")
     if len(parts) > 1:
         return (parts[0][0] + parts[1][0]).upper()
+    if len(method) == 3:
+        return method.capitalize()
     return method[:2].capitalize()
 
 
@@ -515,8 +506,7 @@ def star_rating(spec: BenchmarkSpec, field: str, value: float, lower_is_better: 
 
     The best 20% of the methods get five stars, the next 20% four, and so on; even the worst method keeps one star.
     Quantiles are used instead of e.g. min-max scaling so that a single outlier cannot compress everyone else's
-    rating. The full fine-tuning baseline is deliberately not part of the ranking -- it would hand every PEFT method
-    five memory/time stars while capping the achievable score rating.
+    rating.
     """
     values = [info["benchmarks"][spec.key][field] for info in METHODS.values() if spec.key in info["benchmarks"]]
     rank = sum(other < value if lower_is_better else other > value for other in values)
@@ -531,8 +521,8 @@ def benchmark_stars(spec: BenchmarkSpec, field: str, value: float, title: str, l
 def rated_metrics(spec: BenchmarkSpec) -> list[tuple[str, str, bool]]:
     """(field, label, lower_is_better) of every star-rated metric of a benchmark, in card-row order.
 
-    This is the single source of truth for the rated rows: the cards, the rating filters, and their labels all
-    derive from it.
+    This is the single source of truth for the rated rows: the cards, the rating filters, and their labels all derive
+    from it.
     """
     rows = [(metric.field, metric.label, not metric.higher_is_better) for metric in spec.metrics]
     rows += [
@@ -558,6 +548,9 @@ def badge(value: bool | None, label: str, title: str | None = None) -> str:
 
 
 def render_card(method: str, spec: BenchmarkSpec) -> str:
+    """
+    The HTML content of a method's card on the shop page, based on its capabilities and benchmark results.
+    """
     info = METHODS[method]
     category = feature(method, "category")["value"]
     bench = info["benchmarks"].get(spec.key)
@@ -619,11 +612,11 @@ def render_card(method: str, spec: BenchmarkSpec) -> str:
     else:
         bench_html = f'<div class="bench muted">No reviews yet (no {esc(spec.label)} benchmark results).</div>'
 
-    # Overlong descriptions are truncated and get a "Show more" toggle that expands them in place, like overlong
-    # YouTube comments: a hidden checkbox placed before the paragraph selects which of the two text spans is shown,
-    # and the toggle's text, through CSS sibling selectors (see the .more-toggle rules) -- no JS or Gradio event
-    # machinery needed. Truncating by character count server-side (instead of a CSS line clamp) keeps the toggle
-    # and the truncation in sync: the toggle exists if and only if there is hidden text to reveal.
+    # Overlong descriptions are truncated and get a "Show more" toggle that expands them in place. A hidden checkbox
+    # placed before the paragraph selects which of the two text spans is shown, and the toggle's text, through CSS
+    # sibling selectors (see the .more-toggle rules). Truncating by character count server-side (instead of a CSS line
+    # clamp) keeps the toggle and the truncation in sync: the toggle exists if and only if there is hidden text to
+    # reveal.
     description = info["description"]
     desc_html = esc(description)
     toggle_html = ""
@@ -742,9 +735,9 @@ def update_cards(
     """Assign the filtered, sorted methods to the fixed pool of card slots.
 
     The trailing arguments are the values of the rating filter slots (in rated_metrics order). Returns the count
-    markdown followed by (visibility, card HTML, method name, add button) for every slot; the button label shows
-    whether the slot's method is already in the cart. Slots beyond the number of matching methods are hidden and get
-    an empty method name, which add_to_cart treats as a no-op.
+    markdown followed by (visibility, card HTML, method name, add button) for every slot; the button label shows whether
+    the slot's method is already in the cart. Slots beyond the number of matching methods are hidden and get an empty
+    method name, which add_to_cart treats as a no-op.
     """
     spec = BENCHMARKS_BY_KEY[bench_key]
     cart = cart or []
@@ -791,16 +784,13 @@ def update_rating_filters(bench_key):
     ]
 
 
-# ---------------------------------------------------------------------------------------------------------------
-# cart
-# ---------------------------------------------------------------------------------------------------------------
-
 # Config arguments used in the cart's usage snippets. Methods not listed get generic arguments based on their
 # category; these are demo values and the snippet says so.
 SNIPPET_CONFIG_ARGS = {
     "ADALORA": 'target_modules=["q_proj", "v_proj"], total_step=1000',
     "ADAPTION_PROMPT": 'adapter_len=16, adapter_layers=8, task_type="CAUSAL_LM"',
     "TRAINABLE_TOKENS": 'target_modules=["embed_tokens"], token_indices=[0, 1]',
+    "IA3": 'target_modules=["q_proj", "v_proj"], feedforward_modules=[]',
 }
 
 # Complete snippet replacements for methods whose usage does not follow the common pattern at all.
@@ -959,6 +949,34 @@ def add_to_cart(cart: list[str] | None, method: str) -> list[str]:
     return cart
 
 
+BENCHMARK_LIST = ", ".join(f"{spec.label} on {spec.model_name}" for spec in BENCHMARKS)
+
+ABOUT_MD = f"""
+## About the PEFT shop
+
+This is an official app of the 🤗 [PEFT](https://github.com/huggingface/peft) library — but please take its
+contents lightly: the shop is a playful way to explore the PEFT methods, not a buyer's guide. In particular, it
+does not endorse any PEFT method over any other. The prices are made up, and the star ratings compress a handful
+of benchmark runs into a coarse ranking; which method works best depends on your model, your task, and your
+compute budget.
+
+The capability data (the badges and filters) is generated directly from the PEFT source code, so it reflects what
+the library actually does. The benchmark numbers come from the [PEFT method comparison]({BENCHMARK_SPACE_URL}),
+where each method is represented by its best run.
+
+## Contribute to the benchmarks 🧪
+
+The benchmarks can always use more coverage, and contributions are very welcome, for example:
+
+- results for methods that have no reviews yet, or better hyper-parameter settings for existing entries
+- new benchmark tasks beyond the current ones
+
+Head over to the [method comparison directory](https://github.com/huggingface/peft/tree/main/method_comparison)
+to get started, and open an [issue](https://github.com/huggingface/peft/issues) to discuss new benchmark ideas or
+anything in the shop that looks off.
+"""
+
+
 # Styling for the HTML-rendered parts. The palette is mapped to Gradio's own theme CSS variables where possible, so
 # light and dark mode adapt automatically (a hand-rolled `.dark` override proved unreliable). The badge and chip
 # backgrounds use translucent colors that work on top of both light and dark surfaces.
@@ -1095,7 +1113,8 @@ def build_demo() -> gr.Blocks:
             f"[GitHub](https://github.com/huggingface/peft) · "
             f"[Benchmarks]({BENCHMARK_SPACE_URL})"
         )
-        # browsing and the cart are two top-level tabs; the tab labels are enlarged via CSS so they're hard to miss
+        # browsing, the cart, and the about page are top-level tabs; the tab labels are enlarged via CSS so they're hard
+        # to miss
         with gr.Tabs():
             with gr.Tab("🛍️ Browse the shop"):
                 with gr.Row():
@@ -1177,30 +1196,31 @@ def build_demo() -> gr.Blocks:
                 receipt_html = gr.HTML(build_receipt([]))
                 gr.Markdown("### Feature comparison")
                 compare_html = gr.HTML(build_comparison([]))
-        benchmark_list = ", ".join(f"{spec.label} on {spec.model_name}" for spec in BENCHMARKS)
+            with gr.Tab("ℹ️ About"):
+                gr.Markdown(ABOUT_MD)
         gr.Markdown(
             f"<small>Capability data is generated from the PEFT code base (peft v{DATA['peft_version']}) by "
             "`scripts/generate_method_capabilities.py`; values marked “?” could not be determined automatically. "
-            f"Benchmark numbers come from the [PEFT method comparison]({BENCHMARK_SPACE_URL}) ({benchmark_list}); "
+            f"Benchmark numbers come from the [PEFT method comparison]({BENCHMARK_SPACE_URL}) ({BENCHMARK_LIST}); "
             "each method shows its best run on the selected benchmark.</small>"
         )
 
         basic_filters = [search, categories, capabilities, layers, quant, benchmarked_only, benchmark, sort_by]
         filter_inputs = basic_filters + rating_filters
-        # The cart is an extra input to the card rendering (for the "in cart" button labels) but deliberately not
-        # part of filter_inputs: resetting the filters must not clear the cart. It sits between the basic filters
-        # and the rating filters so that update_cards can take the latter as its variadic tail.
+        # The cart is an extra input to the card rendering (for the "in cart" button labels) but deliberately not part
+        # of filter_inputs: resetting the filters must not clear the cart. It sits between the basic filters and the
+        # rating filters so that update_cards can take the latter as its variadic tail.
         card_inputs = basic_filters + [cart_select] + rating_filters
         slot_outputs = [count_md]
         for slot_column, slot_html, slot_method, slot_button in slots:
             slot_outputs.extend([slot_column, slot_html, slot_method, slot_button])
         for component in filter_inputs:
-            # The search box needs both listeners: .input fires per keystroke but (in Gradio 6) not when characters
-            # are deleted, .change fires on any value change -- including deletions and programmatic ones like
-            # "reset filters" -- but might lag behind while typing. Double-firing is harmless, the render is
-            # idempotent. trigger_mode="always_last" makes sure the render runs again with the final value when
-            # events arrive while a previous render is still in flight -- the default "once" of .input would
-            # silently drop them, leaving the cards filtered by a stale prefix of the search query.
+            # The search box needs both listeners: .input fires per keystroke but (in Gradio 6) not when characters are
+            # deleted, .change fires on any value change -- including deletions and programmatic ones like "reset
+            # filters" -- but might lag behind while typing. Double-firing is harmless, the render is
+            # idempotent. trigger_mode="always_last" makes sure the render runs again with the final value when events
+            # arrive while a previous render is still in flight -- the default "once" of .input would silently drop
+            # them, leaving the cards filtered by a stale prefix of the search query.
             listeners = [component.change]
             if isinstance(component, gr.Textbox):
                 listeners.append(component.input)
@@ -1222,8 +1242,8 @@ def build_demo() -> gr.Blocks:
             )
 
         # Updating cart_select programmatically (from the cards' add buttons or "clear cart") also triggers these
-        # listeners, so the code snippet, the comparison table, the pay receipt, the cart tab label, and the
-        # "in cart" button labels always follow along.
+        # listeners, so the code snippet, the comparison table, the pay receipt, the cart tab label, and the "in cart"
+        # button labels always follow along.
         cart_outputs = [cart_code, compare_html, receipt_html, cart_tab]
         cart_select.change(update_cart, inputs=cart_select, outputs=cart_outputs, show_progress="hidden")
         cart_select.change(update_cards, inputs=card_inputs, outputs=slot_outputs, show_progress="hidden")
@@ -1235,11 +1255,6 @@ def build_demo() -> gr.Blocks:
         reset_button.click(reset_filters, outputs=filter_inputs, show_progress="hidden")
 
     return demo
-
-
-# ---------------------------------------------------------------------------------------------------------------
-# entry point
-# ---------------------------------------------------------------------------------------------------------------
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
