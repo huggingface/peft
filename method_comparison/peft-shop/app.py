@@ -465,34 +465,33 @@ def fmt_metric(metric: MetricSpec, value: float) -> str:
     return f"{100 * value:.1f}%" if metric.is_percent else f"{value:.3f}"
 
 
-# Deterministic "random" typography for the method names, to give the tiles an individual look: separate bytes of a
-# hash of the method name pick the color, font, and extra style from these fixed lists. md5 is used instead of the
-# builtin hash(), which is salted per process and would not be stable between sessions. All colors are mid-tone so
-# they stay readable on light and dark backgrounds; all fonts are common system fonts, no webfonts needed.
-TITLE_COLORS = ("#e74c3c", "#e67e22", "#d4a017", "#10b981", "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899")
-TITLE_FONTS = (
-    "Georgia, serif",
-    "'Palatino Linotype', Palatino, serif",
-    "'Courier New', Courier, monospace",
-    "Verdana, Geneva, sans-serif",
-    "'Trebuchet MS', sans-serif",
-    "Impact, 'Arial Black', sans-serif",
-)
-TITLE_STYLES = (
-    "",
-    "font-style: italic;",
-    "text-shadow: 2px 2px 3px rgba(0, 0, 0, 0.3);",
-    "letter-spacing: 0.12em;",
-    "border-bottom: 3px dotted currentcolor;",
-)
+# Deterministic tile "branding": separate bytes of a hash of the method name pick the colors and the gradient angle
+# of the card's product-image banner and its logo-like monogram. md5 is used instead of the builtin hash(), which is
+# salted per process and would not be stable between sessions. All colors are mid-tone so they work on light and
+# dark backgrounds; the banner applies them with low alpha, the monogram at full strength.
+TILE_COLORS = ("#e74c3c", "#e67e22", "#d4a017", "#10b981", "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899")
 
 
-def title_style(method: str) -> str:
+def monogram(method: str) -> str:
+    """The 1-2 letter "logo" text of a method: initials of underscore-separated parts, else the first two letters."""
+    parts = method.split("_")
+    if len(parts) > 1:
+        return (parts[0][0] + parts[1][0]).upper()
+    return method[:2].capitalize()
+
+
+def banner_html(method: str) -> str:
+    """The card's header banner: a hash-colored gradient strip with the logo-like monogram and the method name."""
     digest = hashlib.md5(method.encode()).digest()
-    color = TITLE_COLORS[digest[0] % len(TITLE_COLORS)]
-    font = TITLE_FONTS[digest[1] % len(TITLE_FONTS)]
-    extra = TITLE_STYLES[digest[2] % len(TITLE_STYLES)]
-    return f"color: {color}; font-family: {font}; {extra}"
+    color = TILE_COLORS[digest[0] % len(TILE_COLORS)]
+    # the second gradient color is derived as an offset from the first, so the two always differ
+    second = TILE_COLORS[(digest[0] + 1 + digest[1] % (len(TILE_COLORS) - 1)) % len(TILE_COLORS)]
+    angle = digest[2] % 360
+    return (
+        f'<div class="banner" style="background: linear-gradient({angle}deg, {color}40, {second}40);">'
+        f'<span class="monogram" style="background: {color};">{esc(monogram(method))}</span>'
+        f"<h3>{esc(method)}</h3></div>"
+    )
 
 
 def fantasy_price(method: str) -> float:
@@ -626,7 +625,7 @@ def render_card(method: str, spec: BenchmarkSpec) -> str:
         more_html = (
             f'<button class="more-link" popovertarget="desc-{esc(method)}">Show full description</button>'
             f'<div popover id="desc-{esc(method)}" class="desc-popover">'
-            f'<h4 style="{title_style(method)}">{esc(method)}</h4><p>{esc(description)}</p></div>'
+            f"<h4>{esc(method)}</h4><p>{esc(description)}</p></div>"
         )
 
     paper_url = info.get("paper_url")  # .get: tolerate a data.json built before paper links were added
@@ -638,7 +637,7 @@ def render_card(method: str, spec: BenchmarkSpec) -> str:
 
     return f"""
     <article class="card">
-      <h3 style="{title_style(method)}">{esc(method)}</h3>
+      {banner_html(method)}
       <p class="description">{esc(description)}</p>
       {more_html}
       <div class="badges"><span class="chip category">{esc(CATEGORY_LABELS.get(category, category))}</span>{badges}</div>
@@ -811,11 +810,11 @@ model.print_trainable_parameters()
 model.save_pretrained("my-{method.lower()}-adapter")"""
 
 
-def build_comparison(methods: list[str], spec: BenchmarkSpec) -> str:
+def build_comparison(methods: list[str]) -> str:
     """The cart's feature comparison table: feature sets as rows, the collected methods as columns.
 
-    The table is wrapped in a horizontally scrollable container (see the .compare-scroll CSS), since any number of
-    methods can be in the cart.
+    The results of all benchmarks are included, one labeled section each. The table is wrapped in a horizontally
+    scrollable container (see the .compare-scroll CSS), since any number of methods can be in the cart.
     """
     if not methods:
         return '<div class="explorer"><p class="muted">Add methods to the cart to compare their features.</p></div>'
@@ -844,25 +843,26 @@ def build_comparison(methods: list[str], spec: BenchmarkSpec) -> str:
     rows.append(row("Layer types", [layers_cell(m) for m in methods]))
     rows.append(row("Quantization", [quant_cell(m) for m in methods]))
 
-    bench_rows = [
-        # the default argument binds the current metric, as default-less closures in a loop would all end up
-        # referring to the last one
-        (metric.label[0].upper() + metric.label[1:], lambda b, metric=metric: fmt_metric(metric, b[metric.field]))
-        for metric in spec.metrics
-    ]
-    bench_rows += [
-        ("Peak memory", lambda b: fmt_bytes(b["peak_memory_bytes"])),
-        ("Trainable params", lambda b: fmt_params(b["num_trainable_params"])),
-        ("Checkpoint size", lambda b: fmt_megabytes(b["adapter_file_size_bytes"])),
-        ("Train time", lambda b: fmt_minutes(b["train_time_sec"])),
-    ]
-    rows.append(f"<tr><th scope='row' class='section'>{esc(spec.label)} benchmark</th></tr>")
-    for label, fmt in bench_rows:
-        cells = [
-            esc(fmt(b)) if (b := METHODS[m]["benchmarks"].get(spec.key)) else '<span class="muted">—</span>'
-            for m in methods
+    for spec in BENCHMARKS:
+        bench_rows = [
+            # the default argument binds the current metric, as default-less closures in a loop would all end up
+            # referring to the last one
+            (metric.label[0].upper() + metric.label[1:], lambda b, metric=metric: fmt_metric(metric, b[metric.field]))
+            for metric in spec.metrics
         ]
-        rows.append(row(label, cells))
+        bench_rows += [
+            ("Peak memory", lambda b: fmt_bytes(b["peak_memory_bytes"])),
+            ("Trainable params", lambda b: fmt_params(b["num_trainable_params"])),
+            ("Checkpoint size", lambda b: fmt_megabytes(b["adapter_file_size_bytes"])),
+            ("Train time", lambda b: fmt_minutes(b["train_time_sec"])),
+        ]
+        rows.append(f"<tr><th scope='row' class='section'>{esc(spec.label)} benchmark</th></tr>")
+        for label, fmt in bench_rows:
+            cells = [
+                esc(fmt(b)) if (b := METHODS[m]["benchmarks"].get(spec.key)) else '<span class="muted">—</span>'
+                for m in methods
+            ]
+            rows.append(row(label, cells))
     rows.append(
         row("Docs", [f'<a href="{esc(METHODS[m]["docs_url"])}" target="_blank" rel="noopener">↗</a>' for m in methods])
     )
@@ -906,16 +906,15 @@ def build_receipt(methods: list[str]) -> str:
     )
 
 
-def update_cart(methods: list[str], bench_key: str) -> tuple[str, str, str, dict]:
+def update_cart(methods: list[str]) -> tuple[str, str, str, dict]:
     """Return the cart's code snippet, the feature comparison table, the (hidden) pay receipt, and the cart tab
     label, which shows the number of collected methods."""
-    spec = BENCHMARKS_BY_KEY[bench_key]
     methods = methods or []
     tab = gr.update(label=f"🛒 Cart ({len(methods)})" if methods else "🛒 Cart")
     if not methods:
-        return EMPTY_CART_SNIPPET, build_comparison([], spec), build_receipt([]), tab
+        return EMPTY_CART_SNIPPET, build_comparison([]), build_receipt([]), tab
     snippet = "\n\n\n".join(f"# ========== {method} ==========\n{usage_snippet(method)}" for method in methods)
-    return snippet, build_comparison(methods, spec), build_receipt(methods), tab
+    return snippet, build_comparison(methods), build_receipt(methods), tab
 
 
 def add_to_cart(cart: list[str] | None, method: str) -> list[str]:
@@ -938,7 +937,15 @@ CSS = """
   --x-unknown: #9ca3af; --x-unknown-bg: rgba(156, 163, 175, 0.2); color: var(--x-text); }
 
 .explorer .card { display: flex; flex-direction: column; gap: 0.6rem; }
-.explorer .card h3 { margin: 0; font-size: 1.5rem; line-height: 1.15; letter-spacing: 0.02em; }
+.explorer .card h3 { margin: 0; font-size: 1.3rem; font-weight: 700; line-height: 1.15;
+  letter-spacing: 0.02em; min-width: 0; overflow-wrap: anywhere; }
+/* the header banner: a gradient strip carrying the method's logo-like monogram and its name (colors are set
+   inline per method) */
+.explorer .banner { min-height: 3.2rem; border-radius: 8px; display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.4rem 0.7rem; }
+.explorer .monogram { width: 2.2rem; height: 2.2rem; flex-shrink: 0; border-radius: 8px; display: flex; align-items: center;
+  justify-content: center; color: #fff; font-weight: 800; font-size: 0.95rem;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25); }
 .explorer .description { margin: 0; color: var(--x-muted); font-size: 0.86rem; display: -webkit-box;
   -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .explorer .badges, .explorer .quant-row { display: flex; flex-wrap: wrap; gap: 0.3rem; }
@@ -1103,7 +1110,7 @@ def build_demo() -> gr.Blocks:
                 # the receipt popover is invisible until the pay button opens it
                 receipt_html = gr.HTML(build_receipt([]))
                 gr.Markdown("### Feature comparison")
-                compare_html = gr.HTML(build_comparison([], BENCHMARKS[0]))
+                compare_html = gr.HTML(build_comparison([]))
         benchmark_list = ", ".join(f"{spec.label} on {spec.model_name}" for spec in BENCHMARKS)
         gr.Markdown(
             f"<small>Capability data is generated from the PEFT code base (peft v{DATA['peft_version']}) by "
@@ -1145,12 +1152,10 @@ def build_demo() -> gr.Blocks:
             )
 
         # Updating cart_select programmatically (from the cards' add buttons or "clear cart") also triggers these
-        # listeners, so the code snippet, the comparison table, the pay receipt, and the "in cart" button labels
-        # always follow along; the comparison table and receipt follow the benchmark dropdown as well (the benchmark
-        # dropdown already re-renders the cards through the filter listeners above).
+        # listeners, so the code snippet, the comparison table, the pay receipt, the cart tab label, and the
+        # "in cart" button labels always follow along.
         cart_outputs = [cart_code, compare_html, receipt_html, cart_tab]
-        for trigger in (cart_select.change, benchmark.change):
-            trigger(update_cart, inputs=[cart_select, benchmark], outputs=cart_outputs, show_progress="hidden")
+        cart_select.change(update_cart, inputs=cart_select, outputs=cart_outputs, show_progress="hidden")
         cart_select.change(update_cards, inputs=card_inputs, outputs=slot_outputs, show_progress="hidden")
         clear_button.click(list, outputs=cart_select, show_progress="hidden")
         # the receipt is kept up to date by update_cart, so paying only needs to open the popover, which is a purely
