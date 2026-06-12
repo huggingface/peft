@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
-from typing import Optional
+from typing import ClassVar, Optional
 
 from peft.config import PeftConfig
-from peft.utils.peft_types import PeftType
+from peft.utils.peft_types import Paper, PeftType
 
 
 @dataclass
@@ -60,6 +60,16 @@ class XLoraConfig(PeftConfig):
         global_scaling_weight (`float`, *optional*, defaults to 1):
             Weight to multiply output of each LoRA adapter by.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "XLORA": Paper(
+            title=(
+                "X-LoRA: Mixture of Low-Rank Adapter Experts, a Flexible Framework for Large Language Models with "
+                "Applications in Protein Mechanics and Molecular Design"
+            ),
+            url="https://huggingface.co/papers/2402.07148",
+        ),
+    }
 
     hidden_size: int = None  # type: ignore
     adapters: dict[str, str] = None  # type: ignore

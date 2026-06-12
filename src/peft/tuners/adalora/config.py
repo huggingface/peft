@@ -14,10 +14,10 @@
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import ClassVar, Optional
 
 from peft.tuners.lora import LoraConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -55,6 +55,13 @@ class AdaLoraConfig(LoraConfig):
         total_step (`int`): The total training steps that should be specified before training.
         rank_pattern (`list`): The allocated rank for each weight matrix by RankAllocator.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "ADALORA": Paper(
+            title="Adaptive Budget Allocation for Parameter-Efficient Fine-Tuning",
+            url="https://arxiv.org/abs/2303.10512",
+        ),
+    }
 
     target_r: int = field(default=8, metadata={"help": "Target Lora matrix dimension."})
     init_r: int = field(default=12, metadata={"help": "Initial Lora matrix dimension."})

@@ -14,10 +14,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import ClassVar, Literal, Optional, Union
 
 from peft.tuners.lycoris_utils import LycorisConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -74,6 +74,18 @@ class LoKrConfig(LycorisConfig):
         modules_to_save (`Optional[List[str]]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "LOKR": Paper(
+            title="Navigating Text-To-Image Customization: From LyCORIS Fine-Tuning to Model Evaluation",
+            url="https://huggingface.co/papers/2309.14859",
+        ),
+        "FedPara": Paper(
+            title="FedPara: Low-Rank Hadamard Product for Communication-Efficient Federated Learning",
+            url="https://huggingface.co/papers/2108.06098",
+            description="The implementation of LoKr is also based on methods introduced in this paper (see LoHa).",
+        ),
+    }
 
     r: int = field(default=8, metadata={"help": "LoKr rank"})
     alpha: int = field(default=8, metadata={"help": "LoKr alpha"})

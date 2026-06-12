@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import ClassVar, Literal, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 RoadVariant = Literal["road_1", "road_2", "road_4"]
@@ -61,6 +61,13 @@ class RoadConfig(PeftConfig):
         modules_to_save (`List[str]`):
             List of modules apart from Road layers to be set as trainable and saved in the final checkpoint.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "ROAD": Paper(
+            title="3-in-1: 2D Rotary Adaptation for Efficient Finetuning, Efficient Batching and Composability",
+            url="https://huggingface.co/papers/2409.00119",
+        ),
+    }
 
     variant: Union[str, RoadVariant] = field(
         default="road_1",

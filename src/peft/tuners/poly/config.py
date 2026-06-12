@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import ClassVar, Literal, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -45,6 +45,18 @@ class PolyConfig(PeftConfig):
         n_splits (`int`): The number of splits within each LoRA of a Poly layer. A value greater
             than 1 indicates the use of Multi-Head Routing (MHR).
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "POLY": Paper(
+            title="Combining Modular Skills in Multitask Learning",
+            url="https://huggingface.co/papers/2202.13914",
+        ),
+        "MHR": Paper(
+            title="Multi-Head Adapter Routing for Cross-Task Generalization",
+            url="https://huggingface.co/papers/2211.03831",
+            description="To use Multi-Head Routing (MHR), set `n_splits` to a value greater than 1.",
+        ),
+    }
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
     target_modules: Optional[Union[list[str], str]] = field(

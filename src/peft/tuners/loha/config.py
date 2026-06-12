@@ -14,10 +14,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from peft.tuners.lycoris_utils import LycorisConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -68,6 +68,13 @@ class LoHaConfig(LycorisConfig):
         modules_to_save (`Optional[List[str]]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "LOHA": Paper(
+            title="FedPara: Low-Rank Hadamard Product for Communication-Efficient Federated Learning",
+            url="https://huggingface.co/papers/2108.06098",
+        ),
+    }
 
     r: int = field(default=8, metadata={"help": "LoHa rank"})
     alpha: int = field(default=8, metadata={"help": "LoHa alpha"})

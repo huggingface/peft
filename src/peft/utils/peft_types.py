@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import enum
+from dataclasses import dataclass
 from typing import Optional
 
 
@@ -114,6 +115,32 @@ class TaskType(str, enum.Enum):
     TOKEN_CLS = "TOKEN_CLS"
     QUESTION_ANS = "QUESTION_ANS"
     FEATURE_EXTRACTION = "FEATURE_EXTRACTION"
+
+
+@dataclass(frozen=True)
+class Paper:
+    """
+    A reference to a paper that introduces or describes a PEFT method or one of its variants.
+
+    Each PEFT method declares its associated papers in the `papers` class attribute of its config class, which maps a
+    short display name to a `Paper`. The entry for the method itself uses the method's `PeftType` value as the key
+    (e.g. `"LORA"`); variants use their display name as spelled in the publication (e.g. `"DoRA"`). Methods without any
+    associated paper declare an empty dict.
+
+    Args:
+        title (str):
+            The full title of the paper.
+        url (str):
+            Link to the paper. Prefer `https://huggingface.co/papers/...` over arxiv links, arxiv links over other
+            sources.
+        description (Optional[str], optional):
+            Free text providing additional context. For papers describing a variant of a method, this should mention
+            how to enable it, e.g. "To use DoRA, pass `use_dora=True`.".
+    """
+
+    title: str
+    url: str
+    description: Optional[str] = None
 
 
 def register_peft_method(

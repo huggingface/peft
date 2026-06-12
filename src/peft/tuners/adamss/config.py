@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import ClassVar, Literal, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -129,6 +129,13 @@ class AdamssConfig(PeftConfig):
             effective ranks (more aggressive truncation). Typical values range from 0.05 to 0.2. Default is 0.1 (10% of
             max).
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "ADAMSS": Paper(
+            title="AdaMSS: Adaptive Multi-Subspace Approach for Parameter-Efficient Fine-Tuning",
+            url="https://openreview.net/forum?id=8ZdWmpYxT0",
+        ),
+    }
 
     r: int = field(
         default=100,

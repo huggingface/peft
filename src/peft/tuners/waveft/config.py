@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 from .constants import WAVELET_REDUCTIONS
 
@@ -89,6 +89,13 @@ class WaveFTConfig(PeftConfig):
             `False`. Note: This option is included for experimental thoroughness to allow researchers to reproduce
             paper results, rather than for practical utility, as no beneficial scenarios have been identified.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "WAVEFT": Paper(
+            title="Exploring Sparsity for Parameter Efficient Fine Tuning Using Wavelets",
+            url="https://huggingface.co/papers/2505.12532",
+        ),
+    }
 
     n_frequency: int = field(
         default=2592,  # Default value might need adjustment based on common use cases or paper findings
