@@ -35,6 +35,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     EvaConfig,
+    FrodConfig,
     GraloraConfig,
     IA3Config,
     LilyConfig,
@@ -1831,6 +1832,71 @@ class TestVeraInitialization:
         model = get_peft_model(self.get_model(), config0)
         # not full message but enough to identify the error
         msg = f"vera_A has a size of {rank0} but {rank1} or greater is required"
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config1)
+
+
+class TestFrodInitialization:
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+                self.lin1 = nn.Linear(20, 20, bias=bias)
+                self.lin2 = nn.Linear(20, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                X = self.lin2(X)
+                return X
+
+        return MLP().to(self.torch_device)
+
+    def test_frod_multiple_adapters_same_prng_share_projection_buffers(self):
+        torch.manual_seed(0)
+        config0 = FrodConfig(target_modules=["lin1", "lin2"], init_weights=False)
+        model = get_peft_model(self.get_model().cpu(), config0)
+
+        config1 = FrodConfig(target_modules=["lin1", "lin2"], init_weights=False)
+        model.add_adapter("other", config1)
+
+        assert model.base_model.model.lin1.frod_V["default"].data_ptr() == (
+            model.base_model.model.lin1.frod_V["other"].data_ptr()
+        )
+        assert model.base_model.model.lin1.frod_s_indices["default"].data_ptr() == (
+            model.base_model.model.lin1.frod_s_indices["other"].data_ptr()
+        )
+        assert model.base_model.model.lin2.frod_V["default"].data_ptr() == (
+            model.base_model.model.lin2.frod_V["other"].data_ptr()
+        )
+        assert model.base_model.model.lin2.frod_s_indices["default"].data_ptr() == (
+            model.base_model.model.lin2.frod_s_indices["other"].data_ptr()
+        )
+
+    def test_frod_mixing_save_projection_raises(self):
+        config0 = FrodConfig(target_modules=["lin0"], init_weights=False, save_projection=True)
+        model = get_peft_model(self.get_model(), config0)
+
+        config1 = FrodConfig(target_modules=["lin0"], init_weights=False, save_projection=False)
+        msg = re.escape(
+            "FRoD projection weights must be saved for all adapters or none, but got multiple different values: "
+            "[False, True]"
+        )
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config1)
+
+    def test_frod_add_second_adapter_with_different_prng_key_raises(self):
+        config0 = FrodConfig(target_modules=["lin0"], init_weights=False)
+        model = get_peft_model(self.get_model(), config0)
+
+        config1 = FrodConfig(target_modules=["lin0"], init_weights=False, projection_prng_key=123)
+        msg = re.escape(
+            "FRoD projection initialization key must be the same for all adapters. Got "
+            "config.projection_prng_key=123 but previous config had 0."
+        )
         with pytest.raises(ValueError, match=msg):
             model.add_adapter("other", config1)
 
