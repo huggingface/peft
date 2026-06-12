@@ -2572,9 +2572,15 @@ class TestPeftCustomModel(PeftCommonTester):
         with torch.inference_mode():
             output_before = model(**X)
 
-        # sanity check; use tighter tolerances than below, as some methods (e.g. COFT) only have a small effect on
-        # the output
-        assert not torch.allclose(output_base, output_before, atol=1e-6, rtol=1e-6)
+        # COFT constrains the rotation to stay close to the identity, so its effect on the output is small and the
+        # sanity check below needs tighter tolerances to detect it reliably across platforms
+        if (config_cls == OFTConfig) and config_kwargs.get("coft", False):
+            atol, rtol = 1e-6, 1e-6
+        else:
+            atol, rtol = 1e-5, 1e-5
+
+        # sanity check
+        assert not torch.allclose(output_base, output_before, atol=atol, rtol=rtol)
 
         model.save_pretrained(tmp_path)
         del model
@@ -2585,7 +2591,6 @@ class TestPeftCustomModel(PeftCommonTester):
         with torch.inference_mode():
             output_after = model(**X)
 
-        atol, rtol = 1e-5, 1e-5
         assert torch.allclose(output_before, output_after, atol=atol, rtol=rtol)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
