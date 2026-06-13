@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import math
 import warnings
 from collections.abc import Callable
@@ -139,19 +140,46 @@ class LoraLayer(BaseTunerLayer):
     def _get_in_out_features(self, module: nn.Module) -> tuple[int, int] | tuple[None, None]:
         return _get_in_out_features(module)
 
-    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        """Return a matching LoRA variant for this layer type.
-
-        Given the init arguments of this layer, return the correct LoRA variant, if any. E.g., if `use_dora=True`, this
-        method should return the DoRA variant for the given layer. If `use_alora=True`, same for aLoRA.
-
-        If there is no fitting variant, return None.
-
-        Note: If this layer type does not support the LoRA variant at all, please raise an error during __init__ as is
-        convention, and not here.
-
+    @property
+    def lora_variants(self):
         """
-        return None
+        A dictionary mapping the active LoRA variants to their respective classes.
+
+        To extend this, subclasses should override this property and return a dictionary where the keys are tuples of
+        variant field names (from LoraConfig) and the values are the specific LoraVariant subclasses.
+
+        Tuples are used as keys because they are immutable and hashable, allowing us to safely map combinations of
+        active variants (e.g., DoRA + another variant) to a specific composed variant class.
+        """
+        return {(): None}
+
+    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
+
+        # Fetch the dictionary of variants
+        layer_variants = self.lora_variants
+        lora_variants_configs = [f for f in dataclasses.fields(config) if f.metadata.get("is_lora_variant")]
+
+        # 1. Gather all valid variant field names from the config
+        tagged_fields = {f.name for f in lora_variants_configs}
+
+        # 2. SANITY CHECK: Ensure all keys in the layer's dictionary actually exist in the config
+        for variant_keys in layer_variants.keys():
+            for variant_name in variant_keys:
+                if variant_name not in tagged_fields:
+                    raise ValueError(
+                        f"Variant '{variant_name}' found in lora_variants but it is not tagged with "
+                        f"'is_lora_variant' in LoraConfig."
+                    )
+
+        # 3. Figure out which variants are currently active
+        active_variants = tuple(sorted(f.name for f in lora_variants_configs if getattr(config, f.name)))
+
+        # 4. Route to the correct variant class
+        if active_variants not in layer_variants:
+            raise ValueError(f"Invalid or unsupported variant combination: {active_variants}")
+
+        variant_class = layer_variants[active_variants]
+        return variant_class() if variant_class else None
 
     def update_layer(
         self,
@@ -795,36 +823,19 @@ class Linear(nn.Module, LoraLayer):
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def resolve_lora_variant(self, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if config.velora_config is not None:
-            from .variants import VeloraLinearVariant
+    @property
+    def lora_variants(self):
+        from . import variants
 
-            return VeloraLinearVariant()
-
-        if config.arrow_config is not None:
-            from .variants import ArrowLinearVariant
-
-            return ArrowLinearVariant()
-
-        if config.monteclora_config is not None:
-            from .variants import MontecloraLinearVariant
-
-            return MontecloraLinearVariant()
-        if config.use_bdlora is not None:
-            from .variants import BdLoraLinearVariant
-
-            return BdLoraLinearVariant()
-
-        use_alora = config.alora_invocation_tokens is not None
-        if not config.use_dora and not use_alora:
-            return None
-
-        from .variants import ALoraLinearVariant, DoraLinearVariant
-
-        if use_alora:
-            return ALoraLinearVariant()
-        else:
-            return DoraLinearVariant()
+        return {
+            (): None,
+            ("use_dora",): variants.DoraLinearVariant,
+            ("arrow_config",): variants.ArrowLinearVariant,
+            ("use_bdlora",): variants.BdLoraLinearVariant,
+            ("alora_invocation_tokens",): variants.ALoraLinearVariant,
+            ("velora_config",): variants.VeloraLinearVariant,
+            ("monteclora_config",): variants.MontecloraLinearVariant,
+        }
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -1061,15 +1072,14 @@ class Embedding(nn.Module, LoraLayer):
             config=config,
         )
 
-    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if config.velora_config is not None:
-            raise ValueError("VeLoRA does not support adapting embedding layers.")
-        if not config.use_dora:
-            return None
+    @property
+    def lora_variants(self):
+        from . import variants
 
-        from .variants import DoraEmbeddingVariant
-
-        return DoraEmbeddingVariant()
+        return {
+            (): None,
+            ("use_dora",): variants.DoraEmbeddingVariant,
+        }
 
     def update_layer(
         self,
@@ -1670,15 +1680,14 @@ class Conv2d(_ConvNd):
             raise ValueError(f"Conv2d layer kernel must have 4 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv2d
 
-    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if config.velora_config is not None:
-            raise ValueError("VeLoRA does not support adapting conv layers.")
-        if not config.use_dora:
-            return None
+    @property
+    def lora_variants(self):
+        from . import variants
 
-        from .variants import DoraConv2dVariant
-
-        return DoraConv2dVariant()
+        return {
+            (): None,
+            ("use_dora",): variants.DoraConv2dVariant,
+        }
 
 
 class Conv1d(_ConvNd):
@@ -1689,15 +1698,14 @@ class Conv1d(_ConvNd):
             raise ValueError(f"Conv1d layer kernel must have 3 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv1d
 
-    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if config.velora_config is not None:
-            raise ValueError("VeLoRA does not support adapting conv layers.")
-        if not config.use_dora:
-            return None
+    @property
+    def lora_variants(self):
+        from . import variants
 
-        from .variants import DoraConv1dVariant
-
-        return DoraConv1dVariant()
+        return {
+            (): None,
+            ("use_dora",): variants.DoraConv1dVariant,
+        }
 
 
 class Conv3d(_ConvNd):
@@ -1708,15 +1716,14 @@ class Conv3d(_ConvNd):
             raise ValueError(f"Conv3d layer kernel must have 5 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv3d
 
-    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if config.velora_config is not None:
-            raise ValueError("VeLoRA does not support adapting conv layers.")
-        if not config.use_dora:
-            return None
+    @property
+    def lora_variants(self):
+        from . import variants
 
-        from .variants import DoraConv3dVariant
-
-        return DoraConv3dVariant()
+        return {
+            (): None,
+            ("use_dora",): variants.DoraConv3dVariant,
+        }
 
 
 class MultiheadAttention(nn.Module, LoraLayer):
