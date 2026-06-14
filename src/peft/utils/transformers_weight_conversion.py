@@ -368,8 +368,18 @@ def _convert_peft_config_moe(peft_config, model_type: str) -> None:
     if not fused_targets:
         return
 
-    peft_config.target_parameters = set(peft_config.target_parameters or [])
-    peft_config.target_modules = set(peft_config.target_modules or [])
+    # Normalize string targets (e.g. "all-linear") to a single-element list before
+    # converting to a set, otherwise ``set("all-linear")`` would yield the individual
+    # characters instead of the intended module name. See issue #3229.
+    def _to_target_set(value):
+        if value is None:
+            return set()
+        if isinstance(value, str):
+            return {value}
+        return set(value)
+
+    peft_config.target_parameters = _to_target_set(peft_config.target_parameters)
+    peft_config.target_modules = _to_target_set(peft_config.target_modules)
     if not hasattr(peft_config, "rank_pattern") or peft_config.rank_pattern is None:
         peft_config.rank_pattern = {}
     if not hasattr(peft_config, "alpha_pattern") or peft_config.alpha_pattern is None:
