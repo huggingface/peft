@@ -32,6 +32,14 @@ coefficients and a sparse set of off-diagonal rotation coefficients. This can be
 restrictive. The trade-off is that FRoD computes fixed projection tensors from the base weights during adapter
 injection, which makes setup more expensive and the implementation less broadly supported than LoRA.
 
+Projection initialization can be slow on large models because FRoD runs matrix decompositions over the target module
+categories before injecting the adapters. A progress bar is shown by default and can be disabled with
+`FrodConfig(progressbar=False)`.
+
+For memory-constrained training, `runtime_offload_base_weight=True` can move target base weights to CPU during active
+FRoD forward passes that do not use dropout. This is opt-in because PEFT methods usually keep all base parameters on
+the accelerator after loading and forward passes.
+
 FRoD currently has the following constraint:
 
 - Only `nn.Linear` and `transformers.pytorch_utils.Conv1D` layers are supported.
@@ -51,6 +59,7 @@ peft_config = FrodConfig(
     modules_to_save=["classifier"],
     sparse_rate=0.02,
     frod_dropout=0.0,
+    runtime_offload_base_weight=True,
 )
 
 model = get_peft_model(model, peft_config)

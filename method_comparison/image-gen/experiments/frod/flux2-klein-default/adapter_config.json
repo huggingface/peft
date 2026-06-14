@@ -13,6 +13,7 @@
   "projection_prng_key": 0,
   "regularization_alpha": 0.001,
   "revision": null,
+  "runtime_offload_base_weight": true,
   "save_projection": true,
   "sparse_rate": 0.01,
   "target_modules": [

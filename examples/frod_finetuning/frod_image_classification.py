@@ -3,38 +3,90 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 
 import os
+from dataclasses import dataclass, field
+from typing import Optional
 
 import numpy as np
 import torch
 from datasets import load_dataset
-from transformers import AutoImageProcessor, AutoModelForImageClassification, Trainer, TrainingArguments
+from transformers import (
+    AutoImageProcessor,
+    AutoModelForImageClassification,
+    HfArgumentParser,
+    Trainer,
+    TrainingArguments,
+)
 
 from peft import FrodConfig, get_peft_model
 
 
-MODEL_NAME = os.environ.get("FROD_IMAGE_MODEL_NAME", "openai/clip-vit-base-patch32")
-OUTPUT_DIR = os.environ.get("FROD_IMAGE_OUTPUT_DIR", "clip-vit-base-patch32-frod-stanford-cars")
-DATA_DIR = os.environ.get("FROD_STANFORD_CARS_DATA_DIR")
-NUM_TRAIN_EPOCHS = int(os.environ.get("FROD_IMAGE_NUM_TRAIN_EPOCHS", "3"))
-TRAIN_BATCH_SIZE = int(os.environ.get("FROD_IMAGE_TRAIN_BATCH_SIZE", "64"))
-EVAL_BATCH_SIZE = int(os.environ.get("FROD_IMAGE_EVAL_BATCH_SIZE", "64"))
-SPARSE_RATE = float(os.environ.get("FROD_IMAGE_SPARSE_RATE", "0.01"))
-FROD_LAMBDA_L_LR = float(os.environ.get("FROD_IMAGE_LAMBDA_L_LR", "5e-4"))
-FROD_LAMBDA_S_LR = float(os.environ.get("FROD_IMAGE_LAMBDA_S_LR", "5e-5"))
-CLASSIFIER_LR = float(os.environ.get("FROD_IMAGE_CLASSIFIER_LR", "1e-4"))
-CLIP_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"]
+@dataclass
+class FrodImageArguments:
+    model_name_or_path: str = field(
+        default="openai/clip-vit-base-patch32",
+        metadata={"help": "Model checkpoint used for image classification."},
+    )
+    data_dir: Optional[str] = field(
+        default=None,
+        metadata={"help": "Optional local Stanford Cars dataset directory containing the parquet data files."},
+    )
+    target_modules: list[str] = field(
+        default_factory=lambda: ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
+        metadata={"help": "Module names to replace with FRoD adapters."},
+    )
+    sparse_rate: float = field(
+        default=0.01,
+        metadata={"help": "Fraction of off-diagonal entries trained in the sparse FRoD matrix."},
+    )
+    frod_dropout: float = field(
+        default=0.0,
+        metadata={"help": "Dropout probability applied before the FRoD adapter branch."},
+    )
+    frod_lambda_l_lr: float = field(
+        default=5e-4,
+        metadata={"help": "Learning rate for the trainable diagonal FRoD coefficients."},
+    )
+    frod_lambda_s_lr: float = field(
+        default=5e-5,
+        metadata={"help": "Learning rate for the trainable sparse FRoD coefficients."},
+    )
+    classifier_lr: float = field(default=1e-4, metadata={"help": "Learning rate for the classification head."})
+    projection_prng_key: int = field(default=3, metadata={"help": "Random seed used for FRoD projection masks."})
+    runtime_offload_base_weight: bool = field(
+        default=False,
+        metadata={"help": "Move target base weights to CPU during active FRoD forward passes to reduce GPU memory."},
+    )
+
+
+@dataclass
+class FrodImageTrainingArguments(TrainingArguments):
+    output_dir: str = "clip-vit-base-patch32-frod-stanford-cars"
+    learning_rate: float = 5e-4
+    per_device_train_batch_size: int = 64
+    per_device_eval_batch_size: int = 64
+    num_train_epochs: float = 3
+    eval_strategy: str = "epoch"
+    save_strategy: str = "epoch"
+    load_best_model_at_end: bool = True
+    metric_for_best_model: str = "accuracy"
+    lr_scheduler_type: str = "constant"
+    remove_unused_columns: bool = False
+    report_to: str = "none"
 
 
 def main():
-    if DATA_DIR:
+    parser = HfArgumentParser((FrodImageArguments, FrodImageTrainingArguments))
+    frod_args, training_args = parser.parse_args_into_dataclasses()
+
+    if frod_args.data_dir:
         data_files = {
             "train": [
-                os.path.join(DATA_DIR, "data", "train-00000-of-00002.parquet"),
-                os.path.join(DATA_DIR, "data", "train-00001-of-00002.parquet"),
+                os.path.join(frod_args.data_dir, "data", "train-00000-of-00002.parquet"),
+                os.path.join(frod_args.data_dir, "data", "train-00001-of-00002.parquet"),
             ],
             "test": [
-                os.path.join(DATA_DIR, "data", "test-00000-of-00002.parquet"),
-                os.path.join(DATA_DIR, "data", "test-00001-of-00002.parquet"),
+                os.path.join(frod_args.data_dir, "data", "test-00000-of-00002.parquet"),
+                os.path.join(frod_args.data_dir, "data", "test-00001-of-00002.parquet"),
             ],
         }
     else:
@@ -52,7 +104,7 @@ def main():
     dataset = load_dataset("parquet", data_files=data_files)
     train_split = dataset["train"]
     eval_split = dataset["test"]
-    image_processor = AutoImageProcessor.from_pretrained(MODEL_NAME)
+    image_processor = AutoImageProcessor.from_pretrained(frod_args.model_name_or_path)
     label_feature = train_split.features["label"]
     label_names = (
         label_feature.names if hasattr(label_feature, "names") else [str(i) for i in sorted(set(train_split["label"]))]
@@ -61,18 +113,19 @@ def main():
     label2id = {name: idx for idx, name in id2label.items()}
 
     model = AutoModelForImageClassification.from_pretrained(
-        MODEL_NAME,
+        frod_args.model_name_or_path,
         num_labels=len(label_names),
         id2label=id2label,
         label2id=label2id,
         ignore_mismatched_sizes=True,
     )
     peft_config = FrodConfig(
-        target_modules=CLIP_TARGET_MODULES,
+        target_modules=frod_args.target_modules,
         modules_to_save=["classifier"],
-        frod_dropout=0.0,
-        sparse_rate=SPARSE_RATE,
-        projection_prng_key=3,
+        frod_dropout=frod_args.frod_dropout,
+        sparse_rate=frod_args.sparse_rate,
+        projection_prng_key=frod_args.projection_prng_key,
+        runtime_offload_base_weight=frod_args.runtime_offload_base_weight,
     )
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
@@ -97,28 +150,16 @@ def main():
 
     optimizer = torch.optim.AdamW(
         [
-            {"params": [p for n, p in model.named_parameters() if "frod_lambda_l" in n], "lr": FROD_LAMBDA_L_LR},
+            {
+                "params": [p for n, p in model.named_parameters() if "frod_lambda_l" in n],
+                "lr": frod_args.frod_lambda_l_lr,
+            },
             {
                 "params": [p for n, p in model.named_parameters() if "frod_lambda_s_values" in n],
-                "lr": FROD_LAMBDA_S_LR,
+                "lr": frod_args.frod_lambda_s_lr,
             },
-            {"params": [p for n, p in model.named_parameters() if "classifier" in n], "lr": CLASSIFIER_LR},
+            {"params": [p for n, p in model.named_parameters() if "classifier" in n], "lr": frod_args.classifier_lr},
         ]
-    )
-
-    training_args = TrainingArguments(
-        output_dir=OUTPUT_DIR,
-        learning_rate=FROD_LAMBDA_L_LR,
-        per_device_train_batch_size=TRAIN_BATCH_SIZE,
-        per_device_eval_batch_size=EVAL_BATCH_SIZE,
-        num_train_epochs=NUM_TRAIN_EPOCHS,
-        eval_strategy="epoch",
-        save_strategy="epoch",
-        load_best_model_at_end=True,
-        metric_for_best_model="accuracy",
-        lr_scheduler_type="constant",
-        remove_unused_columns=False,
-        report_to="none",
     )
 
     trainer = Trainer(
@@ -132,7 +173,7 @@ def main():
     )
     trainer.train()
     trainer.evaluate()
-    model.save_pretrained(OUTPUT_DIR)
+    model.save_pretrained(training_args.output_dir)
 
 
 if __name__ == "__main__":

@@ -17,11 +17,11 @@ Both scripts use separate optimizer learning rates for FRoD diagonal coefficient
 classification head. FRoD dropout is set to `0.0` because the sparse rotational parameterization is the main
 regularizer in these examples.
 
-To use local mirrors of the image model or dataset, override the image example paths with environment variables:
+To use local mirrors of the image model or dataset, pass the paths as CLI arguments:
 
 ```bash
-FROD_IMAGE_MODEL_NAME=/path/to/local/clip-vit-model \
-FROD_STANFORD_CARS_DATA_DIR=/path/to/local/stanford_cars \
-FROD_IMAGE_OUTPUT_DIR=clip-vit-local-frod-stanford-cars \
-python examples/frod_finetuning/frod_image_classification.py
+python examples/frod_finetuning/frod_image_classification.py \
+  --model_name_or_path /path/to/local/clip-vit-model \
+  --data_dir /path/to/local/stanford_cars \
+  --output_dir clip-vit-local-frod-stanford-cars
 ```

@@ -62,6 +62,14 @@ class FrodConfig(PeftConfig):
         regularization_alpha (`float`):
             Small positive value used while building the shared basis from base weights. It stabilizes the matrix
             inverse when layers in the same category have correlated weights. Defaults to `1e-3`.
+        progressbar (`bool`):
+            Whether to show a progress bar while building the FRoD projections. Projection initialization can be slow
+            on large models because it runs matrix decompositions over the target module categories. Defaults to
+            `True`.
+        runtime_offload_base_weight (`bool`):
+            Whether to move target base weights to CPU during active FRoD forward passes that do not need them. This
+            can reduce GPU memory because FRoD reconstructs the adapted weight directly, but it changes the usual PEFT
+            convention that all base parameters stay on the accelerator after forward. Defaults to `False`.
     """
 
     target_modules: Optional[Union[list[str], str]] = field(
@@ -148,6 +156,25 @@ class FrodConfig(PeftConfig):
                 "Small positive value used while building the shared basis from base weights. It stabilizes matrix "
                 "inverses for correlated layers."
             ),
+        },
+    )
+    progressbar: bool = field(
+        default=True,
+        metadata={
+            "help": (
+                "Whether to show a progress bar while building FRoD projections. Initialization can be slow on large "
+                "models because it runs matrix decompositions over the target module categories."
+            )
+        },
+    )
+    runtime_offload_base_weight: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Whether to move target base weights to CPU during active FRoD forward passes that do not need them. "
+                "This reduces GPU memory but does not preserve the usual PEFT invariant that all base parameters stay "
+                "on the accelerator after forward."
+            )
         },
     )
 

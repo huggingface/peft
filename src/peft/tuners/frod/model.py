@@ -19,6 +19,7 @@ from collections import defaultdict
 
 import torch
 from torch import nn
+from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
@@ -138,8 +139,14 @@ class FrodModel(BaseTuner):
             self.frod_s_size = nn.ModuleDict()
 
         generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
-        categories = {category for layer_dict in weights.values() for category in layer_dict}
-        for category in sorted(categories):
+        categories = sorted({category for layer_dict in weights.values() for category in layer_dict})
+        progress_bar = tqdm(
+            categories,
+            disable=not config.progressbar,
+            desc="FRoD hierarchical joint decomposition",
+            unit="category",
+        )
+        for category in progress_bar:
             matrices = [
                 layer_dict[category].detach().to(torch.float32).cpu()
                 for _, layer_dict in sorted(weights.items())
@@ -147,6 +154,7 @@ class FrodModel(BaseTuner):
             ]
             if not matrices:
                 continue
+            progress_bar.set_postfix(category=category, layers=len(matrices), dim=matrices[0].shape[1])
 
             v_matrix = _projection_from_weights(matrices, config.regularization_alpha)
             example_weight = next(layer_dict[category] for layer_dict in weights.values() if category in layer_dict)

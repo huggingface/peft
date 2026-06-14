@@ -2,6 +2,8 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 
+from dataclasses import dataclass, field
+
 import numpy as np
 import torch
 from datasets import load_dataset
@@ -9,6 +11,7 @@ from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
     DataCollatorWithPadding,
+    HfArgumentParser,
     Trainer,
     TrainingArguments,
 )
@@ -16,18 +19,61 @@ from transformers import (
 from peft import FrodConfig, TaskType, get_peft_model
 
 
-MODEL_NAME = "google-bert/bert-base-uncased"
-DATASET_NAME = "nyu-mll/glue"
-TASK_NAME = "sst2"
-OUTPUT_DIR = "bert-base-uncased-frod-sst2"
-FROD_LAMBDA_L_LR = 2e-2
-FROD_LAMBDA_S_LR = 2e-3
-CLASSIFIER_LR = 1e-2
+@dataclass
+class FrodTextArguments:
+    model_name_or_path: str = field(
+        default="google-bert/bert-base-uncased",
+        metadata={"help": "Model checkpoint used for sequence classification."},
+    )
+    dataset_name: str = field(default="nyu-mll/glue", metadata={"help": "Dataset name or local dataset path."})
+    task_name: str = field(default="sst2", metadata={"help": "Dataset configuration name."})
+    target_modules: list[str] = field(
+        default_factory=lambda: ["query", "value"],
+        metadata={"help": "Module names to replace with FRoD adapters."},
+    )
+    sparse_rate: float = field(
+        default=0.02,
+        metadata={"help": "Fraction of off-diagonal entries trained in the sparse FRoD matrix."},
+    )
+    frod_dropout: float = field(
+        default=0.0,
+        metadata={"help": "Dropout probability applied before the FRoD adapter branch."},
+    )
+    frod_lambda_l_lr: float = field(
+        default=2e-2,
+        metadata={"help": "Learning rate for the trainable diagonal FRoD coefficients."},
+    )
+    frod_lambda_s_lr: float = field(
+        default=2e-3,
+        metadata={"help": "Learning rate for the trainable sparse FRoD coefficients."},
+    )
+    classifier_lr: float = field(default=1e-2, metadata={"help": "Learning rate for the classification head."})
+    runtime_offload_base_weight: bool = field(
+        default=False,
+        metadata={"help": "Move target base weights to CPU during active FRoD forward passes to reduce GPU memory."},
+    )
+
+
+@dataclass
+class FrodTextTrainingArguments(TrainingArguments):
+    output_dir: str = "bert-base-uncased-frod-sst2"
+    learning_rate: float = 2e-2
+    per_device_train_batch_size: int = 32
+    per_device_eval_batch_size: int = 64
+    num_train_epochs: float = 1
+    eval_strategy: str = "epoch"
+    save_strategy: str = "epoch"
+    load_best_model_at_end: bool = True
+    metric_for_best_model: str = "accuracy"
+    report_to: str = "none"
 
 
 def main():
-    dataset = load_dataset(DATASET_NAME, TASK_NAME)
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    parser = HfArgumentParser((FrodTextArguments, FrodTextTrainingArguments))
+    frod_args, training_args = parser.parse_args_into_dataclasses()
+
+    dataset = load_dataset(frod_args.dataset_name, frod_args.task_name)
+    tokenizer = AutoTokenizer.from_pretrained(frod_args.model_name_or_path)
 
     def preprocess(batch):
         return tokenizer(batch["sentence"], truncation=True)
@@ -35,13 +81,14 @@ def main():
     tokenized = dataset.map(preprocess, batched=True)
     tokenized = tokenized.rename_column("label", "labels")
 
-    model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2)
+    model = AutoModelForSequenceClassification.from_pretrained(frod_args.model_name_or_path, num_labels=2)
     peft_config = FrodConfig(
         task_type=TaskType.SEQ_CLS,
-        target_modules=["query", "value"],
+        target_modules=frod_args.target_modules,
         modules_to_save=["classifier"],
-        frod_dropout=0.0,
-        sparse_rate=0.02,
+        frod_dropout=frod_args.frod_dropout,
+        sparse_rate=frod_args.sparse_rate,
+        runtime_offload_base_weight=frod_args.runtime_offload_base_weight,
     )
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
@@ -52,26 +99,16 @@ def main():
 
     optimizer = torch.optim.AdamW(
         [
-            {"params": [p for n, p in model.named_parameters() if "frod_lambda_l" in n], "lr": FROD_LAMBDA_L_LR},
+            {
+                "params": [p for n, p in model.named_parameters() if "frod_lambda_l" in n],
+                "lr": frod_args.frod_lambda_l_lr,
+            },
             {
                 "params": [p for n, p in model.named_parameters() if "frod_lambda_s_values" in n],
-                "lr": FROD_LAMBDA_S_LR,
+                "lr": frod_args.frod_lambda_s_lr,
             },
-            {"params": [p for n, p in model.named_parameters() if "classifier" in n], "lr": CLASSIFIER_LR},
+            {"params": [p for n, p in model.named_parameters() if "classifier" in n], "lr": frod_args.classifier_lr},
         ]
-    )
-
-    training_args = TrainingArguments(
-        output_dir=OUTPUT_DIR,
-        learning_rate=FROD_LAMBDA_L_LR,
-        per_device_train_batch_size=32,
-        per_device_eval_batch_size=64,
-        num_train_epochs=1,
-        eval_strategy="epoch",
-        save_strategy="epoch",
-        load_best_model_at_end=True,
-        metric_for_best_model="accuracy",
-        report_to="none",
     )
 
     trainer = Trainer(
@@ -86,7 +123,7 @@ def main():
     )
     trainer.train()
     trainer.evaluate()
-    model.save_pretrained(OUTPUT_DIR)
+    model.save_pretrained(training_args.output_dir)
 
 
 if __name__ == "__main__":
