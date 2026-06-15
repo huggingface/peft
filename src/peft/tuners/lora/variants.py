@@ -29,7 +29,7 @@ from peft.utils.other import transpose
 from .arrow import ArrowLoraLinearLayer
 from .config import LoraConfig, PeftConfig
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
-from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
+from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraLayer, LoraVariant, _ConvNd
 from .monteclora import MontecloraSampler
 from .velora import VeloraFunction, _get_group_dim, _normalize_projection, _reshape_to_grouped_subtokens
 
@@ -1218,12 +1218,16 @@ class MontecloraLinearVariant(LoraVariant):
         return result
 
 
-def _register_frozen_peft_weight(module: Linear | Embedding, adapter_name: str, weight_name: str) -> None:
+def _register_frozen_peft_weight(module: LoraLayer, adapter_name: str, weight_name: str) -> None:
+    """Register an adapter weight that should stay frozen for this PEFT layer."""
     frozen_peft_weight_names = module.frozen_peft_weight_names.copy()
-    frozen_names = frozen_peft_weight_names.get(adapter_name, ())
-    frozen_peft_weight_names[adapter_name] = tuple(dict.fromkeys((*frozen_names, weight_name)))
+    frozen_peft_weight_names.setdefault(adapter_name, ())
+
+    if weight_name not in frozen_peft_weight_names[adapter_name]:
+        frozen_peft_weight_names[adapter_name] += (weight_name,)
+
     module.frozen_peft_weight_names = frozen_peft_weight_names
-    module._freeze_declared_peft_weights(adapter_name)
+    module._freeze_non_trainable_peft_weights(adapter_name)
 
 
 class MiCALinearVariant(LoraVariant):

@@ -503,7 +503,7 @@ class BaseTuner(nn.Module, ABC):
 
         for module in model.modules():
             if isinstance(module, self.tuner_layer_cls):
-                module._freeze_declared_peft_weights()
+                module._freeze_non_trainable_peft_weights()
 
     def _enable_adapter_layers(self, enabled: bool = True) -> None:
         for module in self.model.modules():
@@ -1555,7 +1555,16 @@ class BaseTunerLayer(ABC):
                     _set_layer_requires_grad(layer, False)
             self._disable_adapters = True
 
-    def _freeze_declared_peft_weights(self, adapter_names: str | Sequence[str] | None = None) -> None:
+    def _freeze_non_trainable_peft_weights(self, adapter_names: str | Sequence[str] | None = None) -> None:
+        """Freeze PEFT weights that adapter variants declare as non-trainable.
+
+        Some variants intentionally train only a subset of their adapter weights. This method reapplies those
+        declarations after code paths that may otherwise mark adapter weights as trainable, such as adapter setup
+        or adapter switching.
+        """
+        if not self.frozen_peft_weight_names:
+            return
+
         if adapter_names is None:
             adapter_names = self.frozen_peft_weight_names.keys()
         elif isinstance(adapter_names, str):
@@ -1594,7 +1603,7 @@ class BaseTunerLayer(ABC):
                 should_require_grad = (key in adapter_names) and (not inference_mode)
                 _set_layer_requires_grad(layer, should_require_grad)
 
-        self._freeze_declared_peft_weights(adapter_names)
+        self._freeze_non_trainable_peft_weights(adapter_names)
         self._active_adapter = adapter_names
 
     def _all_available_adapter_names(self) -> list[str]:
@@ -1672,7 +1681,7 @@ class BaseTunerLayer(ABC):
                     _set_layer_requires_grad(layer, requires_grad)
 
         if requires_grad:
-            self._freeze_declared_peft_weights(adapter_names_set)
+            self._freeze_non_trainable_peft_weights(adapter_names_set)
 
     def _get_base_layer_device_and_dtype(self, base_layer):
         """

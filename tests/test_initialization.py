@@ -497,6 +497,8 @@ class TestLoraInitialization:
         assert trainable_parameters(model) == ["base_model.model.fc1.lora_A.default.weight"]
 
         model.delete_adapter("other")
+        assert "other" not in model.base_model.model.fc1.frozen_peft_weight_names
+        assert "other" not in model.base_model.model.fc2.frozen_peft_weight_names
         config2 = LoraConfig(target_modules=["fc1"], r=4)
         model.add_adapter("other", config2)
         model.set_adapter("other")
