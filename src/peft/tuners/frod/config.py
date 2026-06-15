@@ -67,9 +67,10 @@ class FrodConfig(PeftConfig):
             on large models because it runs matrix decompositions over the target module categories. Defaults to
             `True`.
         runtime_offload_base_weight (`bool`):
-            Whether to move target base weights to CPU during active FRoD forward passes that do not need them. This
-            can reduce GPU memory because FRoD reconstructs the adapted weight directly, but it changes the usual PEFT
-            convention that all base parameters stay on the accelerator after forward. Defaults to `False`.
+            Whether to keep target base weights on CPU when the active FRoD path does not need them. This can reduce
+            GPU memory because FRoD reconstructs the adapted weight directly, but it changes the usual PEFT convention
+            that all base parameters stay on the accelerator after moving the model or running forward. Defaults to
+            `False`.
     """
 
     target_modules: Optional[Union[list[str], str]] = field(
@@ -171,9 +172,9 @@ class FrodConfig(PeftConfig):
         default=False,
         metadata={
             "help": (
-                "Whether to move target base weights to CPU during active FRoD forward passes that do not need them. "
-                "This reduces GPU memory but does not preserve the usual PEFT invariant that all base parameters stay "
-                "on the accelerator after forward."
+                "Whether to keep target base weights on CPU when the active FRoD path does not need them. This reduces "
+                "GPU memory but does not preserve the usual PEFT invariant that all base parameters stay on the "
+                "accelerator after moving the model or running forward."
             )
         },
     )

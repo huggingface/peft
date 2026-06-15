@@ -1888,6 +1888,18 @@ class TestFrodInitialization:
         with pytest.raises(ValueError, match=msg):
             model.add_adapter("other", config1)
 
+    def test_frod_mixing_runtime_offload_base_weight_raises(self):
+        config0 = FrodConfig(target_modules=["lin0"], init_weights=False)
+        model = get_peft_model(self.get_model(), config0)
+
+        config1 = FrodConfig(target_modules=["lin0"], init_weights=False, runtime_offload_base_weight=True)
+        msg = re.escape(
+            "FRoD runtime base-weight offloading must be enabled for all adapters or none, but got multiple "
+            "different values: [False, True]"
+        )
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config1)
+
     def test_frod_add_second_adapter_with_different_prng_key_raises(self):
         config0 = FrodConfig(target_modules=["lin0"], init_weights=False)
         model = get_peft_model(self.get_model(), config0)

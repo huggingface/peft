@@ -36,9 +36,9 @@ Projection initialization can be slow on large models because FRoD runs matrix d
 categories before injecting the adapters. A progress bar is shown by default and can be disabled with
 `FrodConfig(progressbar=False)`.
 
-For memory-constrained training, `runtime_offload_base_weight=True` can move target base weights to CPU during active
-FRoD forward passes that do not use dropout. This is opt-in because PEFT methods usually keep all base parameters on
-the accelerator after loading and forward passes.
+For memory-constrained training, `runtime_offload_base_weight=True` keeps target base weights on CPU when the active
+FRoD path does not need them. This is opt-in because PEFT methods usually keep all base parameters on the accelerator
+after moving the model and after forward passes.
 
 FRoD currently has the following constraint:
 

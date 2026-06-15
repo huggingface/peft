@@ -54,7 +54,7 @@ class FrodImageArguments:
     projection_prng_key: int = field(default=3, metadata={"help": "Random seed used for FRoD projection masks."})
     runtime_offload_base_weight: bool = field(
         default=False,
-        metadata={"help": "Move target base weights to CPU during active FRoD forward passes to reduce GPU memory."},
+        metadata={"help": "Keep target base weights on CPU when active FRoD training does not need them."},
     )
 
 

@@ -26,9 +26,47 @@ from .._buffer_dict import BufferDict
 from .config import FrodConfig
 
 
+class FrodSparseActivationFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx, z_flat: torch.Tensor, indices: torch.Tensor, values: torch.Tensor, chunk_size: int
+    ) -> torch.Tensor:
+        rows, cols = indices
+        ctx.save_for_backward(z_flat, rows, cols, values)
+        ctx.chunk_size = max(1, chunk_size)
+
+        result = torch.zeros_like(z_flat)
+        nnz = values.numel()
+        for start in range(0, nnz, ctx.chunk_size):
+            stop = min(start + ctx.chunk_size, nnz)
+            updates = z_flat.index_select(1, cols[start:stop]) * values[start:stop]
+            result.index_add_(1, rows[start:stop], updates)
+        return result
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        z_flat, rows, cols, values = ctx.saved_tensors
+        grad_z = torch.zeros_like(z_flat) if ctx.needs_input_grad[0] else None
+        grad_values = torch.empty_like(values) if ctx.needs_input_grad[2] else None
+
+        nnz = values.numel()
+        for start in range(0, nnz, ctx.chunk_size):
+            stop = min(start + ctx.chunk_size, nnz)
+            chunk_rows = rows[start:stop]
+            chunk_cols = cols[start:stop]
+            grad_rows = grad_output.index_select(1, chunk_rows)
+            if grad_z is not None:
+                grad_z.index_add_(1, chunk_cols, grad_rows * values[start:stop])
+            if grad_values is not None:
+                grad_values[start:stop] = (grad_rows * z_flat.index_select(1, chunk_cols)).sum(dim=0)
+
+        return grad_z, None, grad_values, None
+
+
 class FrodLayer(BaseTunerLayer):
     adapter_layer_names = ("frod_lambda_l", "frod_lambda_s_values")
     other_param_names = ("frod_V", "frod_U", "frod_s_indices", "frod_s_size", "runtime_offload_base_weight")
+    _frod_sparse_chunk_size = 16_384
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer
@@ -82,9 +120,9 @@ class FrodLayer(BaseTunerLayer):
         if adapter_name not in frod_V:
             # FRoD projection buffers are shared across adapters for the same module category.
             reference_adapter = next(iter(frod_V))
-            frod_V[adapter_name] = frod_V[reference_adapter]
-            frod_s_indices[adapter_name] = frod_s_indices[reference_adapter]
-            frod_s_size[adapter_name] = frod_s_size[reference_adapter]
+            frod_V[adapter_name] = frod_V[reference_adapter].to(device="cpu")
+            frod_s_indices[adapter_name] = frod_s_indices[reference_adapter].to(device="cpu", dtype=torch.long)
+            frod_s_size[adapter_name] = frod_s_size[reference_adapter].to(device="cpu", dtype=torch.long)
 
         frod_v = frod_V[adapter_name].to(dtype=dtype, device="cpu")
         frod_s_index = frod_s_indices[adapter_name].to(device="cpu", dtype=torch.long)
@@ -92,11 +130,7 @@ class FrodLayer(BaseTunerLayer):
         nnz = frod_s_index.shape[1]
         self.frod_lambda_s_values[adapter_name] = nn.Parameter(torch.zeros(nnz, device=device, dtype=dtype))
 
-        # Keep FrodModel as the only registered owner of these shared buffers. Assigning them as normal attributes
-        # would register the same projection containers under every wrapped layer and duplicate traversal/state keys.
-        self.__dict__["frod_V"] = frod_V
-        self.__dict__["frod_s_indices"] = frod_s_indices
-        self.__dict__["frod_s_size"] = frod_s_size
+        self._set_shared_projection_buffers(frod_V, frod_s_indices, frod_s_size)
 
         U, L = self._calculate_frod_u_and_lambda(frod_v, weight)
         U = U.to(dtype)
@@ -110,9 +144,24 @@ class FrodLayer(BaseTunerLayer):
                 nn.init.normal_(self.frod_lambda_s_values[adapter_name], std=0.05)
                 self.frod_lambda_l[adapter_name].add_(torch.randn_like(self.frod_lambda_l[adapter_name]) * 0.05)
 
+        # U is frozen but used in every active forward. Register it as a non-persistent buffer so it follows
+        # model.to(device) once instead of being repeatedly copied from CPU and retained in CUDA's allocation cache.
         self.frod_U[adapter_name] = U.cpu()
         self._move_adapter_to_device_of_base_layer(adapter_name, device=device)
         self.set_adapter(self.active_adapters)
+
+    def _set_shared_projection_buffers(
+        self,
+        frod_V: BufferDict,
+        frod_s_indices: BufferDict,
+        frod_s_size: BufferDict,
+    ) -> None:
+        # FRoD owns projection buffers in FrodModel by module category. Unlike VeRA's single global projection dict,
+        # assigning these category-level BufferDicts as normal layer attributes would register them on every wrapped
+        # layer. Keep plain references so FrodModel remains the only registered owner.
+        object.__setattr__(self, "frod_V", frod_V)
+        object.__setattr__(self, "frod_s_indices", frod_s_indices)
+        object.__setattr__(self, "frod_s_size", frod_s_size)
 
     def _calculate_frod_u_and_lambda(self, V, W):
         w = W.detach().to(torch.float64).cpu()
@@ -153,6 +202,12 @@ class Linear(nn.Linear, FrodLayer):
         self.update_layer(adapter_name, frod_V, frod_s_indices, frod_s_size, config=config)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
+    def _apply(self, fn, recurse=True):
+        result = super()._apply(fn, recurse=recurse)
+        if any(self.runtime_offload_base_weight.values()):
+            self._offload_base_weight_to_cpu()
+        return result
+
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         adapter_names = check_adapters_to_merge(self, adapter_names)
         if not adapter_names:
@@ -185,9 +240,9 @@ class Linear(nn.Linear, FrodLayer):
     ) -> nn.Module:
         if merge:
             self.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-            self._move_base_weight_to_device_of_adapter(self.active_adapters[0] if self.active_adapters else None)
-        else:
-            self._move_base_weight_to_device_of_adapter(self.active_adapters[0] if self.active_adapters else None)
+        # The runtime offload path can keep the target base weight on CPU during active FRoD training. After unloading,
+        # the returned plain base layer must be back on the adapter/model device so the model remains usable.
+        self._move_base_weight_to_device_of_adapter(self.active_adapters[0] if self.active_adapters else None)
         return self.get_base_layer()
 
     def unmerge(self) -> None:
@@ -240,12 +295,11 @@ class Linear(nn.Linear, FrodLayer):
             return torch.zeros_like(z_flat)
         if z_flat.dtype in (torch.float16, torch.bfloat16):
             # Some backends do not implement sparse addmm for fp16/bf16. This computes z @ S.T directly from COO
-            # entries and keeps the activation-side path in the requested dtype.
-            rows, cols = S_sparse.indices()
-            updates = z_flat.index_select(1, cols) * S_sparse.values()
-            result = torch.zeros_like(z_flat)
-            result.index_add_(1, rows, updates)
-            return result
+            # entries and keeps the activation-side path in the requested dtype. The custom autograd function chunks
+            # the COO work without saving every chunk's large [tokens, chunk_nnz] temporary for backward.
+            return FrodSparseActivationFunction.apply(
+                z_flat, S_sparse.indices(), S_sparse.values(), self._frod_sparse_chunk_size
+            )
         return torch.sparse.mm(S_sparse, z_flat.t()).t()
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:

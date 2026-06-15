@@ -170,6 +170,63 @@ class TestFrod:
         # Different target categories have distinct projection buffers.
         assert frod_V_lin1.data_ptr() != mlp_same_prng.base_model.frod_V["lin2"]["default"].data_ptr()
 
+    def test_frod_chunked_sparse_activation_matches_dense_and_gradients(self, mlp):
+        config = FrodConfig(target_modules=["lin1"], init_weights=False)
+        peft_model = get_peft_model(mlp, config)
+        layer = peft_model.base_model.model.lin1
+
+        indices = torch.tensor([[0, 1, 2, 3, 0], [1, 2, 3, 0, 2]])
+        values = torch.tensor([0.5, -0.25, 1.5, 0.75, -1.0], dtype=torch.float16, requires_grad=True)
+        sparse = torch.sparse_coo_tensor(indices, values, (4, 4)).coalesce()
+        z = torch.randn(3, 4, dtype=torch.float16, requires_grad=True)
+
+        old_chunk_size = layer._frod_sparse_chunk_size
+        layer._frod_sparse_chunk_size = 2
+        try:
+            actual = layer._sparse_activation_mm(z, sparse)
+        finally:
+            layer._frod_sparse_chunk_size = old_chunk_size
+        actual.float().pow(2).sum().backward()
+
+        z_expected = z.detach().clone().requires_grad_(True)
+        values_expected = values.detach().clone().requires_grad_(True)
+        dense = torch.zeros(4, 4, dtype=torch.float16)
+        dense[indices[0], indices[1]] = values_expected
+        expected = z_expected @ dense.t()
+        expected.float().pow(2).sum().backward()
+
+        assert values.grad is not None
+        assert z.grad is not None
+        assert torch.allclose(actual, expected, atol=1e-3, rtol=1e-3)
+        assert torch.allclose(values.grad, values_expected.grad, atol=1e-3, rtol=1e-3)
+        assert torch.allclose(z.grad, z_expected.grad, atol=1e-3, rtol=1e-3)
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+    def test_frod_runtime_offload_keeps_base_weight_on_cpu_after_cuda(self, mlp):
+        config = FrodConfig(target_modules=["lin1", "lin2"], runtime_offload_base_weight=True)
+        peft_model = get_peft_model(mlp, config).cuda()
+        lin1 = peft_model.base_model.model.lin1
+
+        assert lin1.get_base_layer().weight.device.type == "cpu"
+        assert lin1.frod_U["default"].device.type == "cuda"
+        assert lin1.frod_lambda_l["default"].device.type == "cuda"
+
+        inputs = torch.randn(5, 10, device="cuda")
+        output = peft_model(inputs)
+
+        assert output.device.type == "cuda"
+        assert lin1.get_base_layer().weight.device.type == "cpu"
+
+    def test_frod_autocast_keeps_frozen_u_in_base_dtype(self):
+        model = MLP().to(torch.bfloat16)
+        config = FrodConfig(target_modules=["lin1"], init_weights=False)
+        peft_model = get_peft_model(model, config)
+        lin1 = peft_model.base_model.model.lin1
+
+        assert lin1.frod_U["default"].dtype == torch.bfloat16
+        assert lin1.frod_lambda_l["default"].dtype == torch.float32
+        assert lin1.frod_lambda_s_values["default"].dtype == torch.float32
+
     def test_frod_categories_with_common_llama_targets(self):
         model = LlamaForCausalLM(
             LlamaConfig(

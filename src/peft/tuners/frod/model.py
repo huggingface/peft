@@ -188,6 +188,19 @@ class FrodModel(BaseTuner):
     def _pre_injection_hook(self, model: nn.Module, config: FrodConfig, adapter_name: str) -> None:
         self._init_frod_projections(config, adapter_name)
 
+    def _cast_adapter_dtype(self, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
+        super()._cast_adapter_dtype(adapter_name, autocast_adapter_dtype)
+
+        if not autocast_adapter_dtype:
+            return
+
+        for module in self.model.modules():
+            if not isinstance(module, FrodLayer) or adapter_name not in module.frod_U:
+                continue
+            _, base_dtype = module._get_base_layer_device_and_dtype(module.get_base_layer())
+            if base_dtype is not None and (base_dtype.is_floating_point or base_dtype.is_complex):
+                module.frod_U[adapter_name] = module.frod_U[adapter_name].to(dtype=base_dtype)
+
     def _check_new_adapter_config(self, config: FrodConfig) -> None:
         super()._check_new_adapter_config(config)
 
@@ -206,6 +219,13 @@ class FrodModel(BaseTuner):
             raise ValueError(
                 "FRoD projection weights must be saved for all adapters or none, but got multiple different values: "
                 f"{save_projection_values}"
+            )
+
+        runtime_offload_values = sorted({config.runtime_offload_base_weight for config in self.peft_config.values()})
+        if len(runtime_offload_values) > 1:
+            raise ValueError(
+                "FRoD runtime base-weight offloading must be enabled for all adapters or none, but got multiple "
+                f"different values: {runtime_offload_values}"
             )
 
     def _create_and_replace(
