@@ -54,6 +54,7 @@ from peft.tuners.tuners_utils import (
 )
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, ModulesToSaveWrapper, infer_device
 from peft.utils.constants import DUMMY_MODEL_CONFIG, MIN_TARGET_MODULES_FOR_OPTIMIZATION
+from peft.utils.quantization_utils import Bnb8bitBackend
 
 from .testing_utils import hub_online_once, require_bitsandbytes, require_non_cpu
 
@@ -488,6 +489,48 @@ class TestTargetedModuleNames:
         ]
         assert model.targeted_module_names == expected
 
+    @pytest.mark.parametrize("layers_pattern", [None, "layers", ["h", "layers"]])
+    def test_layers_to_transform_filters_by_layer_not_expert_index(self, layers_pattern):
+        # Test fix to issue #3016
+        # The layer-index regex used a greedy ".*" prefix, so for MoE paths like
+        # "model.layers.1.mlp.experts.0.up_proj" it captured the expert index instead of the layer
+        # index, making layers_to_transform target the wrong modules.
+        class ToyMoEBlock(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.self_attn = nn.Module()
+                self.self_attn.q_proj = nn.Linear(4, 4, bias=False)
+
+                self.mlp = nn.Module()
+                self.mlp.experts = nn.ModuleList([nn.Module() for _ in range(2)])
+                for e in range(2):
+                    self.mlp.experts[e].up_proj = nn.Linear(4, 4, bias=False)
+
+        class ToyMoEModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.model = nn.Module()
+                self.model.layers = nn.ModuleList([ToyMoEBlock() for _ in range(4)])
+
+        config = LoraConfig(
+            target_modules=["q_proj", "up_proj"],
+            layers_pattern=layers_pattern,
+            layers_to_transform=[1],
+            r=2,
+            lora_alpha=4,
+        )
+        model = get_peft_model(ToyMoEModel(), config)
+
+        # only layer 1's modules should be targeted, both experts included.
+        # Under the bug, layers.1.experts.0 was misread as layer 0 and dropped, and a
+        # layers.2.experts.1 module could be misread as layer 1 and wrongly included.
+        expected = {
+            "model.layers.1.self_attn.q_proj",
+            "model.layers.1.mlp.experts.0.up_proj",
+            "model.layers.1.mlp.experts.1.up_proj",
+        }
+        assert set(model.targeted_module_names) == expected
+
 
 class TestTargetedParameterNames:
     """Check that the attribute targeted_parameter_names (via target_parameters) is correctly set.
@@ -904,6 +947,49 @@ class TestModelAndLayerStatus:
         layer_status = large_model.get_layer_status()
         assert [status.name for status in layer_status] == ["model.lin0", "model.lin1"]
         assert [status.module_type for status in layer_status] == ["lora.ParamWrapper", "lora.Linear"]
+
+    def test_quantization_backend_small(self, small_model):
+        # non-quantized model should have quantization_backend=None
+        layer_status = small_model.get_layer_status()
+        assert [status.quantization_backend for status in layer_status] == [None]
+
+    def test_quantization_backend_large(self, large_model):
+        layer_status = large_model.get_layer_status()
+        result = [status.quantization_backend for status in layer_status]
+        expected = [None, None, None, None]
+        assert result == expected
+
+    def test_quantization_backend_bnb(self, small_base_model_cls):
+        # Manually inject an inconsistent quantization_backend instead of loading a model with bnb so that the test can run
+        # without bnb
+        model = small_base_model_cls()
+        config = LoraConfig(target_modules=["lin0", "lin1"])
+        model = get_peft_model(model, config)
+
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayer):
+                module.quantization_backend = Bnb8bitBackend()
+
+        layer_status = model.get_layer_status()
+        result = [status.quantization_backend for status in layer_status]
+        assert result == ["bnb 8bit", "bnb 8bit"]
+
+    def test_quantization_backend_irregular(self, small_base_model_cls):
+        # Manually inject an inconsistent quantization_backend to simulate irregular state. This is an invalid state, but we
+        # should still test it.
+        model = small_base_model_cls()
+        config = LoraConfig(target_modules=["lin0", "lin1"])
+        model = get_peft_model(model, config)
+
+        # set quantization_backend on only one layer
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayer):
+                module.quantization_backend = Bnb8bitBackend()
+                break
+
+        layer_status = model.get_layer_status()
+        result = [status.quantization_backend for status in layer_status]
+        assert result == ["bnb 8bit", None]
 
     ################
     # model status #
@@ -1343,6 +1429,44 @@ class TestModelAndLayerStatus:
         assert layer_status0.requires_grad == {"default": True}
         assert layer_status0.available_adapters == ["default"]
         assert layer_status0.devices == {"default": ["cpu", self.torch_device]}
+
+    def test_model_quantization_backend_small(self, small_model):
+        model_status = small_model.get_model_status()
+        assert model_status.quantization_backend is None
+
+    def test_model_quantization_backend_large(self, large_model):
+        model_status = large_model.get_model_status()
+        assert model_status.quantization_backend is None
+
+    def test_model_quantization_backend_bnb(self, small_base_model_cls):
+        # Manually inject an inconsistent quantization_backend instead of loading a model with bnb so that the test can run
+        # without bnb
+        model = small_base_model_cls()
+        config = LoraConfig(target_modules=["lin0", "lin1"])
+        model = get_peft_model(model, config)
+
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayer):
+                module.quantization_backend = Bnb8bitBackend()
+
+        model_status = model.get_model_status()
+        assert model_status.quantization_backend == "bnb 8bit"
+
+    def test_model_quantization_backend_irregular(self, small_base_model_cls):
+        # Manually inject an inconsistent quantization_backend to simulate irregular state. This is an invalid state, but we
+        # should still test it.
+        model = small_base_model_cls()
+        config = LoraConfig(target_modules=["lin0", "lin1"])
+        model = get_peft_model(model, config)
+
+        # set quantization_backend on only one layer
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayer):
+                module.quantization_backend = Bnb8bitBackend()
+                break
+
+        model_status = model.get_model_status()
+        assert model_status.quantization_backend == "irregular"
 
     ###################
     # non-PEFT models #

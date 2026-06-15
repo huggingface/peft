@@ -30,6 +30,17 @@ The abstract from the paper is:
 
 - VB-LoRA has two sets of training parameters: vector bank parameters and logit parameters. In practice, we found that logit parameters require a higher learning rate, while vector bank parameters require a lower learning rate. When using the AdamW optimizer, typical learning rates are 0.01 for logits and 0.001 for vector bank parameters.
 
+## Benchmark overview
+
+<iframe
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=VBLORA"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
+
+# API
+
 ## VBLoRAConfig
 
 [[autodoc]] tuners.vblora.config.VBLoRAConfig

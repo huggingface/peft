@@ -1,0 +1,6 @@
+datasets
+diffusers>=0.37.0
+torchvision
+numpy
+tqdm
+pillow

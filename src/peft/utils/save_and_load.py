@@ -19,7 +19,7 @@ import platform
 import re
 import warnings
 from collections import namedtuple
-from typing import Optional
+from typing import Literal, Optional
 
 import huggingface_hub
 import torch
@@ -74,8 +74,29 @@ def _get_tp_info(model) -> TpInfo | None:
     return None
 
 
+def _filter_state_dict_for_adapter_name(
+    state_dict: dict[str, torch.Tensor], unwanted_adapter_names: list[str]
+) -> dict[str, torch.Tensor]:
+    """Filter the state dict to remove keys that correspond to the unwanted adapter
+
+    Use a negative filter to avoid removing keys that correspond to keys that contain no adapter name at all, e.g. when
+    using modules_to_save.
+    """
+    return {
+        k: v
+        for k, v in state_dict.items()
+        if not any(
+            f".{adapter_name}." in k or k.endswith(f".{adapter_name}") for adapter_name in unwanted_adapter_names
+        )
+    }
+
+
 def get_peft_model_state_dict(
-    model, state_dict=None, adapter_name="default", unwrap_compiled=False, save_embedding_layers="auto"
+    model,
+    state_dict=None,
+    adapter_name: str = "default",
+    unwrap_compiled: bool = False,
+    save_embedding_layers: bool | Literal["auto"] = "auto",
 ):
     """
     Get the state dict of the given adapter of the PEFT model.
@@ -109,6 +130,18 @@ def get_peft_model_state_dict(
     config = model.peft_config[adapter_name]
     if state_dict is None:
         state_dict = model.state_dict()
+
+    # FILTER FOR ADAPTER NAME
+    unwanted_adapter_names = [name for name in model.peft_config if name != adapter_name]
+    if not config.is_prompt_learning:
+        # Prompt learning methods don't support multiple adapters and hence don't have the adapter name in the Parameter
+        # name.
+        state_dict_filtered_for_adapter_name = _filter_state_dict_for_adapter_name(state_dict, unwanted_adapter_names)
+        if len(state_dict_filtered_for_adapter_name) > 0:
+            # If, after filtering the state dict for the adapter name, we end up with an empty state dict, it means that
+            # the adapter weights are not stored with the adapter name as suffix. This can happen e.g. for adaption
+            # prompt (which is not a prompt learning method).
+            state_dict = state_dict_filtered_for_adapter_name
 
     # If model was sharded with TP, gather full tensors for saving
     tp_info = _get_tp_info(model)
@@ -150,7 +183,7 @@ def get_peft_model_state_dict(
                         to_return[bias_name] = state_dict[bias_name]
         else:
             raise NotImplementedError
-        to_return = {k: v for k, v in to_return.items() if (("lora_" in k and adapter_name in k) or ("bias" in k))}
+        to_return = {k: v for k, v in to_return.items() if (("lora_" in k) or ("bias" in k))}
         if config.peft_type == PeftType.ADALORA:
             rank_pattern = config.rank_pattern
             if rank_pattern is not None:
@@ -222,6 +255,8 @@ def get_peft_model_state_dict(
                     to_return[f"{name}.shira_indices.{k}"] = (
                         v.to(torch.float32) if platform.system() == "Windows" else v
                     )
+                    # the above may contain other adapter names, so filter again
+                    to_return = _filter_state_dict_for_adapter_name(to_return, unwanted_adapter_names)
 
     elif config.peft_type == PeftType.VERA:
         vera_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
@@ -300,7 +335,7 @@ def get_peft_model_state_dict(
         ]
     elif config.peft_type in list(PeftType):
         prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
-        to_return = {k: state_dict[k] for k in state_dict if prefix in k}
+        to_return = {k: v for k, v in state_dict.items() if prefix in k}
     else:
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 
@@ -497,14 +532,30 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
         state_dict (`dict`): The adapter state dict to shard in-place (as loaded from a checkpoint).
         adapter_name (`str`): The name of the adapter whose weights are being sharded.
     """
+    from ..tuners.lora.layer import LoraLayer  # lazy import to avoid circular import
+
+    tp_lora_modules = []
+    for name, module in model.named_modules():
+        if not isinstance(module, LoraLayer):
+            continue
+
+        base_layer = module.get_base_layer()
+        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+        device_mesh = getattr(base_layer, "_hf_device_mesh", None)
+        if tp_plan is None or device_mesh is None:
+            continue
+
+        tp_lora_modules.append((name, module, base_layer, tp_plan, device_mesh))
+
+    if not tp_lora_modules:
+        return
+
     from transformers.integrations.tensor_parallel import (
         ALL_PARALLEL_STYLES,
         ColwiseParallel,
         EmbeddingParallel,
         RowwiseParallel,
     )
-
-    from ..tuners.lora.layer import LoraLayer  # lazy import to avoid circular import
 
     should_check = True
     prefix_to_remove = None
@@ -513,16 +564,8 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
 
     possible_prefixes = ["base_model.model.", "base_model."]
 
-    for name, module in model.named_modules():
-        if not isinstance(module, LoraLayer):
-            continue
-        base_layer = module.get_base_layer()
+    for name, module, base_layer, tp_plan, device_mesh in tp_lora_modules:
         device = base_layer.weight.device
-        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
-        device_mesh = getattr(base_layer, "_hf_device_mesh", None)
-
-        if tp_plan is None or device_mesh is None:
-            continue
 
         # One time check to make sure we are adding / removing a potential prefix to get the proper key in the state
         # dict. Same thing for the adapter name.

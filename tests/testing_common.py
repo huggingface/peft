@@ -28,7 +28,7 @@ import torch
 import yaml
 from diffusers import StableDiffusionPipeline
 from packaging import version
-from safetensors.torch import save_file
+from safetensors.torch import load_file, save_file
 
 from peft import (
     AdaLoraConfig,
@@ -434,6 +434,30 @@ class PeftCommonTester:
 
                 assert "default" in model_from_pretrained.peft_config.keys()
                 assert "new_adapter" not in model_from_pretrained.peft_config.keys()
+
+    def _test_save_pretrained_adapter_name_substring(self, model_id, config_cls, config_kwargs):
+        # Test that if we have multiple adapters, only the specified adapter is saved, even if adapter names match
+        # substrings of other adapter names.
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(
+                base_model_name_or_path=model_id,
+                **config_kwargs,
+            )
+            model = get_peft_model(model, config)  # adapter name will be "default"
+            # to calculate the expected number of weights, use get_peft_model_state_dict, since some methods like VeRA
+            # will add shared weights there, which we wouldn't count correctly when using model.state_dict()
+            expected_number_of_weights = len(get_peft_model_state_dict(model))
+
+            model.add_adapter("default2", config)  # prefix
+            model.add_adapter("other_default", config)  # suffix
+            model.add_adapter("foodefault_bar", config)  # infix
+            model.add_adapter("efaul", config)  # substring
+
+            with tempfile.TemporaryDirectory() as tmp_dirname:
+                model.save_pretrained(tmp_dirname, selected_adapters=["default"])
+                state_dict = load_file(os.path.join(tmp_dirname, "adapter_model.safetensors"))
+                assert len(state_dict) == expected_number_of_weights
 
     def _test_from_pretrained_config_construction(self, model_id, config_cls, config_kwargs):
         with hub_online_once(model_id):
