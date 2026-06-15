@@ -68,6 +68,17 @@ peft_model = PeftModel.from_pretrained(model, "mica-llama-2-7b")
 - MiCA performs a full SVD per target weight at initialization. For 7B-scale models this is a one-time cost of seconds; for substantially larger weight matrices (e.g. 70B-scale) the cost grows.
 - Combining MiCA with `use_dora=True` or other LoRA variants is not supported in this initial integration.
 
+## Recommended workflow
+
+MiCA is designed for continued pretraining / domain-adaptive pretraining. For this use case, start from the base model rather than an instruction- or chat-tuned checkpoint. The SVD initialization is computed from the weights of the model being adapted, so the intended workflow is:
+
+1. Load the base model.
+2. Train the MiCA adapter on continued-pretraining/domain data.
+3. Merge the adapter into the base model weights.
+4. Use the merged model as the adapted base for later instruction/chat tuning.
+
+Applying a MiCA adapter trained on the base model directly to an already instruction-tuned model with matching architecture may be technically possible, but it is not the primary recommended workflow.
+
 ## Citation
 
 ```

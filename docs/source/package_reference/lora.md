@@ -122,6 +122,8 @@ config = LoraConfig(init_lora_weights="mica", r=16, target_modules=["q_proj", "v
 ```
 
 MiCA currently supports `nn.Linear` and `nn.Embedding` target modules. The chosen rank must satisfy `r <= min(in_features, out_features)` for linear layers and `r <= min(num_embeddings, embedding_dim)` for embedding layers. For detailed usage, see [these instructions](https://github.com/huggingface/peft/tree/main/examples/mica_finetuning).
+
+MiCA is primarily intended for continued pretraining / domain-adaptive pretraining. In that setting, use the base model, not an instruction- or chat-tuned checkpoint, for the SVD initialization and MiCA training. After training, merge the adapter into the base model weights and use the resulting adapted base model as the starting point for subsequent instruction/chat tuning.
 </hfoption>
 
 <hfoption id="CorDA">
