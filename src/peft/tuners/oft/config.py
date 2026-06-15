@@ -32,14 +32,14 @@ class OFTConfig(PeftConfig):
     Args:
         r (`int`):
             OFT rank, number of OFT blocks per injected layer. Bigger `r` results in more sparse update matrices with
-            fewer trainable paramters. You can only specify either `r` or `oft_block_size`, but not both
-            simultaneously, because `r` × `oft_block_size` = layer dimension. For simplicity, we let you speficy either
+            fewer trainable parameters. You can only specify either `r` or `oft_block_size`, but not both
+            simultaneously, because `r` × `oft_block_size` = layer dimension. For simplicity, we let you specify either
             `r` or `oft_block_size` and infer the other one. Default set to `r = 0`, the user is advised to set the
             `oft_block_size` instead for better clarity.
         oft_block_size (`int`): OFT block size across different layers. Bigger `oft_block_size` results in more dense
             update matrices with more trainable parameters. Choose `oft_block_size` to be divisible by layer's input
             dimension (`in_features`), e.g., 4, 8, 16. You can only specify either `r` or `oft_block_size`, but not
-            both simultaneously, because `r` × `oft_block_size` = layer dimension. For simplicity, we let you speficy
+            both simultaneously, because `r` × `oft_block_size` = layer dimension. For simplicity, we let you specify
             either `r` or `oft_block_size` and infer the other one. Default set to `oft_block_size = 32`.
         use_cayley_neumann (bool): Specifies whether to use the Cayley-Neumann parameterization (efficient but
             approximate) or the vanilla Cayley parameterization (exact but computationally expensive because of matrix
