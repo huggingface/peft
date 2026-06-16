@@ -97,30 +97,14 @@ LORA_4BIT_FOLDER = "lora_opt-350m_bnb_4bit"
 
 
 @pytest.fixture(scope="session", autouse=True)
-def setup_tearndown():
+def setup_teardown():
     # Use a pytest session-scoped fixture to setup and teardown exactly once per session. AFAICT, unittest does not
     # provide such a feature
-
-    # download regression artifacts from Hugging Face Hub at the start
-    snapshot_download(repo_id=HF_REPO, local_dir=REGRESSION_DIR)
-
-    # WARNING: If running on XPU, LORA_4BIT_FOLDER artifacts are loaded from HF_REPO_XPU, which is outside of
-    # peft direct control. The load_output function uses torch.load, which can execute arbitrary
-    # code from pickle files. Users should be aware of this potential security risk.
-    use_xpu = strtobool(os.environ.get("PEFT_USE_XPU", "False")) and (infer_device() == "xpu")
-    if use_xpu:
-        lora_4bit_folder_path = os.path.join(REGRESSION_DIR, LORA_4BIT_FOLDER)
-        shutil.rmtree(lora_4bit_folder_path)
-        snapshot_download(
-            repo_id=HF_REPO_XPU,
-            local_dir=REGRESSION_DIR,
-            allow_patterns=[f"{LORA_4BIT_FOLDER}/**"],
-        )
-
     yield
 
     # delete regression artifacts at the end of the test session; optionally, upload them first if in creation mode
     creation_mode = strtobool(os.environ.get("REGRESSION_CREATION_MODE", "False"))
+    use_xpu = strtobool(os.environ.get("PEFT_USE_XPU", "False")) and (infer_device() == "xpu")
     if creation_mode:
         if use_xpu:
             lora_4bit_folder_path = os.path.join(REGRESSION_DIR, LORA_4BIT_FOLDER)
@@ -187,6 +171,15 @@ def load_output(name):
     return torch.load(filename, map_location=infer_device())
 
 
+def download_regression_artifact(name):
+    # WARNING: If running on XPU, LORA_4BIT_FOLDER artifacts are loaded from HF_REPO_XPU, which is outside of peft
+    # direct control. The load_output function uses torch.load, which can execute arbitrary code from pickle files.
+    # Users should be aware of this potential security risk.
+    use_xpu = strtobool(os.environ.get("PEFT_USE_XPU", "False")) and (infer_device() == "xpu")
+    repo_id = HF_REPO_XPU if (name == LORA_4BIT_FOLDER and use_xpu) else HF_REPO
+    snapshot_download(repo_id=repo_id, local_dir=REGRESSION_DIR, allow_patterns=[f"{name}/**"])
+
+
 @pytest.mark.regression
 class RegressionTester(unittest.TestCase):
     """Base class for regression testing
@@ -236,6 +229,7 @@ class RegressionTester(unittest.TestCase):
     def assert_results_equal_or_store(self, model, name):
         """Check if the outputs are the same or save the outputs if in creation mode."""
         if not self.creation_mode:  # normal regression testing mode
+            download_regression_artifact(name)
             self._assert_results_equal(name)
         else:
             output = self.get_output(model)

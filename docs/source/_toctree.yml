@@ -7,36 +7,30 @@
   - local: install
     title: Installation
 
-- title: Tutorial
+- title: Guides
   sections:
-  - local: tutorial/peft_model_config
+  - local: guides/peft_model_config
     title: Configurations and models
-  - local: tutorial/peft_integrations
+  - local: guides/peft_integrations
     title: Integrations
-
-- title: PEFT method guides
-  sections:
-  - local: task_guides/prompt_based_methods
-    title: Prompt-based methods
-  - local: task_guides/lora_based_methods
-    title: LoRA methods
-  - local: task_guides/ia3
-    title: IA3
-
-- title: Developer guides
-  sections:
+  - sections:
+    - local: accelerate/deepspeed
+      title: DeepSpeed
+    - local: accelerate/fsdp
+      title: Fully Sharded Data Parallel
+    title: Distributed Training
+  - local: developer_guides/memory_efficient_training
+    title: Memory Efficient Training
   - local: developer_guides/model_merging
     title: Model merging
   - local: developer_guides/quantization
     title: Quantization
-  - local: developer_guides/lora
-    title: LoRA
   - local: developer_guides/custom_models
     title: Custom models
   - local: developer_guides/low_level_api
     title: Adapter injection
   - local: developer_guides/mixed_models
-    title: Mixed adapter types
+    title: Mixing PEFT methods
   - local: developer_guides/torch_compile
     title: torch.compile
   - local: developer_guides/contributing
@@ -46,25 +40,105 @@
   - local: developer_guides/checkpoint
     title: PEFT checkpoint format
 
-- title: 🤗 Accelerate integrations
+- title: Methods
   sections:
-  - local: accelerate/deepspeed
-    title: DeepSpeed
-  - local: accelerate/fsdp
-    title: Fully Sharded Data Parallel
+    - local: methods/overview
+      title: Overview
+    - sections:
+      - local: package_reference/cartridges
+        title: Cartridges
+      - local: package_reference/cpt
+        title: CPT
+      - local: package_reference/llama_adapter
+        title: Llama-Adapter
+      - local: package_reference/p_tuning
+        title: P-Tuning
+      - local: package_reference/prefix_tuning
+        title: Prefix tuning
+      - local: package_reference/prompt_tuning
+        title: Prompt tuning
+      title: Soft Prompting
+    - sections:
+      - local: package_reference/beft
+        title: BEFT
+      - local: package_reference/layernorm_tuning
+        title: LayerNorm Tuning
+      - local: package_reference/trainable_tokens
+        title: Trainable Tokens
+      title: Layer Tuning
+    - sections:
+      - local: package_reference/adalora
+        title: AdaLoRA
+      - local: package_reference/adamss
+        title: AdaMSS
+      - local: package_reference/boft
+        title: BOFT
+      - local: package_reference/c3a
+        title: C3A
+      - local: package_reference/delora
+        title: DeLoRA
+      - local: package_reference/fourierft
+        title: FourierFT
+      - local: package_reference/gralora
+        title: GraLoRA
+      - local: package_reference/hira
+        title: HiRA
+      - local: package_reference/hra
+        title: HRA
+      - local: package_reference/ia3
+        title: IA3
+      - local: package_reference/lily
+        title: Lily
+      - local: package_reference/loha
+        title: LoHa
+      - local: package_reference/lokr
+        title: LoKr
+      - sections:
+        - local: package_reference/lora
+          title: LoRA
+        - local: package_reference/lora_variant_bdlora
+          title: "Variant: BD-LoRA"
+        - local: package_reference/lora_variant_dora
+          title: "Variant: DoRA"
+        - local: package_reference/lora_variant_monteclora
+          title: "Variant: MonteCLoRA"
+        - local: package_reference/lora_variant_velora
+          title: "Variant: VeLoRA"
+        title: LoRA
+      - local: package_reference/miss
+        title: MiSS
+      - local: package_reference/oft
+        title: OFT
+      - local: package_reference/osf
+        title: OSF
+      - local: package_reference/peanut
+        title: PEANuT
+      - local: package_reference/poly
+        title: Polytropon
+      - local: package_reference/psoft
+        title: PSOFT
+      - local: package_reference/pvera
+        title: PVeRA
+      - local: package_reference/randlora
+        title: RandLora
+      - local: package_reference/road
+        title: RoAd
+      - local: package_reference/shira
+        title: SHiRA
+      - local: package_reference/tinylora
+        title: TinyLoRA
+      - local: package_reference/vblora
+        title: VB-LoRA
+      - local: package_reference/vera
+        title: VeRA
+      - local: package_reference/waveft
+        title: WaveFT
+      - local: package_reference/xlora
+        title: X-LoRA
+      title: Adapters
 
-- title: Conceptual guides
+- isExpanded: false
   sections:
-  - local: conceptual_guides/adapter
-    title: Adapters
-  - local: conceptual_guides/prompting
-    title: Soft prompts
-  - local: conceptual_guides/ia3
-    title: IA3
-  - local: conceptual_guides/oft
-    title: OFT/BOFT
-
-- sections:
   - sections:
     - local: package_reference/auto_class
       title: AutoPeftModel
@@ -82,8 +156,32 @@
       title: AdaLoRA
     - local: package_reference/adamss
       title: AdaMSS
+    - local: package_reference/beft
+      title: BEFT
+    - local: package_reference/boft
+      title: BOFT
+    - local: package_reference/c3a
+      title: C3A
+    - local: package_reference/cartridges
+      title: Cartridges
+    - local: package_reference/cpt
+      title: CPT
+    - local: package_reference/delora
+      title: DeLoRA
+    - local: package_reference/fourierft
+      title: FourierFT
+    - local: package_reference/gralora
+      title: GraLoRA
+    - local: package_reference/hira
+      title: HiRA
+    - local: package_reference/hra
+      title: HRA
     - local: package_reference/ia3
       title: IA3
+    - local: package_reference/layernorm_tuning
+      title: Layernorm tuning
+    - local: package_reference/lily
+      title: Lily
     - local: package_reference/llama_adapter
       title: Llama-Adapter
     - local: package_reference/loha
@@ -92,34 +190,28 @@
       title: LoKr
     - local: package_reference/lora
       title: LoRA
-    - local: package_reference/osf
-      title: OSF
-    - local: package_reference/xlora
-      title: X-LoRA
     - local: package_reference/adapter_utils
       title: LyCORIS
+    - local: package_reference/miss
+      title: MiSS
     - local: package_reference/multitask_prompt_tuning
       title: Multitask Prompt Tuning
     - local: package_reference/oft
       title: OFT
-    - local: package_reference/boft
-      title: BOFT
-    - local: package_reference/psoft
-      title: PSOFT
-    - local: package_reference/poly
-      title: Polytropon
+    - local: package_reference/osf
+      title: OSF
     - local: package_reference/p_tuning
       title: P-tuning
+    - local: package_reference/peanut
+      title: PEANuT
+    - local: package_reference/poly
+      title: Polytropon
     - local: package_reference/prefix_tuning
       title: Prefix tuning
-    - local: package_reference/cartridges
-      title: Cartridges
     - local: package_reference/prompt_tuning
       title: Prompt tuning
-    - local: package_reference/layernorm_tuning
-      title: Layernorm tuning
-    - local: package_reference/vera
-      title: VeRA
+    - local: package_reference/psoft
+      title: PSOFT
     - local: package_reference/pvera
       title: PVeRA
     - local: package_reference/fourierft
@@ -140,28 +232,23 @@
       title: Trainable Tokens
     - local: package_reference/randlora
       title: RandLora
-    - local: package_reference/shira
-      title: SHiRA
-    - local: package_reference/c3a
-      title: C3A
-    - local: package_reference/miss
-      title: MiSS
     - local: package_reference/road
       title: RoAd
-    - local: package_reference/waveft
-      title: WaveFT
-    - local: package_reference/delora
-      title: DeLoRA
+    - local: package_reference/shira
+      title: SHiRA
     - local: package_reference/tinylora
       title: TinyLoRA
-    - local: package_reference/lily
-      title: Lily
-    - local: package_reference/peanut
-      title: PEANuT
-    - local: package_reference/beft
-      title: BEFT
-
-    title: Adapters
+    - local: package_reference/trainable_tokens
+      title: Trainable Tokens
+    - local: package_reference/vblora
+      title: VB-LoRA
+    - local: package_reference/vera
+      title: VeRA
+    - local: package_reference/waveft
+      title: WaveFT
+    - local: package_reference/xlora
+      title: X-LoRA
+    title: Tuners
   - sections:
     - local: package_reference/merge_utils
       title: Model merge

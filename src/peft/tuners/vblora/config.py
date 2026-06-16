@@ -24,7 +24,7 @@ from peft.utils import PeftType
 @dataclass
 class VBLoRAConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a [`VBLoRAConfig`].
+    This is the configuration class to store the configuration of a [`VBLoRAModel`].
 
     Paper: https://huggingface.co/papers/2405.15179
 

@@ -4322,6 +4322,48 @@ class TestHotSwapping:
             elif "lora_B" in name:
                 assert param.shape[1] == new_rank
 
+    @pytest.mark.parametrize("previous_requires_grad", [False, True])
+    def test_prepare_model_for_compiled_hotswap_conserves_requires_grad(self, previous_requires_grad):
+        # check that preparing the LoRA weights does not change requires_grad
+        old_rank = 8
+        target_rank = old_rank + 1
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=old_rank)
+        model = self.get_model()
+        model = get_peft_model(model, config)
+
+        # set requires_grad of LoRA weights
+        for name, param in model.named_parameters():
+            if "lora_" in name:
+                param.requires_grad_(previous_requires_grad)
+
+        prepare_model_for_compiled_hotswap(model, target_rank=target_rank)
+
+        # check requires_grad of LoRA weights
+        for name, param in model.named_parameters():
+            if "lora_" in name:
+                assert param.requires_grad is previous_requires_grad
+
+    @pytest.mark.parametrize("previous_requires_grad", [False, True])
+    def test_prepare_model_for_compiled_hotswap_conv2d_conserves_requires_grad(self, previous_requires_grad):
+        # check that preparing the LoRA weights does not change requires_grad
+        old_rank = 8
+        target_rank = old_rank + 1
+        config = LoraConfig(target_modules=["conv"], r=old_rank)
+        model = self.get_model_conv2d()
+        model = get_peft_model(model, config)
+
+        # set requires_grad of LoRA weights
+        for name, param in model.named_parameters():
+            if "lora_" in name:
+                param.requires_grad_(previous_requires_grad)
+
+        prepare_model_for_compiled_hotswap(model, target_rank=target_rank)
+
+        # check requires_grad of LoRA weights
+        for name, param in model.named_parameters():
+            if "lora_" in name:
+                assert param.requires_grad is previous_requires_grad
+
     def test_prepare_model_for_compiled_hotswap_model_already_compiled_raises(self):
         config = LoraConfig(target_modules=["lin0"])
         model = self.get_model()

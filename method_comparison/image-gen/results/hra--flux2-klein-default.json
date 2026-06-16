@@ -1,0 +1,248 @@
+{
+  "run_info": {
+    "created_at": "2026-06-09T13:07:26+00:00",
+    "total_time": 11352.288050381001,
+    "experiment_name": "hra/flux2-klein-default",
+    "peft_branch": "main",
+    "train_config": {
+      "model_id": "black-forest-labs/FLUX.2-klein-base-4B",
+      "dataset_id": "peft-internal-testing/cat-image-dataset",
+      "dataset_split": "train",
+      "dtype": "bfloat16",
+      "resolution": 512,
+      "batch_size": 2,
+      "batch_size_eval": 1,
+      "repeats": 1000,
+      "max_steps": 750,
+      "eval_steps": 100,
+      "compile": false,
+      "use_gc": true,
+      "seed": 0,
+      "grad_norm_clip": 1.0,
+      "optimizer_type": "AdamW",
+      "optimizer_kwargs": {
+        "lr": 0.0001,
+        "weight_decay": 0.0001
+      },
+      "lr_scheduler": null,
+      "use_amp": false,
+      "autocast_adapter_dtype": true,
+      "instance_prompts": [
+        "sks cat sitting on a chair in front of a box of chocolates",
+        "sks cat playing on the Steam Deck",
+        "sks cat wearing a necklace while sitting in a box on a sofa",
+        "a box with four donuts in front of sks cat",
+        "sks cat wearing a pink veil with flowers on it and a dagger made out of yellow cardboard",
+        "sks cat between two pillows, with one pillow showing a polar bear and the other a fox",
+        "sks cat with an espresso reading the newspaper",
+        "a close up of a hand petting sks cat on the head",
+        "sks cat opens a white door",
+        "sks cat with a VIP \"all access\" pass",
+        "sks cat in front of a monitor showing the video game \"RimWorld\"",
+        "sks cat reads a newspaper about cannabis",
+        "sks cat reading the newspaper with the title \"DIE BOX\"",
+        "sks cat being fed sushi",
+        "sks cat in front of a box of tomatoes",
+        "a gingerbread house in front of sks cat",
+        "sks cat is wearing a Wednesday Addams costume",
+        "sks cat looks skeptical as he reads a magazine depicting a black cat",
+        "sks cat wearing a striped scarf",
+        "sleepy sks cat lying in bed covered by a blue blanket"
+      ],
+      "image_column": "image",
+      "valid_size": 2,
+      "test_size": 4,
+      "num_inference_steps": 20,
+      "guidance_scale": 3.5,
+      "max_sequence_length": 512,
+      "text_encoder_out_layers": [
+        10,
+        20,
+        30
+      ],
+      "weighting_scheme": "none",
+      "logit_mean": 0.0,
+      "logit_std": 1.0,
+      "mode_scale": 1.29,
+      "dino_model_id": "facebook/dinov2-base",
+      "dino_image_size": 224,
+      "sample_image_prompts": [
+        "a photo of sks cat",
+        "a color drawing of sks cat",
+        "sks cat at the beach",
+        "a photo of sks dog",
+        "a photo of an orange cat"
+      ],
+      "drift_image_prompts": [
+        "a photo of cat",
+        "a color drawing of cat",
+        "cat sitting in a bathtub",
+        "cat looks into a mirror",
+        "a photo of cat next to a tree",
+        "the Mona Lisa but she looks angry",
+        "a dog holding a sign that says hello world",
+        "a photo of the Eiffel tower at night",
+        "an astronaut riding a horse",
+        "3d design concept of a chair that looks like an avocado"
+      ]
+    },
+    "peft_config": {
+      "task_type": null,
+      "peft_type": "HRA",
+      "auto_mapping": null,
+      "peft_version": "0.18.2.dev0@UNKNOWN",
+      "base_model_name_or_path": null,
+      "revision": null,
+      "inference_mode": false,
+      "r": 32,
+      "apply_GS": false,
+      "target_modules": [
+        "to_v",
+        "to_out.0",
+        "linear_in",
+        "add_v_proj",
+        "to_k",
+        "linear_out",
+        "to_qkv_mlp_proj",
+        "to_q",
+        "add_k_proj",
+        "to_add_out",
+        "add_q_proj"
+      ],
+      "exclude_modules": null,
+      "init_weights": true,
+      "layers_to_transform": null,
+      "layers_pattern": null,
+      "bias": "none",
+      "modules_to_save": null
+    },
+    "error_msg": ""
+  },
+  "train_info": {
+    "accelerator_memory_reserved_avg": 33476879319,
+    "accelerator_memory_max": 47359983616,
+    "accelerator_memory_reserved_99th": 47326429184,
+    "train_time": 9824.567679766005,
+    "file_size": 39332240,
+    "num_trainable_params": 9830400,
+    "num_total_params": 3885374976,
+    "status": "success",
+    "metrics": [
+      {
+        "step": 100,
+        "valid dino_similarity": 0.3935689628124237,
+        "train loss": 0.7713394165039062,
+        "train samples": 200,
+        "train time": 975.4857535669962,
+        "eval time": 214.68726077499923,
+        "mem allocated avg": 8422570690.56,
+        "mem reserved avg": 47323031797.76,
+        "elapsed time": 1196.5852056719996
+      },
+      {
+        "step": 200,
+        "valid dino_similarity": 0.40438196063041687,
+        "train loss": 0.7880617380142212,
+        "train samples": 400,
+        "train time": 1005.4165307220101,
+        "eval time": 216.22108728999956,
+        "mem allocated avg": 8422063237.12,
+        "mem reserved avg": 21243625472.0,
+        "elapsed time": 2418.4087825059996
+      },
+      {
+        "step": 300,
+        "valid dino_similarity": 0.505301833152771,
+        "train loss": 0.7538036704063416,
+        "train samples": 600,
+        "train time": 1004.786632051997,
+        "eval time": 215.93002987499858,
+        "mem allocated avg": 8422106572.8,
+        "mem reserved avg": 21628725493.76,
+        "elapsed time": 3639.32005733
+      },
+      {
+        "step": 400,
+        "valid dino_similarity": 0.6528792977333069,
+        "train loss": 0.7812439799308777,
+        "train samples": 800,
+        "train time": 983.9856222909948,
+        "eval time": 217.97808849899957,
+        "mem allocated avg": 8421809121.28,
+        "mem reserved avg": 47049605120.0,
+        "elapsed time": 4841.472134622001
+      },
+      {
+        "step": 500,
+        "valid dino_similarity": 0.680561363697052,
+        "train loss": 0.7429240345954895,
+        "train samples": 1000,
+        "train time": 1006.9375934079981,
+        "eval time": 215.31067393799822,
+        "mem allocated avg": 8422216837.12,
+        "mem reserved avg": 21628599664.64,
+        "elapsed time": 6063.907996018001
+      },
+      {
+        "step": 600,
+        "valid dino_similarity": 0.6747124791145325,
+        "train loss": 0.774470865726471,
+        "train samples": 1200,
+        "train time": 981.4495257950002,
+        "eval time": 217.85170519700114,
+        "mem allocated avg": 8421911521.28,
+        "mem reserved avg": 47049605120.0,
+        "elapsed time": 7263.395282030002
+      },
+      {
+        "step": 700,
+        "valid dino_similarity": 0.6752539873123169,
+        "train loss": 0.7347908020019531,
+        "train samples": 1400,
+        "train time": 1003.8321732119657,
+        "eval time": 214.7787208059999,
+        "mem allocated avg": 8422319237.12,
+        "mem reserved avg": 21628599664.64,
+        "elapsed time": 8482.191420154
+      },
+      {
+        "step": 750,
+        "test dino_similarity": 0.6441149314244589,
+        "drift": 0.2597343921661377,
+        "train loss": 0.741257905960083,
+        "train samples": 1500
+      }
+    ]
+  },
+  "meta_info": {
+    "model_info": {
+      "sha": "a3b4f4849157f664bdbc776fd7453c2783562f4d",
+      "created_at": "2026-01-14T13:42:28+00:00"
+    },
+    "dataset_info": {
+      "sha": "37df3244ae3aa36e85178b6cf946338137fc3068",
+      "created_at": "2026-03-09T15:31:26+00:00"
+    },
+    "package_info": {
+      "transformers-version": "5.10.2",
+      "transformers-commit-hash": null,
+      "peft-version": "0.19.2.dev0",
+      "peft-commit-hash": "b2d61f5f80a7ac540fb572c077d8265a95986db8",
+      "datasets-version": "4.2.0",
+      "datasets-commit-hash": null,
+      "diffusers-version": "0.38.0",
+      "diffusers-commit-hash": null,
+      "torch-version": "2.12.0+cu130",
+      "torch-commit-hash": null
+    },
+    "system_info": {
+      "system": "Linux",
+      "release": "6.17.0-1009-aws",
+      "version": "#9~24.04.2-Ubuntu SMP Fri Mar  6 23:50:29 UTC 2026",
+      "machine": "x86_64",
+      "processor": "x86_64",
+      "accelerator": "NVIDIA L40S"
+    },
+    "pytorch_info": "PyTorch built with:\n  - GCC 13.3\n  - C++ Version: 202002\n  - Intel(R) oneAPI Math Kernel Library Version 2024.2-Product Build 20240605 for Intel(R) 64 architecture applications\n  - Intel(R) MKL-DNN v3.11.2 (Git Hash 03c022d3ffdcee958cfacbe720048e725fdf644c)\n  - OpenMP 201511 (a.k.a. OpenMP 4.5)\n  - LAPACK is enabled (usually provided by MKL)\n  - NNPACK is enabled\n  - CPU capability usage: AVX2\n  - CUDA Runtime 13.0\n  - NVCC architecture flags: -gencode;arch=compute_75,code=sm_75;-gencode;arch=compute_80,code=sm_80;-gencode;arch=compute_86,code=sm_86;-gencode;arch=compute_90,code=sm_90;-gencode;arch=compute_100,code=sm_100;-gencode;arch=compute_120,code=sm_120\n  - CuDNN 90.7.1  (built against CUDA 12.8)\n    - Built with CuDNN 92.0\n  - Magma 2.6.1\n  - Build settings: BLAS_INFO=mkl, BUILD_TYPE=Release, COMMIT_SHA=7661cd9c6b841b62b7f411aa52ec51f05457263b, CUDA_FLAGS= -DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS -Xfatbin -compress-all -DONNX_NAMESPACE=onnx_torch -gencode arch=compute_75,code=sm_75 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_100,code=sm_100 -gencode arch=compute_120,code=sm_120 -Xcudafe --diag_suppress=cc_clobber_ignored,--diag_suppress=field_without_dll_interface,--diag_suppress=base_class_has_different_dll_interface,--diag_suppress=dll_interface_conflict_none_assumed,--diag_suppress=dll_interface_conflict_dllexport_assumed,--diag_suppress=bad_friend_decl --expt-relaxed-constexpr --expt-extended-lambda -Xfatbin -compress-all --threads 2 -compress-mode=size -Wno-deprecated-gpu-targets --expt-extended-lambda -DCUB_WRAPPED_NAMESPACE=at_cuda_detail -DDISABLE_CUSPARSE_DEPRECATED -DCUDA_HAS_FP16=1 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -DC10_NODEPRECATED, CUDA_VERSION=13.0, CUDNN_VERSION=9.20.0, CXX_COMPILER=/opt/rh/gcc-toolset-13/root/usr/bin/c++, CXX_FLAGS= -fvisibility-inlines-hidden -DUSE_PTHREADPOOL -DNDEBUG -DUSE_KINETO -DLIBKINETO_NOROCTRACER -DLIBKINETO_NOXPUPTI=ON -DUSE_FBGEMM -DUSE_MSLK -DUSE_PYTORCH_QNNPACK -DUSE_XNNPACK -DSYMBOLICATE_MOBILE_DEBUG_HANDLE -O2 -fPIC -DC10_NODEPRECATED -Wall -Wextra -Werror=return-type -Werror=non-virtual-dtor -Werror=range-loop-construct -Werror=bool-operation -Wnarrowing -Wno-missing-field-initializers -Wno-unknown-pragmas -Wno-unused-parameter -Wno-strict-overflow -Wno-strict-aliasing -Wno-stringop-overflow -Wsuggest-override -Wno-psabi -Wno-error=old-style-cast -faligned-new -Wno-maybe-uninitialized -fno-math-errno -fno-trapping-math -Werror=format -Wno-dangling-reference -Wno-error=dangling-reference -Wno-stringop-overflow, LAPACK_INFO=mkl, PERF_WITH_AVX=1, PERF_WITH_AVX2=1, TORCH_VERSION=2.12.0, USE_CUDA=ON, USE_CUDNN=ON, USE_CUSPARSELT=1, USE_GFLAGS=OFF, USE_GLOG=OFF, USE_GLOO=ON, USE_MKL=ON, USE_MKLDNN=ON, USE_MPI=OFF, USE_NCCL=1, USE_NNPACK=ON, USE_OPENMP=ON, USE_ROCM=OFF, USE_ROCM_KERNEL_ASSERT=OFF, USE_XCCL=OFF, USE_XPU=OFF, \n"
+  }
+}
