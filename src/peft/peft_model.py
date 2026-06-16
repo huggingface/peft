@@ -352,7 +352,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
                     )
 
-                # Before exporting the parameters we need to make sure all the tensors are contigious as saving
+                # Before exporting the parameters we need to make sure all the tensors are contiguous as saving
                 # non-contiguous parameters is not supported. Tensors can become non contigiuous
                 # if they are a transpose view of another tensor. This can happen
                 # during adapter tying or parameter sharing.
@@ -649,7 +649,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             for param in module.parameters():
                 param.requires_grad = False
             if isinstance(module, PreTrainedModel):
-                # Make sure to freeze Tranformers model
+                # Make sure to freeze Transformers model
                 if transformer_backbone is None:
                     transformer_backbone = module
                     self.transformer_backbone_name = name
@@ -880,7 +880,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     )
 
             elif peft_config.num_transformer_submodules == 1:
-                # Dont' apply this to encoder-decoder models and not to models requiring special processing.
+                # Don't apply this to encoder-decoder models and not to models requiring special processing.
                 # TODO: remove from_legacy_cache once transformers < 4.56 is dropped
                 transformers_lt_4_56 = packaging.version.parse(transformers.__version__) < packaging.version.parse(
                     "4.56.0.dev0"
@@ -893,7 +893,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             elif (peft_config.num_transformer_submodules == 2) and getattr(
                 self.base_model, "_supports_cache_class", True
             ):
-                # Dont' apply this to encoder-decoder models that don't support new Cache format yet
+                # Don't apply this to encoder-decoder models that don't support new Cache format yet
                 # If we don't apply this, prefix-tuning fails to update cross-attn cache
                 # TODO: remove check for _supports_cache_class once transformers 4.53 is no longer supported
                 # TODO: remove from_legacy_cache once transformers < 4.56 is dropped
@@ -2256,7 +2256,7 @@ class PeftModelForCausalLM(PeftModel):
                         # (embeddings) are inserted, thus set cache_position to correspond to these tokens
                         cache_position_ = torch.arange(total_seq_len, device=model_kwargs["input_ids"].device)
                     else:
-                        # prefix tuning acts directly on the cache, no need to upate cache_position
+                        # prefix tuning acts directly on the cache, no need to update cache_position
                         cache_position_ = model_kwargs["cache_position"]
 
                     attention_mask_new = create_attention_mask(

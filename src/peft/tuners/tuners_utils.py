@@ -1142,7 +1142,7 @@ class BaseTuner(nn.Module, ABC):
 
     def _replace_module(self, parent, child_name, new_module, child) -> None:
         """
-        Replace the sub-module of a given moduel with a new PEFT module.
+        Replace the sub-module of a given module with a new PEFT module.
 
         This also deals with device placement of the new module to be in line with the child module.
 
@@ -1301,7 +1301,7 @@ class BaseTuner(nn.Module, ABC):
 
     def _check_tied_modules(self, model: nn.Module, peft_config):
         """
-        Checks if any of the tied layers are targetted via `modules_to_save` or `target_modules`. Updates the
+        Checks if any of the tied layers are targeted via `modules_to_save` or `target_modules`. Updates the
         `peft_config` in place with any layers/adapters that needs to be tied
         """
         modules_to_save = set(getattr(peft_config, "modules_to_save", []) or [])
@@ -2023,7 +2023,7 @@ def clone_module(module: nn.Module, share_weights=False):
 
 
 def replicate_layers(model: nn.Module, layer_map: list[tuple[int, int]]):
-    """Replicate layers in a transfomer model with weight sharing.
+    """Replicate layers in a transformer model with weight sharing.
 
     This function looks for a module list attribute at model[(.model)*].layers and replicates the layers in the module
     list according to the layer map. For example the map `[[0, 4], [2, 5]]` will take the set of layers `[0, 1, 2, 3,

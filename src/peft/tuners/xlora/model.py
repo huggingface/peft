@@ -421,7 +421,7 @@ class XLoraModel(BaseTuner):
         self.disabled = False
 
     """
-    This diasables the X-LoRA adapter.
+    This disables the X-LoRA adapter.
     """
 
     def disable_adapter_layers(self) -> None:
