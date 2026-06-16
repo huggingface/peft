@@ -26,47 +26,9 @@ from .._buffer_dict import BufferDict
 from .config import FrodConfig
 
 
-class FrodSparseActivationFunction(torch.autograd.Function):
-    @staticmethod
-    def forward(
-        ctx, z_flat: torch.Tensor, indices: torch.Tensor, values: torch.Tensor, chunk_size: int
-    ) -> torch.Tensor:
-        rows, cols = indices
-        ctx.save_for_backward(z_flat, rows, cols, values)
-        ctx.chunk_size = max(1, chunk_size)
-
-        result = torch.zeros_like(z_flat)
-        nnz = values.numel()
-        for start in range(0, nnz, ctx.chunk_size):
-            stop = min(start + ctx.chunk_size, nnz)
-            updates = z_flat.index_select(1, cols[start:stop]) * values[start:stop]
-            result.index_add_(1, rows[start:stop], updates)
-        return result
-
-    @staticmethod
-    def backward(ctx, grad_output: torch.Tensor):
-        z_flat, rows, cols, values = ctx.saved_tensors
-        grad_z = torch.zeros_like(z_flat) if ctx.needs_input_grad[0] else None
-        grad_values = torch.empty_like(values) if ctx.needs_input_grad[2] else None
-
-        nnz = values.numel()
-        for start in range(0, nnz, ctx.chunk_size):
-            stop = min(start + ctx.chunk_size, nnz)
-            chunk_rows = rows[start:stop]
-            chunk_cols = cols[start:stop]
-            grad_rows = grad_output.index_select(1, chunk_rows)
-            if grad_z is not None:
-                grad_z.index_add_(1, chunk_cols, grad_rows * values[start:stop])
-            if grad_values is not None:
-                grad_values[start:stop] = (grad_rows * z_flat.index_select(1, chunk_cols)).sum(dim=0)
-
-        return grad_z, None, grad_values, None
-
-
 class FrodLayer(BaseTunerLayer):
     adapter_layer_names = ("frod_lambda_l", "frod_lambda_s_values")
     other_param_names = ("frod_V", "frod_U", "frod_s_indices", "frod_s_size", "runtime_offload_base_weight")
-    _frod_sparse_chunk_size = 16_384
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer
@@ -294,12 +256,9 @@ class Linear(nn.Linear, FrodLayer):
         if S_sparse._nnz() == 0:
             return torch.zeros_like(z_flat)
         if z_flat.dtype in (torch.float16, torch.bfloat16):
-            # Some backends do not implement sparse addmm for fp16/bf16. This computes z @ S.T directly from COO
-            # entries and keeps the activation-side path in the requested dtype. The custom autograd function chunks
-            # the COO work without saving every chunk's large [tokens, chunk_nnz] temporary for backward.
-            return FrodSparseActivationFunction.apply(
-                z_flat, S_sparse.indices(), S_sparse.values(), self._frod_sparse_chunk_size
-            )
+            # CUDA sparse addmm is not implemented for fp16/bf16 in some PyTorch builds. Densifying only the sparse S
+            # factor keeps the trainable COO parameterization while using the much faster dense GEMM kernel.
+            return z_flat @ S_sparse.to_dense().t()
         return torch.sparse.mm(S_sparse, z_flat.t()).t()
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
