@@ -193,9 +193,9 @@ class BdLoraConfig:
             `pattern is in target_name`. Example: ['out_proj', 'down_proj']
         nblocks: Number of blocks in block-diagonal matrices
         match_strict:
-            If set to true, requires each target_module to have either a block-diagonal LoRA-A or LoRA-B, and raises
-            an error otherwise. You can set this to False to mix LoRA and BD-LoRA training, e.g. if some layers in
-            your module do not benefit from BD-LoRA.
+            If set to true, requires each target_module to have either a block-diagonal LoRA-A or LoRA-B, and raises an
+            error otherwise. You can set this to False to mix LoRA and BD-LoRA training, e.g. if some layers in your
+            module do not benefit from BD-LoRA.
     """
 
     target_modules_bd_a: Optional[list[str]] = field(
@@ -500,12 +500,12 @@ class LoraConfig(PeftConfig):
         qalora_group_size (`int`):
             Group size parameter for QALoRA pooling, controlling the dimension reduction factor. Input dimensions are
             pooled into groups of this size, reducing the computational cost. Higher values provide more compression
-            but may reduce model quality. This parameter determines how many original features are averaged together
-            to create one pooled feature. Only used when `use_qalora=True`.
+            but may reduce model quality. This parameter determines how many original features are averaged together to
+            create one pooled feature. Only used when `use_qalora=True`.
         monteclora_config (`Optional[MontecloraConfig]`):
             The configuration of Monteclora (Monte Carlo Low-Rank Adaptation). If passed, Monteclora will be used to
-            add variational Monte Carlo sampling on top of the LoRA adapters. See `MontecloraConfig` for details on
-            the individual hyperparameters.
+            add variational Monte Carlo sampling on top of the LoRA adapters. See `MontecloraConfig` for details on the
+            individual hyperparameters.
         layer_replication (`List[Tuple[int, int]]`):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
