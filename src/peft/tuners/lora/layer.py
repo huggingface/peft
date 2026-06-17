@@ -407,8 +407,8 @@ class LoraLayer(BaseTunerLayer):
 
         Initializes `lora_B` from the `r` left singular vectors of the base weight associated with the smallest
         singular values, and sets `lora_A` to zero. The `lora_B` matrix is frozen during training (see
-        `MiCALinearVariant.init`); only `lora_A` is updated. Because `lora_A == 0` at init, the adapter
-        contribution `B @ A == 0` and the base weight does not need to be modified to preserve the forward output.
+        `MiCALinearVariant.init`); only `lora_A` is updated. Because `lora_A == 0` at init, the adapter contribution `B
+        @ A == 0` and the base weight does not need to be modified to preserve the forward output.
         """
         # When the adapter is being created under `init_empty_weights` (e.g. low_cpu_mem_usage=True), its parameters
         # live on the meta device and will be filled in from a checkpoint after creation. Skip the SVD in that case.
@@ -1203,8 +1203,8 @@ class Embedding(nn.Module, LoraLayer):
         """Minor Component Adaptation (MiCA) initialization for embedding layers.
 
         The effective embedding projection has shape `(embedding_dim, num_embeddings)`, so MiCA initializes
-        `lora_embedding_B` from the minor left singular vectors of `base_layer.weight.T` and sets
-        `lora_embedding_A` to zero.
+        `lora_embedding_B` from the minor left singular vectors of `base_layer.weight.T` and sets `lora_embedding_A` to
+        zero.
         """
         if self.lora_embedding_B[adapter_name].device.type == "meta":
             return

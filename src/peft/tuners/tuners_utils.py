@@ -1559,8 +1559,8 @@ class BaseTunerLayer(ABC):
         """Freeze PEFT weights that adapter variants declare as non-trainable.
 
         Some variants intentionally train only a subset of their adapter weights. This method reapplies those
-        declarations after code paths that may otherwise mark adapter weights as trainable, such as adapter setup
-        or adapter switching.
+        declarations after code paths that may otherwise mark adapter weights as trainable, such as adapter setup or
+        adapter switching.
         """
         if not self.frozen_peft_weight_names:
             return

@@ -1234,8 +1234,8 @@ class MiCALinearVariant(LoraVariant):
     """Variant for Minor Component Adaptation (MiCA), https://arxiv.org/abs/2604.01694.
 
     The actual SVD-based initialization is performed in `LoraLayer.mica_init` (called from `update_layer`); this
-    variant declares `lora_B` as frozen. Forward and merge semantics are identical to vanilla LoRA, since
-    `delta_W = scaling * B @ A` and only `A` is updated.
+    variant declares `lora_B` as frozen. Forward and merge semantics are identical to vanilla LoRA, since `delta_W =
+    scaling * B @ A` and only `A` is updated.
     """
 
     @staticmethod
