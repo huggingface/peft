@@ -42,7 +42,7 @@ jobs:
           # data.json is generated at deploy time so that it always matches the deployed PEFT commit (see
           # method_comparison/peft-shop/README.md); the app reads method_capabilities.json from the CWD and
           # writes data.json into its own directory, where the deploy step below picks it up
-          python scripts/generate_method_capabilities.py --output method_comparison/peft-shop/method_capabilities.json
+          python scripts/generate_method_capabilities.py --output method_capabilities.json
           python method_comparison/peft-shop/app.py --rebuild --build-only
 
       - name: Ensure Space exists
@@ -71,5 +71,8 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote add gradio-app https://huggingface.co/spaces/peft-internal-testing/PEFT-shop
           git add .
+          # data.json is gitignored (see .gitignore) so it doesn't get committed into the PEFT repo during local
+          # dev; force-add it here so the self-contained data file actually ships with the Space
+          git add -f data.json
           git commit -m "🚀 Deploy PEFT shop app from GH action"
           git push -f gradio-app HEAD:main
