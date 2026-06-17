@@ -139,29 +139,42 @@ DESCRIPTION_OVERRIDES: dict[str, str] = {}
 BENCHMARK_SPACE_URL = "https://huggingface.co/spaces/peft-internal-testing/PEFT-method-comparison"
 
 
+# Sanity check: Minimum length, in characters, of an extracted paragraph for it to be accepted as a method description
+MIN_DESCRIPTION_LENGTH = 60
+
+
 def extract_description(docs_path: Path) -> str | None:
     """Extract a short description from a method's documentation page.
 
-    The package_reference pages consistently start with a license comment, a `# Title` heading, and then a prose
-    paragraph describing the method. That first paragraph (clipped to at most two sentences) makes a good card
-    description. Markdown links are flattened to their text.
+    The package_reference pages start with a license comment and a `# Title` heading, followed by a prose paragraph
+    describing the method. That paragraph, clipped to at most two sentences, makes a good card description. The title
+    is, however, frequently followed by other blocks first -- an image banner (a `<div>` wrapping an `<img>`), a
+    `<small>` caption, a doc-builder callout (`> [!TIP]`), or an `## Overview` subheading -- so the first block that
+    reads as prose is used: one that starts with a letter and is long enough to be a real sentence (a sanity check
+    against grabbing a markup leftover). Markdown links are flattened to their text.
     """
     try:
         text = docs_path.read_text()
     except OSError:
         return None
 
-    # drop the HTML license comment, then find the first paragraph after the first heading
+    # drop the HTML license comment, then take everything after the first heading
     text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
-    match = re.search(r"^# .+?$\s+(.+?)(?:\n\s*\n|$)", text, flags=re.MULTILINE | re.DOTALL)
+    match = re.search(r"^# .+?$(.*)", text, flags=re.MULTILINE | re.DOTALL)
     if match is None:
         return None
-    paragraph = " ".join(match.group(1).split())
-    paragraph = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", paragraph)  # [text](url) -> text
 
-    # clip to at most two sentences to keep the cards compact
-    sentences = re.split(r"(?<=[.!?]) ", paragraph)
-    return " ".join(sentences[:2]).strip() or None
+    # scan the blank-line-separated blocks and use the first one that reads as prose; non-prose blocks (image divs,
+    # captions, callouts, subheadings) start with a non-letter character or are too short to be a real description
+    for block in re.split(r"\n\s*\n", match.group(1)):
+        paragraph = " ".join(block.split())
+        paragraph = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", paragraph)  # [text](url) -> text
+        if not (paragraph[:1].isalpha() and len(paragraph) >= MIN_DESCRIPTION_LENGTH):
+            continue
+        # clip to at most two sentences to keep the cards compact
+        sentences = re.split(r"(?<=[.!?]) ", paragraph)
+        return " ".join(sentences[:2]).strip() or None
+    return None
 
 
 def load_benchmark_results(
@@ -242,7 +255,7 @@ def build_data(capabilities_path: Path, benchmarks_dir: Path, docs_dir: Path) ->
         docs_path = docs_dir / f"{slug}.md"
         description = DESCRIPTION_OVERRIDES.get(name) or extract_description(docs_path)
         if description is None:
-            logger.warning(f"No description found for {name} (looked at {docs_path})")
+            logger.warning(f"No valid description found for {name} (looked at {docs_path})")
             description = "See the PEFT documentation for details on this method."
 
         # The paper link is determined by scripts/generate_method_capabilities.py (the "paper_url" feature). Older
