@@ -1,0 +1,4 @@
+{
+  "max_steps": 1500,
+  "batch_size_eval": 25
+}

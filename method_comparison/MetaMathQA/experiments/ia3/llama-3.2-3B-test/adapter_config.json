@@ -1,0 +1,13 @@
+{
+  "peft_type": "IA3",
+  "task_type": "CAUSAL_LM",
+  "target_modules": [
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "down_proj"
+  ],
+  "feedforward_modules": [
+    "down_proj"
+  ]
+}
