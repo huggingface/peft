@@ -42,7 +42,7 @@ jobs:
           # data.json is generated at deploy time so that it always matches the deployed PEFT commit (see
           # method_comparison/peft-shop/README.md); the app reads method_capabilities.json from the CWD and
           # writes data.json into its own directory, where the deploy step below picks it up
-          python scripts/generate_method_capabilities.py --output method_capabilities.json
+          python scripts/generate_method_capabilities.py --output method_comparison/peft-shop/method_capabilities.json
           python method_comparison/peft-shop/app.py --rebuild --build-only
 
       - name: Ensure Space exists
