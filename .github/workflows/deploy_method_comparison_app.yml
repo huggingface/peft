@@ -5,6 +5,8 @@ on:
     branches: [ main ]
     paths:
       - "method_comparison/**"
+      # the method explorer (PEFT shop) app has its own Space and deploy workflow
+      - "!method_comparison/peft-shop/**"
   workflow_dispatch:
 
 permissions: {}
@@ -32,6 +34,8 @@ jobs:
       - name: Deploy method_comparison app to HF Spaces
         run: |
           cd method_comparison
+          # the method explorer (PEFT shop) app is deployed to its own Space by its own workflow
+          rm -rf peft-shop
           git init
           # Spaces expect requirements.txt
           mv requirements-app.txt requirements.txt
