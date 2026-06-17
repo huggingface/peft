@@ -1610,6 +1610,28 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def active_peft_config(self):
         return self.peft_config[self.active_adapter]
 
+    def _adjust_prompt_learning_kwargs(
+        self,
+        peft_config: PeftConfig,
+        *,
+        position_ids_kwargs: dict[str, Any],
+        token_type_ids_kwargs: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Adjust prompt-learning kwargs for supported position and token ids"""
+        if position_ids_kwargs.get("position_ids", None) is not None:
+            if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
+                # Offset position_ids by num_virtual_tokens to account for the KV cache prefix
+                position_ids_kwargs["position_ids"] = (
+                    position_ids_kwargs["position_ids"] + peft_config.num_virtual_tokens
+                )
+            else:
+                warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
+                position_ids_kwargs["position_ids"] = None
+
+        if token_type_ids_kwargs is not None and token_type_ids_kwargs.get("token_type_ids", None) is not None:
+            warnings.warn("Token type ids are not supported for parameter efficient tuning. Ignoring token type ids")
+            token_type_ids_kwargs["token_type_ids"] = None
+
     def _get_peft_specific_model_tags(self):
         """Derive tags for the model card from the adapter's config. For example, setting the
         base model is important for enabling support for HF inference providers but it also makes models more
@@ -1864,13 +1886,7 @@ class PeftModelForSequenceClassification(PeftModel):
             # concat prompt attention mask
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask.device)
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
-        if kwargs.get("position_ids", None) is not None:
-            if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
-                # Offset position_ids by num_virtual_tokens to account for the KV cache prefix
-                kwargs["position_ids"] = kwargs["position_ids"] + peft_config.num_virtual_tokens
-            else:
-                warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
-                kwargs["position_ids"] = None
+        self._adjust_prompt_learning_kwargs(peft_config, position_ids_kwargs=kwargs)
         kwargs.update(
             {
                 "attention_mask": attention_mask,
@@ -2069,17 +2085,11 @@ class PeftModelForCausalLM(PeftModel):
             # concat prompt attention mask
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask.device)
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
-
-        if kwargs.get("position_ids", None) is not None:
-            if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
-                # Offset position_ids by num_virtual_tokens to account for the KV cache prefix
-                kwargs["position_ids"] = kwargs["position_ids"] + peft_config.num_virtual_tokens
-            else:
-                warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
-                kwargs["position_ids"] = None
-        if kwargs.get("token_type_ids", None) is not None:
-            warnings.warn("Token type ids are not supported for parameter efficient tuning. Ignoring token type ids")
-            kwargs["token_type_ids"] = None
+        self._adjust_prompt_learning_kwargs(
+            peft_config,
+            position_ids_kwargs=kwargs,
+            token_type_ids_kwargs=kwargs,
+        )
         kwargs.update(
             {
                 "attention_mask": attention_mask,
@@ -2274,21 +2284,11 @@ class PeftModelForCausalLM(PeftModel):
                     # 2d attention mask
                     model_kwargs["attention_mask"] = torch.cat((prefix_attention_mask, attention_mask), dim=1)
 
-            if model_kwargs.get("position_ids", None) is not None:
-                if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
-                    # Offset position_ids by num_virtual_tokens to account for the KV cache prefix
-                    model_kwargs["position_ids"] = model_kwargs["position_ids"] + peft_config.num_virtual_tokens
-                else:
-                    warnings.warn(
-                        "Position ids are not supported for parameter efficient tuning. Ignoring position ids."
-                    )
-                    model_kwargs["position_ids"] = None
-
-            if kwargs.get("token_type_ids", None) is not None:
-                warnings.warn(
-                    "Token type ids are not supported for parameter efficient tuning. Ignoring token type ids"
-                )
-                kwargs["token_type_ids"] = None
+            self._adjust_prompt_learning_kwargs(
+                peft_config,
+                position_ids_kwargs=model_kwargs,
+                token_type_ids_kwargs=kwargs,
+            )
 
             cache: transformers.Cache | None = model_kwargs.get("past_key_values", None)
             # no past_key_values or past_key_values empty cache
@@ -2425,16 +2425,11 @@ class PeftModelForSeq2SeqLM(PeftModel):
             if peft_config.peft_type not in [PeftType.PROMPT_TUNING, PeftType.P_TUNING]:
                 decoder_attention_mask = torch.cat((prefix_attention_mask, decoder_attention_mask), dim=1)
 
-        if kwargs.get("position_ids", None) is not None:
-            if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
-                # Offset position_ids by num_virtual_tokens to account for the KV cache prefix
-                kwargs["position_ids"] = kwargs["position_ids"] + peft_config.num_virtual_tokens
-            else:
-                warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
-                kwargs["position_ids"] = None
-        if kwargs.get("token_type_ids", None) is not None:
-            warnings.warn("Token type ids are not supported for parameter efficient tuning. Ignoring token type ids")
-            kwargs["token_type_ids"] = None
+        self._adjust_prompt_learning_kwargs(
+            peft_config,
+            position_ids_kwargs=kwargs,
+            token_type_ids_kwargs=kwargs,
+        )
         kwargs.update(
             {
                 "attention_mask": attention_mask,
@@ -2525,20 +2520,11 @@ class PeftModelForSeq2SeqLM(PeftModel):
             else:
                 if "input_ids" not in kwargs:
                     raise ValueError("input_ids must be provided for Peft model generation")
-                if kwargs.get("position_ids", None) is not None:
-                    if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
-                        # Offset position_ids by num_virtual_tokens to account for the KV cache prefix
-                        kwargs["position_ids"] = kwargs["position_ids"] + peft_config.num_virtual_tokens
-                    else:
-                        warnings.warn(
-                            "Position ids are not supported for parameter efficient tuning. Ignoring position ids."
-                        )
-                        kwargs["position_ids"] = None
-                if kwargs.get("token_type_ids", None) is not None:
-                    warnings.warn(
-                        "Token type ids are not supported for parameter efficient tuning. Ignoring token type ids"
-                    )
-                    kwargs["token_type_ids"] = None
+                self._adjust_prompt_learning_kwargs(
+                    peft_config,
+                    position_ids_kwargs=kwargs,
+                    token_type_ids_kwargs=kwargs,
+                )
 
                 if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
                     outputs = self.base_model.generate(**kwargs)
@@ -2759,13 +2745,7 @@ class PeftModelForTokenClassification(PeftModel):
             # concat prompt attention mask
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask.device)
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
-        if kwargs.get("position_ids", None) is not None:
-            if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
-                # Offset position_ids by num_virtual_tokens to account for the KV cache prefix
-                kwargs["position_ids"] = kwargs["position_ids"] + peft_config.num_virtual_tokens
-            else:
-                warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
-                kwargs["position_ids"] = None
+        self._adjust_prompt_learning_kwargs(peft_config, position_ids_kwargs=kwargs)
         kwargs.update(
             {
                 "attention_mask": attention_mask,
@@ -3000,13 +2980,7 @@ class PeftModelForQuestionAnswering(PeftModel):
             # concat prompt attention mask
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask.device)
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
-        if kwargs.get("position_ids", None) is not None:
-            if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
-                # Offset position_ids by num_virtual_tokens to account for the KV cache prefix
-                kwargs["position_ids"] = kwargs["position_ids"] + peft_config.num_virtual_tokens
-            else:
-                warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
-                kwargs["position_ids"] = None
+        self._adjust_prompt_learning_kwargs(peft_config, position_ids_kwargs=kwargs)
         kwargs.update(
             {
                 "attention_mask": attention_mask,
@@ -3184,17 +3158,11 @@ class PeftModelForFeatureExtraction(PeftModel):
             # concat prompt attention mask
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask.device)
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
-
-        if kwargs.get("position_ids", None) is not None:
-            if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
-                # Offset position_ids by num_virtual_tokens to account for the KV cache prefix
-                kwargs["position_ids"] = kwargs["position_ids"] + peft_config.num_virtual_tokens
-            else:
-                warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
-                kwargs["position_ids"] = None
-        if kwargs.get("token_type_ids", None) is not None:
-            warnings.warn("Token type ids are not supported for parameter efficient tuning. Ignoring token type ids")
-            kwargs["token_type_ids"] = None
+        self._adjust_prompt_learning_kwargs(
+            peft_config,
+            position_ids_kwargs=kwargs,
+            token_type_ids_kwargs=kwargs,
+        )
         kwargs.update(
             {
                 "attention_mask": attention_mask,
