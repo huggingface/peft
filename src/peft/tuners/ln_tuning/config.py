@@ -55,7 +55,7 @@ class LNTuningConfig(PeftConfig):
                 "List of module names or regex expression of the module names to replace with LNTuning."
                 "For example, '.*decoder.*' or '.*encoder.*'. "
                 "If not specified, modules will be chosen according to the model architecture, If the architecture is "
-                "not known, an error will be raised -- in this case, you shoud specify the target modules manually."
+                "not known, an error will be raised -- in this case, you should specify the target modules manually."
             ),
         },
     )

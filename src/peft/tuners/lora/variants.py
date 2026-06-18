@@ -97,7 +97,7 @@ class ArrowLinearVariant(LoraVariant):
             output of the base model + delta weight computed by arrow layer.
         """
         arrow = module.lora_arrow[active_adapter]  # ArrowLoraLinearLayer
-        # Apply GenKnowSub the 1st time if applcable. By calling arrow/on_adapter_change(),
+        # Apply GenKnowSub the 1st time if applicable. By calling arrow/on_adapter_change(),
         # gen_know_sub() is redone for newly added adapters after arrow.create_arrow_model().
         arrow.gen_know_sub(module.lora_A, module.lora_B)
         # lazily build prototypes the 1st time after GenKnowSub. By calling arrow/on_adapter_change(),
