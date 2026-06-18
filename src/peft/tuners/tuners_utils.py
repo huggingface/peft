@@ -1395,7 +1395,7 @@ class BaseTunerLayer(ABC):
     adapter_layer_names: tuple[str, ...] = ()
     # All names of other parameters that may contain adapter-related parameters
     other_param_names: tuple[str, ...] = ()
-    # Mapping from adapter name to adapter layer names that should always stay frozen
+    # This dict maps from the adapter name to the layer(s) whose weights should stay frozen
     frozen_peft_weight_names: dict[str, tuple[str, ...]] = {}
 
     # indicates whether all adapters should be disabled
