@@ -2287,7 +2287,7 @@ class PeftModelForCausalLM(PeftModel):
             self._adjust_prompt_learning_kwargs(
                 peft_config,
                 position_ids_kwargs=model_kwargs,
-                token_type_ids_kwargs=kwargs,
+                token_type_ids_kwargs=model_kwargs,
             )
 
             cache: transformers.Cache | None = model_kwargs.get("past_key_values", None)
