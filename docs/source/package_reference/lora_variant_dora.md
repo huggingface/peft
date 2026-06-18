@@ -73,7 +73,7 @@ For [`meta-llama/Llama-3.1-8B`](https://huggingface.co/meta-llama/Llama-3.1-8B),
 - DoRA with caching requires 17% more time
 - DoRA with caching requires 41% more memory
 
-Caching can thus make inference with DoRA significantly faster but it also requires signficantly more memory. Ideally, if the use case allows it, just merge the DoRA adapter to avoid both memory and runtime overhead.
+Caching can thus make inference with DoRA significantly faster but it also requires significantly more memory. Ideally, if the use case allows it, just merge the DoRA adapter to avoid both memory and runtime overhead.
 
 ## Caveats
 

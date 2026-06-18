@@ -93,7 +93,7 @@ It is also possible to convert a LoRA adapter into another LoRA adapter. Why wou
 
 ### Non-LoRA to LoRA conversion
 
-Of course, converting one PEFT adapter into another adapter is a lossy process. The new adapter will most likely not perform as well as the initial adapter. Therefore, it is highly advised to **evaluate the converted LoRA adapter**. This way, you can make sure that the converted adapter performs well enough for your use case. The general rule applies that the higher the rank of the LoRA adaper, the better it will approximate your initial adapter. This means that the converted LoRA adapter may require more parameters than the original adapter to achieve a similar performanace.
+Of course, converting one PEFT adapter into another adapter is a lossy process. The new adapter will most likely not perform as well as the initial adapter. Therefore, it is highly advised to **evaluate the converted LoRA adapter**. This way, you can make sure that the converted adapter performs well enough for your use case. The general rule applies that the higher the rank of the LoRA adapter, the better it will approximate your initial adapter. This means that the converted LoRA adapter may require more parameters than the original adapter to achieve a similar performanace.
 
 To give an example, here are some numbers that were derived on the [PEFT MetaMathQA benchmark](https://github.com/huggingface/peft/tree/main/method_comparison/MetaMathQA). For this, a [LoHa](https://huggingface.co/docs/peft/package_reference/loha) adapter was used to fine-tune `meta-llama/Llama-3.2-3B` on MetaMathQA and evaluated on GSM8K. The initial LoKr adapter had rank 32, resulting in 18,350,080 trainable parameters and a test accuracy of 41.85%. Evaluation required 12.25 GB of memory. The checkpoint was converted into LoRA with different values for the `rank`. The resulting outcome is:
 
@@ -135,7 +135,7 @@ So for instance for rank 0.95, we can close the accuracy gap to just 0.3 percent
 
 ## Caveats
 
-There are some limitations to the LoRA conversion. As mentioned above, a reduction in performance is expected and the converted LoRA will most likely be less parameter efficient than the original adapter. Morever, LoRA conversion has these limitations:
+There are some limitations to the LoRA conversion. As mentioned above, a reduction in performance is expected and the converted LoRA will most likely be less parameter efficient than the original adapter. Moreover, LoRA conversion has these limitations:
 
 - Right now, only adapters applied to linear layers can be converted.
 - Not all PEFT methods currently support LoRA conversion.

@@ -46,7 +46,7 @@ class GraloraConfig(PeftConfig):
             improve the generalization of the GraLoRA adapter.
         gralora_k (`int`):
             GraLoRA k determines the number of subblocks in the GraLoRA adapter. The rank r must be divisible by
-            gralora_k for the GraLoRA adapter to be valid. The total parameter count is preserved regardles of
+            gralora_k for the GraLoRA adapter to be valid. The total parameter count is preserved regardless of
             gralora_k. The entire rank of the GraLoRA adapter is increased by gralora_k, while the rank of each
             subblock is reduced by gralora_k. gralora_k=2 is recommended for rank 32 or lower, and gralora_k=4 is
             recommended for rank 64 or higher.
@@ -123,7 +123,7 @@ class GraloraConfig(PeftConfig):
             "help": (
                 "gralora_k determines the number of subblocks in the GraLoRA adapter. "
                 "The rank r must be divisible by gralora_k for the GraLoRA adapter to be valid. "
-                "The total parameter count is preserved regardles of gralora_k. "
+                "The total parameter count is preserved regardless of gralora_k. "
                 "The entire rank of the GraLoRA adapter is increased by gralora_k, while the rank of each subblock is reduced by gralora_k. "
                 "gralora_k=2 is recommended for rank 32 or lower, and gralora_k=4 is recommended for rank 64 or higher. "
             )

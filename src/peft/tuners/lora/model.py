@@ -318,7 +318,7 @@ class LoraModel(BaseTuner):
                         device_mesh,
                     )
                 else:  # embedding_rowwise
-                    # TP hooks are  handled in the `_embed` method in lora/layer.py where they are explicitely called.
+                    # TP hooks are  handled in the `_embed` method in lora/layer.py where they are explicitly called.
                     # Here we simply register the TP plans.
                     tp_plan_keys.append(f"{generic_key}.base_layer.weight")
                     tp_plan_keys.append(f"{generic_key}.lora_embedding_A.{adapter_name}")
@@ -369,7 +369,7 @@ class LoraModel(BaseTuner):
 
         if lora_config._custom_modules:
             # Experimental custom LoRA module support. Allows users to pass a custom mapping for unsupported layer
-            # types by impelementing their own LoRA layers.
+            # types by implementing their own LoRA layers.
             def dynamic_dispatch_func(target, adapter_name, config, **kwargs):
                 new_module = None
 

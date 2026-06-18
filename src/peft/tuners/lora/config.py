@@ -427,7 +427,7 @@ class LoraConfig(PeftConfig):
             using SVD. Passing `'corda'` results in the initialization of <a
             href='https://huggingface.co/papers/2406.05223' >Context-Oriented Decomposition Adaptation</a>, which
             converges even more rapidly than PiSSA in Instruction-Previewed Mode, and preserves world knowledge better
-            than LoRA in Knowledge-Preserved Mode. Passing `"orthogonal"` results in LoRA A and B being intialized
+            than LoRA in Knowledge-Preserved Mode. Passing `"orthogonal"` results in LoRA A and B being initialized
             orthogonally; in this, it resembles `"olora"`, but the base weights are left untouched (requires `r` to be
             even, only supported for linear layers for now).
         layers_to_transform (`Union[List[int], int]`):
@@ -1044,7 +1044,7 @@ class MontecloraConfig:
     Monteclora introduces variational inference into LoRA by adding Monte Carlo sampling to the adapter weights.
 
     In practice you can think of Monteclora as adding stochastic, learned perturbations on top of the LoRA weights to
-    obtain a better-calibrated and better-regularized adapter. The argments below let you trade off stability,
+    obtain a better-calibrated and better-regularized adapter. The arguments below let you trade off stability,
     regularization strength, and compute cost.
 
     Args:

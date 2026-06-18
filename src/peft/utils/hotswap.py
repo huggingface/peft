@@ -308,7 +308,7 @@ def prepare_model_for_compiled_hotswap(
 
     Raises:
         ValueError
-            If the model is already compiled or if no adpater layer was found, raise an error.
+            If the model is already compiled or if no adapter layer was found, raise an error.
 
     Example:
 
