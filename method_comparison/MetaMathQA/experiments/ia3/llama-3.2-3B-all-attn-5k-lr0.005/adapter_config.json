@@ -1,0 +1,14 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "exclude_modules": null,
+  "fan_in_fan_out": false,
+  "feedforward_modules": ["down_proj", "gate_proj", "up_proj"],
+  "inference_mode": false,
+  "init_ia3_weights": true,
+  "modules_to_save": null,
+  "peft_type": "IA3",
+  "revision": null,
+  "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "down_proj", "gate_proj", "up_proj"],
+  "task_type": null
+}
