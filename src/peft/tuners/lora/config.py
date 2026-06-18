@@ -108,13 +108,8 @@ class LoftQConfig:
     This is the sub-configuration class to store the configuration of a [`LoraModel`].
 
     Args:
-        bits_pattern (`dict`): The mapping from layer names or regexp expression to bits which are different from the
-            default bits specified by `bits`. For example, `{model.decoder.layers.0.encoder_attn.k_proj: 2`}.
-        bits (`int`): Quantization bits for LoftQ.
-        iter (`int`): Alternating iterations for LoftQ.
-        fake (`bool`): True: use fp16/fp32; used for first time to save weights. False: use bitsandbytes 4bit linear
-            models. weights can't be saved. Recommend to set to True, save the weights and load the saved weights in 4
-            bits.
+        loftq_bits (`int`): Quantization bits for LoftQ.
+        loftq_iter (`int`): Alternating iterations for LoftQ.
     """
 
     loftq_bits: int = field(default=4, metadata={"help": "Quantization bits for LoftQ"})
@@ -197,6 +192,10 @@ class BdLoraConfig:
             Modules where the LoRA-B is block-diagonal. Matches each pattern in the list against the module name via
             `pattern is in target_name`. Example: ['out_proj', 'down_proj']
         nblocks: Number of blocks in block-diagonal matrices
+        match_strict:
+            If set to true, requires each target_module to have either a block-diagonal LoRA-A or LoRA-B, and raises an
+            error otherwise. You can set this to False to mix LoRA and BD-LoRA training, e.g. if some layers in your
+            module do not benefit from BD-LoRA.
     """
 
     target_modules_bd_a: Optional[list[str]] = field(
@@ -468,6 +467,9 @@ class LoraConfig(PeftConfig):
         corda_config (`Optional[CordaConfig]`):
             The configuration of CorDA. If this is not None, then CorDA will be used to build the adapter layers. Also
             pass `init_lora_weights='corda'`.
+        lora_ga_config (`Optional[LoraGAConfig]`):
+            The configuration of LoRA-GA. If this is passed, then LoRA-GA will be used to initialize the adapter
+            layers. Also set `init_lora_weights='lora_ga'` in this case.
         use_dora (`bool`):
             Enable 'Weight-Decomposed Low-Rank Adaptation' (DoRA). This technique decomposes the updates of the weights
             into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is
@@ -489,6 +491,21 @@ class LoraConfig(PeftConfig):
             operations. Overall adapter inference speedups of an order of magnitude or more can occur on vLLM,
             depending on the length of the shared context. Note that merging is not possible due to the selective
             application of the weights.
+        use_qalora (`bool`):
+            It is only implemented in GPTQ for now. Enable <a
+            href='https://huggingface.co/papers/2309.14717'>Quantization-Aware Low-Rank Adaptation (QALoRA)</a>. This
+            technique combines quantization-aware training with LoRA to improve performance for quantized models. This
+            can improve the performance of LoRA, especially at low ranks. Right now, QALoRA only supports linear
+            layers.
+        qalora_group_size (`int`):
+            Group size parameter for QALoRA pooling, controlling the dimension reduction factor. Input dimensions are
+            pooled into groups of this size, reducing the computational cost. Higher values provide more compression
+            but may reduce model quality. This parameter determines how many original features are averaged together to
+            create one pooled feature. Only used when `use_qalora=True`.
+        monteclora_config (`Optional[MontecloraConfig]`):
+            The configuration of Monteclora (Monte Carlo Low-Rank Adaptation). If passed, Monteclora will be used to
+            add variational Monte Carlo sampling on top of the LoRA adapters. See `MontecloraConfig` for details on the
+            individual hyperparameters.
         layer_replication (`List[Tuple[int, int]]`):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
@@ -509,6 +526,12 @@ class LoraConfig(PeftConfig):
             `target_parameters`. As an example, for Llama4, you can pass:
             `target_parameters=['feed_forward.experts.gate_up_proj', 'feed_forward.experts.down_proj]`. Passing a
             string for regex matching is not implemented yet.
+        use_bdlora (`Optional[BdLoraConfig]`):
+            Enable BD-LoRA (Block-Diagonal LoRA) by providing a BdLoraConfig. This technique uses block-diagonal
+            matrices for LoRA-A or LoRA-B factors to enable faster multi-LoRA serving by eliminating communication
+            overheads in distributed settings.
+        arrow_config (`Optional[ArrowConfig]`):
+            The necessary config to apply arrow routing on the model.
         ensure_weight_tying (`bool`, *optional*)
             Whether to tie weights or not after peft initialization. This will ensure that the adapters added to the
             tied layers are also tied. This is only applicable for layers passed via `modules_to_save` and
