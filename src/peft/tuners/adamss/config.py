@@ -324,6 +324,15 @@ class AdamssConfig(PeftConfig):
             )
         },
     )
+    random_seed: int = field(
+        default=0,
+        metadata={
+            "help": (
+                "Seed used to deterministically create and rebuild the adapter weights, so that a saved adapter "
+                "reproduces its outputs after loading. Default: 0."
+            )
+        },
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.ADAMSS

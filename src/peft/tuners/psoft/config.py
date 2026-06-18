@@ -166,6 +166,16 @@ class PsoftConfig(PeftConfig):
             "help": "Number of power iterations used by torch.svd_lowrank when psoft_svd='lowrank'. Only used when psoft_svd='lowrank'. "
         },
     )
+    random_seed: int = field(
+        default=0,
+        metadata={
+            "help": (
+                "Seed used to deterministically create and rebuild the adapter weights when psoft_svd='lowrank', so "
+                "that a saved adapter reproduces its outputs after loading. Only used when psoft_svd='lowrank'. "
+                "Default: 0."
+            )
+        },
+    )
     psoft_orth: bool = field(
         default=True,
         metadata={

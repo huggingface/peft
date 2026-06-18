@@ -57,6 +57,10 @@ class GraloraConfig(PeftConfig):
             Bias type for gralora. Can be 'none', 'all' or 'gralora_only'. If 'all' or 'gralora_only', the
             corresponding biases will be updated during training. Be aware that this means that, even when disabling
             the adapters, the model will not produce the same output as the base model would have without adaptation.
+        modules_to_save (`Optional[list[str]]`):
+            List of modules apart from gralora layers to be set as trainable and saved in the final checkpoint. For
+            example, in Sequence Classification or Token Classification tasks, the final layer `classifier/score` are
+            randomly initialized and as such need to be trainable and saved.
         init_weights (`bool`):
             Whether to initialize the weights of the GraLoRA layers with their default initialization. Don't change
             this setting, except if you know exactly what you're doing.
