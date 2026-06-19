@@ -37,6 +37,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
+    FrodConfig,
     GraloraConfig,
     HiraConfig,
     HRAConfig,
@@ -870,6 +871,14 @@ TEST_CASES = [
         RandLoraConfig,
         {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "randlora_alpha": 1},
     ),
+    ########
+    # FRoD #
+    ########
+    ("Vanilla MLP 1 FRoD", "MLP", FrodConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 FRoD", "MLP", FrodConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 FRoD", "MLP", FrodConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 FRoD", "MLP", FrodConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 FRoD", "MLP", FrodConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
     #######
     # C3A #
     #######
@@ -1387,6 +1396,13 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         "VeRA Same",
         "vera",
         VeraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "FRoD Same",
+        "frod",
+        FrodConfig,
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin0"], "init_weights": False},
     ),
@@ -3501,7 +3517,8 @@ class TestPeftCustomModel(PeftCommonTester):
         assert "other" in model.base_model.classifier.modules_to_save
 
     @pytest.mark.parametrize(
-        "config_cls", [IA3Config, BeftConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig, MissConfig]
+        "config_cls",
+        [IA3Config, BeftConfig, FrodConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig, MissConfig],
     )
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
@@ -3533,7 +3550,8 @@ class TestPeftCustomModel(PeftCommonTester):
         model(**inputs)
 
     @pytest.mark.parametrize(
-        "config_cls", [IA3Config, BeftConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig]
+        "config_cls",
+        [IA3Config, BeftConfig, FrodConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig],
     )
     def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
         # See issue 1574
@@ -3876,6 +3894,7 @@ class TestPeftCustomModel(PeftCommonTester):
             AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
             BeftConfig(target_modules=["lin0"], init_weights=False),
+            FrodConfig(target_modules=["lin0"], init_weights=False),
             OFTConfig(target_modules=["lin0"], init_weights=False, r=2, oft_block_size=0),
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
             HRAConfig(target_modules=["lin0"], init_weights=False),
