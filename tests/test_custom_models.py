@@ -35,6 +35,7 @@ from peft import (
     BeftConfig,
     BOFTConfig,
     C3AConfig,
+    DeftConfig,
     DeloraConfig,
     FourierFTConfig,
     FrodConfig,
@@ -532,6 +533,15 @@ TEST_CASES = [
         OFTConfig,
         {"r": 5, "oft_block_size": 0, "target_modules": ["conv2d"], "coft": True, "block_share": True},
     ),
+    #########
+    # DEFT #
+    #########
+    ("Vanilla MLP 1 DEFT", "MLP", DeftConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 DEFT", "MLP", DeftConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 DEFT", "MLP", DeftConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 4 DEFT qr", "MLP", DeftConfig, {"target_modules": ["lin0"], "decomposition_method": "qr"}),
+    ("Vanilla MLP 5 DEFT", "MLP", DeftConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    ("Vanilla MLP 6 DEFT gating", "MLP", DeftConfig, {"target_modules": ["lin0", "lin1"], "use_gating": True}),
     ########
     # HRA #
     ########
@@ -1435,6 +1445,22 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         HRAConfig,
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
+        # qr gives scale-independent (O(1)) updates at random init; the default relu update is ~|P|^2 and too small
+        # here for the adapters' outputs to differ beyond tolerance.
+        "DEFT Same",
+        "deft",
+        DeftConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "decomposition_method": "qr"},
+        {"target_modules": ["lin0"], "init_weights": False, "decomposition_method": "qr"},
+    ),
+    (
+        "DEFT Different",
+        "deft",
+        DeftConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "decomposition_method": "qr"},
+        {"target_modules": ["lin1"], "init_weights": False, "decomposition_method": "qr"},
     ),
     (
         "MiSS Same",

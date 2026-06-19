@@ -75,6 +75,8 @@
         title: BOFT
       - local: package_reference/c3a
         title: C3A
+      - local: package_reference/deft
+        title: DEFT
       - local: package_reference/delora
         title: DeLoRA
       - local: package_reference/fourierft
@@ -166,6 +168,8 @@
       title: Cartridges
     - local: package_reference/cpt
       title: CPT
+    - local: package_reference/deft
+      title: DEFT
     - local: package_reference/delora
       title: DeLoRA
     - local: package_reference/fourierft
@@ -226,6 +230,8 @@
       title: HiRA
     - local: package_reference/hra
       title: HRA
+    - local: package_reference/deft
+      title: DEFT
     - local: package_reference/cpt
       title: CPT
     - local: package_reference/trainable_tokens

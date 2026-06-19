@@ -52,6 +52,7 @@ class PeftType(str, enum.Enum):
     - DELORA
     - GRALORA
     - ADAMSS
+    - DEFT
     """
 
     PROMPT_TUNING = "PROMPT_TUNING"
@@ -94,6 +95,7 @@ class PeftType(str, enum.Enum):
     TINYLORA = "TINYLORA"
     PSOFT = "PSOFT"
     PEANUT = "PEANUT"
+    DEFT = "DEFT"
 
 
 class TaskType(str, enum.Enum):
