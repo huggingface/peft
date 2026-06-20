@@ -54,6 +54,7 @@ from peft.utils.other import (
     set_additional_trainable_modules,
 )
 from peft.utils.peft_types import PeftType, TaskType
+from peft.utils.quantization_utils import QuantizationBackend
 from peft.utils.warning import PeftWarning
 
 from ..config import PeftConfig
@@ -209,8 +210,13 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
         # GPT-QModel quantized linears
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "EetqLinear":
-        # Eetq layers
-        in_features, out_features = module.in_features, module.out_features
+        if hasattr(module, "in_features"):
+            # Eetq layers
+            in_features, out_features = module.in_features, module.out_features
+        else:
+            # Transformers Eetq layers
+            # https://github.com/huggingface/transformers/blob/c220ea9ecee9231927a47d97a63d5604a09d4c63/src/transformers/integrations/eetq.py#L74
+            in_features, out_features = module.weight.shape
     elif hasattr(module, "W_q") and module.__class__.__name__ == "HQQLinear":
         # HQQ layers
         in_features, out_features = module.in_features, module.out_features
@@ -1136,7 +1142,7 @@ class BaseTuner(nn.Module, ABC):
 
     def _replace_module(self, parent, child_name, new_module, child) -> None:
         """
-        Replace the sub-module of a given moduel with a new PEFT module.
+        Replace the sub-module of a given module with a new PEFT module.
 
         This also deals with device placement of the new module to be in line with the child module.
 
@@ -1295,7 +1301,7 @@ class BaseTuner(nn.Module, ABC):
 
     def _check_tied_modules(self, model: nn.Module, peft_config):
         """
-        Checks if any of the tied layers are targetted via `modules_to_save` or `target_modules`. Updates the
+        Checks if any of the tied layers are targeted via `modules_to_save` or `target_modules`. Updates the
         `peft_config` in place with any layers/adapters that needs to be tied
         """
         modules_to_save = set(getattr(peft_config, "modules_to_save", []) or [])
@@ -1395,6 +1401,9 @@ class BaseTunerLayer(ABC):
     # List all merged adapters
     merged_adapters: list[str] = []
 
+    # the quantization backend used within this class, e.g. Bnb8bitBackend or None if no quantization
+    quantization_backend: QuantizationBackend | None = None
+
     def get_base_layer(self) -> nn.Module:
         """
         (Recursively) get the base_layer.
@@ -1406,6 +1415,25 @@ class BaseTunerLayer(ABC):
         while hasattr(base_layer, "base_layer"):
             base_layer = base_layer.base_layer
         return base_layer
+
+    def get_base_weight(self) -> torch.Tensor:
+        """Return the weight of the base layer.
+
+        This takes care of potentially dequantizing the weight if it is quantized.
+        """
+        if self.quantization_backend is not None:
+            return self.quantization_backend.get_base_weight(self.get_base_layer())
+        return self.get_base_layer().weight.data
+
+    def set_base_weight(self, weight_data: torch.Tensor) -> None:
+        """Sets the base weight of the base layer to the new tensor
+
+        This works also with quantized weights.
+        """
+        if self.quantization_backend is not None:
+            self.quantization_backend.set_base_weight(self, weight_data)
+        else:
+            self.get_base_layer().weight.data = weight_data
 
     def _get_embed_scale(self):
         """
@@ -1685,7 +1713,7 @@ class BaseTunerLayer(ABC):
         Usually, we want to enable this to align the input dtype with the dtype of the weight, but by setting
         layer.cast_input_dtype=False, this can be disabled if necessary.
 
-        Enabling or disabling can be managed via the peft.helpers.disable_lora_input_dtype_casting context manager.
+        Enabling or disabling can be managed via the peft.helpers.disable_input_dtype_casting context manager.
         """
         if x is None:  # useful e.g. if x is the bias, which can be None
             return None
@@ -1847,11 +1875,13 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
             # TODO: It's still unclear how empty layers_pattern (None, [], or "") should behave
             # For now, empty layers_pattern means any layer pattern is ok
             if layers_pattern is None or len(layers_pattern) == 0:
-                layer_index = re.match(r".*\.[^.]*\.(\d+)\.", key)
+                # Lazy .*? matches the first numbered segment (the layer index), not the last one; a greedy .* would
+                # wrongly pick up nested indices such as the expert index in MoE models ("...layers.1.experts.0...").
+                layer_index = re.match(r".*?\.[^.]*\.(\d+)\.", key)
             else:
                 layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
                 for pattern in layers_pattern:
-                    layer_index = re.match(rf".*\.{pattern}\.(\d+)\.", key)
+                    layer_index = re.match(rf".*?\.{pattern}\.(\d+)\.", key)
                     if layer_index is not None:
                         break
 
@@ -1993,7 +2023,7 @@ def clone_module(module: nn.Module, share_weights=False):
 
 
 def replicate_layers(model: nn.Module, layer_map: list[tuple[int, int]]):
-    """Replicate layers in a transfomer model with weight sharing.
+    """Replicate layers in a transformer model with weight sharing.
 
     This function looks for a module list attribute at model[(.model)*].layers and replicates the layers in the module
     list according to the layer map. For example the map `[[0, 4], [2, 5]]` will take the set of layers `[0, 1, 2, 3,

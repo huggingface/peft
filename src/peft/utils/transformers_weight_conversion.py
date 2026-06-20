@@ -162,7 +162,7 @@ class FlattenDims(ConversionOps):
 
     @property
     def reverse_op(self) -> ConversionOps:
-        raise NotImplementedError("Reversing flatteing operatio is not supported.")
+        raise NotImplementedError("Reversing flatteing operation is not supported.")
 
     def __repr__(self):
         return f"{self.__class__.__name__}(dims={self.dims})"
@@ -190,7 +190,7 @@ class PermuteDims(ConversionOps):
 
     @property
     def reverse_op(self) -> ConversionOps:
-        raise NotImplementedError("Reversing flatteing operatio is not supported yet.")
+        raise NotImplementedError("Reversing flatteing operation is not supported yet.")
 
     def __repr__(self):
         return f"{self.__class__.__name__}(dims={self.dims})"
@@ -555,7 +555,7 @@ def convert_peft_adapter_state_dict_for_transformers(
         # This logic is copied here but with an extra caveat: We only undo the key renaming if it is due to a missing
         # prefix, e.g. "text_model.foo.bar" => "foo.bar". This is why we check if the renamed key is a suffix of the
         # original key. However, strictly checking for the suffix is not enough because the renamed key also introduces
-        # the adapater name, which is not in the original key. Therefore, we need to remove the adapter name first.
+        # the adapter name, which is not in the original key. Therefore, we need to remove the adapter name first.
         if (
             (renamed_key not in adapter_state_dict)
             and (original_key in adapter_state_dict)

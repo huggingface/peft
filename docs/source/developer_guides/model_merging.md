@@ -29,7 +29,7 @@ Models are merged with the [`~LoraModel.add_weighted_adapter`] method, and the s
 
 With TIES and DARE, merging is enabled by setting `combination_type` and `density` to a value of the weights to keep from the individual models. For example, let's merge three finetuned [TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T](https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T) models: [tinyllama_lora_nobots](https://huggingface.co/smangrul/tinyllama_lora_norobots), [tinyllama_lora_sql](https://huggingface.co/smangrul/tinyllama_lora_sql), and [tinyllama_lora_adcopy](https://huggingface.co/smangrul/tinyllama_lora_adcopy).
 
-<Tip warninig={true}>
+<Tip warning={true}>
 
 When you're attempting to merge fully trained models with TIES, you should be aware of any special tokens each model may have added to the embedding layer which are not a part of the original checkpoint's vocabulary. This may cause an issue because each model may have added a special token to the same embedding position. If this is the case, you should use the [`~transformers.PreTrainedModel.resize_token_embeddings`] method to avoid merging the special tokens at the same embedding index.
 

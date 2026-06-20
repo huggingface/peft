@@ -1,0 +1,8 @@
+{
+  "max_steps": 300,
+  "eval_steps": 100,
+  "optimizer_kwargs": {
+    "lr": 0.00005,
+    "weight_decay": 0.01
+  }
+}

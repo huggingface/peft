@@ -69,6 +69,7 @@ from peft import (
     AdaLoraConfig,
     ArrowConfig,
     EvaConfig,
+    FrodConfig,
     HiraConfig,
     LoftQConfig,
     LoraConfig,
@@ -133,6 +134,42 @@ if device == "cpu":
 
 # A full testing suite that tests all the necessary features on GPU. The tests should
 # rely on the example scripts to test the features.
+
+
+class FrodRuntimeOffloadMLP(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.relu = torch.nn.ReLU()
+        self.lin0 = torch.nn.Linear(10, 20)
+        self.lin1 = torch.nn.Linear(20, 20)
+        self.lin2 = torch.nn.Linear(20, 20)
+        self.lin3 = torch.nn.Linear(20, 2)
+
+    def forward(self, inputs):
+        hidden = self.lin0(inputs)
+        hidden = self.relu(hidden)
+        hidden = self.lin1(hidden)
+        hidden = self.relu(hidden)
+        hidden = self.lin2(hidden)
+        hidden = self.relu(hidden)
+        return self.lin3(hidden)
+
+
+@pytest.mark.single_gpu_tests
+def test_frod_runtime_offload_keeps_base_weight_on_cpu_after_accelerator_move():
+    config = FrodConfig(target_modules=["lin1", "lin2"], runtime_offload_base_weight=True)
+    peft_model = get_peft_model(FrodRuntimeOffloadMLP(), config).to(torch_device)
+    lin1 = peft_model.base_model.model.lin1
+
+    assert lin1.get_base_layer().weight.device.type == "cpu"
+    assert lin1.frod_U["default"].device.type == torch_device
+    assert lin1.frod_lambda_l["default"].device.type == torch_device
+
+    inputs = torch.randn(5, 10, device=torch_device)
+    output = peft_model(inputs)
+
+    assert output.device.type == torch_device
+    assert lin1.get_base_layer().weight.device.type == "cpu"
 
 
 @dataclass
@@ -4235,12 +4272,6 @@ class PeftEetqGPUTests(unittest.TestCase):
         assert torch.isfinite(output.logits).all()
         model.train(training)
 
-    @pytest.mark.xfail(
-        reason="EETQ is not yet supported by Transformers v5",
-        condition=is_transformers_ge_v5,
-        strict=True,
-        raises=NotImplementedError,
-    )
     @pytest.mark.single_gpu_tests
     def test_causal_lm_training_eetq(self):
         r"""
@@ -4296,12 +4327,6 @@ class PeftEetqGPUTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
-    @pytest.mark.xfail(
-        reason="EETQ is not yet supported by Transformers v5",
-        condition=is_transformers_ge_v5,
-        strict=True,
-        raises=NotImplementedError,
-    )
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
     def test_causal_lm_training_multi_gpu_eetq(self):

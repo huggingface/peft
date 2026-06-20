@@ -1,0 +1,78 @@
+name: Deploy "PEFT shop" Gradio app to Spaces
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      # the app itself, and the data sources baked into its data.json: benchmark results and the capability script
+      - "method_comparison/peft-shop/**"
+      - "method_comparison/*/results/**"
+      - "scripts/generate_method_capabilities.py"
+  schedule:
+    # monthly refresh so that newly added PEFT methods reach the Space without a manual dispatch
+    - cron: "0 3 1 * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  deploy:
+    # GH Environment for extra protection: https://github.com/huggingface/peft/settings/environments
+    environment: branch-protection-main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install PEFT and app dependencies
+        run: |
+          # CPU-only torch keeps the install small and fast; the capability probes run on CPU anyway
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e . gradio tqdm
+
+      - name: Build the app data
+        run: |
+          # data.json is generated at deploy time so that it always matches the deployed PEFT commit (see
+          # method_comparison/peft-shop/README.md); the app reads method_capabilities.json from the CWD and
+          # writes data.json into its own directory, where the deploy step below picks it up
+          python scripts/generate_method_capabilities.py --output method_capabilities.json
+          python method_comparison/peft-shop/app.py --rebuild --build-only
+
+      - name: Ensure Space exists
+        env:
+          HF_TOKEN: ${{ secrets.PEFT_INTERNAL_REPO_READ_WRITE }}
+        run: |
+          # pushing to a non-existent Space would fail, the Hub does not create repositories on git push
+          python -c "
+          from huggingface_hub import create_repo
+          create_repo('peft-internal-testing/PEFT-shop', repo_type='space', space_sdk='gradio', exist_ok=True)
+          "
+
+      - name: Authenticate via ~/.netrc
+        env:
+          HF_TOKEN: ${{ secrets.PEFT_INTERNAL_REPO_READ_WRITE }}
+        run: |
+          # netrc needs BOTH login and password entries
+          printf "machine huggingface.co\nlogin hf\npassword ${HF_TOKEN}\n" >> ~/.netrc
+          chmod 600 ~/.netrc
+
+      - name: Deploy PEFT shop app to HF Spaces
+        run: |
+          cd method_comparison/peft-shop
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add gradio-app https://huggingface.co/spaces/peft-internal-testing/PEFT-shop
+          git add .
+          # data.json is gitignored (see .gitignore) so it doesn't get committed into the PEFT repo during local
+          # dev; force-add it here so the self-contained data file actually ships with the Space
+          git add -f data.json
+          git commit -m "🚀 Deploy PEFT shop app from GH action"
+          git push -f gradio-app HEAD:main

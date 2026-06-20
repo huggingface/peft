@@ -1,0 +1,33 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "bias": "none",
+  "fan_in_fan_out": false,
+  "frod_dropout": 0.0,
+  "inference_mode": false,
+  "init_weights": true,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "modules_to_save": null,
+  "peft_type": "FROD",
+  "projection_prng_key": 0,
+  "regularization_alpha": 0.001,
+  "revision": null,
+  "runtime_offload_base_weight": true,
+  "save_projection": true,
+  "sparse_rate": 0.01,
+  "target_modules": [
+    "to_v",
+    "add_v_proj",
+    "to_qkv_mlp_proj",
+    "linear_out",
+    "to_k",
+    "to_add_out",
+    "add_q_proj",
+    "linear_in",
+    "add_k_proj",
+    "to_q",
+    "to_out.0"
+  ],
+  "task_type": null
+}
