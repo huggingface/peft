@@ -181,6 +181,10 @@ def get_peft_model_state_dict(
                     bias_name = k.split("lora_")[0] + "bias"
                     if bias_name in state_dict:
                         to_return[bias_name] = state_dict[bias_name]
+                    else:
+                        bias_name = k.split("lora_")[0] + "base_layer.bias"
+                        if bias_name in state_dict:
+                            to_return[bias_name] = state_dict[bias_name]
         else:
             raise NotImplementedError
         to_return = {k: v for k, v in to_return.items() if (("lora_" in k) or ("bias" in k))}
