@@ -108,9 +108,7 @@ class BenchmarkResult:
                 "version": platform.version(),
                 "machine": platform.machine(),
                 "processor": platform.processor(),
-                "accelerator": torch_accelerator_module.get_device_name(0)
-                if torch_accelerator_module.is_available()
-                else "N/A",
+                "accelerator": torch_accelerator_module.get_device_name(0) if torch_accelerator_module.is_available() else "N/A",
             },
         }
 
@@ -138,9 +136,7 @@ class BenchmarkResult:
         if performance_metrics:  # For things like overall tokens/sec if calculated
             self.generation_info.update(performance_metrics)
 
-    def add_memory_log(
-        self, stage: str, ram_mb: float, accelerator_allocated_mb: float, accelerator_reserved_mb: float
-    ):
+    def add_memory_log(self, stage: str, ram_mb: float, accelerator_allocated_mb: float, accelerator_reserved_mb: float):
         """Add a memory usage log entry to generation_info."""
         self.generation_info["memory"]["memory_logs"].append(
             {
