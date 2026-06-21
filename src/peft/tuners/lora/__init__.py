@@ -20,6 +20,7 @@ from .config import (
     ArrowConfig,
     BdLoraConfig,
     EvaConfig,
+    KasaConfig,
     LoftQConfig,
     LoraConfig,
     LoraGAConfig,
@@ -33,6 +34,7 @@ from .gptq import GPTQLoraLinear
 from .layer import Conv2d, Conv3d, Embedding, Linear, LoraLayer, ParamWrapper
 from .loraga import preprocess_loraga
 from .model import LoraModel
+from .variants import get_kasa_regularization_loss
 
 
 __all__ = [
@@ -43,6 +45,7 @@ __all__ = [
     "Embedding",
     "EvaConfig",
     "GPTQLoraLinear",
+    "KasaConfig",
     "Linear",
     "LoftQConfig",
     "LoraConfig",
@@ -56,6 +59,7 @@ __all__ = [
     "convert_to_lora",
     "create_arrow_model",
     "get_eva_state_dict",
+    "get_kasa_regularization_loss",
     "initialize_lora_eva_weights",
     "preprocess_loraga",
     "save_as_lora",

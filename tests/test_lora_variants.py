@@ -17,7 +17,7 @@ import torch
 from torch import nn
 from transformers import AutoModelForCausalLM
 
-from peft import LoraConfig, TaskType, get_peft_model
+from peft import KasaConfig, LoraConfig, TaskType, get_peft_model
 from peft.tuners.lora.layer import Conv1d as LoraConv1d
 from peft.tuners.lora.layer import Conv2d as LoraConv2d
 from peft.tuners.lora.layer import Embedding as LoraEmbedding
@@ -28,6 +28,7 @@ from peft.tuners.lora.variants import (
     DoraConv2dVariant,
     DoraEmbeddingVariant,
     DoraLinearVariant,
+    KasaLinearVariant,
     calculate_alora_offsets,
     get_alora_offsets_for_forward,
     get_alora_offsets_for_generate,
@@ -112,6 +113,9 @@ VARIANT_MAP = {
     "alora": {
         LoraLinear: ALoraLinearVariant,
     },
+    "kasa": {
+        LoraLinear: KasaLinearVariant,
+    },
 }
 
 
@@ -125,6 +129,11 @@ TEST_CASES = [
         "alora",
         LoraConfig,
         {"target_modules": ["linear1", "linear2"], "alora_invocation_tokens": [1]},
+    ),
+    (
+        "kasa",
+        LoraConfig,
+        {"target_modules": ["linear1", "linear2"], "kasa_config": KasaConfig(), "r": 4},
     ),
 ]
 
@@ -173,6 +182,19 @@ class TestLoraVariants:
 
         for layer in layer_names:
             assert getattr(peft_model.base_model.model, layer).lora_magnitude_vector["default"].weight.grad is not None
+
+    def test_kasa_params_have_gradients(self):
+        """Ensure that the lora_diag parameter added by the KaSA variant participates in the output computation."""
+        layer_names = ["linear1", "linear2"]
+        peft_config = LoraConfig(target_modules=layer_names, kasa_config=KasaConfig(), r=4)
+        _, peft_model = self.custom_model_with_loss_backpropagated(peft_config)
+
+        for layer in layer_names:
+            lora_diag = getattr(peft_model.base_model.model, layer).lora_diag["default"]
+            assert lora_diag.requires_grad
+            assert lora_diag.grad is not None
+            # lora_diag is the new KaSA parameter of shape (r,).
+            assert lora_diag.shape == (4,)
 
 
 class TestActivatedLora:

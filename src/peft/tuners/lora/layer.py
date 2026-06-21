@@ -796,6 +796,11 @@ class Linear(nn.Module, LoraLayer):
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def resolve_lora_variant(self, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
+        if config.kasa_config is not None:
+            from .variants import KasaLinearVariant
+
+            return KasaLinearVariant()
+
         if config.velora_config is not None:
             from .variants import VeloraLinearVariant
 
@@ -1064,6 +1069,8 @@ class Embedding(nn.Module, LoraLayer):
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
         if config.velora_config is not None:
             raise ValueError("VeLoRA does not support adapting embedding layers.")
+        if config.kasa_config is not None:
+            raise ValueError("KaSA does not support adapting embedding layers.")
         if not config.use_dora:
             return None
 
@@ -1379,6 +1386,8 @@ class _ConvNd(nn.Module, LoraLayer):
             raise ValueError("aLoRA does not support adapting conv layers.")
         if config.velora_config is not None:
             raise ValueError("VeLoRA does not support adapting conv layers.")
+        if config.kasa_config is not None:
+            raise ValueError("KaSA does not support adapting conv layers.")
         if base_layer.groups > 1:
             warnings.warn("LoRA adapter added to ConvNd layer with groups > 1. Merging is not supported.")
 
@@ -1673,6 +1682,8 @@ class Conv2d(_ConvNd):
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
         if config.velora_config is not None:
             raise ValueError("VeLoRA does not support adapting conv layers.")
+        if config.kasa_config is not None:
+            raise ValueError("KaSA does not support adapting conv layers.")
         if not config.use_dora:
             return None
 
@@ -1692,6 +1703,8 @@ class Conv1d(_ConvNd):
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
         if config.velora_config is not None:
             raise ValueError("VeLoRA does not support adapting conv layers.")
+        if config.kasa_config is not None:
+            raise ValueError("KaSA does not support adapting conv layers.")
         if not config.use_dora:
             return None
 
@@ -1711,6 +1724,8 @@ class Conv3d(_ConvNd):
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
         if config.velora_config is not None:
             raise ValueError("VeLoRA does not support adapting conv layers.")
+        if config.kasa_config is not None:
+            raise ValueError("KaSA does not support adapting conv layers.")
         if not config.use_dora:
             return None
 
@@ -1756,6 +1771,8 @@ class MultiheadAttention(nn.Module, LoraLayer):
             raise ValueError(f"{self.__class__.__name__} does not support DoRA (yet), please set use_dora to False")
         if config.velora_config is not None:
             raise ValueError(f"{self.__class__.__name__} does not support VeLoRA, please set `velora_config=None`.")
+        if config.kasa_config is not None:
+            raise ValueError(f"{self.__class__.__name__} does not support KaSA, please set `kasa_config=None`.")
         if kwargs.get("use_alora", False):
             raise ValueError(f"{self.__class__.__name__} does not support aLoRA (yet), please set use_alora to False")
         super().__init__()
@@ -2172,6 +2189,8 @@ class ParamWrapper(nn.Module, LoraLayer):
             raise ValueError(f"lora.{self.__class__.__name__} does not work with use_dora=True.")
         if config.velora_config is not None:
             raise ValueError(f"lora.{self.__class__.__name__} does not work when `velora_config` is set.")
+        if config.kasa_config is not None:
+            raise ValueError(f"lora.{self.__class__.__name__} does not work when `kasa_config` is set.")
         if is_target_conv_1d_layer:
             raise ValueError(f"lora.{self.__class__.__name__} does not work with is_target_conv_1d_layer=True.")
 
