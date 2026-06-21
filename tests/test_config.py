@@ -64,7 +64,7 @@ from peft import (
 )
 
 
-class TestingCommitHashError(Exception):
+class CommitHashTestingError(Exception):
     pass
 
 
@@ -601,7 +601,7 @@ class TestPeftConfig:
         monkeypatch.setattr(config, "__version__", version)
 
         def fake_commit_hash_raises(pkg_name):
-            raise TestingCommitHashError("Error for testing purpose")
+            raise CommitHashTestingError("Error for testing purpose")
 
         monkeypatch.setattr(config, "_get_commit_hash", fake_commit_hash_raises)
 
