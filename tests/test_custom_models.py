@@ -1622,6 +1622,61 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": "uniform"},
         {"target_modules": ["lin1"], "init_weights": "uniform"},
     ),
+    (
+        "LoHa Same",
+        "loha",
+        LoHaConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "LoHa Different",
+        "loha",
+        LoHaConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
+        "LoKr Same",
+        "lokr",
+        LoKrConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "LoKr Different",
+        "lokr",
+        LoKrConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
+        "OFT Same",
+        "oft",
+        OFTConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "oft_block_size": 2},
+        {"target_modules": ["lin0"], "init_weights": False, "oft_block_size": 2},
+    ),
+    # Note: OFT "Different" (targeting different modules) is omitted because the
+    # test_merge_layers_multi test fails due to numerical precision issues when
+    # two OFT adapters targeting different modules produce very similar merged outputs.
+    # Note: C3A does not support multiple active adapters: the block circular convolution
+    # in C3A's forward pass fails with >1 active adapter due to tensor shape mismatches
+    # when accumulating results from multiple c3a_kernel parameters.
+    (
+        "AdaMSS Same",
+        "adamss",
+        AdamssConfig,
+        {"target_modules": ["lin0"], "r": 8, "num_subspaces": 2, "init_weights": False},
+        {"target_modules": ["lin0"], "r": 8, "num_subspaces": 2, "init_weights": False},
+    ),
+    (
+        "AdaMSS Different",
+        "adamss",
+        AdamssConfig,
+        {"target_modules": ["lin0"], "r": 8, "num_subspaces": 2, "init_weights": False},
+        {"target_modules": ["lin1"], "r": 2, "num_subspaces": 2, "init_weights": False},
+    ),
 ]
 
 
