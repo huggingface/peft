@@ -161,6 +161,10 @@ class MyAutoModelForCausalLM(AutoModelForCausalLM):
             with torch.no_grad():
                 for param in model.parameters():
                     param.data = torch.randn(param.shape)
+        elif args[0] == "trl-internal-testing/tiny-GptOssForCausalLM":
+            # model is bf16, which trips up some tests that require tight tolerances
+            with torch.no_grad():
+                model.float()
         return model
 
 
