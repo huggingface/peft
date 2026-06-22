@@ -142,7 +142,12 @@ def infer_device() -> str:
     return "cpu"
 
 
-def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs=None):
+def prepare_model_for_kbit_training(
+    model,
+    use_gradient_checkpointing=True,
+    gradient_checkpointing_kwargs=None,
+    low_memory_mode=False,
+):
     r"""
     Note this method only works for `transformers` models.
 
@@ -150,6 +155,12 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
         head to fp32 4- Freezing the base model layers to ensure they are not updated during training
 
+    .. warning::
+
+        This function can allocate approximately 1 GB of CUDA reserved memory during the fp32 upcast of layer norms
+        and gradient-flow setup. On memory-constrained devices (e.g., 8 GB unified-memory edge accelerators such as
+        Jetson Orin Nano, Apple Silicon, AMD APU), pass ``low_memory_mode=True`` to process modules sequentially
+        and free cached memory between steps, reducing peak memory at the cost of additional runtime.
 
     Args:
         model (`transformers.PreTrainedModel`):
@@ -160,6 +171,9 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
             Keyword arguments to pass to the gradient checkpointing function, please refer to the documentation of
             `torch.utils.checkpoint.checkpoint` for more details about the arguments that you can pass to that method.
             Note this is only available in the latest transformers versions (> 4.34.1).
+        low_memory_mode (`bool`, *optional*, defaults to `False`):
+            If True, process modules one-by-one during fp32 upcast and call ``torch.cuda.empty_cache()`` after each
+            module to reduce peak CUDA memory. This is useful for memory-constrained devices but may be slower.
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
     is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
@@ -183,11 +197,21 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
         and not is_torchao_quantized
     ):
         # cast all non INT8 parameters to fp32
-        for param in model.parameters():
-            if (
-                (param.dtype == torch.float16) or (param.dtype == torch.bfloat16)
-            ) and param.__class__.__name__ != "Params4bit":
-                param.data = param.data.to(torch.float32)
+        with torch.no_grad():
+            if low_memory_mode:
+                for module in model.modules():
+                    for param in module.parameters(recurse=False):
+                        if (
+                            (param.dtype == torch.float16) or (param.dtype == torch.bfloat16)
+                        ) and param.__class__.__name__ != "Params4bit":
+                            param.data = param.data.to(torch.float32)
+                    torch.cuda.empty_cache()
+            else:
+                for param in model.parameters():
+                    if (
+                        (param.dtype == torch.float16) or (param.dtype == torch.bfloat16)
+                    ) and param.__class__.__name__ != "Params4bit":
+                        param.data = param.data.to(torch.float32)
 
     if (
         loaded_in_kbit
