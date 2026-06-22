@@ -27,7 +27,7 @@ import torch
 import transformers
 from torch import nn
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_transformers_ge_v5_4_0
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_quanto_available, is_transformers_ge_v5_4_0
 from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
@@ -397,6 +397,11 @@ class LoraModel(BaseTuner):
             from .bnb import dispatch_bnb_4bit
 
             dispatchers.append(dispatch_bnb_4bit)
+
+        if is_quanto_available():
+            from .quanto import dispatch_quanto
+
+            dispatchers.append(dispatch_quanto)
 
         dispatchers.extend(
             [
