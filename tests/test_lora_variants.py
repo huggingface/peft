@@ -189,7 +189,7 @@ class TestLoraVariants:
             # 3. Assert that the sanity check catches it and throws the right error
             with pytest.raises(
                 ValueError,
-                match="Variant 'fake_unregistered_variant' found in lora_variants but it is not tagged with 'is_lora_variant' in LoraConfig.",
+                match="found in lora_variants but not tagged with 'is_lora_variant' in LoraConfig",
             ):
                 layer.resolve_lora_variant(config=config)
 
@@ -206,6 +206,18 @@ class TestLoraVariants:
             }
             # 3. Assert invalid combination error is raised
             with pytest.raises(ValueError, match="Invalid or unsupported variant combination"):
+                layer.resolve_lora_variant(config=config)
+
+    def test_unsorted_variant_keys_raises_error(self):
+        config = LoraConfig()
+        base_layer = nn.Linear(10, 10)
+        layer = LoraLinear(base_layer, "default", config, r=8, lora_alpha=8)
+
+        with patch("peft.tuners.lora.layer.Linear.lora_variants", new_callable=PropertyMock) as mock_variants:
+            mock_variants.return_value = {
+                ("use_dora", "use_bdlora"): None,
+            }
+            with pytest.raises(ValueError, match="must be sorted tuples"):
                 layer.resolve_lora_variant(config=config)
 
 

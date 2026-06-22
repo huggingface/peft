@@ -157,19 +157,22 @@ class LoraLayer(BaseTunerLayer):
 
         # Fetch the dictionary of variants
         layer_variants = self.lora_variants
+        if any(tuple(sorted(k)) != k for k in layer_variants.keys()):
+            raise ValueError("Keys in lora_variants must be sorted tuples (e.g ('a', 'b'), not ('b', 'a')).")
+
         lora_variants_configs = [f for f in dataclasses.fields(config) if f.metadata.get("is_lora_variant")]
 
         # 1. Gather all valid variant field names from the config
         tagged_fields = {f.name for f in lora_variants_configs}
 
         # 2. SANITY CHECK: Ensure all keys in the layer's dictionary actually exist in the config
-        for variant_keys in layer_variants.keys():
-            for variant_name in variant_keys:
-                if variant_name not in tagged_fields:
-                    raise ValueError(
-                        f"Variant '{variant_name}' found in lora_variants but it is not tagged with "
-                        f"'is_lora_variant' in LoraConfig."
-                    )
+        all_variant_names = {name for variant_keys in layer_variants.keys() for name in variant_keys}
+        missing_variants = all_variant_names - tagged_fields
+        if missing_variants:
+            raise ValueError(
+                f"variant(s) {sorted(missing_variants)} found in lora_variants but not tagged with "
+                f"'is_lora_variant' in LoraConfig."
+            )
 
         # 3. Figure out which variants are currently active
         active_variants = tuple(sorted(f.name for f in lora_variants_configs if getattr(config, f.name)))
