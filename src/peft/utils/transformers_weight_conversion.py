@@ -400,10 +400,9 @@ def _resolve_string_target_modules(peft_config, model, target_module_mapping: di
         if is_all_linear:
             matched.add(old_name)
             continue
-        # a representative expert index (0/1) is enough for the regexes seen in practice
+        # probe the reconstructed v4 key (the fused parameter's container + the pre-fusion projection name)
         for container in containers:
-            candidates = (f"{container}.{old_name}", f"{container}.0.{old_name}", f"{container}.1.{old_name}")
-            if any(check_target_module_exists(peft_config, candidate) for candidate in candidates):
+            if check_target_module_exists(peft_config, f"{container}.{old_name}"):
                 matched.add(old_name)
                 break
     return matched
