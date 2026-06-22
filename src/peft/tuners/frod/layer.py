@@ -103,8 +103,8 @@ class FrodLayer(BaseTunerLayer):
         else:
             # PEFT convention: init_weights=False should produce a non-identity adapter for merge tests.
             with torch.no_grad():
-                nn.init.normal_(self.frod_lambda_s_values[adapter_name], std=0.05)
-                self.frod_lambda_l[adapter_name].add_(torch.randn_like(self.frod_lambda_l[adapter_name]) * 0.05)
+                nn.init.normal_(self.frod_lambda_s_values[adapter_name], std=0.1)
+                self.frod_lambda_l[adapter_name].add_(torch.randn_like(self.frod_lambda_l[adapter_name]) * 0.1)
 
         # U is frozen but used in every active forward. Register it as a non-persistent buffer so it follows
         # model.to(device) once instead of being repeatedly copied from CPU and retained in CUDA's allocation cache.
