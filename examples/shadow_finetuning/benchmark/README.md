@@ -40,6 +40,14 @@ export NCCL_IB_DISABLE="1"
 
 > ran on 4090
 
+```bash
+# 1. CR, LoRA 
+CUDA_VISIBLE_DEVICES=0,1 accelerate launch --num_processes 2 --main_process_port 1234 run_benchmark.py --task cls --methods lora --bf16 --max_seq_length 128 --num_train_epochs 3 --lora_dropout 0.2
+
+# 2. CR, implicit shadow
+CUDA_VISIBLE_DEVICES=2,3 accelerate launch --num_processes 2 --main_process_port 1235 run_benchmark.py --task cls --methods shadow --bf16 --shadow_num_attention_heads 8 --shadow_alpha 0.1 --max_seq_length 128 --learning_rate 5e-4 --num_train_epochs 3 --output_dir benchmark_outputs/implicit-shadow
+```
+
 Results:
 
 ```
@@ -52,30 +60,9 @@ lora          30,679,040      0.404%          270.0        0.9495        /
 shadow        29,135,104      0.383%          290.4        0.9574        0.8059
 ```
 
-```bash
-# 1. CR, LoRA 
-CUDA_VISIBLE_DEVICES=0,1 accelerate launch --num_processes 2 --main_process_port 1234 run_benchmark.py --task cls --methods lora --bf16 --max_seq_length 128 --num_train_epochs 3 --lora_dropout 0.2
-
-# 2. CR, implicit shadow
-CUDA_VISIBLE_DEVICES=2,3 accelerate launch --num_processes 2 --main_process_port 1235 run_benchmark.py --task cls --methods shadow --bf16 --shadow_num_attention_heads 8 --shadow_alpha 0.1 --max_seq_length 128 --learning_rate 5e-4 --num_train_epochs 3 --output_dir benchmark_outputs/implicit-shadow
-```
-
 #### Generation: GSM8k
 
 > ran on A800
-
-Results: 
-
-```
-======================================================================
-Comparison (gsm8k, Qwen/Qwen3-8B)
-======================================================================
-method                   trainable  trainable%  train_time(s)      accuracy   shadow_only
--------------------------------------------------------------------------------
-lora                     30,670,848      0.373%          696.2        0.8014        /
-random shadow            29,118,720      0.329%          721.7        0.8153        0.0159
-pretrained-shadow        453,844,992     4.817%         877.0       0.8173       0.5042
-```
 
 ```bash
 # 1. GSM8k, LoRA 
@@ -101,6 +88,18 @@ CUDA_VISIBLE_DEVICES=2 python run_benchmark.py --mode eval --task gsm8k --method
 CUDA_VISIBLE_DEVICES=3 python run_benchmark.py --mode eval --task gsm8k --methods shadow --bf16 --adapter_dir benchmark_outputs/gsm8k-explicit-shadow --generation_max_length 256 --shadow_inference_mode shadow_only
 ```
 
+Results: 
+
+```
+======================================================================
+Comparison (gsm8k, Qwen/Qwen3-8B)
+======================================================================
+method                   trainable  trainable%  train_time(s)      accuracy   shadow_only
+-------------------------------------------------------------------------------
+lora                     30,670,848      0.373%          696.2        0.8014        /
+random shadow            29,118,720      0.329%          721.7        0.8153        0.0159
+pretrained-shadow        453,844,992     4.817%         877.0       0.8173       0.5042
+```
 
 ## Notes
 
