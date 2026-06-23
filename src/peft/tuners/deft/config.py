@@ -93,7 +93,7 @@ class DeftConfig(PeftConfig):
         default=None,
         metadata={"help": "List of module names or regex expression of the module names to exclude from DEFT."},
     )
-    decomposition_method: str = field(
+    decomposition_method: Literal["relu", "qr"] = field(
         default="relu",
         metadata={
             "help": (
