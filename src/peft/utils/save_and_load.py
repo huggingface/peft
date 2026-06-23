@@ -179,6 +179,9 @@ def get_peft_model_state_dict(
         model = getattr(model, "_orig_mod", model)
 
     config = model.peft_config[adapter_name]
+    # Only validate shapes for state dicts we infer ourselves. When the caller passes an explicit `state_dict` we have
+    # no guarantee about its provenance (e.g. a manually post-processed export), so we must not second-guess it.
+    state_dict_was_inferred = state_dict is None
     if state_dict is None:
         state_dict = model.state_dict()
 
@@ -332,6 +335,10 @@ def get_peft_model_state_dict(
     # Key formats can be method-specific, so the removal is delegated to the tuner class, see
     # BaseTuner._remove_adapter_name_from_key for the default implementation.
     to_return = {tuner_cls._remove_adapter_name_from_key(k, adapter_name): v for k, v in to_return.items()}
+
+    if state_dict_was_inferred and config.peft_type in (PeftType.LORA, PeftType.ADALORA):
+        _validate_lora_adapter_state_dict(to_return, adapter_name=adapter_name)
+
     return to_return
 
 
