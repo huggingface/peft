@@ -202,7 +202,7 @@ class LoraLayer(BaseTunerLayer):
 
         # Tying adapters is only implemented for Linear layers
         # where the source is the embedding layer.
-        # Currently, this is the most prevelant way of tying layers (weight tying)
+        # Currently, this is the most prevalent way of tying layers (weight tying)
         if tied_adapter:
             lora_A_params = tied_adapter["lora_A"]
             lora_B_params = tied_adapter["lora_B"]
@@ -1333,7 +1333,7 @@ class Embedding(nn.Module, LoraLayer):
                     embedding_A = self.lora_embedding_A[active_adapter].T
                     embedding_B = self.lora_embedding_B[active_adapter].T
                     scaling = self.scaling[active_adapter]
-                    # input and ouput function hooks for TP support.
+                    # input and output function hooks for TP support.
                     input_fn = self.input_fns.get(active_adapter, None)
                     output_fn = self.output_fns.get(active_adapter, None)
                     after_A = self._embed(x, embedding_A, input_fn=input_fn, output_fn=output_fn)

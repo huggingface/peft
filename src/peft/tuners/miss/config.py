@@ -60,6 +60,8 @@ class MissConfig(PeftConfig):
             layer at this index.
         layers_pattern (`str`):
             The layer pattern name, used only if `layers_to_transform` is different from `None`.
+        bias (`str`):
+            Bias type for MiSS. Can be `'none'`, `'all'` or `'MiSS_only'`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
     """

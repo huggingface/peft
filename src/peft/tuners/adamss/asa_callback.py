@@ -66,7 +66,7 @@ class AdamssAsaCallback(TrainerCallback):
     trainer = Trainer(
         model=model,
         callbacks=[AdamssAsaCallback()],
-        ...,
+        # ...,
     )
     trainer.train()
     ```

@@ -1083,6 +1083,15 @@ class BaseTuner(nn.Module, ABC):
 
         def create_and_replace_param(module_name, key, param_name):
             # helper function to avoid duplication
+            if module_name == "":
+                # nn.Parameters that are registered directly on the top-level module (i.e. the module passed to
+                # get_peft_model) cannot be targeted. Wrapping the parameter would require replacing the module that
+                # holds it with lora.ParamWrapper, but that module is its own parent, so the wrapper ends up registered
+                # as a submodule of the very module it wraps. This creates a cyclic module graph, resulting in an error.
+                raise ValueError(
+                    f"Targeting an nn.Parameter on the top-level module is not supported (parameter '{param_name}'). "
+                )
+
             parent, target, target_name = _get_submodules(model, module_name)
             unwrapped_module_name = strip_base_layer_from_name(module_name)
             unwrapped_module = model.get_submodule(unwrapped_module_name)
@@ -1142,7 +1151,7 @@ class BaseTuner(nn.Module, ABC):
 
     def _replace_module(self, parent, child_name, new_module, child) -> None:
         """
-        Replace the sub-module of a given moduel with a new PEFT module.
+        Replace the sub-module of a given module with a new PEFT module.
 
         This also deals with device placement of the new module to be in line with the child module.
 
@@ -1301,7 +1310,7 @@ class BaseTuner(nn.Module, ABC):
 
     def _check_tied_modules(self, model: nn.Module, peft_config):
         """
-        Checks if any of the tied layers are targetted via `modules_to_save` or `target_modules`. Updates the
+        Checks if any of the tied layers are targeted via `modules_to_save` or `target_modules`. Updates the
         `peft_config` in place with any layers/adapters that needs to be tied
         """
         modules_to_save = set(getattr(peft_config, "modules_to_save", []) or [])
@@ -1875,11 +1884,13 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
             # TODO: It's still unclear how empty layers_pattern (None, [], or "") should behave
             # For now, empty layers_pattern means any layer pattern is ok
             if layers_pattern is None or len(layers_pattern) == 0:
-                layer_index = re.match(r".*\.[^.]*\.(\d+)\.", key)
+                # Lazy .*? matches the first numbered segment (the layer index), not the last one; a greedy .* would
+                # wrongly pick up nested indices such as the expert index in MoE models ("...layers.1.experts.0...").
+                layer_index = re.match(r".*?\.[^.]*\.(\d+)\.", key)
             else:
                 layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
                 for pattern in layers_pattern:
-                    layer_index = re.match(rf".*\.{pattern}\.(\d+)\.", key)
+                    layer_index = re.match(rf".*?\.{pattern}\.(\d+)\.", key)
                     if layer_index is not None:
                         break
 
@@ -2021,7 +2032,7 @@ def clone_module(module: nn.Module, share_weights=False):
 
 
 def replicate_layers(model: nn.Module, layer_map: list[tuple[int, int]]):
-    """Replicate layers in a transfomer model with weight sharing.
+    """Replicate layers in a transformer model with weight sharing.
 
     This function looks for a module list attribute at model[(.model)*].layers and replicates the layers in the module
     list according to the layer map. For example the map `[[0, 4], [2, 5]]` will take the set of layers `[0, 1, 2, 3,

@@ -20,6 +20,49 @@ import os
 import pandas as pd
 
 
+_COMMON_METRIC_PREFERENCES = {
+    "accelerator_memory_reserved_avg": "lower",
+    "accelerator_memory_max": "lower",
+    "accelerator_memory_reserved_99th": "lower",
+    "total_time": "lower",
+    "train_time": "lower",
+    "file_size": "lower",
+    "train_loss": "lower",
+    "num_trainable_params": "lower",
+}
+
+_TASK_METRIC_PREFERENCES = {
+    "MetaMathQA": {
+        "test_accuracy": "higher",
+        "forgetting*": "lower",
+    },
+    "image-gen": {
+        "test_dino_similarity": "higher",
+        "drift*": "lower",
+    },
+}
+
+_TASK_PARETO_DEFAULTS = {
+    "MetaMathQA": ("accelerator_memory_max", "test_accuracy"),
+    "image-gen": ("accelerator_memory_max", "test_dino_similarity"),
+}
+
+_METRIC_EXPLANATIONS = {
+    "MetaMathQA": (
+        "*forgetting: This is the reduction in CE loss on a sample of Wikipedia data and reflects how much the "
+        "model 'forgot' during training. The lower the number, the better."
+    ),
+    "image-gen": (
+        "*drift: This measures how much the generated images drift from the base model's outputs on unrelated "
+        "prompts, reflecting how much the model 'forgot' during training. The lower the number, the better."
+    ),
+}
+
+
+def _get_metric_explanation(task_name):
+    return _METRIC_EXPLANATIONS.get(task_name, "")
+
+
 def _preprocess_common(row):
     """Extract fields common to all tasks from a single result row.
 
@@ -40,9 +83,9 @@ def _preprocess_common(row):
     dct = {
         "experiment_name": run_info["experiment_name"],
         "model_id": run_info["train_config"]["model_id"],
-        "train_config": run_info["train_config"],
+        "train_config": json.dumps(run_info["train_config"]),
         "peft_type": peft_type,
-        "peft_config": run_info["peft_config"],
+        "peft_config": json.dumps(run_info["peft_config"]),
         "accelerator_memory_reserved_avg": train_info["accelerator_memory_reserved_avg"],
         "accelerator_memory_max": train_info["accelerator_memory_max"],
         "accelerator_memory_reserved_99th": train_info["accelerator_memory_reserved_99th"],
@@ -57,8 +100,8 @@ def _preprocess_common(row):
         "transformers_version": meta_info["package_info"]["transformers-version"],
         "datasets_version": meta_info["package_info"]["datasets-version"],
         "torch_version": meta_info["package_info"]["torch-version"],
-        "package_info": meta_info["package_info"],
-        "system_info": meta_info["system_info"],
+        "package_info": json.dumps(meta_info["package_info"]),
+        "system_info": json.dumps(meta_info["system_info"]),
         "created_at": run_info["created_at"],
     }
     return dct, train_metrics
@@ -83,6 +126,10 @@ _TASK_PREPROCESSORS = {
     "MetaMathQA": _preprocess_metamathqa,
     "image-gen": _preprocess_image_gen,
 }
+
+
+def format_df(df):
+    return df.style.format(precision=3, thousands=",", decimal=".")
 
 
 def preprocess(rows, task_name: str, print_fn=print):
@@ -195,6 +242,19 @@ _TASK_IMPORTANT_COLUMNS = {
 }
 
 
+def get_task_columns(task_name):
+    """Return the columns relevant to a task, ordered for display.
+
+    The important columns (including the task's own metrics) come first, followed by the remaining columns. Columns
+    belonging to other tasks are excluded.
+    """
+    relevant = list(_COMMON_DTYPES) + list(_TASK_DTYPES.get(task_name, {}))
+    important = _TASK_IMPORTANT_COLUMNS.get(task_name, ["experiment_name", "peft_type"])
+    ordered = [col for col in important if col in relevant]
+    ordered += [col for col in relevant if col not in ordered]
+    return ordered
+
+
 def load_df(path, task_name, print_fn=print):
     jsons = load_jsons(path)
     preprocessed = preprocess(jsons, task_name=task_name, print_fn=print_fn)
@@ -209,11 +269,75 @@ def load_df(path, task_name, print_fn=print):
     df["total_time"] = df["total_time"].round().astype(int)
 
     # reorder columns for better viewing, pinned_columns arg in Gradio seems not to work correctly
-    important_columns = _TASK_IMPORTANT_COLUMNS.get(task_name, ["experiment_name", "peft_type"])
-    other_columns = [col for col in df if col not in important_columns]
-    df = df[important_columns + other_columns]
+    df = df[get_task_columns(task_name)]
 
     columns = ["experiment_name", "model_id", "peft_type", "created_at"]
     # we want to keep only the most recent run for each experiment
     df = df.sort_values("created_at").drop_duplicates(columns, keep="last")
     return df
+
+
+def get_metric_preferences(task_name):
+    prefs = dict(_COMMON_METRIC_PREFERENCES)
+    prefs.update(_TASK_METRIC_PREFERENCES.get(task_name, {}))
+    return prefs
+
+
+def get_model_ids(task_name, df):
+    filtered = df[df["task_name"] == task_name]
+    return sorted(filtered["model_id"].unique())
+
+
+def filter_data(task_name, model_id, df):
+    filtered = df[(df["task_name"] == task_name) & (df["model_id"] == model_id)]
+    # only show the columns relevant to the task, with the important ones first
+    return filtered[get_task_columns(task_name)]
+
+
+# Compute the Pareto frontier for two selected metrics.
+def compute_pareto_frontier(df, metric_x, metric_y, metric_preferences):
+    if df.empty:
+        return df
+
+    df = df.copy()
+    points = df[[metric_x, metric_y]].values
+    selected_indices = []
+
+    def dominates(a, b, metric_x, metric_y):
+        # Check for each metric whether b is as good or better than a
+        if metric_preferences[metric_x] == "higher":
+            cond_x = b[0] >= a[0]
+            better_x = b[0] > a[0]
+        else:
+            cond_x = b[0] <= a[0]
+            better_x = b[0] < a[0]
+        if metric_preferences[metric_y] == "higher":
+            cond_y = b[1] >= a[1]
+            better_y = b[1] > a[1]
+        else:
+            cond_y = b[1] <= a[1]
+            better_y = b[1] < a[1]
+        return cond_x and cond_y and (better_x or better_y)
+
+    for i, point in enumerate(points):
+        dominated = False
+        for j, other_point in enumerate(points):
+            if i == j:
+                continue
+            if dominates(point, other_point, metric_x, metric_y):
+                dominated = True
+                break
+        if not dominated:
+            selected_indices.append(i)
+    pareto_df = df.iloc[selected_indices]
+    return pareto_df
+
+
+def load_task_results(task_configs):
+    dfs = []
+    for task_name, path in task_configs.items():
+        if os.path.isdir(path):
+            task_df = load_df(path, task_name=task_name)
+            if not task_df.empty:
+                dfs.append(task_df)
+    return pd.concat(dfs, ignore_index=True)
