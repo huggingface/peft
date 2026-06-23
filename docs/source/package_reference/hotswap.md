@@ -61,6 +61,8 @@ with torch.inference_mode():
     output_adapter_1 = model(inputs).logits
 ```
 
+Note that if you want to hotswap weights that were added through `target_parameters`, i.e. that directly target an `nn.Parameter`, re-compilation and/or graph breaks cannot be prevented. Therefore, it is recommended to avoid using `target_parameters` together with compiled models and hotswapping.
+
 ## Caveats
 
 Hotswapping works with transformers models and diffusers models. However, there are some caveats:
