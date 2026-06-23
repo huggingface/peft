@@ -45,7 +45,6 @@ from peft.utils import AuxiliaryTrainingWrapper
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.utils.integrations import init_empty_weights
 from peft.utils.other import TrainableTokensWrapper, create_attention_mask, set_additional_trainable_modules
-from peft.utils.save_and_load import _validate_lora_adapter_state_dict
 
 from . import __version__
 from .config import PeftConfig
@@ -320,13 +319,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 adapter_name=adapter_name,
                 save_embedding_layers=save_embedding_layers,
             )
-
-            # Refuse to write LoRA adapters whose lora_A / lora_B tensors look unsharded (1-D or zero-sized). This is
-            # the canonical signature of an export that ran without gathering DeepSpeed ZeRO-3 / FSDP shards; the
-            # artifact otherwise looks valid on disk but breaks downstream loaders such as vLLM hot-swap with a
-            # confusing IndexError. Surface the failure here, where the caller can act on it. See
-            # vllm-project/vllm#28640 and huggingface/transformers#45313 for the historical failure mode.
-            _validate_lora_adapter_state_dict(output_state_dict, adapter_name=adapter_name)
 
             output_dir = os.path.join(save_directory, adapter_name) if adapter_name != "default" else save_directory
             os.makedirs(output_dir, exist_ok=True)

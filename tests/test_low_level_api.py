@@ -701,3 +701,26 @@ class TestPeftStateDict:
             target_modules=["foo", "foo_baz", "baz_foo", "foo_baz_foo", "baz_foo_baz"], init_lora_weights=False
         )
         self.check_peft_model_weights_loaded_correctly(MyModel, config, nested=nested, adapter_name="foo")
+
+
+class TestStateDictFsdpShapeValidation:
+    # Mitigation for a potential error in DeepSpeed ZeRO-3 / FSDP settings where the
+    # gather context was forgot when retrieving the state dict. See #3251
+    # for details.
+
+    class _Tiny(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = nn.Linear(8, 8)
+
+    def test_save_pretrained_raises_for_unsharded_state_dict(self, tmp_path):
+        peft_model = get_peft_model(self._Tiny(), LoraConfig(target_modules=["linear"], r=4))
+        # Emulate the ungathered ZeRO-3 / FSDP shard: lora_A is left as a flat (1-D) tensor instead of (r, in_dim).
+        peft_model.base_model.model.linear.lora_A["default"].weight.data = torch.zeros(32)
+        with pytest.raises(ValueError, match=r"DeepSpeed ZeRO-3 / FSDP shards"):
+            peft_model.save_pretrained(tmp_path / "broken-adapter")
+
+    def test_save_pretrained_succeeds_for_normal_lora(self, tmp_path):
+        peft_model = get_peft_model(self._Tiny(), LoraConfig(target_modules=["linear"], r=4))
+        peft_model.save_pretrained(tmp_path / "ok-adapter")
+        assert (tmp_path / "ok-adapter" / "adapter_config.json").exists()
