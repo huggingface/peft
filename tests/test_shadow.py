@@ -355,6 +355,69 @@ class TestShadowExplicitModel:
         assert out.shadow_logits.shape == (2, 6, 128)
         out.loss.backward()
 
+    def test_explicit_frozen_embeddings_stay_frozen(self):
+        base = make_llama_causal(hidden_size=32, num_layers=4)
+        shadow = make_llama_causal(hidden_size=16, num_layers=2)
+        for param in shadow.get_input_embeddings().parameters():
+            param.requires_grad = False
+
+        model = get_peft_model(base, ShadowConfig(task_type="CAUSAL_LM"), shadow_model=shadow)
+
+        shadow_embed = model.base_model.shadow_model.get_input_embeddings()
+        assert not any(param.requires_grad for param in shadow_embed.parameters())
+        assert any(
+            param.requires_grad
+            for name, param in model.base_model.shadow_model.named_parameters()
+            if "embed_tokens" not in name
+        )
+
+    def test_explicit_frozen_backbone_layer_stays_frozen(self):
+        base = make_llama_causal(hidden_size=32, num_layers=4)
+        shadow = make_llama_causal(hidden_size=16, num_layers=2)
+        for param in shadow.model.layers[0].parameters():
+            param.requires_grad = False
+
+        model = get_peft_model(base, ShadowConfig(task_type="CAUSAL_LM"), shadow_model=shadow)
+
+        assert not any(param.requires_grad for param in model.base_model.shadow_model.layers[0].parameters())
+        assert any(param.requires_grad for param in model.base_model.shadow_model.layers[1].parameters())
+
+    def test_projected_explicit_frozen_lm_head_stays_frozen(self):
+        base = make_llama_causal(hidden_size=32, num_layers=4)
+        shadow = make_llama_causal(hidden_size=16, num_layers=2)
+        projected = AutoModelForCausalLMWithHiddenProjection.wrap(
+            shadow_model=shadow,
+            shadow_hidden_projection=nn.Linear(16, 32, bias=False),
+            lm_head=base.lm_head,
+            init_optimal_projection=False,
+        )
+        for param in projected.lm_head.parameters():
+            param.requires_grad = False
+
+        model = get_peft_model(
+            base,
+            ShadowConfig(task_type="CAUSAL_LM", modules_to_save=["shadow_lm_head"]),
+            shadow_model=projected,
+        )
+
+        assert not any(param.requires_grad for param in model.base_model.shadow_lm_head.parameters())
+
+    def test_projected_explicit_frozen_projection_stays_frozen(self):
+        base = make_llama_causal(hidden_size=32, num_layers=4)
+        shadow = make_llama_causal(hidden_size=16, num_layers=2)
+        projected = AutoModelForCausalLMWithHiddenProjection.wrap(
+            shadow_model=shadow,
+            shadow_hidden_projection=nn.Linear(16, 32, bias=False),
+            lm_head=base.lm_head,
+            init_optimal_projection=False,
+        )
+        for param in projected.shadow_hidden_projection.parameters():
+            param.requires_grad = False
+
+        model = get_peft_model(base, ShadowConfig(task_type="CAUSAL_LM"), shadow_model=projected)
+
+        assert not any(param.requires_grad for param in model.base_model.shadow_hidden_projection.parameters())
+
     def test_explicit_roundtrip(self, tmp_path):
         base = make_llama_causal(hidden_size=32, num_layers=4)
         base_sd = copy.deepcopy(base.state_dict())

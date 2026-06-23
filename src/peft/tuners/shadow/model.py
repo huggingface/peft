@@ -197,6 +197,9 @@ class ShadowModel(nn.Module, GenerationMixin):
         self.shadow_inference_mode = shadow_config.shadow_inference_mode
         self.shadow_loss_weight = float(shadow_config.shadow_loss_weight)
         self.task_type = shadow_config.task_type
+        self._explicit_shadow_requires_grad_state = self._get_explicit_shadow_requires_grad_state(
+            explicit_shadow_model
+        )
 
         # Freeze the base model.
         for p in self.model.parameters():
@@ -243,6 +246,7 @@ class ShadowModel(nn.Module, GenerationMixin):
         setattr(base_backbone, base_layers_attr, wrapped)
 
         self._mark_trainable(shadow_config)
+        self._restore_explicit_shadow_requires_grad_state()
 
         # Match the shadow modules to the base model's device and dtype. The shadow backbone, injection/update adapters
         # and projection are created in the default float dtype, while the base model is often loaded in fp16/bf16
@@ -262,6 +266,66 @@ class ShadowModel(nn.Module, GenerationMixin):
                     module.to(device=base_param.device, dtype=base_param.dtype)
 
     # ------------------------------------------------------------------ build helpers
+
+    @staticmethod
+    def _get_module_requires_grad_state(module: Optional[nn.Module]) -> dict[str, bool]:
+        if module is None:
+            return {}
+        return {name: param.requires_grad for name, param in module.named_parameters()}
+
+    @classmethod
+    def _get_explicit_shadow_requires_grad_state(cls, explicit_shadow_model) -> dict[str, dict[str, bool]]:
+        """Record explicit-shadow parameter trainability before ShadowPEFT enables adapter training."""
+        if explicit_shadow_model is None:
+            return {}
+
+        get_output_embeddings = getattr(explicit_shadow_model, "get_output_embeddings", None)
+        if callable(get_output_embeddings):
+            shadow_head = get_output_embeddings()
+        else:
+            shadow_head = getattr(explicit_shadow_model, "lm_head", None)
+        shadow_projection = getattr(explicit_shadow_model, "shadow_hidden_projection", None)
+
+        if isinstance(explicit_shadow_model, AutoModelForCausalLMWithHiddenProjection):
+            shadow_backbone = explicit_shadow_model.shadow_model
+            shadow_head = getattr(explicit_shadow_model, "lm_head", shadow_head)
+            shadow_projection = getattr(explicit_shadow_model, "shadow_hidden_projection", shadow_projection)
+        else:
+            shadow_backbone = extract_backbone_model(explicit_shadow_model)
+
+        return {
+            "shadow_model": cls._get_module_requires_grad_state(shadow_backbone),
+            "shadow_hidden_projection": cls._get_module_requires_grad_state(shadow_projection),
+            "shadow_lm_head": cls._get_module_requires_grad_state(shadow_head),
+        }
+
+    @staticmethod
+    def _restore_module_requires_grad_state(module: Optional[nn.Module], state: dict[str, bool]) -> None:
+        if module is None or not state:
+            return
+        for name, param in module.named_parameters():
+            if name not in state:
+                continue
+            requires_grad = state[name]
+            param.requires_grad = requires_grad
+
+    def _restore_explicit_shadow_requires_grad_state(self) -> None:
+        """Preserve explicit shadow-model trainability after enabling ShadowPEFT adapter modules."""
+        if not self._explicit_shadow_requires_grad_state:
+            return
+
+        self._restore_module_requires_grad_state(
+            self.shadow_model,
+            self._explicit_shadow_requires_grad_state.get("shadow_model", {}),
+        )
+        self._restore_module_requires_grad_state(
+            self.shadow_hidden_projection,
+            self._explicit_shadow_requires_grad_state.get("shadow_hidden_projection", {}),
+        )
+        self._restore_module_requires_grad_state(
+            self.shadow_lm_head,
+            self._explicit_shadow_requires_grad_state.get("shadow_lm_head", {}),
+        )
 
     def _build_shadow_backbone(self, shadow_config: ShadowConfig, explicit_shadow_model, hidden_size: int) -> None:
         self._explicit_shadow_model = explicit_shadow_model is not None
