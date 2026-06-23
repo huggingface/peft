@@ -384,6 +384,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 )
             inference_mode = peft_config.inference_mode
             peft_config.inference_mode = True
+            if peft_config.peft_type == PeftType.SHADOW and getattr(self.base_model, "_explicit_shadow_model", False):
+                from peft.tuners.shadow.model_utils import resolve_explicit_shadow_model_name
+
+                runtime_shadow = getattr(peft_config, "shadow_model", None)
+                if runtime_shadow is None:
+                    runtime_shadow = getattr(self.base_model, "shadow_model", None)
+                explicit_path = resolve_explicit_shadow_model_name(runtime_shadow) if runtime_shadow is not None else None
+                if explicit_path:
+                    peft_config.explicit_shadow_model_name_or_path = explicit_path
 
             if peft_config.task_type is None:
                 # deal with auto mapping
@@ -429,6 +438,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         ephemeral_gpu_offload: bool = False,
         low_cpu_mem_usage: bool = False,
         key_mapping: Optional[dict[str, str]] = None,
+        shadow_model: Optional[torch.nn.Module] = None,
         **kwargs: Any,
     ) -> PeftModel:
         r"""
@@ -583,6 +593,25 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 else:
                     if "adapters" not in kwargs:
                         raise ValueError("If model_id is a local path, then `adapters` must be passed in kwargs.")
+
+        if shadow_model is None and getattr(config, "explicit_shadow_model_name_or_path", None):
+            from peft.tuners.shadow.model_utils import load_explicit_shadow_model
+
+            shadow_load_kwargs = {
+                key: kwargs[key]
+                for key in ("cache_dir", "token", "revision", "subfolder", "trust_remote_code", "torch_dtype")
+                if key in kwargs
+            }
+            shadow_model = load_explicit_shadow_model(
+                config.explicit_shadow_model_name_or_path,
+                **shadow_load_kwargs,
+            )
+
+        if shadow_model is not None:
+            if not getattr(config, "is_shadow", False):
+                raise ValueError("`shadow_model` is only supported when loading a ShadowPEFT adapter (`ShadowConfig`).")
+            # Attach the explicit shadow model as a runtime attribute read by the ShadowModel tuner (not serialized).
+            config.shadow_model = shadow_model
 
         if config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys():
             model = cls(
@@ -1042,7 +1071,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.prepare_inputs_for_generation = old_prepare_inputs_for_generation
                 self._adapters_disabled = False
 
-        elif self.peft_config[self.active_adapter].is_adaption_prompt:
+        elif self.peft_config[self.active_adapter].is_adaption_prompt or self.peft_config[self.active_adapter].is_shadow:
             try:
                 self.base_model.disable_adapter_layers()
                 self._adapters_disabled = True
@@ -1138,6 +1167,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     model_config=BaseTuner.get_model_config(self),
                     adapter_name=adapter_name,
                 )
+            elif peft_config.is_shadow:
+                self.base_model.add_adapter(adapter_name, peft_config)
             else:
                 self.peft_config[adapter_name] = peft_config
                 self.base_model.inject_adapter(

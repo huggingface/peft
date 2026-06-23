@@ -74,8 +74,8 @@ def inject_adapter_in_model(
             checkpoint was created without meta data. Note that the values from the `state_dict` are not used, only the
             keys are used to determine the correct layers that should be adapted.
     """
-    if peft_config.is_prompt_learning or peft_config.is_adaption_prompt:
-        raise ValueError("`create_and_replace` does not support prompt learning and adaption prompt yet.")
+    if peft_config.is_prompt_learning or peft_config.is_adaption_prompt or peft_config.is_shadow:
+        raise ValueError("`create_and_replace` does not support prompt learning, adaption prompt and shadow yet.")
 
     if peft_config.peft_type not in PEFT_TYPE_TO_TUNER_MAPPING.keys():
         raise ValueError(

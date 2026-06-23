@@ -123,6 +123,8 @@
         title: RandLora
       - local: package_reference/road
         title: RoAd
+      - local: package_reference/shadow
+        title: ShadowPEFT
       - local: package_reference/shira
         title: SHiRA
       - local: package_reference/tinylora
@@ -231,6 +233,8 @@
       title: PEANuT
     - local: package_reference/beft
       title: BEFT
+    - local: package_reference/shadow
+      title: ShadowPEFT
 
     title: Adapters
   - sections:

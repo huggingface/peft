@@ -1,0 +1,55 @@
+# Copyright 2024-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from peft.utils import register_peft_method
+
+from .config import ShadowConfig
+from .model import ShadowCausalLMOutputWithPast, ShadowModel, ShadowSequenceClassifierOutput
+from .projected_causal_lm import (
+    AutoModelForCausalLMWithHiddenProjection,
+    AutoModelForCausalLMWithHiddenProjectionConfig,
+)
+
+
+__all__ = [
+    "AutoModelForCausalLMWithHiddenProjection",
+    "AutoModelForCausalLMWithHiddenProjectionConfig",
+    "ShadowCausalLMOutputWithPast",
+    "ShadowConfig",
+    "ShadowModel",
+    "ShadowSequenceClassifierOutput",
+]
+
+register_peft_method(name="shadow", config_cls=ShadowConfig, model_cls=ShadowModel, prefix="shadow_")
+
+
+def _register_projected_causal_lm_with_transformers() -> None:
+    """Register the projected shadow model with transformers' Auto classes (best-effort)."""
+    import contextlib
+
+    from transformers import AutoConfig, AutoModelForCausalLM
+
+    # Already registered (e.g. on re-import) or unsupported transformers version: nothing to do.
+    with contextlib.suppress(Exception):
+        AutoConfig.register(
+            AutoModelForCausalLMWithHiddenProjectionConfig.model_type,
+            AutoModelForCausalLMWithHiddenProjectionConfig,
+        )
+        AutoModelForCausalLM.register(
+            AutoModelForCausalLMWithHiddenProjectionConfig,
+            AutoModelForCausalLMWithHiddenProjection,
+        )
+
+
+_register_projected_causal_lm_with_transformers()
