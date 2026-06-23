@@ -1427,13 +1427,12 @@ def run_method(method, args, tokenizer, train_ds, eval_ds, collator, compute_met
         if trainable is None or total is None:
             trainable, total = model.get_nb_trainable_parameters()
     else:
-        shadow_model = load_shadow_model(args) if method == "shadow" else None
-        if shadow_model is not None:
-            for name, param in shadow_model.named_parameters():
-                if param.requires_grad:
-                    print(f">>> Trainable shadow model parameter: {name}")
+        shadow_model = load_shadow_model(args) if method == "shadow" else None            
         model = apply_peft(load_base_model(args, num_labels), method, args, shadow_model=shadow_model)
         print(">>> model:", model)
+        for name, param in model.shadow_model.named_parameters():
+            if not param.requires_grad:
+                print(f">>> Frozen shadow model parameter: {name}")
         trainable, total = model.get_nb_trainable_parameters()
 
     if args.gradient_checkpointing:

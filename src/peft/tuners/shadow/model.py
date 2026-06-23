@@ -408,6 +408,9 @@ class ShadowModel(nn.Module, GenerationMixin):
             if base_head is None:
                 raise AttributeError("Base model does not expose output embeddings/lm_head for the shadow head.")
             self.shadow_lm_head = deepcopy(base_head)
+            # Freeze the shadow lm head by default
+            for p in self.shadow_lm_head.parameters():
+                p.requires_grad = False
         elif self.task_type == TaskType.SEQ_CLS:
             head = None
             for attr in ("score", "classifier"):
