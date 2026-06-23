@@ -41,6 +41,8 @@ export NCCL_IB_DISABLE="1"
 > ran on 4090
 
 Results:
+
+```
 ======================================================================
 Comparison (cls, Qwen/Qwen3-8B)
 ======================================================================
@@ -48,7 +50,7 @@ method         trainable  trainable%  train_time(s)      accuracy   shadow_only
 -------------------------------------------------------------------------------
 lora          30,679,040      0.404%          270.0        0.9495        /
 shadow        29,135,104      0.383%          290.4        0.9574        0.8059
-
+```
 
 ```bash
 # 1. CR, LoRA 
@@ -63,6 +65,8 @@ CUDA_VISIBLE_DEVICES=2,3 accelerate launch --num_processes 2 --main_process_port
 > ran on A800
 
 Results: 
+
+```
 ======================================================================
 Comparison (gsm8k, Qwen/Qwen3-8B)
 ======================================================================
@@ -71,7 +75,7 @@ method                   trainable  trainable%  train_time(s)      accuracy   sh
 lora                     30,670,848      0.373%          696.2        0.8014        /
 random shadow            29,118,720      0.329%          721.7        0.8153        0.0159
 pretrained-shadow        453,844,992     4.817%         877.0       0.8173       0.5042
-
+```
 
 ```bash
 # 1. GSM8k, LoRA 
