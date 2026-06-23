@@ -1083,6 +1083,15 @@ class BaseTuner(nn.Module, ABC):
 
         def create_and_replace_param(module_name, key, param_name):
             # helper function to avoid duplication
+            if module_name == "":
+                # nn.Parameters that are registered directly on the top-level module (i.e. the module passed to
+                # get_peft_model) cannot be targeted. Wrapping the parameter would require replacing the module that
+                # holds it with lora.ParamWrapper, but that module is its own parent, so the wrapper ends up registered
+                # as a submodule of the very module it wraps. This creates a cyclic module graph, resulting in an error.
+                raise ValueError(
+                    f"Targeting an nn.Parameter on the top-level module is not supported (parameter '{param_name}'). "
+                )
+
             parent, target, target_name = _get_submodules(model, module_name)
             unwrapped_module_name = strip_base_layer_from_name(module_name)
             unwrapped_module = model.get_submodule(unwrapped_module_name)
