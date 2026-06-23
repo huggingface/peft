@@ -304,7 +304,6 @@ class TestTransformersV5:
         # Ensure that using LoRA directly with a v5 model still works
         inputs = torch.arange(10).view(1, -1).to(device=self.torch_device)
         model_id = "hf-internal-testing/Mixtral-tiny"
-        lora_id = "peft-internal-testing/mixtral-pre-v5-lora"
 
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
