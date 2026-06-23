@@ -20,8 +20,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
-from peft.utils.other import is_gptqmodel_quant_linear
+from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
+from peft.utils import quantization_extra_repr, resolve_quantization_backend
 
 from .config import OFTConfig
 
@@ -329,6 +329,9 @@ class OFTLayer(BaseTunerLayer):
         base_layer: the pretrained model layer
         """
         self.base_layer = base_layer
+        self.quantization_backend = resolve_quantization_backend(
+            self.get_base_layer(), get_apply_tensor_subclass=kwargs.get("get_apply_tensor_subclass")
+        )
         self.oft_R = nn.ModuleDict({})
         # For Embedding layer
         self.oft_embedding_R = nn.ModuleDict({})
@@ -344,39 +347,11 @@ class OFTLayer(BaseTunerLayer):
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
-        if isinstance(base_layer, nn.Linear):
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif isinstance(base_layer, nn.Conv2d):
-            in_features, out_features = base_layer.in_channels, base_layer.out_channels
-        elif isinstance(base_layer, nn.Embedding):
+        if isinstance(base_layer, nn.Embedding):
+            # For embedding layers, in_features is the embedding dimension (the dimension that gets rotated)
             in_features, out_features = base_layer.embedding_dim, base_layer.num_embeddings
-        elif hasattr(base_layer, "infeatures") and hasattr(base_layer, "outfeatures"):
-            # QuantLinear
-            in_features, out_features = base_layer.infeatures, base_layer.outfeatures
-        elif hasattr(base_layer, "input_size") and hasattr(base_layer, "output_size"):
-            # Megatron ColumnParallelLinear,RowParallelLinear
-            in_features, out_features = base_layer.input_size, base_layer.output_size
-        elif hasattr(base_layer, "codebooks") and base_layer.__class__.__name__ == "QuantizedLinear":
-            # AQLM QuantLinear
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif is_gptqmodel_quant_linear(base_layer):
-            # GPT-QModel quantized linears
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif base_layer.__class__.__name__ == "EetqLinear":
-            # Eetq layers
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif hasattr(base_layer, "W_q") and base_layer.__class__.__name__ == "HQQLinear":
-            # HQQ layers
-            in_features, out_features = base_layer.in_features, base_layer.out_features
         else:
-            # possibly support user provided custom layer types using dynamic dispatch
-            if hasattr(base_layer, "in_features") and hasattr(base_layer, "out_features"):
-                in_features, out_features = base_layer.in_features, base_layer.out_features
-            else:
-                in_features, out_features = None, None
-            warnings.warn(
-                f"Unsupported layer type '{type(base_layer)}' encountered, proceed at your own risk.", UserWarning
-            )
+            in_features, out_features = _get_in_out_features(base_layer)
 
         self.in_features = in_features
         self.out_features = out_features
@@ -579,33 +554,31 @@ class Linear(nn.Module, OFTLayer):
         if not adapter_names:
             # no adapter to merge
             return
-
         for active_adapter in adapter_names:
             if active_adapter in self.oft_R.keys():
-                base_layer = self.get_base_layer()
-                orig_dtype = base_layer.weight.dtype
+                orig_weight = self.get_base_weight().clone()
+                orig_dtype = orig_weight.dtype
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
-                    orig_weights = base_layer.weight.data
+                    # because of the copy operation.
                     oft_mat = self.get_delta_weight(active_adapter)
-                    orig_weights = torch.transpose(orig_weights, 0, 1)
-                    orig_weights = torch.mm(oft_mat, orig_weights.to(oft_mat.dtype))
-                    orig_weights = torch.transpose(orig_weights, 0, 1)
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = torch.mm(oft_mat, orig_weight.to(oft_mat.dtype))
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
 
-                    if not torch.isfinite(orig_weights).all():
+                    if not torch.isfinite(orig_weight).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weights.contiguous().to(orig_dtype)
+                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
                 else:
-                    orig_weights = base_layer.weight.data
                     oft_mat = self.get_delta_weight(active_adapter)
-                    orig_weights = torch.transpose(orig_weights, 0, 1)
-                    orig_weights = torch.mm(oft_mat, orig_weights.to(oft_mat.dtype))
-                    orig_weights = torch.transpose(orig_weights, 0, 1)
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = torch.mm(oft_mat, orig_weight.to(oft_mat.dtype))
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
 
-                    base_layer.weight.data = orig_weights.contiguous().to(orig_dtype)
+                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
 
                 self.merged_adapters.append(active_adapter)
 
@@ -617,8 +590,6 @@ class Linear(nn.Module, OFTLayer):
             warnings.warn("Already unmerged. Nothing to do.")
             return
 
-        base_layer = self.get_base_layer()
-        orig_dtype = base_layer.weight.dtype
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.oft_R.keys():
@@ -628,12 +599,13 @@ class Linear(nn.Module, OFTLayer):
                 if previous_dtype != torch.float32:
                     oft_mat = oft_mat.to(torch.float32)
 
-                orig_weights = self.get_base_layer().weight.data
-                orig_weights = torch.transpose(orig_weights, 0, 1)
-                orig_weights = torch.mm(torch.linalg.inv(oft_mat).to(previous_dtype), orig_weights.to(previous_dtype))
-                orig_weights = torch.transpose(orig_weights, 0, 1)
+                orig_weight = self.get_base_weight()
+                orig_dtype = orig_weight.dtype
+                orig_weight = torch.transpose(orig_weight, 0, 1)
+                orig_weight = torch.mm(torch.linalg.inv(oft_mat).to(previous_dtype), orig_weight.to(previous_dtype))
+                orig_weight = torch.transpose(orig_weight, 0, 1)
 
-                base_layer.weight.data = orig_weights.to(orig_dtype)
+                self.set_base_weight(orig_weight.to(orig_dtype))
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -690,6 +662,9 @@ class Linear(nn.Module, OFTLayer):
         rep = super().__repr__()
         return "oft." + rep
 
+    def extra_repr(self) -> str:
+        return quantization_extra_repr(self)
+
 
 class Conv2d(nn.Module, OFTLayer):
     """OFT implemented in Conv2d layer"""
@@ -704,7 +679,7 @@ class Conv2d(nn.Module, OFTLayer):
         **kwargs,
     ) -> None:
         super().__init__()
-        OFTLayer.__init__(self, base_layer)
+        OFTLayer.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
 
         self._active_adapter = adapter_name
@@ -816,39 +791,38 @@ class Conv2d(nn.Module, OFTLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.oft_R.keys():
                 base_layer = self.get_base_layer()
-                orig_dtype = base_layer.weight.dtype
+                orig_weight = self.get_base_weight()
+                orig_dtype = orig_weight.dtype
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
-                    orig_weights = base_layer.weight.data.clone()
                     oft_mat = self.get_delta_weight(active_adapter)
 
-                    orig_weights = orig_weights.view(
+                    orig_weight = orig_weight.view(
                         self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
                     )
-                    orig_weights = torch.transpose(orig_weights, 0, 1)
-                    orig_weights = torch.mm(oft_mat, orig_weights.to(oft_mat.dtype))
-                    orig_weights = torch.transpose(orig_weights, 0, 1)
-                    orig_weights = orig_weights.view(
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = torch.mm(oft_mat, orig_weight.to(oft_mat.dtype))
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = orig_weight.view(
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
                     )
 
-                    base_layer.weight.data = orig_weights.contiguous().to(orig_dtype)
+                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
                 else:
                     oft_mat = self.get_delta_weight(active_adapter)
 
-                    orig_weights = base_layer.weight.data.clone()
-                    orig_weights = orig_weights.view(
+                    orig_weight = orig_weight.view(
                         self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
                     )
-                    orig_weights = torch.transpose(orig_weights, 0, 1)
-                    orig_weights = torch.mm(oft_mat, orig_weights.to(oft_mat.dtype))
-                    orig_weights = torch.transpose(orig_weights, 0, 1)
-                    orig_weights = orig_weights.view(
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = torch.mm(oft_mat, orig_weight.to(oft_mat.dtype))
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = orig_weight.view(
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
                     )
 
-                    base_layer.weight.data = orig_weights.contiguous().to(orig_dtype)
+                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
 
                 self.merged_adapters.append(active_adapter)
 
@@ -861,7 +835,6 @@ class Conv2d(nn.Module, OFTLayer):
             return
 
         base_layer = self.get_base_layer()
-        orig_dtype = base_layer.weight.dtype
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.oft_R.keys():
@@ -871,22 +844,23 @@ class Conv2d(nn.Module, OFTLayer):
                 if previous_dtype != torch.float32:
                     oft_mat = oft_mat.to(torch.float32)
 
-                orig_weights = self.get_base_layer().weight.data.clone()
-                orig_weights = orig_weights.view(
+                orig_weight = self.get_base_weight()
+                orig_dtype = orig_weight.dtype
+                orig_weight = orig_weight.view(
                     self.out_features,
-                    self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0],
+                    self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0],
                 )
-                orig_weights = torch.transpose(orig_weights, 0, 1)
-                orig_weights = torch.mm(torch.linalg.inv(oft_mat).to(previous_dtype), orig_weights.to(previous_dtype))
-                orig_weights = torch.transpose(orig_weights, 0, 1)
-                orig_weights = orig_weights.view(
+                orig_weight = torch.transpose(orig_weight, 0, 1)
+                orig_weight = torch.mm(torch.linalg.inv(oft_mat).to(previous_dtype), orig_weight.to(previous_dtype))
+                orig_weight = torch.transpose(orig_weight, 0, 1)
+                orig_weight = orig_weight.view(
                     self.out_features,
                     self.in_features,
-                    self.get_base_layer().kernel_size[0],
-                    self.get_base_layer().kernel_size[0],
+                    base_layer.kernel_size[0],
+                    base_layer.kernel_size[0],
                 )
 
-                base_layer.weight.data = orig_weights.to(orig_dtype)
+                self.set_base_weight(orig_weight.to(orig_dtype))
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -943,6 +917,9 @@ class Conv2d(nn.Module, OFTLayer):
         rep = super().__repr__()
         return "oft." + rep
 
+    def extra_repr(self) -> str:
+        return quantization_extra_repr(self)
+
 
 class Embedding(nn.Module, OFTLayer):
     # OFT implemented in a Embedding layer
@@ -956,7 +933,7 @@ class Embedding(nn.Module, OFTLayer):
         **kwargs,
     ) -> None:
         super().__init__()
-        OFTLayer.__init__(self, base_layer)
+        OFTLayer.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
 
         self._active_adapter = adapter_name
@@ -1046,26 +1023,24 @@ class Embedding(nn.Module, OFTLayer):
 
         for active_adapter in adapter_names:
             if active_adapter in self.oft_embedding_R.keys():
-                base_layer = self.get_base_layer()
-                orig_dtype = base_layer.weight.dtype
+                orig_weight = self.get_base_weight()
+                orig_dtype = orig_weight.dtype
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
-                    orig_weights = base_layer.weight.data
                     oft_mat = self.get_delta_weight(active_adapter)
-                    orig_weights = torch.mm(orig_weights.to(oft_mat.dtype), oft_mat)
+                    orig_weight = torch.mm(orig_weight.to(oft_mat.dtype), oft_mat)
 
-                    if not torch.isfinite(orig_weights).all():
+                    if not torch.isfinite(orig_weight).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weights.contiguous().to(orig_dtype)
+                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
                 else:
-                    orig_weights = base_layer.weight.data
                     oft_mat = self.get_delta_weight(active_adapter)
-                    orig_weights = torch.mm(orig_weights.to(oft_mat.dtype), oft_mat)
+                    orig_weight = torch.mm(orig_weight.to(oft_mat.dtype), oft_mat)
 
-                    base_layer.weight.data = orig_weights.contiguous().to(orig_dtype)
+                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -1076,8 +1051,6 @@ class Embedding(nn.Module, OFTLayer):
             warnings.warn("Already unmerged. Nothing to do.")
             return
 
-        base_layer = self.get_base_layer()
-        orig_dtype = base_layer.weight.dtype
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.oft_embedding_R.keys():
@@ -1087,10 +1060,11 @@ class Embedding(nn.Module, OFTLayer):
                 if previous_dtype != torch.float32:
                     oft_mat = oft_mat.to(torch.float32)
 
-                orig_weights = self.get_base_layer().weight.data
-                orig_weights = torch.mm(orig_weights.to(oft_mat.dtype), torch.linalg.inv(oft_mat))
+                orig_weight = self.get_base_weight()
+                orig_dtype = orig_weight.dtype
+                orig_weight = torch.mm(orig_weight.to(oft_mat.dtype), torch.linalg.inv(oft_mat))
 
-                base_layer.weight.data = orig_weights.to(orig_dtype)
+                self.set_base_weight(orig_weight.to(orig_dtype))
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -1157,33 +1131,5 @@ class Embedding(nn.Module, OFTLayer):
         rep = super().__repr__()
         return "oft." + rep
 
-
-def dispatch_default(
-    target: torch.nn.Module,
-    adapter_name: str,
-    oft_config: OFTConfig,
-    **kwargs,
-) -> Optional[torch.nn.Module]:
-    new_module = None
-
-    if isinstance(target, BaseTunerLayer):
-        target_base_layer = target.get_base_layer()
-    else:
-        target_base_layer = target
-
-    if isinstance(target_base_layer, torch.nn.Conv2d):
-        new_module = Conv2d(target, adapter_name, config=oft_config, **kwargs)
-    elif isinstance(target_base_layer, torch.nn.Linear):
-        if kwargs["fan_in_fan_out"]:
-            warnings.warn(
-                "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
-                "Setting fan_in_fan_out to False."
-            )
-            kwargs["fan_in_fan_out"] = oft_config.fan_in_fan_out = False
-        new_module = Linear(target, adapter_name, config=oft_config, **kwargs)
-    elif isinstance(target_base_layer, torch.nn.Embedding):
-        embedding_kwargs = kwargs.copy()
-        embedding_kwargs.pop("fan_in_fan_out", None)
-        new_module = Embedding(target, adapter_name, config=oft_config, **embedding_kwargs)
-
-    return new_module
+    def extra_repr(self) -> str:
+        return quantization_extra_repr(self)
