@@ -52,9 +52,9 @@ def _validate_lora_adapter_state_dict(
     """Refuse to save a LoRA adapter state dict whose ``lora_A`` / ``lora_B`` tensors look unsharded.
 
     A correctly-saved LoRA adapter has ``lora_A`` of shape ``(rank, in_dim)`` and ``lora_B`` of shape ``(out_dim,
-    rank)`` — both 2-D and non-empty. If any such tensor is 1-D or has a zero-sized dimension, the upstream caller
-    almost always has a partitioned-parameter export under DeepSpeed ZeRO-3 / FSDP that did not gather model shards
-    before ``save_pretrained``. The artifact looks structurally valid (filenames + ``adapter_config.json`` present),
+    rank)`` — both 2-D and non-empty. If any such tensor is 1-D or has a zero-sized dimension, it typically indicates
+    a partitioned-parameter export under DeepSpeed ZeRO-3 / FSDP that did not gather model shards before
+    ``save_pretrained``. The artifact looks structurally valid (filenames + ``adapter_config.json`` present),
     but downstream loaders fail with confusing index errors at the first attempted use, e.g.::
 
         IndexError: too many indices for tensor of dimension 1
