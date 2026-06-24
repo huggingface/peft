@@ -103,6 +103,12 @@ TEST_CASES = [
     ("Vanilla MLP 7 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": ["lin0"], "use_dora": True}),
     ("Vanilla MLP 8 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"], "use_dora": True}),
     (
+        "Vanilla MLP 1 LoRA with MiCA",
+        "MLP",
+        LoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": "mica", "r": 4},
+    ),
+    (
         "Vanilla MLP 9 LoRA with DoRA",
         "MLP",
         LoraConfig,
@@ -2564,8 +2570,12 @@ class TestPeftCustomModel(PeftCommonTester):
                 # via Monte Carlo sampling), so we don't include them in the strict allclose check below.
                 continue
             if (model.prefix in name) or ("modules_to_save" in name) or ("token_adapter.trainable_tokens" in name):
-                # target_modules, modules_to_save and modules of `NewTokensWrapper` _are_ updated
-                assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
+                # target_modules, modules_to_save and modules of `NewTokensWrapper` _are_ updated, except for adapter
+                # parameters that the variant intentionally freezes (e.g. MiCA freezes lora_B).
+                if not param_after.requires_grad:
+                    assert torch.equal(param_before, param_after)
+                else:
+                    assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
             else:
                 assert torch.allclose(param_before, param_after, atol=tol, rtol=tol)
 
