@@ -43,9 +43,6 @@ class DeftLayer(BaseTunerLayer):
         # The residual projection (I - P_proj) @ W is not invertible, so the delta applied during merge is cached
         # here per adapter to allow an exact unmerge.
         self._cached_merge_delta = {}
-        # In eval/inference the adapter weights are frozen, so the (relatively expensive) delta is computed once and
-        # cached here to avoid recomputing it for every generated token. Cleared whenever the module enters train mode.
-        self._eval_delta_cache = {}
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
@@ -119,7 +116,7 @@ class DeftLayer(BaseTunerLayer):
 
         if init_weights:
             # Identity initialization: choose R so that the delta is exactly zero at init, i.e. the adapted weight
-            # equals the base weight. With delta = Q_P @ (g * R - right.T @ W) (see `_compute_delta`), delta == 0 holds
+            # equals the base weight. With delta = Q_P @ (g * R - right.T @ W) (see `get_delta_weight`), delta == 0 holds
             # for R = (right.T @ W) / g. This starts training from the pretrained weights and learns the injection,
             # avoiding the immediate "forgetting" caused by removing a sub-space of W.
             P = self.deft_P[adapter_name].detach().to(base_weight.device)
@@ -168,12 +165,14 @@ class DeftLinear(nn.Module, DeftLayer):
         self.update_layer(adapter_name, r, config=config, **kwargs)
 
     def _project(self, P: torch.Tensor, adapter_name: str):
-        """Return ``(Q_P, right)`` (both float32) such that the projector is ``P_proj = Q_P @ right.T`` and the
-        injection uses ``Q_P``.
+        """Return `(Q_P, right)` (both float32) such that the projector is `P_proj = Q_P @ right.T` and the injection
+        uses `Q_P`.
 
-          - ``relu``: ``Q_P = P``, ``right = relu(P)`` -> ``P_proj = P @ relu(P).T`` (non-orthogonal)
-          - ``qr``: ``Q_P = qr(P)``, ``right = Q_P`` -> ``P_proj = Q_P @ Q_P.T`` (orthogonal)
+          - `relu`: `Q_P = P`, `right = relu(P)` -> `P_proj = P @ relu(P).T` (non-orthogonal)
+          - `qr`: `Q_P = qr(P)`, `right = Q_P` -> `P_proj = Q_P @ Q_P.T` (orthogonal)
         """
+        # float32 for numerical stability: the QR decomposition (and the projection math) are unreliable in
+        # half precision, so the projection is always computed in float32 and cast back by the caller.
         P = P.to(torch.float32)
         method = self.deft_decomposition[adapter_name]
         if method == "relu":
@@ -186,20 +185,22 @@ class DeftLinear(nn.Module, DeftLayer):
             raise ValueError(f"Unknown decomposition_method '{method}'.")
         return Q_P, right
 
-    def _compute_delta(self, adapter_name: str) -> torch.Tensor:
-        """Compute the additive delta such that ``W + delta`` equals the DEFT-adapted weight.
+    def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
+        """Return the additive delta such that `W + delta` equals the DEFT-adapted weight.
 
-        The adapted weight is ``(I - P_proj) @ W + g * Q_P @ R`` (``g`` is the optional gate), so the delta is
-        ``-P_proj @ W + g * Q_P @ R``. Using ``P_proj = Q_P @ right.T`` this factors into
+        The adapted weight is `(I - P_proj) @ W + g * Q_P @ R` (`g` is the optional gate), so the delta is `-P_proj @ W
+        + g * Q_P @ R`. Using `P_proj = Q_P @ right.T` this factors into
 
             delta = Q_P @ (g * R - right.T @ W)
 
-        which only uses rank-``r`` matmuls and never materializes the ``out x out`` projection matrix.
+        which only uses rank-`r` matmuls and never materializes the `out x out` projection matrix. This is used by
+        `merge`; the forward pass computes the equivalent update directly on the activations instead.
         """
         base_layer = self.get_base_layer()
         weight = base_layer.weight
         orig_dtype = weight.dtype
 
+        # computed in float32 for numerical stability (see `_project`), then cast back to the base weight dtype
         Q_P, right = self._project(self.deft_P[adapter_name], adapter_name)
         W = weight.to(torch.float32)
         R = self.deft_R[adapter_name].to(torch.float32)
@@ -208,27 +209,6 @@ class DeftLinear(nn.Module, DeftLayer):
 
         delta = Q_P @ (R - right.transpose(0, 1) @ W)
         return delta.to(orig_dtype)
-
-    def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
-        """Return the additive delta such that ``W + delta`` equals the DEFT-adapted weight."""
-        return self._compute_delta(adapter_name)
-
-    def _delta(self, adapter_name: str) -> torch.Tensor:
-        """Return the delta for the forward pass, caching it while the module is frozen (eval + no grad)."""
-        if self.training or torch.is_grad_enabled():
-            # training (or grad-enabled eval): the delta must stay in the autograd graph and be recomputed
-            return self._compute_delta(adapter_name)
-        cached = self._eval_delta_cache.get(adapter_name)
-        if cached is None:
-            cached = self._compute_delta(adapter_name)
-            self._eval_delta_cache[adapter_name] = cached
-        return cached
-
-    def train(self, mode: bool = True):
-        # entering train mode invalidates the frozen-eval delta cache, since the adapter weights will change
-        if mode:
-            self._eval_delta_cache.clear()
-        return super().train(mode)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -292,24 +272,39 @@ class DeftLinear(nn.Module, DeftLayer):
             result = self.base_layer(x, *args, **kwargs)
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
+        elif not any(active_adapter in self.deft_P.keys() for active_adapter in self.active_adapters):
+            # no active DEFT adapter on this layer
+            result = self.base_layer(x, *args, **kwargs)
         else:
+            # LoRA-style forward: instead of materializing W' = W + delta and calling F.linear, apply the update
+            # directly to the activations. This preserves any hooks on the base layer's forward (e.g. sharding) and
+            # keeps the path compatible with quantized base layers.
+            #
+            # For one adapter, delta = Q_P @ (g*R - right.T @ W), so
+            #     x @ delta.T = [ (x @ R.T) - (x @ W.T) @ right ] @ Q_P.T  =  inject - correction
+            # where (x @ W.T) is the bias-free base product.
             base_layer = self.get_base_layer()
-            orig_weight = base_layer.weight.data
-            new_weight = orig_weight
+            bias = base_layer.bias
 
-            for active_adapter in self.active_adapters:
-                if active_adapter not in self.deft_P.keys():
-                    continue
-                x = self.deft_dropout[active_adapter](x)
-                new_weight = new_weight + self._delta(active_adapter)
+            active_adapters = [a for a in self.active_adapters if a in self.deft_P.keys()]
+            base_out = self.base_layer(x, *args, **kwargs)
+            # the DEFT update is computed in float32 for numerical stability (see `_project`)
+            compute_dtype = torch.float32
+            result = base_out.to(compute_dtype)
+            # bias-free base product (x @ W.T), needed by the subspace-removal (correction) term
+            base_product = result if bias is None else result - bias.to(compute_dtype)
 
-            bias = self.base_layer.bias
-            if self.cast_input_dtype_enabled:
-                x = self._cast_input_dtype(x, new_weight.dtype)
-                bias = self._cast_input_dtype(bias, new_weight.dtype)
-            else:
-                x = x.to(new_weight.dtype)
-            result = F.linear(input=x, weight=new_weight, bias=bias)
+            x = self._cast_input_dtype(x, compute_dtype)
+            for active_adapter in active_adapters:
+                Q_P, right = self._project(self.deft_P[active_adapter], active_adapter)
+                R = self.deft_R[active_adapter].to(compute_dtype)
+                if self.deft_use_gating[active_adapter]:
+                    R = R * torch.sigmoid(self.deft_gate[active_adapter].to(compute_dtype))
+
+                x_drop = self.deft_dropout[active_adapter](x)
+                inject = F.linear(x_drop, R) @ Q_P.transpose(0, 1)
+                correction = (base_product @ right) @ Q_P.transpose(0, 1)
+                result = result + inject - correction
 
         result = result.to(previous_dtype)
         return result

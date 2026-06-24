@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -56,15 +56,17 @@ class DeftConfig(PeftConfig):
             How the projector `P_proj` is derived from `P`. Either `"relu"` (default, non-orthogonal `P @ relu(P).T`)
             or `"qr"` (orthogonal `Q_P @ Q_P.T`).
         init_scale (`float`):
-            Scaling applied to the standard deviation used to initialize the injection matrix `R`. Smaller values keep
-            the injected update closer to zero at initialization.
+            Scaling applied to the standard deviation used to initialize the injection matrix `R` (only used when
+            `init_weights=False`). Smaller values keep the injected update closer to zero at initialization. Defaults
+            to `1.0`.
         use_gating (`bool`):
-            Whether to learn a scalar sigmoid gate that scales the injected update `Q_P @ R`.
+            Whether to learn a scalar sigmoid gate that scales the injected update `Q_P @ R`. Defaults to `False`.
         deft_dropout (`float`):
-            The dropout probability applied to the layer input.
+            The dropout probability applied to the layer input. Defaults to `0.0`.
         init_weights (`bool`):
-            Whether to use DEFT's default initialization for the adapter weights. Don't change this setting, except if
-            you know exactly what you're doing.
+            Whether to use DEFT's default (identity) initialization for the adapter weights, so the adapter is a no-op
+            at the start of training. Don't change this setting, except if you know exactly what you're doing. Defaults
+            to `True`.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
