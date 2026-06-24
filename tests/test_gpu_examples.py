@@ -4946,6 +4946,65 @@ class TestFSDPWrap:
         fsdp_auto_wrap_policy(SimpleModel())  # does not raise
 
 
+class TestUnshardedLoRASaveUnderZeRO3:
+    """Regression test for #3251.
+
+    Under DeepSpeed ZeRO-3, the parameters are partitioned across ranks, so a ``save_pretrained()`` that forgets to
+    gather them writes ``lora_A`` / ``lora_B`` tensors that are 1-D (FSDP flat shard) or zero-sized (ZeRO-3 on the
+    non-owning rank). The artifact looks valid on disk but later crashes downstream loaders (e.g. vLLM hot-swap) with
+    an opaque ``IndexError``. ``get_peft_model_state_dict`` now refuses to emit such a state dict and raises at write
+    time instead. This reproduces the real path on a single GPU (world_size=1 is enough: ``deepspeed.zero.Init``
+    partitions the parameter, leaving the ungathered shard) and asserts the guard fires, and that the documented
+    ``GatheredParameters`` workaround still saves a correct 2-D adapter.
+    """
+
+    class _Tiny(torch.nn.Module):
+        def __init__(self, d=128, v=256):
+            super().__init__()
+            self.embed = torch.nn.Embedding(v, d)
+            self.proj = torch.nn.Linear(d, d, bias=False)
+
+        def forward(self, input_ids):
+            return self.proj(self.embed(input_ids))
+
+    @pytest.mark.single_gpu_tests
+    @require_torch_gpu
+    def test_zero3_ungathered_save_raises_and_gather_succeeds(self, tmp_path):
+        deepspeed = pytest.importorskip("deepspeed")
+
+        os.environ.setdefault("MASTER_ADDR", "localhost")
+        os.environ.setdefault("MASTER_PORT", "29555")
+        os.environ.setdefault("LOCAL_RANK", "0")
+        os.environ.setdefault("RANK", "0")
+        os.environ.setdefault("WORLD_SIZE", "1")
+
+        we_initialized_pg = not dist.is_initialized()
+        if we_initialized_pg:
+            init_process_group(world_size=1, rank=0)
+        try:
+            ds_config = {"train_batch_size": dist.get_world_size(), "zero_optimization": {"stage": 3}}
+            with deepspeed.zero.Init(config_dict_or_path=ds_config):
+                model = get_peft_model(self._Tiny(), LoraConfig(target_modules=["proj"], r=8))
+            engine, *_ = deepspeed.initialize(
+                model=model, config=ds_config, model_parameters=model.parameters()
+            )
+
+            # Saving without gathering the ZeRO-3 shards must now raise instead of writing a corrupt adapter.
+            with pytest.raises(ValueError, match=r"DeepSpeed ZeRO-3 / FSDP shards"):
+                engine.module.save_pretrained(tmp_path / "ungathered")
+
+            # The documented workaround (gather first) still produces a correct, loadable 2-D adapter.
+            lora_params = [p for n, p in engine.module.named_parameters() if "lora_A" in n or "lora_B" in n]
+            with deepspeed.zero.GatheredParameters(lora_params, modifier_rank=0):
+                engine.module.save_pretrained(tmp_path / "gathered")
+            sd = load_file(tmp_path / "gathered" / "adapter_model.safetensors")
+            lora_a = next(v for k, v in sd.items() if "lora_A" in k)
+            assert lora_a.ndim == 2 and all(d > 0 for d in lora_a.shape)
+        finally:
+            if we_initialized_pg and dist.is_initialized():
+                dist.destroy_process_group()
+
+
 class TestBOFT:
     """
     Test that we can correctly use half-precision models with BOFT.
