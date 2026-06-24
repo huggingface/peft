@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import ClassVar, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType, Paper
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -72,6 +72,7 @@ class FrodConfig(PeftConfig):
             that all base parameters stay on the accelerator after moving the model or running forward. Defaults to
             `False`.
     """
+
     papers: ClassVar[dict[str, Paper]] = {
         "FROD": Paper(
             title="FRoD: Full-Rank Efficient Fine-Tuning with Rotational Degrees for Fast Convergence",
