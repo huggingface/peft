@@ -23,12 +23,12 @@ subspace from `W`, and a low-rank update that injects new content into that subs
 balance aligning with a target distribution, learning new concepts from a few images (personalization), and preserving
 the pretrained model's instruction-following ability and editability.
 
-When to use DEFT: it is designed for settings where the new content should *replace* part of what the base model
-already encodes rather than only be added on top (e.g. text-to-image personalization and concept editing), and where
-preserving the base model's other capabilities matters. Because it both removes a sub-space of `W` and injects into it,
-DEFT is a good fit when LoRA-style purely-additive updates struggle to overwrite existing behavior. For tasks that only
-need to *add* capacity (e.g. learning a new skill without touching existing ones), a purely additive method such as
-LoRA may be simpler and equally effective.
+Concretely, DEFT combines two trainable low-rank components: (1) a projection onto the complement of a low-rank
+subspace spanned by a low-rank matrix, and (2) a low-rank update. The first low-rank matrix defines the subspace, while
+the second enables flexible parameter adaptation within that subspace.
+
+When to use DEFT: it is best suited to adapting a model to new data or concepts while **retaining and even improving the
+base model's instruction-following ability** and keeping **forgetting of its previous capabilities to a minimum**.
 
 Per target layer, DEFT learns a projection direction `P` (shape `out_features x r`) and an injection matrix `R` (shape
 `r x in_features`). The effective weight is the residual projection
