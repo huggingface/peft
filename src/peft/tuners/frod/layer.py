@@ -101,7 +101,6 @@ class FrodLayer(BaseTunerLayer):
         if init_weights:
             self.reset_frod_parameters(adapter_name)
         else:
-            # PEFT convention: init_weights=False should produce a non-identity adapter for merge tests.
             with torch.no_grad():
                 nn.init.normal_(self.frod_lambda_s_values[adapter_name], std=0.1)
                 self.frod_lambda_l[adapter_name].add_(torch.randn_like(self.frod_lambda_l[adapter_name]) * 0.1)
