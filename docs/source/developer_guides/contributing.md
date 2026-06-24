@@ -99,6 +99,7 @@ New parameter-efficient fine-tuning methods are developed all the time. If you w
 - [ ] Export the new config/model from `src/peft/tuners/__init__.py` and `src/peft/__init__.py`.
 - [ ] If the method needs default target modules for Transformers models, add the mapping in `src/peft/utils/constants.py`.
 - [ ] Add the method to the test matrix in `tests/test_custom_models.py` as these are the broadest and quickest tests. Check that the tests pass with `pytest tests/test_custom_models.py -k <method-name> -v`, fix failures if any.
+- [ ] On the config class, add a `papers` attribute with the title of, and link to, the paper.
 - [ ] Run style/quality checks with `make style` before pushing.
 - [ ] In the PR description, explain the method, link the paper, summarize tradeoffs, and list what was added.
 

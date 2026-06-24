@@ -637,6 +637,11 @@ class LoraConfig(PeftConfig):
             url="https://huggingface.co/papers/2510.23346",
             description="To use BD-LoRA, pass a `use_bdlora`.",
         ),
+        "MiCA": Paper(
+            title="MiCA Learns More Knowledge Than LoRA and Full Fine-Tuning",
+            url="https://huggingface.co/papers/2604.01694",
+            description="To use MiCA, pass a `init_lora_weights='mica'`.",
+        ),
     }
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
