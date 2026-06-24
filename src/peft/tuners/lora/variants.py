@@ -29,7 +29,7 @@ from peft.utils.other import transpose
 from .arrow import ArrowLoraLinearLayer
 from .config import LoraConfig, PeftConfig
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
-from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
+from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraLayer, LoraVariant, _ConvNd
 from .monteclora import MontecloraSampler
 from .velora import VeloraFunction, _get_group_dim, _normalize_projection, _reshape_to_grouped_subtokens
 
@@ -1216,3 +1216,97 @@ class MontecloraLinearVariant(LoraVariant):
         out_A = F.linear(x_dropped, current_weight_A)
         result = result + lora_B(out_A) * scaling
         return result
+
+
+def _register_frozen_peft_weight(module: LoraLayer, adapter_name: str, weight_name: str) -> None:
+    """Register an adapter weight that should stay frozen for this PEFT layer."""
+    frozen_peft_weight_names = module.frozen_peft_weight_names.copy()
+    frozen_peft_weight_names.setdefault(adapter_name, ())
+
+    if weight_name not in frozen_peft_weight_names[adapter_name]:
+        frozen_peft_weight_names[adapter_name] += (weight_name,)
+
+    module.frozen_peft_weight_names = frozen_peft_weight_names
+    module._freeze_non_trainable_peft_weights(adapter_name)
+
+
+class MiCALinearVariant(LoraVariant):
+    """Variant for Minor Component Adaptation (MiCA), https://arxiv.org/abs/2604.01694.
+
+    The actual SVD-based initialization is performed in `LoraLayer.mica_init` (called from `update_layer`); this
+    variant declares `lora_B` as frozen. Forward and merge semantics are identical to vanilla LoRA, since `delta_W =
+    scaling * B @ A` and only `A` is updated.
+    """
+
+    @staticmethod
+    def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
+        _register_frozen_peft_weight(module, adapter_name, "lora_B")
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return orig_weight + module.get_delta_weight(active_adapter).to(orig_weight.dtype)
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        orig_weight.data += module.get_delta_weight(active_adapter).to(orig_weight.dtype)
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return orig_weight - module.get_delta_weight(active_adapter).to(orig_weight.dtype)
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+        return result + lora_B(lora_A(dropout(x))) * scaling
+
+
+class MiCAEmbeddingVariant(LoraVariant):
+    """Embedding variant for Minor Component Adaptation (MiCA), https://arxiv.org/abs/2604.01694."""
+
+    @staticmethod
+    def init(module: Embedding, adapter_name: str, **kwargs: Any) -> None:
+        _register_frozen_peft_weight(module, adapter_name, "lora_embedding_B")
+
+    @staticmethod
+    def merge_safe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return orig_weight + module.get_delta_weight(active_adapter).to(orig_weight.dtype)
+
+    @staticmethod
+    def merge_unsafe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        orig_weight.data += module.get_delta_weight(active_adapter).to(orig_weight.dtype)
+
+    @staticmethod
+    def unmerge(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return orig_weight - module.get_delta_weight(active_adapter).to(orig_weight.dtype)
+
+    @staticmethod
+    def forward(
+        module: Embedding,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        embedding_A = module.lora_embedding_A[active_adapter].T
+        embedding_B = module.lora_embedding_B[active_adapter].T
+        scaling = module.scaling[active_adapter]
+        input_fn = module.input_fns.get(active_adapter, None)
+        output_fn = module.output_fns.get(active_adapter, None)
+
+        after_A = module._embed(x, embedding_A, input_fn=input_fn, output_fn=output_fn)
+        adapter_output = (after_A @ embedding_B) * scaling
+
+        embed_scale = module._get_embed_scale()
+        if embed_scale is not None:
+            adapter_output = adapter_output * embed_scale.to(adapter_output.dtype)
+
+        return result + adapter_output
