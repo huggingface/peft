@@ -25,6 +25,7 @@ from transformers import (
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
     CLIPTextModel,
+    CLIPTextModelWithProjection,
 )
 
 from peft import (
@@ -472,6 +473,32 @@ class TestInjectAdapterFromStateDict:
 
             # sanity check:
             assert (model.encoder.layers[0].self_attn.v_proj.lora_B.default.weight == 555).all()
+
+    def test_prefix_removal_is_undone(self):
+        # See discussion starting here: https://github.com/huggingface/peft/pull/3212#issuecomment-4402677775.
+        # For some models like CLIPTextModelWithProjection, transformers would add a removal of the 'text_model.' prefix
+        # to the conversions, but this removal is incorrect. Therefore, there is a logic in transformers to undo the
+        # removal if there is not entry in the state_dict for the renamed key. This logic was missing in PEFT, resulting
+        # in missing and unexpected keys.
+        config = LoraConfig(target_modules=["q_proj", "v_proj"])
+        model_id = "peft-internal-testing/tiny-clip-text-2"
+
+        with hub_online_once(model_id):
+            model = CLIPTextModelWithProjection.from_pretrained(model_id)
+            inject_adapter_in_model(config, model)
+            # sanity check:
+            assert (model.text_model.encoder.layers[0].self_attn.v_proj.lora_B.default.weight == 0).all()
+
+            state_dict = get_peft_model_state_dict(model)
+            state_dict = {k: torch.ones_like(v) * 555 for k, v in state_dict.items()}
+            load_result = set_peft_model_state_dict(model, state_dict)
+
+            assert not load_result.unexpected_keys
+            # base model weights may be missing, but LoRA weights should never be missing
+            assert not any("lora" in k for k in load_result.missing_keys)
+
+            # sanity check:
+            assert (model.text_model.encoder.layers[0].self_attn.v_proj.lora_B.default.weight == 555).all()
 
 
 class TestPeftStateDict:

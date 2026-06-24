@@ -37,6 +37,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
+    FrodConfig,
     GraloraConfig,
     HiraConfig,
     HRAConfig,
@@ -101,6 +102,12 @@ TEST_CASES = [
     ),
     ("Vanilla MLP 7 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": ["lin0"], "use_dora": True}),
     ("Vanilla MLP 8 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"], "use_dora": True}),
+    (
+        "Vanilla MLP 1 LoRA with MiCA",
+        "MLP",
+        LoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": "mica", "r": 4},
+    ),
     (
         "Vanilla MLP 9 LoRA with DoRA",
         "MLP",
@@ -870,6 +877,14 @@ TEST_CASES = [
         RandLoraConfig,
         {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "randlora_alpha": 1},
     ),
+    ########
+    # FRoD #
+    ########
+    ("Vanilla MLP 1 FRoD", "MLP", FrodConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 FRoD", "MLP", FrodConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 FRoD", "MLP", FrodConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 FRoD", "MLP", FrodConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 FRoD", "MLP", FrodConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
     #######
     # C3A #
     #######
@@ -1387,6 +1402,13 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         "VeRA Same",
         "vera",
         VeraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "FRoD Same",
+        "frod",
+        FrodConfig,
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin0"], "init_weights": False},
     ),
@@ -2137,6 +2159,12 @@ class TestPeftCustomModel(PeftCommonTester):
         self._test_save_pretrained(model_id, config_cls, config_kwargs, safe_serialization=False)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_save_pretrained_adapter_name_substring(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_save_pretrained_adapter_name_substring(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_load_model_low_cpu_mem_usage(self, test_name, model_id, config_cls, config_kwargs):
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
         self._test_load_model_low_cpu_mem_usage(model_id, config_cls, config_kwargs)
@@ -2542,10 +2570,54 @@ class TestPeftCustomModel(PeftCommonTester):
                 # via Monte Carlo sampling), so we don't include them in the strict allclose check below.
                 continue
             if (model.prefix in name) or ("modules_to_save" in name) or ("token_adapter.trainable_tokens" in name):
-                # target_modules, modules_to_save and modules of `NewTokensWrapper` _are_ updated
-                assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
+                # target_modules, modules_to_save and modules of `NewTokensWrapper` _are_ updated, except for adapter
+                # parameters that the variant intentionally freezes (e.g. MiCA freezes lora_B).
+                if not param_after.requires_grad:
+                    assert torch.equal(param_before, param_after)
+                else:
+                    assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
             else:
                 assert torch.allclose(param_before, param_after, atol=tol, rtol=tol)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_save_load_roundtrip(self, test_name, model_id, config_cls, config_kwargs, tmp_path):
+        # An explicit test that when loading a trained model, the outputs from the forward pass remain the same
+        X = self.prepare_inputs_for_testing()
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        with torch.inference_mode():
+            output_base = model(**X)
+
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        torch.manual_seed(0)
+        model = get_peft_model(model, config)
+        model.eval()
+        with torch.inference_mode():
+            output_before = model(**X)
+
+        # COFT constrains the rotation to stay close to the identity, so its effect on the output is small and the
+        # sanity check below needs tighter tolerances to detect it reliably across platforms
+        if (config_cls == OFTConfig) and config_kwargs.get("coft", False):
+            atol, rtol = 1e-6, 1e-6
+        else:
+            atol, rtol = 1e-5, 1e-5
+
+        # sanity check
+        assert not torch.allclose(output_base, output_before, atol=atol, rtol=rtol)
+
+        model.save_pretrained(tmp_path)
+        del model
+
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        torch.manual_seed(54321)  # ensure that the seed is different from what was used when get_peft_model was called
+        model = PeftModel.from_pretrained(model, tmp_path)
+        with torch.inference_mode():
+            output_after = model(**X)
+
+        assert torch.allclose(output_before, output_after, atol=atol, rtol=rtol)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_parameters_after_loading_model(self, test_name, model_id, config_cls, config_kwargs):
@@ -3455,7 +3527,8 @@ class TestPeftCustomModel(PeftCommonTester):
         assert "other" in model.base_model.classifier.modules_to_save
 
     @pytest.mark.parametrize(
-        "config_cls", [IA3Config, BeftConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig, MissConfig]
+        "config_cls",
+        [IA3Config, BeftConfig, FrodConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig, MissConfig],
     )
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
@@ -3487,7 +3560,8 @@ class TestPeftCustomModel(PeftCommonTester):
         model(**inputs)
 
     @pytest.mark.parametrize(
-        "config_cls", [IA3Config, BeftConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig]
+        "config_cls",
+        [IA3Config, BeftConfig, FrodConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig],
     )
     def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
         # See issue 1574
@@ -3830,6 +3904,7 @@ class TestPeftCustomModel(PeftCommonTester):
             AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
             BeftConfig(target_modules=["lin0"], init_weights=False),
+            FrodConfig(target_modules=["lin0"], init_weights=False),
             OFTConfig(target_modules=["lin0"], init_weights=False, r=2, oft_block_size=0),
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
             HRAConfig(target_modules=["lin0"], init_weights=False),

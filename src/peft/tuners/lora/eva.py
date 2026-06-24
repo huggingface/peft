@@ -249,7 +249,7 @@ def prepare_model_inputs_fn_language_modeling(model_input, peft_config: LoraConf
     if not isinstance(model_input, dict):
         raise TypeError("When using `prepare_model_inputs_fn_language_modeling` inputs must be a dictionary")
     mask = model_input.get("attention_mask", torch.ones_like(model_input["input_ids"])).bool()
-    if peft_config.eva_config.use_label_mask and hasattr(model_input, "labels"):
+    if peft_config.eva_config.use_label_mask and ("labels" in model_input):
         mask = torch.logical_and(mask, model_input["labels"] != peft_config.eva_config.label_mask_value)
     return mask.nonzero()
 

@@ -39,7 +39,7 @@ class RoadConfig(PeftConfig):
             parameters for each layer that RoAd is applied to.
             - road_2: Uses the same scale and angle for each element.
             This variant has 2x the number of parameters compared to road_1.
-            - road_4: Uses two different scales and angles for each ellement.
+            - road_4: Uses two different scales and angles for each element.
             This variant has 4x the number of parameters compared to road_1.
         group_size (`int`):
             Group size defines how elements are grouped together into 2D vectors for rotation. Within each group

@@ -49,6 +49,7 @@ from .constants import (
     TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_FROD_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_GRALORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
@@ -96,6 +97,7 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_FROD_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_GRALORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING",
@@ -525,7 +527,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         Enable or disable gradients on the given adapter(s).
 
         Args:
-            adapter_name (`str` or `Sequence[str]`):
+            adapter_names (`str` or `Sequence[str]`):
                 The name of the adapter(s) whose gradients should be enabled/disabled.
             requires_grad (`bool`, *optional*)
                 Whether to enable (`True`, default) or disable (`False`).
