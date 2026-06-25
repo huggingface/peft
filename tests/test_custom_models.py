@@ -1628,6 +1628,70 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": "uniform"},
         {"target_modules": ["lin1"], "init_weights": "uniform"},
     ),
+    (
+        "LoHa Same",
+        "loha",
+        LoHaConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "LoHa Different",
+        "loha",
+        LoHaConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
+        "LoKr Same",
+        "lokr",
+        LoKrConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "LoKr Different",
+        "lokr",
+        LoKrConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
+        "OFT Same",
+        "oft",
+        OFTConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "oft_block_size": 2},
+        {"target_modules": ["lin0"], "init_weights": False, "oft_block_size": 2},
+    ),
+    (
+        "OFT Different",
+        "oft",
+        OFTConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "oft_block_size": 2},
+        {"target_modules": ["lin1"], "init_weights": False, "oft_block_size": 2},
+    ),
+    # Note: Multiple C3A adapters applied to the same layer fails with shape mismatch
+    (
+        "C3A Different",
+        "c3a",
+        C3AConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "block_size": 2},
+        {"target_modules": ["lin1"], "init_weights": False, "block_size": 2},
+    ),
+    (
+        "AdaMSS Same",
+        "adamss",
+        AdamssConfig,
+        {"target_modules": ["lin0"], "r": 8, "num_subspaces": 2, "init_weights": False},
+        {"target_modules": ["lin0"], "r": 8, "num_subspaces": 2, "init_weights": False},
+    ),
+    (
+        "AdaMSS Different",
+        "adamss",
+        AdamssConfig,
+        {"target_modules": ["lin0"], "r": 8, "num_subspaces": 2, "init_weights": False},
+        {"target_modules": ["lin1"], "r": 2, "num_subspaces": 2, "init_weights": False},
+    ),
 ]
 
 
@@ -4422,7 +4486,7 @@ class TestMultipleActiveAdapters:
         model.eval()
 
         with torch.inference_mode():
-            logits_adapter_1 = model(**dummy_input)[0]
+            outputs_adapter_1 = model(**dummy_input)
 
         model.add_adapter("adapter-2", config_2)
         model.set_adapter("adapter-2")
@@ -4436,40 +4500,40 @@ class TestMultipleActiveAdapters:
         model.eval()
 
         with torch.inference_mode():
-            logits_adapter_2 = model(**dummy_input)[0]
+            outputs_adapter_2 = model(**dummy_input)
 
-        assert not torch.allclose(logits_adapter_1, logits_adapter_2, atol=1e-3, rtol=1e-3)
+        assert not torch.allclose(outputs_adapter_1, outputs_adapter_2, atol=1e-3, rtol=1e-3)
 
         model.set_adapter("default")
 
         with torch.inference_mode():
-            logits_adapter_1_after_set = model(**dummy_input)[0]
+            outputs_adapter_1_after_set = model(**dummy_input)
 
-        assert torch.allclose(logits_adapter_1_after_set, logits_adapter_1, atol=1e-3, rtol=1e-3)
+        assert torch.allclose(outputs_adapter_1_after_set, outputs_adapter_1, atol=1e-3, rtol=1e-3)
 
         model_copy = copy.deepcopy(model)
         model_copy_2 = copy.deepcopy(model)
         model_merged_all = model.merge_and_unload(adapter_names=["adapter-2", "default"])
 
         with torch.inference_mode():
-            logits_merged_all = model_merged_all(**dummy_input)[0]
+            outputs_merged_all = model_merged_all(**dummy_input)
 
-        assert not torch.allclose(logits_merged_all, logits_adapter_2, atol=1e-3, rtol=1e-3)
-        assert not torch.allclose(logits_merged_all, logits_adapter_1, atol=1e-3, rtol=1e-3)
+        assert not torch.allclose(outputs_merged_all, outputs_adapter_2, atol=1e-3, rtol=1e-3)
+        assert not torch.allclose(outputs_merged_all, outputs_adapter_1, atol=1e-3, rtol=1e-3)
 
         model_merged_adapter_2 = model_copy.merge_and_unload(adapter_names=["adapter-2"])
 
         with torch.inference_mode():
-            logits_merged_adapter_2 = model_merged_adapter_2(**dummy_input)[0]
+            outputs_merged_adapter_2 = model_merged_adapter_2(**dummy_input)
 
-        assert torch.allclose(logits_merged_adapter_2, logits_adapter_2, atol=1e-3, rtol=1e-3)
+        assert torch.allclose(outputs_merged_adapter_2, outputs_adapter_2, atol=1e-3, rtol=1e-3)
 
         model_merged_adapter_default = model_copy_2.merge_and_unload(adapter_names=["default"])
 
         with torch.inference_mode():
-            logits_merged_adapter_default = model_merged_adapter_default(**dummy_input)[0]
+            outputs_merged_adapter_default = model_merged_adapter_default(**dummy_input)
 
-        assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3)
+        assert torch.allclose(outputs_merged_adapter_default, outputs_adapter_1, atol=1e-3, rtol=1e-3)
 
 
 class MLP_2x_same_shape(nn.Module):
