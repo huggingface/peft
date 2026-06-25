@@ -4,7 +4,7 @@
   "encoder_dropout": 0.0,
   "encoder_hidden_size": 3072,
   "encoder_num_layers": 2,
-  "encoder_reparameterization_type": "LSTM",
+  "encoder_reparameterization_type": "MLP",
   "inference_mode": false,
   "num_attention_heads": 24,
   "num_layers": 28,
