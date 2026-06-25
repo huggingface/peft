@@ -1454,6 +1454,27 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config)
 
+    def test_nemotron_h_has_defaults_and_blocks_mamba_modules(self):
+        # Nemotron-H is a hybrid Mamba + Attention (+ MoE) architecture. It must
+        # (a) have default target modules (the attention q/k/v/o_proj) so that
+        # target_modules=None resolves without error, and (b) be treated as a
+        # Mamba-based model so that targeting a Mamba mixer module such as
+        # `out_proj` raises (see test_lora_incompatible_mamba_modules above).
+        model_id = "trl-internal-testing/tiny-NemotronHForCausalLM-nano"
+        with hub_online_once(model_id):
+            # (a) target_modules=None falls back to the nemotron_h defaults
+            # (q/k/v/o_proj attention projections), which exist -> does not raise
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            get_peft_model(model, LoraConfig(task_type="CAUSAL_LM"))  # does not raise
+
+            # (b) nemotron_h is registered as a Mamba-based model, so targeting
+            # the Mamba mixer's `out_proj` is forbidden and must raise
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            config = LoraConfig(task_type="CAUSAL_LM", target_modules=["out_proj"])
+            msg = "is incompatible with Mamba-based models"
+            with pytest.raises(ValueError, match=msg):
+                get_peft_model(model, config)
+
     def get_model_conv2d_groups(self):
         class ModelConv2DGroups(nn.Module):
             """For testing when groups argument is used in conv layer"""
