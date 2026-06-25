@@ -37,6 +37,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     FourierFTConfig,
+    FrodConfig,
     GraloraConfig,
     HiraConfig,
     HRAConfig,
@@ -101,6 +102,12 @@ TEST_CASES = [
     ),
     ("Vanilla MLP 7 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": ["lin0"], "use_dora": True}),
     ("Vanilla MLP 8 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"], "use_dora": True}),
+    (
+        "Vanilla MLP 1 LoRA with MiCA",
+        "MLP",
+        LoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": "mica", "r": 4},
+    ),
     (
         "Vanilla MLP 9 LoRA with DoRA",
         "MLP",
@@ -870,6 +877,14 @@ TEST_CASES = [
         RandLoraConfig,
         {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "randlora_alpha": 1},
     ),
+    ########
+    # FRoD #
+    ########
+    ("Vanilla MLP 1 FRoD", "MLP", FrodConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 FRoD", "MLP", FrodConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 FRoD", "MLP", FrodConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 FRoD", "MLP", FrodConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 FRoD", "MLP", FrodConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
     #######
     # C3A #
     #######
@@ -1390,6 +1405,13 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin0"], "init_weights": False},
     ),
+    (
+        "FRoD Same",
+        "frod",
+        FrodConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
     # Note: PVeRA presents the same problem mentioned above for VeRA.
     (
         "PVeRA Same",
@@ -1605,6 +1627,70 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         TinyLoraConfig,
         {"target_modules": ["lin0"], "init_weights": "uniform"},
         {"target_modules": ["lin1"], "init_weights": "uniform"},
+    ),
+    (
+        "LoHa Same",
+        "loha",
+        LoHaConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "LoHa Different",
+        "loha",
+        LoHaConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
+        "LoKr Same",
+        "lokr",
+        LoKrConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "LoKr Different",
+        "lokr",
+        LoKrConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
+        "OFT Same",
+        "oft",
+        OFTConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "oft_block_size": 2},
+        {"target_modules": ["lin0"], "init_weights": False, "oft_block_size": 2},
+    ),
+    (
+        "OFT Different",
+        "oft",
+        OFTConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "oft_block_size": 2},
+        {"target_modules": ["lin1"], "init_weights": False, "oft_block_size": 2},
+    ),
+    # Note: Multiple C3A adapters applied to the same layer fails with shape mismatch
+    (
+        "C3A Different",
+        "c3a",
+        C3AConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "block_size": 2},
+        {"target_modules": ["lin1"], "init_weights": False, "block_size": 2},
+    ),
+    (
+        "AdaMSS Same",
+        "adamss",
+        AdamssConfig,
+        {"target_modules": ["lin0"], "r": 8, "num_subspaces": 2, "init_weights": False},
+        {"target_modules": ["lin0"], "r": 8, "num_subspaces": 2, "init_weights": False},
+    ),
+    (
+        "AdaMSS Different",
+        "adamss",
+        AdamssConfig,
+        {"target_modules": ["lin0"], "r": 8, "num_subspaces": 2, "init_weights": False},
+        {"target_modules": ["lin1"], "r": 2, "num_subspaces": 2, "init_weights": False},
     ),
 ]
 
@@ -2548,8 +2634,12 @@ class TestPeftCustomModel(PeftCommonTester):
                 # via Monte Carlo sampling), so we don't include them in the strict allclose check below.
                 continue
             if (model.prefix in name) or ("modules_to_save" in name) or ("token_adapter.trainable_tokens" in name):
-                # target_modules, modules_to_save and modules of `NewTokensWrapper` _are_ updated
-                assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
+                # target_modules, modules_to_save and modules of `NewTokensWrapper` _are_ updated, except for adapter
+                # parameters that the variant intentionally freezes (e.g. MiCA freezes lora_B).
+                if not param_after.requires_grad:
+                    assert torch.equal(param_before, param_after)
+                else:
+                    assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
             else:
                 assert torch.allclose(param_before, param_after, atol=tol, rtol=tol)
 
@@ -3501,7 +3591,8 @@ class TestPeftCustomModel(PeftCommonTester):
         assert "other" in model.base_model.classifier.modules_to_save
 
     @pytest.mark.parametrize(
-        "config_cls", [IA3Config, BeftConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig, MissConfig]
+        "config_cls",
+        [IA3Config, BeftConfig, FrodConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig, MissConfig],
     )
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
@@ -3533,7 +3624,8 @@ class TestPeftCustomModel(PeftCommonTester):
         model(**inputs)
 
     @pytest.mark.parametrize(
-        "config_cls", [IA3Config, BeftConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig]
+        "config_cls",
+        [IA3Config, BeftConfig, FrodConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig],
     )
     def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
         # See issue 1574
@@ -3876,6 +3968,7 @@ class TestPeftCustomModel(PeftCommonTester):
             AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
             BeftConfig(target_modules=["lin0"], init_weights=False),
+            FrodConfig(target_modules=["lin0"], init_weights=False),
             OFTConfig(target_modules=["lin0"], init_weights=False, r=2, oft_block_size=0),
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
             HRAConfig(target_modules=["lin0"], init_weights=False),
@@ -4393,7 +4486,7 @@ class TestMultipleActiveAdapters:
         model.eval()
 
         with torch.inference_mode():
-            logits_adapter_1 = model(**dummy_input)[0]
+            outputs_adapter_1 = model(**dummy_input)
 
         model.add_adapter("adapter-2", config_2)
         model.set_adapter("adapter-2")
@@ -4407,40 +4500,40 @@ class TestMultipleActiveAdapters:
         model.eval()
 
         with torch.inference_mode():
-            logits_adapter_2 = model(**dummy_input)[0]
+            outputs_adapter_2 = model(**dummy_input)
 
-        assert not torch.allclose(logits_adapter_1, logits_adapter_2, atol=1e-3, rtol=1e-3)
+        assert not torch.allclose(outputs_adapter_1, outputs_adapter_2, atol=1e-3, rtol=1e-3)
 
         model.set_adapter("default")
 
         with torch.inference_mode():
-            logits_adapter_1_after_set = model(**dummy_input)[0]
+            outputs_adapter_1_after_set = model(**dummy_input)
 
-        assert torch.allclose(logits_adapter_1_after_set, logits_adapter_1, atol=1e-3, rtol=1e-3)
+        assert torch.allclose(outputs_adapter_1_after_set, outputs_adapter_1, atol=1e-3, rtol=1e-3)
 
         model_copy = copy.deepcopy(model)
         model_copy_2 = copy.deepcopy(model)
         model_merged_all = model.merge_and_unload(adapter_names=["adapter-2", "default"])
 
         with torch.inference_mode():
-            logits_merged_all = model_merged_all(**dummy_input)[0]
+            outputs_merged_all = model_merged_all(**dummy_input)
 
-        assert not torch.allclose(logits_merged_all, logits_adapter_2, atol=1e-3, rtol=1e-3)
-        assert not torch.allclose(logits_merged_all, logits_adapter_1, atol=1e-3, rtol=1e-3)
+        assert not torch.allclose(outputs_merged_all, outputs_adapter_2, atol=1e-3, rtol=1e-3)
+        assert not torch.allclose(outputs_merged_all, outputs_adapter_1, atol=1e-3, rtol=1e-3)
 
         model_merged_adapter_2 = model_copy.merge_and_unload(adapter_names=["adapter-2"])
 
         with torch.inference_mode():
-            logits_merged_adapter_2 = model_merged_adapter_2(**dummy_input)[0]
+            outputs_merged_adapter_2 = model_merged_adapter_2(**dummy_input)
 
-        assert torch.allclose(logits_merged_adapter_2, logits_adapter_2, atol=1e-3, rtol=1e-3)
+        assert torch.allclose(outputs_merged_adapter_2, outputs_adapter_2, atol=1e-3, rtol=1e-3)
 
         model_merged_adapter_default = model_copy_2.merge_and_unload(adapter_names=["default"])
 
         with torch.inference_mode():
-            logits_merged_adapter_default = model_merged_adapter_default(**dummy_input)[0]
+            outputs_merged_adapter_default = model_merged_adapter_default(**dummy_input)
 
-        assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3)
+        assert torch.allclose(outputs_merged_adapter_default, outputs_adapter_1, atol=1e-3, rtol=1e-3)
 
 
 class MLP_2x_same_shape(nn.Module):

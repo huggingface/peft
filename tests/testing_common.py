@@ -1064,7 +1064,11 @@ class PeftCommonTester:
 
             for n, param in model.named_parameters():
                 if (model.prefix in n) or ("modules_to_save" in n) or ("token_adapter.trainable_tokens" in n):
-                    assert param.grad is not None
+                    # variants like MiCA intentionally freeze a subset of adapter params, which won't have a grad
+                    if param.requires_grad:
+                        assert param.grad is not None
+                    else:
+                        assert param.grad is None
                 else:
                     assert param.grad is None
 

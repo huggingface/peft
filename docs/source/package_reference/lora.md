@@ -110,6 +110,22 @@ lora_config = LoraConfig(init_lora_weights="pissa_niter_[number of iters]", ...)
 For detailed instruction on using PiSSA, please follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/pissa_finetuning).
 </hfoption>
 
+
+<hfoption id="MiCA">
+[MiCA](https://arxiv.org/abs/2604.01694) (Minor Component Adaptation) is a complement to PiSSA: instead of initializing from the *principal* singular components, MiCA uses the *minor* ones. Concretely, with `W = U Σ V^T`, MiCA sets `B = U[:, -r:]` (the `r` left singular vectors associated with the smallest singular values) and `A = 0`. During training, only `A` is updated; `B` is frozen. The intuition is that the minor singular directions are largely unused by the pretrained task and therefore offer a more "plastic" subspace for injecting new knowledge while preserving pretrained capabilities.
+
+Because `A == 0` at init, the adapter contribution `B · A == 0` and the model output is preserved exactly at step 0 — no residual subtraction on the base weight is needed (unlike PiSSA). Since only `A` is trainable, the trainable parameter count for matching `r` is roughly half that of LoRA.
+
+```python
+from peft import LoraConfig
+config = LoraConfig(init_lora_weights="mica", r=16, target_modules=["q_proj", "v_proj"], ...)
+```
+
+MiCA currently supports `nn.Linear` and `nn.Embedding` target modules. The chosen rank must satisfy `r <= min(in_features, out_features)` for linear layers and `r <= min(num_embeddings, embedding_dim)` for embedding layers. For detailed usage, see [these instructions](https://github.com/huggingface/peft/tree/main/examples/mica_finetuning).
+
+MiCA is primarily intended for continued pretraining / domain-adaptive pretraining. In that setting, use the base model, not an instruction- or chat-tuned checkpoint, for the SVD initialization and MiCA training. After training, merge the adapter into the base model weights and use the resulting adapted base model as the starting point for subsequent instruction/chat tuning.
+</hfoption>
+
 <hfoption id="CorDA">
 [CorDA](https://huggingface.co/papers/2406.05223) builds task-aware LoRA adapters from weight decomposition oriented by the context of downstream task to learn (instruction-previewed mode, IPM) or world knowledge to maintain (knowledge-preserved mode, KPM).  The KPM not only achieves better performance than LoRA on fine-tuning tasks, but also mitigates the catastrophic forgetting of pre-trained world knowledge.  When preserving pre-trained knowledge is not a concern, the IPM is favored because it can further accelerate convergence and enhance the fine-tuning performance.
 

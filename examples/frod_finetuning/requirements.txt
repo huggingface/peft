@@ -1,0 +1,6 @@
+peft
+transformers
+accelerate>=1.0.0
+datasets
+numpy
+Pillow

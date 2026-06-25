@@ -26,7 +26,7 @@ The abstract from the paper is:
 
 ## Usage Tips
 
-- VB-LoRA utilizes a sparse top-k module to learn the sharing machanism. When saving adapter parameters, you can either save only the top-k weights and their indices by setting `save_only_topk_weights = True` in `VBLoRAConfig`, or save all the trainable logits by setting it to `False`. Enabling `save_only_topk_weights = True` significantly reduces storage space; for instance, in Llama2-7B, the storage file size decreases from 308MB to 2.5MB. Note that models saved with `save_only_topk_weights = True` are intended for merging or inference only and cannot be used to resume training.
+- VB-LoRA utilizes a sparse top-k module to learn the sharing mechanism. When saving adapter parameters, you can either save only the top-k weights and their indices by setting `save_only_topk_weights = True` in `VBLoRAConfig`, or save all the trainable logits by setting it to `False`. Enabling `save_only_topk_weights = True` significantly reduces storage space; for instance, in Llama2-7B, the storage file size decreases from 308MB to 2.5MB. Note that models saved with `save_only_topk_weights = True` are intended for merging or inference only and cannot be used to resume training.
 
 - VB-LoRA has two sets of training parameters: vector bank parameters and logit parameters. In practice, we found that logit parameters require a higher learning rate, while vector bank parameters require a lower learning rate. When using the AdamW optimizer, typical learning rates are 0.01 for logits and 0.001 for vector bank parameters.
 

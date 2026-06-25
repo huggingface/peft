@@ -330,7 +330,7 @@ class LoraModel(BaseTuner):
                         device_mesh,
                     )
                 else:  # embedding_rowwise
-                    # TP hooks are  handled in the `_embed` method in lora/layer.py where they are explicitely called.
+                    # TP hooks are  handled in the `_embed` method in lora/layer.py where they are explicitly called.
                     # Here we simply register the TP plans.
                     tp_plan_keys.append(f"{generic_key}.base_layer.weight")
                     tp_plan_keys.append(f"{generic_key}.lora_embedding_A.{adapter_name}")
@@ -381,7 +381,7 @@ class LoraModel(BaseTuner):
 
         if lora_config._custom_modules:
             # Experimental custom LoRA module support. Allows users to pass a custom mapping for unsupported layer
-            # types by impelementing their own LoRA layers.
+            # types by implementing their own LoRA layers.
             def dynamic_dispatch_func(target, adapter_name, config, **kwargs):
                 new_module = None
 
@@ -919,10 +919,21 @@ class LoraModel(BaseTuner):
         return lora_deltas
 
     def subtract_mutated_init(self, output_state_dict: dict[str, torch.Tensor], adapter_name: str, kwargs=None):
-        """
-        This function can calculate the updates of the PiSSA/CorDA/OLoRA by comparing the parameters of the
+        r"""
+        This function can calculate the updates of PiSSA/CorDA/OLoRA by comparing the parameters of the
         PiSSA/CorDA/OLoRA adapter in `output_state_dict` with the initial values of PiSSA/CorDA/OLoRA in
         `adapter_name`, thus converting PiSSA/CorDA/OLoRA to LoRA.
+
+        Methods like PiSSA remove a portion of the model base weights for training and therefore are not easily
+        swapped. But if you know both the initial pre-training and the post-training weights, you can compute the
+        \Delta W and use that as a LoRA adapter.
+
+        Compute steps:
+
+        - $W = W_{res} + A_0 B_0$ (PiSSA init)
+        - $W + \Delta W = W_{res} + A B$ (PiSSA after training)
+        - $\Delta W = W_{res} + AB - W = W_{res} + AB - W_{res} - A_0 B_0$ (Deriving dW for LoRA)
+        - $\Delta W = AB - A_0 B_0$
         """
         for name, param in self.model.named_parameters():
             if (
