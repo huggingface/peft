@@ -61,6 +61,13 @@ class DeftConfig(PeftConfig):
             to `1.0`.
         use_gating (`bool`):
             Whether to learn a scalar sigmoid gate that scales the injected update `Q_P @ R`. Defaults to `False`.
+        alpha (`Optional[int]`):
+            The scaling factor for the injection term, which is scaled by `alpha / r` (analogous to LoRA's alpha). If
+            `None`, no scaling is applied (factor `1.0`). The subspace-removal term is unaffected.
+        para (`bool`):
+            Whether to use the PaRa method: pure subspace removal (`delta = -P_proj @ W`) with no injection term. When
+            `True`, `R` is not created, `P` is the only trainable matrix, and the adapter cannot be an identity at init.
+            Defaults to `False` (full DEFT).
         deft_dropout (`float`):
             The dropout probability applied to the layer input. Defaults to `0.0`.
         init_weights (`bool`):
@@ -111,6 +118,25 @@ class DeftConfig(PeftConfig):
     use_gating: bool = field(
         default=False,
         metadata={"help": "Whether to learn a scalar sigmoid gate that scales the injected update."},
+    )
+    alpha: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Scaling factor for the injection term, scaled by `alpha / r` (analogous to LoRA's alpha). If None, no "
+                "scaling is applied (factor 1.0). The subspace-removal term is unaffected."
+            )
+        },
+    )
+    para: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Whether to use the PaRa method: pure subspace removal `delta = -P_proj @ W` with no injection term. "
+                "When True, R is not created, P is the only trainable matrix, and the adapter cannot be an identity at "
+                "init. Defaults to False (full DEFT)."
+            )
+        },
     )
     deft_dropout: float = field(
         default=0.0,

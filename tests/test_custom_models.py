@@ -542,6 +542,7 @@ TEST_CASES = [
     ("Vanilla MLP 4 DEFT qr", "MLP", DeftConfig, {"target_modules": ["lin0"], "decomposition_method": "qr"}),
     ("Vanilla MLP 5 DEFT", "MLP", DeftConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
     ("Vanilla MLP 6 DEFT gating", "MLP", DeftConfig, {"target_modules": ["lin0", "lin1"], "use_gating": True}),
+    ("Vanilla MLP 7 DEFT alpha", "MLP", DeftConfig, {"target_modules": ["lin0"], "decomposition_method": "qr", "alpha": 16}),
     ########
     # HRA #
     ########
@@ -7099,3 +7100,39 @@ class TestDefaultTargetModules:
         model = get_peft_model(model, config)
         assert model.targeted_module_names == ["lin0", "lin1"]
         assert model.peft_config["default"].target_modules == {"lin0", "lin1"}
+
+
+class TestDeftPaRa:
+    """Dedicated tests for the DEFT PaRa mode (`para=True`): pure subspace removal, no injection.
+
+    PaRa is not an identity at init (it removes a sub-space of W), so it does not fit the shared
+    custom-model test cases that assume an identity-at-init adapter.
+    """
+
+    def test_para_removal_only_and_exact_merge(self):
+        torch.manual_seed(0)
+        model = MLP()
+        model.eval()  # disable dropout so the forward is deterministic
+        x = torch.rand(5, 10)
+        base_out = model(x).detach().clone()
+        w0 = model.lin0.weight.detach().clone()
+
+        config = DeftConfig(target_modules=["lin0"], decomposition_method="qr", para=True)
+        peft_model = get_peft_model(model, config)
+        peft_model.eval()
+        layer = peft_model.base_model.model.lin0
+
+        # PaRa creates no injection matrix R; P is the only trainable matrix.
+        assert "default" in layer.deft_P
+        assert "default" not in layer.deft_R
+
+        # PaRa is not an identity at init: removing a sub-space of W changes the output.
+        para_out = peft_model(x)
+        assert not torch.allclose(base_out, para_out, atol=1e-4)
+
+        # merge then forward equals the unmerged forward; unmerge restores the original weight exactly.
+        peft_model.merge_adapter(safe_merge=True)
+        merged_out = peft_model(x)
+        assert torch.allclose(para_out, merged_out, atol=1e-4)
+        peft_model.unmerge_adapter()
+        assert torch.allclose(layer.base_layer.weight, w0, atol=1e-5)
