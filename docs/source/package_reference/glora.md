@@ -17,6 +17,15 @@ rendered properly in your Markdown viewer.
 
 Generalized Low-Rank Adaptation ([GLoRA](https://huggingface.co/papers/2306.07967)) is a PEFT method that generalizes LoRA and related approaches. GLoRA decomposes updates into configurable paths (A, B, C, D, E), where each path can use low-rank, vector, constant, or disabled parameterization depending on the path.
 
+Each path supports one of four parameterization modes. They trade off **parameter count** against **expressiveness** (how rich the update can be):
+
+- `"lora"`: Low-rank decomposition (like standard LoRA). Uses `r * (out + in)` parameters and can express rank-`r` corrections. Most expressive, most parameters.
+- `"vector"`: A single vector (e.g. shape `(out, 1)`), broadcast across the matrix. Uses `O(out)` parameters; only per-channel scaling or shifts.
+- `"constant"`: A single scalar shared across all elements. Uses 1 parameter; least expressive among the trainable options.
+- `"none"`: Zeros with no trainable parameters; disables that path entirely.
+
+Not every path accepts every mode (for example, `config_D_E` does not support `"lora"`). Choosing `"lora"` on more paths increases capacity and trainable parameters; `"vector"`, `"constant"`, or `"none"` reduce both.
+
 GLoRA is especially useful for research and advanced applications where you want to experiment with structured update patterns and combine multiple adaptation mechanisms in a single layer.
 
 At a high level, GLoRA modifies a frozen linear layer with:
