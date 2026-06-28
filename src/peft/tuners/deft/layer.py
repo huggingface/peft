@@ -26,12 +26,11 @@ from .config import DeftConfig
 
 class DeftLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
-    adapter_layer_names = ("deft_P", "deft_R", "deft_gate")
+    adapter_layer_names = ("deft_P", "deft_R")
     # All names of other parameters that may contain adapter-related parameters
     other_param_names = (
         "deft_r",
         "deft_decomposition",
-        "deft_use_gating",
         "deft_init_scale",
         "deft_para",
         "deft_scaling",
@@ -41,13 +40,11 @@ class DeftLayer(BaseTunerLayer):
         self.base_layer = base_layer
         self.deft_r = {}
         self.deft_decomposition = {}
-        self.deft_use_gating = {}
         self.deft_init_scale = {}
         self.deft_para = {}
         self.deft_scaling = {}
         self.deft_P = nn.ParameterDict({})
         self.deft_R = nn.ParameterDict({})
-        self.deft_gate = nn.ParameterDict({})
         self.deft_dropout = nn.ModuleDict({})
         # The residual projection (I - P_proj) @ W is not invertible, so the delta applied during merge is cached
         # here per adapter to allow an exact unmerge.
@@ -88,7 +85,6 @@ class DeftLayer(BaseTunerLayer):
         r = min(r, self.out_features)
         self.deft_r[adapter_name] = r
         self.deft_decomposition[adapter_name] = config.decomposition_method
-        self.deft_use_gating[adapter_name] = config.use_gating
         self.deft_init_scale[adapter_name] = config.init_scale
         self.deft_para[adapter_name] = config.para
         # injection scaling (analogous to LoRA's alpha/r); 1.0 = no scaling (backward compatible)
@@ -104,8 +100,6 @@ class DeftLayer(BaseTunerLayer):
         self.deft_P[adapter_name] = nn.Parameter(torch.empty(self.out_features, r))
         if not config.para:
             self.deft_R[adapter_name] = nn.Parameter(torch.empty(r, self.in_features))
-        if config.use_gating:
-            self.deft_gate[adapter_name] = nn.Parameter(torch.full((1,), 0.5))
 
         self.reset_deft_parameters(adapter_name, init_weights=config.init_weights)
 
@@ -118,8 +112,6 @@ class DeftLayer(BaseTunerLayer):
             return
 
         nn.init.normal_(self.deft_P[adapter_name], mean=0.0, std=0.02)
-        if adapter_name in self.deft_gate.keys():
-            nn.init.constant_(self.deft_gate[adapter_name], 0.5)
 
         if self.deft_para[adapter_name]:
             # PaRa (para=True): no injection matrix R to initialize; the update is pure subspace removal and
@@ -135,16 +127,12 @@ class DeftLayer(BaseTunerLayer):
 
         if init_weights:
             # Identity initialization: choose R so that the delta is exactly zero at init, i.e. the adapted weight
-            # equals the base weight. With delta = Q_P @ (g * R - right.T @ W) (see `get_delta_weight`), delta == 0 holds
-            # for R = (right.T @ W) / g. This starts training from the pretrained weights and learns the injection,
+            # equals the base weight. With delta = Q_P @ (R - right.T @ W) (see `get_delta_weight`), delta == 0 holds
+            # for R = right.T @ W. This starts training from the pretrained weights and learns the injection,
             # avoiding the immediate "forgetting" caused by removing a sub-space of W.
             P = self.deft_P[adapter_name].detach().to(base_weight.device)
             _, right = self._project(P, adapter_name)
             R_init = right.transpose(0, 1) @ base_weight.detach().to(torch.float32)
-            if adapter_name in self.deft_gate.keys():
-                # the gate is moved to the base-layer device only after reset, so move it explicitly here
-                gate = self.deft_gate[adapter_name].detach().to(device=base_weight.device, dtype=torch.float32)
-                R_init = R_init / torch.sigmoid(gate)
             # divide by the injection scaling so that (scaling * R_init) == right.T @ W, keeping delta == 0 at init
             R_init = R_init / self.deft_scaling[adapter_name]
             with torch.no_grad():
@@ -209,10 +197,10 @@ class DeftLinear(nn.Module, DeftLayer):
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         """Return the additive delta such that `W + delta` equals the DEFT-adapted weight.
 
-        The adapted weight is `(I - P_proj) @ W + g * Q_P @ R` (`g` is the optional gate), so the delta is `-P_proj @ W
-        + g * Q_P @ R`. Using `P_proj = Q_P @ right.T` this factors into
+        The adapted weight is `(I - P_proj) @ W + Q_P @ R`, so the delta is `-P_proj @ W + Q_P @ R`. Using
+        `P_proj = Q_P @ right.T` this factors into
 
-            delta = Q_P @ (g * R - right.T @ W)
+            delta = Q_P @ (R - right.T @ W)
 
         which only uses rank-`r` matmuls and never materializes the `out x out` projection matrix. This is used by
         `merge`; the forward pass computes the equivalent update directly on the activations instead.
@@ -229,8 +217,6 @@ class DeftLinear(nn.Module, DeftLayer):
             delta = -(Q_P @ (right.transpose(0, 1) @ W))
             return delta.to(orig_dtype)
         R = self.deft_R[adapter_name].to(torch.float32)
-        if self.deft_use_gating[adapter_name]:
-            R = R * torch.sigmoid(self.deft_gate[adapter_name].to(torch.float32))
         R = R * self.deft_scaling[adapter_name]
 
         delta = Q_P @ (R - right.transpose(0, 1) @ W)
@@ -306,7 +292,7 @@ class DeftLinear(nn.Module, DeftLayer):
             # directly to the activations. This preserves any hooks on the base layer's forward (e.g. sharding) and
             # keeps the path compatible with quantized base layers.
             #
-            # For one adapter, delta = Q_P @ (g*R - right.T @ W), so
+            # For one adapter, delta = Q_P @ (R - right.T @ W), so
             #     x @ delta.T = [ (x @ R.T) - (x @ W.T) @ right ] @ Q_P.T  =  inject - correction
             # where (x @ W.T) is the bias-free base product.
             base_layer = self.get_base_layer()
@@ -328,8 +314,6 @@ class DeftLinear(nn.Module, DeftLayer):
                 result = result - correction
                 if not self.deft_para[active_adapter]:
                     R = self.deft_R[active_adapter].to(compute_dtype)
-                    if self.deft_use_gating[active_adapter]:
-                        R = R * torch.sigmoid(self.deft_gate[active_adapter].to(compute_dtype))
                     R = R * self.deft_scaling[active_adapter]
                     x_drop = self.deft_dropout[active_adapter](x)
                     result = result + F.linear(x_drop, R) @ Q_P.transpose(0, 1)

@@ -34,11 +34,10 @@ Per target layer, DEFT learns a projection direction `P` (shape `out_features x 
 `r x in_features`). The effective weight is the residual projection
 
 ```
-W' = (I - P_proj) @ W + g * Q_P @ R
+W' = (I - P_proj) @ W + Q_P @ R
 ```
 
-where `g` is an optional learnable sigmoid gate. The projector `P_proj` is derived from `P` according to
-`decomposition_method`:
+The projector `P_proj` is derived from `P` according to `decomposition_method`:
 
 - `"relu"` (default): `Q_P = P`, `P_proj = P @ relu(P).T` — a non-orthogonal projection.
 - `"qr"`: `Q_P = qr(P)`, `P_proj = Q_P @ Q_P.T` — an orthogonal projection.
@@ -46,7 +45,7 @@ where `g` is an optional learnable sigmoid gate. The projector `P_proj` is deriv
 The `(I - P_proj) @ W` term removes a sub-space of the pretrained weight while `Q_P @ R` injects new content into it.
 By default (`init_weights=True`) `R` is initialized so that the update is an exact identity at initialization
 (`W' == W`), so training starts from the pretrained weights and learns the injection. The update is equivalent to a
-low-rank additive delta `Q_P @ (g * R - right.T @ W)`, which is computed without ever forming the `out x out`
+low-rank additive delta `Q_P @ (R - right.T @ W)`, which is computed without ever forming the `out x out`
 projection matrix and can be merged into the base weights for inference-free deployment.
 
 DEFT is currently implemented for `torch.nn.Linear` layers. The original implementation and the experiments from the

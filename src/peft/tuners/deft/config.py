@@ -28,8 +28,8 @@ class DeftConfig(PeftConfig):
 
     DEFT (Decompositional Efficient Fine-Tuning) performs knowledge injection through a residual-projection update. For
     a frozen base weight `W`, a low-rank projection direction `P` (shape `out_features x r`) and an injection matrix
-    `R` (shape `r x in_features`) are learned. The adapted weight is `W' = (I - P_proj) @ W + g * Q_P @ R` (`g` is the
-    optional gate), where the projector `P_proj` is derived from `P` according to `decomposition_method`:
+    `R` (shape `r x in_features`) are learned. The adapted weight is `W' = (I - P_proj) @ W + Q_P @ R`, where the
+    projector `P_proj` is derived from `P` according to `decomposition_method`:
 
       - `"relu"` (default): `Q_P = P`, `P_proj = P @ relu(P).T` (non-orthogonal projection)
       - `"qr"`: `Q_P = qr(P)`, `P_proj = Q_P @ Q_P.T` (orthogonal projection)
@@ -59,8 +59,6 @@ class DeftConfig(PeftConfig):
             Scaling applied to the standard deviation used to initialize the injection matrix `R` (only used when
             `init_weights=False`). Smaller values keep the injected update closer to zero at initialization. Defaults
             to `1.0`.
-        use_gating (`bool`):
-            Whether to learn a scalar sigmoid gate that scales the injected update `Q_P @ R`. Defaults to `False`.
         alpha (`Optional[int]`):
             The scaling factor for the injection term, which is scaled by `alpha / r` (analogous to LoRA's alpha). If
             `None`, no scaling is applied (factor `1.0`). The subspace-removal term is unaffected.
@@ -114,10 +112,6 @@ class DeftConfig(PeftConfig):
     init_scale: float = field(
         default=1.0,
         metadata={"help": "Scaling applied to the std used to initialize the injection matrix R."},
-    )
-    use_gating: bool = field(
-        default=False,
-        metadata={"help": "Whether to learn a scalar sigmoid gate that scales the injected update."},
     )
     alpha: Optional[int] = field(
         default=None,

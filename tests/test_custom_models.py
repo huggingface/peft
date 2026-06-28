@@ -541,8 +541,12 @@ TEST_CASES = [
     ("Vanilla MLP 3 DEFT", "MLP", DeftConfig, {"target_modules": ["lin0", "lin1"]}),
     ("Vanilla MLP 4 DEFT qr", "MLP", DeftConfig, {"target_modules": ["lin0"], "decomposition_method": "qr"}),
     ("Vanilla MLP 5 DEFT", "MLP", DeftConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
-    ("Vanilla MLP 6 DEFT gating", "MLP", DeftConfig, {"target_modules": ["lin0", "lin1"], "use_gating": True}),
-    ("Vanilla MLP 7 DEFT alpha", "MLP", DeftConfig, {"target_modules": ["lin0"], "decomposition_method": "qr", "alpha": 16}),
+    (
+        "Vanilla MLP 7 DEFT alpha",
+        "MLP",
+        DeftConfig,
+        {"target_modules": ["lin0"], "decomposition_method": "qr", "alpha": 16},
+    ),
     ########
     # HRA #
     ########
