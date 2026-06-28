@@ -159,7 +159,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base_model", type=str, default="path/to/model")
+    parser.add_argument("--base_model", type=str, help="Base model path or Hub model id")
     parser.add_argument("--data_path", type=str, default="yahma/alpaca-cleaned")
     parser.add_argument("--output_dir", type=str, default="glora")
     parser.add_argument("--batch_size", type=int, default=16)
