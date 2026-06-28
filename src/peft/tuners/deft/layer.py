@@ -46,9 +46,11 @@ class DeftLayer(BaseTunerLayer):
         self.deft_P = nn.ParameterDict({})
         self.deft_R = nn.ParameterDict({})
         self.deft_dropout = nn.ModuleDict({})
-        # The residual projection (I - P_proj) @ W is not invertible, so the delta applied during merge is cached
-        # here per adapter to allow an exact unmerge.
-        self._cached_merge_delta = {}
+        # The residual projection (I - P_proj) @ W is not invertible, so unmerge cannot recover the delta from the
+        # merged weight. Rather than cache the full out x in delta, cache only its base-weight-dependent factor
+        # right.T @ W (shape r x in_features) per adapter; unmerge recomputes the exact delta from it (~r/out_features
+        # of the memory).
+        self._cached_merge_factor = {}
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
@@ -194,33 +196,38 @@ class DeftLinear(nn.Module, DeftLayer):
             raise ValueError(f"Unknown decomposition_method '{method}'.")
         return Q_P, right
 
+    def _merge_factor(self, adapter_name: str) -> torch.Tensor:
+        """Return the only base-weight-dependent part of the merge delta: `right.T @ W` (shape `r x in_features`), in
+        float32. Caching this instead of the full `out x in` delta lets `unmerge` recompute the exact delta while
+        storing roughly `r / out_features` as much memory.
+        """
+        # computed in float32 for numerical stability (see `_project`)
+        weight = self.get_base_layer().weight
+        _, right = self._project(self.deft_P[adapter_name], adapter_name)
+        return right.transpose(0, 1) @ weight.to(torch.float32)
+
+    def _delta_from_factor(self, adapter_name: str, factor: torch.Tensor) -> torch.Tensor:
+        """Reconstruct the additive delta from the cached factor `M = right.T @ W` (float32): `delta = Q_P @ (R - M)`,
+        or `-Q_P @ M` for PaRa. Exact even after the base weight changed, since `M` is taken from the original weight.
+        """
+        orig_dtype = self.get_base_layer().weight.dtype
+        Q_P, _ = self._project(self.deft_P[adapter_name], adapter_name)
+        if self.deft_para[adapter_name]:
+            # PaRa: pure subspace removal, delta = -P_proj @ W = -Q_P @ (right.T @ W)
+            return (-(Q_P @ factor)).to(orig_dtype)
+        R = self.deft_R[adapter_name].to(torch.float32) * self.deft_scaling[adapter_name]
+        return (Q_P @ (R - factor)).to(orig_dtype)
+
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         """Return the additive delta such that `W + delta` equals the DEFT-adapted weight.
 
         The adapted weight is `(I - P_proj) @ W + Q_P @ R`, so the delta is `-P_proj @ W + Q_P @ R`. Using
-        `P_proj = Q_P @ right.T` this factors into
-
-            delta = Q_P @ (R - right.T @ W)
-
-        which only uses rank-`r` matmuls and never materializes the `out x out` projection matrix. This is used by
-        `merge`; the forward pass computes the equivalent update directly on the activations instead.
+        `P_proj = Q_P @ right.T` this factors into `delta = Q_P @ (R - right.T @ W)` (`-Q_P @ (right.T @ W)` for PaRa),
+        which only uses rank-`r` matmuls and never materializes the `out x out` projection matrix. The
+        base-weight-dependent part `right.T @ W` is produced by `_merge_factor`. Used by `merge`; the forward pass
+        computes the equivalent update directly on the activations instead.
         """
-        base_layer = self.get_base_layer()
-        weight = base_layer.weight
-        orig_dtype = weight.dtype
-
-        # computed in float32 for numerical stability (see `_project`), then cast back to the base weight dtype
-        Q_P, right = self._project(self.deft_P[adapter_name], adapter_name)
-        W = weight.to(torch.float32)
-        if self.deft_para[adapter_name]:
-            # PaRa: pure subspace removal, delta = -P_proj @ W = -Q_P @ (right.T @ W)
-            delta = -(Q_P @ (right.transpose(0, 1) @ W))
-            return delta.to(orig_dtype)
-        R = self.deft_R[adapter_name].to(torch.float32)
-        R = R * self.deft_scaling[adapter_name]
-
-        delta = Q_P @ (R - right.transpose(0, 1) @ W)
-        return delta.to(orig_dtype)
+        return self._delta_from_factor(adapter_name, self._merge_factor(adapter_name))
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -241,11 +248,12 @@ class DeftLinear(nn.Module, DeftLayer):
             return
 
         base_layer = self.get_base_layer()
-        # Each delta's removal term depends on the base weight, so all deltas are computed from the original (unmerged)
-        # weight *before* mutating it. This makes merging a set of adapters equivalent to summing their independent
-        # deltas, matching what `forward` does, and keeps `unmerge` exact via the cached deltas.
-        deltas = {a: self.get_delta_weight(a) for a in adapter_names if a in self.deft_P.keys()}
-        for active_adapter, delta_weight in deltas.items():
+        # The delta's removal term depends on the base weight, so every adapter's base-weight-dependent factor
+        # (right.T @ W) is computed from the original (unmerged) weight *before* mutating it. This makes merging a set
+        # of adapters equivalent to summing their independent deltas (matching `forward`) and keeps `unmerge` exact.
+        factors = {a: self._merge_factor(a) for a in adapter_names if a in self.deft_P.keys()}
+        for active_adapter, factor in factors.items():
+            delta_weight = self._delta_from_factor(active_adapter, factor)
             if safe_merge:
                 new_weight = base_layer.weight.data.clone() + delta_weight
                 if not torch.isfinite(new_weight).all():
@@ -255,8 +263,8 @@ class DeftLinear(nn.Module, DeftLayer):
                 base_layer.weight.data = new_weight
             else:
                 base_layer.weight.data = base_layer.weight.data + delta_weight
-            # cache the exact delta applied so unmerge can reverse the (non-invertible) projection
-            self._cached_merge_delta[active_adapter] = delta_weight
+            # cache only the small r x in_features factor (not the full out x in delta) for an exact unmerge
+            self._cached_merge_factor[active_adapter] = factor.to(base_layer.weight.dtype)
             self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -268,8 +276,10 @@ class DeftLinear(nn.Module, DeftLayer):
             active_adapter = self.merged_adapters.pop()
             if active_adapter not in self.deft_P.keys():
                 continue
-            delta_weight = self._cached_merge_delta.pop(active_adapter, None)
-            if delta_weight is None:
+            factor = self._cached_merge_factor.pop(active_adapter, None)
+            if factor is not None:
+                delta_weight = self._delta_from_factor(active_adapter, factor.to(torch.float32))
+            else:
                 # fall back to recomputation (only exact if the base weight is unchanged since merge)
                 delta_weight = self.get_delta_weight(active_adapter)
             base_layer = self.get_base_layer()

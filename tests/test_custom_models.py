@@ -7140,3 +7140,40 @@ class TestDeftPaRa:
         assert torch.allclose(para_out, merged_out, atol=1e-4)
         peft_model.unmerge_adapter()
         assert torch.allclose(layer.base_layer.weight, w0, atol=1e-5)
+
+
+class TestDeftMerge:
+    """DEFT caches only the small base-weight-dependent factor (`right.T @ W`) at merge, not the full delta."""
+
+    def test_merge_caches_small_factor_and_unmerges_exactly(self):
+        # Caching the full out x in delta per merged adapter is expensive with many adapters; DEFT instead caches only
+        # right.T @ W (r x in_features) and recomputes the exact delta at unmerge (see review feedback).
+        torch.manual_seed(0)
+        model = MLP()
+        model.eval()  # disable dropout for a deterministic forward
+        x = torch.rand(5, 10)
+
+        config = DeftConfig(target_modules=["lin0"], decomposition_method="relu", r=4)
+        peft_model = get_peft_model(model, config)
+        peft_model.eval()
+        layer = peft_model.base_model.model.lin0
+
+        # make the injection non-trivial so the merge delta is non-zero (identity-init alone gives delta == 0)
+        with torch.no_grad():
+            layer.deft_R["default"].normal_(std=0.1)
+
+        r = layer.deft_r["default"]
+        out_features, in_features = layer.base_layer.weight.shape
+        unmerged_out = peft_model(x).detach().clone()
+        w0 = layer.base_layer.weight.detach().clone()
+
+        peft_model.merge_adapter(safe_merge=True)
+        # the cache is the small r x in_features factor, strictly smaller than the full out x in delta
+        factor = layer._cached_merge_factor["default"]
+        assert factor.shape == (r, in_features)
+        assert factor.numel() < out_features * in_features
+
+        # merge is correct, and unmerge restores the original weight exactly from the cached factor
+        assert torch.allclose(peft_model(x), unmerged_out, atol=1e-4)
+        peft_model.unmerge_adapter()
+        assert torch.allclose(layer.base_layer.weight, w0, atol=1e-5)
