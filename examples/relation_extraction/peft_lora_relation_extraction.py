@@ -1,5 +1,5 @@
 import argparse
-import os
+
 import evaluate
 import numpy as np
 import torch
@@ -11,6 +11,7 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
+
 from peft import LoraConfig, TaskType, get_peft_model
 
 
@@ -62,7 +63,7 @@ def main():
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    print(f"Loading dataset 'joelniklaus/sem_eval_2010_task_8' from parquet converter...")
+    print("Loading dataset 'joelniklaus/sem_eval_2010_task_8' from parquet converter...")
     # Load dataset from the parquet branch to avoid remote script execution deprecation issues
     dataset = load_dataset("joelniklaus/sem_eval_2010_task_8", revision="refs/convert/parquet")
 
@@ -70,7 +71,7 @@ def main():
     features = dataset["train"].features
     label_list = features["relation"].names
     num_labels = len(label_list)
-    id2label = {i: label for i, label in enumerate(label_list)}
+    id2label = dict(enumerate(label_list))
     label2id = {label: i for i, label in enumerate(label_list)}
 
     print(f"Relations classes: {label_list}")
@@ -137,12 +138,8 @@ def main():
         predictions, labels = eval_pred
         predictions = np.argmax(predictions, axis=1)
         acc = accuracy_metric.compute(predictions=predictions, references=labels)["accuracy"]
-        f1_macro = f1_metric.compute(
-            predictions=predictions, references=labels, average="macro"
-        )["f1"]
-        f1_micro = f1_metric.compute(
-            predictions=predictions, references=labels, average="micro"
-        )["f1"]
+        f1_macro = f1_metric.compute(predictions=predictions, references=labels, average="macro")["f1"]
+        f1_micro = f1_metric.compute(predictions=predictions, references=labels, average="micro")["f1"]
         return {
             "accuracy": acc,
             "f1_macro": f1_macro,
