@@ -101,7 +101,6 @@ model.merge_and_unload()
 - GLoRA is a superset of LoRA: setting all paths to "lora" recovers standard LoRA.
 - You can use different path types for A/B/C/D/E to experiment with new adaptation strategies.
 - GLoRA supports all standard PEFT adapter management features (add, delete, switch, merge, etc).
-- For unsupported module types, set `target_modules` to linear projections only.
 
 ## See Also
 - [Adapter conceptual guide](../conceptual_guides/adapter.md)
