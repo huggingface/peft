@@ -216,9 +216,13 @@ class GloraLayer(BaseTunerLayer):
 
         if safe_merge:
             if not torch.isfinite(weight.data).all():
-                raise ValueError("NaNs detected in the merged weights. The adapter seems to be broken")
+                raise ValueError(
+                    f"NaNs detected in the merged weights. The adapter {', '.join(all_adapters)} seems to be broken"
+                )
             if bias is not None and not torch.isfinite(bias.data).all():
-                raise ValueError("NaNs detected in the merged weights. The adapter seems to be broken")
+                raise ValueError(
+                    f"NaNs detected in the merged weights. The adapter {', '.join(all_adapters)} seems to be broken"
+                )
 
         for adapter_name in all_adapters:
             self.merged_adapters.append(adapter_name)
