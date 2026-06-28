@@ -35,11 +35,13 @@ class AdamssLayer(BaseTunerLayer):
 
     # All names of layers that may contain adapter weights (trainable or frozen)
     # Use ModuleDict for proper state_dict key format that PEFT's save/load can handle
-    # Only include trainable parameter containers here (not buffers)
-    # adamss_newB is a buffer (frozen), not a trainable parameter
+    # adapter_layer_names holds the trainable parameter containers (not buffers)
     adapter_layer_names = ("adamss_A", "adamss_B")
-    # other_param_names specifies additional non-tensor metadata
+    # other_param_names holds the remaining per-adapter state, so the generic tuner machinery
+    # (delete_adapter, per-adapter device moves, ...) handles it. adamss_newB is a frozen
+    # per-adapter buffer (BufferDict), so it belongs here -- like vera_A/vera_B in VeRA.
     other_param_names = (
+        "adamss_newB",
         "num_subspaces",
         "train_subspace_index",
         "seg_result",

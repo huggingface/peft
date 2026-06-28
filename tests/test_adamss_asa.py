@@ -64,6 +64,23 @@ def _get_adamss_layers(model):
     return [m for m in model.modules() if isinstance(m, AdamssLayer)]
 
 
+def test_delete_adapter_removes_newB_buffer():
+    # adamss_newB is a frozen per-adapter BufferDict, so it must be registered in other_param_names for the
+    # generic delete_adapter() to remove it (like vera_A / vera_B in VeRA). Otherwise the deleted adapter's
+    # projection buffer leaks.
+    cfg = {"target_modules": ["lin0", "lin1"], "r": 8, "num_subspaces": 4, "subspace_rank": 1, "init_weights": None}
+    model = get_peft_model(SimpleMLP(), AdamssConfig(**cfg), adapter_name="a1")
+    model.add_adapter("a2", AdamssConfig(**cfg))
+    model.delete_adapter("a1")
+
+    layers = _get_adamss_layers(model)
+    assert layers
+    for layer in layers:
+        assert "a1" not in layer.adamss_newB  # the deleted adapter's frozen buffer is gone
+        assert "a1" not in layer.adamss_A  # sanity: trainable params are cleaned too
+        assert "a2" in layer.adamss_newB  # the remaining adapter is untouched
+
+
 class TestAdamssAsa:
     # -- update_importance --------------------------------------------------
 
