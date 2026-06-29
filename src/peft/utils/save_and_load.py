@@ -178,9 +178,14 @@ def get_peft_model_state_dict(
             for k in state_dict:
                 if "lora_" in k:
                     to_return[k] = state_dict[k]
-                    bias_name = k.split("lora_")[0] + "bias"
-                    if bias_name in state_dict:
-                        to_return[bias_name] = state_dict[bias_name]
+                    # The trained bias lives on the wrapped base layer (e.g. `...base_layer.bias`),
+                    # not next to the adapter. Older code reconstructed `...bias`, which never
+                    # matched and silently dropped the bias on save (#3306). Keep the unwrapped
+                    # name as a fallback for any layer without a `base_layer`.
+                    module_prefix = k.split("lora_")[0]
+                    for bias_name in (module_prefix + "base_layer.bias", module_prefix + "bias"):
+                        if bias_name in state_dict:
+                            to_return[bias_name] = state_dict[bias_name]
         else:
             raise NotImplementedError
         to_return = {k: v for k, v in to_return.items() if (("lora_" in k) or ("bias" in k))}
@@ -215,9 +220,11 @@ def get_peft_model_state_dict(
             for k in state_dict:
                 if "boft_" in k:
                     to_return[k] = state_dict[k]
-                    bias_name = k.split("boft_")[0] + "bias"
-                    if bias_name in state_dict:
-                        to_return[bias_name] = state_dict[bias_name]
+                    # Same as the LoRA branch above: the trained bias lives on the wrapped base layer.
+                    module_prefix = k.split("boft_")[0]
+                    for bias_name in (module_prefix + "base_layer.bias", module_prefix + "bias"):
+                        if bias_name in state_dict:
+                            to_return[bias_name] = state_dict[bias_name]
         else:
             raise NotImplementedError
 

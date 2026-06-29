@@ -2988,6 +2988,44 @@ class TestPeftCustomModel(PeftCommonTester):
             # This is bad, there was a warning about the bias when there should not have been any.
             self.fail("There should be no warning when bias is set to 'none'")
 
+    def test_bias_only_saves_trained_bias(self, tmp_path):
+        # Regression test for https://github.com/huggingface/peft/issues/3306: with bias="lora_only", the trained bias
+        # of the wrapped base layer must be included in the saved adapter, otherwise reloading silently loses it and the
+        # reloaded model produces different outputs.
+        # 1. build model + wrap with bias="lora_only"
+        torch.manual_seed(0)
+        model = MLP(bias=True).to(self.torch_device)
+        config = LoraConfig(target_modules=["lin0", "lin1"], bias="lora_only")
+        model = get_peft_model(model, config)
+
+        # 2. perturb only the bias so it differs from a fresh init (the only variable in the round trip)
+        with torch.no_grad():
+            for name, param in model.named_parameters():
+                if param.requires_grad and "bias" in name:
+                    param += torch.randn_like(param) * 0.1
+
+        # 3. capture the reference output
+        model.eval()
+
+        x = torch.randn(3, 10).to(self.torch_device)
+        with torch.no_grad():
+            out_before = model(x)
+
+        # 4. round trip: save, then load into a FRESH base model
+        model.save_pretrained(tmp_path)
+        torch.manual_seed(0)  # <- same seed: fresh base starts identical
+        reloaded = PeftModel.from_pretrained(MLP(bias=True).to(self.torch_device), tmp_path)
+        reloaded.eval()
+
+        # 5. assertions
+        with torch.no_grad():
+            out_after = reloaded(x)
+
+        saved = safe_load_file(tmp_path / "adapter_model.safetensors")
+
+        assert torch.allclose(out_after, out_before, atol=1e-6)
+        assert any("bias" in key for key in saved)  # the bias survived the save
+
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_active_adapter(self, test_name, model_id, config_cls, config_kwargs):
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
