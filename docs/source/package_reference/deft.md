@@ -55,7 +55,7 @@ term and drops the injection. Only the projection `P` is trained (no injection m
 identity at initialization. PaRa was introduced for personalizing text-to-image diffusion models and is available here
 as a special case of DEFT.
 
-DEFT is currently implemented for `torch.nn.Linear` layers. The original implementation and the experiments from the
+DEFT is currently implemented for `torch.nn.Linear` and `Conv1D` (e.g. gpt-2, via `fan_in_fan_out`) layers. The original implementation and the experiments from the
 paper (Dreambooth, Dreambench Plus, InsDet, VisualCloze, on Stable Diffusion and a unified model) are available at
 [github.com/MAXNORM8650/DEFT](https://github.com/MAXNORM8650/DEFT).
 

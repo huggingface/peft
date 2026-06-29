@@ -14,6 +14,7 @@
 
 import torch
 from torch import nn
+from transformers.pytorch_utils import Conv1D
 
 from peft import DeftConfig, get_peft_model
 
@@ -106,6 +107,48 @@ class TestDeftMerge:
         assert factor.numel() < out_features * in_features
 
         # merge is correct, and unmerge restores the original weight exactly from the cached factor
+        assert torch.allclose(peft_model(x), unmerged_out, atol=1e-4)
+        peft_model.unmerge_adapter()
+        assert torch.allclose(layer.base_layer.weight, w0, atol=1e-5)
+
+
+class TestDeftConv1D:
+    """DEFT supports `Conv1D` (e.g. gpt-2), whose weight is stored transposed as (in_features, out_features)."""
+
+    def test_conv1d_identity_init_merge_unmerge(self):
+        torch.manual_seed(0)
+
+        class ModelConv1D(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = Conv1D(8, 4)  # Conv1D(out_features=8, in_features=4); weight stored as (4, 8)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        model = ModelConv1D().eval()
+        x = torch.rand(3, 4)
+        base_out = model(x).detach().clone()
+        w0 = model.conv.weight.detach().clone()  # stored as (in_features, out_features) == (4, 8)
+
+        # fan_in_fan_out is auto-enabled for Conv1D by the model dispatch
+        config = DeftConfig(target_modules=["conv"], decomposition_method="relu")
+        peft_model = get_peft_model(model, config)
+        peft_model.eval()
+        layer = peft_model.base_model.model.conv
+
+        assert layer.fan_in_fan_out
+        assert (layer.in_features, layer.out_features) == (4, 8)
+
+        # identity at init (the transposed-weight handling must keep delta == 0)
+        assert torch.allclose(base_out, peft_model(x), atol=1e-5)
+
+        # make the injection non-trivial, then merge == forward and unmerge restores the (transposed) weight exactly
+        with torch.no_grad():
+            layer.deft_R["default"].normal_(std=0.1)
+        unmerged_out = peft_model(x).detach().clone()
+        peft_model.merge_adapter(safe_merge=True)
+        assert layer.base_layer.weight.shape == w0.shape  # storage orientation (in, out) preserved
         assert torch.allclose(peft_model(x), unmerged_out, atol=1e-4)
         peft_model.unmerge_adapter()
         assert torch.allclose(layer.base_layer.weight, w0, atol=1e-5)

@@ -13,7 +13,10 @@
 # limitations under the License.
 
 
+import warnings
+
 import torch
+from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import TRANSFORMERS_MODELS_TO_DEFT_TARGET_MODULES_MAPPING
@@ -83,10 +86,24 @@ class DeftModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
+            if deft_config.fan_in_fan_out:
+                warnings.warn(
+                    "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
+                    "Setting fan_in_fan_out to False."
+                )
+                deft_config.fan_in_fan_out = False
+            new_module = DeftLinear(target, adapter_name, config=deft_config, **kwargs)
+        elif isinstance(target_base_layer, Conv1D):
+            if not deft_config.fan_in_fan_out:
+                warnings.warn(
+                    "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
+                )
+                deft_config.fan_in_fan_out = True
             new_module = DeftLinear(target, adapter_name, config=deft_config, **kwargs)
         else:
             raise TypeError(
-                f"Target module {target} is not supported. Currently, only `torch.nn.Linear` is supported."
+                f"Target module {target} is not supported. Currently, only `torch.nn.Linear` and "
+                "`transformers.pytorch_utils.Conv1D` are supported."
             )
 
         return new_module

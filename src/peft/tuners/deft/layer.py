@@ -18,8 +18,10 @@ from typing import Any, Optional
 import torch
 import torch.nn.functional as F
 from torch import nn
+from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.utils.other import transpose
 
 from .config import DeftConfig
 
@@ -46,6 +48,8 @@ class DeftLayer(BaseTunerLayer):
         self.deft_P = nn.ParameterDict({})
         self.deft_R = nn.ParameterDict({})
         self.deft_dropout = nn.ModuleDict({})
+        # whether the base weight is stored transposed, i.e. (in_features, out_features) as in `Conv1D` (gpt-2)
+        self.fan_in_fan_out = False
         # The residual projection (I - P_proj) @ W is not invertible, so unmerge cannot recover the delta from the
         # merged weight. Rather than cache the full out x in delta, cache only its base-weight-dependent factor
         # right.T @ W (shape r x in_features) per adapter; unmerge recomputes the exact delta from it (~r/out_features
@@ -61,6 +65,11 @@ class DeftLayer(BaseTunerLayer):
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
             self.in_features, self.out_features = base_layer.in_features, base_layer.out_features
+        elif isinstance(base_layer, Conv1D):
+            # Conv1D (e.g. gpt-2) stores its weight transposed as (in_features, out_features)
+            self.in_features, self.out_features = (
+                base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
+            )
         else:
             raise TypeError(f"Unsupported layer type {type(base_layer)}")
 
@@ -89,6 +98,7 @@ class DeftLayer(BaseTunerLayer):
         self.deft_decomposition[adapter_name] = config.decomposition_method
         self.deft_init_scale[adapter_name] = config.init_scale
         self.deft_para[adapter_name] = config.para
+        self.fan_in_fan_out = config.fan_in_fan_out
         # injection scaling (analogous to LoRA's alpha/r); 1.0 = no scaling (backward compatible)
         self.deft_scaling[adapter_name] = (config.alpha / r) if getattr(config, "alpha", None) else 1.0
 
@@ -134,7 +144,9 @@ class DeftLayer(BaseTunerLayer):
             # avoiding the immediate "forgetting" caused by removing a sub-space of W.
             P = self.deft_P[adapter_name].detach().to(base_weight.device)
             _, right = self._project(P, adapter_name)
-            R_init = right.transpose(0, 1) @ base_weight.detach().to(torch.float32)
+            # transpose for `Conv1D`, whose weight is stored as (in_features, out_features), to the logical (out, in)
+            W = transpose(base_weight.detach().to(torch.float32), self.fan_in_fan_out)
+            R_init = right.transpose(0, 1) @ W
             # divide by the injection scaling so that (scaling * R_init) == right.T @ W, keeping delta == 0 at init
             R_init = R_init / self.deft_scaling[adapter_name]
             with torch.no_grad():
@@ -201,10 +213,11 @@ class DeftLinear(nn.Module, DeftLayer):
         float32. Caching this instead of the full `out x in` delta lets `unmerge` recompute the exact delta while
         storing roughly `r / out_features` as much memory.
         """
-        # computed in float32 for numerical stability (see `_project`)
-        weight = self.get_base_layer().weight
+        # computed in float32 for numerical stability (see `_project`); transpose handles `Conv1D` (fan_in_fan_out),
+        # whose weight is stored as (in_features, out_features), so `W` is always logical (out_features, in_features)
+        weight = transpose(self.get_base_layer().weight.to(torch.float32), self.fan_in_fan_out)
         _, right = self._project(self.deft_P[adapter_name], adapter_name)
-        return right.transpose(0, 1) @ weight.to(torch.float32)
+        return right.transpose(0, 1) @ weight
 
     def _delta_from_factor(self, adapter_name: str, factor: torch.Tensor) -> torch.Tensor:
         """Reconstruct the additive delta from the cached factor `M = right.T @ W` (float32): `delta = Q_P @ (R - M)`,
@@ -214,18 +227,21 @@ class DeftLinear(nn.Module, DeftLayer):
         Q_P, _ = self._project(self.deft_P[adapter_name], adapter_name)
         if self.deft_para[adapter_name]:
             # PaRa: pure subspace removal, delta = -P_proj @ W = -Q_P @ (right.T @ W)
-            return (-(Q_P @ factor)).to(orig_dtype)
-        R = self.deft_R[adapter_name].to(torch.float32) * self.deft_scaling[adapter_name]
-        return (Q_P @ (R - factor)).to(orig_dtype)
+            delta = -(Q_P @ factor)
+        else:
+            R = self.deft_R[adapter_name].to(torch.float32) * self.deft_scaling[adapter_name]
+            delta = Q_P @ (R - factor)
+        # delta is logical (out_features, in_features); transpose back to the base layer's storage order (Conv1D)
+        return transpose(delta, self.fan_in_fan_out).to(orig_dtype)
 
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         """Return the additive delta such that `W + delta` equals the DEFT-adapted weight.
 
-        The adapted weight is `(I - P_proj) @ W + Q_P @ R`, so the delta is `-P_proj @ W + Q_P @ R`. Using
-        `P_proj = Q_P @ right.T` this factors into `delta = Q_P @ (R - right.T @ W)` (`-Q_P @ (right.T @ W)` for PaRa),
-        which only uses rank-`r` matmuls and never materializes the `out x out` projection matrix. The
-        base-weight-dependent part `right.T @ W` is produced by `_merge_factor`. Used by `merge`; the forward pass
-        computes the equivalent update directly on the activations instead.
+        The adapted weight is `(I - P_proj) @ W + Q_P @ R`, so the delta is `-P_proj @ W + Q_P @ R`. Using `P_proj =
+        Q_P @ right.T` this factors into `delta = Q_P @ (R - right.T @ W)` (`-Q_P @ (right.T @ W)` for PaRa), which
+        only uses rank-`r` matmuls and never materializes the `out x out` projection matrix. The base-weight-dependent
+        part `right.T @ W` is produced by `_merge_factor`. Used by `merge`; the forward pass computes the equivalent
+        update directly on the activations instead.
         """
         return self._delta_from_factor(adapter_name, self._merge_factor(adapter_name))
 

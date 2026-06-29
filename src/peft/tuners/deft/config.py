@@ -64,8 +64,11 @@ class DeftConfig(PeftConfig):
             `None`, no scaling is applied (factor `1.0`). The subspace-removal term is unaffected.
         para (`bool`):
             Whether to use the PaRa method: pure subspace removal (`delta = -P_proj @ W`) with no injection term. When
-            `True`, `R` is not created, `P` is the only trainable matrix, and the adapter cannot be an identity at init.
-            Defaults to `False` (full DEFT).
+            `True`, `R` is not created, `P` is the only trainable matrix, and the adapter cannot be an identity at
+            init. Defaults to `False` (full DEFT).
+        fan_in_fan_out (`bool`):
+            Set this to `True` if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
+            `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
         deft_dropout (`float`):
             The dropout probability applied to the layer input. Defaults to `0.0`.
         init_weights (`bool`):
@@ -129,6 +132,15 @@ class DeftConfig(PeftConfig):
                 "Whether to use the PaRa method: pure subspace removal `delta = -P_proj @ W` with no injection term. "
                 "When True, R is not created, P is the only trainable matrix, and the adapter cannot be an identity at "
                 "init. Defaults to False (full DEFT)."
+            )
+        },
+    )
+    fan_in_fan_out: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 "
+                "uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to True."
             )
         },
     )
