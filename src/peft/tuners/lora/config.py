@@ -215,14 +215,12 @@ class BdLoraConfig:
             "Example: ['out_proj', 'down_proj']"
         },
     )
-    nblocks: int = (
-        field(
-            default=1,
-            metadata={
-                "help": "Number of blocks each block-diagonal matrix has. If using BD-LoRA to speed up inference, "
-                "set it to be equal to the desired sharding degree during serving."
-            },
-        ),
+    nblocks: int = field(
+        default=1,
+        metadata={
+            "help": "Number of blocks each block-diagonal matrix has. If using BD-LoRA to speed up inference, "
+            "set it to be equal to the desired sharding degree during serving."
+        },
     )
     match_strict: bool = field(
         default=True,
