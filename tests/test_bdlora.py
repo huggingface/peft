@@ -123,6 +123,8 @@ def test_bdlora_merge_delta_matches_manual_dense_equivalent(bdlora_config):
 
 
 def test_bdlora_nblocks_one_matches_vanilla_lora():
+    # With nblocks=1, there is no block split: out_features // 1 = out_features and r // 1 = r
+    # So the BD-LoRA packing reduces to the same shapes as vanilla LoRA, and the outputs should match
     torch.manual_seed(0)
 
     base_model = TinyMLP()
@@ -174,7 +176,13 @@ def test_bdlora_nblocks_one_matches_vanilla_lora():
 @pytest.mark.parametrize(
     "bdlora_config,expected_a_shape,expected_b_shape,expected_adapter_params",
     [
+        # A-block: only LoRA-A is block-diagonal. With in_features=10, nblocks=2, and r=4,
+        # A stores (4, 10 // 2) = (4, 5) parameters, while B stays unchanged as dense at (20, 4)
+        # Total trainable adapter params: 4 * 5 + 20 * 4 = 100
         (BdLoraConfig(target_modules_bd_a=["lin0"], nblocks=2, match_strict=True), (4, 5), (20, 4), 100),
+        # B-block: only LoRA-B is block-diagonal. The packed parameter stores (out_features, r // nblocks),
+        # so B keeps 20 rows but only 4 // 2 = 2 columns per block. That is 2 blocks of shape (10, 2),
+        # for 2 * 10 * 2 = 40 B parameters. A stays unchanged as dense at (4, 10), so the total is 40 + 40 = 80
         (BdLoraConfig(target_modules_bd_b=["lin0"], nblocks=2, match_strict=True), (4, 10), (20, 2), 80),
     ],
 )
@@ -222,7 +230,11 @@ def test_bdlora_packed_shapes_and_adapter_param_counts_vs_vanilla(
     )
     bd_adapter_params = sum(p.numel() for module in (bd_a, bd_b) for p in module.parameters() if p.requires_grad)
 
-    # BD-LoRA must reduce trainable adapter parameters vs vanilla LoRA
+    # For vanilla LoRA on lin0: A has shape (r, in)=(4,10) and B has shape (out, r)=(20,4),
+    # so trainable adapter params are 4*10 + 20*4 = 120
     assert vanilla_adapter_params == 120
+
     assert bd_adapter_params == expected_adapter_params
+
+    # BD-LoRA must reduce trainable adapter parameters vs vanilla LoRA
     assert bd_adapter_params < vanilla_adapter_params
