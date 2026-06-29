@@ -29,6 +29,7 @@ from peft import (
     C3AConfig,
     CartridgeConfig,
     CPTConfig,
+    DeloraConfig,
     FourierFTConfig,
     FrodConfig,
     GraloraConfig,
@@ -53,6 +54,8 @@ from peft import (
     PromptEncoderConfig,
     PromptTuningConfig,
     PsoftConfig,
+    PveraConfig,
+    RandLoraConfig,
     RoadConfig,
     ShiraConfig,
     TaskType,
@@ -60,6 +63,7 @@ from peft import (
     TrainableTokensConfig,
     VBLoRAConfig,
     VeraConfig,
+    WaveFTConfig,
     XLoraConfig,
 )
 
@@ -106,6 +110,12 @@ ALL_CONFIG_CLASSES = (
     (VeraConfig, {}),
     (VBLoRAConfig, {}),
     (XLoraConfig, {"hidden_size": 32, "adapters": {}}),
+    (CPTConfig, {}),
+    (RandLoraConfig, {}),
+    (DeloraConfig, {}),
+    (OFTConfig, {}),
+    (PveraConfig, {}),
+    (WaveFTConfig, {}),
 )
 
 
