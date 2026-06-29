@@ -1597,7 +1597,7 @@ class BaseTunerLayer(ABC):
         inference_mode is True.
 
         Args:
-            adapter_name (`str` or `list[str]`):
+            adapter_names (`str` or `list[str]`):
                  The name(s) of the adapter(s) to set as active.
             inference_mode (bool, optional):
                  Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.

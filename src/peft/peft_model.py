@@ -1208,10 +1208,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         - `quantization_backend` (`str` or `None`):
            The name of the quantization backend, e.g. `"bnb 4bit"`, or `None` if not quantized.
 
-        Args:
-            model ([`~PeftModel`]):
-                The model to get the adapter layer status from.
-
         Returns:
             list[`peft.peft_model.TunerLayerStatus`]:
                 A list of dataclasses, each containing the status of the corresponding adapter layer.
@@ -1250,10 +1246,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         - `quantization_backend` (`str`, `None`, `Literal["irregular"]`):
            The name of the quantization backend, e.g. `"bnb 4bit"`, or `None` if not quantized. If the backend is not
            consistent across all layers, this will be `"irregular"`.
-
-        Args:
-            model ([`~PeftModel`]):
-                The model to get the adapter layer status from.
 
         Returns:
             `peft.peft_model.TunerModelStatus`:
