@@ -48,6 +48,13 @@ By default (`init_weights=True`) `R` is initialized so that the update is an exa
 low-rank additive delta `Q_P @ (R - right.T @ W)`, which is computed without ever forming the `out x out`
 projection matrix and can be merged into the base weights for inference-free deployment.
 
+Setting `para=True` selects the
+[PaRa](https://proceedings.iclr.cc/paper_files/paper/2025/hash/f09e8dd9274cb7c2dd0dc65ffc6f427a-Abstract-Conference.html)
+(Parameter Rank Reduction) variant: a removal-only update `W' = (I - P_proj) @ W` that keeps just the subspace-removal
+term and drops the injection. Only the projection `P` is trained (no injection matrix `R`), so the adapter is not an
+identity at initialization. PaRa was introduced for personalizing text-to-image diffusion models and is available here
+as a special case of DEFT.
+
 DEFT is currently implemented for `torch.nn.Linear` layers. The original implementation and the experiments from the
 paper (Dreambooth, Dreambench Plus, InsDet, VisualCloze, on Stable Diffusion and a unified model) are available at
 [github.com/MAXNORM8650/DEFT](https://github.com/MAXNORM8650/DEFT).
@@ -62,6 +69,17 @@ If you use DEFT in your work, please cite the paper:
   volume={38},
   pages={102009--102035},
   year={2026}
+}
+```
+
+If you use the PaRa variant (`para=True`), please also cite:
+
+```bibtex
+@inproceedings{chen2025personalizing,
+  title={Para: Personalizing text-to-image diffusion via parameter rank reduction},
+  author={Chen, Shangyu and Pan, Zizheng and Cai, Jianfei and Phung, Dinh},
+  booktitle={International Conference on Learning Representations},
+  year={2025}
 }
 ```
 
