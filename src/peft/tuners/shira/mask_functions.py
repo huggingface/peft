@@ -64,11 +64,10 @@ def random_mask(base_layer: nn.Module, r: int, random_seed: Optional[int] = None
     random_generator = torch.Generator()
     if random_seed is not None:
         random_generator.manual_seed(random_seed)
-    idx = (torch.randperm(base_layer.weight.numel(), generator=random_generator)[:num_shira_weights]).to(
-        base_layer.weight.device
-    )
-    val = torch.ones(*idx.shape, dtype=bool)
-    mask = torch.zeros(*shape).to(val).view(1, -1)
+    device = base_layer.weight.device
+    idx = (torch.randperm(base_layer.weight.numel(), generator=random_generator)[:num_shira_weights]).to(device)
+    val = torch.ones(*idx.shape, dtype=bool).to(device)
+    mask = torch.zeros(*shape).to(val).view(1, -1).to(device)
     mask = mask.scatter_(1, idx.unsqueeze(0), val.unsqueeze(0)).view(shape)
 
     return mask
