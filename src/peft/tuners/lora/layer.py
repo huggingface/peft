@@ -179,7 +179,14 @@ class LoraLayer(BaseTunerLayer):
             )
 
         # 3. Figure out which variants are currently active
-        active_variants = tuple(sorted(f.name for f in lora_variants_configs if getattr(config, f.name)))
+        def _is_active(f, config):
+            val = getattr(config, f.name)
+            prefixes = f.metadata.get("lora_variants")
+            if prefixes is not None:
+                return isinstance(val, str) and any(val.startswith(p) for p in prefixes)
+            return bool(val)
+
+        active_variants = tuple(sorted(f.name for f in lora_variants_configs if _is_active(f, config)))
 
         # 4. Route to the correct variant class
         if active_variants not in layer_variants:
@@ -880,15 +887,8 @@ class Linear(nn.Module, LoraLayer):
             ("alora_invocation_tokens",): variants.ALoraLinearVariant,
             ("velora_config",): variants.VeloraLinearVariant,
             ("monteclora_config",): variants.MontecloraLinearVariant,
+            ("init_lora_weights",): variants.MiCALinearVariant,
         }
-
-    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if isinstance(config.init_lora_weights, str) and config.init_lora_weights.startswith("mica"):
-            from .variants import MiCALinearVariant
-
-            return MiCALinearVariant()
-
-        return super().resolve_lora_variant(config=config, **kwargs)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -1132,18 +1132,8 @@ class Embedding(nn.Module, LoraLayer):
         return {
             (): None,
             ("use_dora",): variants.DoraEmbeddingVariant,
+            ("init_lora_weights",): variants.MiCAEmbeddingVariant,
         }
-
-    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if getattr(config, "velora_config", None) is not None:
-            raise ValueError("VeLora does not support adapter layers for nn.Embedding")
-
-        if isinstance(config.init_lora_weights, str) and config.init_lora_weights.startswith("mica"):
-            from .variants import MiCAEmbeddingVariant
-
-            return MiCAEmbeddingVariant()
-
-        return super().resolve_lora_variant(config=config, **kwargs)
 
     def update_layer(
         self,

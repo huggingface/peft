@@ -630,6 +630,8 @@ class LoraConfig(PeftConfig):
                 "base weight associated with the smallest singular values, A is set to zero, and B is frozen during "
                 "training (only A is updated)."
             ),
+            "is_lora_variant": True,
+            "lora_variants": ["mica"],
         },
     )
     layers_to_transform: Optional[Union[list[int], int]] = field(
