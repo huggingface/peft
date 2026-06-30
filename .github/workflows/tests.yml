@@ -5,9 +5,13 @@ on:
     branches: [main]
     paths-ignore:
       - 'docs/**'
+      - 'method_comparison/**'
+      - '**.md'
   pull_request:
     paths-ignore:
       - 'docs/**'
+      - 'method_comparison/**'
+      - '**.md'
 
 env:
   HF_HOME: .cache/huggingface

@@ -390,6 +390,137 @@ class TestLoraInitialization:
         peft_model = get_peft_model(deepcopy(model), config)
         assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
 
+    def test_lora_mica_linear_init_default(self, data):
+        # MiCA initializes A=0 and B = bottom-r left singular vectors of W. Because A=0, the adapter contribution
+        # B @ A is zero at init, so the forward output must equal the base model's output exactly.
+        model = self.get_model()
+        output = model(data)[0]
+
+        config = LoraConfig(init_lora_weights="mica", target_modules=["linear"], r=8)
+        peft_model = get_peft_model(deepcopy(model), config)
+
+        weight_A = peft_model.base_model.linear.lora_A["default"].weight
+        weight_B = peft_model.base_model.linear.lora_B["default"].weight
+
+        # A must be zero
+        assert torch.all(weight_A == 0)
+        # B columns must be orthonormal (since they are left singular vectors)
+        eye = torch.eye(weight_B.shape[1], device=weight_B.device, dtype=weight_B.dtype)
+        assert torch.allclose(weight_B.t() @ weight_B, eye, atol=1e-4)
+        # Output at init equals the base output
+        assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
+
+    def test_lora_mica_embedding_init_default(self):
+        class EmbeddingModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embed = nn.Embedding(7, 5)
+
+            def forward(self, x):
+                return self.embed(x)
+
+        model = EmbeddingModel()
+        data = torch.arange(7).unsqueeze(0)
+        output = model(data)
+
+        config = LoraConfig(init_lora_weights="mica", target_modules=["embed"], r=3)
+        peft_model = get_peft_model(deepcopy(model), config)
+
+        weight_A = peft_model.base_model.embed.lora_embedding_A["default"]
+        weight_B = peft_model.base_model.embed.lora_embedding_B["default"]
+
+        assert torch.all(weight_A == 0)
+        eye = torch.eye(weight_B.shape[1], device=weight_B.device, dtype=weight_B.dtype)
+        assert torch.allclose(weight_B.t() @ weight_B, eye, atol=1e-4)
+        assert weight_A.requires_grad
+        assert not weight_B.requires_grad
+        assert torch.allclose(output, peft_model(data), atol=1e-06)
+
+    def test_lora_mica_uses_minor_components(self):
+        # Verify B equals the *minor* (smallest singular value) left singular vectors, not the major ones.
+        torch.manual_seed(0)
+        model = self.get_model()
+        r = 8
+
+        config = LoraConfig(init_lora_weights="mica", target_modules=["linear"], r=r)
+        peft_model = get_peft_model(deepcopy(model), config)
+        weight_B = peft_model.base_model.linear.lora_B["default"].weight.detach().cpu()
+
+        # Reference SVD of the original weight
+        W = model.linear.weight.detach().cpu().to(torch.float32)
+        U, _S, _ = torch.linalg.svd(W, full_matrices=False)
+        minor_U = U[:, -r:]
+        major_U = U[:, :r]
+
+        # B should span the same subspace as `minor_U` (column spans match up to sign/orthogonal mixing within
+        # equal-singular-value groups). Equality of projectors is the right invariant.
+        proj_B = weight_B @ weight_B.t()
+        proj_minor = minor_U @ minor_U.t()
+        proj_major = major_U @ major_U.t()
+        assert torch.allclose(proj_B, proj_minor, atol=1e-4)
+        assert not torch.allclose(proj_B, proj_major, atol=1e-2)
+
+    def test_lora_mica_freezes_B(self):
+        model = self.get_model()
+        config = LoraConfig(init_lora_weights="mica", target_modules=["linear"], r=8)
+        peft_model = get_peft_model(deepcopy(model), config)
+
+        assert peft_model.base_model.linear.lora_A["default"].weight.requires_grad
+        assert not peft_model.base_model.linear.lora_B["default"].weight.requires_grad
+
+    def test_lora_mica_freezes_B_when_switching_adapters(self):
+        class SimpleMlp(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(10, 10)
+                self.fc2 = nn.Linear(10, 10)
+
+            def forward(self, x):
+                x = torch.relu(self.fc1(x))
+                return self.fc2(x)
+
+        def trainable_parameters(model):
+            return [name for name, param in model.named_parameters() if param.requires_grad]
+
+        config0 = LoraConfig(target_modules=["fc1"], init_lora_weights="mica", r=4)
+        model = get_peft_model(SimpleMlp(), config0)
+        assert trainable_parameters(model) == ["base_model.model.fc1.lora_A.default.weight"]
+
+        config1 = LoraConfig(target_modules=["fc1", "fc2"], init_lora_weights="mica", r=4)
+        model.add_adapter("other", config1)
+        model.set_adapter("other")
+        assert trainable_parameters(model) == [
+            "base_model.model.fc1.lora_A.other.weight",
+            "base_model.model.fc2.lora_A.other.weight",
+        ]
+
+        model.set_adapter("default")
+        assert trainable_parameters(model) == ["base_model.model.fc1.lora_A.default.weight"]
+
+        model.delete_adapter("other")
+        assert "other" not in model.base_model.model.fc1.frozen_peft_weight_names
+        assert "other" not in model.base_model.model.fc2.frozen_peft_weight_names
+        config2 = LoraConfig(target_modules=["fc1"], r=4)
+        model.add_adapter("other", config2)
+        model.set_adapter("other")
+        assert trainable_parameters(model) == [
+            "base_model.model.fc1.lora_A.other.weight",
+            "base_model.model.fc1.lora_B.other.weight",
+        ]
+
+    def test_lora_mica_rank_too_large_raises(self):
+        class SimpleModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(2, 3)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        config = LoraConfig(init_lora_weights="mica", target_modules=["linear"], r=3)
+        with pytest.raises(ValueError, match="MiCA requires `r` <= min"):
+            get_peft_model(SimpleModel(), config)
+
     def test_lora_olora_linear_init_default(self, data):
         model = self.get_model()
         output = model(data)[0]
@@ -3906,13 +4037,11 @@ class TestHotSwapping:
         torch.manual_seed(0)
         return ConvModel().to(self.torch_device)
 
-    # this works with all adapters except prompt learning, but we don't test all
-    # as it is unnecessary and would be slow
     @pytest.mark.parametrize(
         "config",
         [
-            LoraConfig(init_lora_weights=0, target_modules=["lin0"]),
-            LoraConfig(init_lora_weights=0, target_modules=["lin0", "lin1"]),
+            LoraConfig(init_lora_weights=False, target_modules=["lin0"]),
+            LoraConfig(init_lora_weights=False, target_modules=["lin0", "lin1"]),
         ],
     )
     @pytest.mark.parametrize("do_compile", [False, True])
