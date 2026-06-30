@@ -42,8 +42,8 @@ class MLP(nn.Module):
 class TestDeftPaRa:
     """Dedicated tests for the DEFT PaRa mode (`para=True`): pure subspace removal, no injection.
 
-    PaRa is not an identity at init (it removes a sub-space of W), so it does not fit the shared
-    custom-model test cases that assume an identity-at-init adapter.
+    PaRa is not an identity at init (it removes a sub-space of W), so it does not fit the shared custom-model test
+    cases that assume an identity-at-init adapter.
     """
 
     def test_para_removal_only_and_exact_merge(self):
