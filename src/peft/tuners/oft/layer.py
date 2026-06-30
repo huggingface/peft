@@ -556,11 +556,11 @@ class Linear(nn.Module, OFTLayer):
             return
         for active_adapter in adapter_names:
             if active_adapter in self.oft_R.keys():
-                orig_weight = self.get_base_weight().clone()
-                orig_dtype = orig_weight.dtype
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
+                    orig_weight = self.get_base_weight().clone()
+                    orig_dtype = orig_weight.dtype
                     oft_mat = self.get_delta_weight(active_adapter)
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = torch.mm(oft_mat, orig_weight.to(oft_mat.dtype))
@@ -573,6 +573,8 @@ class Linear(nn.Module, OFTLayer):
 
                     self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
                 else:
+                    orig_weight = self.get_base_weight()
+                    orig_dtype = orig_weight.dtype
                     oft_mat = self.get_delta_weight(active_adapter)
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = torch.mm(oft_mat, orig_weight.to(oft_mat.dtype))
