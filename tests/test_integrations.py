@@ -410,9 +410,10 @@ class TestTransformersV5:
 
         config = peft_model.peft_config["default"]
         # non-fused targets stay in target_modules; fused experts move to target_parameters (rank/alpha doubled for the
-        # 2-way gate_up_proj)
+        # 2-way gate_up_proj). The regex does not name the router, so `gate.weight` is *not* pulled in (contrast
+        # `test_qwen3_moe_all_linear_target_modules_works`, where "all-linear" does pull it in).
         assert config.target_modules == {"q_proj", "k_proj", "v_proj"}
-        assert {"gate_up_proj", "down_proj"} <= set(config.target_parameters)
+        assert set(config.target_parameters) == {"gate_up_proj", "down_proj"}
         assert config.rank_pattern == {r".*\.gate_up_proj": config.r * 2}
         assert config.alpha_pattern == {r".*\.gate_up_proj": config.lora_alpha * 2}
         # the experts are actually adapted, not just recorded in the config
@@ -437,8 +438,9 @@ class TestTransformersV5:
         assert adapted == {"q_proj"}
 
     def test_qwen3_moe_all_linear_target_modules_works(self):
-        # "all-linear" is matched by module type, not as a regex. The experts were nn.Linear in v4, so it targeted
-        # them; after fusion they are parameters, so it must still pull them into target_parameters.
+        # "all-linear" is matched by module type, not as a regex. On v4 the experts *and* the router `gate` were
+        # nn.Linear, so "all-linear" targeted them; after fusion the experts are stacked parameters and the router is a
+        # custom module, so "all-linear" must still carry all of them into target_parameters (gate -> gate.weight).
         model_id = "trl-internal-testing/tiny-Qwen3MoeForCausalLM"
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id)
@@ -450,12 +452,16 @@ class TestTransformersV5:
             for name, _ in peft_model.named_modules()
             if name.endswith("lora_A.default")
         }
-        # attention projections resolved as modules; experts (linear in v4) carried into target_parameters
+        # attention projections resolved as modules; experts and router (linear in v4) carried into target_parameters
         assert {"q_proj", "k_proj", "v_proj", "o_proj"} <= adapted
-        assert {"gate_up_proj", "down_proj"} <= set(config.target_parameters)
+        # the router `gate` is adapted too -- it is a parameter (`gate.weight`) on v5, so unlike the regex case it has
+        # to be added by name; this is exactly what distinguishes "all-linear" from a regex that omits the router
+        assert set(config.target_parameters) == {"gate.weight", "gate_up_proj", "down_proj"}
         assert config.rank_pattern == {r".*\.gate_up_proj": config.r * 2}
         assert config.alpha_pattern == {r".*\.gate_up_proj": config.lora_alpha * 2}
+        # the experts and the router gate are actually adapted, not just recorded in the config
         assert any("experts" in name for name, _ in peft_model.named_modules() if name.endswith("lora_A.default"))
+        assert any(name.endswith(".mlp.gate.lora_A.default") for name, _ in peft_model.named_modules())
 
     def test_qwen3_moe_regex_target_modules_save_load_roundtrip(self, tmp_path):
         # Save/reload a regex-targeted adapter. Reload re-runs the conversion on the already-converted config, so this

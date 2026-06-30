@@ -357,44 +357,42 @@ def _resolve_string_target_modules(
 ) -> set[str]:
     """Resolve a string `target_modules` (a regex or `"all-linear"`) to the concrete leaf names it targets.
 
-    Resolving up front lets the list-based remap downstream stay unchanged. The pre-fusion expert projections
-    (`gate_proj`, `up_proj`) are absent from a v5 model -- they live inside the stacked `gate_up_proj` parameter -- so
-    they are recovered from each fused parameter's container, not from `named_modules()`/`named_parameters()`.
+    The keys of `target_module_mapping` are the v4 projection names that were renamed/fused on v5: the expert
+    projections (`gate_proj`, `up_proj`, `down_proj`) and the router `gate`. Resolving the string to leaf names up front
+    lets the list-based remap downstream stay unchanged for a regex and for `"all-linear"` alike.
+
+    `"all-linear"` matched every `nn.Linear` on the v4 model, so it targeted all of those projections; on v5 they are no
+    longer `nn.Linear` (the experts are fused into stacked parameters, the router became a custom module), so they are
+    added directly by name. A regex only targets what it spells out, so the experts -- which no longer exist as real
+    keys -- are recovered by probing each reconstructed v4 key against the pattern.
     """
+    if peft_config.target_modules.lower() == INCLUDE_LINEAR_LAYERS_SHORTHAND:
+        # attention projections are still `nn.Linear` on v5, so resolve them by type; the experts and router were
+        # `nn.Linear` in v4 too but are now parameters / a custom module, so add their v4 names (the mapping keys).
+        resolved = _maybe_include_all_linear_layers(copy.copy(peft_config), model).target_modules
+        return {name.rsplit(".", 1)[-1] for name in resolved} | target_module_mapping.keys()
+
+    # regex: leaf names of the real module/parameter keys it matches (q/k/v_proj, the router module, `down_proj`, ...)
     module_keys = [name for name, _ in model.named_modules()]
     param_keys = [name for name, _ in model.named_parameters()]
-    # new (fused) name -> container paths, used to reconstruct the pre-fusion expert keys
+    matched = {
+        key.rsplit(".", 1)[-1]
+        for key in itertools.chain(module_keys, param_keys)
+        if check_target_module_exists(peft_config, key)
+    }
+
+    # The pre-fusion experts (`gate_proj`, `up_proj`) live inside the stacked `gate_up_proj` parameter, so a regex
+    # naming them matches no real key. Recover them from that parameter's container: e.g. for the parameter
+    # `model.layers.0.mlp.experts.gate_up_proj`, probe the reconstructed v4 key `model.layers.0.mlp.experts.gate_proj`.
     new_name_to_containers: dict[str, set[str]] = {}
     for name in param_keys:
         container, _, leaf = name.rpartition(".")
         new_name_to_containers.setdefault(leaf, set()).add(container)
-
-    is_all_linear = peft_config.target_modules.lower() == INCLUDE_LINEAR_LAYERS_SHORTHAND
-    if is_all_linear:
-        resolved = _maybe_include_all_linear_layers(copy.copy(peft_config), model).target_modules
-        matched: set[str] = {name.rsplit(".", 1)[-1] for name in resolved}
-    else:
-        # leaf names of the real module/parameter keys the regex matches (q/k/v_proj, router `gate`, `down_proj`)
-        matched = {
-            key.rsplit(".", 1)[-1]
-            for key in itertools.chain(module_keys, param_keys)
-            if check_target_module_exists(peft_config, key)
-        }
-
-    # Recover the fused experts: container `model.layers.0.mlp.experts` of `...experts.gate_up_proj` reconstructs the
-    # v4 keys `...experts.gate_proj` / `.up_proj` a regex targets. "all-linear" matches a fused expert iff its
-    # container is present (it was `nn.Linear` in v4); a regex is probed against the reconstructed key.
     for old_name, new_name in target_module_mapping.items():
         if old_name in matched:
             continue
-        containers = new_name_to_containers.get(new_name, ())
-        if not containers:
-            continue
-        if is_all_linear:
-            matched.add(old_name)
-            continue
         # one hit suffices -- `matched` holds leaf names, so stop at the first container (layer) the regex matches
-        for container in containers:
+        for container in new_name_to_containers.get(new_name, ()):
             if check_target_module_exists(peft_config, f"{container}.{old_name}"):
                 matched.add(old_name)
                 break
