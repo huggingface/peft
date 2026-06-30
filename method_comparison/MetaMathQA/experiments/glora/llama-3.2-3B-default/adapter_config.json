@@ -1,0 +1,18 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "bias": "none",
+  "config_A_B": "lora",
+  "config_C": "lora",
+  "config_D_E": "constant",
+  "inference_mode": false,
+  "init_weights": true,
+  "modules_to_save": null,
+  "peft_type": "GLORA",
+  "r": 8,
+  "target_modules": [
+    "q_proj",
+    "v_proj"
+  ],
+  "task_type": "CAUSAL_LM"
+}
