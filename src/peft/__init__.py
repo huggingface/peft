@@ -282,7 +282,6 @@ __all__ = [
     "UniLoraConfig",
     "UniLoraModel",
     "VBLoRAConfig",
-    "VBLoRAConfig",
     "VBLoRAModel",
     "VeloraConfig",
     "VeraConfig",
