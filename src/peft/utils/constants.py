@@ -324,6 +324,8 @@ TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING = {
     "qwen3": ["q_proj", "v_proj"],
 }
 
+TRANSFORMERS_MODELS_TO_UNILORA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
+
 TRANSFORMERS_MODELS_TO_OSF_TARGET_MODULES_MAPPING = {
     "llama": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
     "llama4": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],

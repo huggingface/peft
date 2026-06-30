@@ -67,6 +67,7 @@ from .road import RoadConfig, RoadModel
 from .shira import ShiraConfig, ShiraModel
 from .tinylora import TinyLoraConfig, TinyLoraModel
 from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
+from .unilora import UniLoraConfig, UniLoraModel
 from .vblora import VBLoRAConfig, VBLoRAModel
 from .vera import VeraConfig, VeraModel
 from .waveft import WaveFTConfig, WaveFTModel
@@ -159,6 +160,8 @@ __all__ = [
     "TinyLoraModel",
     "TrainableTokensConfig",
     "TrainableTokensModel",
+    "UniLoraConfig",
+    "UniLoraModel",
     "VBLoRAConfig",
     "VBLoRAModel",
     "VeloraConfig",
