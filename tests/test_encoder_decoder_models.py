@@ -27,6 +27,7 @@ from peft import (
     DeloraConfig,
     FourierFTConfig,
     FrodConfig,
+    GloraConfig,
     GraloraConfig,
     HiraConfig,
     HRAConfig,
@@ -123,6 +124,13 @@ ALL_CONFIGS = [
             "target_modules": None,
             "task_type": "SEQ_2_SEQ_LM",
             "sparse_rate": 0.01,
+        },
+    ),
+    (
+        GloraConfig,
+        {
+            "target_modules": None,
+            "task_type": "SEQ_2_SEQ_LM",
         },
     ),
     (

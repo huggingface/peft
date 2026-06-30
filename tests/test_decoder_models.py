@@ -40,6 +40,7 @@ from peft import (
     DeloraConfig,
     FourierFTConfig,
     FrodConfig,
+    GloraConfig,
     GraloraConfig,
     HiraConfig,
     HRAConfig,
@@ -184,6 +185,22 @@ ALL_CONFIGS = [
             "gralora_dropout": 0.05,
             "gralora_k": 4,
             "hybrid_r": 4,
+        },
+    ),
+    (
+        GloraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "init_weights": True,
+        },
+    ),
+    (
+        GloraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "init_weights": False,
         },
     ),
     (
@@ -387,6 +404,7 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
     if "GPT2LMHeadModel" in model_id and config_cls in [
         BeftConfig,
         BOFTConfig,
+        GloraConfig,
         HRAConfig,
         OFTConfig,
         OSFConfig,
@@ -397,7 +415,7 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         DeloraConfig,
         PsoftConfig,
     ]:
-        pytest.skip("Skipping Beft/BOFT/HRA/OFT/Road/SHiRA/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel")
+        pytest.skip("Skipping Beft/BOFT/GLoRA/HRA/OFT/Road/SHiRA/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel")
 
 
 def _skip_alora_no_activation(config_cls, config_kwargs):

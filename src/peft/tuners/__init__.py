@@ -24,6 +24,7 @@ from .deft import DeftConfig, DeftModel
 from .delora import DeloraConfig, DeloraModel
 from .fourierft import FourierFTConfig, FourierFTModel
 from .frod import FrodConfig, FrodModel
+from .glora import GloraConfig, GloraModel
 from .gralora import GraloraConfig, GraloraModel
 from .hira import HiraConfig, HiraModel
 from .hra import HRAConfig, HRAModel
@@ -101,6 +102,8 @@ __all__ = [
     "FourierFTModel",
     "FrodConfig",
     "FrodModel",
+    "GloraConfig",
+    "GloraModel",
     "GraloraConfig",
     "GraloraModel",
     "HRAConfig",

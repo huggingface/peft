@@ -39,6 +39,7 @@ from peft import (
     DeloraConfig,
     FourierFTConfig,
     FrodConfig,
+    GloraConfig,
     GraloraConfig,
     HiraConfig,
     HRAConfig,
@@ -83,6 +84,25 @@ from .testing_utils import get_state_dict, require_non_cpu, set_init_weights_fal
 # EmbConv1D has an embedding and a Conv1D layer
 # Conv2D has a Conv2D layer
 TEST_CASES = [
+    ########
+    # GLoRA #
+    ########
+    ("Vanilla MLP 1 GLoRA", "MLP", GloraConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 GLoRA", "MLP", GloraConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 GLoRA", "MLP", GloraConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 GLoRA", "MLP", GloraConfig, {"target_modules": ["lin0", "lin1"]}),
+    (
+        "Vanilla MLP 5 GLoRA",
+        "MLP",
+        GloraConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"]},
+    ),
+    (
+        "Vanilla MLP 6 GLoRA",
+        "MLP",
+        GloraConfig,
+        {"target_modules": ["lin0", "lin1"], "modules_to_save": ["lin1"]},
+    ),
     ########
     # LoRA #
     ########
@@ -1397,6 +1417,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin1"], "init_weights": False},
     ),
     (
+        "GLoRA Same",
+        "glora",
+        GloraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "GLoRA Different",
+        "glora",
+        GloraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
         "SHiRA Same",
         "shira",
         ShiraConfig,
@@ -2638,13 +2672,17 @@ class TestPeftCustomModel(PeftCommonTester):
         elif "mha" in model_id.lower():
             # we get exploding gradients with MHA when learning rate is too high
             lr = 1e-3
+        elif issubclass(config_cls, GloraConfig):
+            # GLoRA keeps some factors at zero at init; a higher LR helps all adapter tensors move within a few steps.
+            lr = 50.0
         elif is_monteclora:
             lr = 1e-3
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
-        for _ in range(3):
+        n_train_steps = 10 if issubclass(config_cls, GloraConfig) else 3
+        for _ in range(n_train_steps):
             optimizer.zero_grad()
             y_pred = model(**X)
             loss = y_pred.sum()
@@ -4456,6 +4494,9 @@ class TestMultipleActiveAdapters:
         _skip_if_merging_not_supported(test_name, config_cls, config_kwargs_1)
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
 
+        config_1 = config_cls(**config_kwargs_1)
+        config_2 = config_cls(**config_kwargs_2)
+
         torch.manual_seed(0)
 
         model = self.resolve_model_cls(tuner_method)
@@ -4463,9 +4504,6 @@ class TestMultipleActiveAdapters:
 
         X = self.prepare_inputs_for_testing()
         base_output = model(**X)
-
-        config_1 = config_cls(**config_kwargs_1)
-        config_2 = config_cls(**config_kwargs_2)
 
         peft_model = get_peft_model(model, config_1, adapter_name="adapter_1").eval()
         peft_model.add_adapter("adapter_2", config_2)
@@ -6474,6 +6512,11 @@ MIXED_ADAPTER_TEST_CASES = [
         RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
         RoadConfig(target_modules=["lin0"], group_size=2, variant="road_2", init_weights=False),
     ),
+    (
+        "GLoRA mixed adapter",
+        GloraConfig(target_modules=["lin0"], init_weights=False),
+        GloraConfig(target_modules=["lin0"], r=16, init_weights=False),
+    ),
 ]
 
 
@@ -6542,6 +6585,11 @@ class TestMixedAdapterBatches:
                 RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
                 RoadConfig(target_modules=["lin1"], group_size=2, init_weights=False),
             ),
+            (
+                "GLoRA mixed adapter with different target layers",
+                GloraConfig(target_modules=["lin0"], init_weights=False),
+                GloraConfig(target_modules=["lin1"], init_weights=False),
+            ),
         ],
     )
     def test_mixed_adapter_batches_different_target_layers(self, test_name, config0, config1):
@@ -6563,6 +6611,11 @@ class TestMixedAdapterBatches:
                 "RoAd mixed adapter with modules to save",
                 RoadConfig(target_modules=["lin0"], modules_to_save=["lin1"], group_size=2, init_weights=False),
                 RoadConfig(target_modules=["lin0"], modules_to_save=["lin1"], group_size=2, init_weights=False),
+            ),
+            (
+                "GLoRA mixed adapter with modules to save",
+                GloraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_weights=False),
+                GloraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_weights=False),
             ),
         ],
     )
@@ -6607,6 +6660,11 @@ class TestMixedAdapterBatches:
                 "RoAd mixed adapter with overlapping layers",
                 RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
                 RoadConfig(target_modules=["lin0", "lin1"], group_size=2, init_weights=False),
+            ),
+            (
+                "GLoRA mixed adapter with overlapping layers",
+                GloraConfig(target_modules=["lin0"], init_weights=False),
+                GloraConfig(target_modules=["lin0", "lin1"], init_weights=False),
             ),
         ],
     )
@@ -6753,6 +6811,10 @@ class TestMixedAdapterBatches:
             (
                 "RoAD mixed batch wrong adapter name",
                 RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
+            ),
+            (
+                "GLoRA mixed batch wrong adapter name",
+                GloraConfig(target_modules=["lin0"], init_weights=False),
             ),
         ],
     )
