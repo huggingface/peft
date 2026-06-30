@@ -2657,6 +2657,51 @@ class TestPeftCustomModel(PeftCommonTester):
             # This is bad, there was a warning about the bias when there should not have been any.
             self.fail("There should be no warning when bias is set to 'none'")
 
+    def test_lora_only_bias_is_saved_and_reloaded(self, tmp_path):
+        # See https://github.com/huggingface/peft/issues/3306: with bias="lora_only" the trained
+        # base_layer bias of targeted modules lives at "<module>.base_layer.bias" in the current
+        # tuner-layer structure. It must be included in the saved adapter, otherwise reloading does
+        # not reproduce the trained outputs. Conversely, with bias="none" it must not be saved.
+        from peft.utils import get_peft_model_state_dict
+
+        bias_key = "base_model.model.lin0.base_layer.bias"
+
+        torch.manual_seed(0)
+        model = self.transformers_class.from_pretrained("MLP").to(self.torch_device)
+        config = LoraConfig(target_modules=["lin0"], bias="lora_only")
+        model = get_peft_model(model, config)
+
+        # simulate training by perturbing every trainable parameter, including the base_layer bias
+        with torch.no_grad():
+            for _, param in model.named_parameters():
+                if param.requires_grad:
+                    param.add_(torch.randn_like(param) * 0.1)
+
+        state_dict = get_peft_model_state_dict(model)
+        assert bias_key in state_dict
+
+        data = torch.rand(10, 10).to(self.torch_device)
+        with torch.no_grad():
+            output_before = model(data)
+
+        model.save_pretrained(tmp_path)
+        saved = safe_load_file(tmp_path / "adapter_model.safetensors")
+        assert bias_key in saved
+
+        # reload into a freshly initialized base model with identical base weights (same seed)
+        torch.manual_seed(0)
+        base = self.transformers_class.from_pretrained("MLP").to(self.torch_device)
+        reloaded = PeftModel.from_pretrained(base, tmp_path)
+        with torch.no_grad():
+            output_after = reloaded(data)
+        assert torch.allclose(output_before, output_after)
+
+        # bias="none": the base_layer bias must NOT be saved
+        model_none = self.transformers_class.from_pretrained("MLP").to(self.torch_device)
+        config_none = LoraConfig(target_modules=["lin0"], bias="none")
+        model_none = get_peft_model(model_none, config_none)
+        assert bias_key not in get_peft_model_state_dict(model_none)
+
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_active_adapter(self, test_name, model_id, config_cls, config_kwargs):
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
