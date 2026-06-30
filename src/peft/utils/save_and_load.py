@@ -45,6 +45,58 @@ from .other import (
 from .peft_types import PeftType
 
 
+def _validate_lora_adapter_state_dict(
+    state_dict: dict[str, torch.Tensor],
+    adapter_name: str = "default",
+) -> None:
+    """Refuse to save a LoRA adapter state dict whose ``lora_A`` / ``lora_B`` tensors look unsharded.
+
+    A correctly-saved LoRA adapter has ``lora_A`` of shape ``(rank, in_dim)`` and ``lora_B`` of shape ``(out_dim,
+    rank)`` — both 2-D and non-empty. If any such tensor is 1-D or has a zero-sized dimension, it typically indicates
+    a partitioned-parameter export under DeepSpeed ZeRO-3 / FSDP that did not gather model shards before
+    ``save_pretrained``. The artifact looks structurally valid (filenames + ``adapter_config.json`` present),
+    but downstream loaders fail with confusing index errors at the first attempted use, e.g.::
+
+        IndexError: too many indices for tensor of dimension 1
+
+    in vLLM's ``slice_lora_b`` during hot-swap (vllm-project/vllm#28640).
+
+    Raise here so the failure surfaces at write time, with an actionable hint, instead of corrupting the artifact and
+    deferring the crash to whatever later loads it. Only the ``lora_A`` / ``lora_B`` keys are inspected; legitimately
+    1-D parameters such as DoRA's ``lora_magnitude_vector`` and AdaLoRA's ``lora_E`` are not affected.
+
+    Args:
+        state_dict: LoRA-only state dict that will be written to disk.
+        adapter_name: Adapter name being saved, used in the error message only.
+
+    Raises:
+        ValueError: When at least one ``lora_A`` / ``lora_B`` tensor is empty or has fewer than 2 dimensions.
+    """
+    bad: list[tuple[str, tuple[int, ...]]] = []
+    for name, tensor in state_dict.items():
+        if not isinstance(tensor, torch.Tensor):
+            continue
+        if ".lora_A" not in name and ".lora_B" not in name:
+            continue
+        shape = tuple(tensor.shape)
+        if len(shape) < 2 or any(d == 0 for d in shape):
+            bad.append((name, shape))
+
+    if not bad:
+        return
+
+    preview = ", ".join(f"{n}:{s}" for n, s in bad[:3])
+    suffix = f" (+{len(bad) - 3} more)" if len(bad) > 3 else ""
+    raise ValueError(
+        f"Adapter {adapter_name!r}: {len(bad)} LoRA tensor(s) have invalid shape: "
+        f"{preview}{suffix}. A 1-D or zero-sized lora_A / lora_B tensor indicates that DeepSpeed ZeRO-3 / FSDP shards "
+        "were not gathered before save_pretrained() — downstream loaders such as vLLM hot-swap will then fail with "
+        "IndexError at first use. Wrap the save in deepspeed.zero.GatheredParameters([...], modifier_rank=None) for "
+        "ZeRO-3, or torch.distributed.fsdp.FullyShardedDataParallel.summon_full_params(model) for FSDP, before "
+        "calling save_pretrained()."
+    )
+
+
 def has_valid_embedding_base_layer(layer):
     """Check if the layer has an embedding base layer"""
     return hasattr(layer, "base_layer") and isinstance(layer.base_layer, (torch.nn.Linear, torch.nn.Embedding))
@@ -128,6 +180,9 @@ def get_peft_model_state_dict(
         model = getattr(model, "_orig_mod", model)
 
     config = model.peft_config[adapter_name]
+    # Only validate shapes for state dicts we infer ourselves. When the caller passes an explicit `state_dict` we have
+    # no guarantee about its provenance (e.g. a manually post-processed export), so we must not second-guess it.
+    state_dict_was_inferred = state_dict is None
     if state_dict is None:
         state_dict = model.state_dict()
 
@@ -488,6 +543,10 @@ def get_peft_model_state_dict(
         return f"{key}.{suffix}"  # stitch the suffix back, e.g, v_proj.lora_A.weight
 
     to_return = {remove_adapter_name(k): v for k, v in to_return.items()}
+
+    if state_dict_was_inferred and config.peft_type in (PeftType.LORA, PeftType.ADALORA):
+        _validate_lora_adapter_state_dict(to_return, adapter_name=adapter_name)
+
     return to_return
 
 

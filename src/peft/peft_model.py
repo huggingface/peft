@@ -321,6 +321,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 adapter_name=adapter_name,
                 save_embedding_layers=save_embedding_layers,
             )
+
             output_dir = os.path.join(save_directory, adapter_name) if adapter_name != "default" else save_directory
             os.makedirs(output_dir, exist_ok=True)
 
