@@ -178,7 +178,7 @@ TEST_CASES = [
     ),
     (
         ShiraConfig,
-        {"r": 8},
+        {"r": 8, "random_seed": 42},
     ),
     (
         VeraConfig,

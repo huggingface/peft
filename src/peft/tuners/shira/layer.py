@@ -211,15 +211,14 @@ class Linear(nn.Module, ShiraLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            base_result = self.base_layer(x)
-            new_weight = torch.zeros(self.out_features, self.in_features).to(base_result)
+            new_weight = self.get_base_weight().clone()
 
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.shira_weight.keys():
                     continue
                 new_weight += self.get_delta_weight(active_adapter)
 
-            result = base_result + F.linear(x, new_weight)
+            result = F.linear(x, new_weight, bias=self.base_layer.bias)
 
         return result
 
