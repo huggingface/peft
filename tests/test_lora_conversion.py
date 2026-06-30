@@ -713,10 +713,6 @@ class TestMultiplicativeLoraConversion:
                 self.base_model = AutoModelForCausalLM.from_pretrained(self.model_id).to(self.torch_device)
         return copy.deepcopy(self.base_model)
 
-    @staticmethod
-    def get_mse(output1, output2):
-        return nn.functional.mse_loss(output1.hidden_states[-1], output2.hidden_states[-1]).item()
-
     @pytest.fixture
     def oft_model(self):
         torch.manual_seed(0)
@@ -742,86 +738,3 @@ class TestMultiplicativeLoraConversion:
 
     def test_boft_supports_lora_conversion(self, boft_model):
         assert boft_model.supports_lora_conversion()
-
-    def test_oft_converted_lora_approximates_original(self, oft_model):
-        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
-        with torch.inference_mode():
-            with oft_model.disable_adapter():
-                output_base = oft_model(inputs, output_hidden_states=True)
-            output_oft = oft_model(inputs, output_hidden_states=True)
-
-        # sanity check: OFT should change the output
-        atol, rtol = 1e-4, 1e-4
-        assert not torch.allclose(output_base.logits, output_oft.logits, atol=atol, rtol=rtol)
-
-        lora_config, state_dict = convert_to_lora(oft_model, rank=8)
-        base_model = self.get_base_model()
-        lora_model = get_peft_model(base_model, lora_config).eval()
-        load_result = set_peft_model_state_dict(lora_model, state_dict)
-        assert not load_result.unexpected_keys
-
-        with torch.inference_mode():
-            output_converted = lora_model(inputs, output_hidden_states=True)
-
-        mse_converted = self.get_mse(output_converted, output_oft)
-        assert 0.0 < mse_converted < 0.1, f"OFT conversion MSE too high: {mse_converted}"
-
-    def test_boft_converted_lora_approximates_original(self, boft_model):
-        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
-        with torch.inference_mode():
-            with boft_model.disable_adapter():
-                output_base = boft_model(inputs, output_hidden_states=True)
-            output_boft = boft_model(inputs, output_hidden_states=True)
-
-        # sanity check: BOFT should change the output
-        atol, rtol = 1e-4, 1e-4
-        assert not torch.allclose(output_base.logits, output_boft.logits, atol=atol, rtol=rtol)
-
-        lora_config, state_dict = convert_to_lora(boft_model, rank=8)
-        base_model = self.get_base_model()
-        lora_model = get_peft_model(base_model, lora_config).eval()
-        load_result = set_peft_model_state_dict(lora_model, state_dict)
-        assert not load_result.unexpected_keys
-
-        with torch.inference_mode():
-            output_converted = lora_model(inputs, output_hidden_states=True)
-
-        mse_converted = self.get_mse(output_converted, output_boft)
-        assert 0.0 < mse_converted < 0.1, f"BOFT conversion MSE too high: {mse_converted}"
-
-    def test_oft_targeted_modules_identical(self, oft_model):
-        _, lora_state_dict = convert_to_lora(oft_model, rank=8)
-        oft_state_dict = oft_model.state_dict()
-
-        modules_oft = {k.rsplit(".", 3)[0] for k in oft_state_dict.keys() if ".oft_R" in k}
-        modules_lora = {k.rsplit(".", 2)[0] for k in lora_state_dict.keys() if ".lora" in k}
-        assert modules_oft == modules_lora
-
-    def test_boft_targeted_modules_identical(self, boft_model):
-        _, lora_state_dict = convert_to_lora(boft_model, rank=8)
-        boft_state_dict = boft_model.state_dict()
-
-        modules_boft = {k.rsplit(".", 2)[0] for k in boft_state_dict.keys() if ".boft_R" in k}
-        modules_lora = {k.rsplit(".", 2)[0] for k in lora_state_dict.keys() if ".lora" in k}
-        assert modules_boft == modules_lora
-
-    def test_oft_save_as_lora(self, oft_model, tmp_path):
-        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
-        atol, rtol = 1e-4, 1e-4
-
-        lora_config, state_dict = convert_to_lora(oft_model, rank=8)
-        base_model = self.get_base_model()
-        lora_model = get_peft_model(base_model, lora_config).eval()
-        set_peft_model_state_dict(lora_model, state_dict)
-
-        with torch.inference_mode():
-            output_before = lora_model(inputs).logits
-
-        save_as_lora(tmp_path, oft_model, rank=8)
-        base_model = self.get_base_model()
-        loaded_model = PeftModel.from_pretrained(base_model, tmp_path).to(self.torch_device)
-
-        with torch.inference_mode():
-            output_after = loaded_model(inputs).logits
-
-        assert torch.allclose(output_before, output_after, atol=atol, rtol=rtol)

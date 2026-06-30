@@ -1785,17 +1785,22 @@ class BaseTunerLayer(ABC):
         """
         Return the additive delta weight W' - W for the given adapter.
 
-        For additive PEFT methods (e.g. LoRA, LoKr, LoHa), this is equivalent to ``get_delta_weight``. For
-        multiplicative methods (e.g. OFT, BOFT), this method should be overridden to compute the actual additive delta
-        by constructing the effective weight W' and subtracting the base weight W.
+        For additive PEFT methods (e.g. LoRA, LoKr, LoHa), this is equivalent to `get_delta_weight`. For multiplicative
+        methods (e.g. OFT, BOFT), this method should be overridden to compute the actual additive delta by constructing
+        the effective weight W' and subtracting the base weight W.
 
-        The result is used by ``convert_to_lora`` to perform an SVD-based approximation of the adapter as a LoRA
-        adapter.
+        The result is used by `convert_to_lora` to perform an SVD-based approximation of the adapter as a LoRA adapter.
+
+        By default, this raises `NotImplementedError`. Additive PEFT methods that support LoRA conversion should
+        override this to return `self.get_delta_weight(adapter_name)`.
 
         Args:
             adapter_name (`str`): The name of the adapter. Defaults to `"default"`.
         """
-        return self.get_delta_weight(adapter_name)
+        raise NotImplementedError(
+            f"{type(self)} does not support get_additive_delta. If this is an additive PEFT method, override this "
+            "method to return self.get_delta_weight(adapter_name)."
+        )
 
 
 def _find_minimal_target_modules(

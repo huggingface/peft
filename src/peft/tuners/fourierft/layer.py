@@ -195,6 +195,9 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
         # shape for conversion
         return not isinstance(self.get_base_layer(), Conv1D)
 
+    def get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        return self.get_delta_weight(adapter_name)
+
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "fourierft." + rep
