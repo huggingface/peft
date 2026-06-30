@@ -35,7 +35,9 @@ from transformers.core_model_loading import (
     rename_source_key,
 )
 
-from peft import PeftType
+from peft import PeftConfig, PeftType
+from peft.tuners.tuners_utils import _maybe_include_all_linear_layers, check_target_module_exists
+from peft.utils.constants import INCLUDE_LINEAR_LAYERS_SHORTHAND
 
 
 # https://github.com/huggingface/transformers/pull/45340#issuecomment-4222734042
@@ -350,22 +352,15 @@ _MOE_FUSED_TARGETS: dict[str, dict[str, set[str]]] = {
 }
 
 
-def _resolve_string_target_modules(peft_config, model, target_module_mapping: dict[str, str]) -> set[str]:
-    """Resolve a string ``target_modules`` (a regex or the ``"all-linear"`` shorthand) to a concrete set of leaf names.
+def _resolve_string_target_modules(
+    peft_config: PeftConfig, model: torch.nn.Module, target_module_mapping: dict[str, str]
+) -> set[str]:
+    """Resolve a string `target_modules` (a regex or `"all-linear"`) to the concrete leaf names it targets.
 
-    Resolving the string up front lets the regular list-based remap downstream work unchanged. The pre-fusion expert
-    projections (e.g. ``gate_proj``, ``up_proj``) no longer exist as submodules on a Transformers v5 model -- they are
-    fused into stacked parameters such as ``gate_up_proj`` -- so they cannot be discovered via
-    ``model.named_modules()``. We therefore match against both real module/parameter keys and v4-style expert keys
-    reconstructed from each fused parameter's container.
-
-    ``"all-linear"`` is matched by module *type* rather than as a regex (see ``_maybe_include_all_linear_layers``). On
-    the original v4 architecture the experts were ``nn.Linear``, so ``"all-linear"`` targeted them; we preserve that by
-    also adding any old projection name whose fused container is present on the model.
+    Resolving up front lets the list-based remap downstream stay unchanged. The pre-fusion expert projections
+    (`gate_proj`, `up_proj`) are absent from a v5 model -- they live inside the stacked `gate_up_proj` parameter -- so
+    they are recovered from each fused parameter's container, not from `named_modules()`/`named_parameters()`.
     """
-    from peft.tuners.tuners_utils import _maybe_include_all_linear_layers, check_target_module_exists
-    from peft.utils.constants import INCLUDE_LINEAR_LAYERS_SHORTHAND
-
     module_keys = [name for name, _ in model.named_modules()]
     param_keys = [name for name, _ in model.named_parameters()]
     # new (fused) name -> container paths, used to reconstruct the pre-fusion expert keys
@@ -376,21 +371,19 @@ def _resolve_string_target_modules(peft_config, model, target_module_mapping: di
 
     is_all_linear = peft_config.target_modules.lower() == INCLUDE_LINEAR_LAYERS_SHORTHAND
     if is_all_linear:
-        # resolve the shorthand to the concrete linear module names (matched by type), then keep only the leaf names
         resolved = _maybe_include_all_linear_layers(copy.copy(peft_config), model).target_modules
         matched: set[str] = {name.rsplit(".", 1)[-1] for name in resolved}
     else:
-        # regex: every real module/parameter whose key matches the pattern (covers the attention projections that stay
-        # in `target_modules` as well as the router `gate` and the `down_proj` parameter, which keep their v5 names)
+        # leaf names of the real module/parameter keys the regex matches (q/k/v_proj, router `gate`, `down_proj`)
         matched = {
             key.rsplit(".", 1)[-1]
             for key in itertools.chain(module_keys, param_keys)
             if check_target_module_exists(peft_config, key)
         }
 
-    # the pre-fusion expert projections (e.g. `gate_proj`, `up_proj`) were fused and renamed, so they are absent from
-    # the v5 model. Recover them from each fused parameter's container: for "all-linear", a present container means the
-    # projection was an `nn.Linear` in v4 and would have been targeted; for a regex, probe the reconstructed v4 keys.
+    # Recover the fused experts: container `model.layers.0.mlp.experts` of `...experts.gate_up_proj` reconstructs the
+    # v4 keys `...experts.gate_proj` / `.up_proj` a regex targets. "all-linear" matches a fused expert iff its
+    # container is present (it was `nn.Linear` in v4); a regex is probed against the reconstructed key.
     for old_name, new_name in target_module_mapping.items():
         if old_name in matched:
             continue
@@ -400,7 +393,7 @@ def _resolve_string_target_modules(peft_config, model, target_module_mapping: di
         if is_all_linear:
             matched.add(old_name)
             continue
-        # probe the reconstructed v4 key (the fused parameter's container + the pre-fusion projection name)
+        # one hit suffices -- `matched` holds leaf names, so stop at the first container (layer) the regex matches
         for container in containers:
             if check_target_module_exists(peft_config, f"{container}.{old_name}"):
                 matched.add(old_name)
@@ -408,19 +401,17 @@ def _resolve_string_target_modules(peft_config, model, target_module_mapping: di
     return matched
 
 
-def _convert_peft_config_moe(peft_config, model) -> None:
+def _convert_peft_config_moe(peft_config: PeftConfig, model: torch.nn.Module) -> None:
     """
     In-place convert the PEFT config of MoE models whose architecture changed from transformers v4 to v5.
 
     Since the model architecture changed, the targets have to updated accordingly. Moreover, when weights are fused, it
     requires updating the rank and alpha values of those parameters.
 
-    ``target_modules`` may be a list/set of names, the special string ``"all-linear"``, or a regex string (e.g. a
-    pattern produced by an upstream framework like ms-swift). A string is resolved against the model up front (see
-    ``_resolve_string_target_modules``) into the concrete projection names it targets, so the regular list-based remap
-    below applies to all input shapes alike.
+    A string `target_modules` (a regex, or `"all-linear"`) is resolved against the model up front (see
+    `_resolve_string_target_modules`), so the list-based remap below applies to lists, regexes and `"all-linear"` alike.
     """
-    model_type = getattr(getattr(model, "config", None), "model_type", None)
+    model_type = getattr(model.config, "model_type", None)
     base_model_type = _MODEL_TO_CONVERSION_PATTERN.get(model_type, None)
     if base_model_type is None:
         return
@@ -433,14 +424,10 @@ def _convert_peft_config_moe(peft_config, model) -> None:
     if not fused_targets:
         return
 
-    # A string `target_modules` (a regex or the "all-linear" shorthand) is resolved against the model into the concrete
-    # projection names it targets. The pre-fusion expert projections don't exist as submodules on a v5 model, so they
-    # can't be recovered by iterating the string -- they are matched against the (reconstructed) model keys instead.
     if isinstance(peft_config.target_modules, str):
         resolved = _resolve_string_target_modules(peft_config, model, target_module_mapping)
         if not resolved:
-            # The string matches nothing on the model (e.g. an invalid bare name like "q_proj", which is a regex here).
-            # Leave it untouched so the regular injection path raises its usual error instead of remapping anything.
+            # nothing matched (e.g. bare "q_proj", invalid as a regex) -- leave it for the standard not-found error
             return
         peft_config.target_modules = resolved
 
