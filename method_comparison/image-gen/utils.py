@@ -514,6 +514,7 @@ def log_results(
     train_config: TrainConfig,
     peft_config: Optional[PeftConfig],
     print_fn: Callable[..., None],
+    save_dir: Optional[str] = None,
 ) -> None:
     if train_result.accelerator_memory_reserved_log:
         accelerator_memory_avg = int(
@@ -541,7 +542,8 @@ def log_results(
 
     peft_branch = get_peft_branch()
 
-    save_dir = get_result_save_dir(train_status=train_result.status, peft_branch=peft_branch)
+    if save_dir is None:
+        save_dir = get_result_save_dir(train_status=train_result.status, peft_branch=peft_branch)
 
     if save_dir == RESULT_PATH_CANCELLED:
         print_fn("Experiment run was categorized as canceled")

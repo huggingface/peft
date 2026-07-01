@@ -37,6 +37,18 @@ python run.py -v experiments/lora/flux2-klein-rank16/
 
 By default, the adapter will be saved in a temporary file for further inspection if needed. To prevent this, add the `--clean` flag to the call. To upload the model checkpoint and sample images to a Hugging Face Hub Bucket, pass the `--bucket_name your_user/my_bucket_name` argument.
 
+### Evaluating an existing checkpoint
+
+To run the evaluation (DINOv2 similarity and drift on the test set, sample images) on an already trained checkpoint without retraining, pass the directory containing the trained PEFT checkpoint to `evaluate.py`:
+
+```sh
+python evaluate.py -v /path/to/checkpoint/
+```
+
+The adapter is loaded on top of the same base model and the evaluation runs under the same conditions (seeds, settings) as at the end of a training run. By default, the training parameters are taken from `default_training_params.json`; if the checkpoint was trained with different parameters, place the corresponding `training_params.json` into the checkpoint directory.
+
+The results and sample images of such an evaluation run are always treated as temporary results, i.e. they are stored in `temporary_results/` and `sample-images/temporary_results/`, respectively. Note that evaluating full fine-tuning checkpoints is not supported.
+
 ### Running all pending experiments
 
 The Makefile checks which experiments are missing a corresponding results file and runs those experiments. Note that running a whole sweep can easily take many hours.
@@ -86,4 +98,3 @@ Python 3.12+ is required.
 
 - Add further experiments (more PEFT methods) and explore better hyper-parameters.
 - Test images are already created but they're not uploaded anywhere.
-- The method comparison Gradio app needs to be updated to show the generated images.

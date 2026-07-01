@@ -5,6 +5,8 @@ on:
     branches: [ main ]
     paths:
       - "method_comparison/**"
+      # the method explorer (PEFT shop) app has its own Space and deploy workflow
+      - "!method_comparison/peft-shop/**"
   workflow_dispatch:
 
 permissions: {}
@@ -16,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 0  # full history needed for subtree
           persist-credentials: false
@@ -32,6 +34,8 @@ jobs:
       - name: Deploy method_comparison app to HF Spaces
         run: |
           cd method_comparison
+          # the method explorer (PEFT shop) app is deployed to its own Space by its own workflow
+          rm -rf peft-shop
           git init
           # Spaces expect requirements.txt
           mv requirements-app.txt requirements.txt
@@ -45,9 +49,9 @@ jobs:
       - name: Deploy embeddable method_comparison app to HF Spaces (for docs)
         run: |
           cd method_comparison
+          rm -rf .git
           git init
-          # Spaces expect requirements.txt
-          mv requirements-app.txt requirements.txt
+          # requirements.txt is already present from the previous step
           mv app_embed.py app.py
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
