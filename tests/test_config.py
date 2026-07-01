@@ -62,6 +62,7 @@ from peft import (
     TaskType,
     TinyLoraConfig,
     TrainableTokensConfig,
+    UniLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -118,6 +119,7 @@ ALL_CONFIG_CLASSES = (
     (OFTConfig, {}),
     (PveraConfig, {}),
     (WaveFTConfig, {}),
+    (UniLoraConfig, {}),
 )
 
 
