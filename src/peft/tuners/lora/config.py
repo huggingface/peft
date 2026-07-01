@@ -17,12 +17,12 @@ from __future__ import annotations
 import importlib
 import warnings
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import ClassVar, Literal, Optional, Union
 
 from torch import nn
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -544,6 +544,105 @@ class LoraConfig(PeftConfig):
             `target_modules`.
 
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "LORA": Paper(
+            title="LoRA: Low-Rank Adaptation of Large Language Models",
+            url="https://huggingface.co/papers/2106.09685",
+        ),
+        "rsLoRA": Paper(
+            title="A Rank Stabilization Scaling Factor for Fine-Tuning with LoRA",
+            url="https://huggingface.co/papers/2312.03732",
+            description="To use rank-stabilized LoRA, pass `use_rslora=True`.",
+        ),
+        "DoRA": Paper(
+            title="DoRA: Weight-Decomposed Low-Rank Adaptation",
+            url="https://huggingface.co/papers/2402.09353",
+            description="To use DoRA, pass `use_dora=True`.",
+        ),
+        "PiSSA": Paper(
+            title="PiSSA: Principal Singular Values and Singular Vectors Adaptation of Large Language Models",
+            url="https://huggingface.co/papers/2404.02948",
+            description=(
+                "To use PiSSA initialization, pass `init_lora_weights='pissa'` or "
+                "`init_lora_weights='pissa_niter_[number of iters]'`."
+            ),
+        ),
+        "OLoRA": Paper(
+            title="OLoRA: Orthonormal Low-Rank Adaptation of Large Language Models",
+            url="https://huggingface.co/papers/2406.01775",
+            description="To use OLoRA initialization, pass `init_lora_weights='olora'`.",
+        ),
+        "EVA": Paper(
+            title="Parameter Efficient Fine-tuning via Explained Variance Adaptation",
+            url="https://huggingface.co/papers/2410.07170",
+            description="To use EVA initialization, pass `init_lora_weights='eva'`, optionally with an `eva_config`.",
+        ),
+        "CorDA": Paper(
+            title=(
+                "CorDA: Context-Oriented Decomposition Adaptation of Large Language Models for Task-Aware "
+                "Parameter-Efficient Fine-tuning"
+            ),
+            url="https://huggingface.co/papers/2406.05223",
+            description=(
+                "To use CorDA initialization, pass `init_lora_weights='corda'` together with a `corda_config`."
+            ),
+        ),
+        "LoftQ": Paper(
+            title="LoftQ: LoRA-Fine-Tuning-Aware Quantization for Large Language Models",
+            url="https://huggingface.co/papers/2310.08659",
+            description=(
+                "To use LoftQ initialization, pass `init_lora_weights='loftq'` together with a `loftq_config`."
+            ),
+        ),
+        "LoRA-GA": Paper(
+            title="LoRA-GA: Low-Rank Adaptation with Gradient Approximation",
+            url="https://huggingface.co/papers/2407.05000",
+            description=(
+                "To use LoRA-GA initialization, pass `init_lora_weights='lora_ga'` together with a `lora_ga_config`."
+            ),
+        ),
+        "QA-LoRA": Paper(
+            title="QA-LoRA: Quantization-Aware Low-Rank Adaptation of Large Language Models",
+            url="https://huggingface.co/papers/2309.14717",
+            description="To use QA-LoRA, pass `use_qalora=True` (currently only implemented for GPTQ).",
+        ),
+        "aLoRA": Paper(
+            title="Activated LoRA: Fine-tuned LLMs for Intrinsics",
+            url="https://huggingface.co/papers/2504.12397",
+            description="To use Activated LoRA, pass `alora_invocation_tokens`.",
+        ),
+        "VeLoRA": Paper(
+            title="VeLoRA: Memory Efficient Training using Rank-1 Sub-Token Projections",
+            url="https://huggingface.co/papers/2405.17991",
+            description="To use VeLoRA, pass a `velora_config`.",
+        ),
+        "Arrow": Paper(
+            title="Towards Modular LLMs by Building and Reusing a Library of LoRAs",
+            url="https://huggingface.co/papers/2405.11157",
+            description="To use Arrow routing, pass an `arrow_config`.",
+        ),
+        "GenKnowSub": Paper(
+            title="GenKnowSub: Improving Modularity and Reusability of LLMs through General Knowledge Subtraction",
+            url="https://aclanthology.org/2025.acl-short.54/",
+            description="To use GenKnowSub, set `use_gks=True` in the `arrow_config`.",
+        ),
+        "MonteCLoRA": Paper(
+            title="Robust and Efficient Fine-tuning of LLMs with Bayesian Reparameterization of Low-Rank Adaptation",
+            url="https://huggingface.co/papers/2411.04358",
+            description="To use MonteCLoRA, pass a `monteclora_config`.",
+        ),
+        "BD-LoRA": Paper(
+            title="Block-Diagonal LoRA for Eliminating Communication Overhead in Tensor Parallel LoRA Serving",
+            url="https://huggingface.co/papers/2510.23346",
+            description="To use BD-LoRA, pass a `use_bdlora`.",
+        ),
+        "MiCA": Paper(
+            title="MiCA Learns More Knowledge Than LoRA and Full Fine-Tuning",
+            url="https://huggingface.co/papers/2604.01694",
+            description="To use MiCA, pass a `init_lora_weights='mica'`.",
+        ),
+    }
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
     target_modules: Optional[Union[list[str], str]] = field(

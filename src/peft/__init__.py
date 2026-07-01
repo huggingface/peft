@@ -156,6 +156,7 @@ from .tuners.cartridge.utils import (
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
+    Paper,
     PeftType,
     PeftWarning,
     TaskType,
@@ -240,6 +241,7 @@ __all__ = [
     "OFTModel",
     "OSFConfig",
     "OSFModel",
+    "Paper",
     "PeanutConfig",
     "PeanutModel",
     "PeftConfig",

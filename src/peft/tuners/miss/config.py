@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import ClassVar, Literal, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -65,6 +65,13 @@ class MissConfig(PeftConfig):
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "MISS": Paper(
+            title="MiSS: Revisiting the Trade-off in LoRA with an Efficient Shard-Sharing Structure",
+            url="https://arxiv.org/abs/2409.15371",
+        ),
+    }
 
     r: int = field(
         default=64,

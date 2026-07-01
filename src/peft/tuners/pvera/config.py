@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -78,6 +78,13 @@ class PveraConfig(PeftConfig):
         generator_seed (`int`, defaults to None):
             Random seed for the generator for sampling from the learned distribution.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "PVERA": Paper(
+            title="PVeRA: Probabilistic Vector-Based Random Matrix Adaptation",
+            url="https://huggingface.co/papers/2512.07703",
+        ),
+    }
 
     r: int = field(
         default=256,

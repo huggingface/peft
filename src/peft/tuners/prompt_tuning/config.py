@@ -14,10 +14,10 @@
 
 import enum
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from peft.config import PromptLearningConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 class PromptTuningInit(str, enum.Enum):
@@ -44,6 +44,13 @@ class PromptTuningConfig(PromptLearningConfig):
             The keyword arguments to pass to `AutoTokenizer.from_pretrained`. Only used if `prompt_tuning_init` is
             `TEXT`.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "PROMPT_TUNING": Paper(
+            title="The Power of Scale for Parameter-Efficient Prompt Tuning",
+            url="https://huggingface.co/papers/2104.08691",
+        ),
+    }
 
     prompt_tuning_init: Union[PromptTuningInit, str] = field(
         default=PromptTuningInit.RANDOM,

@@ -13,10 +13,10 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import ClassVar, Literal, Optional
 
 from peft.config import PromptLearningConfig
-from peft.utils import PeftType, TaskType
+from peft.utils import Paper, PeftType, TaskType
 
 
 @dataclass
@@ -32,6 +32,13 @@ class CPTConfig(PromptLearningConfig):
 
     For more details, see the paper: https://huggingface.co/papers/2410.17222
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "CPT": Paper(
+            title="Context-aware Prompt Tuning: Advancing In-Context Learning with Adversarial Methods",
+            url="https://huggingface.co/papers/2410.17222",
+        ),
+    }
 
     # Token-related configurations
     cpt_token_ids: Optional[list[int]] = field(

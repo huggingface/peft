@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -87,6 +87,13 @@ class TinyLoraConfig(PeftConfig):
         model = get_peft_model(base_model, config)
         ```
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "TINYLORA": Paper(
+            title="Learning to Reason in 13 Parameters",
+            url="https://huggingface.co/papers/2602.04118",
+        ),
+    }
 
     r: int = field(default=2, metadata={"help": "TinyLoRA SVD rank (frozen)"})
     u: int = field(default=64, metadata={"help": "Trainable vector dimension per group"})

@@ -13,10 +13,10 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import ClassVar, Literal
 
 from peft.config import PromptLearningConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -30,6 +30,13 @@ class PrefixTuningConfig(PromptLearningConfig):
         encoder_hidden_size (`int`): The hidden size of the prompt encoder.
         prefix_projection (`bool`): Whether to project the prefix embeddings.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "PREFIX_TUNING": Paper(
+            title="Prefix-Tuning: Optimizing Continuous Prompts for Generation",
+            url="https://huggingface.co/papers/2101.00190",
+        ),
+    }
 
     init_weights: Literal["zero"] | None = field(
         default=None,

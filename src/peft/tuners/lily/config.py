@@ -14,10 +14,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -89,6 +89,13 @@ class LilyConfig(PeftConfig):
             is zero at the start of training and does not disturb the pretrained model. It is strongly recommended to
             keep this as `True` unless you have a specific reason to change it.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "LILY": Paper(
+            title="Low-Rank Interconnected Adaptation across Layers",
+            url="https://huggingface.co/papers/2407.09946",
+        ),
+    }
 
     r: int = field(
         default=32,
