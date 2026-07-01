@@ -36,6 +36,7 @@ from peft import (
     C3AConfig,
     CartridgeConfig,
     CPTConfig,
+    DeftConfig,
     DeloraConfig,
     FourierFTConfig,
     FrodConfig,
@@ -130,6 +131,13 @@ ALL_CONFIGS = [
             "cpt_token_ids": [0, 1, 2, 3, 4, 5, 6, 7],  # Example token IDs for testing
             "cpt_mask": [1, 1, 1, 1, 1, 1, 1, 1],
             "cpt_tokens_type_mask": [1, 2, 2, 2, 3, 3, 4, 4],
+        },
+    ),
+    (
+        DeftConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
         },
     ),
     (

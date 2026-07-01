@@ -23,6 +23,7 @@ from peft import (
     BeftConfig,
     BOFTConfig,
     C3AConfig,
+    DeftConfig,
     DeloraConfig,
     FourierFTConfig,
     FrodConfig,
@@ -93,6 +94,13 @@ ALL_CONFIGS = [
             "target_modules": None,
             "r": 2,
             "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        DeftConfig,
+        {
+            "task_type": "SEQ_2_SEQ_LM",
+            "target_modules": None,
         },
     ),
     (
