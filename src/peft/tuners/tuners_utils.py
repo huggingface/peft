@@ -1085,6 +1085,16 @@ class BaseTuner(nn.Module, ABC):
                 module_name = prefix + suffix
             return module_name
 
+        def find_existing_param_wrapper(module, parameter_name):
+            # When adding a further adapter, the parameter may already be wrapped by a (possibly nested) ParamWrapper
+            # that was created for a previous adapter. In that case, return that wrapper so the new adapter can be added
+            # to it (via update_layer) instead of nesting yet another wrapper.
+            while isinstance(module, BaseTunerLayer) and (module.__class__.__name__ == "ParamWrapper"):
+                if module.parameter_name == parameter_name:
+                    return module
+                module = module.base_layer
+            return None
+
         def create_and_replace_param(module_name, key, param_name):
             # helper function to avoid duplication
             if module_name == "":
@@ -1108,6 +1118,12 @@ class BaseTuner(nn.Module, ABC):
                     "try setting `target_modules=[]` to prevent it."
                 )
 
+            short_param_name = param_name.rpartition(".")[-1]  # "foo.bar.gate_up_proj" -> "gate_up_proj"
+            # If a previous adapter already wraps this parameter, reuse that wrapper instead of nesting a new one.
+            existing_wrapper = find_existing_param_wrapper(unwrapped_module, short_param_name)
+            if existing_wrapper is not None:
+                target = existing_wrapper
+
             self._check_target_module_compatiblity(peft_config, model, target_name)
             ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
             with ctx():
@@ -1118,7 +1134,7 @@ class BaseTuner(nn.Module, ABC):
                     target_name,
                     parent,
                     current_key=key,
-                    parameter_name=param_name.rpartition(".")[-1],
+                    parameter_name=short_param_name,
                 )
 
         # TODO very simple matching, might not cover all use cases
