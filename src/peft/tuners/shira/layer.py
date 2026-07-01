@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import copy
 import warnings
 from typing import Optional
 
@@ -20,7 +19,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
+from peft.utils import quantization_extra_repr, resolve_quantization_backend
 
 from .config import ShiraConfig
 
@@ -37,20 +37,19 @@ class ShiraLayer(BaseTunerLayer):
         self.scaling = {}
         self.shira_weight = nn.ParameterDict({})
         self.shira_indices = {}
-        self.weight_shape = base_layer.weight.shape  # Assumes SHiRA is on some layer with "weight" parameter
+        self.quantization_backend = resolve_quantization_backend(
+            self.get_base_layer(), get_apply_tensor_subclass=kwargs.get("get_apply_tensor_subclass")
+        )
 
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
 
         base_layer = self.get_base_layer()
-        if isinstance(base_layer, nn.Linear):
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        else:
-            raise NotImplementedError("Only nn.Linear layers supported currently")
+        self.in_features, self.out_features = _get_in_out_features(base_layer)
+        if None in (self.in_features, self.out_features):
+            raise TypeError("Only nn.Linear layers supported currently")
 
-        self.in_features = in_features
-        self.out_features = out_features
         self.kwargs = kwargs
 
     def update_layer(
@@ -83,7 +82,7 @@ class ShiraLayer(BaseTunerLayer):
         # https://github.com/pytorch/pytorch/issues/79542.
         shira_init_weight = torch.zeros(num_shira_weight) if init_weights else torch.randn(num_shira_weight)
         self.shira_weight[adapter_name] = nn.Parameter(
-            shira_init_weight.to(self.base_layer.weight.dtype).to(self.base_layer.weight.device),
+            shira_init_weight,
             requires_grad=True,
         )
 
@@ -93,7 +92,7 @@ class ShiraLayer(BaseTunerLayer):
             self.shira_indices[adapter_name] = torch.cat(
                 [mask_indices[0].unsqueeze(0), mask_indices[1].unsqueeze(0)], 0
             ).to(torch.int)
-            self.shira_indices[adapter_name] = self.shira_indices[adapter_name].to(self.base_layer.weight.device)
+            self.shira_indices[adapter_name] = self.shira_indices[adapter_name]
 
             if self.shira_indices[adapter_name].shape[1] != self.shira_weight[adapter_name].shape[0]:
                 raise ValueError(
@@ -158,18 +157,20 @@ class Linear(nn.Module, ShiraLayer):
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
-                    orig_weights = base_layer.weight.data.clone()
+                    orig_weight = self.get_base_weight().clone()
+                    orig_weight += self.get_delta_weight(active_adapter)
 
-                    orig_weights += self.get_delta_weight(active_adapter)
-
-                    if not torch.isfinite(orig_weights).all():
+                    if not torch.isfinite(orig_weight).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weights
+                    self.set_base_weight(orig_weight)
                 else:
-                    base_layer.weight.data += self.get_delta_weight(active_adapter)
+                    orig_weight = self.get_base_weight()
+                    delta_weight = self.get_delta_weight(active_adapter)
+                    orig_weight += delta_weight
+                    self.set_base_weight(orig_weight)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -180,7 +181,9 @@ class Linear(nn.Module, ShiraLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.shira_weight.keys():
-                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
+                orig_weight = self.get_base_weight()
+                orig_weight -= self.get_delta_weight(active_adapter)
+                self.set_base_weight(orig_weight)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -193,8 +196,11 @@ class Linear(nn.Module, ShiraLayer):
 
         # In multi-gpu environment, the indices are at the wrong gpu.  This is needed to correct this.
         self.shira_indices[adapter] = self.shira_indices[adapter].to(self.shira_weight[adapter].device)
+
         return torch.sparse_coo_tensor(
-            self.shira_indices[adapter], self.shira_weight[adapter] * self.scaling[adapter], self.weight_shape
+            self.shira_indices[adapter],
+            self.shira_weight[adapter] * self.scaling[adapter],
+            (self.out_features, self.in_features),
         )
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
@@ -205,7 +211,8 @@ class Linear(nn.Module, ShiraLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            new_weight = copy.deepcopy(self.base_layer.weight.data)
+            new_weight = self.get_base_weight().clone()
+
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.shira_weight.keys():
                     continue
@@ -222,3 +229,6 @@ class Linear(nn.Module, ShiraLayer):
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "shira." + rep
+
+    def extra_repr(self) -> str:
+        return quantization_extra_repr(self)
