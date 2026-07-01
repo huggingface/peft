@@ -178,9 +178,13 @@ def get_peft_model_state_dict(
             for k in state_dict:
                 if "lora_" in k:
                     to_return[k] = state_dict[k]
-                    bias_name = k.split("lora_")[0] + "bias"
-                    if bias_name in state_dict:
-                        to_return[bias_name] = state_dict[bias_name]
+                    prefix = k.split("lora_")[0]
+                    # The trainable bias of a targeted layer lives under the wrapped `base_layer`
+                    # (current tuner-layer structure); older state dicts may store it directly on
+                    # the module, so check both names.
+                    for bias_name in (prefix + "base_layer.bias", prefix + "bias"):
+                        if bias_name in state_dict:
+                            to_return[bias_name] = state_dict[bias_name]
         else:
             raise NotImplementedError
         to_return = {k: v for k, v in to_return.items() if (("lora_" in k) or ("bias" in k))}
@@ -215,9 +219,11 @@ def get_peft_model_state_dict(
             for k in state_dict:
                 if "boft_" in k:
                     to_return[k] = state_dict[k]
-                    bias_name = k.split("boft_")[0] + "bias"
-                    if bias_name in state_dict:
-                        to_return[bias_name] = state_dict[bias_name]
+                    prefix = k.split("boft_")[0]
+                    # See the lora_only branch above: the trained bias may live under `base_layer`.
+                    for bias_name in (prefix + "base_layer.bias", prefix + "bias"):
+                        if bias_name in state_dict:
+                            to_return[bias_name] = state_dict[bias_name]
         else:
             raise NotImplementedError
 
