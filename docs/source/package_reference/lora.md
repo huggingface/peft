@@ -234,7 +234,7 @@ def train_step():
 preprocess_loraga(model, lora_config, train_step)
 ```
 
-#### Usage Tips
+**Usage Tips**
 
 - **Gradient Estimation**: LoRA-GA requires a gradient estimation phase before model initialization. Use `preprocess_loraga()` with a `train_step` callback to compute gradients over a small number of training batches (typically 64-128 batches).
 
