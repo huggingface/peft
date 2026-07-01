@@ -19,6 +19,7 @@ import math
 import torch
 from torch import nn
 
+import peft.optimizers.lorafa as lorafa_module
 from peft import LoraConfig, get_peft_model
 from peft.optimizers import create_lorafa_optimizer
 
@@ -285,3 +286,76 @@ def test_lorafa_weight_decay_decoupled_update_non_lora_params():
             rtol=1e-5,
             atol=1e-6,
         ), f"{name} does not match decoupled weight decay scaling"
+
+
+def test_lorafa_respects_layer_specific_scaling_patterns(monkeypatch):
+    """
+    Test if the optimizer uses each layer's own scaling when rank_pattern changes the effective rank
+    """
+
+    monkeypatch.setattr(lorafa_module, "is_bf16_available", lambda: False)
+
+    seed = 123
+    torch.manual_seed(seed)
+
+    lora_rank = 16
+    lora_alpha = 32
+    lr = 7e-5
+    config = LoraConfig(
+        r=lora_rank,
+        lora_alpha=lora_alpha,
+        target_modules=["lin0", "lin1"],
+        rank_pattern={
+            "lin0": 8
+        },  # lin0 will have effective rank 8, lin1 will have effective rank 16, so their scaling will differ
+        bias="none",
+    )
+    model = get_peft_model(SimpleNet(), config).to(torch_device)
+    optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr)
+
+    lin0 = model.base_model.model.lin0
+    lin1 = model.base_model.model.lin1
+
+    # Manually set gradients for lin0 and lin1's lora_B weights to a known value (e.g., all 0.5) to test the expected exp_avg_B update
+    lin0_grad = torch.full_like(lin0.lora_B.default.weight, 0.5)
+    lin1_grad = torch.full_like(lin1.lora_B.default.weight, 0.5)
+    lin0.lora_B.default.weight.grad = lin0_grad
+    lin1.lora_B.default.weight.grad = lin1_grad
+
+    optimizer.step()
+
+    # func to compute the expected exp_avg_B after one step, given the layer and its gradient
+    # Replicates math from lorarfa_module.LoraFAOptimizer.step()
+    def expected_exp_avg_B(layer, grad):
+        # scaling factor for the layer
+        scale = layer.scaling["default"]
+        # A
+        a_weight = layer.lora_A.default.weight
+
+        # projection
+        delta = 1e-8
+
+        # computing the inverse matrix
+        aa_T = a_weight @ a_weight.T
+        aa_T_inv = torch.linalg.pinv(aa_T + delta * torch.eye(a_weight.shape[0]).to(a_weight.device))
+
+        projected_grad_B = (1.0 / scale**2) * (grad @ aa_T_inv)
+
+        # Get beta1 from the only one optimizer's param group created in lorarfa_module.create_lorafa_optimizer()
+        beta1, _ = optimizer.param_groups[0]["betas"]
+
+        # Since expected_exp_avg_B starts at zero, the first step's expected value is just the projected_grad scaled by (1 - beta1)
+        expect_exp_avg_B = projected_grad_B * (1.0 - beta1)
+        return expect_exp_avg_B
+
+    # Retrieve the updated exp_avg_B from the optimizer's state for both lin0 and lin1
+    lin0_state = optimizer.state["base_model.model.lin0.lora"]
+    lin1_state = optimizer.state["base_model.model.lin1.lora"]
+
+    # Check that the exp_avg_B values in the optimizer's state match the expected values based on the manually set gradients and the layer-specific scaling
+    assert torch.allclose(lin1_state["exp_avg_B"], expected_exp_avg_B(lin1, lin1_grad), rtol=1e-5, atol=1e-6), (
+        "lin1 exp_avg_B does not match the expected layer-specific scaling"
+    )
+    assert torch.allclose(lin0_state["exp_avg_B"], expected_exp_avg_B(lin0, lin0_grad), rtol=1e-5, atol=1e-6), (
+        "lin0 exp_avg_B does not match the expected layer-specific scaling"
+    )

@@ -91,10 +91,9 @@ class LoraFAOptimizer(Optimizer):
             loss = closure()
 
         for group in self.param_groups:
-            scaling_factor = group["scaling_factor"]
             param_list = []
             name_list = []
-            for p, n in zip(group["params"], group["names"]):
+            for p, n, scaling_factor in zip(group["params"], group["names"], group["scaling_factors"]):
                 # Skip non-lora no-grad module, since we need lora_A which is no-grad.
                 if "lora" not in n and p.grad is None:
                     continue
@@ -219,6 +218,7 @@ def create_lorafa_optimizer(
     This function will:
     - Disable gradient updates for the "lora_A" parameters (these are typically frozen during LoRA training).
     - Compute the scaling factor based on provided `lora_alpha` and rank `r` for proper gradient projection.
+    - Get the scaling factor for each lora parameter based on the layer-specific configuration.
     - Create and configure parameter groups for the optimizer including specified learning rate, weight decay, and
       additional optimizer options.
 
@@ -242,12 +242,36 @@ def create_lorafa_optimizer(
         if "lora_A" in name:
             param.requires_grad_(False)
     lora_scaling = lora_alpha / math.sqrt(r) if use_rslora else lora_alpha / r
+
+    # this func maps a flattened parameter name back to its LoRA module and adapter
+    # Returns None for non-LoRA parameters and unresolved names
+    def get_scaling_factor(parameter_name: str):
+        if ".lora_" not in parameter_name:
+            return None
+
+        # Split the parameter name to extract the module name and the adapter name
+        module_name, _, lora_suffix = parameter_name.partition(".lora_")
+        lora_parts = lora_suffix.split(".")
+        if len(lora_parts) < 3:
+            return None
+
+        adapter_name = lora_parts[1]
+
+        # Get the module corresponding to the parameter and check if it has a scaling factor for the adapter
+        module = model.get_submodule(module_name)
+        if hasattr(module, "scaling") and adapter_name in module.scaling:
+            return module.scaling[adapter_name]
+
+        return None
+
+    named_parameters = list(model.named_parameters())
     param_groups = [
         {
-            "params": model.parameters(),
+            "params": [param for _, param in named_parameters],
             "lr": lr,
-            "names": [name for name, _ in model.named_parameters()],
-            "scaling_factor": lora_scaling,
+            "names": [name for name, _ in named_parameters],
+            "scaling_factors": [get_scaling_factor(name) for name, _ in named_parameters],
+            "scaling_factor": lora_scaling,  # legacy scalar
             "betas": (0.9, 0.999),
             "weight_decay": weight_decay,
         }
