@@ -72,6 +72,7 @@ class CPTConfig(PromptLearningConfig):
         """
         Post-initialization hook to set additional attributes after the config is initialized.
         """
+        super().__post_init__()
         # CPT-specific static attributes
         self.is_prompt_learning = True  # Indicates that CPT is a prompt-learning method.
         self.num_layers = None  # Number of layers (optional, not always required).

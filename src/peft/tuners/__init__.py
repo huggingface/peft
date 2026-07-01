@@ -23,6 +23,7 @@ from .cpt import CPTConfig, CPTEmbedding
 from .delora import DeloraConfig, DeloraModel
 from .fourierft import FourierFTConfig, FourierFTModel
 from .frod import FrodConfig, FrodModel
+from .glora import GloraConfig, GloraModel
 from .gralora import GraloraConfig, GraloraModel
 from .hira import HiraConfig, HiraModel
 from .hra import HRAConfig, HRAModel
@@ -66,6 +67,7 @@ from .road import RoadConfig, RoadModel
 from .shira import ShiraConfig, ShiraModel
 from .tinylora import TinyLoraConfig, TinyLoraModel
 from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
+from .unilora import UniLoraConfig, UniLoraModel
 from .vblora import VBLoRAConfig, VBLoRAModel
 from .vera import VeraConfig, VeraModel
 from .waveft import WaveFTConfig, WaveFTModel
@@ -98,6 +100,8 @@ __all__ = [
     "FourierFTModel",
     "FrodConfig",
     "FrodModel",
+    "GloraConfig",
+    "GloraModel",
     "GraloraConfig",
     "GraloraModel",
     "HRAConfig",
@@ -156,6 +160,8 @@ __all__ = [
     "TinyLoraModel",
     "TrainableTokensConfig",
     "TrainableTokensModel",
+    "UniLoraConfig",
+    "UniLoraModel",
     "VBLoRAConfig",
     "VBLoRAModel",
     "VeloraConfig",

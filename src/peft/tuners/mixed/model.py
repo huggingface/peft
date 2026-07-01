@@ -164,8 +164,7 @@ class MixedModel(BaseTuner):
                 for n, p in model.named_parameters():
                     if "bias" in n:
                         p.requires_grad = True
-            elif bias == "lora_only":
-                # TODO: check if this is needed for other supported types
+            elif bias.endswith("_only"):  # e.g. "lora_only" or "oft_only"
                 for m in model.modules():
                     if isinstance(m, Layers) and hasattr(m, "bias") and m.bias is not None:
                         m.bias.requires_grad = True

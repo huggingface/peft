@@ -50,6 +50,7 @@ from peft import (
     PromptTuningConfig,
     PveraConfig,
     RoadConfig,
+    UniLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     convert_to_lora,
@@ -1060,7 +1061,11 @@ class PeftCommonTester:
 
             for n, param in model.named_parameters():
                 if (model.prefix in n) or ("modules_to_save" in n) or ("token_adapter.trainable_tokens" in n):
-                    assert param.grad is not None
+                    # variants like MiCA intentionally freeze a subset of adapter params, which won't have a grad
+                    if param.requires_grad:
+                        assert param.grad is not None
+                    else:
+                        assert param.grad is None
                 else:
                     assert param.grad is None
 
@@ -1106,11 +1111,15 @@ class PeftCommonTester:
                 assert torch.allclose(logits, logits_from_pretrained, atol=1e-4, rtol=1e-4)
 
     def _test_training_layer_indexing(self, model_id, config_cls, config_kwargs):
-        if config_cls in (VBLoRAConfig, VeraConfig):
-            # TODO investigate why these two are flaky
+        if config_cls in (VBLoRAConfig, VeraConfig, UniLoraConfig):
+            # TODO investigate why these methods are flaky
             # pytest tests/test_decoder_models.py tests/test_feature_extraction_models.py -k "layer_indexing and (vera
             # or vblora)"
-            pytest.skip("VBLoRA and VeRA are flaky with layer indexing, possibly because of shared weights.")
+            # UniLora uses one shared trainable theta_d parameter, so the generic trainable-parameter count assertion
+            # does not decrease when fewer layers are targeted.
+            pytest.skip(
+                "VBLoRA, VeRA, and UniLora use shared weights, so this generic layer-indexing count check is skipped."
+            )
         try:
             config = config_cls(
                 base_model_name_or_path=model_id,

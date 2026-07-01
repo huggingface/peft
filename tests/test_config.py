@@ -29,8 +29,10 @@ from peft import (
     C3AConfig,
     CartridgeConfig,
     CPTConfig,
+    DeloraConfig,
     FourierFTConfig,
     FrodConfig,
+    GloraConfig,
     GraloraConfig,
     HiraConfig,
     HRAConfig,
@@ -53,6 +55,8 @@ from peft import (
     PromptEncoderConfig,
     PromptTuningConfig,
     PsoftConfig,
+    PveraConfig,
+    RandLoraConfig,
     RoadConfig,
     ShiraConfig,
     TaskType,
@@ -60,6 +64,7 @@ from peft import (
     TrainableTokensConfig,
     VBLoRAConfig,
     VeraConfig,
+    WaveFTConfig,
     XLoraConfig,
 )
 
@@ -80,6 +85,7 @@ ALL_CONFIG_CLASSES = (
     (C3AConfig, {}),
     (FourierFTConfig, {}),
     (FrodConfig, {}),
+    (GloraConfig, {}),
     (GraloraConfig, {}),
     (HiraConfig, {}),
     (HRAConfig, {}),
@@ -106,6 +112,12 @@ ALL_CONFIG_CLASSES = (
     (VeraConfig, {}),
     (VBLoRAConfig, {}),
     (XLoraConfig, {"hidden_size": 32, "adapters": {}}),
+    (CPTConfig, {"task_type": "CAUSAL_LM"}),
+    (RandLoraConfig, {}),
+    (DeloraConfig, {}),
+    (OFTConfig, {}),
+    (PveraConfig, {}),
+    (WaveFTConfig, {}),
 )
 
 
@@ -132,6 +144,8 @@ class TestPeftConfig:
         r"""
         Test if all configs work correctly for all valid task types
         """
+        if config_class is CPTConfig:
+            pytest.skip("CPTConfig only supports the CAUSAL_LM task type (validated in its __post_init__)")
         config_class(task_type=valid_task_type, **mandatory_kwargs)
 
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
@@ -139,6 +153,8 @@ class TestPeftConfig:
         r"""
         Test if all configs correctly raise the defined error message for invalid task types.
         """
+        if config_class is CPTConfig:
+            pytest.skip("CPTConfig validates task_type with a config-specific message in its __post_init__")
         invalid_task_type = "invalid-task-type"
         with pytest.raises(
             ValueError,
@@ -171,6 +187,8 @@ class TestPeftConfig:
         Test if the config is correctly loaded using:
         - from_pretrained
         """
+        if config_class is OFTConfig:
+            pytest.skip("OFT's from_pretrained back-compat guard fires before the generic load path tested here")
         for model_name, revision in PEFT_MODELS_TO_TEST:
             # Test we can load config from delta
             config_class.from_pretrained(model_name, revision=revision)
@@ -221,6 +239,8 @@ class TestPeftConfig:
         r"""
         Test if the config is correctly loaded with extra kwargs
         """
+        if config_class is OFTConfig:
+            pytest.skip("OFT's from_pretrained back-compat guard fires before the generic load path tested here")
         with tempfile.TemporaryDirectory() as tmp_dirname:
             for model_name, revision in PEFT_MODELS_TO_TEST:
                 # Test we can load config from delta
@@ -239,6 +259,8 @@ class TestPeftConfig:
         r"""
         Test if the config correctly removes runtime config when saving
         """
+        if config_class is OFTConfig:
+            pytest.skip("OFT's from_pretrained back-compat guard fires before the generic load path tested here")
         with tempfile.TemporaryDirectory() as tmp_dirname:
             for model_name, revision in PEFT_MODELS_TO_TEST:
                 cfg = config_class.from_pretrained(model_name, revision=revision)
@@ -482,6 +504,8 @@ class TestPeftConfig:
         """Following up on the previous test about forward compatibility, we *don't* want any random json to be accepted as
         a PEFT config. There should be a minimum set of required keys.
         """
+        if config_class is OFTConfig:
+            pytest.skip("OFT's from_pretrained back-compat guard fires before the generic load path tested here")
         non_peft_json = {"foo": "bar", "baz": 123}
         with open(tmp_path / "adapter_config.json", "w") as f:
             json.dump(non_peft_json, f)

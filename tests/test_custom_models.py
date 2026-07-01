@@ -38,6 +38,7 @@ from peft import (
     DeloraConfig,
     FourierFTConfig,
     FrodConfig,
+    GloraConfig,
     GraloraConfig,
     HiraConfig,
     HRAConfig,
@@ -62,6 +63,7 @@ from peft import (
     TaskType,
     TinyLoraConfig,
     TrainableTokensConfig,
+    UniLoraConfig,
     VBLoRAConfig,
     VeloraConfig,
     VeraConfig,
@@ -78,10 +80,41 @@ from .testing_common import PeftCommonTester, _skip_if_merging_not_supported
 from .testing_utils import get_state_dict, require_non_cpu, set_init_weights_false
 
 
+def _zero_unilora_theta_d(model, adapter_name="default"):
+    torch.nn.init.zeros_(model.unilora_theta_d[adapter_name])
+
+
+def _reset_unilora_theta_d(model, config, adapter_name="default"):
+    theta_d = model.unilora_theta_d[adapter_name]
+    if config.init_weights:
+        torch.nn.init.uniform_(theta_d, -config.init_theta_d_bound, config.init_theta_d_bound)
+    else:
+        torch.nn.init.normal_(theta_d)
+
+
 # MLP is a vanilla FF network with only linear layers
 # EmbConv1D has an embedding and a Conv1D layer
 # Conv2D has a Conv2D layer
 TEST_CASES = [
+    ########
+    # GLoRA #
+    ########
+    ("Vanilla MLP 1 GLoRA", "MLP", GloraConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 GLoRA", "MLP", GloraConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 GLoRA", "MLP", GloraConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 GLoRA", "MLP", GloraConfig, {"target_modules": ["lin0", "lin1"]}),
+    (
+        "Vanilla MLP 5 GLoRA",
+        "MLP",
+        GloraConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"]},
+    ),
+    (
+        "Vanilla MLP 6 GLoRA",
+        "MLP",
+        GloraConfig,
+        {"target_modules": ["lin0", "lin1"], "modules_to_save": ["lin1"]},
+    ),
     ########
     # LoRA #
     ########
@@ -102,6 +135,12 @@ TEST_CASES = [
     ),
     ("Vanilla MLP 7 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": ["lin0"], "use_dora": True}),
     ("Vanilla MLP 8 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"], "use_dora": True}),
+    (
+        "Vanilla MLP 1 LoRA with MiCA",
+        "MLP",
+        LoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": "mica", "r": 4},
+    ),
     (
         "Vanilla MLP 9 LoRA with DoRA",
         "MLP",
@@ -879,6 +918,30 @@ TEST_CASES = [
     ("Vanilla MLP 3 FRoD", "MLP", FrodConfig, {"target_modules": ["lin1"]}),
     ("Vanilla MLP 4 FRoD", "MLP", FrodConfig, {"target_modules": ["lin0", "lin1"]}),
     ("Vanilla MLP 5 FRoD", "MLP", FrodConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    ###########
+    # UniLora #
+    ###########
+    ("Vanilla MLP 1 UniLora", "MLP", UniLoraConfig, {"target_modules": "lin0", "theta_d_length": 101}),
+    ("Vanilla MLP 2 UniLora", "MLP", UniLoraConfig, {"target_modules": ["lin0"], "theta_d_length": 101}),
+    ("Vanilla MLP 3 UniLora", "MLP", UniLoraConfig, {"target_modules": ["lin1"], "theta_d_length": 101}),
+    (
+        "Vanilla MLP 4 UniLora",
+        "MLP",
+        UniLoraConfig,
+        {"target_modules": ["lin0", "lin1"], "theta_d_length": 101},
+    ),
+    (
+        "Vanilla MLP 5 UniLora",
+        "MLP",
+        UniLoraConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "theta_d_length": 101},
+    ),
+    (
+        "Embedding + transformers Conv1D 1 UniLora",
+        "EmbConv1D",
+        UniLoraConfig,
+        {"target_modules": ["conv1d"], "theta_d_length": 101},
+    ),
     #######
     # C3A #
     #######
@@ -1376,6 +1439,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin1"], "init_weights": False},
     ),
     (
+        "GLoRA Same",
+        "glora",
+        GloraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "GLoRA Different",
+        "glora",
+        GloraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
         "SHiRA Same",
         "shira",
         ShiraConfig,
@@ -1421,6 +1498,13 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         RandLoraConfig,
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "UniLora Same",
+        "unilora",
+        UniLoraConfig,
+        {"target_modules": ["lin0"], "theta_d_length": 101, "init_weights": False},
+        {"target_modules": ["lin0"], "theta_d_length": 101, "init_weights": False},
     ),
     (
         "HRA Same",
@@ -1621,6 +1705,70 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         TinyLoraConfig,
         {"target_modules": ["lin0"], "init_weights": "uniform"},
         {"target_modules": ["lin1"], "init_weights": "uniform"},
+    ),
+    (
+        "LoHa Same",
+        "loha",
+        LoHaConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "LoHa Different",
+        "loha",
+        LoHaConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
+        "LoKr Same",
+        "lokr",
+        LoKrConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "LoKr Different",
+        "lokr",
+        LoKrConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
+        "OFT Same",
+        "oft",
+        OFTConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "oft_block_size": 2},
+        {"target_modules": ["lin0"], "init_weights": False, "oft_block_size": 2},
+    ),
+    (
+        "OFT Different",
+        "oft",
+        OFTConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "oft_block_size": 2},
+        {"target_modules": ["lin1"], "init_weights": False, "oft_block_size": 2},
+    ),
+    # Note: Multiple C3A adapters applied to the same layer fails with shape mismatch
+    (
+        "C3A Different",
+        "c3a",
+        C3AConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "block_size": 2},
+        {"target_modules": ["lin1"], "init_weights": False, "block_size": 2},
+    ),
+    (
+        "AdaMSS Same",
+        "adamss",
+        AdamssConfig,
+        {"target_modules": ["lin0"], "r": 8, "num_subspaces": 2, "init_weights": False},
+        {"target_modules": ["lin0"], "r": 8, "num_subspaces": 2, "init_weights": False},
+    ),
+    (
+        "AdaMSS Different",
+        "adamss",
+        AdamssConfig,
+        {"target_modules": ["lin0"], "r": 8, "num_subspaces": 2, "init_weights": False},
+        {"target_modules": ["lin1"], "r": 2, "num_subspaces": 2, "init_weights": False},
     ),
 ]
 
@@ -2510,6 +2658,9 @@ class TestPeftCustomModel(PeftCommonTester):
             config_kwargs = set_init_weights_false(config_cls, config_kwargs)
             # Use random float inputs to avoid ReLU dead zones that block gradient to specific subspaces.
             X = {"X": torch.randn(9, 10, device=self.torch_device)}
+        elif issubclass(config_cls, UniLoraConfig):
+            config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+            X = self.prepare_inputs_for_testing()
         else:
             X = self.prepare_inputs_for_testing()
 
@@ -2537,13 +2688,17 @@ class TestPeftCustomModel(PeftCommonTester):
         elif "mha" in model_id.lower():
             # we get exploding gradients with MHA when learning rate is too high
             lr = 1e-3
+        elif issubclass(config_cls, GloraConfig):
+            # GLoRA keeps some factors at zero at init; a higher LR helps all adapter tensors move within a few steps.
+            lr = 50.0
         elif is_monteclora:
             lr = 1e-3
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
-        for _ in range(3):
+        n_train_steps = 10 if issubclass(config_cls, GloraConfig) else 3
+        for _ in range(n_train_steps):
             optimizer.zero_grad()
             y_pred = model(**X)
             loss = y_pred.sum()
@@ -2564,8 +2719,12 @@ class TestPeftCustomModel(PeftCommonTester):
                 # via Monte Carlo sampling), so we don't include them in the strict allclose check below.
                 continue
             if (model.prefix in name) or ("modules_to_save" in name) or ("token_adapter.trainable_tokens" in name):
-                # target_modules, modules_to_save and modules of `NewTokensWrapper` _are_ updated
-                assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
+                # target_modules, modules_to_save and modules of `NewTokensWrapper` _are_ updated, except for adapter
+                # parameters that the variant intentionally freezes (e.g. MiCA freezes lora_B).
+                if not param_after.requires_grad:
+                    assert torch.equal(param_before, param_after)
+                else:
+                    assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
             else:
                 assert torch.allclose(param_before, param_after, atol=tol, rtol=tol)
 
@@ -2613,6 +2772,9 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_parameters_after_loading_model(self, test_name, model_id, config_cls, config_kwargs):
         # An explicit test that when loading a trained model, the parameters are loaded correctly
         # see issue #808
+        if issubclass(config_cls, UniLoraConfig):
+            config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
@@ -2628,7 +2790,7 @@ class TestPeftCustomModel(PeftCommonTester):
             lr = 0.1  # otherwise we get nan
         elif "mha" in model_id.lower():
             lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high
-        elif issubclass(config_cls, (VBLoRAConfig, RandLoraConfig, OSFConfig)):
+        elif issubclass(config_cls, (VBLoRAConfig, RandLoraConfig, UniLoraConfig, OSFConfig)):
             lr = 0.01  # otherwise we get nan
         elif issubclass(config_cls, AdaLoraConfig):
             lr = 1e-4  # AdaLoRA + init_lora_weights=False can blow up with multi-target SGD
@@ -2694,6 +2856,10 @@ class TestPeftCustomModel(PeftCommonTester):
             for module in model.modules():
                 if hasattr(module, "lora_E") and "default" in module.lora_E:
                     torch.nn.init.zeros_(module.lora_E["default"])
+        if issubclass(config_cls, UniLoraConfig):
+            # UniLora cannot use zero initialization by default because the adapter update is quadratic in theta_d.
+            # Zero it only for this identity check, then restore a trainable initialization before optimization.
+            _zero_unilora_theta_d(model)
         model.eval()
         outputs_before = model(**X)
         # OSF uses SVD reconstruction which introduces small numerical differences
@@ -2710,6 +2876,8 @@ class TestPeftCustomModel(PeftCommonTester):
             for module in model.modules():
                 if hasattr(module, "lora_E") and "default" in module.lora_E:
                     torch.nn.init.normal_(module.lora_E["default"])
+        if issubclass(config_cls, UniLoraConfig):
+            _reset_unilora_theta_d(model, config)
         if issubclass(config_cls, TinyLoraConfig):
             # Re-initialize tinylora_v so it can be trained
             model.base_model._init_tinylora_v(config, "default")
@@ -2784,6 +2952,8 @@ class TestPeftCustomModel(PeftCommonTester):
             for module in model.modules():
                 if hasattr(module, "lora_E") and "default" in module.lora_E:
                     torch.nn.init.zeros_(module.lora_E["default"])
+        if issubclass(config_cls, UniLoraConfig):
+            _zero_unilora_theta_d(model)
         model.eval()
         outputs_before = model(**X)
 
@@ -2795,6 +2965,8 @@ class TestPeftCustomModel(PeftCommonTester):
             for module in model.modules():
                 if hasattr(module, "lora_E") and "default" in module.lora_E:
                     torch.nn.init.normal_(module.lora_E["default"])
+        if issubclass(config_cls, UniLoraConfig):
+            _reset_unilora_theta_d(model, config)
         if issubclass(config_cls, TinyLoraConfig):
             # Re-initialize tinylora_v so it can be trained
             model.base_model._init_tinylora_v(config, "default")
@@ -4351,6 +4523,9 @@ class TestMultipleActiveAdapters:
         _skip_if_merging_not_supported(test_name, config_cls, config_kwargs_1)
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
 
+        config_1 = config_cls(**config_kwargs_1)
+        config_2 = config_cls(**config_kwargs_2)
+
         torch.manual_seed(0)
 
         model = self.resolve_model_cls(tuner_method)
@@ -4358,9 +4533,6 @@ class TestMultipleActiveAdapters:
 
         X = self.prepare_inputs_for_testing()
         base_output = model(**X)
-
-        config_1 = config_cls(**config_kwargs_1)
-        config_2 = config_cls(**config_kwargs_2)
 
         peft_model = get_peft_model(model, config_1, adapter_name="adapter_1").eval()
         peft_model.add_adapter("adapter_2", config_2)
@@ -4412,7 +4584,7 @@ class TestMultipleActiveAdapters:
         model.eval()
 
         with torch.inference_mode():
-            logits_adapter_1 = model(**dummy_input)[0]
+            outputs_adapter_1 = model(**dummy_input)
 
         model.add_adapter("adapter-2", config_2)
         model.set_adapter("adapter-2")
@@ -4426,40 +4598,40 @@ class TestMultipleActiveAdapters:
         model.eval()
 
         with torch.inference_mode():
-            logits_adapter_2 = model(**dummy_input)[0]
+            outputs_adapter_2 = model(**dummy_input)
 
-        assert not torch.allclose(logits_adapter_1, logits_adapter_2, atol=1e-3, rtol=1e-3)
+        assert not torch.allclose(outputs_adapter_1, outputs_adapter_2, atol=1e-3, rtol=1e-3)
 
         model.set_adapter("default")
 
         with torch.inference_mode():
-            logits_adapter_1_after_set = model(**dummy_input)[0]
+            outputs_adapter_1_after_set = model(**dummy_input)
 
-        assert torch.allclose(logits_adapter_1_after_set, logits_adapter_1, atol=1e-3, rtol=1e-3)
+        assert torch.allclose(outputs_adapter_1_after_set, outputs_adapter_1, atol=1e-3, rtol=1e-3)
 
         model_copy = copy.deepcopy(model)
         model_copy_2 = copy.deepcopy(model)
         model_merged_all = model.merge_and_unload(adapter_names=["adapter-2", "default"])
 
         with torch.inference_mode():
-            logits_merged_all = model_merged_all(**dummy_input)[0]
+            outputs_merged_all = model_merged_all(**dummy_input)
 
-        assert not torch.allclose(logits_merged_all, logits_adapter_2, atol=1e-3, rtol=1e-3)
-        assert not torch.allclose(logits_merged_all, logits_adapter_1, atol=1e-3, rtol=1e-3)
+        assert not torch.allclose(outputs_merged_all, outputs_adapter_2, atol=1e-3, rtol=1e-3)
+        assert not torch.allclose(outputs_merged_all, outputs_adapter_1, atol=1e-3, rtol=1e-3)
 
         model_merged_adapter_2 = model_copy.merge_and_unload(adapter_names=["adapter-2"])
 
         with torch.inference_mode():
-            logits_merged_adapter_2 = model_merged_adapter_2(**dummy_input)[0]
+            outputs_merged_adapter_2 = model_merged_adapter_2(**dummy_input)
 
-        assert torch.allclose(logits_merged_adapter_2, logits_adapter_2, atol=1e-3, rtol=1e-3)
+        assert torch.allclose(outputs_merged_adapter_2, outputs_adapter_2, atol=1e-3, rtol=1e-3)
 
         model_merged_adapter_default = model_copy_2.merge_and_unload(adapter_names=["default"])
 
         with torch.inference_mode():
-            logits_merged_adapter_default = model_merged_adapter_default(**dummy_input)[0]
+            outputs_merged_adapter_default = model_merged_adapter_default(**dummy_input)
 
-        assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3)
+        assert torch.allclose(outputs_merged_adapter_default, outputs_adapter_1, atol=1e-3, rtol=1e-3)
 
 
 class MLP_2x_same_shape(nn.Module):
@@ -6369,6 +6541,11 @@ MIXED_ADAPTER_TEST_CASES = [
         RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
         RoadConfig(target_modules=["lin0"], group_size=2, variant="road_2", init_weights=False),
     ),
+    (
+        "GLoRA mixed adapter",
+        GloraConfig(target_modules=["lin0"], init_weights=False),
+        GloraConfig(target_modules=["lin0"], r=16, init_weights=False),
+    ),
 ]
 
 
@@ -6437,6 +6614,11 @@ class TestMixedAdapterBatches:
                 RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
                 RoadConfig(target_modules=["lin1"], group_size=2, init_weights=False),
             ),
+            (
+                "GLoRA mixed adapter with different target layers",
+                GloraConfig(target_modules=["lin0"], init_weights=False),
+                GloraConfig(target_modules=["lin1"], init_weights=False),
+            ),
         ],
     )
     def test_mixed_adapter_batches_different_target_layers(self, test_name, config0, config1):
@@ -6458,6 +6640,11 @@ class TestMixedAdapterBatches:
                 "RoAd mixed adapter with modules to save",
                 RoadConfig(target_modules=["lin0"], modules_to_save=["lin1"], group_size=2, init_weights=False),
                 RoadConfig(target_modules=["lin0"], modules_to_save=["lin1"], group_size=2, init_weights=False),
+            ),
+            (
+                "GLoRA mixed adapter with modules to save",
+                GloraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_weights=False),
+                GloraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_weights=False),
             ),
         ],
     )
@@ -6502,6 +6689,11 @@ class TestMixedAdapterBatches:
                 "RoAd mixed adapter with overlapping layers",
                 RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
                 RoadConfig(target_modules=["lin0", "lin1"], group_size=2, init_weights=False),
+            ),
+            (
+                "GLoRA mixed adapter with overlapping layers",
+                GloraConfig(target_modules=["lin0"], init_weights=False),
+                GloraConfig(target_modules=["lin0", "lin1"], init_weights=False),
             ),
         ],
     )
@@ -6648,6 +6840,10 @@ class TestMixedAdapterBatches:
             (
                 "RoAD mixed batch wrong adapter name",
                 RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False),
+            ),
+            (
+                "GLoRA mixed batch wrong adapter name",
+                GloraConfig(target_modules=["lin0"], init_weights=False),
             ),
         ],
     )
