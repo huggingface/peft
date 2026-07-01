@@ -1,3 +1,8 @@
+"""
+This script fine-tunes a BERT-based model on Relation Extraction using PEFT LoRA.
+It is the script equivalent of the `peft_lora_relation_extraction.ipynb` notebook.
+"""
+
 import argparse
 
 import evaluate
@@ -117,11 +122,14 @@ def main():
     print("Resized model token embeddings to match tokenizer vocabulary.")
 
     # Configure LoRA for Sequence Classification
+    # We use `trainable_token_indices` to selectively train the embeddings of the newly added special tokens.
+    # This avoids training the entire embedding matrix while still learning representations for the new tokens.
     peft_config = LoraConfig(
         task_type=TaskType.SEQ_CLS,
         r=8,
         lora_alpha=16,
         target_modules=["query", "value"],
+        trainable_token_indices=tokenizer.convert_tokens_to_ids(["<e1>", "</e1>", "<e2>", "</e2>"]),
         lora_dropout=0.1,
         bias="none",
     )
