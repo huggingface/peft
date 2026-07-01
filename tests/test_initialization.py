@@ -42,6 +42,7 @@ from peft import (
     LoftQConfig,
     LoKrConfig,
     LoraConfig,
+    MissConfig,
     PeanutConfig,
     PeftMixedModel,
     PeftModel,
@@ -5784,3 +5785,80 @@ class TestWeightTying:
             lm_lora_B = model.base_model.model.lm_head.lora_B[adapter_name].weight
             assert embed_lora_A.data_ptr() != lm_lora_B.data_ptr()
             assert embed_lora_B.data_ptr() != lm_lora_A.data_ptr()
+
+
+class TestMissInitialization:
+    """Basic sanity tests for the MiSS tuner."""
+
+    torch_device = infer_device()
+
+    def get_model(self, bias=True):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 10, bias=bias)
+                self.lin1 = nn.Linear(10, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP(bias=bias).to(self.torch_device).eval()
+
+    @pytest.fixture
+    def data(self):
+        torch.manual_seed(0)
+        return torch.randn(4, 10, device=self.torch_device)
+
+    def test_miss_fn_per_adapter(self):
+        # Reproduces the bug where `miss_fn` (from `init_weights`) is not set on a
+        # per-adapter level: adding a second adapter with a different `init_weights`
+        # value overrides the first adapter's setting. Miss issue #6.
+        model = self.get_model()
+        config0 = MissConfig(target_modules=["lin0"], r=2, init_weights=True)
+        model = get_peft_model(model, config0)
+
+        config1 = MissConfig(target_modules=["lin0"], r=2, init_weights="bat")
+        model.add_adapter("adapter1", config1)
+
+        layer = model.base_model.model.lin0
+        # miss_fn should be stored per-adapter, not as a single value
+        assert layer.miss_fn["default"] is True
+        assert layer.miss_fn["adapter1"] == "bat"
+
+    def test_miss_fn_per_adapter_forward(self, data):
+        # Ensure forward pass works correctly with different `init_weights` per adapter.
+        model = self.get_model()
+        config0 = MissConfig(target_modules=["lin0"], r=2, init_weights=True)
+        model = get_peft_model(model, config0)
+
+        config1 = MissConfig(target_modules=["lin0"], r=2, init_weights="bat")
+        model.add_adapter("adapter1", config1)
+
+        # Forward with just bat adapter should work
+        model.set_adapter("adapter1")
+        out_bat = model(data)
+        assert out_bat.shape == (4, 2)
+
+        # Forward with just default adapter
+        model.set_adapter("default")
+        out_default = model(data)
+        assert out_default.shape == (4, 2)
+
+    def test_miss_fn_per_adapter_three_variants(self):
+        # Add three adapters with all three init_weights variants: True, "bat", "mini"
+        model = self.get_model()
+        config0 = MissConfig(target_modules=["lin0"], r=2, init_weights=True)
+        model = get_peft_model(model, config0)
+
+        config1 = MissConfig(target_modules=["lin0"], r=2, init_weights="bat")
+        model.add_adapter("adapter1", config1)
+
+        config2 = MissConfig(target_modules=["lin0"], r=2, init_weights="mini", mini_r=1)
+        model.add_adapter("adapter2", config2)
+
+        layer = model.base_model.model.lin0
+        assert layer.miss_fn["default"] is True
+        assert layer.miss_fn["adapter1"] == "bat"
+        assert layer.miss_fn["adapter2"] == "mini"

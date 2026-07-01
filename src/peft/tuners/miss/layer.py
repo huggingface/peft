@@ -31,7 +31,7 @@ class MissLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names = ("miss_block",)
     # All names of other parameters that may contain adapter-related parameters
-    other_param_names = ("miss_r", "miss_dropout", "miss_mini_r")
+    other_param_names = ("miss_r", "miss_dropout", "miss_mini_r", "miss_fn")
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
@@ -41,6 +41,7 @@ class MissLayer(BaseTunerLayer):
         self.miss_r = {}
         self.miss_dropout = nn.ModuleDict({})
         self.miss_mini_r = {}
+        self.miss_fn = {}
         self.miss_block = nn.ParameterDict({})
         # Mark the weight as unmerged
         self._disable_adapters = False
@@ -79,6 +80,7 @@ class MissLayer(BaseTunerLayer):
 
         self.miss_r[adapter_name] = r
         self.miss_mini_r[adapter_name] = mini_r
+        self.miss_fn[adapter_name] = init_weights
         if miss_dropout > 0.0:
             miss_dropout_layer = nn.Dropout(p=miss_dropout)
         else:
@@ -157,7 +159,6 @@ class MissLinear(nn.Module, MissLayer):
         MissLayer.__init__(self, base_layer, **kwargs)
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, config=config, **kwargs)
-        self.miss_fn = config.init_weights
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -185,7 +186,7 @@ class MissLinear(nn.Module, MissLayer):
                     # because of the copy operation.
                     weight = self.get_base_weight().clone()
                     orig_dtype = weight.dtype
-                    if self.miss_fn == "bat":
+                    if self.miss_fn[active_adapter] == "bat":
                         weight += self.get_delta_weight(active_adapter, weight)
                     else:
                         weight = self.get_delta_weight_miss(active_adapter, weight)
@@ -199,7 +200,7 @@ class MissLinear(nn.Module, MissLayer):
                 else:
                     weight = self.get_base_weight()
                     orig_dtype = weight.dtype
-                    if self.miss_fn == "bat":
+                    if self.miss_fn[active_adapter] == "bat":
                         weight += self.get_delta_weight(active_adapter, weight)
                     else:
                         weight = self.get_delta_weight_miss(active_adapter, weight)
@@ -220,9 +221,9 @@ class MissLinear(nn.Module, MissLayer):
             if active_adapter in self.miss_block.keys():
                 weight = self.get_base_weight()
                 orig_dtype = weight.dtype
-                if self.miss_fn == "bat":
+                if self.miss_fn[active_adapter] == "bat":
                     weight = self.get_delta_weight(active_adapter, weight, reverse=True)
-                elif self.miss_fn == "mini":
+                elif self.miss_fn[active_adapter] == "mini":
                     weight = self.get_delta_weight_miss(active_adapter, weight, reverse=True)
                 else:
                     weight = self.get_delta_weight_miss(active_adapter, weight, reverse=True)
@@ -295,7 +296,7 @@ class MissLinear(nn.Module, MissLayer):
         in_features = orig_weight.size(-1)
         out_features = orig_weight.size(0)
         r = miss_B.size(0)
-        if self.miss_fn == "mini":
+        if self.miss_fn[adapter] == "mini":
             miss_B = miss_B.repeat(1, out_features // self.miss_mini_r[adapter])
 
         sign = -1 if reverse else 1
@@ -333,7 +334,10 @@ class MissLinear(nn.Module, MissLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            if self.miss_fn == "bat":
+            # Determine the MiSS variant from the active adapters. When multiple adapters are active, they must
+            # all use the same variant; otherwise, the forward pass is ambiguous.
+            active_fns = {self.miss_fn[adapter] for adapter in self.active_adapters if adapter in self.miss_block}
+            if active_fns == {"bat"}:
                 orig_weight = self.get_base_weight().clone()
                 for active_adapter in self.active_adapters:
                     if active_adapter not in self.miss_block.keys():
@@ -352,7 +356,7 @@ class MissLinear(nn.Module, MissLayer):
                     if active_adapter not in self.miss_block.keys():
                         continue
                     miss = self.miss_block[active_adapter]
-                    if self.miss_fn == "mini":
+                    if self.miss_fn[active_adapter] == "mini":
                         miss = miss.repeat(1, self.base_layer.out_features // self.miss_mini_r[active_adapter])
 
                     dropout = self.miss_dropout[active_adapter]
