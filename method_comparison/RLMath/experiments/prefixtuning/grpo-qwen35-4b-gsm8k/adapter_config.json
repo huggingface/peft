@@ -1,0 +1,6 @@
+{
+  "base_model_name_or_path": "Qwen/Qwen3.5-4B",
+  "peft_type": "PREFIX_TUNING",
+  "num_virtual_tokens": 20,
+  "task_type": "CAUSAL_LM"
+}

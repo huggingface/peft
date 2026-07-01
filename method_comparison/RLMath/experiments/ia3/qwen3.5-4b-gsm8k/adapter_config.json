@@ -1,0 +1,13 @@
+{
+  "base_model_name_or_path": "Qwen/Qwen3.5-4B",
+  "peft_type": "IA3",
+  "target_modules": [
+    "k_proj",
+    "v_proj",
+    "down_proj"
+  ],
+  "feedforward_modules": [
+    "down_proj"
+  ],
+  "task_type": "CAUSAL_LM"
+}

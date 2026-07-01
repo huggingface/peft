@@ -1,0 +1,21 @@
+{
+  "base_model_name_or_path": "Qwen/Qwen3.5-4B",
+  "peft_type": "ADALORA",
+  "lora_alpha": 32,
+  "target_modules": [
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj",
+    "gate_proj",
+    "up_proj",
+    "down_proj"
+  ],
+  "task_type": "CAUSAL_LM",
+  "init_r": 64,
+  "target_r": 16,
+  "deltaT": 10,
+  "beta1": 0.85,
+  "beta2": 0.85,
+  "orth_reg_weight": 0.5
+}

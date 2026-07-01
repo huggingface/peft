@@ -1,0 +1,23 @@
+{
+  "model_id": "meta-llama/Llama-3.1-8B-Instruct",
+  "save_checkpoint": true,
+  "dataset_name": "gsm8k_tinker",
+  "reward_type": "tinker",
+  "learning_rate": 8e-05,
+  "lr_scheduler_type": "constant",
+  "warmup_ratio": 0.0,
+  "beta": 0.0,
+  "temperature": 1.0,
+  "max_completion_length": 1024,
+  "per_device_train_batch_size": 1,
+  "gradient_accumulation_steps": 4,
+  "max_steps": 220,
+  "train_subset_size": 3000,
+  "adam_beta1": 0.9,
+  "adam_beta2": 0.95,
+  "loss_type": "dr_grpo",
+  "scale_rewards": "none",
+  "disable_dropout": true,
+  "num_iterations": 1,
+  "epsilon": 0.2
+}

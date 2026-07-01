@@ -1,0 +1,6 @@
+{
+  "model_id": "Qwen/Qwen3.5-4B",
+  "save_checkpoint": true,
+  "max_steps": 200,
+  "learning_rate": 4e-05
+}

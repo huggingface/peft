@@ -1,0 +1,9 @@
+{
+  "base_model_name_or_path": "Qwen/Qwen3.5-4B",
+  "peft_type": "LN_TUNING",
+  "target_modules": [
+    "input_layernorm",
+    "post_attention_layernorm"
+  ],
+  "task_type": "CAUSAL_LM"
+}
