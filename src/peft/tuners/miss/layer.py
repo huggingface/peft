@@ -334,6 +334,13 @@ class MissLinear(nn.Module, MissLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             if self.miss_fn == "bat":
+                if (self.quantization_backend is not None) and (not self.quantization_backend.supports_merge):
+                    raise ValueError(
+                        "Using MiSS with `init_weights='bat'` is not supported for quantization with "
+                        f"{self.quantization_backend.backend_name}. Use a different quantization backend or a "
+                        "different initialization method."
+                    )
+
                 orig_weight = self.get_base_weight().clone()
                 for active_adapter in self.active_adapters:
                     if active_adapter not in self.miss_block.keys():

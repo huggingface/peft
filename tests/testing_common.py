@@ -42,6 +42,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    MissConfig,
     OSFConfig,
     PeftModel,
     PrefixTuningConfig,
@@ -778,6 +779,8 @@ class PeftCommonTester:
 
     def _test_safe_merge(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        if (config_cls == MissConfig) and (config_kwargs.get("init_weights") == "bat"):
+            pytest.skip(reason="Test requires non-zero init but MiSS is using 'bat' init")
         torch.manual_seed(0)
 
         with hub_online_once(model_id):
