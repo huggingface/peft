@@ -103,12 +103,14 @@ class RandLoraConfig(PeftConfig):
         },
     )
     save_projection: bool = field(
-        default=True,
+        default=False,
         metadata={
             "help": (
                 "Whether to save the basis_A / basis_B projections in the state dict alongside per layer lambda / "
-                "gamma weights. This will increase the size of the checkpoint, but guarantee that we can reload "
-                "the checkpoint on all system configurations."
+                "gamma weights. When False (default), projections are regenerated deterministically from "
+                "`projection_prng_key` on load, keeping checkpoints small (only lambda/gamma are saved). "
+                "Set to True only if you need to load the checkpoint on a system where the projection cannot "
+                "be reproduced (e.g. different PyTorch version with changed RNG behaviour)."
             )
         },
     )
