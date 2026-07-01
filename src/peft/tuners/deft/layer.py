@@ -314,13 +314,9 @@ class DeftLinear(nn.Module, DeftLayer):
             # no active DEFT adapter on this layer
             result = self.base_layer(x, *args, **kwargs)
         else:
-            # LoRA-style forward: instead of materializing W' = W + delta and calling F.linear, apply the update
-            # directly to the activations. This preserves any hooks on the base layer's forward (e.g. sharding) and
-            # keeps the path compatible with quantized base layers.
-            #
-            # For one adapter, delta = Q_P @ (R - right.T @ W), so
-            #     x @ delta.T = [ (x @ R.T) - (x @ W.T) @ right ] @ Q_P.T  =  inject - correction
-            # where (x @ W.T) is the bias-free base product.
+            # Apply the update on the activations instead of materializing W + delta. For one adapter,
+            # delta = Q_P @ (R - right.T @ W), so x @ delta.T = [(x @ R.T) - (x @ W.T) @ right] @ Q_P.T
+            # (injection minus subspace-removal), where (x @ W.T) is the bias-free base product.
             base_layer = self.get_base_layer()
             bias = base_layer.bias
 
