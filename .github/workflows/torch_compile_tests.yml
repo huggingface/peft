@@ -38,7 +38,6 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           ref: ${{ github.event.inputs.branch }}
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
           persist-credentials: false
       - name: Pip install
         run: |
@@ -46,9 +45,11 @@ jobs:
           pip install -e . --no-deps
           pip install pytest-cov pytest-reportlog parameterized datasets scipy einops
           pip install "pytest>=7.2.0,<8.0.0" # see: https://github.com/huggingface/transformers/blob/ce4fff0be7f6464d713f7ac3e0bbaafbc6959ae5/setup.py#L148C6-L148C26
-          if [ "${USE_PYTORCH_NIGHTLY}" = "true" ]; then
-            python -m pip install --upgrade --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
-          fi
+      - name: Install PyTorch nightly
+        if: github.event.inputs.pytorch_nightly == 'true'
+        run: |
+          source activate peft
+          python -m pip install --upgrade --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
       - name: Test compile with pytest
         run: |
           source activate peft
