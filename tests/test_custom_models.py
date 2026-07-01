@@ -573,6 +573,19 @@ TEST_CASES = [
         DeftConfig,
         {"target_modules": ["lin0"], "decomposition_method": "qr", "alpha": 16},
     ),
+    (
+        "Vanilla MLP 8 DEFT PaRa relu",
+        "MLP",
+        DeftConfig,
+        {"target_modules": ["lin0"], "decomposition_method": "relu", "para": True},
+    ),
+    (
+        "Vanilla MLP 9 DEFT PaRa qr",
+        "MLP",
+        DeftConfig,
+        {"target_modules": ["lin0"], "decomposition_method": "qr", "para": True},
+    ),
+    ("Embedding + transformers Conv1D 1 DEFT", "EmbConv1D", DeftConfig, {"target_modules": ["conv1d"]}),
     ########
     # HRA #
     ########
@@ -2842,6 +2855,10 @@ class TestPeftCustomModel(PeftCommonTester):
         # OSF uses SVD reconstruction which introduces small numerical differences
         if issubclass(config_cls, OSFConfig):
             assert torch.allclose(outputs_base, outputs_before, rtol=1e-4, atol=1e-4)
+        elif isinstance(config, DeftConfig) and config.para:
+            # PaRa (DEFT with para=True) is a removal-only method and is intentionally not identity-at-init, so a
+            # fresh adapter already changes the output; skip this precondition (the disable/enable checks below apply).
+            pass
         else:
             assert torch.allclose(outputs_base, outputs_before)
 
@@ -2896,6 +2913,9 @@ class TestPeftCustomModel(PeftCommonTester):
         # OSF uses SVD reconstruction which introduces small numerical differences
         if issubclass(config_cls, OSFConfig):
             assert torch.allclose(outputs_before, outputs_disabled, rtol=1e-4, atol=1e-4)
+        elif isinstance(config, DeftConfig) and config.para:
+            # PaRa is not identity-at-init, so disabling returns the base output (not `outputs_before`)
+            assert torch.allclose(outputs_base, outputs_disabled)
         else:
             assert torch.allclose(outputs_before, outputs_disabled)
         assert torch.allclose(outputs_after, outputs_enabled_after_disable)
@@ -2994,7 +3014,10 @@ class TestPeftCustomModel(PeftCommonTester):
         assert torch.allclose(outputs_after, outputs_unmerged, atol=atol, rtol=rtol)
 
         # check that disabling adapters gives the same results as before training
-        assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol)
+        # (skipped for PaRa: DEFT with para=True is not identity-at-init, so `outputs_before` already differs from the
+        # disabled/base output; the disable -> base behavior is covered by test_disable_adapters)
+        if not (isinstance(config, DeftConfig) and config.para):
+            assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol)
 
         # check that enabling + disabling adapters does not change the results
         assert torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol)
