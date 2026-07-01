@@ -115,7 +115,7 @@ def _convert_module_to_lora(
     if isinstance(module, MissLinear):
         return _convert_miss_module_to_lora(module, rank, adapter_name)
 
-    delta_weight = module.get_delta_weight(adapter_name)
+    delta_weight = module.get_additive_delta(adapter_name)
     # Note: Explore different algorithms (truncated, randomized, ...) to see if they are more efficient
 
     orig_dtype = delta_weight.dtype
@@ -154,8 +154,9 @@ def convert_to_lora(
     Convert a non-LoRA model with PEFT layers to a LoRA checkpoint.
 
     This is only supported for some specific PEFT methods that allow an equivalent conversion. Essentially, this comes
-    down to PEFT methods that work by updating the base weight with a delta weight. Also, right now, only linear layers
-    are supported.
+    down to PEFT methods for which we can compute the additive delta weight W' - W, either directly (additive methods
+    like LoKr) or by constructing the effective weight W' first (multiplicative methods like OFT). Also, right now,
+    only linear layers are supported.
 
     The LoRA adapter will try to approximate the initial adapter as close as possible. The higher the rank, the better
     the approximation. It is expected that the approximation will never reach the full performance of the original
@@ -302,11 +303,11 @@ def convert_to_lora(
     ):
         if not isinstance(module, BaseTunerLayer):
             continue
-        if not hasattr(module, "get_delta_weight"):
+        if not hasattr(module, "get_additive_delta"):
             # if we arrive here, it means that the layer actually does not support LoRA conversion, which should not
             # happen
             raise TypeError(
-                f"Module of type {type(module)} does not have a get_delta_weight method, which is required for "
+                f"Module of type {type(module)} does not have a get_additive_delta method, which is required for "
                 "conversion. Please open an issue: https://github.com/huggingface/peft/issues"
             )
 

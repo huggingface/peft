@@ -663,6 +663,23 @@ class Linear(nn.Module, OFTLayer):
         else:
             return oft_R_module.get_weight()
 
+    def get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        """Return the additive delta W' - W for OFT.
+
+        OFT is a multiplicative method: W' = W @ R^T, where R is the orthogonal rotation matrix. The additive delta is
+        thus W @ R^T - W.
+        """
+        oft_mat = self.get_delta_weight(adapter_name)
+        base_weight = self.get_base_layer().weight.data
+        orig_dtype = base_weight.dtype
+        # compute in float32 for numerical stability
+        effective_weight = torch.mm(base_weight.float(), oft_mat.float().t())
+        delta = effective_weight - base_weight.float()
+        return delta.to(orig_dtype)
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        return True
+
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
 

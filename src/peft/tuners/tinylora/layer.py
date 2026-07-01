@@ -131,6 +131,9 @@ class TinyLoraLayer(BaseTunerLayer):
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         return True
 
+    def get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        return self.get_delta_weight(adapter_name)
+
     def _get_layer_seed(self, adapter_name: str, base_seed: int) -> int:
         """Get a deterministic seed for this layer's projection matrices."""
         return base_seed + self._layer_idx
