@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import dataclasses
 from unittest.mock import PropertyMock, patch
 
 import pytest
@@ -24,6 +25,7 @@ from peft.tuners.lora.layer import Conv1d as LoraConv1d
 from peft.tuners.lora.layer import Conv2d as LoraConv2d
 from peft.tuners.lora.layer import Embedding as LoraEmbedding
 from peft.tuners.lora.layer import Linear as LoraLinear
+from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.lora.variants import (
     ALoraLinearVariant,
     DoraConv1dVariant,
@@ -189,7 +191,7 @@ class TestLoraVariants:
             # 3. Assert that the sanity check catches it and throws the right error
             with pytest.raises(
                 ValueError,
-                match="found in lora_variants but not tagged with 'is_lora_variant' in LoraConfig",
+                match=".*found in lora_variant.*",
             ):
                 layer.resolve_lora_variant(config=config)
 
@@ -219,6 +221,44 @@ class TestLoraVariants:
             }
             with pytest.raises(ValueError, match="must be sorted tuples"):
                 layer.resolve_lora_variant(config=config)
+
+    def test_multiple_string_variants_in_init_lora_weights(self):
+        """
+        Verify that multiple variant names originating from the same configuration field (init_lora_weights) resolve to
+        different LoraVariant implementations.
+        """
+
+        @dataclasses.dataclass
+        class MockConfig:
+            init_lora_weights: str = dataclasses.field(
+                default="foobar", metadata={"lora_variants": ["mica", "foobar"]}
+            )
+
+        class MockMiCAVariant:
+            pass
+
+        class MockFoobarVariant:
+            pass
+
+        class MockLayer(LoraLayer):
+            @property
+            def lora_variants(self):
+                return {
+                    ("mica",): MockMiCAVariant,
+                    ("foobar",): MockFoobarVariant,
+                }
+
+        layer = MockLayer(base_layer=nn.Linear(10, 10))
+
+        # Resolve and verify the correct variants
+        for value, expected_class in [
+            ("mica", MockMiCAVariant),
+            ("foobar", MockFoobarVariant),
+        ]:
+            config = MockConfig(init_lora_weights=value)
+            resolved_instance = layer.resolve_lora_variant(config=config)
+
+            assert isinstance(resolved_instance, expected_class)
 
 
 class TestActivatedLora:

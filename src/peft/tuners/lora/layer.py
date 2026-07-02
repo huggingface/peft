@@ -158,41 +158,41 @@ class LoraLayer(BaseTunerLayer):
         return {(): None}
 
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-
-        # Fetch the dictionary of variants
-        layer_variants = self.lora_variants
-        if any(tuple(sorted(k)) != k for k in layer_variants.keys()):
+        """TODO"""
+        # mapping from declared variant to the LoraVariant class, keys are tuples to allow for multi variants
+        lora_variant_mapping = self.lora_variants
+        if any(tuple(sorted(k)) != k for k in lora_variant_mapping.keys()):
             raise ValueError("Keys in lora_variants must be sorted tuples (e.g ('a', 'b'), not ('b', 'a')).")
 
-        lora_variants_configs = [f for f in dataclasses.fields(config) if f.metadata.get("is_lora_variant")]
+        # for each LoRA variant, determine if they are configured as active or not
+        requested_lora_variants: dict[str, bool] = {}
+        for field in dataclasses.fields(config):
+            # for init_lora_weights, we collect the field's lora_variants and check the value to determine if the
+            # variant is requested
+            if field.name == "init_lora_weights":
+                for init_variant_option in field.metadata["lora_variants"]:
+                    requested_lora_variants[init_variant_option] = config.init_lora_weights == init_variant_option
+            # for all other fields, if the metadata declares them as is_lora_variant and we check if the value is truthy
+            # to determine if the variant is requested
+            elif field.metadata.get("is_lora_variant"):
+                requested_lora_variants[field.name] = bool(getattr(config, field.name))
 
-        # 1. Gather all valid variant field names from the config
-        tagged_fields = {f.name for f in lora_variants_configs}
-
-        # 2. SANITY CHECK: Ensure all keys in the layer's dictionary actually exist in the config
-        all_variant_names = {name for variant_keys in layer_variants.keys() for name in variant_keys}
-        missing_variants = all_variant_names - tagged_fields
+        # sanity check: each mapping key must be present in the LoraConfig
+        all_variant_names = {name for variant_keys in lora_variant_mapping.keys() for name in variant_keys}
+        missing_variants = all_variant_names - requested_lora_variants.keys()
         if missing_variants:
             raise ValueError(
-                f"variant(s) {sorted(missing_variants)} found in lora_variants but not tagged with "
-                f"'is_lora_variant' in LoraConfig."
+                f"variant(s) {sorted(missing_variants)} found in lora_variants but neither tagged with "
+                f"'is_lora_variant' in LoraConfig, nor declared as a LoRA variant in init_lora_weights."
             )
 
-        # 3. Figure out which variants are currently active
-        def _is_active(f, config):
-            val = getattr(config, f.name)
-            prefixes = f.metadata.get("lora_variants")
-            if prefixes is not None:
-                return isinstance(val, str) and any(val.startswith(p) for p in prefixes)
-            return bool(val)
+        # collect active variants: keys are sorted tuples of strings
+        requested_keys = tuple(sorted(k for k, v in requested_lora_variants.items() if v))
+        if requested_keys not in lora_variant_mapping:
+            raise ValueError(f"Invalid or unsupported variant combination: {requested_keys}")
 
-        active_variants = tuple(sorted(f.name for f in lora_variants_configs if _is_active(f, config)))
-
-        # 4. Route to the correct variant class
-        if active_variants not in layer_variants:
-            raise ValueError(f"Invalid or unsupported variant combination: {active_variants}")
-
-        variant_class = layer_variants[active_variants]
+        # return the found variant or None for vanilla LoRA
+        variant_class = lora_variant_mapping[requested_keys]
         return variant_class() if variant_class else None
 
     def update_layer(
@@ -887,7 +887,7 @@ class Linear(nn.Module, LoraLayer):
             ("alora_invocation_tokens",): variants.ALoraLinearVariant,
             ("velora_config",): variants.VeloraLinearVariant,
             ("monteclora_config",): variants.MontecloraLinearVariant,
-            ("init_lora_weights",): variants.MiCALinearVariant,
+            ("mica",): variants.MiCALinearVariant,
         }
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -1132,7 +1132,7 @@ class Embedding(nn.Module, LoraLayer):
         return {
             (): None,
             ("use_dora",): variants.DoraEmbeddingVariant,
-            ("init_lora_weights",): variants.MiCAEmbeddingVariant,
+            ("mica",): variants.MiCAEmbeddingVariant,
         }
 
     def update_layer(
