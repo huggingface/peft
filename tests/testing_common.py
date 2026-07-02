@@ -718,14 +718,18 @@ class PeftCommonTester:
             with torch.inference_mode():
                 logits_adapter_2 = model(**dummy_input)[0]
 
-            assert not torch.allclose(logits_adapter_1, logits_adapter_2, atol=1e-3, rtol=1e-3)
+            atol, rtol = 1e-3, 1e-3
+            if config_kwargs.get("target_parameters"):
+                # for the MoE test with target parameters, we need tighter tolerances because the adapter influence is smaller
+                atol, rtol = 1e-4, 1e-4
+            assert not torch.allclose(logits_adapter_1, logits_adapter_2, atol=atol, rtol=rtol)
 
             model.set_adapter("default")
 
             with torch.inference_mode():
                 logits_adapter_1_after_set = model(**dummy_input)[0]
 
-            assert torch.allclose(logits_adapter_1_after_set, logits_adapter_1, atol=1e-3, rtol=1e-3)
+            assert torch.allclose(logits_adapter_1_after_set, logits_adapter_1, atol=atol, rtol=rtol)
 
             model_copy = copy.deepcopy(model)
             model_copy_2 = copy.deepcopy(model)
@@ -734,22 +738,22 @@ class PeftCommonTester:
             with torch.inference_mode():
                 logits_merged_all = model_merged_all(**dummy_input)[0]
 
-            assert not torch.allclose(logits_merged_all, logits_adapter_2, atol=1e-3, rtol=1e-3)
-            assert not torch.allclose(logits_merged_all, logits_adapter_1, atol=1e-3, rtol=1e-3)
+            assert not torch.allclose(logits_merged_all, logits_adapter_2, atol=atol, rtol=rtol)
+            assert not torch.allclose(logits_merged_all, logits_adapter_1, atol=atol, rtol=rtol)
 
             model_merged_adapter_2 = model_copy.merge_and_unload(adapter_names=["adapter-2"])
 
             with torch.inference_mode():
                 logits_merged_adapter_2 = model_merged_adapter_2(**dummy_input)[0]
 
-            assert torch.allclose(logits_merged_adapter_2, logits_adapter_2, atol=1e-3, rtol=1e-3)
+            assert torch.allclose(logits_merged_adapter_2, logits_adapter_2, atol=atol, rtol=rtol)
 
             model_merged_adapter_default = model_copy_2.merge_and_unload(adapter_names=["default"])
 
             with torch.inference_mode():
                 logits_merged_adapter_default = model_merged_adapter_default(**dummy_input)[0]
 
-            assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3)
+            assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=atol, rtol=rtol)
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
