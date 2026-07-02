@@ -412,6 +412,15 @@ def get_peft_branch() -> str:
     )
 
 
+def get_git_is_dirty() -> bool:
+    """Check if the PEFT git worktree has uncommitted changes."""
+    peft_dir = os.path.dirname(peft.__file__)
+    # Exit code 0 means clean, non-zero means dirty (or error, which we treat as dirty)
+    result = subprocess.run(["git", "diff", "--quiet"], cwd=peft_dir)
+    result_cached = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=peft_dir)
+    return result.returncode != 0 or result_cached.returncode != 0
+
+
 class TrainStatus(enum.Enum):
     FAILED = "failed"
     SUCCESS = "success"
@@ -568,6 +577,7 @@ def log_results(
             "total_time": time_total,
             "experiment_name": experiment_name,
             "peft_branch": peft_branch,
+            "peft_is_dirty": get_git_is_dirty(),
             "train_config": asdict(train_config),
             "peft_config": peft_config_dict,
             "error_msg": train_result.error_msg,
