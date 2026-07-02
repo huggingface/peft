@@ -334,14 +334,17 @@ class MissLinear(nn.Module, MissLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            # Determine the MiSS variant from the active adapters. When multiple adapters are active, they must
-            # all use the same variant; otherwise, the forward pass is ambiguous.
-            active_fns = {self.miss_fn[adapter] for adapter in self.active_adapters if adapter in self.miss_block}
-            if active_fns == {"bat"}:
+            # Separate active adapters into bat and non-bat variants. bat adapters modify the
+            # base weight, while non-bat adapters (balance/mini) add a delta to the output. Both
+            # types can be active at the same time: bat weight modifications are applied first,
+            # then non-bat output deltas are added on top.
+            active_adapters = [a for a in self.active_adapters if a in self.miss_block]
+            bat_adapters = [a for a in active_adapters if self.miss_fn[a] == "bat"]
+            non_bat_adapters = [a for a in active_adapters if self.miss_fn[a] != "bat"]
+
+            if bat_adapters:
                 orig_weight = self.get_base_weight().clone()
-                for active_adapter in self.active_adapters:
-                    if active_adapter not in self.miss_block.keys():
-                        continue
+                for active_adapter in bat_adapters:
                     delta_weight = self.get_delta_weight(active_adapter, orig_weight)
                     orig_weight = orig_weight + delta_weight
 
@@ -352,20 +355,19 @@ class MissLinear(nn.Module, MissLayer):
                 result = self.base_layer(x, *args, **kwargs)
                 if self.quantization_backend is not None:
                     result = self.quantization_backend.maybe_clone_base_result(result)
-                for active_adapter in self.active_adapters:
-                    if active_adapter not in self.miss_block.keys():
-                        continue
-                    miss = self.miss_block[active_adapter]
-                    if self.miss_fn[active_adapter] == "mini":
-                        miss = miss.repeat(1, self.base_layer.out_features // self.miss_mini_r[active_adapter])
 
-                    dropout = self.miss_dropout[active_adapter]
-                    r = miss.size(0)
-                    if x.size(-1) % r != 0:
-                        padding_size = (r - x.size(-1) % r) % r
-                        x = F.pad(x, (0, padding_size))
-                    x = self._cast_input_dtype(x, miss.dtype)
-                    result = result + torch.sum(dropout(x).reshape(*x.shape[:-1], x.size(-1) // r, r), dim=-2) @ miss
+            for active_adapter in non_bat_adapters:
+                miss = self.miss_block[active_adapter]
+                if self.miss_fn[active_adapter] == "mini":
+                    miss = miss.repeat(1, self.base_layer.out_features // self.miss_mini_r[active_adapter])
+
+                dropout = self.miss_dropout[active_adapter]
+                r = miss.size(0)
+                if x.size(-1) % r != 0:
+                    padding_size = (r - x.size(-1) % r) % r
+                    x = F.pad(x, (0, padding_size))
+                x = self._cast_input_dtype(x, miss.dtype)
+                result = result + torch.sum(dropout(x).reshape(*x.shape[:-1], x.size(-1) // r, r), dim=-2) @ miss
 
         result = result.to(previous_dtype)
         return result

@@ -5733,3 +5733,67 @@ class TestMissInitialization:
         assert layer.miss_fn["default"] is True
         assert layer.miss_fn["adapter1"] == "bat"
         assert layer.miss_fn["adapter2"] == "mini"
+
+    def test_miss_mix_bat_and_non_bat_forward(self, data):
+        # Mixing bat and non-bat adapters in the same forward pass: bat adapters modify the
+        # base weight, non-bat adapters add a delta to the output. Both contributions should
+        # be present in the result.
+        model = self.get_model()
+        config0 = MissConfig(target_modules=["lin0"], r=2, init_weights="bat")
+        model = get_peft_model(model, config0)
+
+        config1 = MissConfig(target_modules=["lin0"], r=2, init_weights=True)
+        model.add_adapter("adapter1", config1)
+
+        # Set non-zero random weights so both adapters contribute
+        layer = model.base_model.model.lin0
+        torch.manual_seed(42)
+        layer.miss_block["default"].data = torch.randn_like(layer.miss_block["default"])
+        layer.miss_block["adapter1"].data = torch.randn_like(layer.miss_block["adapter1"])
+
+        # Activate both adapters simultaneously at the layer level
+        layer.set_adapter(["default", "adapter1"])
+        out_mixed = model(data)
+        assert out_mixed.shape == (4, 2)
+
+        # Compute the individual contributions for comparison
+        model.set_adapter("default")  # bat only
+        out_bat = model(data)
+
+        model.set_adapter("adapter1")  # non-bat only
+        out_non_bat = model(data)
+
+        # The mixed output should differ from both individual outputs, confirming
+        # both adapter contributions are applied (not just one type).
+        assert not torch.allclose(out_mixed, out_bat)
+        assert not torch.allclose(out_mixed, out_non_bat)
+
+    def test_miss_mix_bat_and_mini_forward(self, data):
+        # Mixing bat and mini adapters in the same forward pass.
+        model = self.get_model()
+        config0 = MissConfig(target_modules=["lin0"], r=2, init_weights="bat")
+        model = get_peft_model(model, config0)
+
+        config1 = MissConfig(target_modules=["lin0"], r=2, init_weights="mini", mini_r=1)
+        model.add_adapter("adapter1", config1)
+
+        # Set non-zero random weights so both adapters contribute
+        layer = model.base_model.model.lin0
+        torch.manual_seed(42)
+        layer.miss_block["default"].data = torch.randn_like(layer.miss_block["default"])
+        layer.miss_block["adapter1"].data = torch.randn_like(layer.miss_block["adapter1"])
+
+        # Activate both adapters simultaneously at the layer level
+        layer.set_adapter(["default", "adapter1"])
+        out_mixed = model(data)
+        assert out_mixed.shape == (4, 2)
+
+        # Verify it differs from bat-only and mini-only
+        model.set_adapter("default")
+        out_bat = model(data)
+
+        model.set_adapter("adapter1")
+        out_mini = model(data)
+
+        assert not torch.allclose(out_mixed, out_bat)
+        assert not torch.allclose(out_mixed, out_mini)
