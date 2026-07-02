@@ -31,11 +31,20 @@ from transformers.pytorch_utils import Conv1D
 
 from peft import (
     AdaptionPromptConfig,
+    FourierFTConfig,
+    FrodConfig,
+    GraloraConfig,
     IA3Config,
     LoHaConfig,
+    LoKrConfig,
     LoraConfig,
+    OSFConfig,
     PeftModel,
+    PolyConfig,
     PromptTuningConfig,
+    PsoftConfig,
+    UniLoraConfig,
+    VBLoRAConfig,
     VeraConfig,
     get_layer_status,
     get_model_status,
@@ -2288,3 +2297,82 @@ class TestRankAndAlphaPattern:
         assert model.module.foobar.scaling["default"] == 1.0
         assert model.module.module.foo.scaling["default"] == 0.125
         assert model.module.module.barfoo.scaling["default"] == 1.0
+
+
+class TestDeleteAdapterContainerRegistration:
+    """Regression tests for `delete_adapter` fully removing per-adapter state.
+
+    Several tuners kept per-adapter state in containers (dicts / BufferDicts) that were not listed in the layer's
+    `adapter_layer_names` / `other_param_names`. `BaseTunerLayer.delete_adapter` only iterates those two tuples, so
+    the state of a deleted adapter was left behind. Each parametrization below deletes one of two adapters and
+    asserts that none of the previously-unregistered containers still holds the deleted adapter.
+    """
+
+    class MLP16(nn.Module):
+        # dimensions chosen so that every tuner's config constraints are satisfiable (e.g. VBLoRA requires
+        # in/out features divisible by `vector_length`)
+        def __init__(self):
+            super().__init__()
+            self.lin1 = nn.Linear(16, 16)
+            self.lin2 = nn.Linear(16, 16)
+
+        def forward(self, x):
+            return self.lin2(self.lin1(x))
+
+    # tuner name -> (config factory, per-adapter containers that used to leak on delete)
+    CASES = {
+        "unilora": (
+            lambda: UniLoraConfig(target_modules=["lin1", "lin2"], r=4, theta_d_length=100),
+            ["r", "unilora_indices_A", "unilora_indices_B"],
+        ),
+        "fourierft": (
+            lambda: FourierFTConfig(target_modules=["lin1", "lin2"], n_frequency=50),
+            ["indices"],
+        ),
+        "psoft": (
+            lambda: PsoftConfig(target_modules=["lin1", "lin2"], r=4),
+            ["random_seed", "_psoft_A_cache", "_psoft_B_cache"],
+        ),
+        "vblora": (
+            lambda: VBLoRAConfig(target_modules=["lin1", "lin2"], r=2, num_vectors=8, vector_length=4),
+            ["r", "topk"],
+        ),
+        "gralora": (
+            lambda: GraloraConfig(target_modules=["lin1", "lin2"], r=4, gralora_k=2),
+            ["gralora_k"],
+        ),
+        "poly": (
+            lambda: PolyConfig(target_modules=["lin1", "lin2"], r=2, n_tasks=2, n_skills=2, n_splits=1),
+            ["poly_type"],
+        ),
+        "frod": (
+            lambda: FrodConfig(target_modules=["lin1", "lin2"]),
+            ["r"],
+        ),
+        "osf": (
+            lambda: OSFConfig(target_modules=["lin1", "lin2"], effective_rank=4),
+            ["effective_rank"],
+        ),
+        "lokr": (
+            lambda: LoKrConfig(target_modules=["lin1", "lin2"], r=4),
+            ["rank_dropout_scale"],
+        ),
+    }
+
+    @pytest.mark.parametrize("tuner", CASES.keys())
+    def test_delete_adapter_removes_previously_unregistered_containers(self, tuner):
+        make_config, containers = self.CASES[tuner]
+        model = get_peft_model(self.MLP16(), make_config(), adapter_name="a1")
+        model.add_adapter("a2", make_config())
+
+        model.delete_adapter("a2")
+
+        checked = set()
+        for module in model.modules():
+            for name in containers:
+                container = getattr(module, name, None)
+                if container is not None and hasattr(container, "keys"):
+                    checked.add(name)
+                    assert "a2" not in container, f"deleted adapter still present in `{name}`"
+                    assert "a1" in container, f"remaining adapter missing from `{name}`"
+        assert checked == set(containers), f"containers not found on any layer: {set(containers) - checked}"
