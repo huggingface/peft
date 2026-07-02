@@ -358,13 +358,13 @@ def _resolve_string_target_modules(
     """Resolve a string `target_modules` (a regex or `"all-linear"`) to the concrete leaf names it targets.
 
     The keys of `target_module_mapping` are the v4 projection names that were renamed/fused on v5: the expert
-    projections (`gate_proj`, `up_proj`, `down_proj`) and the router `gate`. Resolving the string to leaf names up front
-    lets the list-based remap downstream stay unchanged for a regex and for `"all-linear"` alike.
+    projections (`gate_proj`, `up_proj`, `down_proj`) and the router `gate`. Resolving the string to leaf names up
+    front lets the list-based remap downstream stay unchanged for a regex and for `"all-linear"` alike.
 
-    `"all-linear"` matched every `nn.Linear` on the v4 model, so it targeted all of those projections; on v5 they are no
-    longer `nn.Linear` (the experts are fused into stacked parameters, the router became a custom module), so they are
-    added directly by name. A regex only targets what it spells out, so the experts -- which no longer exist as real
-    keys -- are recovered by probing each reconstructed v4 key against the pattern.
+    `"all-linear"` matched every `nn.Linear` on the v4 model, so it targeted all of those projections; on v5 they are
+    no longer `nn.Linear` (the experts are fused into stacked parameters, the router became a custom module), so they
+    are added directly by name. A regex only targets what it spells out, so the experts -- which no longer exist as
+    real keys -- are recovered by probing each reconstructed v4 key against the pattern.
     """
     if peft_config.target_modules.lower() == INCLUDE_LINEAR_LAYERS_SHORTHAND:
         # attention projections are still `nn.Linear` on v5, so resolve them by type; the experts and router were
@@ -407,7 +407,8 @@ def _convert_peft_config_moe(peft_config: PeftConfig, model: torch.nn.Module) ->
     requires updating the rank and alpha values of those parameters.
 
     A string `target_modules` (a regex, or `"all-linear"`) is resolved against the model up front (see
-    `_resolve_string_target_modules`), so the list-based remap below applies to lists, regexes and `"all-linear"` alike.
+    `_resolve_string_target_modules`), so the list-based remap below applies to lists, regexes and `"all-linear"`
+    alike.
     """
     model_type = getattr(model.config, "model_type", None)
     base_model_type = _MODEL_TO_CONVERSION_PATTERN.get(model_type, None)
