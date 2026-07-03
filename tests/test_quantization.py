@@ -208,6 +208,11 @@ def check_outputs_similar(x, y, min_corr=MIN_CORR, max_mse=MAX_MSE):
         assert False, f"MSE ({mse:.4f}<={max_mse}) check failed"
 
 
+def _config_supports_forward(config, quant) -> bool:
+    # TODO
+    return not (isinstance(config, MissConfig) and (config.init_weights == "bat") and (not quant.supports_merge))
+
+
 class TestQuantization:
     """Test for PEFT method x quantization method
 
@@ -262,7 +267,7 @@ class TestQuantization:
         config = config_cls(**config_kwargs)
         model = get_peft_model(model, config)
 
-        if (config_cls == MissConfig) and (config.init_weights == "bat") and (not quant.supports_merge):
+        if not _config_supports_forward(config, quant):
             with pytest.raises(ValueError, match="is not supported for quantization with"), torch.inference_mode():
                 model(dummy_input).logits
             return
@@ -292,7 +297,7 @@ class TestQuantization:
         torch.manual_seed(SEED)
         model = get_peft_model(model, config).eval()
 
-        if (config_cls == MissConfig) and (config.init_weights == "bat") and (not quant.supports_merge):
+        if not _config_supports_forward(config, quant):
             with pytest.raises(ValueError, match="is not supported for quantization with"), torch.inference_mode():
                 model(dummy_input).logits
             return
