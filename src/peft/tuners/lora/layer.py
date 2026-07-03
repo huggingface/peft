@@ -819,12 +819,19 @@ class Linear(nn.Module, LoraLayer):
         if not config.use_dora and not use_alora:
             return None
 
-        from .variants import ALoraLinearVariant, DoraLinearVariant
-
         if use_alora:
+            from .variants import ALoraLinearVariant
+
             return ALoraLinearVariant()
-        else:
-            return DoraLinearVariant()
+
+        if config.use_dora == "kernel":
+            from .variants import DoraKernelLinearVariant
+
+            return DoraKernelLinearVariant()
+
+        from .variants import DoraLinearVariant
+
+        return DoraLinearVariant()
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """

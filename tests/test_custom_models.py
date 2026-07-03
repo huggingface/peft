@@ -4014,6 +4014,152 @@ class TestPeftCustomModel(PeftCommonTester):
         for k in state_dict:
             assert torch.allclose(state_dict[k], state_dict_loaded[k])
 
+    @pytest.mark.parametrize("bias", [False, True])
+    @pytest.mark.parametrize("lora_dropout", [0.0, 0.1])
+    def test_dora_kernel_matches_standard(self, bias, lora_dropout):
+        # Verify that use_dora="kernel" produces the same output as use_dora=True
+        torch.manual_seed(42)
+        config_std = LoraConfig(
+            target_modules=["lin0"],
+            r=8,
+            lora_alpha=16,
+            use_dora=True,
+            init_lora_weights=False,
+            lora_dropout=lora_dropout,
+        )
+        config_kern = LoraConfig(
+            target_modules=["lin0"],
+            r=8,
+            lora_alpha=16,
+            use_dora="kernel",
+            init_lora_weights=False,
+            lora_dropout=lora_dropout,
+        )
+
+        # Create two identical base models
+        torch.manual_seed(0)
+        model_std = MLP(bias=bias)
+        torch.manual_seed(0)
+        model_kern = MLP(bias=bias)
+
+        # Create peft models with the same LoRA init seed
+        torch.manual_seed(42)
+        peft_std = get_peft_model(model_std, config_std)
+        torch.manual_seed(42)
+        peft_kern = get_peft_model(model_kern, config_kern)
+
+        # Sync LoRA weights and magnitude vectors
+        std_layer = peft_std.base_model.model.lin0
+        kern_layer = peft_kern.base_model.model.lin0
+        kern_layer.lora_A["default"].weight.data = std_layer.lora_A["default"].weight.data.clone()
+        kern_layer.lora_B["default"].weight.data = std_layer.lora_B["default"].weight.data.clone()
+        kern_layer.lora_magnitude_vector["default"].weight.data = std_layer.lora_magnitude_vector[
+            "default"
+        ].weight.data.clone()
+
+        # Check that the kernel layer is used
+        dora_layer = peft_kern.base_model.model.lin0.lora_magnitude_vector["default"]
+        assert type(dora_layer).__name__ == "DoraKernelLinearLayer"
+
+        x = torch.randn(8, 10)
+
+        # eval mode (no dropout randomness)
+        peft_std.eval()
+        peft_kern.eval()
+        with torch.no_grad():
+            out_std = peft_std(x)
+            out_kern = peft_kern(x)
+        assert torch.allclose(out_std, out_kern, atol=1e-5)
+
+        # training mode (with dropout, using same seed for dropout mask)
+        peft_std.train()
+        peft_kern.train()
+        torch.manual_seed(123)
+        out_std = peft_std(x)
+        loss_std = out_std.sum()
+        loss_std.backward()
+
+        torch.manual_seed(123)
+        out_kern = peft_kern(x)
+        loss_kern = out_kern.sum()
+        loss_kern.backward()
+
+        assert torch.allclose(out_std, out_kern, atol=1e-5)
+
+        # Check gradients match
+        for name, param_std in peft_std.named_parameters():
+            if not param_std.requires_grad:
+                continue
+            param_kern = dict(peft_kern.named_parameters())[name]
+            assert torch.allclose(param_std.grad, param_kern.grad, atol=1e-5), f"Gradient mismatch for {name}"
+
+    def test_dora_kernel_merge_unmerge(self):
+        # Verify merge and unmerge work correctly with use_dora="kernel"
+        torch.manual_seed(42)
+        config = LoraConfig(
+            target_modules=["lin0"],
+            r=8,
+            lora_alpha=16,
+            use_dora="kernel",
+            init_lora_weights=False,
+        )
+        base_model = MLP()
+        model = get_peft_model(base_model, config)
+
+        x = torch.randn(8, 10)
+        model.eval()
+        with torch.no_grad():
+            out_before = model(x)
+
+        # merge
+        model.merge_adapter()
+        with torch.no_grad():
+            out_merged = model(x)
+        assert torch.allclose(out_before, out_merged, atol=1e-5)
+
+        # unmerge
+        model.unmerge_adapter()
+        with torch.no_grad():
+            out_unmerged = model(x)
+        assert torch.allclose(out_before, out_unmerged, atol=1e-5)
+
+    def test_dora_kernel_save_load(self):
+        # Verify that a kernel DoRA model can be saved and loaded, and that the
+        # loaded model uses the kernel layer
+        torch.manual_seed(42)
+        config = LoraConfig(
+            target_modules=["lin0"],
+            r=8,
+            lora_alpha=16,
+            use_dora="kernel",
+            init_lora_weights=False,
+        )
+        base_model = MLP()
+        model = get_peft_model(base_model, config)
+
+        x = torch.randn(8, 10)
+        model.eval()
+        with torch.no_grad():
+            out_before = model(x)
+
+        tmp_dirname = tempfile.mkdtemp()
+        try:
+            model.save_pretrained(tmp_dirname)
+            del model
+            # use the same seed for the base model so weights match
+            torch.manual_seed(42)
+            loaded = PeftModel.from_pretrained(MLP(), tmp_dirname)
+        finally:
+            try:
+                shutil.rmtree(tmp_dirname)
+            except PermissionError:
+                pass
+
+        loaded.eval()
+        with torch.no_grad():
+            out_loaded = loaded(x)
+        assert torch.allclose(out_before, out_loaded, atol=1e-5)
+
     def test_gralora_and_hybrid_gralora_parameter_count(self):
         # Here we test the parameter count of GraLoRA is preserved
         # when rank r + hybrid_r is the same regardless of the value of gralora_k.

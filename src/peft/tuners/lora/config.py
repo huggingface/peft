@@ -723,15 +723,16 @@ class LoraConfig(PeftConfig):
             )
         },
     )
-    use_dora: bool = field(
+    use_dora: Union[bool, Literal["kernel"]] = field(
         default=False,
         metadata={
             "help": (
-                "Enable <a href='https://huggingface.co/papers/2402.09353'>'Weight-Decomposed Low-Rank Adaptation' (DoRA)</a>. This technique decomposes the updates of the "
+                "Enable <a href='https://huggingface.co/docs/papers/2402.09353'>'Weight-Decomposed Low-Rank Adaptation' (DoRA)</a>. This technique decomposes the updates of the "
                 "weights into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the "
                 "magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, "
                 "especially at low ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger"
-                "overhead than pure LoRA, so it is recommended to merge weights for inference."
+                "overhead than pure LoRA, so it is recommended to merge weights for inference. If 'kernel', uses a "
+                "memory-efficient implementation that avoids materializing the full LoRA weight matrix."
             )
         },
     )

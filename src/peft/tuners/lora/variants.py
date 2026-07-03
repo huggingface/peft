@@ -29,7 +29,8 @@ from peft.utils.other import transpose
 from .arrow import ArrowLoraLinearLayer
 from .config import LoraConfig, PeftConfig
 from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
-from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraVariant, _ConvNd
+from .dora_kernel import DoraKernelLinearLayer
+from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraLayer, LoraVariant, _ConvNd
 from .monteclora import MontecloraSampler
 from .velora import VeloraFunction, _get_group_dim, _normalize_projection, _reshape_to_grouped_subtokens
 
@@ -214,6 +215,85 @@ class DoraLinearVariant(LoraVariant):
         new_weight = orig_weight.data / dora_factor.view(-1, 1) - delta_weight
         new_weight = new_weight.to(orig_dtype)
         return new_weight
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+
+        if isinstance(dropout, nn.Identity) or not module.training:
+            base_result = result
+        else:
+            x = dropout(x)
+            base_result = None
+
+        result = result + module.lora_magnitude_vector[active_adapter](
+            x,
+            lora_A=lora_A,
+            lora_B=lora_B,
+            scaling=scaling,
+            base_layer=module.get_base_layer(),
+            base_result=base_result,
+            adapter_name=active_adapter,
+        )
+        return result
+
+
+class DoraKernelLinearVariant(LoraVariant):
+    """DoRA variant using the low-rank kernel for the weight norm.
+
+    Only supports ``nn.Linear`` base layers. Conv and embedding layers fall back to the standard DoRA variant.
+    """
+
+    @staticmethod
+    def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
+        if not module.lora_magnitude_vector:
+            module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_magnitude_vector",)
+
+        dora_layer = DoraKernelLinearLayer(fan_in_fan_out=getattr(module, "fan_in_fan_out", False))
+        lora_A = module.lora_A[adapter_name].weight
+        lora_B = module.lora_B[adapter_name].weight
+        place_on_cpu = module.ephemeral_gpu_offload and (lora_A.device.type == "cpu" or lora_B.device.type == "cpu")
+        if module.ephemeral_gpu_offload:
+            if lora_A.device.type in ["cuda", "xpu"]:
+                lora_B = lora_B.to(lora_A.device)
+            else:
+                if lora_B.device.type not in ["cuda", "xpu"]:
+                    if is_xpu_available():
+                        lora_B = lora_B.to("xpu")
+                    else:
+                        lora_B = lora_B.to("cuda")
+                lora_A = lora_A.to(lora_B.device)
+        scaling = module.scaling[adapter_name]
+        dora_layer.update_layer(
+            base_layer=module.get_base_layer(),
+            lora_A=lora_A,
+            lora_B=lora_B,
+            scaling=scaling,
+            place_on_cpu=place_on_cpu,
+        )
+        module.lora_magnitude_vector[adapter_name] = dora_layer
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        # Reuse the standard DoRA merge, which uses the full weight norm
+        return DoraLinearVariant.merge_safe(module, active_adapter, orig_weight)
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        DoraLinearVariant.merge_unsafe(module, active_adapter, orig_weight)
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return DoraLinearVariant.unmerge(module, active_adapter, orig_weight)
 
     @staticmethod
     def forward(
