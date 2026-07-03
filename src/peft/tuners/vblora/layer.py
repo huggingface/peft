@@ -30,7 +30,7 @@ class VBLoRALayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
     adapter_layer_names = ("vblora_logits_A", "vblora_logits_B", "vblora_vector_bank")
     # All names of other parameters that may contain adapter-related parameters
-    other_param_names = ("r", "topk")
+    other_param_names = ("r", "topk", "vblora_dropout")
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer

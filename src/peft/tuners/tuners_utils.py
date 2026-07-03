@@ -2224,11 +2224,14 @@ def delete_adapter(
             The name of remaining adapter(s) after deletion, or `None` if there are no active adapters left. Use this
             to set the new active adapter of the model if necessary.
     """
-    key_list = [key for key, _ in model.named_modules() if prefix not in key]
+    # Capture (key, module) pairs up front. Deleting an adapter mutates the module tree (e.g. it removes the adapter's
+    # entry from a `ModuleDict` such as `<method>_dropout`), so re-resolving a key with `get_submodule` mid-loop can
+    # raise for a submodule that was just removed. `named_modules()` already yields the module itself, so keep it
+    # instead of looking it up again by key.
+    modules_to_update = [module for key, module in model.named_modules() if prefix not in key]
     new_adapter = None
 
-    for key in key_list:
-        _, target, _ = _get_submodules(model, key)
+    for target in modules_to_update:
         if isinstance(target, layer_cls):
             target.delete_adapter(adapter_name)
             if new_adapter is None:

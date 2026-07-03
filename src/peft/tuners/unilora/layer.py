@@ -32,6 +32,7 @@ class UniLoraLayer(BaseTunerLayer):
         "unilora_indices_B",
         "unilora_scales_A",
         "unilora_scales_B",
+        "unilora_dropout",
     )
 
     def __init__(self, base_layer: nn.Module, **kwargs):
