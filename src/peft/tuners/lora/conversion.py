@@ -49,41 +49,20 @@ def _find_cutoff_index(S: torch.Tensor, threshold: float) -> int:
 def _convert_miss_module_to_lora(
     module, rank: int | float, adapter_name: str = "default"
 ) -> tuple[torch.Tensor, torch.Tensor, int]:
-    """Convert a single MiSS layer to LoRA A and B matrices.
+    """Convert a single MiSS layer (standard or mini mode) to LoRA A and B matrices.
 
-    For standard and mini modes, the MiSS forward pass (reshape+sum @ miss) is already a rank-r factorization, so the
-    exact factors are returned directly without SVD.
+    The MiSS forward pass (reshape+sum @ miss) is already a rank-r factorization, so the exact factors are returned
+    directly without SVD.
 
-    For bat mode, the delta weight depends on the base weight, so SVD is used.
+    For ``bat`` mode, the conversion goes through the generic ``get_additive_delta`` + SVD path and does not call this
+    function.
     """
     miss_fn = module.miss_fn
     miss_block = module.miss_block[adapter_name]
     in_features = module.in_features
     out_features = module.out_features
-    r_miss = module.miss_r[adapter_name]
     orig_dtype = miss_block.dtype
     device = miss_block.device
-
-    if miss_fn == "bat":
-        base_weight = module.get_base_layer().weight.data.clone()
-        delta_weight = module.get_delta_weight(adapter_name, base_weight).float()
-
-        U, S, V = torch.linalg.svd(delta_weight, full_matrices=False)
-
-        if isinstance(rank, int):
-            effective_rank = rank
-        else:
-            effective_rank = _find_cutoff_index(S, threshold=rank)
-
-        if effective_rank > U.shape[1]:
-            raise ValueError(
-                f"The chosen rank {effective_rank} is larger than the weight shape ({U.shape[1]}), please choose a "
-                "lower rank."
-            )
-
-        lora_B = U[:, :effective_rank] * S[:effective_rank]
-        lora_A = V[:effective_rank]
-        return lora_A.to(orig_dtype).contiguous(), lora_B.to(orig_dtype).contiguous(), effective_rank
 
     # Standard or mini: exact conversion using the native rank r
     miss = miss_block.float()
@@ -112,7 +91,9 @@ def _convert_module_to_lora(
     """Convert a single BaseTunerLayer's adapter weight to a LoRA weight, return A, B, and the effective rank."""
     from peft.tuners.miss.layer import MissLinear
 
-    if isinstance(module, MissLinear):
+    # MiSS standard/mini modes have an exact rank-r factorization that avoids SVD.
+    # MiSS bat mode uses get_additive_delta and falls through to the generic SVD path below.
+    if isinstance(module, MissLinear) and module.miss_fn != "bat":
         return _convert_miss_module_to_lora(module, rank, adapter_name)
 
     delta_weight = module.get_additive_delta(adapter_name)

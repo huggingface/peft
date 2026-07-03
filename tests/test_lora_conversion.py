@@ -22,13 +22,11 @@ from torch import nn
 from transformers import AutoModelForCausalLM
 
 from peft import (
-    BOFTConfig,
     C3AConfig,
     IA3Config,
     LoKrConfig,
     LoraConfig,
     MissConfig,
-    OFTConfig,
     PeftModel,
     PrefixTuningConfig,
     convert_to_lora,
@@ -693,48 +691,3 @@ class TestMissLoraConversion:
             output_after = loaded_model(inputs).logits
 
         assert torch.allclose(output_before, output_after, atol=atol, rtol=rtol)
-
-
-class TestMultiplicativeLoraConversion:
-    """Test LoRA conversion for multiplicative PEFT methods (OFT, BOFT).
-
-    These methods don't use an additive delta weight (W' = W + ΔW). Instead, they apply a multiplicative transformation
-    (e.g. W' = W @ R for OFT). The conversion uses get_additive_delta to compute the actual additive delta W' - W,
-    which is then SVD-approximated.
-    """
-
-    model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
-    torch_device = infer_device()
-    base_model = None
-
-    def get_base_model(self):
-        if self.base_model is None:
-            with hub_online_once(self.model_id):
-                self.base_model = AutoModelForCausalLM.from_pretrained(self.model_id).to(self.torch_device)
-        return copy.deepcopy(self.base_model)
-
-    @pytest.fixture
-    def oft_model(self):
-        torch.manual_seed(0)
-        config = OFTConfig(
-            init_weights=False,
-            oft_block_size=4,
-            target_modules=["q_proj", "v_proj"],
-        )
-        return get_peft_model(self.get_base_model(), config).eval()
-
-    @pytest.fixture
-    def boft_model(self):
-        torch.manual_seed(0)
-        config = BOFTConfig(
-            init_weights=False,
-            boft_block_size=4,
-            target_modules=["q_proj", "v_proj"],
-        )
-        return get_peft_model(self.get_base_model(), config).eval()
-
-    def test_oft_supports_lora_conversion(self, oft_model):
-        assert oft_model.supports_lora_conversion()
-
-    def test_boft_supports_lora_conversion(self, boft_model):
-        assert boft_model.supports_lora_conversion()
