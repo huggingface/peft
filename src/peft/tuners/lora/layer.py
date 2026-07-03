@@ -2072,9 +2072,9 @@ class MultiheadAttention(nn.Module, LoraLayer):
         dtype = self.lora_B[adapter].weight.dtype
 
         # In case users wants to merge the adapter weights that are in
-        # float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
-        # float16 because the `@` and matmul operation in general is not supported in torch + cpu + fp16.
-        cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
+        # (b)float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
+        # (b)float16 because some CPUs have slow bf16/fp16 matmuls.
+        cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
         weight_A = self.lora_A[adapter].weight
         weight_B = self.lora_B[adapter].weight
@@ -2223,13 +2223,15 @@ def _register_parameter_or_buffer(module, name, X):
 
 class ParamWrapper(nn.Module, LoraLayer):
     """A LoRA wrapper for `nn.Parameter`. This layer is dispatched if users target a parameter directly with
-    `lora_config.target_parameters`
-        Note:
+    `lora_config.target_parameters`.
+
+    Note:
         - When accessing the wrapped nn.Parameter directly, e.g. via `module.weight`, the LoRA weights are *not*
           applied.
-        - It is currently not implemented to target multiple parameters on the same module. To achieve this, it is
-          currently required to create a separate LoRA adapter (with another adapter name) and activate both at the
-          same time.
+        - Each `ParamWrapper` adapts exactly one `nn.Parameter`. To target multiple parameters on the same module, the
+          wrappers are nested, i.e. a `ParamWrapper` wraps another `ParamWrapper`.
+        - Multiple adapters are supported, but all adapters on the model that use `target_parameters` must target the
+          same set of parameters.
     """
 
     def __init__(

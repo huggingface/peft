@@ -1707,15 +1707,35 @@ class TestLoraInitialization:
         with pytest.warns(RuntimeWarning, match=msg):
             get_peft_model(model, config)
 
-    def test_adding_multiple_adapters_with_target_parameters_raises(self):
+    def test_adding_multiple_adapters_with_same_target_parameters_works(self):
+        # Multiple adapters that target the same set of parameters are supported.
         model = self.get_model()
         config = LoraConfig(target_modules=[], target_parameters=["linear.weight"])
         model = get_peft_model(model, config)
-        msg = re.escape("only one LoRA adapter per model with `target_parameters` is allowed")
-        with pytest.raises(ValueError, match=msg):
-            model.add_adapter(adapter_name="other", peft_config=config)
+        # a second adapter targeting the same parameter(s) can be added
+        config_other = LoraConfig(target_modules=[], target_parameters=["linear.weight"])
+        model.add_adapter(adapter_name="other", peft_config=config_other)
+        assert "other" in model.peft_config
 
-    def test_loading_loading_adapters_with_target_parameters_raises(self, tmp_path):
+    def test_adding_multiple_adapters_with_different_target_parameters_raises(self):
+        # Multiple adapters that target a different set of parameters are not supported -- all adapters that use
+        # target_parameters on the same model must target the same set of parameters. This is because the information
+        # which parameter is targeted is not stored in the state_dict itself (remember: if we target multiple parameters
+        # on the same module, we solve that by nesting, which means that the nesting level encodes which parameter is
+        # targeted). Therefore, if we had different adapters targeting different parameters, we would not be able to
+        # tell which parameter is meant to be targeted.
+        model = self.get_model()
+        config = LoraConfig(target_modules=[], target_parameters=["linear.weight"])
+        model = get_peft_model(model, config)
+        config_other = LoraConfig(target_modules=[], target_parameters=["embed.weight"])
+        msg = re.escape("all adapters must target the same set of parameters")
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter(adapter_name="other", peft_config=config_other)
+        # the invalid config was not added
+        assert "other" not in model.peft_config
+
+    def test_loading_multiple_adapters_with_target_parameters_works(self, tmp_path):
+        # A second adapter targeting the same parameter(s) can be loaded onto the model.
         model = self.get_model()
         config = LoraConfig(target_modules=[], target_parameters=["linear.weight"])
         model = get_peft_model(model, config)
@@ -1723,9 +1743,8 @@ class TestLoraInitialization:
 
         model = self.get_model()
         model = PeftModel.from_pretrained(model, tmp_path)
-        msg = re.escape("only one LoRA adapter per model with `target_parameters` is allowed")
-        with pytest.raises(ValueError, match=msg):
-            model.load_adapter(tmp_path, adapter_name="other")
+        model.load_adapter(tmp_path, adapter_name="other")
+        assert "other" in model.peft_config
 
     def test_multiple_configs_with_bias_raises(self, tmp_path):
         # There cannot be more than one config with bias != "none".

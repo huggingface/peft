@@ -234,7 +234,7 @@ def train_step():
 preprocess_loraga(model, lora_config, train_step)
 ```
 
-#### Usage Tips
+**Usage Tips**
 
 - **Gradient Estimation**: LoRA-GA requires a gradient estimation phase before model initialization. Use `preprocess_loraga()` with a `train_step` callback to compute gradients over a small number of training batches (typically 64-128 batches).
 
@@ -341,7 +341,7 @@ A more detailed investigation of this issue can be found on this [pull request o
 #### Caveats
 
 - At the moment, this argument allows to target 2-dim or 3-dim `nn.Parameter`s. It is assumed that in the case of a 3-dim parameter, the 0th dimension is the expert dimension.
-- It is currently not possible to add multiple LoRA adapters (via `model.add_adapter` or `model.load_adapter`) that use `target_parameters` at the same time.
+- Multiple LoRA adapters (added via `model.add_adapter` or `model.load_adapter`) that use `target_parameters` are supported, but all of them must target the same set of parameters.
 
 #### MoE expert parameters and vLLM
 
