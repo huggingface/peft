@@ -580,7 +580,7 @@ def get_peft_branch() -> str:
     )
 
 
-def get_git_is_dirty() -> bool:
+def get_peft_worktree_is_dirty() -> bool:
     """Check if the PEFT git worktree has uncommitted changes."""
     peft_dir = os.path.dirname(peft.__file__)
     # Exit code 0 means clean, non-zero means dirty (or error, which we treat as dirty)
@@ -708,7 +708,7 @@ def log_results(
             "total_time": time_total,
             "experiment_name": experiment_name,
             "peft_branch": peft_branch,
-            "peft_is_dirty": get_git_is_dirty(),
+            "peft_worktree_is_dirty": get_peft_worktree_is_dirty(),
             "train_config": asdict(train_config),
             "peft_config": peft_config_dict,
             "error_msg": train_result.error_msg,
