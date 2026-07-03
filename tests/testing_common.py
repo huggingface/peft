@@ -1895,7 +1895,7 @@ class PeftCommonTester:
             model = get_peft_model(model, config).eval()
 
             if not model.supports_lora_conversion():
-                return
+                pytest.skip(f"{config_cls.__name__} does not support LoRA conversion")
             if ("OPT" in model_id) and ("fc1" in config.target_modules):
                 # the fc1 and fc2 layers in OPT have size (16, 4), thus choose smaller rank
                 rank = 4
