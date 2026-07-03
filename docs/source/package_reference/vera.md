@@ -21,14 +21,16 @@ rendered properly in your Markdown viewer.
 ## How VeRA works
 
 LoRA updates a frozen base model by learning two small, low-rank matrices for each adapted layer. The rank is the
-inner dimension of these matrices, and it controls how much capacity the adapter has. In LoRA, increasing the rank or
-adapting more layers increases the number of trainable parameters quickly because each layer receives its own pair of
-matrices.
+inner dimension of these matrices, and it controls how much capacity the adapter has. In LoRA, increasing `r` or
+adapting more layers increases the number of trainable parameters quickly because every adapted layer learns its own
+pair of low-rank matrices.
 
 VeRA keeps the same low-rank adaptation idea but changes which parameters are trained. Instead of learning separate
 low-rank matrices for every layer, VeRA uses one frozen, randomly initialized pair of low-rank matrices, `A` and `B`,
-that is shared across layers. Each adapted layer only learns two scaling vectors, commonly written as `d` and `b`,
-which rescale the shared matrices to produce a layer-specific update.
+that is shared across layers. Each adapted layer only learns two scaling vectors, `vera_lambda_d` and `vera_lambda_b`,
+which rescale the shared matrices to produce a layer-specific update. VeRA's trainable parameter count therefore still
+increases with `r` and with the number of adapted layers, but much more slowly than LoRA's because the large `A` and
+`B` matrices are shared and frozen instead of learned separately for each layer.
 
 This is why VeRA can use fewer trainable parameters than LoRA. In the simplified parameter count from the paper, LoRA
 scales with `2 * L_tuned * d_model * r`, where `L_tuned` is the number of adapted layers, `d_model` is the model
