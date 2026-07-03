@@ -28,9 +28,10 @@ pair of low-rank matrices.
 VeRA keeps the same low-rank adaptation idea but changes which parameters are trained. Instead of learning separate
 low-rank matrices for every layer, VeRA uses one frozen, randomly initialized pair of low-rank matrices, `A` and `B`,
 that is shared across layers. Each adapted layer only learns two scaling vectors, `vera_lambda_d` and `vera_lambda_b`,
-which rescale the shared matrices to produce a layer-specific update. VeRA's trainable parameter count therefore still
-increases with `r` and with the number of adapted layers, but much more slowly than LoRA's because the large `A` and
-`B` matrices are shared and frozen instead of learned separately for each layer.
+which rescale the shared matrices to produce a layer-specific update. Since `vera_lambda_d` has size `r`, VeRA's
+trainable parameter count still increases with `r` and with the number of adapted layers. However, it grows much more
+slowly than LoRA's because the large `A` and `B` matrices are shared and frozen instead of learned separately for each
+layer.
 
 This is why VeRA can use fewer trainable parameters than LoRA. In the simplified parameter count from the paper, LoRA
 scales with `2 * L_tuned * d_model * r`, where `L_tuned` is the number of adapted layers, `d_model` is the model
