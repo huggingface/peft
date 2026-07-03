@@ -64,8 +64,8 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
     device = weight.device
     dtype = weight.dtype
     if not is_bnb_4bit_available() and num_bits == 4:
-        raise ValueError(
-            "Native support for nf4 is being deprecated with PEFT 0.20. Please install a recent version of bitsandbytes.",
+        raise RuntimeError(
+            "Native support for nf4 is was removed in PEFT 0.20. Please install a recent version of bitsandbytes.",
         )
     compute_device = "xpu" if is_xpu_available() else "cuda"
 
