@@ -4283,9 +4283,12 @@ class PeftEetqGPUTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             quantization_config = EetqConfig("int8")
 
-            model = AutoModelForCausalLM.from_pretrained(
-                self.causal_lm_model_id, device_map="auto", quantization_config=quantization_config
-            )
+            try:
+                model = AutoModelForCausalLM.from_pretrained(
+                    self.causal_lm_model_id, device_map="auto", quantization_config=quantization_config
+                )
+            except FileNotFoundError:
+                pytest.skip("There is no kernel for EETQ on this architecture, skipping this test.")
 
             model = prepare_model_for_kbit_training(model)
 
