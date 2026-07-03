@@ -715,12 +715,3 @@ class TestGetModuleNamesTiedWithEmbedding:
 
             modules = _get_module_names_tied_with_embedding(model)
             assert modules == []
-
-
-# TODO for PEFT 0.20 remove this
-class TestLoftQDeprecation:
-    def test_nfquantizer_deprecation(self):
-        from peft.utils.loftq_utils import NFQuantizer
-
-        with pytest.warns(match="NFQuantizer is deprecated") as record:
-            _ = NFQuantizer(device="cpu")
