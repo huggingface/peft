@@ -1,4 +1,4 @@
-# Copyright 2025-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,19 +28,20 @@ from ..peft_model import PeftModel
 def _collect_lora_pairs(
     model: torch.nn.Module,
 ) -> list[tuple[torch.nn.Parameter, torch.nn.Parameter]]:
-    """Return the list of ``(lora_A, lora_B)`` weight parameter pairs of ``model``.
+    """Return the list of `(lora_A, lora_B)` weight parameter pairs of `model`.
 
-    Pairs are matched by name substitution: for every parameter whose name contains ``lora_A`` the sibling ``lora_B``
+    Pairs are matched by name substitution: for every parameter whose name contains `.lora_A.` the sibling `lora_B`
     parameter is looked up by substituting the substring. Only 2D weight matrices that both require gradients are
-    returned, which is exactly what the ``r x r`` preconditioner is defined for. DoRA's ``lora_magnitude_vector`` is
-    ignored because it does not match either factor and is not part of the low-rank product.
+    returned, which is exactly what the `r x r` preconditioner is defined for. Any auxiliary trainable parameters that
+    don't match the `lora_A` / `lora_B` naming (for example DoRA's magnitude vector) are ignored — the preconditioner
+    is only defined for the low-rank product.
     """
     params = dict(model.named_parameters())
     pairs = []
     for name, param_a in params.items():
-        if "lora_A" not in name:
+        if ".lora_A." not in name:
             continue
-        param_b = params.get(name.replace("lora_A", "lora_B"))
+        param_b = params.get(name.replace(".lora_A.", ".lora_B."))
         if param_b is None:
             continue
         if param_a.ndim != 2 or param_b.ndim != 2:
@@ -52,12 +53,15 @@ def _collect_lora_pairs(
 
 
 class _RiemannianPreconditioner:
-    """Applies the ``r x r`` Riemannian preconditioner in-place to LoRA gradients.
+    """Applies the `r x r` Riemannian preconditioner in-place to LoRA gradients.
 
-    For each ``(lora_A, lora_B)`` pair, the Euclidean gradients are rescaled to the scaled-gradient / Riemannian
-    directions defined by the paper: ``g_A`` is replaced by ``(B^T B + reg * I_r)^-1 @ g_A``, and ``g_B`` is replaced
-    by ``g_B @ (A A^T + reg * I_r)^-1``. Both preconditioners are ``r x r``, so storage and runtime overhead are small
-    in the LoRA rank.
+    For each `(lora_A, lora_B)` pair, the Euclidean gradients are rescaled to the scaled-gradient / Riemannian
+    directions defined by the paper: `g_A` is replaced by `(B^T B + reg * I_r)^-1 @ g_A`, and `g_B` is replaced by `g_B
+    @ (A A^T + reg * I_r)^-1`. Both preconditioners are `r x r`, so storage and runtime overhead are small in the LoRA
+    rank.
+
+    The scalar `reg` is a damping term added to the `r x r` matrix's diagonal before inversion; it stabilizes the
+    inverse when a factor is (near) rank-deficient. Very small values (e.g. `1e-6`) work well in practice.
     """
 
     def __init__(
@@ -117,21 +121,22 @@ def create_riemannian_optimizer(
 
     Reference: https://github.com/pilancilab/Riemannian_Preconditioned_LoRA
 
-    The returned optimizer behaves exactly like ``optimizer_cls`` (e.g. ``torch.optim.AdamW`` or ``torch.optim.SGD``)
-    except that, on every ``step``, the gradients of the LoRA ``A`` and ``B`` matrices are first multiplied by an ``r x
-    r`` Riemannian preconditioner. Non-LoRA parameters are updated unchanged.
+    The returned optimizer behaves exactly like `optimizer_cls` (e.g. `torch.optim.AdamW` or `torch.optim.SGD`) except
+    that, on every `step`, the gradients of the LoRA `A` and `B` matrices are first multiplied by an `r x r` Riemannian
+    preconditioner. Non-LoRA parameters are updated unchanged.
 
     Args:
         model (`torch.nn.Module`): The PEFT model containing LoRA-adapted parameters.
         optimizer_cls (`type[torch.optim.Optimizer]`): The base optimizer class to wrap, e.g. `torch.optim.AdamW`.
         lr (`float`): Learning rate passed to the base optimizer.
-        reg (`float`): Damping added to the ``r x r`` preconditioner for numerical stability (default: `1e-6`).
+        reg (`float`): Damping added to the diagonal of the `r x r` matrix before inversion; stabilizes the inverse
+            when a LoRA factor is (near) rank-deficient (default: `1e-6`).
         kwargs (`dict`): Additional keyword arguments forwarded to the base optimizer (e.g. `weight_decay`, `betas`).
 
     Returns:
         `torch.optim.Optimizer`: A subclass instance of `optimizer_cls` that preconditions LoRA gradients on each
-        `step`. Only ``lora_A`` / ``lora_B`` weight matrices are preconditioned; every other trainable parameter is
-        updated by `optimizer_cls` unchanged.
+        `step`. Only `lora_A` / `lora_B` weight matrices are preconditioned; every other trainable parameter is updated
+        by `optimizer_cls` unchanged.
     """
     if not issubclass(optimizer_cls, Optimizer):
         raise TypeError(f"optimizer_cls must be a subclass of torch.optim.Optimizer, got {optimizer_cls!r}.")

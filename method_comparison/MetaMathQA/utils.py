@@ -45,7 +45,7 @@ from transformers import (
 
 import peft
 from peft import PeftConfig, get_peft_model
-from peft.optimizers import create_lorafa_optimizer, create_loraplus_optimizer
+from peft.optimizers import create_lorafa_optimizer, create_loraplus_optimizer, create_riemannian_optimizer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 
 
@@ -281,6 +281,8 @@ def get_optimizer_and_scheduler(
         optimizer = create_loraplus_optimizer(model, optimizer_cls=torch.optim.AdamW, **optimizer_kwargs)
     elif optimizer_type == "lora-fa":
         optimizer = create_lorafa_optimizer(model, **optimizer_kwargs)
+    elif optimizer_type == "riemannian":
+        optimizer = create_riemannian_optimizer(model, optimizer_cls=torch.optim.AdamW, **optimizer_kwargs)
     else:
         cls = getattr(torch.optim, optimizer_type)
         optimizer = cls(model.parameters(), **optimizer_kwargs)
