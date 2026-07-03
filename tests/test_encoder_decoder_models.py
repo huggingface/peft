@@ -23,9 +23,11 @@ from peft import (
     BeftConfig,
     BOFTConfig,
     C3AConfig,
+    DeftConfig,
     DeloraConfig,
     FourierFTConfig,
     FrodConfig,
+    GloraConfig,
     GraloraConfig,
     HiraConfig,
     HRAConfig,
@@ -45,6 +47,7 @@ from peft import (
     ShiraConfig,
     TaskType,
     TinyLoraConfig,
+    UniLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -94,6 +97,13 @@ ALL_CONFIGS = [
         },
     ),
     (
+        DeftConfig,
+        {
+            "task_type": "SEQ_2_SEQ_LM",
+            "target_modules": None,
+        },
+    ),
+    (
         DeloraConfig,
         {
             "task_type": "SEQ_2_SEQ_LM",
@@ -115,6 +125,13 @@ ALL_CONFIGS = [
             "target_modules": None,
             "task_type": "SEQ_2_SEQ_LM",
             "sparse_rate": 0.01,
+        },
+    ),
+    (
+        GloraConfig,
+        {
+            "target_modules": None,
+            "task_type": "SEQ_2_SEQ_LM",
         },
     ),
     (
@@ -253,6 +270,14 @@ ALL_CONFIGS = [
             "d_initial": 0.1,
             "save_projection": True,
             "bias": "none",
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        UniLoraConfig,
+        {
+            "target_modules": None,
+            "theta_d_length": 257,
             "task_type": "SEQ_2_SEQ_LM",
         },
     ),

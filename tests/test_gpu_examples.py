@@ -4283,9 +4283,12 @@ class PeftEetqGPUTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             quantization_config = EetqConfig("int8")
 
-            model = AutoModelForCausalLM.from_pretrained(
-                self.causal_lm_model_id, device_map="auto", quantization_config=quantization_config
-            )
+            try:
+                model = AutoModelForCausalLM.from_pretrained(
+                    self.causal_lm_model_id, device_map="auto", quantization_config=quantization_config
+                )
+            except FileNotFoundError:
+                pytest.skip("There is no kernel for EETQ on this architecture, skipping this test.")
 
             model = prepare_model_for_kbit_training(model)
 
@@ -5789,6 +5792,97 @@ class TestHotSwapping:
         with torch._dynamo.config.patch(error_on_recompile=True):
             with pytest.raises(torch._dynamo.exc.RecompileError):  # raise an error on recompilation
                 self.check_hotswap(do_hotswap=False, ranks=ranks, alpha_scalings=ranks)
+
+    @pytest.mark.parametrize("do_compile", [False, True])
+    def test_hotswap_lora_target_parameters(self, do_compile, tmp_path):
+        # Test that hotswapping works with target_parameters. In this test, there is no need to call
+        # prepare_model_for_compiled_hotswap, as we use the same LoRA shapes. Due to (re-)compilation, the test is
+        # relatively slow.
+        atol, rtol = 1e-6, 1e-6
+        model_id = "trl-internal-testing/tiny-GptOssForCausalLM"
+        inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+
+        def strong_init(model):
+            # increase the scale of the LoRA weights so that the difference between adapters is more pronounced, making the test more robust
+            for name, param in model.named_parameters():
+                if "lora_" in name:
+                    param.data *= 10.0
+
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+            with torch.inference_mode():
+                output_base = model(inputs).logits
+
+            # create adapter 0
+            config = LoraConfig(
+                target_parameters=[
+                    "mlp.experts.down_proj",
+                    "mlp.experts.gate_up_proj",
+                ],
+                init_lora_weights=False,
+            )
+            torch.manual_seed(0)
+            model = get_peft_model(model, config)
+            strong_init(model)
+            # Note: For compilation, use eager backend, as the parameter targeting, which uses nn.utils.parametrize,
+            # leads to recompiles/graph breaks, which can signficantly affect the outputs, even if weights are correctly
+            # loaded.
+            model = torch.compile(model, backend="eager")
+            with torch.inference_mode():
+                torch.manual_seed(0)
+                output0 = model(inputs).logits
+
+            # sanity check: outputs differ
+            assert not torch.allclose(output_base, output0, atol=1e-3, rtol=1e-3)
+
+            model.save_pretrained(tmp_path / "adapter0")
+            del model
+
+            # create adapter 1
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+            torch.manual_seed(1)
+            model = get_peft_model(model, config)
+            strong_init(model)
+            model = torch.compile(model, backend="eager")
+            model.eval()
+            with torch.inference_mode():
+                torch.manual_seed(0)
+                output1 = model(inputs).logits
+            model.save_pretrained(tmp_path / "adapter1")
+
+            # sanity check: they're not the same
+            assert not torch.allclose(output0, output1, atol=1e-3, rtol=1e-3)
+
+            del model
+
+            # load adapter 0
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+            model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
+            model = torch.compile(model, backend="eager")
+            with torch.inference_mode():
+                torch.manual_seed(0)
+                output_loaded0 = model(inputs).logits
+
+            # sanity check: same output after loading for adapter 0
+            assert torch.allclose(output0, output_loaded0, atol=atol, rtol=rtol)
+
+            # hotswap with adapter 1
+            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+            with torch.inference_mode():
+                torch.manual_seed(0)
+                output_loaded1 = model(inputs).logits
+
+            # real check: model now behaves like adapter 1
+            assert torch.allclose(output1, output_loaded1, atol=atol, rtol=rtol)
+
+            # hotswap back to adapter 0
+            hotswap_adapter(model, tmp_path / "adapter0", adapter_name="default")
+            with torch.inference_mode():
+                torch.manual_seed(0)
+                output_loaded_back0 = model(inputs).logits
+
+            # real check: model now behaves again like adapter 0
+            assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
 
     ###################
     # DIFFUSION MODEL #

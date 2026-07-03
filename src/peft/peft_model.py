@@ -243,10 +243,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 The path to the initialized adapter, which is obtained after initializing the model with
                 PiSSA/CorDA/OLoRA and before performing any training. When `path_initial_model_for_weight_conversion`
                 is not None, the difference in adapter before and after fine-tuning is calculated. This difference can
-                be represented as the parameters of a standard LoRA adapter. Using this converted adapter does not
-                require changes to the base model, thus conveniently allowing the use of multiple PiSSA/CorDA/OLoRA
-                adapters with LoRA adapters, and the activation or deactivation of any adapters. Note that this
-                conversion is not supported if `rslora` is used in combination with `rank_pattern` or `alpha_pattern`.
+                be represented as the parameters of a standard LoRA adapter. In contrast to PiSSA and friends, using
+                this converted adapter does not require changes to the base model, thus conveniently allowing the use
+                of multiple PiSSA/CorDA/OLoRA adapters with LoRA adapters, and the activation or deactivation of any
+                adapters. Note that this conversion is not supported if `rslora` is used in combination with
+                `rank_pattern` or `alpha_pattern`. See [`peft.tuners.lora.LoraModel.subtract_mutated_init`] for more
+                information.
             kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the `push_to_hub` method.
 
@@ -617,7 +619,19 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # 3. Remove TinyLoRA layer-level tinylora_v references (they share with model-level tinylora_v)
         def is_expected_missing_key(k):
             # TinyLoRA: layer-level tinylora_v is a reference to model-level, exclude from warning
-            return not ("vblora_vector_bank" in k or "prompt_encoder" in k or ".tinylora_v." in k)
+            if "vblora_vector_bank" in k or "prompt_encoder" in k or ".tinylora_v." in k:
+                return False
+            if (
+                config.peft_type == PeftType.UNILORA
+                and ".unilora_theta_d." in k
+                and not k.startswith("base_model.unilora_theta_d.")
+            ):
+                return False
+            return not (
+                config.peft_type == PeftType.UNILORA
+                and not getattr(config, "save_indices", False)
+                and (".unilora_indices_" in k or ".unilora_scales_" in k)
+            )
 
         missing_keys = [k for k in load_result.missing_keys if is_expected_missing_key(k)]
         if missing_keys:
@@ -1206,10 +1220,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         - `quantization_backend` (`str` or `None`):
            The name of the quantization backend, e.g. `"bnb 4bit"`, or `None` if not quantized.
 
-        Args:
-            model ([`~PeftModel`]):
-                The model to get the adapter layer status from.
-
         Returns:
             list[`peft.peft_model.TunerLayerStatus`]:
                 A list of dataclasses, each containing the status of the corresponding adapter layer.
@@ -1248,10 +1258,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         - `quantization_backend` (`str`, `None`, `Literal["irregular"]`):
            The name of the quantization backend, e.g. `"bnb 4bit"`, or `None` if not quantized. If the backend is not
            consistent across all layers, this will be `"irregular"`.
-
-        Args:
-            model ([`~PeftModel`]):
-                The model to get the adapter layer status from.
 
         Returns:
             `peft.peft_model.TunerModelStatus`:
@@ -1486,6 +1492,18 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 # TinyLoRA: layer-level tinylora_v is a reference to model-level, skip it
                 if ".tinylora_v." in key:
                     continue
+                if (
+                    tuner == PeftType.UNILORA
+                    and ".unilora_theta_d." in key
+                    and not key.startswith("base_model.unilora_theta_d.")
+                ):
+                    continue
+                if (
+                    tuner == PeftType.UNILORA
+                    and not getattr(self.peft_config[adapter_name], "save_indices", False)
+                    and (".unilora_indices_" in key or ".unilora_scales_" in key)
+                ):
+                    continue
                 adapter_missing_keys.append(key)
 
         load_result.missing_keys.clear()
@@ -1589,7 +1607,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         Note: Not supported for prompt learning methods like prompt tuning.
 
         Args:
-            adapter_name (`str` or `Sequence[str]`):
+            adapter_names (`str` or `Sequence[str]`):
                 The name of the adapter(s) whose gradients should be enabled/disabled.
             requires_grad (`bool`, *optional*)
                 Whether to enable (`True`, default) or disable (`False`).
