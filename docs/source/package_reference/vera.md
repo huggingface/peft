@@ -21,8 +21,9 @@ rendered properly in your Markdown viewer.
 ## How VeRA works
 
 LoRA updates a frozen base model by learning two small, low-rank matrices for each adapted layer. The rank is the
-inner dimension of these matrices, and it controls how much capacity the adapter has. Increasing the rank or adapting
-more layers increases the number of trainable LoRA parameters because each layer receives its own pair of matrices.
+inner dimension of these matrices, and it controls how much capacity the adapter has. In LoRA, increasing the rank or
+adapting more layers increases the number of trainable parameters quickly because each layer receives its own pair of
+matrices.
 
 VeRA keeps the same low-rank adaptation idea but changes which parameters are trained. Instead of learning separate
 low-rank matrices for every layer, VeRA uses one frozen, randomly initialized pair of low-rank matrices, `A` and `B`,
