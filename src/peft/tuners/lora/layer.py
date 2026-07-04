@@ -158,7 +158,10 @@ class LoraLayer(BaseTunerLayer):
         return {(): None}
 
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        """TODO"""
+        """Resolves the appropriate LoRA variant class based on the given configuration.
+        This method inspects the LoraConfig to identify active variants (such as matching the string value of
+        init_lora_weights to the registered metadata) and retrieves the corresponding class from the layer's variant
+        registry."""
         # mapping from declared variant to the LoraVariant class, keys are tuples to allow for multi variants
         lora_variant_mapping = self.lora_variants
         if any(tuple(sorted(k)) != k for k in lora_variant_mapping.keys()):

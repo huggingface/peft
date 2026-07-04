@@ -360,7 +360,7 @@ class TestActivatedLora:
         input_ids = torch.tensor([[0, 1, 2, 3]])
         with pytest.raises(ValueError) as e:
             with torch.no_grad():
-                lora_model(X=input_ids, num_beams=2, alora_offsets=[3])
+                lora_out = lora_model(X=input_ids, num_beams=2, alora_offsets=[3])
         assert "Beam search not yet supported for aLoRA." in str(e.value)
 
     def test_gradient_checkpointing_double_forward_raises(self):
