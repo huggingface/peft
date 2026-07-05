@@ -73,6 +73,10 @@ def inject_adapter_in_model(
             This can be useful when the exact `target_modules` of the PEFT method is unknown, for instance because the
             checkpoint was created without meta data. Note that the values from the `state_dict` are not used, only the
             keys are used to determine the correct layers that should be adapted.
+
+    Note:
+        For AdaLora, the returned model will have an ``update_and_allocate`` method bound to it. This method must be
+        called after each backward pass and before ``optimizer.zero_grad()`` to dynamically reallocate rank budgets.
     """
     if peft_config.is_prompt_learning or peft_config.is_adaption_prompt:
         raise ValueError("`create_and_replace` does not support prompt learning and adaption prompt yet.")
@@ -89,4 +93,13 @@ def inject_adapter_in_model(
         model, peft_config, adapter_name=adapter_name, low_cpu_mem_usage=low_cpu_mem_usage, state_dict=state_dict
     )
 
-    return peft_model.model
+    returned_model = peft_model.model
+
+    # Some tuner types expose training-time methods that are only present on the tuner wrapper, not on the inner
+    # model. Bind those methods onto the returned model so callers do not need to hold a separate reference to the
+    # tuner. For example, AdaLoraModel.update_and_allocate must be called after each backward pass to dynamically
+    # reallocate rank budgets; without this binding the method is unreachable after inject_adapter_in_model returns.
+    if hasattr(peft_model, "update_and_allocate"):
+        returned_model.update_and_allocate = peft_model.update_and_allocate
+
+    return returned_model

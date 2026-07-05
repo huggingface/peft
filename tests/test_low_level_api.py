@@ -121,6 +121,32 @@ class TestLowLevelFunctional:
         assert hasattr(model.linear2, "weight")
         assert hasattr(model.linear2, "bias")
 
+    def test_adalora_update_and_allocate_after_inject(self):
+        # Regression test for https://github.com/huggingface/peft/issues/3373.
+        # After inject_adapter_in_model, AdaLora's update_and_allocate must be callable on the returned model.
+        model = DummyModel()
+
+        adalora_config = AdaLoraConfig(
+            target_modules=["linear"],
+            total_step=10,
+        )
+
+        model = inject_adapter_in_model(adalora_config, model)
+
+        assert hasattr(model, "update_and_allocate"), (
+            "update_and_allocate must be accessible on the model returned by inject_adapter_in_model "
+            "when using AdaLoraConfig"
+        )
+        assert callable(model.update_and_allocate)
+
+        # Verify the method actually executes: gradients must exist before calling update_and_allocate,
+        # matching the expected training loop ordering (loss.backward → update_and_allocate → zero_grad).
+        dummy_inputs = torch.LongTensor([[0, 1, 2, 3, 4, 5, 6, 7]])
+        output = model(dummy_inputs)
+        output.sum().backward()
+        # Should not raise; step 0 is inside the budgeting window and exercises update_ipt + mask_to_budget.
+        model.update_and_allocate(0)
+
 
 class TestInjectAdapterFromStateDict:
     # The inject_adapter_in_model function can determine the target modules based on the LoraConfig (default) or based
