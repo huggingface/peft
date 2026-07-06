@@ -128,7 +128,9 @@ def test_lorafa_init_default():
     model = get_peft_model(model, config)
     optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr)
 
-    assert math.isclose(optimizer.param_groups[0]["scaling_factor"], lora_alpha / lora_rank, rel_tol=1e-9, abs_tol=0.0)
+    scaling_factors = [factor for factor in optimizer.param_groups[0]["scaling_factors"] if factor is not None]
+    assert scaling_factors
+    assert all(math.isclose(factor, lora_alpha / lora_rank, rel_tol=1e-9, abs_tol=0.0) for factor in scaling_factors)
 
     all_A_fixed = True
     all_B_trainable = True
@@ -157,12 +159,16 @@ def test_lorafa_init_rslora():
         r=lora_rank,
         lora_alpha=lora_alpha,
         target_modules=["lin0", "lin1"],
+        use_rslora=True,
         bias="none",
     )
     model = get_peft_model(model, config)
     optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr, use_rslora=True)
-    assert math.isclose(
-        optimizer.param_groups[0]["scaling_factor"], lora_alpha / math.sqrt(lora_rank), rel_tol=1e-9, abs_tol=0.0
+    scaling_factors = [factor for factor in optimizer.param_groups[0]["scaling_factors"] if factor is not None]
+    assert scaling_factors
+    assert all(
+        math.isclose(factor, lora_alpha / math.sqrt(lora_rank), rel_tol=1e-9, abs_tol=0.0)
+        for factor in scaling_factors
     )
 
 
