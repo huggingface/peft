@@ -3500,10 +3500,10 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_adapter_properly_cleans_up_after_itself(self, test_name, model_id, config_cls, config_kwargs):
-        # Generic guard against dangling per-adapter state: `delete_adapter` should remove the adapter's entry from
-        # every dict-like container on the model and its tuner layers, not just those registered in
-        # `adapter_layer_names` / `other_param_names`. Automatically discovers such containers so that a newly added
-        # PEFT method that forgets to register one is caught here.
+        # Generic guard against dangling per-adapter state: after `delete_adapter`, no adapter-specific attributes
+        # should remain on the model or its tuner layers. `adapter_layer_names` / `other_param_names` are just the
+        # mechanism used to track what to delete; this test discovers every dict-like per-adapter container
+        # automatically, so a newly added PEFT method that forgets to register one is still caught here.
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(**config_kwargs)
         model = get_peft_model(model, config, adapter_name="foobar")
