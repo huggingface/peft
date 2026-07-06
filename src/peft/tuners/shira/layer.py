@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import warnings
+from functools import lru_cache
 from typing import Optional
 
 import torch
@@ -110,6 +111,26 @@ class ShiraLayer(BaseTunerLayer):
             # Ignore the case where the adapter is not in the layer
             return
         self.scaling[adapter] = scale
+
+    @lru_cache(None)  # noqa: B019
+    def _warn_once_about_module_hooks(self):
+        # ShiRA has a forward method that uses the base weights instead of the .forward call of the base layer.
+        # This ignores any hook set on the base layer. Inform the user about this so that they can register the
+        # hooks on the PEFT module instead.
+        base_layer = self.get_base_layer()
+        if any(
+            [
+                base_layer._forward_hooks,
+                base_layer._forward_pre_hooks,
+                base_layer._backward_hooks,
+                base_layer._backward_pre_hooks,
+            ]
+        ):
+            warnings.warn(
+                "One of the base layers adapted with ShiRA has backward/forward (pre) hooks set which will be ignored "
+                "by the adapter's forward implementation. Please set the hooks on the adapted layer instead (i.e., "
+                "apply the hooks on the same path but after applying the PEFT config)."
+            )
 
 
 class Linear(nn.Module, ShiraLayer):
@@ -210,7 +231,21 @@ class Linear(nn.Module, ShiraLayer):
             result = self.base_layer(x, *args, **kwargs)
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
+        elif self.quantization_backend and not self.quantization_backend.supports_merge:
+            # For the normal forward path, self.get_base_weight() needs to be called, but if the quantization backend
+            # doesn't support it, we use a pattern that avoid dequantizing the base weight. The disadvantage is that
+            # this is slower.
+            base_result = self.base_layer(x, *args, **kwargs)
+            new_weight = torch.zeros(self.out_features, self.in_features).to(base_result)
+
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.shira_weight.keys():
+                    continue
+                new_weight += self.get_delta_weight(active_adapter)
+
+            result = base_result + F.linear(x, new_weight)
         else:
+            self._warn_once_about_module_hooks()
             new_weight = self.get_base_weight().clone()
 
             for active_adapter in self.active_adapters:

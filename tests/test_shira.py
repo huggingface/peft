@@ -15,6 +15,7 @@
 # This test file is for tests specific to SHiRA.
 
 import os
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -276,3 +277,13 @@ class TestShira:
         inputs = torch.randn(5, 10).to(dtype)
         output = peft_model(inputs)  # should not raise
         assert output.dtype == dtype
+
+    def test_shira_warns_about_hooks(self):
+        model = MLP()
+
+        with patch('peft.tuners.shira.layer.ShiraLayer._warn_once_about_module_hooks') as m:
+            config = ShiraConfig(r=2, target_modules=["lin1", "lin2"])
+            peft_model = get_peft_model(model, config)
+            inputs = torch.randn(5, 10)
+            _ = peft_model(inputs)
+            assert m.call_count > 0
