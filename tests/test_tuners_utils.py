@@ -15,6 +15,8 @@ import dataclasses
 import re
 from copy import deepcopy
 
+import diffusers
+import packaging.version
 import pytest
 import torch
 from diffusers import StableDiffusionPipeline
@@ -58,6 +60,9 @@ from peft.utils.quantization_utils import Bnb8bitBackend
 
 from .testing_utils import hub_online_once, require_bitsandbytes, require_non_cpu
 
+
+# TODO: remove once Diffusers 0.40 is released
+is_diffusers_ge_v040 = packaging.version.parse(diffusers.__version__) >= packaging.version.parse("0.40.0.dev0")
 
 # Implements tests for regex matching logic common for all BaseTuner subclasses, and
 # tests for correct behaviour with different config kwargs for BaseTuners (Ex: feedforward for IA3, etc) and
@@ -340,6 +345,10 @@ class TestPeftCustomKwargs:
             assert new_config.target_modules == expected_target_modules
 
     def test_maybe_include_all_linear_layers_diffusion(self):
+        # TODO: remove once Diffusers 0.40 is released
+        if not is_diffusers_ge_v040:
+            pytest.skip("This test fails with Diffusers < 0.40 due to a change in huggingface_hub")
+
         model_id = "hf-internal-testing/tiny-sd-pipe"
         with hub_online_once(model_id):
             model = StableDiffusionPipeline.from_pretrained(model_id)
