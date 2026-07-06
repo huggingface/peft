@@ -19,6 +19,7 @@ This module contains the implementation of the LoRA-FA optimizer.
 from __future__ import annotations
 
 import math
+import warnings
 from collections.abc import Callable, Iterable
 
 import torch
@@ -77,6 +78,8 @@ class LoraFAOptimizer(Optimizer):
             "correct_bias": correct_bias,
         }
         super().__init__(params, defaults)
+        # Warn once per optimizer instance so the deprecation path does not spam every training step
+        self._legacy_scaling_factor_warned = False
 
     @torch.no_grad()
     def step(self, closure: Callable | None = None):
@@ -93,7 +96,23 @@ class LoraFAOptimizer(Optimizer):
         for group in self.param_groups:
             param_list = []
             name_list = []
-            for p, n, scaling_factor in zip(group["params"], group["names"], group["scaling_factors"]):
+
+            # TODO remove after 2026-11-01
+            if "scaling_factors" in group:
+                scaling_factors = group["scaling_factors"]
+            elif "scaling_factor" in group:
+                if not self._legacy_scaling_factor_warned:
+                    warnings.warn(
+                        "`scaling_factor` is deprecated and will be removed after 2026-11-01. "
+                        "Please use `scaling_factors` instead.",
+                        FutureWarning,
+                    )
+                    self._legacy_scaling_factor_warned = True
+                scaling_factors = [group["scaling_factor"]] * len(group["params"])
+            else:
+                raise KeyError("Expected optimizer param group to define `scaling_factors`.")
+
+            for p, n, scaling_factor in zip(group["params"], group["names"], scaling_factors):
                 # Skip non-lora no-grad module, since we need lora_A which is no-grad.
                 if "lora" not in n and p.grad is None:
                     continue
@@ -250,9 +269,9 @@ def create_lorafa_optimizer(
             return None
 
         # Split the parameter name to extract the module name and the adapter name
-        module_name, _, lora_suffix = parameter_name.partition(".lora_")
+        module_name, _, lora_suffix = parameter_name.rpartition(".lora_")
         lora_parts = lora_suffix.split(".")
-        if len(lora_parts) < 3:
+        if len(lora_parts) < 2:
             return None
 
         adapter_name = lora_parts[1]
@@ -271,7 +290,7 @@ def create_lorafa_optimizer(
             "lr": lr,
             "names": [name for name, _ in named_parameters],
             "scaling_factors": [get_scaling_factor(name) for name, _ in named_parameters],
-            "scaling_factor": lora_scaling,  # legacy scalar
+            "scaling_factor": lora_scaling,  # TODO remove after 2026-11-01
             "betas": (0.9, 0.999),
             "weight_decay": weight_decay,
         }
