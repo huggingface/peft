@@ -42,6 +42,16 @@ class SimpleNet(nn.Module):
         return X
 
 
+class EmbeddingNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.embedding = nn.Embedding(100, 8)
+        self.lin = nn.Linear(8, 4)
+
+    def forward(self, X):
+        return self.lin(self.embedding(X))
+
+
 def _run_lorafa_weight_decay_step(config: LoraConfig, lr: float, weight_decay: float):
     seed = 42
 
@@ -170,6 +180,46 @@ def test_lorafa_init_rslora():
         math.isclose(factor, lora_alpha / math.sqrt(lora_rank), rel_tol=1e-9, abs_tol=0.0)
         for factor in scaling_factors
     )
+
+
+def test_lorafa_init_embedding_target_module():
+    """
+    Test if embedding-targeted LoRA adapters resolve scaling_factors and the optimizer step works
+    """
+    lora_rank = 16
+    lora_alpha = 32
+    lr = 7e-5
+
+    model = EmbeddingNet()
+    config = LoraConfig(
+        r=lora_rank,
+        lora_alpha=lora_alpha,
+        target_modules=["embedding"],
+        bias="none",
+    )
+    model = get_peft_model(model, config).to(torch_device)
+    optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr)
+
+    lora_scaling_factors = [
+        scaling_factor
+        for name, scaling_factor in zip(
+            optimizer.param_groups[0]["names"], optimizer.param_groups[0]["scaling_factors"]
+        )
+        if "lora" in name
+    ]
+    assert lora_scaling_factors
+    assert all(scaling_factor is not None for scaling_factor in lora_scaling_factors)
+    assert all(
+        math.isclose(scaling_factor, lora_alpha / lora_rank, rel_tol=1e-9, abs_tol=0.0)
+        for scaling_factor in lora_scaling_factors
+    )
+
+    # Run a single optimizer step to ensure it works without crashing
+    x = torch.randint(100, (2, 3)).to(torch_device)
+    output = model(x)
+    output.sum().backward()
+
+    optimizer.step()
 
 
 def test_LoraFAOptimizer_step():
