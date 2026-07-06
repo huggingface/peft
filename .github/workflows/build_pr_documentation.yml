@@ -11,9 +11,8 @@ permissions: {}
 
 jobs:
   build:
-    uses: huggingface/doc-builder/.github/workflows/build_pr_documentation.yml@b0f9a6e3b6aa912656cbda9f74896eb721d29421  # main
+    uses: huggingface/doc-builder/.github/workflows/build_pr_documentation.yml@e60a538eea9817ab312196d0d233604b01697265  # main (light installs, no custom container)
     with:
       commit_sha: ${{ github.event.pull_request.head.sha }}
       pr_number: ${{ github.event.number }}
       package: peft
-      custom_container: huggingface/transformers-doc-builder
