@@ -927,7 +927,7 @@ class Linear(nn.Module, LoraLayer):
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
                         delta_weight = self.get_delta_weight(active_adapter)
-                        base_layer.weight.data += delta_weight
+                        base_layer.weight.data += delta_weight.to(orig_dtype)
                     else:
                         self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer.weight)
 
@@ -990,10 +990,6 @@ class Linear(nn.Module, LoraLayer):
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
-
-            # cast back the weights
-            self.lora_A[adapter].weight.data = weight_A.to(dtype)
-            self.lora_B[adapter].weight.data = weight_B.to(dtype)
 
         return output_tensor
 
@@ -1318,10 +1314,6 @@ class Embedding(nn.Module, LoraLayer):
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
-
-            # cast back the weights
-            self.lora_embedding_A[adapter] = weight_A.to(dtype)
-            self.lora_embedding_B[adapter] = weight_B.to(dtype)
 
         return output_tensor
 
@@ -1693,10 +1685,6 @@ class _ConvNd(nn.Module, LoraLayer):
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
-
-            # cast back the weights
-            self.lora_A[adapter].weight.data = weight_A.to(dtype)
-            self.lora_B[adapter].weight.data = weight_B.to(dtype)
 
         return output_tensor
 
