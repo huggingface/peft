@@ -281,7 +281,7 @@ class TestShira:
     def test_shira_warns_about_hooks(self):
         model = MLP()
 
-        with patch('peft.tuners.shira.layer.ShiraLayer._warn_once_about_module_hooks') as m:
+        with patch("peft.tuners.shira.layer.ShiraLayer._warn_once_about_module_hooks") as m:
             config = ShiraConfig(r=2, target_modules=["lin1", "lin2"])
             peft_model = get_peft_model(model, config)
             inputs = torch.randn(5, 10)
