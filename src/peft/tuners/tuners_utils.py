@@ -148,7 +148,7 @@ def _check_lora_target_modules_mamba(peft_config: PeftConfig, model: nn.Module, 
 
     lora_like_types = {"LORA", "ADALORA", "XLORA", "RANDLORA"}
     incompatible_modules = {"out_proj", "conv1d"}
-    mamba_model_types = {"falcon_h1", "mamba", "mamba2", "falcon_mamba"}
+    mamba_model_types = {"falcon_h1", "mamba", "mamba2", "falcon_mamba", "nemotron_h"}
 
     if (
         peft_config.peft_type in lora_like_types
