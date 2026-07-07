@@ -61,7 +61,7 @@ class _RiemannianPreconditioner:
     rank.
 
     The scalar `reg` is a damping term added to the `r x r` matrix's diagonal before inversion; it stabilizes the
-    inverse when a factor is (near) rank-deficient. Very small values (e.g. `1e-6`) work well in practice.
+    inverse when a factor is (near) rank-deficient.
     """
 
     def __init__(
@@ -111,7 +111,7 @@ def create_riemannian_optimizer(
     optimizer_cls: type[Optimizer],
     *,
     lr: float,
-    reg: float = 1e-6,
+    reg: float = 1e-2,
     **kwargs,
 ) -> Optimizer:
     """
@@ -125,12 +125,15 @@ def create_riemannian_optimizer(
     that, on every `step`, the gradients of the LoRA `A` and `B` matrices are first multiplied by an `r x r` Riemannian
     preconditioner. Non-LoRA parameters are updated unchanged.
 
+    Only `nn.Linear`-shaped LoRA layers (`lora_A` / `lora_B`) are preconditioned. LoRA on embedding layers
+    (`lora_embedding_A` / `lora_embedding_B`, stored as `nn.Parameter`) is left unpreconditioned.
+
     Args:
         model (`torch.nn.Module`): The PEFT model containing LoRA-adapted parameters.
         optimizer_cls (`type[torch.optim.Optimizer]`): The base optimizer class to wrap, e.g. `torch.optim.AdamW`.
         lr (`float`): Learning rate passed to the base optimizer.
-        reg (`float`): Damping added to the diagonal of the `r x r` matrix before inversion; stabilizes the inverse
-            when a LoRA factor is (near) rank-deficient (default: `1e-6`).
+        reg (`float`): Damping added to the `r x r` matrix diagonal before inversion; stabilizes the inverse when a
+            LoRA factor is (near) rank-deficient.
         kwargs (`dict`): Additional keyword arguments forwarded to the base optimizer (e.g. `weight_decay`, `betas`).
 
     Returns:

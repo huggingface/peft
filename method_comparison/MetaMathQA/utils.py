@@ -133,7 +133,9 @@ class TrainConfig:
             raise ValueError(f"Invalid eval_steps: {self.eval_steps} > max_steps: {self.max_steps}")
         if self.grad_norm_clip < 0:
             raise ValueError(f"Invalid grad_norm_clip: {self.grad_norm_clip}")
-        if self.optimizer_type not in ["lora+", "lora-fa"] and not hasattr(torch.optim, self.optimizer_type):
+        if self.optimizer_type not in ["lora+", "lora-fa", "riemannian"] and not hasattr(
+            torch.optim, self.optimizer_type
+        ):
             raise ValueError(f"Invalid optimizer_type: {self.optimizer_type}")
         if self.lr_scheduler not in [None, "cosine"]:
             raise ValueError(f"Invalid lr_scheduler: {self.lr_scheduler}, must be None or 'cosine'")
