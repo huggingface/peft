@@ -26,6 +26,28 @@ from peft.utils import quantization_extra_repr, resolve_quantization_backend
 from .config import ShiraConfig
 
 
+# use a LRU_cache so that the warning is only ever called once and not repeated for every layer/step/epoch
+@lru_cache(None)
+def _warn_once_about_module_hooks(shira_layer):
+    # ShiRA has a forward method that uses the base weights instead of the .forward call of the base layer.
+    # This ignores any hook set on the base layer. Inform the user about this so that they can register the
+    # hooks on the PEFT module instead.
+    base_layer = shira_layer.get_base_layer()
+    if any(
+        [
+            base_layer._forward_hooks,
+            base_layer._forward_pre_hooks,
+            base_layer._backward_hooks,
+            base_layer._backward_pre_hooks,
+        ]
+    ):
+        warnings.warn(
+            "One of the base layers adapted with ShiRA has backward/forward (pre) hooks set which will be ignored "
+            "by the adapter's forward implementation. Please set the hooks on the adapted layer instead (i.e., "
+            "apply the hooks on the same path but after applying the PEFT config)."
+        )
+
+
 class ShiraLayer(BaseTunerLayer):
     # List all names of layers that may contain trainable adapter weights
     adapter_layer_names = ("shira_weight",)
@@ -111,26 +133,6 @@ class ShiraLayer(BaseTunerLayer):
             # Ignore the case where the adapter is not in the layer
             return
         self.scaling[adapter] = scale
-
-    @lru_cache(None)  # noqa: B019
-    def _warn_once_about_module_hooks(self):
-        # ShiRA has a forward method that uses the base weights instead of the .forward call of the base layer.
-        # This ignores any hook set on the base layer. Inform the user about this so that they can register the
-        # hooks on the PEFT module instead.
-        base_layer = self.get_base_layer()
-        if any(
-            [
-                base_layer._forward_hooks,
-                base_layer._forward_pre_hooks,
-                base_layer._backward_hooks,
-                base_layer._backward_pre_hooks,
-            ]
-        ):
-            warnings.warn(
-                "One of the base layers adapted with ShiRA has backward/forward (pre) hooks set which will be ignored "
-                "by the adapter's forward implementation. Please set the hooks on the adapted layer instead (i.e., "
-                "apply the hooks on the same path but after applying the PEFT config)."
-            )
 
 
 class Linear(nn.Module, ShiraLayer):
@@ -245,7 +247,7 @@ class Linear(nn.Module, ShiraLayer):
 
             result = base_result + F.linear(x, new_weight)
         else:
-            self._warn_once_about_module_hooks()
+            _warn_once_about_module_hooks(self)
             new_weight = self.get_base_weight().clone()
 
             for active_adapter in self.active_adapters:
