@@ -1,5 +1,5 @@
 """
-回归测试：验证 LoRA get_delta_weight() 无副作用和 merge dtype 一致性
+Regression tests: Verify LoRA get_delta_weight() has no side effects and merge dtype consistency
 """
 import pytest
 import torch
@@ -8,10 +8,10 @@ from peft import LoraConfig, get_peft_model
 
 
 class TestGetDeltaWeightNoSideEffect:
-    """测试 get_delta_weight() 不修改原始权重"""
+    """Test that get_delta_weight() does not modify original weights"""
 
     def test_linear_get_delta_weight_no_side_effect(self):
-        """测试 Linear.get_delta_weight() 不修改原始权重"""
+        """Test that Linear.get_delta_weight() does not modify original weights"""
         class SimpleModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -26,29 +26,24 @@ class TestGetDeltaWeightNoSideEffect:
 
         lora_layer = peft_model.model.linear
 
-        # 给 lora_B 一些非零值
         with torch.no_grad():
             lora_layer.lora_B["default"].weight.data.fill_(0.5)
 
-        # 记录初始权重
         initial_A = lora_layer.lora_A["default"].weight.data.clone()
         initial_B = lora_layer.lora_B["default"].weight.data.clone()
 
-        # 调用 get_delta_weight
         delta_weight = lora_layer.get_delta_weight("default")
 
-        # 验证权重未被修改
         assert torch.equal(initial_A, lora_layer.lora_A["default"].weight.data), \
-            "Linear.get_delta_weight() 修改了 lora_A 权重"
+            "Linear.get_delta_weight() modified lora_A weights"
         assert torch.equal(initial_B, lora_layer.lora_B["default"].weight.data), \
-            "Linear.get_delta_weight() 修改了 lora_B 权重"
+            "Linear.get_delta_weight() modified lora_B weights"
 
-        # 验证返回值的 dtype
         assert delta_weight.dtype == torch.bfloat16, \
-            f"返回的 delta_weight dtype 应该是 bfloat16，实际是 {delta_weight.dtype}"
+            f"Returned delta_weight dtype should be bfloat16, got {delta_weight.dtype}"
 
     def test_embedding_get_delta_weight_no_side_effect(self):
-        """测试 Embedding.get_delta_weight() 不修改原始权重"""
+        """Test that Embedding.get_delta_weight() does not modify original weights"""
         class SimpleModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -63,25 +58,21 @@ class TestGetDeltaWeightNoSideEffect:
 
         lora_layer = peft_model.model.embed
 
-        # 给 lora_embedding_B 一些非零值
         with torch.no_grad():
             lora_layer.lora_embedding_B["default"].data.fill_(0.5)
 
-        # 记录初始权重
         initial_A = lora_layer.lora_embedding_A["default"].data.clone()
         initial_B = lora_layer.lora_embedding_B["default"].data.clone()
 
-        # 调用 get_delta_weight
         delta_weight = lora_layer.get_delta_weight("default")
 
-        # 验证权重未被修改
         assert torch.equal(initial_A, lora_layer.lora_embedding_A["default"].data), \
-            "Embedding.get_delta_weight() 修改了 lora_embedding_A 权重"
+            "Embedding.get_delta_weight() modified lora_embedding_A weights"
         assert torch.equal(initial_B, lora_layer.lora_embedding_B["default"].data), \
-            "Embedding.get_delta_weight() 修改了 lora_embedding_B 权重"
+            "Embedding.get_delta_weight() modified lora_embedding_B weights"
 
     def test_conv_get_delta_weight_no_side_effect(self):
-        """测试 _ConvNd.get_delta_weight() 不修改原始权重"""
+        """Test that _ConvNd.get_delta_weight() does not modify original weights"""
         class SimpleModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -96,25 +87,21 @@ class TestGetDeltaWeightNoSideEffect:
 
         lora_layer = peft_model.model.conv
 
-        # 给 lora_B 一些非零值
         with torch.no_grad():
             lora_layer.lora_B["default"].weight.data.fill_(0.5)
 
-        # 记录初始权重
         initial_A = lora_layer.lora_A["default"].weight.data.clone()
         initial_B = lora_layer.lora_B["default"].weight.data.clone()
 
-        # 调用 get_delta_weight
         delta_weight = lora_layer.get_delta_weight("default")
 
-        # 验证权重未被修改
         assert torch.equal(initial_A, lora_layer.lora_A["default"].weight.data), \
-            "_ConvNd.get_delta_weight() 修改了 lora_A 权重"
+            "_ConvNd.get_delta_weight() modified lora_A weights"
         assert torch.equal(initial_B, lora_layer.lora_B["default"].weight.data), \
-            "_ConvNd.get_delta_weight() 修改了 lora_B 权重"
+            "_ConvNd.get_delta_weight() modified lora_B weights"
 
     def test_get_delta_weight_multiple_calls_consistent(self):
-        """测试多次调用 get_delta_weight() 结果一致"""
+        """Test that multiple calls to get_delta_weight() return identical results"""
         class SimpleModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -129,27 +116,24 @@ class TestGetDeltaWeightNoSideEffect:
 
         lora_layer = peft_model.model.linear
 
-        # 给 lora_B 一些非零值
         with torch.no_grad():
             lora_layer.lora_B["default"].weight.data.fill_(0.5)
 
-        # 多次调用 get_delta_weight
         delta_weight_1 = lora_layer.get_delta_weight("default")
         delta_weight_2 = lora_layer.get_delta_weight("default")
         delta_weight_3 = lora_layer.get_delta_weight("default")
 
-        # 验证结果一致
         assert torch.equal(delta_weight_1, delta_weight_2), \
-            "多次调用 get_delta_weight() 结果不一致"
+            "Multiple calls to get_delta_weight() returned different results"
         assert torch.equal(delta_weight_2, delta_weight_3), \
-            "多次调用 get_delta_weight() 结果不一致"
+            "Multiple calls to get_delta_weight() returned different results"
 
 
 class TestMergeDtypeConsistency:
-    """测试 merge 操作的 dtype 一致性"""
+    """Test dtype consistency of merge operations"""
 
     def test_linear_merge_unsafe_dtype_consistency(self):
-        """测试 Linear.merge() unsafe path 保持 dtype 一致"""
+        """Test that Linear.merge() unsafe path preserves dtype"""
         class SimpleModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -162,19 +146,16 @@ class TestMergeDtypeConsistency:
         config = LoraConfig(r=8, lora_alpha=16, target_modules=["linear"], lora_dropout=0.0)
         peft_model = get_peft_model(model, config).to(torch.bfloat16)
 
-        # 记录原始 dtype
         orig_dtype = peft_model.model.linear.base_layer.weight.dtype
 
-        # 执行 unsafe merge
         peft_model.merge_adapter(safe_merge=False)
 
-        # 验证 dtype 保持一致
         merged_dtype = peft_model.model.linear.base_layer.weight.dtype
         assert orig_dtype == merged_dtype, \
-            f"unsafe merge 改变了 dtype: {orig_dtype} -> {merged_dtype}"
+            f"unsafe merge changed dtype: {orig_dtype} -> {merged_dtype}"
 
     def test_linear_merge_safe_vs_unsafe_consistency(self):
-        """测试 safe merge 和 unsafe merge 结果数值一致"""
+        """Test that safe merge and unsafe merge produce identical numerical results"""
         class SimpleModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -210,7 +191,7 @@ class TestMergeDtypeConsistency:
         unsafe_merged_weight = peft_model2.model.linear.base_layer.weight.data.clone()
 
         assert torch.allclose(safe_merged_weight, unsafe_merged_weight, rtol=1e-3, atol=1e-3), \
-            "safe merge 和 unsafe merge 结果数值不一致"
+            "safe merge and unsafe merge produced different numerical results"
 
 
 if __name__ == "__main__":

@@ -927,7 +927,7 @@ class Linear(nn.Module, LoraLayer):
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
                         delta_weight = self.get_delta_weight(active_adapter)
-                        base_layer.weight.data += delta_weight.to(orig_dtype)
+                        base_layer.weight.data += delta_weight
                     else:
                         self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer.weight)
 
@@ -1611,7 +1611,7 @@ class _ConvNd(nn.Module, LoraLayer):
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
                         delta_weight = self.get_delta_weight(active_adapter)
-                        base_layer.weight.data += delta_weight.to(orig_dtype)
+                        base_layer.weight.data += delta_weight
                     else:
                         self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer.weight)
 
