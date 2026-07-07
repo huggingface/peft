@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import math
+import warnings
 
 import torch
 from torch import nn
@@ -220,6 +221,38 @@ def test_lorafa_init_embedding_target_module():
     output.sum().backward()
 
     optimizer.step()
+
+
+def test_lorafa_scaling_factor_deprecation_warning():
+    """
+    Test that using the legacy scaling_factor emits a FutureWarning
+    """
+    param = nn.Parameter(torch.ones(2, 2))
+    optimizer = lorafa_module.LoraFAOptimizer(
+        [
+            {
+                "params": [param],
+                "lr": 1e-3,
+                "names": ["dummy.weight"],
+                "scaling_factor": 1.0,
+                "betas": (0.9, 0.999),
+                "eps": 1e-6,
+                "weight_decay": 0.0,
+                "correct_bias": True,
+            }
+        ]
+    )
+    param.grad = torch.ones_like(param)
+
+    # TODO remove after 2026-11-01
+    with warnings.catch_warnings(record=True) as caught_warnings:
+        warnings.simplefilter("always")
+        optimizer.step()
+
+    assert any(
+        isinstance(warning.message, FutureWarning) and "`scaling_factor` is deprecated" in str(warning.message)
+        for warning in caught_warnings
+    )
 
 
 def test_LoraFAOptimizer_step():
