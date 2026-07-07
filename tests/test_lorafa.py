@@ -17,6 +17,7 @@ from __future__ import annotations
 import math
 import warnings
 
+import pytest
 import torch
 from torch import nn
 
@@ -174,13 +175,34 @@ def test_lorafa_init_rslora():
         bias="none",
     )
     model = get_peft_model(model, config)
-    optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr, use_rslora=True)
+    optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr)
     scaling_factors = [factor for factor in optimizer.param_groups[0]["scaling_factors"] if factor is not None]
     assert scaling_factors
     assert all(
         math.isclose(factor, lora_alpha / math.sqrt(lora_rank), rel_tol=1e-9, abs_tol=0.0)
         for factor in scaling_factors
     )
+
+
+def test_lorafa_rslora_flag_mismatch_raises():
+    """
+    Test if passing use_rslora=True in the optimizer helper raises when model active adapters are not rsLoRA
+    """
+    lora_rank = 16
+    lora_alpha = 32
+    lr = 7e-5
+
+    model = SimpleNet()
+    config = LoraConfig(
+        r=lora_rank,
+        lora_alpha=lora_alpha,
+        target_modules=["lin0", "lin1"],
+        bias="none",
+    )
+    model = get_peft_model(model, config)
+
+    with pytest.raises(ValueError, match="do not have `use_rslora=True`"):
+        create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr, use_rslora=True)
 
 
 def test_lorafa_init_embedding_target_module():

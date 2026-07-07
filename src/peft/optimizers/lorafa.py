@@ -257,10 +257,35 @@ def create_lorafa_optimizer(
     Returns:
         Optimizer: Configured lorafa optimizer instance ready for training.
     """
+    active_adapters = [adapter for adapter in model.active_adapters if adapter in model.peft_config]
+    active_adapter_use_rslora = {
+        adapter: bool(getattr(model.peft_config[adapter], "use_rslora", False)) for adapter in active_adapters
+    }
+
+    # TODO remove after 2026-11-01
+    if use_rslora:
+        mismatched_adapters = [adapter for adapter, is_rslora in active_adapter_use_rslora.items() if not is_rslora]
+        if mismatched_adapters:
+            raise ValueError(
+                "`use_rslora=True` was passed to create_lorafa_optimizer, but the following active adapters do not "
+                f"have `use_rslora=True` in the model config: {mismatched_adapters}. Please set `use_rslora=True` "
+                "in LoraConfig for active adapters or stop passing `use_rslora` to the optimizer helper."
+            )
+        warnings.warn(
+            "`use_rslora` in create_lorafa_optimizer is deprecated and will be removed after 2026-11-01. "
+            "Please configure rsLoRA via LoraConfig instead.",
+            FutureWarning,
+        )
+
+    if active_adapter_use_rslora:
+        model_use_rslora = all(active_adapter_use_rslora.values())
+    else:
+        model_use_rslora = use_rslora
+
     for name, param in model.named_parameters():
         if "lora_A" in name:
             param.requires_grad_(False)
-    lora_scaling = lora_alpha / math.sqrt(r) if use_rslora else lora_alpha / r
+    lora_scaling = lora_alpha / math.sqrt(r) if model_use_rslora else lora_alpha / r
 
     # this func maps a flattened parameter name back to its LoRA module and adapter
     # Returns None for non-LoRA parameters and unresolved names
