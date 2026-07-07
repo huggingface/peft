@@ -134,8 +134,8 @@ def precompute_prompt_caches(
             )
             eval_prompt_cache[prompt] = prompt_embeds.to("cpu")
     return (
-        torch.cat(prompt_embeds_cache, dim=0).to(device_type),
-        torch.cat(text_ids_cache, dim=0).to(device_type),
+        (torch.cat(prompt_embeds_cache, dim=0) if prompt_embeds_cache else torch.tensor([])).to(device_type),
+        (torch.cat(text_ids_cache, dim=0) if text_ids_cache else torch.tensor([])).to(device_type),
         eval_prompt_cache,
     )
 
