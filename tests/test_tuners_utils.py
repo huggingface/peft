@@ -431,7 +431,7 @@ class TestPeftCustomKwargs:
                 layer.mlp.down_proj,
             )
             for proj in projs:
-                # the targted layer itself, which in the base model was the nn.Linear layer, is now a LoraLayer
+                # the targeted layer itself, which in the base model was the nn.Linear layer, is now a LoraLayer
                 assert isinstance(proj, LoraLayer)
                 # all children of that layer are still normal nn.Linear layers
                 assert isinstance(proj.base_layer, nn.Linear)
