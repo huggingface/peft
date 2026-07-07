@@ -630,9 +630,8 @@ class LoraConfig(PeftConfig):
                 "base weight associated with the smallest singular values, A is set to zero, and B is frozen during "
                 "training (only A is updated)."
             ),
-            # lora_variants: lists the string prefixes of init_lora_weights values
+            # lora_variants: lists the string values (or prefixes) of init_lora_weights
             # that activate a LoRA variant (e.g. "mica" activates MiCALinearVariant).
-            # These are handled separately from boolean is_lora_variant fields.
             "lora_variants": ["mica"],
         },
     )
