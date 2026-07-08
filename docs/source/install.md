@@ -45,4 +45,4 @@ cd peft
 pip install -e ".[test]"
 ```
 
-If you're planning to contribute to PEFT, follow the [contributing guide](../developer_guides/contributing#installation) instead, which also covers forking, adding the upstream remote, and creating a working branch.
+If you're planning to contribute to PEFT, follow the [contributing guide](developer_guides/contributing#installation) instead, which also covers forking, adding the upstream remote, and creating a working branch.
