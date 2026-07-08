@@ -129,7 +129,6 @@ jobs:
           pip install setuptools
           # cpu version of pytorch
           pip install -e .[test]
-          pip install -U "huggingface_hub<1.22"
       - name: Test with pytest
         shell: bash
         env:

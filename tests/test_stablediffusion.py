@@ -234,7 +234,7 @@ class TestStableDiffusionModel(PeftCommonTester):
 
     transformers_class = StableDiffusionPipeline
 
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="session", autouse=True)
     def load_sd_pipeline(self, request):
         # warning: don't use self.sd_model = ... because this is a class fixture
         request.cls.sd_model = StableDiffusionPipeline.from_pretrained("hf-internal-testing/tiny-sd-pipe")
