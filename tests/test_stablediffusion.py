@@ -14,6 +14,7 @@
 
 import copy
 from dataclasses import asdict, replace
+from functools import lru_cache
 
 import diffusers
 import numpy as np
@@ -227,6 +228,12 @@ def skip_if_not_lora(config_cls):
         pytest.skip("Skipping test because it is only applicable to LoraConfig")
 
 
+@lru_cache
+def load_sd_model(model_id):
+    # FIXME explain why not fixture or class attribute
+    return StableDiffusionPipeline.from_pretrained(model_id)
+
+
 class TestStableDiffusionModel(PeftCommonTester):
     r"""
     Tests that diffusers StableDiffusion model works with PEFT as expected.
@@ -234,16 +241,16 @@ class TestStableDiffusionModel(PeftCommonTester):
 
     transformers_class = StableDiffusionPipeline
 
-    @pytest.fixture(scope="session", autouse=True)
-    def load_sd_pipeline(self, request):
-        # warning: don't use self.sd_model = ... because this is a class fixture
-        request.cls.sd_model = StableDiffusionPipeline.from_pretrained("hf-internal-testing/tiny-sd-pipe")
+    # @pytest.fixture(scope="class", autouse=True)
+    # def load_sd_pipeline(self, request):
+    #     # warning: don't use self.sd_model = ... because this is a class fixture
+    #     request.cls.sd_model = StableDiffusionPipeline.from_pretrained("hf-internal-testing/tiny-sd-pipe")
 
     def instantiate_sd_peft(self, model_id, config_cls, config_kwargs):
         # Instantiate StableDiffusionPipeline
         if model_id == "hf-internal-testing/tiny-sd-pipe":
             # in CI, this model often times out on the hub, let's cache it
-            model = copy.deepcopy(self.sd_model)
+            model = copy.deepcopy(load_sd_model(model_id))
         else:
             model = self.transformers_class.from_pretrained(model_id)
 
