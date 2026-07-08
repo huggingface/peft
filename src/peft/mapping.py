@@ -89,4 +89,7 @@ def inject_adapter_in_model(
         model, peft_config, adapter_name=adapter_name, low_cpu_mem_usage=low_cpu_mem_usage, state_dict=state_dict
     )
 
+    # For AdaLora, return the wrapper to preserve update_and_allocate method
+    if peft_config.peft_type == PeftType.ADALORA:
+        return peft_model
     return peft_model.model
