@@ -124,7 +124,7 @@ def train_model(
         num_train_epochs=num_epochs,
         per_device_train_batch_size=batch_size,
         per_device_eval_batch_size=batch_size,
-        warmup_steps=int(max_steps * 0.1),  # 10% of total trainig steps
+        warmup_steps=int(max_steps * 0.1),  # 10% of total training steps
         weight_decay=0.01,
         logging_dir="./logs",
         logging_steps=eval_step,
