@@ -215,6 +215,7 @@ class SVDConv2d(nn.Module, AdaLoraLayer):
         super().__init__()
         AdaLoraLayer.__init__(self, base_layer)
         self.get_base_layer().weight.requires_grad = False
+        self.fan_in_fan_out = config.fan_in_fan_out
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, lora_alpha, config=config)
 
@@ -301,8 +302,10 @@ class SVDConv2d(nn.Module, AdaLoraLayer):
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         delta = (
-            self.lora_B[adapter]
-            @ (self.lora_A[adapter] * self.lora_E[adapter])
+            transpose(
+                self.lora_B[adapter] @ (self.lora_A[adapter] * self.lora_E[adapter]),
+                self.fan_in_fan_out,
+            )
             * self.scaling[adapter]
             / (self.ranknum[adapter] + 1e-5)
         )
