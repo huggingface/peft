@@ -36,12 +36,13 @@ New features that haven't been released yet are added every day, which also mean
 pip install git+https://github.com/huggingface/peft
 ```
 
-If you're working on contributing to the library or wish to play with the source code and see live 
-results as you run the code, an editable version can be installed from a locally-cloned version of the 
-repository:
+If you wish to play with the source code and see live results as you run the code, an editable version
+can be installed from a locally-cloned version of the repository:
 
 ```bash
 git clone https://github.com/huggingface/peft
 cd peft
-pip install -e .[test]
+pip install -e ".[test]"
 ```
+
+If you're planning to contribute to PEFT, follow the [contributing guide](../developer_guides/contributing#installation) instead, which also covers forking, adding the upstream remote, and creating a working branch.
