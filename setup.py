@@ -29,6 +29,18 @@ extras["docs_specific"] = [
     "requests",  # doc-builder has an implicit dependency on requests (setup.py doesn't mention it, pyproject does)
     "hf-doc-builder",
 ]
+# MCP (Model Context Protocol) server dependencies - optional, not required for core PEFT functionality.
+# Install via: pip install peft[mcp]
+# - fastmcp: MCP server framework for exposing PEFT tools to AI assistants
+# - pydantic: data validation and settings management for MCP request/response models
+# - aiohttp: async HTTP client/server for MCP HTTP transport
+# - sse-starlette: Server-Sent Events support for MCP SSE transport
+extras["mcp"] = [
+    "fastmcp>=2.0.0",
+    "pydantic>=2.0.0",
+    "aiohttp>=3.8.0",
+    "sse-starlette>=1.6.0",
+]
 extras["dev"] = extras["quality"] + extras["docs_specific"]
 extras["test"] = extras["dev"] + [
     "pytest",

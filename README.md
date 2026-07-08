@@ -173,6 +173,106 @@ PEFT can also be applied to training LLMs with RLHF components such as the ranke
 
 Use this [Space](https://stevhliu-peft-methods.hf.space) or check out the [docs](https://huggingface.co/docs/peft/main/en/index) to find which models officially support a PEFT method out of the box. Even if you don't see a model listed below, you can manually configure the model config to enable PEFT for a model. Read the [New transformers architecture](https://huggingface.co/docs/peft/main/en/developer_guides/custom_models#new-transformers-architectures) guide to learn how.
 
+## MCP Server
+
+PEFT provides a Model Context Protocol (MCP) server that exposes PEFT functionality to AI assistants and other MCP clients. This allows you to create, train, evaluate, and manage PEFT models through natural language interactions.
+
+### Installation
+
+Install PEFT with MCP support:
+
+```bash
+pip install peft[mcp]
+```
+
+### Starting the Server
+
+The MCP server supports three transport modes:
+
+```bash
+# Standard input/output (default)
+python -m peft.mcp.server stdio
+
+# Server-Sent Events over HTTP
+python -m peft.mcp.server sse --host 0.0.0.0 --port 8000
+
+# HTTP transport
+python -m peft.mcp.server http --host 0.0.0.0 --port 8000
+```
+
+### Available Tools
+
+The MCP server provides 10 tools for PEFT operations:
+
+1. **list_peft_methods** - List all available PEFT methods with descriptions
+2. **get_peft_config** - Get configuration parameters and defaults for a PEFT method
+   - `method`: PEFT method name (e.g., 'LORA', 'ADALORA', 'IA3')
+3. **create_peft_model** - Create a PEFT model
+   - `model_id`: Unique identifier for the model
+   - `base_model_name_or_path`: Base model name or path
+   - `method`: PEFT method to use
+   - `config_params`: Optional configuration parameters
+   - `adapter_name`: Adapter name (default: 'default')
+4. **train_peft_model** - Train a PEFT model
+   - `model_id`: Model identifier
+   - `dataset_name_or_path`: Training dataset
+   - `training_args`: Optional training arguments
+   - `async_mode`: Run asynchronously (default: true)
+5. **merge_peft_weights** - Merge PEFT weights into base model
+   - `model_id`: Model identifier
+   - `output_path`: Optional path to save merged model
+6. **save_peft_model** - Save PEFT model to disk
+   - `model_id`: Model identifier
+   - `output_path`: Path to save the model
+7. **load_peft_model** - Load PEFT model from disk
+   - `model_id`: Unique identifier for the loaded model
+   - `base_model_name_or_path`: Base model name or path
+   - `adapter_path`: Path to PEFT adapter weights
+   - `adapter_name`: Adapter name (default: 'default')
+8. **evaluate_peft_model** - Evaluate PEFT model performance
+   - `model_id`: Model identifier
+   - `dataset_name_or_path`: Evaluation dataset
+   - `metrics`: List of metrics to compute
+9. **compare_peft_methods** - Compare different PEFT methods
+   - `base_model_name_or_path`: Base model name or path
+   - `methods`: List of PEFT methods to compare
+   - `config_params`: Optional configuration for each method
+10. **get_training_metrics** - Get training metrics for a task
+    - `task_id`: Training task identifier
+
+### Quick Start Example
+
+```python
+# Using the MCP server with an AI assistant
+# 1. List available methods
+list_peft_methods()
+
+# 2. Get LoRA configuration
+get_peft_config(method="LORA")
+
+# 3. Create a PEFT model
+create_peft_model(
+    model_id="my-lora-model",
+    base_model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
+    method="LORA",
+    config_params={"r": 16, "lora_alpha": 32}
+)
+
+# 4. Train the model
+train_peft_model(
+    model_id="my-lora-model",
+    dataset_name_or_path="ought/raft/twitter_complaints"
+)
+
+# 5. Save the trained model
+save_peft_model(
+    model_id="my-lora-model",
+    output_path="./my-lora-adapter"
+)
+```
+
+For more detailed examples and integration guides, see the [MCP documentation](docs/mcp/README.md).
+
 ## Contribute
 
 If you would like to contribute to PEFT, please check out our [contribution guide](https://huggingface.co/docs/peft/developer_guides/contributing).
