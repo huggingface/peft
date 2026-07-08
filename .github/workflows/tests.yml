@@ -129,6 +129,10 @@ jobs:
           pip install setuptools
           # cpu version of pytorch
           pip install -e .[test]
+      - name: debuuuuuuuuuuuuuuuuuuuuuuuuuug # FIXME
+        shell: bash
+        run: |
+          python -c "import os; from huggingface_hub.utils import filter_repo_objects;print(list(filter_repo_objects(['unet/config.json'], allow_patterns=[os.path.join('unet', 'config.json')])))"
       - name: Test with pytest
         shell: bash
         env:
@@ -136,8 +140,6 @@ jobs:
           TRANSFORMERS_IS_CI: 1
           CI: 1
         run: |
-          # FIXME
-          python -c "import os; from huggingface_hub.utils import filter_repo_objects;print(list(filter_repo_objects(['unet/config.json'], allow_patterns=[os.path.join('unet', 'config.json')])))"
           make test
           # clean up all pytest temporary directories that are kept due to retention since space
           # is a scarce resource on the runners and tasks like model cache creation (further below)
