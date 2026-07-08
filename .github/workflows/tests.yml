@@ -35,6 +35,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install .[dev]
+          # TODO see internal discussions about Diffusers/HFH issue, check around ~2025-09-01 if issue is resolved and
+          # pin can be removed
+          pip install huggingface_hub 1.22
       - name: Check quality
         run: |
           make quality
