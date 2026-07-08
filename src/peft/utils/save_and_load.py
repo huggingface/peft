@@ -121,7 +121,7 @@ def get_peft_model_state_dict(
         save_embedding_layers (`Union[bool, str]`, , *optional*, defaults to `auto`):
             If `True`, save the embedding layers in addition to adapter weights. If `auto`, checks the common embedding
             layers `peft.utils.other.EMBEDDING_LAYER_NAMES` in config's `target_modules` when available. Based on it
-            sets the boolean flag. This only works for 🤗 transformers models.
+            sets the boolean flag. This only works for ð¤ transformers models.
 
     """
     if unwrap_compiled:
@@ -181,6 +181,11 @@ def get_peft_model_state_dict(
                     bias_name = k.split("lora_")[0] + "bias"
                     if bias_name in state_dict:
                         to_return[bias_name] = state_dict[bias_name]
+                    # LoRA layers wrap the original module as base_layer; the trained
+                    # bias lives at base_layer.bias rather than directly under bias.
+                    base_layer_bias_name = k.split("lora_")[0] + "base_layer.bias"
+                    if base_layer_bias_name in state_dict:
+                        to_return[base_layer_bias_name] = state_dict[base_layer_bias_name]
         else:
             raise NotImplementedError
         to_return = {k: v for k, v in to_return.items() if (("lora_" in k) or ("bias" in k))}
@@ -465,7 +470,7 @@ def get_peft_model_state_dict(
                 if embedding_module_name:
                     to_return.update({k: v for k, v in state_dict.items() if embedding_module_name in k})
     elif save_embedding_layers:
-        warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
+        warnings.warn("Could not identify embedding layer(s) because the model is not a ð¤ transformers model.")
 
     # REMOVE ADAPTER NAME
     # Ensure not to replace in the middle of the key because a module happens to have the same name as the adapter.
