@@ -199,13 +199,15 @@ class GloraLayer(BaseTunerLayer):
         bias = self.bias
         device, dtype = weight.device, weight.dtype
 
-        # we need a clone of the original weights to compute the merged weights
-        # before they get mutated by the merge process
-        w0 = weight.data.clone()
-        b0 = bias.data.clone() if bias is not None else None
+        # Read the original weights directly as the reference for the merge math. The base layer
+        # is only reassigned at the very end (after the safe_merge check), so it stays untouched
+        # until then and needs no defensive clone here.
+        w0 = weight.data
+        b0 = bias.data if bias is not None else None
 
-        # Accumulate into separate clones instead of mutating the base layer directly, so that if
-        # safe_merge detects non-finite values below, the base layer's weights/bias are untouched.
+        # The accumulator must be a separate tensor from `w0`: each adapter's update reads the
+        # original weights (`w0 * A`), so accumulating in place on `w0` would feed the next adapter
+        # the already-merged weights and corrupt multi-adapter merges.
         new_weight = w0.clone()
         new_bias = b0.clone() if b0 is not None else None
 
