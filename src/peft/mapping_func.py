@@ -17,6 +17,7 @@ from __future__ import annotations
 import warnings
 from typing import Optional
 
+import torch
 from transformers import PreTrainedModel
 
 from .auto import MODEL_TYPE_TO_PEFT_MODEL_MAPPING
@@ -103,6 +104,22 @@ def get_peft_model(
             f"Adapter name '{adapter_name}' should not be contained in the prefix '{prefix}'. "
             "This may lead to reinitialization of the adapter weights during loading."
         )
+
+    # Model parameters on the meta device at wrap time indicate that they will only be materialized later (e.g. on
+    # the first forward call). Anything that captures parameter references before that point, such as forward/backward
+    # hooks registered by third-party libraries or an optimizer created early, will reference stale parameters and
+    # training can silently fail to update any weights. Models loaded with a device_map (`hf_device_map` is set) or
+    # with low_cpu_mem_usage=True are excluded, as these flows handle materialization themselves.
+    if not low_cpu_mem_usage and not hasattr(model, "hf_device_map"):
+        meta = torch.device("meta")
+        if any(p.device == meta for p in model.parameters()):
+            warnings.warn(
+                "The model has parameters on the meta device. They will only be materialized after wrapping, so "
+                "parameter references captured now (e.g. hooks registered by other libraries or an optimizer "
+                "created before the first forward call) can become stale and training may silently not update any "
+                "weights. If you intend to train, move the model to the target device before calling "
+                "`get_peft_model`, and register hooks or create the optimizer afterwards."
+            )
 
     if mixed:
         # note: PeftMixedModel does not support autocast_adapter_dtype, so don't pass it
