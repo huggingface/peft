@@ -204,25 +204,34 @@ class GloraLayer(BaseTunerLayer):
         w0 = weight.data.clone()
         b0 = bias.data.clone() if bias is not None else None
 
+        # Accumulate into separate clones instead of mutating the base layer directly, so that if
+        # safe_merge detects non-finite values below, the base layer's weights/bias are untouched.
+        new_weight = w0.clone()
+        new_bias = b0.clone() if b0 is not None else None
+
         for adapter_name in all_adapters:
             A = self.glora_A[adapter_name]().to(device=device, dtype=dtype)
             B = self.glora_B[adapter_name]().to(device=device, dtype=dtype)
-            base_layer.weight.data += w0 * A + B
+            new_weight += w0 * A + B
             if b0 is not None:
                 C = self.glora_C[adapter_name]().to(device=device, dtype=dtype)
                 D = self.glora_D[adapter_name]().to(device=device, dtype=dtype)
                 E = self.glora_E[adapter_name]().to(device=device, dtype=dtype)
-                base_layer.bias.data += b0 * D + E + torch.matmul(w0, C).squeeze(-1)
+                new_bias += b0 * D + E + torch.matmul(w0, C).squeeze(-1)
 
         if safe_merge:
-            if not torch.isfinite(weight.data).all():
+            if not torch.isfinite(new_weight).all():
                 raise ValueError(
                     f"NaNs detected in the merged weights. The adapter {', '.join(all_adapters)} seems to be broken"
                 )
-            if bias is not None and not torch.isfinite(bias.data).all():
+            if new_bias is not None and not torch.isfinite(new_bias).all():
                 raise ValueError(
                     f"NaNs detected in the merged weights. The adapter {', '.join(all_adapters)} seems to be broken"
                 )
+
+        base_layer.weight.data = new_weight
+        if new_bias is not None:
+            base_layer.bias.data = new_bias
 
         for adapter_name in all_adapters:
             self.merged_adapters.append(adapter_name)
