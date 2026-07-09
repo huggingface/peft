@@ -96,6 +96,7 @@ def reduce_intruder_dimension(
         if cast_to_fp32:
             W_dtype = W.dtype
             W = W.float()
+            W_merged = W_merged.float()
 
         # compare base weights and adapter weights using cosine similarity.
         # based on this similarity we can find intruder dimensions using threshold_epsilon
@@ -145,16 +146,18 @@ def reduce_intruder_dimension(
         B_new = U_dW[:, :effective_rank] @ torch.diag(S_dW[:effective_rank]).sqrt()
         A_new = torch.diag(S_dW[:effective_rank]).sqrt() @ V_dW[:effective_rank]
 
+        # cast the new adapter weights back from float32 to whatever the base layer's weights
+        # were before, so the new adapter's dtype matches the old adapter's and the base model's
+        if cast_to_fp32:
+            B_new = B_new.to(W_dtype)
+            A_new = A_new.to(W_dtype)
+
         if is_embedding:
             layer.lora_embedding_B[new_adapter_name].data = B_new
             layer.lora_embedding_A[new_adapter_name].data = A_new
         else:
             layer.lora_B[new_adapter_name].weight.data = B_new
             layer.lora_A[new_adapter_name].weight.data = A_new
-
-        # cast W back from float32 to whatever it was before to save memory in the long run
-        if cast_to_fp32:
-            W = W.to(W_dtype)
 
     logging_sink(f"Enabling new adapter {new_adapter_name}")
     peft_model.set_adapter(new_adapter_name)
