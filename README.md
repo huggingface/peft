@@ -189,3 +189,7 @@ To use 🤗 PEFT in your publication, please cite it by using the following BibT
   year =         {2022}
 }
 ```
+
+---
+
+*[Mukller](https://github.com/Mukller)*
