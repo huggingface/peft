@@ -108,7 +108,9 @@ class TestLoraIntruders:
         for name, module in model_lin.named_modules():
             if name in original_dtypes:
                 # The new adapter's dtype must match the old adapter's (and the base model's) dtype,
-                # not be left as the float32 the SVD internally computed in.
+                # not be left as the float32 the SVD internally computed in. Both LoRA factors are
+                # rebuilt from the SVD, so check A and B.
+                assert module.lora_A["intruder_reduced"].weight.dtype == original_dtypes[name]
                 assert module.lora_B["intruder_reduced"].weight.dtype == original_dtypes[name]
                 assert original_dtypes[name] == torch.bfloat16
 

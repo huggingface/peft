@@ -91,6 +91,8 @@ def reduce_intruder_dimension(
         W_merged = W + dW
         is_embedding = old_adapter_name not in layer.lora_B
 
+        # torch.linalg.svd below does not support half precision, so upcast fp16/bf16 inputs to
+        # fp32 for the decomposition; the resulting factors are cast back to W_dtype at the end.
         cast_to_fp32 = W.dtype in (torch.float16, torch.bfloat16)
 
         if cast_to_fp32:
