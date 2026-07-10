@@ -60,17 +60,17 @@ For the task of sequence classification, one can initialize the IA3 config for a
 
 ```py
 from peft import IA3Config, TaskType, get_peft_model
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForSeq2SeqLM
 
-model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-1B")
+model = AutoModelForSeq2SeqLM.from_pretrained("t5-small")
 peft_config = IA3Config(
-    task_type=TaskType.SEQ_CLS,
+    task_type=TaskType.SEQ_2_SEQ_LM,
     target_modules=["k_proj", "v_proj", "down_proj"],
     feedforward_modules=["down_proj"],
 )
 model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
-# "trainable params: 278,528 || all params: 1,236,812,800 || trainable%: 0.0225"
+# Example output: "trainable params: 37,888 || all params: 60,506,624 || trainable%: 0.0626"
 ```
 
 ### Choosing target modules
