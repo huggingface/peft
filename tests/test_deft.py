@@ -16,6 +16,7 @@ import torch
 from torch import nn
 
 from peft import DeftConfig, get_peft_model
+from peft.tuners._buffer_dict import BufferDict
 
 
 class MLP(nn.Module):
@@ -115,8 +116,15 @@ class TestDeftMerge:
         # merge() caches its factor in float32; downcasting it to the base dtype (the bug this fixes)
         # makes unmerge recompute a slightly different delta than merge applied, so the roundtrip
         # drifts further than the plain bf16 add/subtract rounding. Measure the base-weight roundtrip
-        # error both ways and assert the float32-cached factor is at least as accurate as the
-        # downcast one (in practice strictly better).
+        # error both ways and assert the float32-cached factor is strictly more accurate.
+        #
+        # `deft_P` (hence the cached factor `right.T @ W`) is deliberately scaled well above its
+        # default init (std=0.02): the factor's own magnitude has to be large enough that rounding
+        # it to bf16 shifts the recomputed delta by more than the base weight's own bf16 storage
+        # quantization step -- otherwise the discrepancy this bug introduces is silently absorbed by
+        # that ordinary rounding and this test can't observe it (verified empirically: at the default
+        # init scale, `err_float32 == err_downcast` every time, which would make this test pass
+        # whether the bug is present or not).
         def roundtrip_max_abs_error(downcast_cached_factor: bool) -> float:
             torch.manual_seed(0)
             model = MLP().to(torch.bfloat16)
@@ -126,6 +134,7 @@ class TestDeftMerge:
             peft_model.eval()
             layer = peft_model.base_model.model.lin0
             with torch.no_grad():
+                layer.deft_P["default"].normal_(std=1.0)
                 layer.deft_R["default"].normal_(std=0.1)
 
             w0 = layer.base_layer.weight.detach().clone()
@@ -141,4 +150,23 @@ class TestDeftMerge:
 
         err_float32 = roundtrip_max_abs_error(downcast_cached_factor=False)
         err_downcast = roundtrip_max_abs_error(downcast_cached_factor=True)
-        assert err_float32 <= err_downcast
+        assert err_float32 < err_downcast
+
+    def test_cached_merge_factor_is_a_buffer_dict(self):
+        # Regression test (CPU-only): `_cached_merge_factor` used to be a plain dict, invisible to
+        # both `model.to(device)` and `_move_adapter_to_device_of_base_layer` (both only sweep
+        # `nn.ModuleDict`/`nn.ParameterDict`/`BufferDict` entries) -- merging on one device, moving the
+        # model, then unmerging raised a device-mismatch RuntimeError because the cache never followed.
+        # This only asserts the container type/registration, not an actual cross-device move, precisely
+        # so the regression is caught without requiring a GPU.
+        torch.manual_seed(0)
+        model = MLP()
+        config = DeftConfig(target_modules=["lin0"], decomposition_method="relu", r=4)
+        peft_model = get_peft_model(model, config)
+        layer = peft_model.base_model.model.lin0
+
+        assert isinstance(layer._cached_merge_factor, BufferDict)
+        assert "_cached_merge_factor" in layer.other_param_names
+
+        peft_model.merge_adapter()
+        assert isinstance(layer._cached_merge_factor["default"], torch.Tensor)
