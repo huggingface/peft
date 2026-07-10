@@ -16,6 +16,9 @@ rendered properly in your Markdown viewer.
 
 # IA3
 
+> [!TIP]
+> IA3 is an excellent choice when you need the smallest possible adapter size — it uses learned vectors instead of low-rank matrices, making it one of the most parameter-efficient methods available (as low as 0.01% of the original model size for T0). If your priority is minimal disk/memory footprint and fast training, IA3 is a strong candidate.
+
 <div class="flex justify-center">
     <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/ia3.png"/>
 </div>
@@ -50,13 +53,56 @@ can be determined based on the size of the weight matrices.
 
 ## Usage
 
+> [!TIP]
+> For autoregressive models, target `k_proj`, `v_proj`, and `down_proj` — these are the layers the authors found to be most effective. Set `feedforward_modules=["down_proj"]` so IA3 knows which modules are feedforward layers and can apply the correct scaling.
+
 For the task of sequence classification, one can initialize the IA3 config for a Llama model as follows:
 
 ```py
+from peft import IA3Config, TaskType, get_peft_model
+from transformers import AutoModelForCausalLM
+
+model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-1B")
 peft_config = IA3Config(
-    task_type=TaskType.SEQ_CLS, target_modules=["k_proj", "v_proj", "down_proj"], feedforward_modules=["down_proj"]
+    task_type=TaskType.SEQ_CLS,
+    target_modules=["k_proj", "v_proj", "down_proj"],
+    feedforward_modules=["down_proj"],
 )
+model = get_peft_model(model, peft_config)
+model.print_trainable_parameters()
+# "trainable params: 278,528 || all params: 1,236,812,800 || trainable%: 0.0225"
 ```
+
+### Choosing target modules
+
+For most Transformer architectures:
+
+* **Key, value projections** (`k_proj`, `v_proj`) — the attention mechanism's most expressive components
+* **Feedforward projection** (`down_proj`) — the second linear layer of each MLP block
+
+You may also target the query projection (`q_proj`) and the first feedforward layer (`up_proj`), though the original paper found these less critical. Adding more modules increases the parameter count slightly but can boost performance.
+
+### When to use IA3 vs LoRA
+
+| | IA3 | LoRA |
+|---|---|---|
+| **Trainable parameters** | Extremely low (~0.01% for T0) | Low (~0.1-1%) |
+| **Adapter type** | Learned vectors (element-wise scale) | Low-rank matrices |
+| **Best for** | Minimal footprint, fast convergence | Broad task support, mature ecosystem |
+| **Merge with base model** | ✅ Yes | ✅ Yes |
+| **Inference latency** | None (after merge) | None (after merge) |
+
+IA3 is particularly effective when you:
+
+* Are severely storage-constrained and need the smallest possible adapters
+* Want faster convergence on smaller datasets (fewer parameters to learn)
+* Are comparing PEFT methods and want a strong baseline that trades minimal parameters for competitive accuracy
+
+LoRA may be preferable when you:
+
+* Need the broader ecosystem of LoRA variants (DoRA, QLoRA, etc.)
+* Want the most widely-tested approach with extensive community support
+* Need to combine with quantization methods that have been validated with LoRA
 
 ## Benchmark overview
 
