@@ -4077,6 +4077,18 @@ class TestHotSwapping:
         torch.manual_seed(0)
         return ConvModel().to(self.torch_device)
 
+    def get_model_conv2d_grouped(self):
+        class ConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(4, 4, kernel_size=3, groups=2)
+
+            def forward(self, X):
+                return self.conv(X)
+
+        torch.manual_seed(0)
+        return ConvModel().to(self.torch_device)
+
     @pytest.mark.parametrize(
         "config",
         [
@@ -4366,6 +4378,65 @@ class TestHotSwapping:
         # real check: model now behaves again like adapter 0
         assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
 
+    def test_hotswap_works_different_ranks_grouped_conv2d(self, tmp_path):
+        # same as previous test, but for a grouped Conv2d (groups > 1); the model is padded to a larger target rank
+        # first, then an adapter with a smaller rank is hotswapped in, see #3416
+        atol, rtol = 1e-4, 1e-4
+        inputs = torch.rand(3, 4, 10, 10).to(self.torch_device)
+
+        # create adapter 0
+        config0 = LoraConfig(target_modules=["conv"], r=4, init_lora_weights=False)
+        model = self.get_model_conv2d_grouped()
+        torch.manual_seed(0)
+        model = get_peft_model(model, config0)
+        model.eval()
+        with torch.inference_mode():
+            output0 = model(inputs)
+        model.save_pretrained(tmp_path / "adapter0")
+
+        del model
+
+        # create adapter 1
+        config1 = LoraConfig(target_modules=["conv"], r=2, init_lora_weights=False)
+        model = self.get_model_conv2d_grouped()
+        torch.manual_seed(1)
+        model = get_peft_model(model, config1)
+        model.eval()
+        with torch.inference_mode():
+            output1 = model(inputs)
+        model.save_pretrained(tmp_path / "adapter1")
+
+        # sanity check: they're not the same
+        assert not torch.allclose(output0, output1, atol=atol, rtol=rtol)
+
+        del model
+
+        # load adapter 0 and pad it to the target rank
+        model = self.get_model_conv2d_grouped()
+        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
+        prepare_model_for_compiled_hotswap(model, target_rank=8)
+        with torch.inference_mode():
+            output_loaded0 = model(inputs)
+
+        # sanity check: same output after padding for adapter 0
+        assert torch.allclose(output0, output_loaded0, atol=atol, rtol=rtol)
+
+        # hotswap with adapter 1, whose rank is smaller than the target rank
+        hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+        with torch.inference_mode():
+            output_loaded1 = model(inputs)
+
+        # real check: model now behaves like adapter 1
+        assert torch.allclose(output1, output_loaded1, atol=atol, rtol=rtol)
+
+        # hotswap back to adapter 0
+        hotswap_adapter(model, tmp_path / "adapter0", adapter_name="default")
+        with torch.inference_mode():
+            output_loaded_back0 = model(inputs)
+
+        # real check: model now behaves again like adapter 0
+        assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
+
     def test_prepare_model_for_compiled_hotswap_scalings_are_tensors(self):
         config = LoraConfig(target_modules=["lin0", "lin1"])
         model = self.get_model()
@@ -4461,6 +4532,18 @@ class TestHotSwapping:
         msg = re.escape("Trying to pad the adapter to the target rank 9, but the original rank is larger (10)")
         with pytest.raises(ValueError, match=msg):
             prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+
+    def test_prepare_model_for_compiled_hotswap_grouped_conv2d_indivisible_target_rank_raises(self):
+        # when the target rank is not divisible by the groups of the base layer, raise an error, see #3416
+        config = LoraConfig(target_modules=["conv"], r=4)
+        model = self.get_model_conv2d_grouped()
+        model = get_peft_model(model, config)
+
+        msg = re.escape(
+            "Trying to pad the adapter to the target rank 7, which is not divisible by the number of groups (2)"
+        )
+        with pytest.raises(ValueError, match=msg):
+            prepare_model_for_compiled_hotswap(model, target_rank=7)
 
     def test_prepare_model_for_compiled_hotswap_with_rank_pattern(self):
         old_rank0 = 8
@@ -4621,6 +4704,37 @@ class TestHotSwapping:
 
         new_rank = 13
         prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+        with torch.inference_mode():
+            output_after = model(inputs)
+
+        assert torch.allclose(output_before, output_after)
+
+    def test_prepare_model_for_compiled_hotswap_does_not_change_output_grouped_conv2d(self):
+        # same as previous test, but for a grouped Conv2d (groups > 1), see #3416
+        inputs = torch.rand(3, 4, 10, 10).to(self.torch_device)
+        model = self.get_model_conv2d_grouped().eval()
+        with torch.inference_mode():
+            output_base = model(inputs)
+
+        old_rank = 4
+        config = LoraConfig(target_modules=["conv"], r=old_rank, init_lora_weights=False)
+        model = get_peft_model(model, config).eval()
+        with torch.inference_mode():
+            output_before = model(inputs)
+
+        # sanity check: LoRA changed output
+        assert not torch.allclose(output_base, output_before)
+
+        new_rank = 8
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+
+        # for grouped convs, LoRA B stores rank // groups input channels
+        for name, param in model.named_parameters():
+            if "lora_A" in name:
+                assert param.shape[0] == new_rank
+            elif "lora_B" in name:
+                assert param.shape[1] == new_rank // 2
+
         with torch.inference_mode():
             output_after = model(inputs)
 
