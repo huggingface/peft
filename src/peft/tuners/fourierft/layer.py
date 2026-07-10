@@ -30,7 +30,7 @@ class FourierFTLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names = ("fourierft_spectrum",)
     # All names of other parameters that may contain adapter-related parameters
-    other_param_names = ("fourierft_n_frequency", "fourierft_scaling", "fourierft_random_loc_seed")
+    other_param_names = ("fourierft_n_frequency", "fourierft_scaling", "fourierft_random_loc_seed", "indices")
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer

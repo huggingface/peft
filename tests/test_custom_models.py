@@ -3499,6 +3499,46 @@ class TestPeftCustomModel(PeftCommonTester):
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_delete_adapter_properly_cleans_up_after_itself(self, test_name, model_id, config_cls, config_kwargs):
+        # Generic guard against dangling per-adapter state: after `delete_adapter`, no adapter-specific attributes
+        # should remain on the model or its tuner layers. This test discovers every dict-like per-adapter container
+        # automatically, so a newly added PEFT method that forgets to register one is still caught here.
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(**config_kwargs)
+        model = get_peft_model(model, config, adapter_name="foobar")
+
+        def get_dict_like_attrs(obj):
+            for attr_name in dir(obj):
+                if attr_name.startswith("_"):
+                    continue
+                try:
+                    attr = getattr(obj, attr_name)
+                except AttributeError:
+                    continue
+                is_dict_like = (
+                    callable(getattr(attr, "keys", None))
+                    and hasattr(attr, "__getitem__")
+                    and hasattr(attr, "__contains__")
+                )
+                if not is_dict_like:
+                    continue
+                if "foobar" in attr:
+                    yield attr_name, attr
+
+        # collect dict-like attributes holding the adapter before deletion
+        dict_attrs = list(get_dict_like_attrs(model))
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayer):
+                dict_attrs.extend(list(get_dict_like_attrs(module)))
+
+        # sanity check: there should be at least one such attribute
+        assert dict_attrs, f"No dict-like attributes found on {config.peft_type}, please check the test"
+
+        model.delete_adapter(adapter_name="foobar")
+        dangling_attrs = [attr_name for attr_name, attr in dict_attrs if "foobar" in attr]
+        assert not dangling_attrs, f"Found dangling attributes after adapter deletion: {sorted(dangling_attrs)}"
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_inactive_adapter(self, test_name, model_id, config_cls, config_kwargs):
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
         self._test_delete_inactive_adapter(model_id, config_cls, config_kwargs)

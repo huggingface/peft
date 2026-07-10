@@ -191,7 +191,10 @@ class PsoftLayer(BaseTunerLayer):
         "psoft_dropout",
         "psoft_svd",
         "psoft_svd_lowrank_niter",
+        "random_seed",
         "ab_svd_init",
+        "_psoft_A_cache",
+        "_psoft_B_cache",
     )
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
