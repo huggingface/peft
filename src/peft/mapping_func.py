@@ -113,7 +113,9 @@ def get_peft_model(
     if not low_cpu_mem_usage and not hasattr(model, "hf_device_map"):
         meta = torch.device("meta")
         if any(p.device == meta for p in model.parameters()):
-            warnings.warn(
+            # TEMPORARY (per PR review): raise instead of warn so CI can verify no existing test trips this
+            # condition, i.e. no false positives across the suite. Revert to warnings.warn before merge.
+            raise RuntimeError(
                 "The model has parameters on the meta device. They will only be materialized after wrapping, so "
                 "parameter references captured now (e.g. hooks registered by other libraries or an optimizer "
                 "created before the first forward call) can become stale and training may silently not update any "

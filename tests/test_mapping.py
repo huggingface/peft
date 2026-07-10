@@ -55,6 +55,7 @@ class TestGetPeftModel:
         with pytest.warns(UserWarning, match=self.RELOAD_WARNING_EXPECTED_MATCH):
             get_peft_model(peft_model, lora_config_1)
 
+    @pytest.mark.xfail(strict=True, reason="temporary: warning replaced by raise for CI false-positive check")
     def test_get_peft_model_warns_when_params_on_meta_device(self, lora_config_0):
         with torch.device("meta"):
             base_model = torch.nn.Sequential(torch.nn.Linear(10, 2), torch.nn.Linear(2, 10))
