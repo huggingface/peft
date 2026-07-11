@@ -155,7 +155,7 @@ class DeloraConfig(PeftConfig):
             raise ValueError("`layers_to_transform` cannot be used when `target_modules` is a str.")
 
         # check for layers_to_transform and layers_pattern
-        if self.layers_pattern and not self.layers_to_transform:
+        if self.layers_pattern and self.layers_to_transform is None:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
 
         if self.r <= 0:

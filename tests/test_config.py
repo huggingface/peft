@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import copy
+import inspect
 import json
 import os
 import pickle
@@ -121,6 +122,14 @@ ALL_CONFIG_CLASSES = (
     (PveraConfig, {}),
     (WaveFTConfig, {}),
 )
+
+# Config classes that support selecting layers by index (`layers_to_transform`) together
+# with a custom `layers_pattern`.
+LAYER_INDEXING_CONFIG_CLASSES = [
+    (config_class, mandatory_kwargs)
+    for config_class, mandatory_kwargs in ALL_CONFIG_CLASSES
+    if {"layers_to_transform", "layers_pattern"} <= set(inspect.signature(config_class).parameters)
+]
 
 
 class TestPeftConfig:
@@ -542,6 +551,19 @@ class TestPeftConfig:
         )
         assert config.layers_to_transform is None
         assert config.layers_pattern is None
+
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", LAYER_INDEXING_CONFIG_CLASSES)
+    def test_config_layers_to_transform_index_zero(self, config_class, mandatory_kwargs):
+        # `layers_to_transform=0` selects the first layer and is a valid index. Because 0
+        # is falsy, a truthiness check on `layers_to_transform` wrongly rejected it when
+        # combined with `layers_pattern`; the guard must compare against None instead.
+        config = config_class(
+            layers_to_transform=0,
+            layers_pattern="model.layers",
+            **mandatory_kwargs,
+        )
+        assert config.layers_to_transform == 0
+        assert config.layers_pattern == "model.layers"
 
     @pytest.mark.parametrize("version", ["0.10", "0.17.0", "1"])
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
