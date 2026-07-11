@@ -90,7 +90,10 @@ class LNTuningModel(BaseTuner):
             new_module = LNTuningLayer(target, adapter_name, config=peft_config)
         else:
             new_module = target
-            new_module.update_layer(target.base_layer, adapter_name, config=peft_config)
+            # Use `original_module`, not `base_layer`: if another adapter is currently merged, `base_layer` holds
+            # that adapter's trained weights rather than the pristine pretrained layer (see `LNTuningLayer.merge`),
+            # which would otherwise leak into the newly added adapter's initialization.
+            new_module.update_layer(target.original_module, adapter_name, config=peft_config)
         return new_module
 
     def _unloading_checks(self, adapter_names: Optional[list[str]]):

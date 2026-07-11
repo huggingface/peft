@@ -6649,6 +6649,35 @@ class TestRequiresGrad:
         assert all(not p.requires_grad for p in model.parameters())
 
 
+class TestLNTuningMerge:
+    """Test that adding a new LN Tuning adapter is not affected by another adapter being merged.
+
+    LN Tuning does not merge by computing a delta, instead it swaps `base_layer` with the trained adapter layer
+    (see `LNTuningLayer.merge`). If a subsequent adapter were initialized from `base_layer`, it would incorrectly
+    start from a previously merged adapter's trained weights instead of the pristine pretrained layer.
+    """
+
+    def test_add_adapter_after_merge_is_initialized_from_pretrained_weights(self):
+        base_model = MLP_LayerNorm()
+        # capture the pristine, pretrained weight independently of any PEFT-internal bookkeeping
+        pretrained_weight = base_model.layernorm0.weight.data.clone()
+
+        config = LNTuningConfig(target_modules=["layernorm0"])
+        model = get_peft_model(base_model, config)
+
+        # simulate training of the "default" adapter, then merge it, as documented for LN Tuning
+        model.base_model.model.layernorm0.ln_tuning_layers["default"].weight.data.fill_(999.0)
+        model.merge_adapter()
+        assert model.base_model.model.layernorm0.merged
+
+        # adding a new adapter while "default" is merged must not leak the merged (trained) weights into it
+        model.add_adapter("adapter2", LNTuningConfig(target_modules=["layernorm0"]))
+        new_adapter_weight = model.base_model.model.layernorm0.ln_tuning_layers["adapter2"].weight.data
+
+        assert torch.allclose(new_adapter_weight, pretrained_weight)
+        assert not torch.allclose(new_adapter_weight, torch.full_like(new_adapter_weight, 999.0))
+
+
 # this is for PEFT methods that support mixed adapter batches.
 MIXED_ADAPTER_TEST_CASES = [
     (

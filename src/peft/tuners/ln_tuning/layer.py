@@ -35,6 +35,11 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
         super().__init__()
         self.base_layer = base_layer
         self.ln_tuning_layers = nn.ModuleDict({})
+        # Keep an untouched copy of the pretrained layer. `merge` repoints `base_layer` to whichever adapter is
+        # currently merged (see `merge`/`unmerge` below), so `base_layer` cannot be relied on to always hold the
+        # pristine pretrained weights. `original_module` is never touched by merge/unmerge and is therefore what
+        # new adapters should be initialized from, regardless of whether another adapter is currently merged.
+        self.original_module = deepcopy(base_layer)
         self.update_layer(self.base_layer, adapter_name, config=config)
         self._active_adapter = adapter_name
         self.merged_adapters = []
