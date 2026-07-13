@@ -148,7 +148,9 @@ def _get_padded_linear(lora_module: torch.nn.Module, target_rank: int, is_lora_A
     return new_layer
 
 
-def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A: bool) -> torch.nn.Conv2d:
+def _get_padded_conv2d(
+    lora_module: torch.nn.Module, target_rank: int, is_lora_A: bool, base_layer_groups: int = 1
+) -> torch.nn.Conv2d:
     """
     Get a new Conv2d layer for LoRA with padded weights according to the target rank.
 
@@ -167,7 +169,10 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
     weight = lora_module.weight
     # For Conv2d: [out_channels, in_channels, kernel_height, kernel_width]
     out_channels, in_channels, kh, kw = weight.shape
-    original_rank = out_channels if is_lora_A else in_channels
+    groups = lora_module.groups
+    # For lora_B with groups > 1, the effective rank is in_channels * groups because weight.shape[1] contains the
+    # rank per group. lora_A is created with groups=1, so its rank is out_channels.
+    original_rank = out_channels if is_lora_A else in_channels * groups
 
     if original_rank == target_rank:
         return lora_module
@@ -182,7 +187,15 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
     if is_lora_A:
         # LoRA A affects out_channels
         padded = torch.zeros(target_rank, in_channels, kh, kw, device=weight.device, dtype=weight.dtype)
-        padded[:out_channels, :, :, :] = weight
+        if base_layer_groups == 1:
+            padded[:out_channels, :, :, :] = weight
+        else:
+            rank_per_group = out_channels // base_layer_groups
+            target_rank_per_group = target_rank // base_layer_groups
+            for group_idx in range(base_layer_groups):
+                old_start = group_idx * rank_per_group
+                new_start = group_idx * target_rank_per_group
+                padded[new_start : new_start + rank_per_group] = weight[old_start : old_start + rank_per_group]
         new_layer = torch.nn.Conv2d(
             in_channels,
             target_rank,
@@ -190,11 +203,18 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
             stride=lora_module.stride,
             padding=lora_module.padding,
             bias=lora_module.bias is not None,
-            groups=lora_module.groups,
+            groups=groups,
         )
     else:
-        # LoRA B affects in_channels
-        padded = torch.zeros(out_channels, target_rank, kh, kw, device=weight.device, dtype=weight.dtype)
+        # LoRA B affects in_channels. When groups > 1, the target rank must be divisible by groups and the weight
+        # tensor's second dimension is target_rank // groups.
+        if target_rank % groups != 0:
+            raise ValueError(
+                f"Trying to pad a Conv2d LoRA B with groups={groups} to target rank {target_rank}, but the target "
+                f"rank is not divisible by {groups}. Please choose a target rank that is divisible by groups."
+            )
+        target_in_channels = target_rank // groups
+        padded = torch.zeros(out_channels, target_in_channels, kh, kw, device=weight.device, dtype=weight.dtype)
         padded[:, :in_channels, :, :] = weight
         new_layer = torch.nn.Conv2d(
             target_rank,
@@ -203,7 +223,7 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
             stride=lora_module.stride,
             padding=lora_module.padding,
             bias=lora_module.bias is not None,
-            groups=lora_module.groups,
+            groups=groups,
         )
     new_layer.weight.requires_grad_(lora_module.weight.requires_grad)
 
@@ -249,18 +269,34 @@ def _pad_lora_weights(model: torch.nn.Module, target_rank: int) -> bool:
             pad_fn = _get_padded_linear
         elif isinstance(module, Conv2d):
             pad_fn = _get_padded_conv2d
+            base_layer_groups = module.get_base_layer().groups
+            if target_rank % base_layer_groups != 0:
+                raise ValueError(
+                    f"Trying to pad a Conv2d LoRA adapter with groups={base_layer_groups} to target rank "
+                    f"{target_rank}, but the target rank is not divisible by {base_layer_groups}."
+                )
         else:
             # Skip any other module types
             continue
 
         # Pad LoRA A
         for adapter_name, lora_A_module in module.lora_A.items():
-            new_layer = pad_fn(lora_A_module, target_rank=target_rank, is_lora_A=True)
+            if isinstance(module, Conv2d):
+                new_layer = pad_fn(
+                    lora_A_module, target_rank=target_rank, is_lora_A=True, base_layer_groups=base_layer_groups
+                )
+            else:
+                new_layer = pad_fn(lora_A_module, target_rank=target_rank, is_lora_A=True)
             module.lora_A[adapter_name] = new_layer
 
         # Pad LoRA B
         for adapter_name, lora_B_module in module.lora_B.items():
-            new_layer = pad_fn(lora_B_module, target_rank=target_rank, is_lora_A=False)
+            if isinstance(module, Conv2d):
+                new_layer = pad_fn(
+                    lora_B_module, target_rank=target_rank, is_lora_A=False, base_layer_groups=base_layer_groups
+                )
+            else:
+                new_layer = pad_fn(lora_B_module, target_rank=target_rank, is_lora_A=False)
             module.lora_B[adapter_name] = new_layer
 
         found_adapter = True
@@ -490,7 +526,18 @@ def hotswap_adapter_from_state_dict(
             # Linear or Conv2d: the check for dim 0 or 1 works for both of these layer types
             if old_val.shape[0] > new_val.shape[0]:
                 old_val.data.fill_(0)
-                old_val.data[: new_val.shape[0]].copy_(new_val.data)
+                if isinstance(module, Conv2d) and ".lora_A." in key and module.get_base_layer().groups > 1:
+                    groups = module.get_base_layer().groups
+                    old_rank_per_group = old_val.shape[0] // groups
+                    new_rank_per_group = new_val.shape[0] // groups
+                    for group_idx in range(groups):
+                        old_start = group_idx * old_rank_per_group
+                        new_start = group_idx * new_rank_per_group
+                        old_val.data[old_start : old_start + new_rank_per_group].copy_(
+                            new_val.data[new_start : new_start + new_rank_per_group]
+                        )
+                else:
+                    old_val.data[: new_val.shape[0]].copy_(new_val.data)
             elif old_val.shape[1] > new_val.shape[1]:
                 old_val.data.fill_(0)
                 old_val.data[:, : new_val.shape[1]].copy_(new_val.data)
