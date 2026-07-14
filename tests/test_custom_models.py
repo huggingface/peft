@@ -1792,7 +1792,13 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": False, "oft_block_size": 2},
         {"target_modules": ["lin1"], "init_weights": False, "oft_block_size": 2},
     ),
-    # Note: Multiple C3A adapters applied to the same layer fails with shape mismatch
+    (
+        "C3A Same",
+        "c3a",
+        C3AConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "block_size": 2},
+        {"target_modules": ["lin0"], "init_weights": False, "block_size": 2},
+    ),
     (
         "C3A Different",
         "c3a",
@@ -4752,6 +4758,37 @@ class TestMultipleActiveAdapters:
             outputs_merged_adapter_default = model_merged_adapter_default(**dummy_input)
 
         assert torch.allclose(outputs_merged_adapter_default, outputs_adapter_1, atol=1e-3, rtol=1e-3)
+
+    def test_c3a_multiple_active_adapters_forward_matches_independent_sum(self):
+        # Regression test for a bug where C3ALinear.forward chained active adapters through `x` (feeding adapter
+        # N's output as adapter N+1's input) instead of applying every adapter to the original input and summing
+        # the results independently, as the (correct) additive `merge` path does. On a square layer this silently
+        # produced wrong values; on a non-square layer (as used here) it crashed with a shape mismatch, since the
+        # previous adapter's output dimension does not match the next adapter's expected input dimension.
+        torch.manual_seed(0)
+
+        model = MLP().to(self.torch_device).eval()
+        config_1 = C3AConfig(target_modules=["lin0"], init_weights=False, block_size=2)
+        config_2 = C3AConfig(target_modules=["lin0"], init_weights=False, block_size=2)
+
+        peft_model = get_peft_model(model, config_1, adapter_name="adapter_1")
+        peft_model.add_adapter("adapter_2", config_2)
+        peft_model.eval()
+
+        X = self.prepare_inputs_for_testing()
+
+        # Ground truth: `merge` adds each adapter's delta weight independently, so merging both adapters and
+        # running a forward pass on the result is, by construction, the correct independent-additive-sum that the
+        # unmerged multi-adapter forward pass should match.
+        model_merged = copy.deepcopy(peft_model).merge_and_unload(adapter_names=["adapter_1", "adapter_2"])
+        with torch.inference_mode():
+            expected = model_merged(**X)
+
+        self.set_multiple_active_adapters(peft_model, ["adapter_1", "adapter_2"])
+        with torch.inference_mode():
+            combined_output = peft_model(**X)
+
+        assert torch.allclose(combined_output, expected, atol=1e-4, rtol=1e-4)
 
 
 class MLP_2x_same_shape(nn.Module):

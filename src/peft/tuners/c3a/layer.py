@@ -191,12 +191,22 @@ class C3ALinear(nn.Module, C3ALayer):
         else:
             result = self.base_layer(x, *args, **kwargs)
             x = x.to(torch.float32)
+            # Sum the kernels of all active adapters first and only then apply the (expensive)
+            # BlockCircularConvolution once. This is mathematically equivalent to applying the convolution
+            # per adapter and summing the results (the operation is linear in the kernel), but avoids
+            # reassigning `x` to the previous adapter's output, which would incorrectly chain adapters
+            # (feeding adapter N's output into adapter N+1) instead of applying every adapter to the
+            # original input and summing the deltas, as the additive `merge` path does.
+            combined_kernel = None
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.c3a_kernel.keys():
                     continue
                 c3a_kernel = self.c3a_kernel[active_adapter].to(torch.float32)
-                x = BlockCircularConvolution.apply(x, c3a_kernel) / x.size(-1)
-                result += x.to(result.dtype)
+                combined_kernel = c3a_kernel if combined_kernel is None else combined_kernel + c3a_kernel
+
+            if combined_kernel is not None:
+                delta = BlockCircularConvolution.apply(x, combined_kernel) / x.size(-1)
+                result += delta.to(result.dtype)
 
         result = result.to(previous_dtype)
         return result
