@@ -1346,9 +1346,14 @@ class KasaLinearVariant(LoraVariant):
     """
 
     @staticmethod
-    def _truncate_base_weight(module: Linear, r: int) -> None:
+    def _truncate_base_weight(module: Linear, r: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Replace the frozen base weight in-place with its rank-``(k - r)`` SVD approximation (drop the ``r`` smallest
-        singular components). ``k = min(in_features, out_features)``."""
+        singular components). ``k = min(in_features, out_features)``.
+
+        Returns the dropped low-rank component as fp32 factors ``(U_d * S_d, Vh_d)`` with shapes ``(out, r)`` and ``(r,
+        in)``, so callers on the deferred path can cheaply correct an output that was computed with the un-truncated
+        weight (see ``forward``).
+        """
         base_layer = module.get_base_layer()
         weight = base_layer.weight
         orig_dtype = weight.dtype
@@ -1371,6 +1376,40 @@ class KasaLinearVariant(LoraVariant):
         Vh_p = Vh[:svd_rank, :]
         truncated = (U_p * S_p) @ Vh_p
         base_layer.weight.data = truncated.to(orig_dtype)
+        return U[:, svd_rank:] * S[svd_rank:], Vh[svd_rank:, :]
+
+    @staticmethod
+    def _apply_deferred_truncation(module: Linear, active_adapter: str) -> Optional[tuple[torch.Tensor, torch.Tensor]]:
+        """Apply the SVD truncation that was deferred at init (meta device / low_cpu_mem_usage), if still pending.
+
+        The destructive base-weight truncation cannot run at init when the base weight is on the meta device, so it is
+        applied lazily on the first operation that needs the real base weight: ``forward``, but also ``merge_safe`` /
+        ``merge_unsafe``, which would otherwise silently merge into the un-truncated weight (and, once merged, the
+        variant ``forward`` is never called, so the truncation would never happen at all). ``lora_diag`` is re-created
+        on the real device if it is still a meta tensor.
+
+        Returns the dropped low-rank factors from ``_truncate_base_weight`` if the truncation ran now, or `None` if
+        nothing was pending.
+        """
+        deferred = getattr(module, "_lora_kasa_truncation_deferred", None)
+        if not deferred or active_adapter not in deferred:
+            return None
+        base_weight = module.get_base_layer().weight
+        if base_weight.device.type == "meta":
+            raise RuntimeError(
+                "KaSA could not apply its SVD base-weight truncation because the base weight is still on the "
+                "meta device. Materialize the base model weights before running a forward pass or merging."
+            )
+        r = module.r[active_adapter]
+        old_diag = module.lora_diag[active_adapter]
+        if old_diag.device.type == "meta":
+            module.lora_diag[active_adapter] = nn.Parameter(
+                torch.randn(r, device=base_weight.device, dtype=base_weight.dtype)
+            )
+        with gather_params_ctx(base_weight):
+            dropped = KasaLinearVariant._truncate_base_weight(module, r)
+        deferred.discard(active_adapter)
+        return dropped
 
     @staticmethod
     def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
@@ -1444,12 +1483,18 @@ class KasaLinearVariant(LoraVariant):
 
     @staticmethod
     def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        if KasaLinearVariant._apply_deferred_truncation(module, active_adapter) is not None:
+            # The passed `orig_weight` was cloned from the base weight before the truncation ran; refresh it so the
+            # delta is merged into the truncated weight.
+            orig_weight = module.get_base_layer().weight.data.clone()
         orig_dtype = orig_weight.dtype
         delta_weight = KasaLinearVariant._get_delta_weight(module, active_adapter)
         return orig_weight + delta_weight.to(orig_dtype)
 
     @staticmethod
     def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        # `orig_weight` is the live base weight Parameter, so it reflects the truncation if one just ran.
+        KasaLinearVariant._apply_deferred_truncation(module, active_adapter)
         orig_dtype = orig_weight.dtype
         delta_weight = KasaLinearVariant._get_delta_weight(module, active_adapter)
         orig_weight.data += delta_weight.to(orig_dtype)
@@ -1468,30 +1513,16 @@ class KasaLinearVariant(LoraVariant):
         result: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
-        deferred = getattr(module, "_lora_kasa_truncation_deferred", None)
-        if deferred is not None and active_adapter in deferred:
-            # The destructive SVD truncation was deferred at init because the base weight was on the meta device
-            # (low_cpu_mem_usage=True). Now that a real base weight is materialized, apply it exactly once. We also
-            # re-create lora_diag on the real device/dtype (it was a meta tensor at init).
-            base_weight = module.get_base_layer().weight
-            if base_weight.device.type == "meta":
-                raise RuntimeError(
-                    "KaSA could not apply its SVD base-weight truncation because the base weight is still on the "
-                    "meta device at forward time. Materialize the base model weights before running a forward pass."
-                )
-            r = module.r[active_adapter]
-            old_diag = module.lora_diag[active_adapter]
-            if old_diag.device.type == "meta":
-                module.lora_diag[active_adapter] = nn.Parameter(
-                    torch.randn(r, device=base_weight.device, dtype=base_weight.dtype)
-                )
-            with gather_params_ctx(base_weight):
-                KasaLinearVariant._truncate_base_weight(module, r)
-            deferred.discard(active_adapter)
+        dropped = KasaLinearVariant._apply_deferred_truncation(module, active_adapter)
+        if dropped is not None:
             # `result` was computed by the caller using the *un-truncated* base weight (the base forward runs before
-            # this variant forward). Now that the base has been truncated, recompute the base contribution so this
-            # first forward already reflects the truncated weight, matching every subsequent call.
-            result = module.get_base_layer()(x)
+            # this variant forward). Subtract the dropped low-rank component so this first forward already reflects
+            # the truncated weight, matching every subsequent call. Correcting instead of recomputing the base forward
+            # preserves the contributions other active adapters may already have added to `result`, and stays in the
+            # right dtype (`x` was cast to the adapter dtype by the caller, which may differ from the base dtype).
+            dropped_us, dropped_vh = dropped
+            correction = F.linear(F.linear(x.to(dropped_vh.dtype), dropped_vh), dropped_us)
+            result = result - correction.to(result.dtype)
 
         lora_A = module.lora_A[active_adapter]
         lora_B = module.lora_B[active_adapter]

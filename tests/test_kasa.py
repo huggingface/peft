@@ -319,6 +319,108 @@ def test_kasa_reload_onto_original_base_retruncates(tmp_path, low_cpu_mem_usage)
     assert torch.allclose(out_after, out_after2, atol=1e-6)
 
 
+@pytest.mark.parametrize("safe_merge", [False, True])
+def test_kasa_merge_before_forward_applies_deferred_truncation(tmp_path, safe_merge):
+    """Merging right after a low_cpu_mem_usage=True load (a standard deployment flow, e.g. merge_and_unload) must
+    apply the deferred base-weight truncation first. Otherwise the delta is merged into the un-truncated weight and,
+    because merged layers never call the variant forward, the truncation would never run at all."""
+    from peft import PeftModel
+
+    torch.manual_seed(0)
+    base = MLP()
+    original_state = copy.deepcopy(base.state_dict())
+    model = get_peft_model(copy.deepcopy(base), _make_kasa_config(r=4))
+    _randomize_adapter(model)
+    model.eval()
+    x = torch.randn(3, 16)
+    with torch.no_grad():
+        out_trained = model(x)
+
+    save_dir = tmp_path / "kasa_adapter"
+    model.save_pretrained(save_dir)
+
+    fresh_base = MLP()
+    fresh_base.load_state_dict(original_state)
+    reloaded = PeftModel.from_pretrained(fresh_base, save_dir, low_cpu_mem_usage=True)
+    reloaded.eval()
+    # Merge BEFORE any forward pass has had a chance to apply the deferred truncation.
+    reloaded.base_model.merge_adapter(safe_merge=safe_merge)
+    with torch.no_grad():
+        out_merged = reloaded(x)
+    assert torch.allclose(out_trained, out_merged, atol=1e-5)
+
+
+def test_kasa_deferred_truncation_with_bf16_base_and_fp32_adapter(tmp_path):
+    """With a bf16 base model, the adapter weights are upcast to fp32 by default (autocast_adapter_dtype=True). The
+    first forward after a low_cpu_mem_usage=True load must handle the dtype mismatch between the cast input and the
+    base weight, and must match the output of a non-deferred load."""
+    from peft import PeftModel
+
+    torch.manual_seed(0)
+    base = MLP().to(torch.bfloat16)
+    original_state = copy.deepcopy(base.state_dict())
+    model = get_peft_model(copy.deepcopy(base), _make_kasa_config(r=4))
+    _randomize_adapter(model)
+    model.eval()
+    x = torch.randn(3, 16, dtype=torch.bfloat16)
+
+    save_dir = tmp_path / "kasa_adapter"
+    model.save_pretrained(save_dir)
+
+    outputs = {}
+    for low_cpu_mem_usage in (False, True):
+        fresh_base = MLP().to(torch.bfloat16)
+        fresh_base.load_state_dict(original_state)
+        reloaded = PeftModel.from_pretrained(fresh_base, save_dir, low_cpu_mem_usage=low_cpu_mem_usage)
+        reloaded.eval()
+        with torch.no_grad():
+            out = reloaded(x)
+            out2 = reloaded(x)
+        assert out.dtype == torch.bfloat16
+        # The first forward on the deferred path computes the un-truncated bf16 base output plus an fp32 correction,
+        # while subsequent forwards use the truncated bf16 base directly, so they only agree up to bf16 rounding.
+        assert torch.allclose(out, out2, atol=1e-2)
+        outputs[low_cpu_mem_usage] = out2
+    # The steady state of both loading paths must match (same truncated weight, up to bf16 rounding of the SVD).
+    assert torch.allclose(outputs[False], outputs[True], atol=1e-2)
+
+
+def test_kasa_deferred_truncation_preserves_other_adapter_contributions(tmp_path):
+    """On the first forward after a low_cpu_mem_usage=True load, applying the deferred truncation must not discard the
+    contributions that other active adapters already added to the layer output."""
+    from peft import PeftModel
+
+    torch.manual_seed(0)
+    base = MLP()
+    original_state = copy.deepcopy(base.state_dict())
+    model = get_peft_model(copy.deepcopy(base), _make_kasa_config(r=4))
+    model.eval()
+
+    save_dir = tmp_path / "kasa_adapter"
+    model.save_pretrained(save_dir)
+
+    fresh_base = MLP()
+    fresh_base.load_state_dict(original_state)
+    reloaded = PeftModel.from_pretrained(fresh_base, save_dir, low_cpu_mem_usage=True)
+
+    # Add a vanilla LoRA adapter with a non-zero contribution and activate it FIRST, so it is processed before the
+    # deferred KaSA adapter in the same forward pass.
+    vanilla_config = LoraConfig(target_modules=["lin0", "lin1"], r=4, lora_alpha=8)
+    reloaded.add_adapter("vanilla", vanilla_config)
+    with torch.no_grad():
+        for name in ["lin0", "lin1"]:
+            layer = getattr(reloaded.base_model.model, name)
+            nn.init.normal_(layer.lora_B["vanilla"].weight, std=0.2)
+    reloaded.base_model.set_adapter(["vanilla", "default"])
+    reloaded.eval()
+
+    x = torch.randn(5, 16)
+    with torch.no_grad():
+        out1 = reloaded(x)  # first forward: the deferred truncation fires mid-loop
+        out2 = reloaded(x)  # subsequent forwards: steady state
+    assert torch.allclose(out1, out2, atol=1e-6)
+
+
 # ----------------------------------------------------------------------------------------------------------------------
 # Regularization helper (L2 singular-value penalty + L3 orthogonal regularization)
 # ----------------------------------------------------------------------------------------------------------------------
