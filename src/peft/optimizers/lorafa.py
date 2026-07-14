@@ -229,7 +229,12 @@ class LoraFAOptimizer(Optimizer):
 
 
 def create_lorafa_optimizer(
-    model: PeftModel, r: int, lora_alpha: int, lr: float, weight_decay: float = 0.0, use_rslora: bool = False
+    model: PeftModel,
+    r: int,
+    lora_alpha: int,
+    lr: float,
+    weight_decay: float = 0.0,
+    use_rslora: bool | None = None,
 ) -> Optimizer:
     """
     Helper function to instantiate a lorafa optimizer specifically configured for a given model using the LoRA method.
@@ -250,9 +255,9 @@ def create_lorafa_optimizer(
         lora_alpha (int): Scaling factor for LoRA parameterization.
         lr (float): Learning rate for optimizer updates.
         weight_decay (float): Weight decay for AdamW.
-        use_rslora (bool):
-            whether to use rslora. In rslora, the lora scaling factor becomes to lora_alpha / math.sqrt(r) instead of
-            lora_alpha / r.
+        use_rslora (bool | None, optional):
+            Deprecated. Whether to use rsLoRA. If not `None`, it must match the `use_rslora` setting of all active
+            adapters in the model config. Configure rsLoRA via `LoraConfig` instead.
 
     Returns:
         Optimizer: Configured lorafa optimizer instance ready for training.
@@ -261,26 +266,25 @@ def create_lorafa_optimizer(
     active_adapter_use_rslora = {
         adapter: bool(getattr(model.peft_config[adapter], "use_rslora", False)) for adapter in active_adapters
     }
-
     # TODO remove after 2026-11-01
-    if use_rslora:
-        mismatched_adapters = [adapter for adapter, is_rslora in active_adapter_use_rslora.items() if not is_rslora]
+    if use_rslora is not None:
+        mismatched_adapters = [
+            adapter for adapter, is_rslora in active_adapter_use_rslora.items() if is_rslora != use_rslora
+        ]
         if mismatched_adapters:
             raise ValueError(
-                "`use_rslora=True` was passed to create_lorafa_optimizer, but the following active adapters do not "
-                f"have `use_rslora=True` in the model config: {mismatched_adapters}. Please set `use_rslora=True` "
-                "in LoraConfig for active adapters or stop passing `use_rslora` to the optimizer helper."
+                f"`use_rslora={use_rslora}` was passed to create_lorafa_optimizer, but the following active adapters "
+                f"have `use_rslora` set differently in the model config: {mismatched_adapters}. Please configure "
+                "rsLoRA via LoraConfig and remove the `use_rslora` argument from create_lorafa_optimizer."
             )
         warnings.warn(
             "`use_rslora` in create_lorafa_optimizer is deprecated and will be removed after 2026-11-01. "
             "Please configure rsLoRA via LoraConfig instead.",
             FutureWarning,
         )
-
-    if active_adapter_use_rslora:
-        model_use_rslora = all(active_adapter_use_rslora.values())
-    else:
         model_use_rslora = use_rslora
+    else:
+        model_use_rslora = all(active_adapter_use_rslora.values()) if active_adapter_use_rslora else False
 
     for name, param in model.named_parameters():
         if "lora_A" in name:

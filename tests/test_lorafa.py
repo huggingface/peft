@@ -122,9 +122,10 @@ def _run_lorafa_weight_decay_step(config: LoraConfig, lr: float, weight_decay: f
     )
 
 
-def test_lorafa_init_default():
+@pytest.mark.parametrize("use_rslora", [False, True])
+def test_lorafa_init(use_rslora):
     """
-    Test if the optimizer is correctly created
+    Test if the optimizer is correctly created for both standard LoRA and rsLoRA configs.
     """
     lora_rank = 16
     lora_alpha = 32
@@ -135,14 +136,16 @@ def test_lorafa_init_default():
         r=lora_rank,
         lora_alpha=lora_alpha,
         target_modules=["lin0", "lin1"],
+        use_rslora=use_rslora,
         bias="none",
     )
     model = get_peft_model(model, config)
     optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr)
 
+    expected_scaling = lora_alpha / math.sqrt(lora_rank) if use_rslora else lora_alpha / lora_rank
     scaling_factors = [factor for factor in optimizer.param_groups[0]["scaling_factors"] if factor is not None]
     assert scaling_factors
-    assert all(math.isclose(factor, lora_alpha / lora_rank, rel_tol=1e-9, abs_tol=0.0) for factor in scaling_factors)
+    assert all(math.isclose(factor, expected_scaling, rel_tol=1e-9, abs_tol=0.0) for factor in scaling_factors)
 
     all_A_fixed = True
     all_B_trainable = True
@@ -158,35 +161,10 @@ def test_lorafa_init_default():
     assert all_A_fixed and all_B_trainable
 
 
-def test_lorafa_init_rslora():
+@pytest.mark.parametrize("use_rslora", [False, True])
+def test_lorafa_rslora_flag_mismatch_raises(use_rslora):
     """
-    Test if the optimizer is correctly created when use_rslora = True
-    """
-    lora_rank = 16
-    lora_alpha = 32
-    lr = 7e-5
-
-    model = SimpleNet()
-    config = LoraConfig(
-        r=lora_rank,
-        lora_alpha=lora_alpha,
-        target_modules=["lin0", "lin1"],
-        use_rslora=True,
-        bias="none",
-    )
-    model = get_peft_model(model, config)
-    optimizer = create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr)
-    scaling_factors = [factor for factor in optimizer.param_groups[0]["scaling_factors"] if factor is not None]
-    assert scaling_factors
-    assert all(
-        math.isclose(factor, lora_alpha / math.sqrt(lora_rank), rel_tol=1e-9, abs_tol=0.0)
-        for factor in scaling_factors
-    )
-
-
-def test_lorafa_rslora_flag_mismatch_raises():
-    """
-    Test if passing use_rslora=True in the optimizer helper raises when model active adapters are not rsLoRA
+    Test if passing an explicit use_rslora flag that disagrees with the active adapter config raises.
     """
     lora_rank = 16
     lora_alpha = 32
@@ -197,12 +175,13 @@ def test_lorafa_rslora_flag_mismatch_raises():
         r=lora_rank,
         lora_alpha=lora_alpha,
         target_modules=["lin0", "lin1"],
+        use_rslora=not use_rslora,
         bias="none",
     )
     model = get_peft_model(model, config)
 
-    with pytest.raises(ValueError, match="do not have `use_rslora=True`"):
-        create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr, use_rslora=True)
+    with pytest.raises(ValueError, match="was passed to create_lorafa_optimizer"):
+        create_lorafa_optimizer(model=model, r=lora_rank, lora_alpha=lora_alpha, lr=lr, use_rslora=use_rslora)
 
 
 def test_lorafa_init_embedding_target_module():
