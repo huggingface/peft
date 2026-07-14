@@ -62,12 +62,7 @@ from .psoft import PsoftConfig, PsoftModel
 from .pvera import PveraConfig, PveraModel
 from .randlora import RandLoraConfig, RandLoraModel
 from .road import RoadConfig, RoadModel
-from .shadow import (
-    AutoModelForCausalLMWithHiddenProjection,
-    AutoModelForCausalLMWithHiddenProjectionConfig,
-    ShadowConfig,
-    ShadowModel,
-)
+from .shadow import ShadowConfig, ShadowModel
 from .shira import ShiraConfig, ShiraModel
 from .tinylora import TinyLoraConfig, TinyLoraModel
 from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
@@ -85,8 +80,6 @@ __all__ = [
     "AdaptionPromptConfig",
     "AdaptionPromptModel",
     "ArrowConfig",
-    "AutoModelForCausalLMWithHiddenProjection",
-    "AutoModelForCausalLMWithHiddenProjectionConfig",
     "BOFTConfig",
     "BOFTModel",
     "BdLoraConfig",

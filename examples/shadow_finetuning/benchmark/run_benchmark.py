@@ -31,11 +31,8 @@ Examples:
     # train only (FSDP), then eval separately on one GPU for faster GSM8K generation:
     accelerate launch --config_file fsdp_config.yaml run_benchmark.py --mode train --task gsm8k --methods lora --bf16
     CUDA_VISIBLE_DEVICES=0 python run_benchmark.py --mode eval --task gsm8k --methods lora --bf16
-    # explicit (optionally pre-trained) shadow model:
+    # initialize the shadow backbone from a pretrained model instead of a fresh 'mirror' backbone:
     python run_benchmark.py --task gsm8k --methods shadow --shadow_model_name Qwen/Qwen3-0.6B
-    # projected shadow model (small backbone + trained hidden projection) on a larger base:
-    python run_benchmark.py --task gsm8k --model_name Qwen/Qwen3-8B --methods shadow \
-        --shadow_model_name shadow-llm/Qwen3-0.6B-H8B --bf16
     # FSDP (recommended for large models; Trainer applies PEFT's auto-wrap policy automatically):
     accelerate launch --config_file fsdp_config.yaml run_benchmark.py --task cls --methods lora --bf16
 """
@@ -48,6 +45,7 @@ import math
 import os
 import re
 import time
+
 
 # RTX 4000 series: PartialState/NCCL fails on single-GPU runs unless these are set early.
 os.environ.setdefault("NCCL_P2P_DISABLE", "1")
@@ -62,7 +60,6 @@ from datasets import load_dataset
 from torch.distributed.fsdp import FullyShardedDataParallel
 from torch.utils.data import DataLoader
 from transformers import (
-    AutoConfig,
     AutoModelForCausalLM,
     AutoModelForSequenceClassification,
     AutoTokenizer,
@@ -76,6 +73,7 @@ from transformers import (
 from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
 from transformers.trainer_utils import EvalLoopOutput
 
+
 try:
     from transformers.trainer_optimizer import is_optimizer_factory
 except ImportError:
@@ -83,8 +81,8 @@ except ImportError:
     def is_optimizer_factory(_optimizer_cls_or_factory):
         return False
 
+
 from peft import (
-    AutoModelForCausalLMWithHiddenProjection,
     LoraConfig,
     PeftConfig,
     PeftModel,
@@ -229,10 +227,12 @@ def parse_args():
         help="LR multiplier for the shadow backbone (lr = learning_rate * scale).",
     )
     parser.add_argument(
-        "--shadow_inference_mode",
-        choices=("base_shadow", "shadow_only", "both"),
-        default="both",
-        help="ShadowPEFT inference mode for eval: base+shadow (default path), shadow-only, or run both.",
+        "--eval_detached_shadow_only",
+        action="store_true",
+        help=(
+            "For the shadow method, evaluate ONLY the standalone detached shadow network (`unload_shadow()`) instead "
+            "of the base+shadow (adapted) model. Supported for all tasks (cls/clm/gsm8k); best run single-process."
+        ),
     )
 
     args = parser.parse_args()
@@ -495,13 +495,19 @@ def _left_pad_prompts(prompt_ids, prompt_mask, pad_id):
 
 
 def is_shadow_backbone_param(name: str) -> bool:
-    """True for trainable parameters owned by the shadow backbone (not injection/update/projection)."""
-    return name.startswith("base_model.shadow_model.")
+    """True for trainable parameters owned by the shadow backbone (not the injection/update/projection adapters)."""
+    return ".shadow_backbone." in name
+
+
+def _shadow_uses_pretrained_backbone(shadow_tuner) -> bool:
+    """True if the shadow backbone was initialized from a pretrained model rather than a fresh 'mirror' backbone."""
+    peft_config = getattr(shadow_tuner, "peft_config", None) or {}
+    return any(getattr(cfg, "shadow_model", "mirror") != "mirror" for cfg in peft_config.values())
 
 
 def build_shadow_optimizer_groups(opt_model, learning_rate, weight_decay, shadow_lr_scale, decay_parameters):
     shadow_tuner = getattr(opt_model, "base_model", None)
-    is_explicit = bool(getattr(shadow_tuner, "_explicit_shadow_model", False))
+    is_explicit = _shadow_uses_pretrained_backbone(shadow_tuner)
     shadow_lr = learning_rate * shadow_lr_scale
 
     buckets = {
@@ -581,7 +587,12 @@ class ShadowOptimizerTrainer(Trainer):
         return self.optimizer
 
     def _record_shadow_loss(self, outputs):
+        # Prefer the output attribute (present for single-process runs); fall back to the value stashed on the tuner,
+        # which survives DDP/FSDP (they reconstruct the model output and drop non-field attributes like shadow_loss).
         shadow_loss = getattr(outputs, "shadow_loss", None)
+        if shadow_loss is None:
+            tuner = getattr(self.accelerator.unwrap_model(self.model), "base_model", None)
+            shadow_loss = getattr(tuner, "last_shadow_loss", None)
         if shadow_loss is None or not getattr(self, "is_in_train", False):
             return
         value = shadow_loss.detach().float()
@@ -624,7 +635,6 @@ class GSM8KTrainer(ShadowOptimizerTrainer):
         self.max_print_predictions = max_print_predictions
         self.compute_eval_loss = compute_eval_loss
         self.distributed_eval = distributed_eval
-        self.gsm8k_inference_mode = "base_shadow"
         super().__init__(
             *args,
             use_shadow_lr_scales=use_shadow_lr_scales,
@@ -635,7 +645,16 @@ class GSM8KTrainer(ShadowOptimizerTrainer):
     _EVAL_ONLY_KEYS = ("prompt_input_ids", "prompt_attention_mask", "gold_answers")
 
     def _gsm8k_eval_tag(self):
-        return "shadow_only" if self.gsm8k_inference_mode == "shadow_only" else "base_shadow"
+        """Log label reflecting which model is being evaluated: detached shadow, base+shadow, or a plain model."""
+        from peft.tuners.shadow import DetachedShadowModel
+
+        model = self._generation_model()
+        if isinstance(model, DetachedShadowModel):
+            return "detached-shadow"
+        peft_config = getattr(model, "peft_config", None)
+        if peft_config and any(config.peft_type == PeftType.SHADOW for config in peft_config.values()):
+            return "base+shadow"
+        return "eval"
 
     def _maybe_print_prediction(self, sample_idx, pred, gold, completion):
         if not self.accelerator.is_main_process:
@@ -837,9 +856,7 @@ class GSM8KTrainer(ShadowOptimizerTrainer):
         shadow_loss_sum = self.accelerator.reduce(shadow_loss_sum, reduction="sum")
         shadow_loss_count = self.accelerator.reduce(shadow_loss_count, reduction="sum")
         avg_loss = float((loss_sum / loss_count).item()) if loss_count.item() > 0 else None
-        avg_shadow_loss = (
-            float((shadow_loss_sum / shadow_loss_count).item()) if shadow_loss_count.item() > 0 else None
-        )
+        avg_shadow_loss = float((shadow_loss_sum / shadow_loss_count).item()) if shadow_loss_count.item() > 0 else None
         return avg_loss, avg_shadow_loss
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
@@ -924,30 +941,7 @@ def load_base_model(args, num_labels, model_name=None):
     return model
 
 
-def load_shadow_model(args, shadow_model_name=None):
-    """Load an explicit shadow model (a fresh copy each call, since get_peft_model mutates in place).
-
-    Supports both a plain causal LM and a projected shadow model (``AutoModelForCausalLMWithHiddenProjection``, e.g.
-    ``shadow-llm/Qwen3-0.6B-H8B``) that bundles a small backbone + a trained hidden-size projection aligned to a larger
-    base model. ShadowPEFT reuses that trained projection instead of randomly initializing one.
-    """
-    shadow_model_name = shadow_model_name or args.shadow_model_name
-    if not shadow_model_name:
-        return None
-    dtype = _resolve_dtype(args)
-    try:
-        model_type = getattr(AutoConfig.from_pretrained(shadow_model_name), "model_type", None)
-    except Exception:
-        model_type = None
-    if model_type == "causal_lm_with_hidden_projection":
-        # Keep the backbone trainable; the projection/lm_head freezing follows the checkpoint's defaults.
-        return AutoModelForCausalLMWithHiddenProjection.from_pretrained(
-            shadow_model_name, dtype=dtype, freeze_backbone=False
-        )
-    return AutoModelForCausalLM.from_pretrained(shadow_model_name, dtype=dtype)
-
-
-def apply_peft(base_model, method, args, shadow_model=None):
+def apply_peft(base_model, method, args, shadow_model_name=None):
     task_type = "SEQ_CLS" if args.task == "cls" else "CAUSAL_LM"
     if method == "lora":
         config = LoraConfig(
@@ -961,16 +955,18 @@ def apply_peft(base_model, method, args, shadow_model=None):
 
     config = ShadowConfig(
         task_type=task_type,
-        num_shadow_layers=args.shadow_layers,
-        injection_hidden_size=args.injection_hidden_size,
-        gate_hidden_size=args.gate_hidden_size,
+        # 'mirror' builds a fresh shadow backbone from the base config; a model id initializes it from a pretrained one.
+        shadow_model=shadow_model_name or args.shadow_model_name or "mirror",
+        shadow_num_hidden_layers=args.shadow_layers,
+        r=args.injection_hidden_size,
+        update_hidden_size=args.gate_hidden_size,
         shadow_intermediate_size=args.shadow_intermediate_size,
         shadow_num_attention_heads=args.shadow_num_attention_heads,
-        alpha=args.shadow_alpha,
-        dropout=args.shadow_dropout,
-        shadow_loss_weight=args.shadow_loss_weight,
+        shadow_alpha=args.shadow_alpha,
+        shadow_dropout=args.shadow_dropout,
+        auxiliary_loss_weight=args.shadow_loss_weight,
     )
-    return get_peft_model(base_model, config, shadow_model=shadow_model)
+    return get_peft_model(base_model, config)
 
 
 def resolve_shadow_model_name(method, args):
@@ -1004,11 +1000,11 @@ def report_shadow_checkpoint_restore(adapter_path, shadow_model_name):
     if not keys:
         return
 
-    shadow_backbone = [k for k in keys if ".shadow_model." in k]
+    shadow_backbone = [k for k in keys if ".shadow_backbone." in k]
     adapter_modules = [
         k
         for k in keys
-        if any(part in k for part in ("shadow_injection", "shadow_update", "shadow_hidden_projection"))
+        if any(part in k for part in ("shadow_down", "shadow_up", "shadow_update", "shadow_projection"))
     ]
     main_print(
         f"Adapter checkpoint: {len(keys)} tensors "
@@ -1016,7 +1012,9 @@ def report_shadow_checkpoint_restore(adapter_path, shadow_model_name):
     )
 
     if shadow_backbone:
-        main_print(f"Fine-tuned shadow backbone weights will be loaded from the adapter ({len(shadow_backbone)} tensors).")
+        main_print(
+            f"Fine-tuned shadow backbone weights will be loaded from the adapter ({len(shadow_backbone)} tensors)."
+        )
         if shadow_model_name:
             main_print(
                 f"  Explicit shadow architecture is built from {shadow_model_name!r}, then adapter weights overwrite "
@@ -1046,22 +1044,16 @@ def normalize_fsdp_key(name):
 
 
 def is_shadow_trainable_name(name):
-    return any(
-        marker in name
-        for marker in (
-            ".shadow_model.",
-            ".shadow_injection_model.",
-            ".shadow_update_model.",
-            ".shadow_hidden_projection.",
-            ".shadow_lm_head.",
-            ".shadow_classifier_head.",
-        )
-    )
+    # All ShadowPEFT adapter tensors (backbone, per-block down/up/update, projection, trainable head) carry the
+    # "shadow_" prefix; the frozen base model does not.
+    return "shadow_" in name
 
 
 def collect_fsdp_trainable_peft_state_dict(trainer):
     """Gather only trainable ShadowPEFT tensors from FSDP modules, avoiding the frozen base model."""
-    fsdp_model = trainer.model_wrapped if isinstance(trainer.model_wrapped, FullyShardedDataParallel) else trainer.model
+    fsdp_model = (
+        trainer.model_wrapped if isinstance(trainer.model_wrapped, FullyShardedDataParallel) else trainer.model
+    )
     all_trainable = {
         normalize_fsdp_key(name)
         for name, param in fsdp_model.named_parameters()
@@ -1080,9 +1072,7 @@ def collect_fsdp_trainable_peft_state_dict(trainer):
     # materializing the frozen 8B base model on rank 0.
     for prefix, module in fsdp_module_names:
         if prefix:
-            names_for_module = {
-                name for name in all_trainable if name == prefix or name.startswith(prefix + ".")
-            }
+            names_for_module = {name for name in all_trainable if name == prefix or name.startswith(prefix + ".")}
         else:
             # Root FSDP owns trainable tensors not handled by nested FSDP modules (e.g. injection Parameters).
             names_for_module = {
@@ -1197,22 +1187,14 @@ def load_trained_model(method, args, num_labels):
         )
     base_model_name = resolve_checkpoint_base_model(method, args)
     base_model = load_base_model(args, num_labels, model_name=base_model_name)
-    shadow_model = None
-    shadow_model_name = None
     if method == "shadow":
-        shadow_model_name = resolve_shadow_model_name(method, args)
-        if shadow_model_name:
-            shadow_model = load_shadow_model(args, shadow_model_name=shadow_model_name)
-            for name, param in shadow_model.named_parameters():
-                if param.requires_grad:
-                    print(f">>> Trainable shadow model parameter: {name}")
-        report_shadow_checkpoint_restore(adapter_path, shadow_model_name)
-    return PeftModel.from_pretrained(base_model, adapter_path, shadow_model=shadow_model)
+        # The shadow backbone architecture is rebuilt from the adapter config's `shadow_model` field ('mirror' or a
+        # model id), then the fine-tuned weights in the adapter overwrite it. Nothing extra needs to be passed here.
+        report_shadow_checkpoint_restore(adapter_path, resolve_shadow_model_name(method, args))
+    return PeftModel.from_pretrained(base_model, adapter_path)
 
 
-def build_trainer(
-    method, args, model, tokenizer, train_ds, eval_ds, collator, compute_metrics, num_labels=None
-):
+def build_trainer(method, args, model, tokenizer, train_ds, eval_ds, collator, compute_metrics, num_labels=None):
     is_gsm8k = args.task == "gsm8k"
     fsdp_config = build_fsdp_config(args, method=method)
     training_args = TrainingArguments(
@@ -1280,47 +1262,16 @@ def build_trainer(
     return trainer
 
 
-def shadow_eval_modes(args, method):
-    """Return ordered ShadowPEFT inference modes to run during eval."""
-    if method != "shadow":
-        return ["base_shadow"]
-    if args.shadow_inference_mode == "both":
-        return ["base_shadow", "shadow_only"]
-    return [args.shadow_inference_mode]
-
-
-def eval_metric_prefix(mode, method, modes):
-    """Metric key prefix: dual eval uses shadow_only_* for the second pass; single mode uses primary keys."""
-    if method != "shadow" or len(modes) == 1:
-        return ""
-    return "shadow_only" if mode == "shadow_only" else ""
-
-
-def apply_shadow_inference_mode(model, mode):
-    """Set ShadowPEFT inference mode on a PeftModel, if supported."""
-    shadow_tuner = getattr(model, "base_model", None)
-    if shadow_tuner is not None and hasattr(shadow_tuner, "set_inference_mode"):
-        shadow_tuner.set_inference_mode(mode)
-        return True
-    return False
-
-
-def print_eval_summary(args, label, result, prefix=""):
-    """Print a one-line summary after each eval pass (GSM8K accuracy or cls/clm metric)."""
+def print_eval_summary(args, label, result):
+    """Print a one-line summary after the eval pass (GSM8K accuracy or cls/clm metric)."""
     if not is_main_process():
         return
     metric_name = metric_name_for(args.task)
-    if prefix:
-        metric_key = f"{prefix}_{metric_name}"
-        samples_key = f"{prefix}_eval_samples"
-    else:
-        metric_key = metric_name
-        samples_key = "eval_samples"
-    metric = result.get(metric_key)
+    metric = result.get(metric_name)
     if metric is None:
         return
     if args.task == "gsm8k":
-        samples = result.get(samples_key)
+        samples = result.get("eval_samples")
         sample_str = f" ({int(samples)} samples)" if samples is not None else ""
         print(f"GSM8K {label} result: accuracy={metric:.4f}{sample_str}")
     else:
@@ -1328,47 +1279,35 @@ def print_eval_summary(args, label, result, prefix=""):
 
 
 def evaluate_method(trainer, method, args):
-    modes = shadow_eval_modes(args, method)
-    result = {"shadow_inference_mode": args.shadow_inference_mode if method == "shadow" else None}
+    metrics = trainer.evaluate()
+    result = result_metrics_from_eval(metrics, args.task)
+    print_eval_summary(args, "eval", result)
+    return result
 
-    for mode in modes:
-        if method == "shadow":
-            if not set_shadow_inference_mode(trainer, mode):
-                main_print(f"Warning: could not set ShadowPEFT inference mode {mode!r}; skipping.")
-                continue
-            if mode == "shadow_only":
-                main_print("\n--- Shadow-only eval (lightweight shadow path, no base forward pass) ---")
 
-        if isinstance(trainer, GSM8KTrainer):
-            trainer.gsm8k_inference_mode = mode
+def evaluate_detached_shadow(trainer, args, tokenizer, eval_ds, collator, compute_metrics, num_labels):
+    """Evaluate ONLY the standalone detached shadow network (`unload_shadow()`), independent of the base model.
 
-        prefix = eval_metric_prefix(mode, method, modes)
-        metrics = trainer.evaluate()
-        result.update(result_metrics_from_eval(metrics, args.task, prefix=prefix))
-
-        label = mode if method == "shadow" else "eval"
-        print_eval_summary(args, label, result, prefix=prefix)
-
-    if method == "shadow" and modes != ["shadow_only"]:
-        set_shadow_inference_mode(trainer, "base_shadow")
-        if isinstance(trainer, GSM8KTrainer):
-            trainer.gsm8k_inference_mode = "base_shadow"
-
+    The detached shadow model is a plain task model (a causal LM for clm/gsm8k, a sequence classifier for cls), so it
+    is evaluated by building a fresh trainer around it and reusing the exact same eval loop (accuracy for cls,
+    teacher-forced loss/perplexity for clm, generation for gsm8k). Its metrics are reported in the primary columns --
+    this replaces the base+shadow eval, it is not an extra pass.
+    """
+    shadow_tuner = trainer.accelerator.unwrap_model(trainer.model).base_model
+    detached = shadow_tuner.unload_shadow()
+    detached.eval()
+    main_print("\n--- Detached-shadow-only eval (standalone shadow network, no base model) ---")
+    shadow_trainer = build_trainer(
+        "detached_shadow", args, detached, tokenizer, None, eval_ds, collator, compute_metrics, num_labels
+    )
+    metrics = shadow_trainer.evaluate()
+    result = result_metrics_from_eval(metrics, args.task)
+    print_eval_summary(args, "detached-shadow", result)
     return result
 
 
 def metric_name_for(task):
     return "perplexity" if task == "clm" else "accuracy"
-
-
-def shadow_only_metric_name_for(task):
-    return f"shadow_only_{metric_name_for(task)}"
-
-
-def set_shadow_inference_mode(trainer, mode):
-    """Switch ShadowPEFT inference mode on the unwrapped PEFT model, if supported."""
-    peft_model = trainer.accelerator.unwrap_model(trainer.model)
-    return apply_shadow_inference_mode(peft_model, mode)
 
 
 def result_metrics_from_eval(metrics, task, prefix=""):
@@ -1380,9 +1319,7 @@ def result_metrics_from_eval(metrics, task, prefix=""):
     if shadow_loss is not None:
         result[f"{key}shadow_loss" if prefix else "shadow_loss"] = shadow_loss
     if task == "clm":
-        result[f"{key}perplexity" if prefix else "perplexity"] = (
-            math.exp(eval_loss) if eval_loss is not None else None
-        )
+        result[f"{key}perplexity" if prefix else "perplexity"] = math.exp(eval_loss) if eval_loss is not None else None
     else:
         result[f"{key}accuracy" if prefix else "accuracy"] = metrics.get("eval_accuracy")
     if task == "gsm8k" and not prefix:
@@ -1406,9 +1343,7 @@ def configure_fsdp_for_peft(trainer):
     if peft_config is not None:
         config = next(iter(peft_config.values()))
         if getattr(config, "peft_type", None) == PeftType.SHADOW and not fsdp_plugin.use_orig_params:
-            main_print(
-                "ShadowPEFT requires FSDP use_orig_params=True (mixed frozen/trainable params); enabling it."
-            )
+            main_print("ShadowPEFT requires FSDP use_orig_params=True (mixed frozen/trainable params); enabling it.")
             fsdp_plugin.use_orig_params = True
 
 
@@ -1427,12 +1362,8 @@ def run_method(method, args, tokenizer, train_ds, eval_ds, collator, compute_met
         if trainable is None or total is None:
             trainable, total = model.get_nb_trainable_parameters()
     else:
-        shadow_model = load_shadow_model(args) if method == "shadow" else None            
-        model = apply_peft(load_base_model(args, num_labels), method, args, shadow_model=shadow_model)
+        model = apply_peft(load_base_model(args, num_labels), method, args)
         print(">>> model:", model)
-        for name, param in model.shadow_model.named_parameters():
-            if not param.requires_grad:
-                print(f">>> Frozen shadow model parameter: {name}")
         trainable, total = model.get_nb_trainable_parameters()
 
     if args.gradient_checkpointing:
@@ -1440,9 +1371,7 @@ def run_method(method, args, tokenizer, train_ds, eval_ds, collator, compute_met
     if is_main_process() and hasattr(model, "print_trainable_parameters"):
         model.print_trainable_parameters()
 
-    trainer = build_trainer(
-        method, args, model, tokenizer, train_ds, eval_ds, collator, compute_metrics, num_labels
-    )
+    trainer = build_trainer(method, args, model, tokenizer, train_ds, eval_ds, collator, compute_metrics, num_labels)
 
     train_time = train_summary.get("train_time_s")
     if do_train:
@@ -1478,20 +1407,22 @@ def run_method(method, args, tokenizer, train_ds, eval_ds, collator, compute_met
     }
 
     if do_eval:
-        result.update(evaluate_method(trainer, method, args))
+        if method == "shadow" and args.eval_detached_shadow_only:
+            # Evaluate the standalone detached shadow network only, in place of the base+shadow (adapted) model.
+            result.update(
+                evaluate_detached_shadow(trainer, args, tokenizer, eval_ds, collator, compute_metrics, num_labels)
+            )
+        else:
+            result.update(evaluate_method(trainer, method, args))
 
     return result
 
 
 def print_comparison(args, results, model_name=None):
     metric_name = metric_name_for(args.task)
-    shadow_only_name = shadow_only_metric_name_for(args.task)
-    has_shadow_only = any(shadow_only_name in r for r in results)
     display_model = model_name or args.model_name
 
     header = f"{'method':<10}{'trainable':>14}{'trainable%':>12}{'train_time(s)':>15}{metric_name:>14}"
-    if has_shadow_only:
-        header += f"{'shadow_only':>14}"
     main_print(f"\n{'=' * 70}\nComparison ({args.task}, {display_model})\n{'=' * 70}")
     main_print(header)
     main_print("-" * len(header))
@@ -1502,10 +1433,6 @@ def print_comparison(args, results, model_name=None):
             f"{r['method']:<10}{r['trainable_params']:>14,}{r['trainable_pct']:>11.3f}%"
             f"{r.get('train_time_s') or 0:>15.1f}{metric_str:>14}"
         )
-        if has_shadow_only:
-            shadow_only = r.get(shadow_only_name)
-            shadow_only_str = f"{shadow_only:.4f}" if shadow_only is not None else "n/a"
-            row += f"{shadow_only_str:>14}"
         main_print(row)
 
 

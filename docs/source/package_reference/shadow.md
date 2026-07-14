@@ -1,4 +1,4 @@
-<!--Copyright 2024 The HuggingFace Team. All rights reserved.
+<!--Copyright 2026 The HuggingFace Team. All rights reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
 the License. You may obtain a copy of the License at
@@ -16,29 +16,31 @@ rendered properly in your Markdown viewer.
 
 # ShadowPEFT
 
-[ShadowPEFT](https://arxiv.org/abs/2604.19254) augments a frozen base decoder-only model with a **lightweight, centralized, pretrainable and detachable** *shadow* network that runs in parallel with the backbone. At every decoder layer the shadow network injects a learned correction into the base hidden states, while a gated update evolves the shadow hidden state as the base model processes each layer. Only the shadow backbone and the small injection/update adapters are trained; the base model stays frozen.
-
-Because the shadow module is architecturally decoupled from the backbone, it can be attached or detached without modifying the frozen base weights (modular deployment and independent versioning), and it can be initialized from a smaller pre-trained model that serves as a reusable adaptation module for a larger backbone.
+[ShadowPEFT](https://arxiv.org/abs/2604.19254) augments a frozen base decoder-only model with a **lightweight, pretrainable** *shadow* network that runs in parallel with the backbone. A small shadow backbone produces an initial shadow state `s^(0)`, which then rides the base model's decoder loop: at every targeted block the discrepancy between the base hidden states and the shadow state is injected back into the block input (a low-rank correction), and the shadow state is advanced by a gated residual update computed from the block output. Only the shadow components are trained; the base model stays frozen.
 
 ```
 Input
-  ├──► Shadow model (small, trainable) ──► shadow_hidden_states
+  ├──► Shadow backbone (small, trainable) ──► s^(0)
   └──► Base model (frozen, large)
-         layer_0 ─────────────────────────────────────────► hidden_0
-         layer_1 ◄── ShadowInjection(hidden_0, shadow[0]) ─► hidden_1
-         layer_2 ◄── ShadowInjection(hidden_1, shadow[1]) ─► ...
-                    [ShadowUpdate evolves the shadow state at each layer]
+         block_0 ◄── inject(h, s) ─► h_0 ──► update ─► s_1
+         block_1 ◄── inject(h, s) ─► h_1 ──► update ─► s_2
+         ...                       (the (hidden, shadow) pair rides the loop together)
 ```
 
-Two shadow variants are supported:
+Because the adaptation is an **input-dependent trajectory in layer space** (the shadow state evolves with the data) rather than a static weight-space delta, ShadowPEFT **cannot be merged** into the base weights. Calling `merge`, `merge_adapter`, or `merge_and_unload` raises an explicit error. To obtain the lightweight shadow network on its own (the analogue of `merge_and_unload`), use `model.base_model.unload_shadow()`, which returns a standalone [`~tuners.shadow.layers.DetachedShadowModel`].
 
-- **Implicit shadow** (default): a smaller copy of the base architecture (fewer layers, optionally smaller MLP/attention) is created automatically from the base model's config.
-- **Explicit shadow**: a separately (pre-)trained model that you pass via `get_peft_model(model, config, shadow_model=...)`. When its hidden size differs from the base model, a trained `shadow_hidden_projection` linear layer bridges the gap. See [`AutoModelForCausalLMWithHiddenProjection`] for the standalone distribution format of such projected shadow models.
+ShadowPEFT follows the standard PEFT API: it is a [`~tuners.tuners_utils.BaseTuner`] whose wrapped blocks are [`~tuners.tuners_utils.BaseTunerLayer`] instances, so adding multiple adapters, switching between them with `set_adapter`, deleting them, and enabling/disabling them all work as with other methods. Only **one** adapter can be active at a time, because the shadow state is a single trajectory through the network.
 
-Compared to LoRA-style methods:
+The shadow backbone can be built in two ways, controlled by `ShadowConfig.shadow_model`:
 
-- **Pros**: the adapter is a self-contained network that can be exported and run on its own (`shadow_only` inference), trained centrally and reused across tasks, and initialized from a pre-trained small model. It also exposes a second, shadow-path set of logits (`shadow_logits`) for an auxiliary loss.
-- **Cons**: ShadowPEFT wraps every decoder layer and runs a parallel network, so it adds more parameters and compute than a low-rank adapter and **disables the KV cache** (full-sequence processing is required). Always pass `use_cache=False` during generation. It targets decoder-only models with at least two decoder layers and does not merge into the base weights.
+- `"mirror"` (default): a smaller copy of the base architecture (fewer layers via `shadow_num_hidden_layers`, optionally smaller hidden size / heads / MLP) is created automatically from the base model's config and randomly initialized. When the shadow hidden size matches the base, the frozen base input embeddings are shared (`share_embeddings`); when it differs, a trained projection bridges the gap.
+- a model id or local path: the backbone is loaded with Transformers `AutoModel`, letting you initialize the shadow network from a smaller pre-trained model.
+
+Compared to LoRA-style methods, ShadowPEFT adds more parameters and compute (it runs a parallel network and wraps whole decoder blocks), but the adapter is a self-contained network that can be trained centrally, reused across tasks, and initialized from a pre-trained small model. An optional auxiliary loss (`auxiliary_loss_weight`) applies a copy of the task head to the final shadow state and adds it to the task loss, encouraging the shadow path to solve the task on its own.
+
+## KV cache
+
+ShadowPEFT disables the base model's KV cache (`use_cache` is forced to `False`). During autoregressive decoding a KV cache lets each step attend to cached keys/values and process only the newest token, but the shadow state `s^(0)` is seeded by running the shadow backbone over the **current input sequence**, and the injected correction at each block depends on that full-sequence shadow state. A per-step base model that only sees one new token cannot reconstruct the shadow trajectory for the prefix. In principle a *separate* KV cache for the shadow backbone could restore incremental decoding, but the initial integration keeps the design simple and correct by reprocessing the full sequence each step. Always pass `use_cache=False` during generation.
 
 ## Usage
 
@@ -47,7 +49,7 @@ from transformers import AutoModelForCausalLM
 from peft import ShadowConfig, get_peft_model
 
 model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B")
-config = ShadowConfig(num_shadow_layers=1, injection_hidden_size=16, task_type="CAUSAL_LM")
+config = ShadowConfig(r=8, shadow_num_hidden_layers=1, task_type="CAUSAL_LM")
 model = get_peft_model(model, config)
 model.print_trainable_parameters()
 
@@ -55,19 +57,34 @@ model.print_trainable_parameters()
 out = model.generate(input_ids, use_cache=False, max_new_tokens=32)
 ```
 
-To use an explicit, optionally pre-trained shadow model:
+To initialize the shadow backbone from a smaller pre-trained model, pass its id or path as `shadow_model`:
 
 ```py
-shadow_model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B")
-model = get_peft_model(base_model, ShadowConfig(task_type="CAUSAL_LM"), shadow_model=shadow_model)
+config = ShadowConfig(shadow_model="Qwen/Qwen3-0.6B", task_type="CAUSAL_LM")
+model = get_peft_model(base_model, config)
 ```
 
-When loading a checkpoint trained with an explicit shadow model, pass the same shadow model back:
+## Evaluating the shadow path
+
+By default the model output (`logits`) is the **shadow-adapted base model**: the shadow corrections are injected into
+the base model's hidden states at every layer, so `logits` already reflects ShadowPEFT (use `model.disable_adapter()`
+to get the plain base model for comparison). The auxiliary loss additionally trains the shadow path to solve the task
+on its own.
+
+To evaluate the **standalone shadow network** (the detachable, lightweight model — the ShadowPEFT analogue of
+`merge_and_unload`), use `unload_shadow()`. It returns `head(projection(backbone(x)))` as a normal task model that you
+can evaluate like any other: for a causal-LM task it is a generation-capable causal LM (supports `generate()` and KV
+caching, which the full ShadowPEFT model cannot), and for a sequence-classification task it pools the last token and
+returns class logits.
 
 ```py
-from peft import PeftModel
-
-model = PeftModel.from_pretrained(base_model, "path/to/adapter", shadow_model=shadow_model)
+shadow = model.base_model.unload_shadow()  # a DetachedShadowModel (a PreTrainedModel)
+shadow.eval()
+# causal LM:
+out = shadow.generate(input_ids, max_new_tokens=32)   # KV cache is fine here
+# sequence classification:
+logits = shadow(input_ids=input_ids, attention_mask=attention_mask).logits  # (batch, num_labels)
+shadow.save_pretrained("standalone-shadow")
 ```
 
 # API
@@ -79,7 +96,3 @@ model = PeftModel.from_pretrained(base_model, "path/to/adapter", shadow_model=sh
 ## ShadowModel
 
 [[autodoc]] tuners.shadow.model.ShadowModel
-
-## AutoModelForCausalLMWithHiddenProjection
-
-[[autodoc]] tuners.shadow.projected_causal_lm.AutoModelForCausalLMWithHiddenProjection

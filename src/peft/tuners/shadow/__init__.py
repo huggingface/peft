@@ -1,4 +1,4 @@
-# Copyright 2024-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,41 +15,10 @@
 from peft.utils import register_peft_method
 
 from .config import ShadowConfig
-from .model import ShadowCausalLMOutputWithPast, ShadowModel, ShadowSequenceClassifierOutput
-from .projected_causal_lm import (
-    AutoModelForCausalLMWithHiddenProjection,
-    AutoModelForCausalLMWithHiddenProjectionConfig,
-)
+from .layers import DetachedShadowModel, ShadowCarrier, ShadowLayer
+from .model import ShadowModel
 
 
-__all__ = [
-    "AutoModelForCausalLMWithHiddenProjection",
-    "AutoModelForCausalLMWithHiddenProjectionConfig",
-    "ShadowCausalLMOutputWithPast",
-    "ShadowConfig",
-    "ShadowModel",
-    "ShadowSequenceClassifierOutput",
-]
+__all__ = ["DetachedShadowModel", "ShadowCarrier", "ShadowConfig", "ShadowLayer", "ShadowModel"]
 
 register_peft_method(name="shadow", config_cls=ShadowConfig, model_cls=ShadowModel, prefix="shadow_")
-
-
-def _register_projected_causal_lm_with_transformers() -> None:
-    """Register the projected shadow model with transformers' Auto classes (best-effort)."""
-    import contextlib
-
-    from transformers import AutoConfig, AutoModelForCausalLM
-
-    # Already registered (e.g. on re-import) or unsupported transformers version: nothing to do.
-    with contextlib.suppress(Exception):
-        AutoConfig.register(
-            AutoModelForCausalLMWithHiddenProjectionConfig.model_type,
-            AutoModelForCausalLMWithHiddenProjectionConfig,
-        )
-        AutoModelForCausalLM.register(
-            AutoModelForCausalLMWithHiddenProjectionConfig,
-            AutoModelForCausalLMWithHiddenProjection,
-        )
-
-
-_register_projected_causal_lm_with_transformers()

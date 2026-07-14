@@ -523,7 +523,11 @@ def get_peft_model_state_dict(
         key = pattern.sub("", key)  # remove adapter name, e.g. v_proj.lora_A
         return f"{key}.{suffix}"  # stitch the suffix back, e.g, v_proj.lora_A.weight
 
-    to_return = {remove_adapter_name(k): v for k, v in to_return.items()}
+    if config.peft_type != PeftType.SHADOW:
+        # ShadowPEFT keeps the full (adapter-name-carrying) keys: its shadow backbone is a nested transformer whose
+        # keys don't fit the `<module>.<adapter_name>.weight` convention that `remove_adapter_name` assumes, and its
+        # load path (`set_peft_model_state_dict`) consumes the keys verbatim.
+        to_return = {remove_adapter_name(k): v for k, v in to_return.items()}
     return to_return
 
 

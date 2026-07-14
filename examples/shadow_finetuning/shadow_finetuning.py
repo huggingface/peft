@@ -30,16 +30,21 @@ from peft import PeftModel, ShadowConfig, get_peft_model
 def parse_args():
     parser = argparse.ArgumentParser(description="ShadowPEFT fine-tuning example")
     parser.add_argument("--base_model_name_or_path", type=str, default="Qwen/Qwen3-0.6B")
-    parser.add_argument("--num_shadow_layers", type=int, default=1)
-    parser.add_argument("--injection_hidden_size", type=int, default=16)
-    parser.add_argument("--gate_hidden_size", type=int, default=10)
-    parser.add_argument("--alpha", type=float, default=0.1)
-    parser.add_argument("--dropout", type=float, default=0.1)
-    parser.add_argument("--shadow_loss_weight", type=float, default=0.05)
+    parser.add_argument(
+        "--shadow_model",
+        type=str,
+        default="mirror",
+        help="'mirror' builds a small shadow backbone from the base config; or pass a model id/path to load one.",
+    )
+    parser.add_argument("--shadow_num_hidden_layers", type=int, default=1)
+    parser.add_argument("--r", type=int, default=8)
+    parser.add_argument("--update_hidden_size", type=int, default=None)
+    parser.add_argument("--shadow_alpha", type=float, default=1.0)
+    parser.add_argument("--shadow_dropout", type=float, default=0.0)
+    parser.add_argument("--auxiliary_loss_weight", type=float, default=0.05)
     parser.add_argument("--num_steps", type=int, default=5)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--output_dir", type=str, default="./shadow-adapter")
-    parser.add_argument("--shadow_only", action="store_true", help="Use shadow-only inference after training.")
     return parser.parse_args()
 
 
@@ -54,12 +59,13 @@ def main():
     base_model = AutoModelForCausalLM.from_pretrained(args.base_model_name_or_path)
 
     config = ShadowConfig(
-        num_shadow_layers=args.num_shadow_layers,
-        injection_hidden_size=args.injection_hidden_size,
-        gate_hidden_size=args.gate_hidden_size,
-        alpha=args.alpha,
-        dropout=args.dropout,
-        shadow_loss_weight=args.shadow_loss_weight,
+        shadow_model=args.shadow_model,
+        shadow_num_hidden_layers=args.shadow_num_hidden_layers,
+        r=args.r,
+        update_hidden_size=args.update_hidden_size,
+        shadow_alpha=args.shadow_alpha,
+        shadow_dropout=args.shadow_dropout,
+        auxiliary_loss_weight=args.auxiliary_loss_weight,
         task_type="CAUSAL_LM",
     )
     model = get_peft_model(base_model, config).to(device)
@@ -92,8 +98,6 @@ def main():
     reloaded_base = AutoModelForCausalLM.from_pretrained(args.base_model_name_or_path)
     model = PeftModel.from_pretrained(reloaded_base, args.output_dir).to(device)
     model.eval()
-    if args.shadow_only:
-        model.base_model.set_inference_mode("shadow_only")
 
     prompt = tokenizer("ShadowPEFT", return_tensors="pt").to(device)
     with torch.no_grad():

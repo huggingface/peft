@@ -35,7 +35,6 @@ def get_peft_model(
     autocast_adapter_dtype: bool = True,
     revision: Optional[str] = None,
     low_cpu_mem_usage: bool = False,
-    shadow_model: Optional[PreTrainedModel] = None,
 ) -> PeftModel | PeftMixedModel:
     """
     Returns a Peft model object from a model and a config, where the model will be modified in-place.
@@ -60,22 +59,7 @@ def get_peft_model(
             Create empty adapter weights on meta device. Useful to speed up the loading process. Leave this setting as
             False if you intend on training the model, unless the adapter weights will be replaced by different weights
             before training starts.
-        shadow_model (`transformers.PreTrainedModel`, `optional`, defaults to `None`):
-            Only used by the ShadowPEFT method (`ShadowConfig`). An explicit, optionally pre-trained shadow model to use
-            instead of the implicit shadow model that is otherwise built from the base model's configuration.
     """
-    if shadow_model is not None:
-        if not getattr(peft_config, "is_shadow", False):
-            raise ValueError("`shadow_model` is only supported with a `ShadowConfig` (ShadowPEFT).")
-        # ShadowConfig is JSON-only; the live shadow model is attached as a runtime attribute that the ShadowModel tuner
-        # reads during construction and that is excluded from serialization.
-        peft_config.shadow_model = shadow_model
-        from peft.tuners.shadow.model_utils import resolve_explicit_shadow_model_name
-
-        explicit_path = resolve_explicit_shadow_model_name(shadow_model)
-        if explicit_path:
-            peft_config.explicit_shadow_model_name_or_path = explicit_path
-
     model_config = BaseTuner.get_model_config(model)
     old_name = peft_config.base_model_name_or_path
     new_name = model.__dict__.get("name_or_path", None)

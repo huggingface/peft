@@ -13,33 +13,29 @@ base weights, trained centrally, and even initialized from a smaller pre-trained
 
 ## Quick start
 
-### Implicit shadow model
+### Mirror shadow backbone (default)
 
-The shadow network is built automatically from the base model's config (fewer layers, optionally smaller MLP/attention):
+The shadow backbone is built automatically from the base model's config (fewer layers, optionally smaller
+MLP/attention). This is the default `shadow_model="mirror"`:
 
 ```bash
-python shadow_finetuning.py --base_model_name_or_path Qwen/Qwen3-0.6B --num_shadow_layers 1 --injection_hidden_size 16
+python shadow_finetuning.py --base_model_name_or_path Qwen/Qwen3-0.6B --shadow_num_hidden_layers 1 --r 8
 ```
 
-Use `--shadow_only` at inference time to run the lightweight shadow path without a base forward pass. Note that the KV
-cache is disabled by ShadowPEFT, so generation always uses `use_cache=False`.
+Note that the KV cache is disabled by ShadowPEFT, so generation always uses `use_cache=False`.
 
-### Explicit shadow model
+### Pretrained shadow backbone
 
-Use a separate, (optionally smaller and pre-trained) model as the shadow network. When the shadow model's hidden size
-differs from the base model's, ShadowPEFT inserts a trainable `shadow_hidden_projection` to bridge the two hidden
-spaces. The explicit model is passed via `get_peft_model(model, config, shadow_model=...)` (and again via
-`PeftModel.from_pretrained(model, path, shadow_model=...)` when reloading):
+Initialize the shadow backbone from a separate, (optionally smaller) pretrained model by passing its id/path as
+`ShadowConfig(shadow_model=...)`. When the pretrained backbone's hidden size differs from the base model's, ShadowPEFT
+inserts a trainable projection to bridge the two hidden spaces. After training, `unload_shadow()` returns the standalone
+shadow network:
 
 ```bash
 python shadow_explicit_finetuning.py \
     --base_model_name_or_path Qwen/Qwen3-8B \
-    --shadow_model_name_or_path Qwen/Qwen3-0.6B
+    --shadow_model Qwen/Qwen3-0.6B
 ```
-
-Add `--projected_shadow` to first package the small backbone + projection + the base `lm_head` into a single
-`AutoModelForCausalLMWithHiddenProjection` (with the pseudo-inverse projection init) and use that as the explicit
-shadow model. After training, the example also calls `export_shadow()` to extract a standalone shadow checkpoint.
 
 ## Citation
 
