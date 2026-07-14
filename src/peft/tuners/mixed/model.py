@@ -305,8 +305,10 @@ class MixedModel(BaseTuner):
                     if new_adapter is None:
                         new_adapter = target.active_adapters[:]
 
-        self.active_adapter = new_adapter or []
-        if adapter_to_delete in adapter_names:
+            # This must happen inside the loop, once per deleted adapter: previously it ran once after the loop with
+            # the stale adapter_to_delete/new_adapter from the last iteration only, so auxiliary modules (modules_to_save,
+            # trainable_token_indices) never got cleaned up for any adapter but the last one being deleted in this call.
+            self.active_adapter = new_adapter or []
             _delete_auxiliary_adapter(self.model, adapter_to_delete, new_active_adapters=new_adapter)
 
     def generate(self, *args: Any, **kwargs: Any):

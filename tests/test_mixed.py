@@ -664,6 +664,37 @@ class TestMixedAdapterTypes(unittest.TestCase):
         with pytest.raises(ValueError, match="Only one adapter can be set at a time for ModulesToSaveWrapper"):
             peft_model.set_adapter(["adapter0", "adapter1"])
 
+    def test_delete_multiple_adapters_at_once_cleans_up_modules_to_save_for_all_of_them(self):
+        # Regression test: MixedModel.delete_adapter used to only clean up the auxiliary modules (e.g.
+        # modules_to_save) belonging to the LAST adapter name when multiple names were deleted in a single call,
+        # e.g. peft_model.delete_adapter(["adapter0", "adapter1"]). The loop in MixedModel.delete_adapter computed
+        # `new_adapter`/`adapter_to_delete` per deleted adapter but only called `_delete_auxiliary_adapter` once,
+        # after the loop had finished, using the stale values left over from the last iteration. As a result,
+        # earlier-deleted adapters' entries in ModulesToSaveWrapper.modules_to_save (and its `_adapters` set) were
+        # never removed, i.e. they leaked even though the adapters were otherwise fully deleted (removed from
+        # peft_config and from every BaseTunerLayer).
+        model = SimpleNet().eval().to(self.torch_device)
+        config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        config1 = LoHaConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        config2 = LoKrConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = get_peft_model(model, config0, "adapter0", mixed=True)
+        peft_model.add_adapter("adapter1", config1)
+        peft_model.add_adapter("adapter2", config2)
+
+        wrapper = peft_model.base_model.model.lin1
+        assert set(wrapper.modules_to_save.keys()) == {"adapter0", "adapter1", "adapter2"}
+        assert wrapper._adapters == {"adapter0", "adapter1", "adapter2"}
+
+        # delete two adapters (not the last one) in a single call
+        peft_model.delete_adapter(["adapter0", "adapter1"])
+
+        assert "adapter0" not in wrapper.modules_to_save
+        assert "adapter0" not in wrapper._adapters
+        assert "adapter1" not in wrapper.modules_to_save
+        assert "adapter1" not in wrapper._adapters
+        assert set(wrapper.modules_to_save.keys()) == {"adapter2"}
+        assert wrapper._adapters == {"adapter2"}
+
     def test_get_nb_trainable_parameters(self):
         model = SimpleNet().eval().to(self.torch_device)
         params_base = sum(p.numel() for p in model.parameters())

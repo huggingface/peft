@@ -3636,6 +3636,33 @@ class TestPeftCustomModel(PeftCommonTester):
         assert model.modules_to_save is None
         assert set(model.base_model.model.lin1.modules_to_save) == set()
 
+    def test_delete_adapter_to_zero_then_add_adapter_with_modules_to_save(self):
+        # Regression test: deleting the last remaining adapter leaves the model with zero active adapters, which is
+        # a legitimate state (see test_delete_adapter_multiple_adapters_with_modules_to_save above). However, adding
+        # a new adapter afterwards used to crash with "ValueError: Please specify at least one adapter to set".
+        # This is because BaseTuner.inject_adapter (called by add_adapter) always calls
+        # set_adapter(self.active_adapters), i.e. set_adapter([]) when there are currently no active adapters, and
+        # ModulesToSaveWrapper.check_set_adapter used to unconditionally reject an empty list of adapter names
+        # instead of treating "no currently active adapter" as valid, even though ModulesToSaveWrapper.set_adapter
+        # itself already handles an empty list gracefully.
+        model = MLP()
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        model = get_peft_model(model, config, adapter_name="default").to(self.torch_device)
+
+        model.delete_adapter("default")
+        assert model.active_adapters == []
+        assert model.modules_to_save is None
+        assert dict(model.base_model.model.lin1.modules_to_save) == {}
+
+        # this used to raise: ValueError: Please specify at least one adapter to set
+        model.add_adapter("default2", config)
+        assert model.modules_to_save == {"lin1"}
+        assert "default2" in model.base_model.model.lin1.modules_to_save
+
+        model.set_adapter("default2")
+        inputs = self.prepare_inputs_for_testing()
+        model(**inputs)  # does not raise
+
     def test_delete_adapter_multiple_adapters_with_trainable_token_indices(self):
         # Same as the previous test, just using trainable_token_indices instead of modules_to_save
         # Note that we need to use a transformers model for trainable_token_indices
@@ -3684,6 +3711,29 @@ class TestPeftCustomModel(PeftCommonTester):
         assert set(embed_tokens.token_adapter.trainable_tokens_original) == set()
         assert set(lm_head.token_adapter.trainable_tokens_delta) == set()
         assert set(lm_head.token_adapter.trainable_tokens_original) == set()
+
+    def test_delete_adapter_to_zero_then_add_adapter_with_trainable_token_indices(self):
+        # Same bug as test_delete_adapter_to_zero_then_add_adapter_with_modules_to_save above, but for
+        # trainable_token_indices, which goes through the same check_set_adapter code path, this time via
+        # TrainableTokensWrapper.
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        inputs = {"input_ids": torch.arange(10).view(-1, 1).to(self.torch_device)}
+
+        config = LoraConfig(target_modules=["q_proj"], trainable_token_indices=[0, 1])
+        model = get_peft_model(model, config, adapter_name="default").to(self.torch_device)
+
+        model.delete_adapter("default")
+        assert model.active_adapters == []
+
+        embed_tokens = model.base_model.model.model.decoder.embed_tokens
+        assert set(embed_tokens.token_adapter.trainable_tokens_delta) == set()
+
+        # this used to raise: ValueError: Please specify at least one adapter to set
+        model.add_adapter("default2", config)
+        assert "default2" in embed_tokens.token_adapter.trainable_tokens_delta
+
+        model.set_adapter("default2")
+        model(**inputs)  # does not raise
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):

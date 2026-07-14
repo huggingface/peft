@@ -682,7 +682,10 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
         # adapter_name is a list of str
         if len(adapter_name) == 0:
-            raise ValueError("Please specify at least one adapter to set")
+            # No active adapter is a legitimate state (e.g. right after deleting the last remaining adapter, or when
+            # a newly added adapter is not activated automatically), not a caller mistake, so don't raise here. There
+            # is simply no adapter to set for this module.
+            return None
 
         adapter_names_in_module = [n for n in adapter_name if n in self.modules_to_save]
 
@@ -925,7 +928,10 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
 
         # adapter_name is a list of str
         if len(adapter_name) == 0:
-            raise ValueError("Please specify at least one adapter to set")
+            # No active adapter is a legitimate state (e.g. right after deleting the last remaining adapter, or when
+            # a newly added adapter is not activated automatically), not a caller mistake, so don't raise here. There
+            # is simply no adapter to set for this module.
+            return None
 
         # TODO In theory, multiple active trainable tokens is fine when the indices don't overlap
         adapter_names_in_module = [n for n in adapter_name if n in self.token_adapter.trainable_tokens_delta]
