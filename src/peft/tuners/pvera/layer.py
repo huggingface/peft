@@ -152,7 +152,13 @@ class PveraLayer(BaseTunerLayer):
     def _reparametrize(self, mu, logvar, sample_at_inference):
         if self.training or (not self.training and sample_at_inference):
             std = torch.exp(0.5 * logvar)
-            eps = torch.randn_like(std, generator=self.generator)
+            if self.generator is None:
+                eps = torch.randn_like(std)
+            else:
+                # torch.randn_like does not accept a `generator` argument, so torch.randn is used instead. The
+                # generator is a CPU torch.Generator (see update_layer), hence the noise is sampled on CPU for
+                # reproducible, device-independent results and then moved to std's device and dtype.
+                eps = torch.randn(std.shape, generator=self.generator).to(device=std.device, dtype=std.dtype)
             z = mu + eps * std
         else:
             z = mu

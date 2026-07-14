@@ -242,3 +242,45 @@ class TestPVeRA:
         inputs = torch.randn(5, 10).to(dtype)
         output = peft_model(inputs)  # should not raise
         assert output.dtype == dtype
+
+    def test_pvera_forward_in_training_mode(self):
+        # Regression test: in training mode, PVeRA samples noise via the reparameterization trick in
+        # PveraLayer._reparametrize. This must not raise and must allow gradients to flow back to mu/logvar.
+        config = PveraConfig(target_modules=["lin1", "lin2"], init_weights=False)
+        peft_model = get_peft_model(MLP(), config)
+        peft_model.train()
+        output = peft_model(torch.randn(5, 10))  # should not raise
+        output.sum().backward()  # gradients should flow
+        assert output.shape == (5, 2)
+
+    def test_pvera_sample_at_inference(self):
+        # Regression test: with sample_at_inference=True, the noise is also sampled in eval mode (same code path
+        # in PveraLayer._reparametrize as the training-mode case), which must not raise.
+        config = PveraConfig(target_modules=["lin1", "lin2"], init_weights=False, sample_at_inference=True)
+        peft_model = get_peft_model(MLP(), config)
+        peft_model.eval()
+        peft_model(torch.randn(5, 10))  # should not raise
+
+    def test_pvera_generator_seed_reproducible(self):
+        # With a fixed generator_seed, the sampled noise (and therefore the output) must be reproducible across two
+        # identically initialized models, while a different seed must yield a different output.
+        inputs = torch.randn(5, 10)
+
+        def build(seed):
+            config = PveraConfig(target_modules=["lin1", "lin2"], init_weights=False, generator_seed=seed)
+            torch.manual_seed(0)
+            return get_peft_model(MLP(), config)
+
+        model_a = build(123)
+        model_b = build(123)
+        model_c = build(456)
+
+        model_a.train()
+        model_b.train()
+        model_c.train()
+        output_a = model_a(inputs)
+        output_b = model_b(inputs)
+        output_c = model_c(inputs)
+
+        assert torch.allclose(output_a, output_b)
+        assert not torch.allclose(output_a, output_c)
