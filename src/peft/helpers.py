@@ -298,7 +298,7 @@ class MontecloraTrainerMixin:
 
         # Get PEFT model and train
         model = get_peft_model(base_model, lora_config)
-        trainer = MontecloraTrainer(model=model, args=training_args, ...)
+        trainer = MontecloraTrainer(model=model, args=training_args)
         trainer.train()
         ```
     """

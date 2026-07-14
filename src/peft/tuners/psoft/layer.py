@@ -191,7 +191,10 @@ class PsoftLayer(BaseTunerLayer):
         "psoft_dropout",
         "psoft_svd",
         "psoft_svd_lowrank_niter",
+        "random_seed",
         "ab_svd_init",
+        "_psoft_A_cache",
+        "_psoft_B_cache",
     )
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
@@ -205,6 +208,7 @@ class PsoftLayer(BaseTunerLayer):
         self.psoft_dropout = nn.ModuleDict({})
         self.psoft_svd: dict[str, str] = {}
         self.psoft_svd_lowrank_niter: dict[str, int] = {}
+        self.random_seed: dict[str, int] = {}
         self.ab_svd_init: dict[str, Optional[str]] = {}
 
         # per-adapter trainable module
@@ -251,6 +255,7 @@ class PsoftLayer(BaseTunerLayer):
         self.ab_svd_init[adapter_name] = config.ab_svd_init
         self.psoft_svd[adapter_name] = config.psoft_svd
         self.psoft_svd_lowrank_niter[adapter_name] = config.psoft_svd_lowrank_niter
+        self.random_seed[adapter_name] = config.random_seed
 
         self.psoft_R[adapter_name] = OrthLayer(
             size=r,
@@ -290,6 +295,7 @@ class PsoftLayer(BaseTunerLayer):
                 r,
                 svd_mode=self.psoft_svd[adapter_name],
                 niter=self.psoft_svd_lowrank_niter[adapter_name],
+                random_seed=self.random_seed[adapter_name],
             )
 
             Sr_scaled = Sr / self.scaling[adapter_name]
@@ -309,7 +315,7 @@ class PsoftLayer(BaseTunerLayer):
 
             self._set_psoft_ab_cache_buffers(adapter_name, A, B)
 
-    def _compute_svd_factors(self, weight: torch.Tensor, r: int, *, svd_mode: str, niter: int):
+    def _compute_svd_factors(self, weight: torch.Tensor, r: int, *, svd_mode: str, niter: int, random_seed: int = 0):
         # weight: (out, in) fp32
         if svd_mode == "full":
             U, S, Vh = torch.linalg.svd(weight.data, full_matrices=False)
@@ -317,7 +323,13 @@ class PsoftLayer(BaseTunerLayer):
             Sr = S[:r]  # (r,)
             Uhr = Vh[:r, :]  # (r, in)
         elif svd_mode == "lowrank":
-            U, S, V = svd_lowrank(weight.data, q=r, niter=niter)  # V: (in, r)
+            # torch.svd_lowrank uses a random projection, so the A/B initialization it produces depends on the
+            # RNG state. Seed a forked RNG with the configurable random_seed to make it deterministic
+            # (torch.svd_lowrank does not accept a generator argument); fork_rng leaves the global RNG untouched.
+            fork_devices = [weight.device] if weight.device.type == "cuda" else []
+            with torch.random.fork_rng(devices=fork_devices):
+                torch.manual_seed(random_seed)
+                U, S, V = svd_lowrank(weight.data, q=r, niter=niter)  # V: (in, r)
             Vr = U[:, :r]
             Sr = S[:r]
             Uhr = V[:, :r].t()  # (r, in)

@@ -20,7 +20,43 @@ We are happy to accept contributions to PEFT. If you plan to contribute, please 
 
 ## Installation
 
-For code contributions to PEFT, you should choose the ["source"](../install#source) installation method.
+Follow these steps to start contributing:
+
+1. Fork the [repository](https://github.com/huggingface/peft) by clicking on the 'Fork' button on the repository's page. This creates a copy of the code under your GitHub user account.
+
+2. Clone your fork to your local disk, and add the base repository as a remote. The following command assumes you have your public SSH key uploaded to GitHub. See the following guide for more [information](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository).
+
+   ```bash
+   git clone git@github.com:<your Github handle>/peft.git
+   cd peft
+   git remote add upstream https://github.com/huggingface/peft.git
+   ```
+
+3. Create a new branch to hold your development changes, and do this for every new PR you work on.
+
+   Start by synchronizing your `main` branch with the `upstream/main` branch (more details in the [GitHub Docs](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/syncing-a-fork)):
+
+   ```bash
+   git checkout main
+   git fetch upstream
+   git merge upstream/main
+   ```
+
+   Once your `main` branch is synchronized, create a new branch from it:
+
+   ```bash
+   git checkout -b a-descriptive-name-for-my-changes
+   ```
+
+   **Do not** work on the `main` branch.
+
+4. Set up a development environment by running the following command in a conda or a virtual environment you've created for working on this library:
+
+   ```bash
+   pip install -e ".[test]"
+   ```
+
+   (If PEFT was already installed in the virtual environment, remove it with `pip uninstall peft` before reinstalling it.)
 
 If you are new to creating a pull request, follow the [Creating a pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request) guide by GitHub.
 
@@ -112,6 +148,7 @@ New parameter-efficient fine-tuning methods are developed all the time. If you w
 - [ ] Add docs in `docs/source/package_reference/` with a short explanation, paper link, usage snippet, and autodoc blocks. Explain the pros and cons compared to other methods like LoRA. Register that doc page in `docs/source/_toctree.yml`.
 - [ ] Add a runnable example under `examples/` (can be a copy of an existing example), with a short `README.md`.
 - [ ] Check the benchmarks in `method_comparison/` and add experiment settings for your new method. This is a good place to sanity check that the PEFT method trains as expected. Include one or two reasonable benchmark configurations (one default, one optimized for the benchmark).
+- [ ] Recommended: Add generic quantization support. Instead of having to explicitly add quantization layer types for each quantization method, support generic quantization. As an example, check how it's implemented in [BOFT](https://github.com/huggingface/peft/tree/main/src/peft/tuners/boft). Extend https://github.com/huggingface/peft/blob/main/tests/test_quantization.py by adding your PEFT method there. Ask maintainers for help if needed.
 
 ## Add other features
 

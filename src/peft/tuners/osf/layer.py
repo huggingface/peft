@@ -35,7 +35,7 @@ class OSFLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names: tuple[str, ...] = ("osf_svd_params",)
     # All names of other parameters that may contain adapter-related parameters
-    other_param_names: tuple[str, ...] = ("_osf_U_high", "_osf_S_high", "_osf_V_high")
+    other_param_names: tuple[str, ...] = ("_osf_U_high", "_osf_S_high", "_osf_V_high", "effective_rank")
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer

@@ -6,7 +6,7 @@ runner = Runner(
         tok_model_id=None,  # Automatically determine from ordering file
         model_id=...,  # Model ID of the base model (local path of HF model ID)
         xlora_model_id=...,  # X-LoRA Model ID of the base model (local path of HF model ID)
-        order=...,  # Ordering file to ensure compatability with PEFT
+        order=...,  # Ordering file to ensure compatibility with PEFT
         tgt_non_granular_index=3,  # Only generate scalings for the first 3 decoding tokens, and then use the last generated one
     )
 )

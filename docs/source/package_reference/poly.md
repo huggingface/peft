@@ -35,6 +35,10 @@ The abstract from the paper is:
 </hfoption>
 </hfoptions>
 
+In case you want to try out routing without training first, you can check out the [Arrow LoRA variant](./lora#Arrow).
+
+# API
+
 ## PolyConfig
 
 [[autodoc]] tuners.poly.config.PolyConfig
