@@ -493,9 +493,6 @@ class _ConvNd(nn.Module, HiraLayer):
         super().__init__()
         HiraLayer.__init__(self, base_layer)
 
-        if base_layer.groups > 1:
-            warnings.warn("HiRA adapter added to ConvNd layer with groups > 1. Merging is not supported.")
-
         self._active_adapter = adapter_name
         self._kernel_dim = base_layer.weight.dim()
 
@@ -504,6 +501,22 @@ class _ConvNd(nn.Module, HiraLayer):
     def update_layer(self, adapter_name, r, config: HiraConfig, **kwargs):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+
+        # Determine base conv parameters
+        base = self.get_base_layer()
+        groups = getattr(base, "groups", 1)
+        if groups > 1:
+            # HiRA's forward pass (and merge) rely on `base_weight * get_delta_weight(...)`, a Hadamard product
+            # that requires the delta weight to be shaped exactly like the base layer's weight, i.e.
+            # (out_channels, in_channels // groups, *kernel_size). The low-rank hira_A/hira_B factors used to build
+            # that delta weight do not have a well-defined generalization to grouped convolutions, so instead of
+            # silently constructing a layer that crashes with a confusing shape mismatch on the very first forward
+            # call, raise immediately and clearly (mirrors the equivalent, albeit merge-only, restriction in LoRA's
+            # _ConvNd, see https://github.com/huggingface/peft/pull/2403).
+            raise NotImplementedError(
+                f"HiRA does not support {type(base).__name__} layers with groups > 1 (got groups={groups}). This "
+                "applies to both the forward pass and to merging."
+            )
 
         hira_dropout = config.hira_dropout
         init_weights = config.init_weights
@@ -515,8 +528,6 @@ class _ConvNd(nn.Module, HiraLayer):
             hira_dropout_layer = nn.Identity()
 
         self.hira_dropout[adapter_name] = hira_dropout_layer
-        # Determine base conv parameters
-        base = self.get_base_layer()
         conv_cls = type(base)
         in_channels = base.in_channels
         out_channels = base.out_channels
@@ -524,7 +535,6 @@ class _ConvNd(nn.Module, HiraLayer):
         stride = base.stride
         padding = base.padding
         dilation = getattr(base, "dilation", (1,) * (base.weight.dim() - 2))
-        groups = getattr(base, "groups", 1)
         # Spatial dims for B: 1 in each spatial dimension
         spatial_ones = (1,) * (base.weight.dim() - 2)
 
@@ -643,10 +653,10 @@ class _ConvNd(nn.Module, HiraLayer):
             # conv2d 1x1
             output_tensor = (weight_B.squeeze(3).squeeze(2) @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(3)
         else:
-            output_tensor = self.conv_fn(weight_A.transpose(0, 1), weight_B)
-
-            if self.get_base_layer().groups <= 1:
-                output_tensor = output_tensor.transpose(0, 1)
+            # Note: `groups > 1` is rejected in `update_layer`, so this is always a groups == 1 base layer and the
+            # transpose below is required to match the base layer's (out_channels, in_channels, *kernel_size)
+            # weight shape.
+            output_tensor = self.conv_fn(weight_A.transpose(0, 1), weight_B).transpose(0, 1)
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
