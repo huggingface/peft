@@ -220,6 +220,8 @@ class PsoftLayer(BaseTunerLayer):
 
         self.merged_adapters: list[str] = []
         self._disable_adapters = False
+        # flag to enable/disable casting of input to weight dtype during forward call
+        self.cast_input_dtype_enabled = True
         self.kwargs = kwargs
 
         self.fan_in_fan_out = False

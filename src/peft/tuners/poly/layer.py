@@ -41,6 +41,8 @@ class PolyLayer(BaseTunerLayer):
         self.poly_lora_A = nn.ParameterDict()
         self.poly_lora_B = nn.ParameterDict()
         self.kwargs = kwargs
+        # flag to enable/disable casting of input to weight dtype during forward call
+        self.cast_input_dtype_enabled = True
 
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):

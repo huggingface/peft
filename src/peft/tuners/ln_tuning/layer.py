@@ -38,6 +38,8 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
         self.update_layer(self.base_layer, adapter_name, config=config)
         self._active_adapter = adapter_name
         self.merged_adapters = []
+        # flag to enable/disable casting of input to weight dtype during forward call
+        self.cast_input_dtype_enabled = True
 
         in_features, out_features = _get_in_out_features(self.get_base_layer())
         self.in_features = in_features

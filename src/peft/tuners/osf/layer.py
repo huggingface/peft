@@ -51,6 +51,8 @@ class OSFLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
+        # flag to enable/disable casting of input to weight dtype during forward call
+        self.cast_input_dtype_enabled = True
 
         # Get layer dimensions
         base_layer = self.get_base_layer()

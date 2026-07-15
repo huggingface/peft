@@ -70,6 +70,8 @@ class AdamssLayer(BaseTunerLayer):
         self.exp_avg_unc_B = {}
         self._disable_adapters = False
         self.merged_adapters = []
+        # flag to enable/disable casting of input to weight dtype during forward call
+        self.cast_input_dtype_enabled = True
 
     def reset_importance(self, adapter_name: str) -> None:
         """

@@ -131,6 +131,8 @@ class GloraLayer(BaseTunerLayer):
         self.merged_adapters: list[str] = []
         self._disable_adapters: bool = False
         self._active_adapter: str | list[str] = []
+        # flag to enable/disable casting of input to weight dtype during forward call
+        self.cast_input_dtype_enabled: bool = True
         self.kwargs: dict[str, Any] = dict(kwargs)
 
     def update_layer(self, adapter_name: str, r: int, config: GloraConfig, **kwargs) -> None:

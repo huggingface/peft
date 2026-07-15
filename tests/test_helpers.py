@@ -27,9 +27,35 @@ from peft.helpers import (
     disable_input_dtype_casting,
     rescale_adapter_scale,
 )
+from peft.tuners.adamss.layer import AdamssLayer
+from peft.tuners.beft.layer import BeftLayer
+from peft.tuners.c3a.layer import C3ALayer
+from peft.tuners.delora.layer import DeloraLayer
+from peft.tuners.fourierft.layer import FourierFTLayer
+from peft.tuners.frod.layer import FrodLayer
+from peft.tuners.glora.layer import GloraLayer
+from peft.tuners.gralora.layer import GraloraLayer
+from peft.tuners.ia3.layer import IA3Layer
+from peft.tuners.lily.layer import LilyLayer
+from peft.tuners.ln_tuning.config import LNTuningConfig
+from peft.tuners.ln_tuning.layer import LNTuningLayer
 from peft.tuners.lora.config import MontecloraConfig
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.lora.monteclora import MontecloraSampler
+from peft.tuners.osf.layer import OSFLayer
+from peft.tuners.peanut.layer import PeanutLayer
+from peft.tuners.poly.layer import PolyLayer
+from peft.tuners.psoft.layer import PsoftLayer
+from peft.tuners.pvera.layer import PveraLayer
+from peft.tuners.road.layer import RoadLayer
+from peft.tuners.shira.layer import ShiraLayer
+from peft.tuners.tinylora.layer import TinyLoraLayer
+from peft.tuners.trainable_tokens.layer import TrainableTokensLayer
+from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.tuners.unilora.layer import UniLoraLayer
+from peft.tuners.vblora.layer import VBLoRALayer
+from peft.tuners.vera.layer import VeraLayer
+from peft.tuners.waveft.layer import WaveFTLayer
 from peft.utils import infer_device
 
 from .testing_utils import hub_online_once
@@ -481,6 +507,101 @@ class TestDisableInputDtypeCasting:
         msg = r"expected m.*1 and m.*2 to have the same dtype"
         with pytest.raises(RuntimeError, match=msg):
             model(inputs)
+
+
+class TestDisableInputDtypeCastingMissingAttribute:
+    """Regression test for a bug in ``disable_input_dtype_casting``.
+
+    The context manager visits every ``BaseTunerLayer`` in the model and unconditionally reads
+    ``module.cast_input_dtype_enabled`` without a default (unlike ``_cast_input_dtype``, which safely falls back
+    to ``getattr(self, "cast_input_dtype_enabled", True)``). Many tuner layer classes never set this attribute in
+    their ``__init__`` (unlike e.g. ``LoraLayer`` or ``MissLayer``), so merely instantiating one of them and
+    entering the context manager raised an ``AttributeError``, regardless of whether that particular tuner type
+    ever reads the flag itself.
+    """
+
+    def _check(self, layer):
+        # The layer classes under test are plain mixins, not nn.Module subclasses by themselves (only the
+        # concrete Linear/Embedding/etc. classes used in production are). Registering a non-nn.Module instance as
+        # an attribute does *not* add it to `named_modules()`, which would make the test vacuous. So first make
+        # sure our test setup actually reproduces a real, visited BaseTunerLayer submodule.
+        model = nn.Module()
+        model.layer = layer
+        assert any(isinstance(m, BaseTunerLayer) for _, m in model.named_modules())
+
+        with disable_input_dtype_casting(model):
+            assert layer.cast_input_dtype_enabled is False
+        # restored after leaving the context
+        assert layer.cast_input_dtype_enabled is True
+
+    @pytest.mark.parametrize(
+        "layer_cls, layer_kwargs",
+        [
+            (AdamssLayer, {}),
+            (BeftLayer, {}),
+            (C3ALayer, {}),
+            (DeloraLayer, {}),
+            (FourierFTLayer, {}),
+            (FrodLayer, {}),
+            (GloraLayer, {}),
+            (GraloraLayer, {}),
+            (IA3Layer, {"is_feedforward": False}),
+            (LilyLayer, {}),
+            (OSFLayer, {}),
+            (PeanutLayer, {}),
+            (PolyLayer, {}),
+            (PsoftLayer, {}),
+            (PveraLayer, {}),
+            (RoadLayer, {}),
+            (ShiraLayer, {}),
+            (TinyLoraLayer, {"layer_idx": 0}),
+            (UniLoraLayer, {}),
+            (VBLoRALayer, {}),
+            (VeraLayer, {}),
+            (WaveFTLayer, {}),
+        ],
+        ids=[
+            "adamss",
+            "beft",
+            "c3a",
+            "delora",
+            "fourierft",
+            "frod",
+            "glora",
+            "gralora",
+            "ia3",
+            "lily",
+            "osf",
+            "peanut",
+            "poly",
+            "psoft",
+            "pvera",
+            "road",
+            "shira",
+            "tinylora",
+            "unilora",
+            "vblora",
+            "vera",
+            "waveft",
+        ],
+    )
+    def test_disable_input_dtype_casting_no_attribute_error(self, layer_cls, layer_kwargs):
+        # Build the same way the real concrete subclasses do: nn.Module.__init__ followed by the mixin's
+        # __init__. This does not require going through update_layer or a full PeftConfig/get_peft_model.
+        class _Wrapped(nn.Module, layer_cls):
+            def __init__(self, base_layer):
+                nn.Module.__init__(self)
+                layer_cls.__init__(self, base_layer, **layer_kwargs)
+
+        self._check(_Wrapped(nn.Linear(8, 8)))
+
+    def test_disable_input_dtype_casting_no_attribute_error_ln_tuning(self):
+        # LNTuningLayer already subclasses nn.Module directly, no wrapping needed.
+        self._check(LNTuningLayer(nn.Linear(8, 8), "default", LNTuningConfig()))
+
+    def test_disable_input_dtype_casting_no_attribute_error_trainable_tokens(self):
+        # TrainableTokensLayer already subclasses nn.Module directly, no wrapping needed.
+        self._check(TrainableTokensLayer(nn.Embedding(10, 8), "default"))
 
 
 class TestDoraCaching:
