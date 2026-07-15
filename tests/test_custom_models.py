@@ -3685,6 +3685,84 @@ class TestPeftCustomModel(PeftCommonTester):
         assert set(lm_head.token_adapter.trainable_tokens_delta) == set()
         assert set(lm_head.token_adapter.trainable_tokens_original) == set()
 
+    def test_delete_trainable_adalora_adapter_then_add_new_one(self):
+        # AdaLoRA tracks its (at most one) trainable adapter's name and RankAllocator outside of the usual
+        # peft_config/tuner-layer bookkeeping (`model.base_model.trainable_adapter_name`/`.rankallocator`).
+        # Deleting that adapter and then adding a new trainable one used to leave both still pointing at the
+        # deleted adapter's name, crashing `update_and_allocate` with a bare `KeyError` instead of picking up the
+        # newly added trainable adapter. (`AdaLoraModel.forward`'s orth-reg loss addition reads the same stale
+        # name and would crash identically for a loss-bearing model, e.g. a real transformers model with
+        # `labels=`; not reproduced here since plain `MLP` has no `.loss` to trigger that code path.)
+        model = MLP()
+        config0 = AdaLoraConfig(target_modules=["lin0", "lin1"], total_step=10, tinit=0, tfinal=0)
+        model = get_peft_model(model, config0).to(self.torch_device)
+        inputs = self.prepare_inputs_for_testing()
+
+        model(**inputs).sum().backward()  # populates .grad, needed by update_and_allocate's importance scoring
+        model.base_model.update_and_allocate(1)  # does not raise
+        assert model.base_model.trainable_adapter_name == "default"
+
+        model.delete_adapter("default")
+        assert model.base_model.trainable_adapter_name is None
+        assert model.base_model.rankallocator is None
+
+        config1 = AdaLoraConfig(target_modules=["lin0", "lin1"], total_step=10, tinit=0, tfinal=0)
+        model.add_adapter("second", config1)
+        model.set_adapter("second")
+
+        assert model.base_model.trainable_adapter_name == "second"
+        model(**inputs).sum().backward()  # does not raise
+        model.base_model.update_and_allocate(1)  # used to raise KeyError: 'default'
+
+    def test_update_and_allocate_no_trainable_adalora_adapter_raises(self):
+        # Calling update_and_allocate with no trainable AdaLoRA adapter configured (e.g. right after deleting the
+        # only trainable one) should raise a clear, actionable error instead of a bare KeyError.
+        model = MLP()
+        config = AdaLoraConfig(target_modules=["lin0", "lin1"], total_step=10, tinit=0, tfinal=0)
+        model = get_peft_model(model, config).to(self.torch_device)
+        model.delete_adapter("default")
+
+        with pytest.raises(ValueError, match="no trainable AdaLoRA adapter"):
+            model.base_model.update_and_allocate(1)
+
+    @pytest.mark.parametrize(
+        "init_r, target_r",
+        [
+            (8, 8),  # target_r == init_r: budget_schedule's cubic term always evaluates to init_bgt
+            (8, 10),  # target_r > init_r: budget increases past init_bgt immediately
+        ],
+    )
+    def test_update_and_allocate_target_r_at_least_init_r_does_not_crash(self, init_r, target_r):
+        # mask_to_budget's k = init_bgt - budget was 0 (or negative) whenever target_r >= init_r, which is
+        # invalid for torch.kthvalue (requires 1 <= k <= numel). target_r == init_r in particular is a
+        # legitimate way to use AdaLoRA's importance scoring/orthogonal regularization without ever pruning rank.
+        model = MLP()
+        config = AdaLoraConfig(
+            target_modules=["lin0", "lin1"],
+            total_step=10,
+            tinit=0,
+            tfinal=0,
+            deltaT=1,
+            init_r=init_r,
+            target_r=target_r,
+        )
+        model = get_peft_model(model, config).to(self.torch_device)
+        inputs = self.prepare_inputs_for_testing()
+        model(**inputs).sum().backward()
+        model.base_model.update_and_allocate(1)  # used to raise RuntimeError: kthvalue(): selected number k ...
+
+    def test_update_and_allocate_target_r_less_than_init_r_still_works(self):
+        # Negative control for the two tests above: the ordinary target_r < init_r schedule was never affected
+        # by the kthvalue(k<=0) bug and should keep working exactly as before.
+        model = MLP()
+        config = AdaLoraConfig(
+            target_modules=["lin0", "lin1"], total_step=10, tinit=0, tfinal=0, deltaT=1, init_r=8, target_r=4
+        )
+        model = get_peft_model(model, config).to(self.torch_device)
+        inputs = self.prepare_inputs_for_testing()
+        model(**inputs).sum().backward()
+        model.base_model.update_and_allocate(1)  # does not raise
+
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)

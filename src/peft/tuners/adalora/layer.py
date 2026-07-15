@@ -474,10 +474,21 @@ class RankAllocator:
             triplet_ipt[name_E] = sum_ipt.view(-1, 1)
             all_score.append(sum_ipt.view(-1))
 
+        # Number of (currently unmasked) triplets that need to be pruned this step to reach `budget`.
+        k = self.init_bgt - budget
+        if k <= 0:
+            # There is nothing to prune this step: `budget` (how many units we're allowed to keep) is already at
+            # or above `init_bgt` (how many units we started with). This is the steady state whenever
+            # `target_r >= init_r` -- most notably `target_r == init_r`, where `budget_schedule`'s cubic term
+            # always evaluates to exactly `init_bgt` regardless of the step -- but it can also occur transiently
+            # for an ordinary `target_r < init_r` schedule. `torch.kthvalue` requires `1 <= k <= numel`, so there
+            # is no valid "prune 0 (or fewer than 0) units" call to make; leave every triplet unmasked instead.
+            return {}
+
         # Get the threshold by ranking ipt
         mask_threshold = torch.kthvalue(
             torch.cat(all_score),
-            k=self.init_bgt - budget,
+            k=k,
         )[0].item()
 
         rank_pattern = {}
@@ -489,8 +500,29 @@ class RankAllocator:
                     rank_pattern[n] = (~(triplet_ipt[n] <= mask_threshold)).view(-1).tolist()
         return rank_pattern
 
+    def _sync_cache_devices(self, model):
+        """
+        Move cached importance-tracking tensors back onto the same device as their live parameter.
+
+        `RankAllocator` is a plain object, not an `nn.Module`, so it isn't part of the model's module tree and
+        has no way to learn about a `model.to(device)` call the way per-layer adapter weights do (see
+        `_move_adapter_to_device_of_base_layer`). If the model is moved to a new device after `ipt`/
+        `exp_avg_ipt`/`exp_avg_unc` were already populated on the old one, those caches go stale: the next
+        `update_ipt` call would try to combine an old-device cached tensor with a new-device live one, and
+        `mask_to_budget` would try to compare a cached tensor against a new-device mask threshold. Same
+        staleness bug class as DEFT's cached merge factor going stale across `model.to(device)` (#3412); the fix
+        here re-syncs on access instead of via a device-aware container, since this cache lives outside the
+        module tree that `.to()` recurses into.
+        """
+        for n, p in model.named_parameters():
+            if n in self.exp_avg_ipt and self.exp_avg_ipt[n].device != p.device:
+                self.ipt[n] = self.ipt[n].to(p.device)
+                self.exp_avg_ipt[n] = self.exp_avg_ipt[n].to(p.device)
+                self.exp_avg_unc[n] = self.exp_avg_unc[n].to(p.device)
+
     def update_and_allocate(self, model, global_step, force_mask=False):
         # # Update the importance score and allocate the budget
+        self._sync_cache_devices(model)
         if global_step < self.peft_config.total_step - self.peft_config.tfinal:
             self.update_ipt(model)
         budget, mask_ind = self.budget_schedule(global_step)

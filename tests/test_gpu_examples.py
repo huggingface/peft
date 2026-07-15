@@ -4972,6 +4972,39 @@ class TestAutoCast(unittest.TestCase):
             assert outputs.dtype == precision
 
 
+@require_non_cpu
+class TestAdaLoraRankAllocatorDeviceSync:
+    device = infer_device()
+
+    def test_update_and_allocate_after_model_to_device(self):
+        # RankAllocator (src/peft/tuners/adalora/layer.py) is a plain object, not an nn.Module, so it isn't part
+        # of the model's module tree: `model.to(device)` has no way to move its cached importance-tracking
+        # tensors (`ipt`/`exp_avg_ipt`/`exp_avg_unc`) along with the live parameters, unlike per-layer adapter
+        # weights (see `_move_adapter_to_device_of_base_layer`). If `update_and_allocate` had already populated
+        # those caches on the old device before the model is moved, the next call used to crash blending the
+        # old-device cache with the new-device live tensors. Same staleness bug class as DEFT's cached merge
+        # factor going stale across `model.to(device)` (#3412).
+        torch.manual_seed(0)
+        model = SimpleModel()
+        # tinit is kept large enough that no rank masking is ever triggered in this test (that failure mode --
+        # torch.kthvalue(k=0) -- is a separate bug covered in test_custom_models.py), isolating the device
+        # staleness from it: only `update_ipt`'s importance-score bookkeeping is being exercised here.
+        config = AdaLoraConfig(target_modules=["linear_transform"], total_step=20, tinit=10, tfinal=0, deltaT=1)
+        model = get_peft_model(model, config)
+
+        input_ids = torch.randint(0, 1000, (2, 10))
+        model(input_ids).sum().backward()
+        model.base_model.update_and_allocate(1)  # populates the caches on CPU
+
+        model.to(self.device)
+
+        input_ids = input_ids.to(self.device)
+        model(input_ids).sum().backward()
+        # This used to raise: "Expected all tensors to be on the same device, but found at least two devices,
+        # {self.device} and cpu" when blending the still-CPU-resident cache with the now-on-device live tensors.
+        model.base_model.update_and_allocate(2)
+
+
 class TestFSDPWrap:
     """
     Test that we can successfully initialize an FSDP instance of the module.

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import warnings
+from typing import Optional
 
 import torch
 from transformers.pytorch_utils import Conv1D
@@ -73,6 +74,12 @@ class AdaLoraModel(LoraModel):
 
     # Note: don't redefine prefix or tuner_layer_cls here, it should be inherited from LoraModel
     target_module_mapping = TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING
+    # The name of the (at most one) adapter that is currently trainable, and its RankAllocator. Both are kept in
+    # sync by `inject_adapter`/`delete_adapter` below, and default to None so that a model without any trainable
+    # AdaLoRA adapter (e.g. right after deleting the only one) has well-defined state instead of missing
+    # attributes.
+    trainable_adapter_name = None
+    rankallocator = None
 
     def __init__(self, model, config, adapter_name, **kwargs):
         super().__init__(model, config, adapter_name, **kwargs)
@@ -88,11 +95,50 @@ class AdaLoraModel(LoraModel):
                 "When using multiple adapters, set inference_mode to True for all adapters except the one you want to train."
             )
 
+        # Note: `trainable_adapter_name`/`rankallocator` for `adapter_name` are set up in `inject_adapter`, which
+        # `BaseTuner.__init__` (called above via `super().__init__`) already invokes for this first adapter. This
+        # keeps a single code path for both the initial adapter and any later ones added via `add_adapter`.
+
+    def inject_adapter(
+        self,
+        model: torch.nn.Module,
+        adapter_name: str,
+        autocast_adapter_dtype: bool = True,
+        low_cpu_mem_usage: bool = False,
+        state_dict: Optional[dict[str, torch.Tensor]] = None,
+    ) -> None:
+        super().inject_adapter(
+            model,
+            adapter_name,
+            autocast_adapter_dtype=autocast_adapter_dtype,
+            low_cpu_mem_usage=low_cpu_mem_usage,
+            state_dict=state_dict,
+        )
+        # `_check_new_adapter_config` (called by the `inject_adapter` above) already guarantees that at most one
+        # adapter is trainable (not in inference_mode) at a time, so the adapter just injected is the trainable
+        # one iff it isn't in inference_mode. Track it here so that `forward` and `update_and_allocate` know which
+        # adapter's config/RankAllocator to use. Since this method runs for every adapter injection -- the first
+        # one (via `__init__`) and every subsequent `add_adapter` call alike -- it's the single place that keeps
+        # `trainable_adapter_name`/`rankallocator` in sync across the whole adapter lifecycle, including
+        # delete_adapter (see below) followed by add_adapter re-adding a new trainable adapter.
         if self.peft_config[adapter_name].inference_mode:
             _freeze_adapter(self.model, adapter_name)
         else:
             self.trainable_adapter_name = adapter_name
-            self.rankallocator = RankAllocator(self.model, self.peft_config[adapter_name], self.trainable_adapter_name)
+            self.rankallocator = RankAllocator(self.model, self.peft_config[adapter_name], adapter_name)
+
+    def delete_adapter(self, adapter_name: str) -> None:
+        super().delete_adapter(adapter_name)
+        if adapter_name == self.trainable_adapter_name:
+            # The trainable adapter was just deleted: there is no longer a valid adapter for
+            # `trainable_adapter_name`/`rankallocator` to refer to. Reset both to the same "no trainable adapter"
+            # state a freshly-constructed, inference-mode-only AdaLoraModel would have, rather than leaving them
+            # pointing at a name that no longer exists in `self.peft_config` (which crashes `forward`/
+            # `update_and_allocate` with a bare `KeyError` instead of the clear error in `update_and_allocate` or a
+            # graceful no-op in `forward`). A subsequent `add_adapter` call with a trainable AdaLoraConfig
+            # re-populates both via `inject_adapter` above.
+            self.trainable_adapter_name = None
+            self.rankallocator = None
 
     def _check_new_adapter_config(self, config: LoraConfig) -> None:
         """
@@ -230,6 +276,12 @@ class AdaLoraModel(LoraModel):
         outputs = self.model.forward(*args, **kwargs)
 
         if (getattr(outputs, "loss", None) is not None) and isinstance(outputs.loss, torch.Tensor):
+            if self.trainable_adapter_name is None:
+                # No trainable AdaLoRA adapter is currently configured (e.g. it was deleted via `delete_adapter`
+                # and no new trainable adapter has been added since). There is nothing to orthogonally
+                # regularize in that case, so leave the loss untouched instead of crashing.
+                return outputs
+
             # Calculate the orthogonal regularization
             orth_reg_weight = self.peft_config[self.trainable_adapter_name].orth_reg_weight
 
@@ -323,6 +375,13 @@ class AdaLoraModel(LoraModel):
         >>> optimizer.zero_grad()
         ```
         """
+        if self.trainable_adapter_name is None:
+            raise ValueError(
+                "There is no trainable AdaLoRA adapter to update. This can happen if the adapter that used to be "
+                "trainable was removed via `delete_adapter` and no new trainable adapter was added since. Call "
+                "`add_adapter` with an `AdaLoraConfig` that has `inference_mode=False` before calling "
+                "`update_and_allocate` again."
+            )
         lora_config = self.peft_config[self.trainable_adapter_name]
         # Update the importance score and allocate the budget
         if global_step < lora_config.total_step - lora_config.tfinal:
