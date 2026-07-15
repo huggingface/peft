@@ -111,14 +111,14 @@ class TestDeftMerge:
         assert torch.allclose(layer.base_layer.weight, w0, atol=1e-5)
 
     def test_merge_unmerge_roundtrip_precise_for_bf16_base(self):
-        # User-facing guarantee: merging then unmerging a DEFT adapter restores the base weights.
-        # merge() caches its factor in float32; downcasting it to the base dtype (the bug this fixes)
-        # makes unmerge recompute a slightly different delta than merge applied, so the roundtrip
-        # drifts further than the plain bf16 add/subtract rounding. Measure the base-weight roundtrip
-        # error both ways and assert the float32-cached factor is meaningfully more accurate.
+        # User-facing guarantee: merging then unmerging a DEFT adapter restores the base weights. This requires
+        # the cached factor to stay in float32: rounding it to the base dtype first makes unmerge recompute a
+        # delta that differs from the one merge applied, so the roundtrip drifts further than plain bf16 storage
+        # rounding alone. Measure the base-weight roundtrip error both ways and assert the float32-cached factor
+        # is meaningfully more accurate.
         #
-        # `deft_P` is scaled well above its default init so the effect is large enough to observe
-        # over ordinary bf16 storage rounding (see #3412 for the empirical detail).
+        # `deft_P` is scaled well above its default init so the effect is large enough to observe over ordinary
+        # bf16 storage rounding.
         def roundtrip_max_abs_error(downcast_cached_factor: bool) -> float:
             torch.manual_seed(0)
             model = MLP().to(torch.bfloat16)
@@ -134,8 +134,8 @@ class TestDeftMerge:
             w0 = layer.base_layer.weight.detach().clone()
             peft_model.merge_adapter()
             if downcast_cached_factor:
-                # Reproduce the pre-fix behaviour: the cached factor rounded to the base dtype, so
-                # unmerge recomputes the delta from the rounded factor instead of the exact one.
+                # Force the cached factor through the base dtype and back, so unmerge recomputes the delta from
+                # a rounded factor instead of the exact float32 one merge() cached.
                 dtype = layer.base_layer.weight.dtype
                 rounded = layer._cached_merge_factor["default"].to(dtype).to(torch.float32)
                 layer._cached_merge_factor["default"] = rounded
@@ -144,6 +144,7 @@ class TestDeftMerge:
 
         err_float32 = roundtrip_max_abs_error(downcast_cached_factor=False)
         err_downcast = roundtrip_max_abs_error(downcast_cached_factor=True)
-        # A fixed margin rather than a bare `<`, since the two errors being merely unequal isn't a
-        # reliable signal on its own -- require the float32 path to be at least 10% more accurate.
+        # Require a real margin, not mere inequality: two error values simply differing isn't on its own a
+        # reliable signal that the difference is meaningful, so require the float32 path to be at least 10% more
+        # accurate.
         assert err_float32 < 0.9 * err_downcast
