@@ -47,6 +47,9 @@ class PeanutLayer(BaseTunerLayer):
         self._disable_adapters = False
         self.merged_adapters = []
         self._cached_delta_weights = {}
+        # Snapshot of the base weight before any adapter was ever merged into it, lazily captured the first
+        # time it is needed (see `_get_pristine_base_weight`).
+        self._pristine_base_weight: Optional[torch.Tensor] = None
 
         base_layer = self.get_base_layer()
 
@@ -107,6 +110,22 @@ class PeanutLayer(BaseTunerLayer):
         else:
             nn.init.kaiming_uniform_(self.peanut_B[adapter_name].weight, a=math.sqrt(5))
 
+    def _get_pristine_base_weight(self) -> torch.Tensor:
+        """Return this layer's original base weight, snapshotted before any adapter was ever merged into it.
+
+        PEANuT's delta is ``Tweaker(W)``, i.e. it is explicitly conditioned on the base weight. Computing all
+        adapters' deltas against the same weight snapshot before mutating it (as `merge` does for the adapters
+        passed in a single call) is correct. But separate, sequential `merge()` calls must reuse that same
+        frozen snapshot: recomputing it from the *current* `base_layer.weight` would pick up whatever earlier
+        calls already merged into it, silently and irreversibly diverging from the correct, order-independent
+        result. Caching the snapshot once, the first time it is needed, and reusing it for every later call
+        guarantees every delta is computed against the identical, truly original weight, no matter the call
+        order or how many separate `merge()` calls are made.
+        """
+        if self._pristine_base_weight is None:
+            self._pristine_base_weight = self.get_base_layer().weight.data.detach().clone().cpu()
+        return self._pristine_base_weight.to(self.get_base_layer().weight.device)
+
 
 class Linear(nn.Module, PeanutLayer):
     # PEANuT implemented in a dense layer
@@ -155,7 +174,7 @@ class Linear(nn.Module, PeanutLayer):
         return (delta_w * scaling).transpose(0, 1)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
-        base_weight = self.get_base_layer().weight
+        base_weight = self._get_pristine_base_weight()
         return self._compute_delta_weight(adapter, base_weight)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -164,7 +183,10 @@ class Linear(nn.Module, PeanutLayer):
             return
 
         base_layer = self.get_base_layer()
-        merge_base_weight = base_layer.weight.data.detach().clone()
+        # Use the layer's tracked original weight rather than the current (possibly already-merged) one, so
+        # that this and any later, separate `merge()` call all compute their deltas against the same
+        # reference. See `_get_pristine_base_weight` for why this matters.
+        merge_base_weight = self._get_pristine_base_weight()
 
         for active_adapter in adapter_names:
             if active_adapter not in self.peanut_A:

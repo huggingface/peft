@@ -58,6 +58,9 @@ class FrodLayer(BaseTunerLayer):
         self._disable_adapters = False
         self.merged_adapters = []
         self._frod_merged_delta = {}
+        # Snapshot of the base weight before any adapter was ever merged into it, lazily captured the first
+        # time it is needed (see `_get_pristine_base_weight`).
+        self._pristine_base_weight: Optional[torch.Tensor] = None
 
         self.in_features, self.out_features = _get_in_out_features(self.get_base_layer())
         self.kwargs = kwargs
@@ -150,6 +153,23 @@ class FrodLayer(BaseTunerLayer):
             with torch.no_grad():
                 nn.init.zeros_(self.frod_lambda_s_values[adapter_name])
 
+    def _get_pristine_base_weight(self) -> torch.Tensor:
+        """Return this layer's original base weight, snapshotted before any adapter was ever merged into it.
+
+        FRoD reconstructs the fully adapted weight directly and `get_delta_weight` returns only the difference
+        to the base weight, so that difference must be taken against a fixed reference. A single `merge()`
+        call already handles multiple adapters correctly because every delta is computed before the base
+        weight is mutated (see the comment in `merge`), but separate, sequential `merge()` calls need that
+        same frozen reference: otherwise a later call reads a base weight that already includes an earlier
+        call's merged delta and silently computes the wrong difference. Caching this once, the first time it
+        is needed, and reusing it thereafter guarantees every delta -- no matter the call order or how many
+        separate `merge()` calls are made -- is computed against the identical, truly original weight.
+        """
+        if self._pristine_base_weight is None:
+            self._pristine_base_weight = self.get_base_layer().weight.data.detach().clone().cpu()
+        base_weight = self.get_base_layer().weight
+        return self._pristine_base_weight.to(device=base_weight.device, dtype=base_weight.dtype)
+
 
 class Linear(nn.Linear, FrodLayer):
     def __init__(
@@ -184,7 +204,9 @@ class Linear(nn.Linear, FrodLayer):
 
         base_layer = self.get_base_layer()
         adapter_deltas = []
-        # FRoD deltas are computed against the current base weight, so compute all deltas before mutating it.
+        # Each delta is computed against the layer's tracked original weight (see `_get_pristine_base_weight`),
+        # so gathering them all before mutating the base weight is not strictly required for correctness
+        # anymore, but is kept regardless as it avoids redundant reads of a partially-merged base weight.
         for active_adapter in adapter_names:
             if active_adapter in self.frod_lambda_l.keys():
                 adapter_deltas.append((active_adapter, self.get_delta_weight(active_adapter)))
@@ -234,7 +256,10 @@ class Linear(nn.Linear, FrodLayer):
         weight = self.get_base_layer().weight
         device = weight.device
         dtype = weight.dtype
-        base_weight = transpose(weight, self.fan_in_fan_out)
+        # Use the layer's tracked original weight rather than the current (possibly already-merged) one, so
+        # that this and any later, separate `merge()` call all compute their deltas against the same
+        # reference. See `_get_pristine_base_weight` for why this matters.
+        base_weight = transpose(self._get_pristine_base_weight(), self.fan_in_fan_out)
         U, V, S_sparse, lambda_l = self._get_frod_tensors(adapter, device=device, dtype=dtype)
         S = S_sparse.to_dense()
         L = torch.diag_embed(lambda_l)
