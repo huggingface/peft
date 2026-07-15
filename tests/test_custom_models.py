@@ -389,6 +389,8 @@ TEST_CASES = [
         {"target_modules": ["conv1d"], "r": 2, "use_effective_conv2d": False},
     ),
     ("Conv2d 1x1 LOHA", "Conv2d1x1", LoHaConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d Groups LOHA", "Conv2dGroups", LoHaConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d Groups2 LOHA", "Conv2dGroups2", LoHaConfig, {"target_modules": ["conv2d"]}),
     # LoKr
     ("Vanilla MLP 1 LOKR", "MLP", LoKrConfig, {"target_modules": "lin0"}),
     ("Vanilla MLP 2 LOKR", "MLP", LoKrConfig, {"target_modules": ["lin0"]}),
@@ -449,6 +451,8 @@ TEST_CASES = [
             "decompose_factor": 4,
         },
     ),
+    ("Conv2d Groups LOKR", "Conv2dGroups", LoKrConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d Groups2 LOKR", "Conv2dGroups2", LoKrConfig, {"target_modules": ["conv2d"]}),
     ########
     # OFT #
     ########
@@ -3082,6 +3086,12 @@ class TestPeftCustomModel(PeftCommonTester):
 
         conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
         if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
+            atol, rtol = 1e-3, 1e-3
+
+        if issubclass(config_cls, (LoHaConfig, LoKrConfig)) and model_id in ("Conv2dGroups", "Conv2dGroups2"):
+            # LoHa/LoKr recombine their delta weight from several low-rank factors (Hadamard/Kronecker products)
+            # before merging into a grouped conv's weight, which accumulates more floating-point rounding than a
+            # plain LoRA `B @ A` merge, similar in spirit to the "more instability with Conv" case above.
             atol, rtol = 1e-3, 1e-3
 
         if issubclass(config_cls, OFTConfig):
