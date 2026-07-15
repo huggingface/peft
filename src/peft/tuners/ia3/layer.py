@@ -219,6 +219,41 @@ class _ConvNd(nn.Module, IA3Layer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
+    def _get_ia3_scaling(self, active_adapter: str) -> torch.Tensor:
+        """
+        Return the (IA)^3 scaling tensor for `active_adapter`, reshaped so that it can be broadcast directly
+        against `self.get_base_layer().weight` (shape `(out_channels, in_channels // groups, *kernel_size)`).
+
+        - Non-feedforward layers rescale the *output* channels. Grouped convolutions still keep the full
+          `out_channels` in dim 0 of the weight tensor (only the input-channel dim is split by `groups`), so a
+          simple transpose from `(1, out_channels, 1, ...)` to `(out_channels, 1, 1, ...)` broadcasts correctly
+          no matter the value of `groups`.
+        - Feedforward layers rescale the *input* channels instead. A grouped convolution's weight only stores
+          `in_channels // groups` entries along its input-channel dimension (dim 1), since each output channel
+          only ever convolves with the input channels of its own group. Naively broadcasting the full
+          `in_channels`-sized scaling vector against that dimension is therefore either a shape mismatch (when
+          `in_channels // groups != 1`) or, worse, silently wrong. To broadcast correctly we split both the
+          output-channel dimension of the weight and the scaling vector into `groups` chunks, so that each
+          chunk of output channels is lined up with the scaling values of the input channels that it actually
+          consumes.
+        """
+        base_layer = self.get_base_layer()
+        ia3_scaling = self.ia3_l[active_adapter].data
+
+        if not self.is_feedforward:
+            return ia3_scaling.transpose(0, 1)
+
+        groups = base_layer.groups
+        if groups == 1:
+            return ia3_scaling
+
+        weight = base_layer.weight
+        out_channels, in_channels_per_group = weight.shape[0], weight.shape[1]
+        kernel_singleton_dims = (1,) * (weight.dim() - 2)
+        ia3_scaling = ia3_scaling.reshape(groups, 1, in_channels_per_group, *kernel_singleton_dims)
+        ia3_scaling = ia3_scaling.expand(groups, out_channels // groups, in_channels_per_group, *weight.shape[2:])
+        return ia3_scaling.reshape(out_channels, in_channels_per_group, *weight.shape[2:])
+
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
@@ -241,9 +276,7 @@ class _ConvNd(nn.Module, IA3Layer):
             if active_adapter in self.ia3_l.keys():
                 base_layer = self.get_base_layer()
                 orig_dtype = base_layer.weight.data.dtype
-                ia3_scaling = self.ia3_l[active_adapter].data
-                if not self.is_feedforward:
-                    ia3_scaling = ia3_scaling.transpose(0, 1)
+                ia3_scaling = self._get_ia3_scaling(active_adapter)
 
                 if safe_merge:
                     output_weight = torch.mul(base_layer.weight.data, ia3_scaling).clone()
@@ -278,9 +311,7 @@ class _ConvNd(nn.Module, IA3Layer):
                 base_layer = self.get_base_layer()
                 orig_dtype = base_layer.weight.data.dtype
                 # divide by (IA)^3 vector. Add tolerace to avoid division by zero
-                ia3_scaling = self.ia3_l[active_adapter].data
-                if not self.is_feedforward:
-                    ia3_scaling = ia3_scaling.transpose(0, 1)
+                ia3_scaling = self._get_ia3_scaling(active_adapter)
                 base_layer.weight.data = torch.div(base_layer.weight.data, ia3_scaling + 1e-8).to(orig_dtype)
 
                 if not self.is_feedforward and (base_layer.bias is not None):

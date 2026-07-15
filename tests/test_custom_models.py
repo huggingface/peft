@@ -332,6 +332,29 @@ TEST_CASES = [
         IA3Config,
         {"target_modules": ["conv3d", "lin0"], "feedforward_modules": ["conv3d", "lin0"]},
     ),
+    # regression tests: merging IA3 into a grouped conv layer with is_feedforward=True used to raise a shape
+    # mismatch error, see `peft.tuners.ia3.layer._ConvNd._get_ia3_scaling` for why grouped convs need special
+    # handling. The non-feedforward cases are included as a negative control, since that path was never affected.
+    ("Conv2d Groups IA3", "Conv2dGroups", IA3Config, {"target_modules": ["conv2d"], "feedforward_modules": []}),
+    (
+        "Conv2d Groups IA3 feedforward",
+        "Conv2dGroups",
+        IA3Config,
+        {"target_modules": ["conv2d"], "feedforward_modules": ["conv2d"]},
+    ),
+    (
+        "Conv2d Groups2 IA3 feedforward",
+        "Conv2dGroups2",
+        IA3Config,
+        {"target_modules": ["conv2d"], "feedforward_modules": ["conv2d"]},
+    ),
+    ("Conv3d Groups IA3", "Conv3dGroups", IA3Config, {"target_modules": ["conv3d"], "feedforward_modules": []}),
+    (
+        "Conv3d Groups IA3 feedforward",
+        "Conv3dGroups",
+        IA3Config,
+        {"target_modules": ["conv3d"], "feedforward_modules": ["conv3d"]},
+    ),
     ########
     # BEFT #
     ########
@@ -2192,6 +2215,28 @@ class ModelConv3D(nn.Module):
         return X
 
 
+class ModelConv3DGroups(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv3d = nn.Conv3d(8, 8, 3, padding=1, groups=2)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(8 * 3 * 3 * 3, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
+
+    def forward(self, X):
+        # Note: needs a different input shape, thus ignore original input
+        X = torch.arange(2 * 8 * 3 * 3 * 3).view([2, 8, 3, 3, 3]).to(self.conv3d.weight.device)
+        X = X.to(self.dtype)
+        X = self.conv3d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
+
 class ModelMha(nn.Module):
     def __init__(self):
         super().__init__()
@@ -2288,6 +2333,9 @@ class MockTransformerWrapper:
 
         if model_id == "Conv3d":
             return ModelConv3D().to(dtype)
+
+        if model_id == "Conv3dGroups":
+            return ModelConv3DGroups().to(dtype)
 
         if model_id == "MLP_LayerNorm":
             return MLP_LayerNorm().to(dtype)
