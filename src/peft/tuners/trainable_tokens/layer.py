@@ -162,7 +162,14 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         This is currently not supported and can lead to undefined behavior of the model if no specific merging between
         the overlapping indices' values is applied.
         """
-        if len(adapter_names) <= 1:
+        # Fast path: a single adapter cannot overlap with itself, so if there is at most one adapter name to check
+        # *and* nothing has been merged before, there is nothing that could possibly conflict. However, we must not
+        # skip the check just because the current call itself only has 0 or 1 adapter names: adapters can be merged
+        # one at a time (e.g. merge(["A"]) followed by a separate merge(["B"])) rather than all at once in a single
+        # call, and each such call individually satisfies len(adapter_names) <= 1. If we returned early here based on
+        # the current call alone, we would never take previously merged adapters (self.merged_adapters) into account
+        # and could silently overwrite their already-merged values on overlapping indices without any error.
+        if len(adapter_names) <= 1 and not self.merged_adapters:
             return
 
         indices = set()

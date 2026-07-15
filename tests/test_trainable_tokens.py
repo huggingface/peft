@@ -450,6 +450,101 @@ class TestTrainableTokens:
     @pytest.mark.parametrize(
         "peft_config_factory",
         [
+            lambda token_indices: LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"embed_tokens": token_indices},
+            ),
+        ],
+    )
+    def test_multiple_adapters_overlapping_token_indices_merging_sequential_calls(
+        self, model, peft_config_factory, tmp_path
+    ):
+        # Regression test for a silent-data-corruption bug: _check_overlapping_tokens used to only compare token
+        # indices across adapters that were passed *together* in a single call, guarded by an early
+        # `if len(adapter_names) <= 1: return`. Merging adapters one at a time (each individual call therefore has
+        # len(adapter_names) == 1) bypassed the check entirely, even though the very next lines explicitly union in
+        # `self.merged_adapters` specifically to catch this case. As a result, merging adapter_1 and then, in a
+        # *separate* call, merging overlapping adapter_2 silently overwrote adapter_1's already-merged values with no
+        # error, whereas merging both in a single call (see test_multiple_adapters_overlapping_token_indices_merging
+        # above) already correctly raised.
+        token_indices_1 = [0, 1, 2]
+        token_indices_2 = [2, 3, 4]  # overlaps with token_indices_1 at index 2
+
+        peft_config_1 = peft_config_factory(token_indices_1)
+        peft_config_2 = peft_config_factory(token_indices_2)
+
+        model = get_peft_model(model, peft_config_1, adapter_name="adapter_1")
+        model.add_adapter("adapter_2", peft_config_2)
+
+        self.simulate_training(model.model.model.embed_tokens.token_adapter, "adapter_1")
+        self.simulate_training(model.model.model.embed_tokens.token_adapter, "adapter_2")
+
+        token_adapter = model.model.model.embed_tokens.token_adapter
+        expected_adapter_1_values = token_adapter.trainable_tokens_delta["adapter_1"].data.clone()
+
+        # merging adapter_1 alone must succeed: nothing was merged before, only a single adapter is involved, so
+        # there is nothing that could possibly conflict.
+        model.merge_adapter(adapter_names=["adapter_1"])
+
+        embed_weight = token_adapter.base_layer.weight
+        assert torch.allclose(embed_weight.data[token_indices_1], expected_adapter_1_values)
+
+        # merging adapter_2 alone (a SEPARATE call, not combined with adapter_1 in one call) must be rejected because
+        # index 2 overlaps with the already-merged adapter_1. Before the fix, this call silently succeeded and
+        # clobbered index 2 with adapter_2's value, with no error or warning about the conflict.
+        with pytest.raises(ValueError) as e:
+            model.merge_adapter(adapter_names=["adapter_2"])
+        assert "are already defined and would result in undefined merging behavior" in str(e)
+
+        # the rejected merge of adapter_2 must not have corrupted adapter_1's already-merged values, nor partially
+        # applied adapter_2's values: the base weights and merged bookkeeping must be exactly as they were right
+        # after merging adapter_1 alone.
+        assert torch.allclose(embed_weight.data[token_indices_1], expected_adapter_1_values)
+        assert token_adapter.merged_adapters == ["adapter_1"]
+
+    @pytest.mark.parametrize(
+        "peft_config_factory",
+        [
+            lambda token_indices: LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"embed_tokens": token_indices},
+            ),
+        ],
+    )
+    def test_multiple_adapters_non_overlapping_token_indices_merging_sequential_calls(
+        self, model, peft_config_factory, tmp_path
+    ):
+        # No-regression companion to the test above: sequential (separate-call) merges of adapters with
+        # NON-overlapping token indices must keep working without raising, both before and after the fix for the
+        # silent-corruption bug, i.e. the fix must not make the safe, legitimate case any more restrictive.
+        token_indices_1 = [0, 1, 2]
+        token_indices_2 = [3, 4, 5]
+
+        peft_config_1 = peft_config_factory(token_indices_1)
+        peft_config_2 = peft_config_factory(token_indices_2)
+
+        model = get_peft_model(model, peft_config_1, adapter_name="adapter_1")
+        model.add_adapter("adapter_2", peft_config_2)
+
+        self.simulate_training(model.model.model.embed_tokens.token_adapter, "adapter_1")
+        self.simulate_training(model.model.model.embed_tokens.token_adapter, "adapter_2")
+
+        token_adapter = model.model.model.embed_tokens.token_adapter
+        expected_adapter_1_values = token_adapter.trainable_tokens_delta["adapter_1"].data.clone()
+        expected_adapter_2_values = token_adapter.trainable_tokens_delta["adapter_2"].data.clone()
+
+        # two separate merge calls, no overlap between the two adapters' token indices: must not raise.
+        model.merge_adapter(adapter_names=["adapter_1"])
+        model.merge_adapter(adapter_names=["adapter_2"])
+
+        embed_weight = token_adapter.base_layer.weight
+        assert torch.allclose(embed_weight.data[token_indices_1], expected_adapter_1_values)
+        assert torch.allclose(embed_weight.data[token_indices_2], expected_adapter_2_values)
+        assert token_adapter.merged_adapters == ["adapter_1", "adapter_2"]
+
+    @pytest.mark.parametrize(
+        "peft_config_factory",
+        [
             lambda targets, token_indices: LoraConfig(
                 target_modules=targets,
                 trainable_token_indices={"embed_tokens": token_indices},
