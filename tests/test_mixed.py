@@ -652,6 +652,46 @@ class TestMixedAdapterTypes(unittest.TestCase):
         output_deleted_01 = peft_model(input)
         assert torch.allclose(output_deleted_01, output_base, atol=atol, rtol=rtol)
 
+    def test_load_adapter_does_not_unfreeze_other_active_adapters(self):
+        # Loading a new, unrelated adapter must not change the trainable state of adapters that are already active.
+        # In particular, an adapter that was explicitly frozen via set_adapter(..., inference_mode=True) must stay
+        # frozen, and it must still be the only active adapter, even though a different adapter was just loaded.
+        atol = 1e-5
+        rtol = 1e-5
+        torch.manual_seed(0)
+
+        input = torch.arange(90).reshape(9, 10).to(self.torch_device)
+        model = SimpleNet().eval().to(self.torch_device)
+        config0 = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+        peft_model = get_peft_model(model, config0, "adapter0", mixed=True)
+
+        # explicitly freeze adapter0
+        peft_model.set_adapter("adapter0", inference_mode=True)
+        adapter0_params = [p for n, p in peft_model.named_parameters() if "adapter0" in n]
+        assert adapter0_params
+        assert all(not p.requires_grad for p in adapter0_params)
+
+        output_before = peft_model(input)
+
+        # prepare and save a completely unrelated adapter (different target layer, different adapter type)
+        torch.manual_seed(1)
+        other_base_model = SimpleNet().eval().to(self.torch_device)
+        config1 = LoHaConfig(target_modules=["lin1"], init_weights=False)
+        other_peft_model = get_peft_model(other_base_model, config1, "adapter1", mixed=False)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            other_peft_model.save_pretrained(os.path.join(tmp_dirname, "adapter1"))
+            peft_model.load_adapter(os.path.join(tmp_dirname, "adapter1", "adapter1"), "adapter1")
+
+        # loading an unrelated adapter must not change which adapter is active ...
+        assert peft_model.active_adapters == ["adapter0"]
+        # ... must not resurrect the frozen adapter's requires_grad ...
+        adapter0_params_after = [p for n, p in peft_model.named_parameters() if "adapter0" in n]
+        assert all(not p.requires_grad for p in adapter0_params_after)
+        # ... and the newly loaded (but inactive) adapter1 must not contribute to the forward pass
+        output_after = peft_model(input)
+        assert torch.allclose(output_before, output_after, atol=atol, rtol=rtol)
+
     def test_modules_to_save(self):
         model = SimpleNet().eval().to(self.torch_device)
         config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
