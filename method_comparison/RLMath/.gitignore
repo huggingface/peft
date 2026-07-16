@@ -1,0 +1,8 @@
+# Results and run artifacts (same pattern as MetaMathQA)
+cancelled_results/
+temporary_results/
+
+# RLMath-specific
+checkpoints/
+__pycache__/
+*.pyc

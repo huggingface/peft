@@ -1,0 +1,5 @@
+{
+  "model_id": "Qwen/Qwen3.5-4B",
+  "save_checkpoint": true,
+  "gradient_accumulation_steps": 16
+}
