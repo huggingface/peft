@@ -442,6 +442,64 @@ class TestPeftConfig:
 
         assert "The supplied schedule values don't allow for a budgeting phase" in str(e)
 
+    @pytest.mark.parametrize(
+        "adamss_kwargs",
+        [
+            {"use_asa": True, "init_warmup": 0, "final_warmup": 100, "mask_interval": 10},
+            {"use_asa": True, "init_warmup": 50, "final_warmup": 1000, "mask_interval": 100},
+            {"use_asa": True, "init_warmup": 0, "final_warmup": 1, "mask_interval": 1},
+            {"use_asa": True, "asa_target_subspaces": 1, "init_warmup": 0, "final_warmup": 100},
+            {"use_asa": True, "asa_schedule_exponent": 1.0, "init_warmup": 0, "final_warmup": 100},
+            # ASA disabled: these fields are never read by `update_and_allocate`, so degenerate or `None` values
+            # must be tolerated. `None` mirrors the pattern used by examples/adamss_finetuning/*.py, which pass
+            # `None` for all of these fields whenever `use_asa=False`.
+            {"use_asa": False},
+            {"use_asa": False, "mask_interval": 0, "init_warmup": 10, "final_warmup": 10, "asa_target_subspaces": -1},
+            {
+                "use_asa": False,
+                "mask_interval": None,
+                "init_warmup": None,
+                "final_warmup": None,
+                "asa_target_subspaces": None,
+                "asa_schedule_exponent": None,
+            },
+        ],
+    )
+    def test_adamss_config_valid_asa_schedule_works(self, adamss_kwargs):
+        # Make sure that passing correct ASA scheduling values -- or any values at all when ASA is disabled -- is
+        # not prevented by faulty config checks.
+        AdamssConfig(**adamss_kwargs)  # does not raise
+
+    @pytest.mark.parametrize(
+        "adamss_kwargs,match",
+        [
+            # mask_interval is used as `global_step % config.mask_interval` in `update_and_allocate`; 0 used to
+            # raise a raw ZeroDivisionError deep in training instead of failing fast at construction.
+            ({"mask_interval": 0}, "mask_interval"),
+            ({"mask_interval": -5}, "mask_interval"),
+            # `final_warmup - init_warmup` is a denominator in `_schedule_threshold`; equal values used to raise
+            # ZeroDivisionError, and `init_warmup > final_warmup` silently disabled ASA masking for the whole run
+            # (the `init_warmup <= step <= final_warmup` window is never entered).
+            ({"init_warmup": 10, "final_warmup": 10}, "init_warmup"),
+            ({"init_warmup": 50, "final_warmup": 10}, "init_warmup"),
+            # asa_target_subspaces is used as `k` in `torch.kthvalue` in `_global_mask_to_target`; non-positive
+            # values used to raise a confusing "kthvalue(): selected number k out of range" RuntimeError mid-run.
+            ({"asa_target_subspaces": 0}, "asa_target_subspaces"),
+            ({"asa_target_subspaces": -1}, "asa_target_subspaces"),
+            # asa_schedule_exponent is the exponent of `mul_coeff ** exponent` in `_schedule_threshold`, where
+            # `mul_coeff` reaches exactly 0.0 at `step == final_warmup`; negative values used to raise
+            # ZeroDivisionError ("0.0 cannot be raised to a negative power") and 0.0 silently froze the schedule at
+            # the full subspace count for the entire warmup range.
+            ({"asa_schedule_exponent": 0.0}, "asa_schedule_exponent"),
+            ({"asa_schedule_exponent": -1.0}, "asa_schedule_exponent"),
+        ],
+    )
+    def test_adamss_config_invalid_asa_schedule_raises(self, adamss_kwargs, match):
+        kwargs = {"use_asa": True, "init_warmup": 0, "final_warmup": 100, "mask_interval": 10}
+        kwargs.update(adamss_kwargs)
+        with pytest.raises(ValueError, match=match):
+            AdamssConfig(**kwargs)
+
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
     def test_from_pretrained_forward_compatible(self, config_class, mandatory_kwargs, tmp_path, recwarn):
         """

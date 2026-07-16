@@ -7,6 +7,7 @@ Tests cover:
 - update_and_allocate: full ASA flow (accumulate → global mask → reset)
 """
 
+import pytest
 import torch
 from torch import nn
 
@@ -270,3 +271,39 @@ class TestAdamssAsa:
         for layer in layers:
             for p in layer.adamss_A["default"]:
                 assert p.requires_grad
+
+    # -- config validation (regression tests for ZeroDivisionError bugs) ----
+
+    def test_zero_mask_interval_fails_at_construction_not_training(self):
+        """`mask_interval=0` must raise ValueError as soon as AdamssConfig is constructed (inside
+        `_make_asa_model`), before a model is ever built or `update_and_allocate` is called. Previously this raised
+        a raw `ZeroDivisionError` deep inside `update_and_allocate` instead."""
+        with pytest.raises(ValueError, match="mask_interval"):
+            _make_asa_model(mask_interval=0)
+
+    def test_equal_warmup_bounds_fails_at_construction_not_training(self):
+        """`init_warmup == final_warmup` must raise ValueError at AdamssConfig construction, before a model is ever
+        built. Previously this raised a raw `ZeroDivisionError` deep inside `_schedule_threshold`."""
+        with pytest.raises(ValueError, match="final_warmup"):
+            _make_asa_model(init_warmup=10, final_warmup=10, mask_interval=1)
+
+    def test_full_schedule_range_trains_without_error(self):
+        """A valid ASA config must still train cleanly across the *entire* warmup -> final_warmup range, including
+        the exact step where step == final_warmup (where `mul_coeff` is exactly 0.0) and beyond -- the boundary
+        conditions the ZeroDivisionError bugs used to hit -- and should still end up masking some subspaces."""
+        model = _make_asa_model(
+            num_subspaces=4, asa_target_subspaces=2, init_warmup=0, final_warmup=10, mask_interval=1
+        )
+        optimizer = torch.optim.AdamW(model.parameters(), lr=0.1)
+        layers = _get_adamss_layers(model)
+        initial_active = sum(1 for layer in layers for p in layer.adamss_A["default"] if p.requires_grad)
+
+        for step in range(12):  # runs past final_warmup=10, touching every schedule boundary
+            x = torch.randn(4, 20)
+            model(x).sum().backward()
+            optimizer.step()
+            model.base_model.update_and_allocate(step)  # must not raise
+            optimizer.zero_grad()
+
+        final_active = sum(1 for layer in layers for p in layer.adamss_A["default"] if p.requires_grad)
+        assert final_active < initial_active, f"Active params should decrease: {initial_active} → {final_active}"
