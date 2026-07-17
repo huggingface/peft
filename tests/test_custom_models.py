@@ -3968,6 +3968,31 @@ class TestPeftCustomModel(PeftCommonTester):
                 dw_negative = module.get_delta_weight("merged_negative")
                 assert torch.allclose(dw_adapter1, -dw_negative, atol=1e-6)
 
+    @pytest.mark.parametrize("combination_type", ["linear", "cat", "svd"])
+    def test_add_weighted_adapter_with_rslora_identity_combination(self, combination_type):
+        # See #3449
+        # Combining a single adapter with weight 1.0 must reproduce that adapter exactly. Previously, when the source
+        # adapter used use_rslora=True, the flag was inherited by the combined adapter's config, whose lora_alpha is
+        # chosen so that scaling == lora_alpha / r == 1. With rslora, the scaling became
+        # lora_alpha / sqrt(r) = sqrt(r) != 1 instead, so the combined adapter was sqrt(r) times overscaled.
+        torch.manual_seed(42)
+        model = MLP()
+        config = LoraConfig(r=4, target_modules=["lin0"], init_lora_weights=False, use_rslora=True)
+        model = get_peft_model(model, config, adapter_name="adapter1")
+
+        model.add_weighted_adapter(
+            adapters=["adapter1"],
+            weights=[1.0],
+            adapter_name="merged",
+            combination_type=combination_type,
+        )
+
+        for module in model.modules():
+            if isinstance(module, lora.LoraLayer):
+                dw_adapter1 = module.get_delta_weight("adapter1")
+                dw_merged = module.get_delta_weight("merged")
+                assert torch.allclose(dw_adapter1, dw_merged, atol=1e-5)
+
     def test_add_weighted_adapter_subtraction_with_negative_weights(self):
         # Test that merging two identical adapters with weights [1.0, -1.0] results in approximately zero weights
         model = MLP()

@@ -724,10 +724,14 @@ class LoraModel(BaseTuner):
             svd_rank=svd_rank,
         )
 
+        # The scaling of each source adapter is already folded into the combined lora_A/lora_B weights below, so the
+        # new adapter must have a scaling of exactly 1. With lora_alpha == r this only holds when use_rslora=False
+        # (otherwise scaling would be r / sqrt(r) = sqrt(r)), so don't inherit use_rslora from adapters[0].
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],
             r=new_rank,
             lora_alpha=new_rank,
+            use_rslora=False,
             target_modules=new_target_modules,
             alpha_pattern={},
             rank_pattern={},
