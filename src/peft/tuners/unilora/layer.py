@@ -122,8 +122,10 @@ class UniLoraLayer(BaseTunerLayer):
         if target_device is not None:
             self._move_indices_to_device(adapter_name, target_device)
 
-    def enable_adapters(self, enabled: bool) -> None:
-        super().enable_adapters(enabled)
+    def enable_adapters(self, enabled: bool, inference_mode: bool = False) -> None:
+        # Note: when enabled=True, the base class's call to self.set_adapter(..., inference_mode=inference_mode)
+        # dispatches to the override below, which already takes care of unilora_theta_d's requires_grad.
+        super().enable_adapters(enabled, inference_mode=inference_mode)
         if not enabled:
             for theta_d in self.unilora_theta_d.values():
                 theta_d.requires_grad_(False)

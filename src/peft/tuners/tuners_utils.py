@@ -508,7 +508,21 @@ class BaseTuner(nn.Module, ABC):
     def _enable_adapter_layers(self, enabled: bool = True) -> None:
         for module in self.model.modules():
             if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
-                module.enable_adapters(enabled)
+                if not enabled:
+                    module.enable_adapters(enabled)
+                    continue
+
+                # Re-enabling must restore each of this module's active adapters to their own configured
+                # inference_mode instead of unconditionally marking them trainable again, which would silently
+                # unfreeze an adapter that was loaded/set with inference_mode=True (e.g. a frozen reference
+                # adapter for RLHF-style training). If an active adapter has no entry in peft_config (e.g. it
+                # was already deleted), fall back to treating it as trainable, matching prior behavior.
+                inference_mode = all(
+                    self.peft_config[name].inference_mode
+                    for name in module.active_adapters
+                    if name in self.peft_config
+                )
+                module.enable_adapters(enabled, inference_mode=inference_mode)
 
     def disable_adapter_layers(self) -> None:
         """
@@ -1561,16 +1575,20 @@ class BaseTunerLayer(ABC):
         # is already a list of str
         return self.active_adapter
 
-    def enable_adapters(self, enabled: bool) -> None:
+    def enable_adapters(self, enabled: bool, inference_mode: bool = False) -> None:
         """Toggle the enabling and disabling of adapters
 
         Takes care of setting the requires_grad flag for the adapter weights.
 
         Args:
             enabled (bool): True to enable adapters, False to disable adapters
+            inference_mode (bool, optional): When re-enabling adapters (`enabled=True`), whether the active
+                adapter(s) should be frozen (i.e. `requires_grad=False`) rather than trainable. Should mirror the
+                `inference_mode` that the active adapter(s) were configured with. Ignored when `enabled` is
+                False. Default is False.
         """
         if enabled:
-            self.set_adapter(self.active_adapters)
+            self.set_adapter(self.active_adapters, inference_mode=inference_mode)
             self._disable_adapters = False
         else:
             # disable grads on all adapter layers

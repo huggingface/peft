@@ -3520,6 +3520,34 @@ class TestPeftCustomModel(PeftCommonTester):
         assert all(not module.disable_adapters for module in tuner_modules)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_disable_adapters_exiting_context_preserves_inference_mode(
+        self, test_name, model_id, config_cls, config_kwargs
+    ):
+        # Exiting the disable_adapter context (or calling enable_adapter_layers directly) must not unfreeze an
+        # adapter that was loaded with inference_mode=True. This complements
+        # test_disable_adapters_exiting_context_restores_previous_state, which only checks the enabled/disabled
+        # state of the adapter layers, not requires_grad.
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            inference_mode=True,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        assert all(not p.requires_grad for p in model.parameters())
+
+        with model.disable_adapter():
+            assert all(not p.requires_grad for p in model.parameters())
+        # exiting the context must not unfreeze the adapter
+        assert all(not p.requires_grad for p in model.parameters())
+
+        # same check using the public, non-context-manager API
+        model.base_model.disable_adapter_layers()
+        assert all(not p.requires_grad for p in model.parameters())
+        model.base_model.enable_adapter_layers()
+        assert all(not p.requires_grad for p in model.parameters())
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_adapter(self, test_name, model_id, config_cls, config_kwargs):
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
@@ -4840,6 +4868,29 @@ class TestRequiresGrad:
             "base_model.model.lin0.lora_B.default.weight",
         )
 
+    def test_requires_grad_modules_to_save_disabling_inference_mode(self):
+        # Same as test_requires_grad_modules_to_save_disabling, but for an adapter that was created with
+        # inference_mode=True. Disabling/re-enabling adapter layers must not unfreeze modules_to_save for an
+        # adapter that is supposed to stay frozen throughout.
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"], inference_mode=True)
+        peft_model = get_peft_model(MLP(), config)
+
+        # inference_mode=True from the start: nothing should require grad
+        self.check_requires_grad(peft_model)
+
+        peft_model.disable_adapter_layers()
+        self.check_requires_grad(peft_model)
+
+        # re-enabling must not unfreeze modules_to_save, since the adapter is in inference_mode
+        peft_model.enable_adapter_layers()
+        self.check_requires_grad(peft_model)
+
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # exiting the context must not unfreeze it either
+        self.check_requires_grad(peft_model)
+
     def test_requires_grad_modules_to_save_multiple_adapters(self):
         config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
         peft_model = get_peft_model(MLP(), config0)
@@ -4969,6 +5020,29 @@ class TestRequiresGrad:
 
         # set config1 as active but in inference mode, should result in no module requiring grad
         peft_model.set_adapter("adapter1", inference_mode=True)
+        self.check_requires_grad(peft_model)
+
+    def test_requires_grad_trainable_token_indices_disabling_inference_mode(self):
+        # Same idea as test_requires_grad_modules_to_save_disabling_inference_mode, but for
+        # trainable_token_indices. TrainableTokensWrapper.enable_adapters delegates to its BaseTunerLayer-based
+        # token_adapter, which has the same requires_grad-vs-inference_mode gap as modules_to_save.
+        config = LoraConfig(target_modules=["conv1d"], trainable_token_indices={"emb": [0, 1, 2]}, inference_mode=True)
+        peft_model = get_peft_model(ModelEmbConv1D(), config)
+
+        # inference_mode=True from the start: nothing should require grad
+        self.check_requires_grad(peft_model)
+
+        peft_model.disable_adapter_layers()
+        self.check_requires_grad(peft_model)
+
+        # re-enabling must not unfreeze the trainable tokens, since the adapter is in inference_mode
+        peft_model.enable_adapter_layers()
+        self.check_requires_grad(peft_model)
+
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # exiting the context must not unfreeze it either
         self.check_requires_grad(peft_model)
 
     def test_requires_grad_lora_different_targets(self):

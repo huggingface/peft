@@ -500,11 +500,15 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
             return self._forward_wrapped(*args, **kwargs)
         return self._mixed_batch_forward(*args, adapter_names=adapter_names, **kwargs)
 
-    def enable_adapters(self, enabled: bool):
+    def enable_adapters(self, enabled: bool, inference_mode: bool = False):
         """Toggle the enabling and disabling of adapters
 
         Args:
             enabled (bool): True to enable adapters, False to disable adapters
+            inference_mode (bool, optional): When re-enabling adapters (`enabled=True`), whether the active
+                adapter should be frozen (i.e. `requires_grad=False`) rather than trainable. Subclasses that
+                track their own trainable parameters use this to avoid unfreezing an adapter that was
+                configured with `inference_mode=True`. Ignored when `enabled` is False. Default is False.
         """
         if enabled:
             self._disable_adapters = False
@@ -659,15 +663,16 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         if adapter_name == self.active_adapter:
             _set_layer_requires_grad(self.modules_to_save[adapter_name], True)
 
-    def enable_adapters(self, enabled: bool):
+    def enable_adapters(self, enabled: bool, inference_mode: bool = False):
         """Takes care of setting the required_grad flag on the modules_to_save.
-        If adapters are enabled, gradients for the modules_to_save are required as well.
+        If adapters are enabled, gradients for the modules_to_save are required as well, unless the active
+        adapter's own `inference_mode` says it should stay frozen.
         """
-        super().enable_adapters(enabled)
+        super().enable_adapters(enabled, inference_mode=inference_mode)
 
         if enabled:
             for adapter_name in self.active_adapters:
-                _set_layer_requires_grad(self.modules_to_save[adapter_name], True)
+                _set_layer_requires_grad(self.modules_to_save[adapter_name], not inference_mode)
         else:
             for module in self.modules_to_save.values():
                 _set_layer_requires_grad(module, False)
@@ -907,13 +912,13 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
             f"token_adapter.{k}": state_dict[f"token_adapter.{k}.{adapter_name}"] for k in ["trainable_tokens_delta"]
         }
 
-    def enable_adapters(self, enabled: bool):
+    def enable_adapters(self, enabled: bool, inference_mode: bool = False):
         """Enables/disables the underlying `TrainableTokens` adapter.
         Also handles the internal adapter disable flag.
         """
-        super().enable_adapters(enabled)
+        super().enable_adapters(enabled, inference_mode=inference_mode)
 
-        self.token_adapter.enable_adapters(enabled)
+        self.token_adapter.enable_adapters(enabled, inference_mode=inference_mode)
 
     def check_set_adapter(self, adapter_name: str | list[str]) -> str | None:
         """Helper function to check if the given adapter(s) can be set.

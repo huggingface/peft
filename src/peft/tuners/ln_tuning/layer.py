@@ -48,16 +48,19 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
         self.ln_tuning_layers[adapter_name] = deepcopy(layer)
         self.set_adapter(adapter_name, inference_mode=inference_mode)
 
-    def enable_adapters(self, enabled: bool) -> None:
+    def enable_adapters(self, enabled: bool, inference_mode: bool = False) -> None:
         """Toggle the enabling and disabling of adapters
 
         Takes care of setting the requires_grad flag for the adapter weights.
 
         Args:
             enabled (bool): True to enable adapters, False to disable adapters
+            inference_mode (bool, optional): When re-enabling adapters (`enabled=True`), whether the active
+                adapter(s) should be frozen (i.e. `requires_grad=False`) rather than trainable, mirroring the
+                `inference_mode` they were configured with. Ignored when `enabled` is False. Default is False.
         """
         if enabled:
-            self.set_adapter(self.active_adapters)
+            self.set_adapter(self.active_adapters, inference_mode=inference_mode)
             self._disable_adapters = False
         else:
             if self.merged:
