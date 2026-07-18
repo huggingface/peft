@@ -33,7 +33,7 @@ from .save_and_load import _insert_adapter_name_into_state_dict, load_peft_weigh
 CONFIG_KEYS_TO_CHECK = {PeftType.LORA: ["use_rslora", "lora_dropout", "alpha_pattern", "use_dora"]}
 
 
-def _update_scaling(lora_module, adapter_name, scaling=None):
+def _update_scaling(lora_module: LoraLayer, adapter_name: str, scaling: Optional[float] = None) -> None:
     """
     Update the value of the scalings of the LoRA module.
 
@@ -374,7 +374,7 @@ def hotswap_adapter_from_state_dict(
     adapter_name: str,
     config: LoraConfig,
     parameter_prefix: str = "lora_",
-):
+) -> None:
     """
     Swap out the adapter weights from the model with the weights from state_dict.
 
@@ -555,7 +555,13 @@ def check_hotswap_configs_compatible(config0: PeftConfig, config1: PeftConfig) -
             raise ValueError(f"Configs are incompatible: for {key}, {val0} != {val1}")
 
 
-def hotswap_adapter(model, model_name_or_path, adapter_name, torch_device=None, **kwargs):
+def hotswap_adapter(
+    model: torch.nn.Module,
+    model_name_or_path: str,
+    adapter_name: str,
+    torch_device: Optional[str] = None,
+    **kwargs,
+) -> None:
     """Substitute old adapter data with new adapter data, keeping the rest the same.
 
     As of now, only LoRA is supported.
