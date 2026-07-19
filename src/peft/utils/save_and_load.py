@@ -178,7 +178,7 @@ def get_peft_model_state_dict(
             for k in state_dict:
                 if "lora_" in k:
                     to_return[k] = state_dict[k]
-                    bias_name = k.split("lora_")[0] + "bias"
+                    bias_name = k.split("lora_")[0] + "base_layer.bias"
                     if bias_name in state_dict:
                         to_return[bias_name] = state_dict[bias_name]
         else:
@@ -215,7 +215,7 @@ def get_peft_model_state_dict(
             for k in state_dict:
                 if "boft_" in k:
                     to_return[k] = state_dict[k]
-                    bias_name = k.split("boft_")[0] + "bias"
+                    bias_name = k.split("boft_")[0] + "base_layer.bias"
                     if bias_name in state_dict:
                         to_return[bias_name] = state_dict[bias_name]
         else:
