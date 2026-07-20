@@ -101,7 +101,11 @@ It can happen that while you’re working on your PR, the underlying code base c
 
 When opening a PR, please provide a nice description of the change you're proposing. If it relates to other issues or PRs, please reference them. Providing a good description not only helps the reviewers review your code better and faster, it can also be used later (as a basis) for the commit message which helps with long term maintenance of the project.
 
+Keep the length and complexity of the PR description in line with the change. We don't need ten paragraphs of explanation for a trivial one-line change. Don't restate what is obvious from looking at the diff (e.g. "Fixed the typo in 'foobaar').
+
 If your code makes some non-trivial changes, it may also be a good idea to add comments to the code to explain those changes. For example, if you had to iterate on your implementation multiple times because the most obvious way didn’t work, it’s a good indication that a code comment is needed.
+
+If relevant, indicate how you tested the change, e.g. by showing the `pytest` test command or reproducer code.
 
 ## Bugfixes
 
