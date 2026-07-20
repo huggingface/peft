@@ -3817,6 +3817,45 @@ class TestEvaInitialization:
         ):
             LoraConfig(init_lora_weights=True, eva_config=EvaConfig())
 
+    def test_lora_config_corda_default_created_when_unrelated_config_passed(self):
+        """
+        Tests that a default CorDA config is still created when `init_lora_weights='corda'` even if an unrelated
+        sub-config (here `eva_config`) is also passed.
+
+        The `init_lora_weights` handling for loftq/eva/corda used to be a single ``if``/``elif`` chain, so passing an
+        `eva_config` while requesting corda would trigger the "eva_config ignored" branch and skip the corda default
+        creation, leaving `corda_config` as `None` (which later crashes CorDA initialization).
+        """
+        with pytest.warns(
+            UserWarning, match="`eva_config` specified but will be ignored when `init_lora_weights` is not 'eva'."
+        ):
+            config = LoraConfig(init_lora_weights="corda", eva_config=EvaConfig())
+        assert config.corda_config is not None
+
+    def test_lora_config_eva_default_created_when_unrelated_config_passed(self):
+        """
+        Tests that a default EVA config is still created when `init_lora_weights='eva'` even if an unrelated
+        `loftq_config` is also passed (which used to short-circuit the shared ``if``/``elif`` chain and leave
+        `eva_config` as `None`).
+        """
+        with pytest.warns(
+            UserWarning, match="`loftq_config` specified but will be ignored when `init_lora_weights` is not 'loftq'."
+        ):
+            config = LoraConfig(init_lora_weights="eva", loftq_config={"loftq_bits": 4})
+        assert config.eva_config is not None
+
+    def test_lora_config_warns_for_both_ignored_configs(self):
+        """
+        Tests that both the eva and corda "specified but will be ignored" warnings are emitted when both sub-configs
+        are passed but neither initialization method is selected. The former ``if``/``elif`` chain only emitted the
+        first matching warning.
+        """
+        with pytest.warns(UserWarning) as record:
+            LoraConfig(init_lora_weights=True, eva_config=EvaConfig(), corda_config=CordaConfig())
+        messages = [str(w.message) for w in record]
+        assert any("`eva_config` specified but will be ignored" in m for m in messages)
+        assert any("`corda_config` specified but will be ignored" in m for m in messages)
+
 
 class TestLilyInitialization:
     """Tests for Lily adapter initialization and parameter sharing.

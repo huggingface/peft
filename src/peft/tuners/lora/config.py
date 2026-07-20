@@ -961,13 +961,15 @@ class LoraConfig(PeftConfig):
             self.loftq_config = {}
             warnings.warn("`loftq_config` specified but will be ignored when `init_lora_weights` is not 'loftq'.")
 
-        elif self.init_lora_weights == "eva" and self.eva_config is None:
+        # handle init_lora_weights and eva_config
+        if self.init_lora_weights == "eva" and self.eva_config is None:
             warnings.warn("`init_lora_weights` is 'eva' but `eva_config` is not specified. Using default EVA config.")
             self.eva_config = EvaConfig()
         elif self.init_lora_weights != "eva" and self.eva_config is not None:
             warnings.warn("`eva_config` specified but will be ignored when `init_lora_weights` is not 'eva'.")
 
-        elif self.init_lora_weights == "corda" and self.corda_config is None:
+        # handle init_lora_weights and corda_config
+        if self.init_lora_weights == "corda" and self.corda_config is None:
             warnings.warn(
                 "`init_lora_weights` is 'corda' but `corda_config` is not specified. Using default CorDA config."
             )
