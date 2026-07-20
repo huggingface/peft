@@ -209,7 +209,7 @@ def check_outputs_similar(x, y, min_corr=MIN_CORR, max_mse=MAX_MSE):
 
 
 def _config_supports_forward(config, quant) -> bool:
-    # TODO
+    # check if, for the given PEFT config and quantization backend, calling forward is expected to work
     return not (isinstance(config, MissConfig) and (config.init_weights == "bat") and (not quant.supports_merge))
 
 
