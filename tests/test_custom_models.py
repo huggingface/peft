@@ -1117,7 +1117,8 @@ TEST_CASES = [
         LoraConfig,
         {
             "target_modules": ["lin0", "lin1"],
-            "use_bdlora": BdLoraConfig(target_modules_bd_a=["lin0"], nblocks=2, match_strict=False),
+            # No `nblocks` here on purpose: exercise the default so the config default is covered.
+            "use_bdlora": BdLoraConfig(target_modules_bd_a=["lin0"], match_strict=False),
         },
     ),
     (
