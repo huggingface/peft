@@ -670,7 +670,7 @@ class Linear(nn.Module, OFTLayer):
         thus W @ R^T - W.
         """
         oft_mat = self.get_delta_weight(adapter_name)
-        base_weight = self.get_base_layer().weight.data
+        base_weight = self.get_base_weight()
         orig_dtype = base_weight.dtype
         # compute in float32 for numerical stability
         effective_weight = torch.mm(base_weight.float(), oft_mat.float().t())

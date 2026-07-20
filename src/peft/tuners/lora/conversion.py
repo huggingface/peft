@@ -54,7 +54,7 @@ def _convert_miss_module_to_lora(
     The MiSS forward pass (reshape+sum @ miss) is already a rank-r factorization, so the exact factors are returned
     directly without SVD.
 
-    For ``bat`` mode, the conversion goes through the generic ``get_additive_delta`` + SVD path and does not call this
+    For `bat` mode, the conversion goes through the generic `get_additive_delta` + SVD path and does not call this
     function.
     """
     miss_fn = module.miss_fn

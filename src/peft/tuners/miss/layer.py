@@ -372,9 +372,9 @@ class MissLinear(nn.Module, MissLayer):
     def get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
         """Return the additive delta weight W' - W for the given adapter.
 
-        For ``bat`` mode, ``get_delta_weight`` already computes the additive delta (used in forward as ``orig_weight +
-        delta_weight``), so we delegate to it. For ``standard`` and ``mini`` modes, the conversion is handled by the
-        special-cased ``_convert_miss_module_to_lora`` and does not go through this method.
+        For `bat` mode, `get_delta_weight` already computes the additive delta (used in forward as `orig_weight +
+        delta_weight`), so we delegate to it. For `standard` and `mini` modes, the conversion is handled by the
+        special-cased `_convert_miss_module_to_lora` and does not go through this method.
         """
         if self.miss_fn != "bat":
             raise NotImplementedError(
