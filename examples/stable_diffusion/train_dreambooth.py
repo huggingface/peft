@@ -1173,7 +1173,7 @@ def main(args):
                     pipeline = pipeline.to(accelerator.device)
                     pipeline.set_progress_bar_config(disable=True)
 
-                    # Set evaliation mode
+                    # Set evaluation mode
                     pipeline.unet.eval()
                     pipeline.text_encoder.eval()
 
@@ -1203,7 +1203,7 @@ def main(args):
                                 }
                             )
 
-                    # Set evaliation mode
+                    # Set evaluation mode
                     pipeline.unet.train()
                     pipeline.text_encoder.train()
 

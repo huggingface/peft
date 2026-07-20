@@ -35,6 +35,7 @@ from peft import (
     BeftConfig,
     BOFTConfig,
     C3AConfig,
+    DeftConfig,
     DeloraConfig,
     FourierFTConfig,
     FrodConfig,
@@ -63,6 +64,7 @@ from peft import (
     TaskType,
     TinyLoraConfig,
     TrainableTokensConfig,
+    UniLoraConfig,
     VBLoRAConfig,
     VeloraConfig,
     VeraConfig,
@@ -77,6 +79,18 @@ from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
 from .testing_common import PeftCommonTester, _skip_if_merging_not_supported
 from .testing_utils import get_state_dict, require_non_cpu, set_init_weights_false
+
+
+def _zero_unilora_theta_d(model, adapter_name="default"):
+    torch.nn.init.zeros_(model.unilora_theta_d[adapter_name])
+
+
+def _reset_unilora_theta_d(model, config, adapter_name="default"):
+    theta_d = model.unilora_theta_d[adapter_name]
+    if config.init_weights:
+        torch.nn.init.uniform_(theta_d, -config.init_theta_d_bound, config.init_theta_d_bound)
+    else:
+        torch.nn.init.normal_(theta_d)
 
 
 # MLP is a vanilla FF network with only linear layers
@@ -558,6 +572,33 @@ TEST_CASES = [
         OFTConfig,
         {"r": 5, "oft_block_size": 0, "target_modules": ["conv2d"], "coft": True, "block_share": True},
     ),
+    #########
+    # DEFT #
+    #########
+    ("Vanilla MLP 1 DEFT", "MLP", DeftConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 DEFT", "MLP", DeftConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 DEFT", "MLP", DeftConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 4 DEFT qr", "MLP", DeftConfig, {"target_modules": ["lin0"], "decomposition_method": "qr"}),
+    ("Vanilla MLP 5 DEFT", "MLP", DeftConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    (
+        "Vanilla MLP 7 DEFT alpha",
+        "MLP",
+        DeftConfig,
+        {"target_modules": ["lin0"], "decomposition_method": "qr", "alpha": 16},
+    ),
+    (
+        "Vanilla MLP 8 DEFT PaRa relu",
+        "MLP",
+        DeftConfig,
+        {"target_modules": ["lin0"], "decomposition_method": "relu", "para": True},
+    ),
+    (
+        "Vanilla MLP 9 DEFT PaRa qr",
+        "MLP",
+        DeftConfig,
+        {"target_modules": ["lin0"], "decomposition_method": "qr", "para": True},
+    ),
+    ("Embedding + transformers Conv1D 1 DEFT", "EmbConv1D", DeftConfig, {"target_modules": ["conv1d"]}),
     ########
     # HRA #
     ########
@@ -910,6 +951,30 @@ TEST_CASES = [
     ("Vanilla MLP 3 FRoD", "MLP", FrodConfig, {"target_modules": ["lin1"]}),
     ("Vanilla MLP 4 FRoD", "MLP", FrodConfig, {"target_modules": ["lin0", "lin1"]}),
     ("Vanilla MLP 5 FRoD", "MLP", FrodConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    ###########
+    # UniLora #
+    ###########
+    ("Vanilla MLP 1 UniLora", "MLP", UniLoraConfig, {"target_modules": "lin0", "theta_d_length": 101}),
+    ("Vanilla MLP 2 UniLora", "MLP", UniLoraConfig, {"target_modules": ["lin0"], "theta_d_length": 101}),
+    ("Vanilla MLP 3 UniLora", "MLP", UniLoraConfig, {"target_modules": ["lin1"], "theta_d_length": 101}),
+    (
+        "Vanilla MLP 4 UniLora",
+        "MLP",
+        UniLoraConfig,
+        {"target_modules": ["lin0", "lin1"], "theta_d_length": 101},
+    ),
+    (
+        "Vanilla MLP 5 UniLora",
+        "MLP",
+        UniLoraConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "theta_d_length": 101},
+    ),
+    (
+        "Embedding + transformers Conv1D 1 UniLora",
+        "EmbConv1D",
+        UniLoraConfig,
+        {"target_modules": ["conv1d"], "theta_d_length": 101},
+    ),
     #######
     # C3A #
     #######
@@ -1468,6 +1533,13 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": False},
     ),
     (
+        "UniLora Same",
+        "unilora",
+        UniLoraConfig,
+        {"target_modules": ["lin0"], "theta_d_length": 101, "init_weights": False},
+        {"target_modules": ["lin0"], "theta_d_length": 101, "init_weights": False},
+    ),
+    (
         "HRA Same",
         "hra",
         HRAConfig,
@@ -1480,6 +1552,22 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         HRAConfig,
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
+        # qr gives scale-independent (O(1)) updates at random init; the default relu update is ~|P|^2 and too small
+        # here for the adapters' outputs to differ beyond tolerance.
+        "DEFT Same",
+        "deft",
+        DeftConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "decomposition_method": "qr"},
+        {"target_modules": ["lin0"], "init_weights": False, "decomposition_method": "qr"},
+    ),
+    (
+        "DEFT Different",
+        "deft",
+        DeftConfig,
+        {"target_modules": ["lin0"], "init_weights": False, "decomposition_method": "qr"},
+        {"target_modules": ["lin1"], "init_weights": False, "decomposition_method": "qr"},
     ),
     (
         "MiSS Same",
@@ -2311,6 +2399,32 @@ class TestPeftCustomModel(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_safe_merge(model_id, config_cls, config_kwargs)
 
+    def test_glora_safe_merge_does_not_corrupt_base_layer_on_non_finite_adapter(self):
+        # Regression test: GLoRA's merge() used to accumulate the merged weights directly onto
+        # base_layer.weight.data/bias.data *before* the safe_merge isfinite check, so a broken
+        # (non-finite) adapter would permanently corrupt the base layer even though safe_merge
+        # raises -- defeating the whole point of safe_merge ("check for NaNs before merging").
+        torch.manual_seed(0)
+        model = MLP()
+        orig_weight = model.lin0.weight.data.clone()
+        orig_bias = model.lin0.bias.data.clone()
+
+        config = GloraConfig(target_modules=["lin0"])
+        model = get_peft_model(model, config)
+
+        # Deliberately break the adapter (e.g. a corrupted checkpoint or an fp16 overflow) so that
+        # the merged weights would contain non-finite values.
+        glora_b = model.base_model.model.lin0.glora_B["default"]
+        next(glora_b.parameters()).data.fill_(float("inf"))
+
+        with pytest.raises(ValueError, match="NaNs detected in the merged weights"):
+            model.base_model.model.lin0.merge(safe_merge=True)
+
+        # The base layer must be untouched after the failed safe_merge.
+        assert torch.equal(model.base_model.model.lin0.base_layer.weight.data, orig_weight)
+        assert torch.equal(model.base_model.model.lin0.base_layer.bias.data, orig_bias)
+        assert model.base_model.model.lin0.merged_adapters == []
+
     @pytest.mark.parametrize("safe_merge", [False, True])
     @pytest.mark.parametrize("module_type", ["linear", "conv2d"])
     def test_merge_with_lora_bias_when_base_layer_has_no_bias_warns_and_raises(self, safe_merge, module_type):
@@ -2619,6 +2733,9 @@ class TestPeftCustomModel(PeftCommonTester):
             config_kwargs = set_init_weights_false(config_cls, config_kwargs)
             # Use random float inputs to avoid ReLU dead zones that block gradient to specific subspaces.
             X = {"X": torch.randn(9, 10, device=self.torch_device)}
+        elif issubclass(config_cls, UniLoraConfig):
+            config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+            X = self.prepare_inputs_for_testing()
         else:
             X = self.prepare_inputs_for_testing()
 
@@ -2730,6 +2847,9 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_parameters_after_loading_model(self, test_name, model_id, config_cls, config_kwargs):
         # An explicit test that when loading a trained model, the parameters are loaded correctly
         # see issue #808
+        if issubclass(config_cls, UniLoraConfig):
+            config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
@@ -2745,7 +2865,7 @@ class TestPeftCustomModel(PeftCommonTester):
             lr = 0.1  # otherwise we get nan
         elif "mha" in model_id.lower():
             lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high
-        elif issubclass(config_cls, (VBLoRAConfig, RandLoraConfig, OSFConfig)):
+        elif issubclass(config_cls, (VBLoRAConfig, RandLoraConfig, UniLoraConfig, OSFConfig)):
             lr = 0.01  # otherwise we get nan
         elif issubclass(config_cls, AdaLoraConfig):
             lr = 1e-4  # AdaLoRA + init_lora_weights=False can blow up with multi-target SGD
@@ -2811,11 +2931,19 @@ class TestPeftCustomModel(PeftCommonTester):
             for module in model.modules():
                 if hasattr(module, "lora_E") and "default" in module.lora_E:
                     torch.nn.init.zeros_(module.lora_E["default"])
+        if issubclass(config_cls, UniLoraConfig):
+            # UniLora cannot use zero initialization by default because the adapter update is quadratic in theta_d.
+            # Zero it only for this identity check, then restore a trainable initialization before optimization.
+            _zero_unilora_theta_d(model)
         model.eval()
         outputs_before = model(**X)
         # OSF uses SVD reconstruction which introduces small numerical differences
         if issubclass(config_cls, OSFConfig):
             assert torch.allclose(outputs_base, outputs_before, rtol=1e-4, atol=1e-4)
+        elif isinstance(config, DeftConfig) and config.para:
+            # PaRa (DEFT with para=True) is a removal-only method and is intentionally not identity-at-init, so a
+            # fresh adapter already changes the output; skip this precondition (the disable/enable checks below apply).
+            pass
         else:
             assert torch.allclose(outputs_base, outputs_before)
 
@@ -2827,6 +2955,8 @@ class TestPeftCustomModel(PeftCommonTester):
             for module in model.modules():
                 if hasattr(module, "lora_E") and "default" in module.lora_E:
                     torch.nn.init.normal_(module.lora_E["default"])
+        if issubclass(config_cls, UniLoraConfig):
+            _reset_unilora_theta_d(model, config)
         if issubclass(config_cls, TinyLoraConfig):
             # Re-initialize tinylora_v so it can be trained
             model.base_model._init_tinylora_v(config, "default")
@@ -2870,6 +3000,9 @@ class TestPeftCustomModel(PeftCommonTester):
         # OSF uses SVD reconstruction which introduces small numerical differences
         if issubclass(config_cls, OSFConfig):
             assert torch.allclose(outputs_before, outputs_disabled, rtol=1e-4, atol=1e-4)
+        elif isinstance(config, DeftConfig) and config.para:
+            # PaRa is not identity-at-init, so disabling returns the base output (not `outputs_before`)
+            assert torch.allclose(outputs_base, outputs_disabled)
         else:
             assert torch.allclose(outputs_before, outputs_disabled)
         assert torch.allclose(outputs_after, outputs_enabled_after_disable)
@@ -2901,6 +3034,8 @@ class TestPeftCustomModel(PeftCommonTester):
             for module in model.modules():
                 if hasattr(module, "lora_E") and "default" in module.lora_E:
                     torch.nn.init.zeros_(module.lora_E["default"])
+        if issubclass(config_cls, UniLoraConfig):
+            _zero_unilora_theta_d(model)
         model.eval()
         outputs_before = model(**X)
 
@@ -2912,6 +3047,8 @@ class TestPeftCustomModel(PeftCommonTester):
             for module in model.modules():
                 if hasattr(module, "lora_E") and "default" in module.lora_E:
                     torch.nn.init.normal_(module.lora_E["default"])
+        if issubclass(config_cls, UniLoraConfig):
+            _reset_unilora_theta_d(model, config)
         if issubclass(config_cls, TinyLoraConfig):
             # Re-initialize tinylora_v so it can be trained
             model.base_model._init_tinylora_v(config, "default")
@@ -2968,7 +3105,10 @@ class TestPeftCustomModel(PeftCommonTester):
         assert torch.allclose(outputs_after, outputs_unmerged, atol=atol, rtol=rtol)
 
         # check that disabling adapters gives the same results as before training
-        assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol)
+        # (skipped for PaRa: DEFT with para=True is not identity-at-init, so `outputs_before` already differs from the
+        # disabled/base output; the disable -> base behavior is covered by test_disable_adapters)
+        if not (isinstance(config, DeftConfig) and config.para):
+            assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol)
 
         # check that enabling + disabling adapters does not change the results
         assert torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol)
@@ -3388,6 +3528,46 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_delete_adapter(self, test_name, model_id, config_cls, config_kwargs):
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_delete_adapter_properly_cleans_up_after_itself(self, test_name, model_id, config_cls, config_kwargs):
+        # Generic guard against dangling per-adapter state: after `delete_adapter`, no adapter-specific attributes
+        # should remain on the model or its tuner layers. This test discovers every dict-like per-adapter container
+        # automatically, so a newly added PEFT method that forgets to register one is still caught here.
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(**config_kwargs)
+        model = get_peft_model(model, config, adapter_name="foobar")
+
+        def get_dict_like_attrs(obj):
+            for attr_name in dir(obj):
+                if attr_name.startswith("_"):
+                    continue
+                try:
+                    attr = getattr(obj, attr_name)
+                except AttributeError:
+                    continue
+                is_dict_like = (
+                    callable(getattr(attr, "keys", None))
+                    and hasattr(attr, "__getitem__")
+                    and hasattr(attr, "__contains__")
+                )
+                if not is_dict_like:
+                    continue
+                if "foobar" in attr:
+                    yield attr_name, attr
+
+        # collect dict-like attributes holding the adapter before deletion
+        dict_attrs = list(get_dict_like_attrs(model))
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayer):
+                dict_attrs.extend(list(get_dict_like_attrs(module)))
+
+        # sanity check: there should be at least one such attribute
+        assert dict_attrs, f"No dict-like attributes found on {config.peft_type}, please check the test"
+
+        model.delete_adapter(adapter_name="foobar")
+        dangling_attrs = [attr_name for attr_name, attr in dict_attrs if "foobar" in attr]
+        assert not dangling_attrs, f"Found dangling attributes after adapter deletion: {sorted(dangling_attrs)}"
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_inactive_adapter(self, test_name, model_id, config_cls, config_kwargs):

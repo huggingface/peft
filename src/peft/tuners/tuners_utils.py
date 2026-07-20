@@ -148,7 +148,7 @@ def _check_lora_target_modules_mamba(peft_config: PeftConfig, model: nn.Module, 
 
     lora_like_types = {"LORA", "ADALORA", "XLORA", "RANDLORA"}
     incompatible_modules = {"out_proj", "conv1d"}
-    mamba_model_types = {"falcon_h1", "mamba", "mamba2", "falcon_mamba"}
+    mamba_model_types = {"falcon_h1", "mamba", "mamba2", "falcon_mamba", "nemotron_h"}
 
     if (
         peft_config.peft_type in lora_like_types
@@ -1085,6 +1085,16 @@ class BaseTuner(nn.Module, ABC):
                 module_name = prefix + suffix
             return module_name
 
+        def find_existing_param_wrapper(module, parameter_name):
+            # When adding a further adapter, the parameter may already be wrapped by a (possibly nested) ParamWrapper
+            # that was created for a previous adapter. In that case, return that wrapper so the new adapter can be added
+            # to it (via update_layer) instead of nesting yet another wrapper.
+            while isinstance(module, BaseTunerLayer) and (module.__class__.__name__ == "ParamWrapper"):
+                if module.parameter_name == parameter_name:
+                    return module
+                module = module.base_layer
+            return None
+
         def create_and_replace_param(module_name, key, param_name):
             # helper function to avoid duplication
             if module_name == "":
@@ -1108,6 +1118,12 @@ class BaseTuner(nn.Module, ABC):
                     "try setting `target_modules=[]` to prevent it."
                 )
 
+            short_param_name = param_name.rpartition(".")[-1]  # "foo.bar.gate_up_proj" -> "gate_up_proj"
+            # If a previous adapter already wraps this parameter, reuse that wrapper instead of nesting a new one.
+            existing_wrapper = find_existing_param_wrapper(unwrapped_module, short_param_name)
+            if existing_wrapper is not None:
+                target = existing_wrapper
+
             self._check_target_module_compatiblity(peft_config, model, target_name)
             ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
             with ctx():
@@ -1118,7 +1134,7 @@ class BaseTuner(nn.Module, ABC):
                     target_name,
                     parent,
                     current_key=key,
-                    parameter_name=param_name.rpartition(".")[-1],
+                    parameter_name=short_param_name,
                 )
 
         # TODO very simple matching, might not cover all use cases
@@ -1644,9 +1660,11 @@ class BaseTunerLayer(ABC):
                 del getattr(self, attr)[adapter_name]
 
         if adapter_name in self.frozen_peft_weight_names:
-            frozen_peft_weight_names = self.frozen_peft_weight_names.copy()
-            del frozen_peft_weight_names[adapter_name]
-            self.frozen_peft_weight_names = frozen_peft_weight_names
+            # Delete in place (like the containers above) rather than copy-and-rebind: once an adapter
+            # has been registered the instance already owns its own dict (see
+            # `_register_frozen_peft_weight`), so this can't mutate the class-level default, and it keeps
+            # the deletion visible to any already-held reference to the dict.
+            del self.frozen_peft_weight_names[adapter_name]
 
         if adapter_name in self.active_adapters:
             # choose a new active adapter
@@ -2208,11 +2226,11 @@ def delete_adapter(
             The name of remaining adapter(s) after deletion, or `None` if there are no active adapters left. Use this
             to set the new active adapter of the model if necessary.
     """
-    key_list = [key for key, _ in model.named_modules() if prefix not in key]
     new_adapter = None
 
-    for key in key_list:
-        _, target, _ = _get_submodules(model, key)
+    for key, target in model.named_modules():
+        if prefix in key:
+            continue
         if isinstance(target, layer_cls):
             target.delete_adapter(adapter_name)
             if new_adapter is None:

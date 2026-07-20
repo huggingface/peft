@@ -619,7 +619,19 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # 3. Remove TinyLoRA layer-level tinylora_v references (they share with model-level tinylora_v)
         def is_expected_missing_key(k):
             # TinyLoRA: layer-level tinylora_v is a reference to model-level, exclude from warning
-            return not ("vblora_vector_bank" in k or "prompt_encoder" in k or ".tinylora_v." in k)
+            if "vblora_vector_bank" in k or "prompt_encoder" in k or ".tinylora_v." in k:
+                return False
+            if (
+                config.peft_type == PeftType.UNILORA
+                and ".unilora_theta_d." in k
+                and not k.startswith("base_model.unilora_theta_d.")
+            ):
+                return False
+            return not (
+                config.peft_type == PeftType.UNILORA
+                and not getattr(config, "save_indices", False)
+                and (".unilora_indices_" in k or ".unilora_scales_" in k)
+            )
 
         missing_keys = [k for k in load_result.missing_keys if is_expected_missing_key(k)]
         if missing_keys:
@@ -1479,6 +1491,18 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if tuner_prefix in key and adapter_name in key:
                 # TinyLoRA: layer-level tinylora_v is a reference to model-level, skip it
                 if ".tinylora_v." in key:
+                    continue
+                if (
+                    tuner == PeftType.UNILORA
+                    and ".unilora_theta_d." in key
+                    and not key.startswith("base_model.unilora_theta_d.")
+                ):
+                    continue
+                if (
+                    tuner == PeftType.UNILORA
+                    and not getattr(self.peft_config[adapter_name], "save_indices", False)
+                    and (".unilora_indices_" in key or ".unilora_scales_" in key)
+                ):
                     continue
                 adapter_missing_keys.append(key)
 

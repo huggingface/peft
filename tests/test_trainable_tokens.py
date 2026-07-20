@@ -346,7 +346,7 @@ class TestTrainableTokens:
         ],
     )
     def test_load_multiple_adapters(self, model, peft_config, tmp_path):
-        # tests if having more than one adpater (even with just the same config) works
+        # tests if having more than one adapter (even with just the same config) works
         original_model = copy.deepcopy(model)
         model = get_peft_model(model, peft_config)
 
