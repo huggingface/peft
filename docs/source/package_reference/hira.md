@@ -69,7 +69,7 @@ url={https://openreview.net/forum?id=TwJrTz9cRS}
 
 ## HiraModel
 
-[[autodoc]] tuners.lora.model.HiraModel
+[[autodoc]] tuners.hira.model.HiraModel
 
 ## Core Layers
 
