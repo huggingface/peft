@@ -1,5 +1,5 @@
 """
-This exampe demonstrates loading of LoRA adapter (via PEFT) into an FP8 INC-quantized FLUX model.
+This example demonstrates loading of LoRA adapter (via PEFT) into an FP8 INC-quantized FLUX model.
 
 More info on Intel Neural Compressor (INC) FP8 quantization is available at:
 https://github.com/intel/neural-compressor/tree/master/examples/helloworld/fp8_example

@@ -48,6 +48,7 @@ class AdamssLayer(BaseTunerLayer):
         "exp_avg_ipt_B",
         "exp_avg_unc_A",
         "exp_avg_unc_B",
+        "adamss_newB",
     )
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
@@ -175,7 +176,7 @@ class AdamssLayer(BaseTunerLayer):
 
         # Perform SVD decomposition with diagnostics in case of failure
         try:
-            res = slice_pca(weight_tensor, r, device, torch.float32)
+            res = slice_pca(weight_tensor, r, device, torch.float32, random_seed=config.random_seed)
         except Exception as e:
             raise RuntimeError(
                 f"slice_pca raised an exception for layer {adapter_name} (shape={tuple(weight_tensor.shape)}, dtype={weight_tensor.dtype}, device={device}): {e}"

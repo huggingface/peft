@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+    https://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -39,6 +39,7 @@ pip install peft
 Prepare a model for training with a PEFT method such as LoRA by wrapping the base model and PEFT configuration with `get_peft_model`. For the bigscience/mt0-large model, you're only training 0.19% of the parameters!
 
 ```python
+import torch
 from transformers import AutoModelForCausalLM
 from peft import LoraConfig, TaskType, get_peft_model
 
@@ -62,6 +63,7 @@ model.save_pretrained("qwen2.5-3b-lora")
 To load a PEFT model for inference:
 
 ```python
+import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
@@ -137,7 +139,7 @@ PEFT is directly integrated with [Transformers](https://huggingface.co/docs/tran
 from peft import LoraConfig
 model = ...  # transformers model
 peft_config = LoraConfig(...)
-model.add_adapter(lora_config, adapter_name="lora_1")
+model.add_adapter(peft_config, adapter_name="lora_1")
 ```
 
 To load a trained PEFT adapter, call `load_adapter`:

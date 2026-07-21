@@ -46,7 +46,7 @@ class GraloraConfig(PeftConfig):
             improve the generalization of the GraLoRA adapter.
         gralora_k (`int`):
             GraLoRA k determines the number of subblocks in the GraLoRA adapter. The rank r must be divisible by
-            gralora_k for the GraLoRA adapter to be valid. The total parameter count is preserved regardles of
+            gralora_k for the GraLoRA adapter to be valid. The total parameter count is preserved regardless of
             gralora_k. The entire rank of the GraLoRA adapter is increased by gralora_k, while the rank of each
             subblock is reduced by gralora_k. gralora_k=2 is recommended for rank 32 or lower, and gralora_k=4 is
             recommended for rank 64 or higher.
@@ -57,6 +57,10 @@ class GraloraConfig(PeftConfig):
             Bias type for gralora. Can be 'none', 'all' or 'gralora_only'. If 'all' or 'gralora_only', the
             corresponding biases will be updated during training. Be aware that this means that, even when disabling
             the adapters, the model will not produce the same output as the base model would have without adaptation.
+        modules_to_save (`Optional[list[str]]`):
+            List of modules apart from gralora layers to be set as trainable and saved in the final checkpoint. For
+            example, in Sequence Classification or Token Classification tasks, the final layer `classifier/score` are
+            randomly initialized and as such need to be trainable and saved.
         init_weights (`bool`):
             Whether to initialize the weights of the GraLoRA layers with their default initialization. Don't change
             this setting, except if you know exactly what you're doing.
@@ -119,7 +123,7 @@ class GraloraConfig(PeftConfig):
             "help": (
                 "gralora_k determines the number of subblocks in the GraLoRA adapter. "
                 "The rank r must be divisible by gralora_k for the GraLoRA adapter to be valid. "
-                "The total parameter count is preserved regardles of gralora_k. "
+                "The total parameter count is preserved regardless of gralora_k. "
                 "The entire rank of the GraLoRA adapter is increased by gralora_k, while the rank of each subblock is reduced by gralora_k. "
                 "gralora_k=2 is recommended for rank 32 or lower, and gralora_k=4 is recommended for rank 64 or higher. "
             )

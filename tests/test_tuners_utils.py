@@ -15,6 +15,8 @@ import dataclasses
 import re
 from copy import deepcopy
 
+import diffusers
+import packaging.version
 import pytest
 import torch
 from diffusers import StableDiffusionPipeline
@@ -58,6 +60,9 @@ from peft.utils.quantization_utils import Bnb8bitBackend
 
 from .testing_utils import hub_online_once, require_bitsandbytes, require_non_cpu
 
+
+# TODO: remove once Diffusers 0.40 is released
+is_diffusers_ge_v040 = packaging.version.parse(diffusers.__version__) >= packaging.version.parse("0.40.0.dev0")
 
 # Implements tests for regex matching logic common for all BaseTuner subclasses, and
 # tests for correct behaviour with different config kwargs for BaseTuners (Ex: feedforward for IA3, etc) and
@@ -340,6 +345,10 @@ class TestPeftCustomKwargs:
             assert new_config.target_modules == expected_target_modules
 
     def test_maybe_include_all_linear_layers_diffusion(self):
+        # TODO: remove once Diffusers 0.40 is released
+        if not is_diffusers_ge_v040:
+            pytest.skip("This test fails with Diffusers < 0.40 due to a change in huggingface_hub")
+
         model_id = "hf-internal-testing/tiny-sd-pipe"
         with hub_online_once(model_id):
             model = StableDiffusionPipeline.from_pretrained(model_id)
@@ -422,7 +431,7 @@ class TestPeftCustomKwargs:
                 layer.mlp.down_proj,
             )
             for proj in projs:
-                # the targted layer itself, which in the base model was the nn.Linear layer, is now a LoraLayer
+                # the targeted layer itself, which in the base model was the nn.Linear layer, is now a LoraLayer
                 assert isinstance(proj, LoraLayer)
                 # all children of that layer are still normal nn.Linear layers
                 assert isinstance(proj.base_layer, nn.Linear)
@@ -488,6 +497,48 @@ class TestTargetedModuleNames:
             f"transformer.h.{i}.self_attention.query_key_value" for i in range(len(model.base_model.transformer.h))
         ]
         assert model.targeted_module_names == expected
+
+    @pytest.mark.parametrize("layers_pattern", [None, "layers", ["h", "layers"]])
+    def test_layers_to_transform_filters_by_layer_not_expert_index(self, layers_pattern):
+        # Test fix to issue #3016
+        # The layer-index regex used a greedy ".*" prefix, so for MoE paths like
+        # "model.layers.1.mlp.experts.0.up_proj" it captured the expert index instead of the layer
+        # index, making layers_to_transform target the wrong modules.
+        class ToyMoEBlock(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.self_attn = nn.Module()
+                self.self_attn.q_proj = nn.Linear(4, 4, bias=False)
+
+                self.mlp = nn.Module()
+                self.mlp.experts = nn.ModuleList([nn.Module() for _ in range(2)])
+                for e in range(2):
+                    self.mlp.experts[e].up_proj = nn.Linear(4, 4, bias=False)
+
+        class ToyMoEModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.model = nn.Module()
+                self.model.layers = nn.ModuleList([ToyMoEBlock() for _ in range(4)])
+
+        config = LoraConfig(
+            target_modules=["q_proj", "up_proj"],
+            layers_pattern=layers_pattern,
+            layers_to_transform=[1],
+            r=2,
+            lora_alpha=4,
+        )
+        model = get_peft_model(ToyMoEModel(), config)
+
+        # only layer 1's modules should be targeted, both experts included.
+        # Under the bug, layers.1.experts.0 was misread as layer 0 and dropped, and a
+        # layers.2.experts.1 module could be misread as layer 1 and wrongly included.
+        expected = {
+            "model.layers.1.self_attn.q_proj",
+            "model.layers.1.mlp.experts.0.up_proj",
+            "model.layers.1.mlp.experts.1.up_proj",
+        }
+        assert set(model.targeted_module_names) == expected
 
 
 class TestTargetedParameterNames:

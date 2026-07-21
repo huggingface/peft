@@ -35,6 +35,7 @@ from peft import (
     C3AConfig,
     DeloraConfig,
     EvaConfig,
+    FrodConfig,
     GraloraConfig,
     IA3Config,
     LilyConfig,
@@ -388,6 +389,137 @@ class TestLoraInitialization:
         config = LoraConfig(init_lora_weights="pissa_niter_16", target_modules=["linear"])
         peft_model = get_peft_model(deepcopy(model), config)
         assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
+
+    def test_lora_mica_linear_init_default(self, data):
+        # MiCA initializes A=0 and B = bottom-r left singular vectors of W. Because A=0, the adapter contribution
+        # B @ A is zero at init, so the forward output must equal the base model's output exactly.
+        model = self.get_model()
+        output = model(data)[0]
+
+        config = LoraConfig(init_lora_weights="mica", target_modules=["linear"], r=8)
+        peft_model = get_peft_model(deepcopy(model), config)
+
+        weight_A = peft_model.base_model.linear.lora_A["default"].weight
+        weight_B = peft_model.base_model.linear.lora_B["default"].weight
+
+        # A must be zero
+        assert torch.all(weight_A == 0)
+        # B columns must be orthonormal (since they are left singular vectors)
+        eye = torch.eye(weight_B.shape[1], device=weight_B.device, dtype=weight_B.dtype)
+        assert torch.allclose(weight_B.t() @ weight_B, eye, atol=1e-4)
+        # Output at init equals the base output
+        assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
+
+    def test_lora_mica_embedding_init_default(self):
+        class EmbeddingModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embed = nn.Embedding(7, 5)
+
+            def forward(self, x):
+                return self.embed(x)
+
+        model = EmbeddingModel()
+        data = torch.arange(7).unsqueeze(0)
+        output = model(data)
+
+        config = LoraConfig(init_lora_weights="mica", target_modules=["embed"], r=3)
+        peft_model = get_peft_model(deepcopy(model), config)
+
+        weight_A = peft_model.base_model.embed.lora_embedding_A["default"]
+        weight_B = peft_model.base_model.embed.lora_embedding_B["default"]
+
+        assert torch.all(weight_A == 0)
+        eye = torch.eye(weight_B.shape[1], device=weight_B.device, dtype=weight_B.dtype)
+        assert torch.allclose(weight_B.t() @ weight_B, eye, atol=1e-4)
+        assert weight_A.requires_grad
+        assert not weight_B.requires_grad
+        assert torch.allclose(output, peft_model(data), atol=1e-06)
+
+    def test_lora_mica_uses_minor_components(self):
+        # Verify B equals the *minor* (smallest singular value) left singular vectors, not the major ones.
+        torch.manual_seed(0)
+        model = self.get_model()
+        r = 8
+
+        config = LoraConfig(init_lora_weights="mica", target_modules=["linear"], r=r)
+        peft_model = get_peft_model(deepcopy(model), config)
+        weight_B = peft_model.base_model.linear.lora_B["default"].weight.detach().cpu()
+
+        # Reference SVD of the original weight
+        W = model.linear.weight.detach().cpu().to(torch.float32)
+        U, _S, _ = torch.linalg.svd(W, full_matrices=False)
+        minor_U = U[:, -r:]
+        major_U = U[:, :r]
+
+        # B should span the same subspace as `minor_U` (column spans match up to sign/orthogonal mixing within
+        # equal-singular-value groups). Equality of projectors is the right invariant.
+        proj_B = weight_B @ weight_B.t()
+        proj_minor = minor_U @ minor_U.t()
+        proj_major = major_U @ major_U.t()
+        assert torch.allclose(proj_B, proj_minor, atol=1e-4)
+        assert not torch.allclose(proj_B, proj_major, atol=1e-2)
+
+    def test_lora_mica_freezes_B(self):
+        model = self.get_model()
+        config = LoraConfig(init_lora_weights="mica", target_modules=["linear"], r=8)
+        peft_model = get_peft_model(deepcopy(model), config)
+
+        assert peft_model.base_model.linear.lora_A["default"].weight.requires_grad
+        assert not peft_model.base_model.linear.lora_B["default"].weight.requires_grad
+
+    def test_lora_mica_freezes_B_when_switching_adapters(self):
+        class SimpleMlp(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(10, 10)
+                self.fc2 = nn.Linear(10, 10)
+
+            def forward(self, x):
+                x = torch.relu(self.fc1(x))
+                return self.fc2(x)
+
+        def trainable_parameters(model):
+            return [name for name, param in model.named_parameters() if param.requires_grad]
+
+        config0 = LoraConfig(target_modules=["fc1"], init_lora_weights="mica", r=4)
+        model = get_peft_model(SimpleMlp(), config0)
+        assert trainable_parameters(model) == ["base_model.model.fc1.lora_A.default.weight"]
+
+        config1 = LoraConfig(target_modules=["fc1", "fc2"], init_lora_weights="mica", r=4)
+        model.add_adapter("other", config1)
+        model.set_adapter("other")
+        assert trainable_parameters(model) == [
+            "base_model.model.fc1.lora_A.other.weight",
+            "base_model.model.fc2.lora_A.other.weight",
+        ]
+
+        model.set_adapter("default")
+        assert trainable_parameters(model) == ["base_model.model.fc1.lora_A.default.weight"]
+
+        model.delete_adapter("other")
+        assert "other" not in model.base_model.model.fc1.frozen_peft_weight_names
+        assert "other" not in model.base_model.model.fc2.frozen_peft_weight_names
+        config2 = LoraConfig(target_modules=["fc1"], r=4)
+        model.add_adapter("other", config2)
+        model.set_adapter("other")
+        assert trainable_parameters(model) == [
+            "base_model.model.fc1.lora_A.other.weight",
+            "base_model.model.fc1.lora_B.other.weight",
+        ]
+
+    def test_lora_mica_rank_too_large_raises(self):
+        class SimpleModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(2, 3)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        config = LoraConfig(init_lora_weights="mica", target_modules=["linear"], r=3)
+        with pytest.raises(ValueError, match="MiCA requires `r` <= min"):
+            get_peft_model(SimpleModel(), config)
 
     def test_lora_olora_linear_init_default(self, data):
         model = self.get_model()
@@ -1454,6 +1586,27 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config)
 
+    def test_nemotron_h_has_defaults_and_blocks_mamba_modules(self):
+        # Nemotron-H is a hybrid Mamba + Attention (+ MoE) architecture. It must
+        # (a) have default target modules (the attention q/k/v/o_proj) so that
+        # target_modules=None resolves without error, and (b) be treated as a
+        # Mamba-based model so that targeting a Mamba mixer module such as
+        # `out_proj` raises (see test_lora_incompatible_mamba_modules above).
+        model_id = "trl-internal-testing/tiny-NemotronHForCausalLM-nano"
+        with hub_online_once(model_id):
+            # (a) target_modules=None falls back to the nemotron_h defaults
+            # (q/k/v/o_proj attention projections), which exist -> does not raise
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            get_peft_model(model, LoraConfig(task_type="CAUSAL_LM"))  # does not raise
+
+            # (b) nemotron_h is registered as a Mamba-based model, so targeting
+            # the Mamba mixer's `out_proj` is forbidden and must raise
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            config = LoraConfig(task_type="CAUSAL_LM", target_modules=["out_proj"])
+            msg = "is incompatible with Mamba-based models"
+            with pytest.raises(ValueError, match=msg):
+                get_peft_model(model, config)
+
     def get_model_conv2d_groups(self):
         class ModelConv2DGroups(nn.Module):
             """For testing when groups argument is used in conv layer"""
@@ -1575,15 +1728,35 @@ class TestLoraInitialization:
         with pytest.warns(RuntimeWarning, match=msg):
             get_peft_model(model, config)
 
-    def test_adding_multiple_adapters_with_target_parameters_raises(self):
+    def test_adding_multiple_adapters_with_same_target_parameters_works(self):
+        # Multiple adapters that target the same set of parameters are supported.
         model = self.get_model()
         config = LoraConfig(target_modules=[], target_parameters=["linear.weight"])
         model = get_peft_model(model, config)
-        msg = re.escape("only one LoRA adapter per model with `target_parameters` is allowed")
-        with pytest.raises(ValueError, match=msg):
-            model.add_adapter(adapter_name="other", peft_config=config)
+        # a second adapter targeting the same parameter(s) can be added
+        config_other = LoraConfig(target_modules=[], target_parameters=["linear.weight"])
+        model.add_adapter(adapter_name="other", peft_config=config_other)
+        assert "other" in model.peft_config
 
-    def test_loading_loading_adapters_with_target_parameters_raises(self, tmp_path):
+    def test_adding_multiple_adapters_with_different_target_parameters_raises(self):
+        # Multiple adapters that target a different set of parameters are not supported -- all adapters that use
+        # target_parameters on the same model must target the same set of parameters. This is because the information
+        # which parameter is targeted is not stored in the state_dict itself (remember: if we target multiple parameters
+        # on the same module, we solve that by nesting, which means that the nesting level encodes which parameter is
+        # targeted). Therefore, if we had different adapters targeting different parameters, we would not be able to
+        # tell which parameter is meant to be targeted.
+        model = self.get_model()
+        config = LoraConfig(target_modules=[], target_parameters=["linear.weight"])
+        model = get_peft_model(model, config)
+        config_other = LoraConfig(target_modules=[], target_parameters=["embed.weight"])
+        msg = re.escape("all adapters must target the same set of parameters")
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter(adapter_name="other", peft_config=config_other)
+        # the invalid config was not added
+        assert "other" not in model.peft_config
+
+    def test_loading_multiple_adapters_with_target_parameters_works(self, tmp_path):
+        # A second adapter targeting the same parameter(s) can be loaded onto the model.
         model = self.get_model()
         config = LoraConfig(target_modules=[], target_parameters=["linear.weight"])
         model = get_peft_model(model, config)
@@ -1591,9 +1764,8 @@ class TestLoraInitialization:
 
         model = self.get_model()
         model = PeftModel.from_pretrained(model, tmp_path)
-        msg = re.escape("only one LoRA adapter per model with `target_parameters` is allowed")
-        with pytest.raises(ValueError, match=msg):
-            model.load_adapter(tmp_path, adapter_name="other")
+        model.load_adapter(tmp_path, adapter_name="other")
+        assert "other" in model.peft_config
 
     def test_multiple_configs_with_bias_raises(self, tmp_path):
         # There cannot be more than one config with bias != "none".
@@ -1831,6 +2003,83 @@ class TestVeraInitialization:
         model = get_peft_model(self.get_model(), config0)
         # not full message but enough to identify the error
         msg = f"vera_A has a size of {rank0} but {rank1} or greater is required"
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config1)
+
+
+class TestFrodInitialization:
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+                self.lin1 = nn.Linear(20, 20, bias=bias)
+                self.lin2 = nn.Linear(20, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                X = self.lin2(X)
+                return X
+
+        return MLP().to(self.torch_device)
+
+    def test_frod_multiple_adapters_same_prng_share_projection_buffers(self):
+        torch.manual_seed(0)
+        config0 = FrodConfig(target_modules=["lin1", "lin2"], init_weights=False)
+        model = get_peft_model(self.get_model().cpu(), config0)
+
+        config1 = FrodConfig(target_modules=["lin1", "lin2"], init_weights=False)
+        model.add_adapter("other", config1)
+
+        assert model.base_model.model.lin1.frod_V["default"].data_ptr() == (
+            model.base_model.model.lin1.frod_V["other"].data_ptr()
+        )
+        assert model.base_model.model.lin1.frod_s_indices["default"].data_ptr() == (
+            model.base_model.model.lin1.frod_s_indices["other"].data_ptr()
+        )
+        assert model.base_model.model.lin2.frod_V["default"].data_ptr() == (
+            model.base_model.model.lin2.frod_V["other"].data_ptr()
+        )
+        assert model.base_model.model.lin2.frod_s_indices["default"].data_ptr() == (
+            model.base_model.model.lin2.frod_s_indices["other"].data_ptr()
+        )
+
+    def test_frod_mixing_save_projection_raises(self):
+        config0 = FrodConfig(target_modules=["lin0"], init_weights=False, save_projection=True)
+        model = get_peft_model(self.get_model(), config0)
+
+        config1 = FrodConfig(target_modules=["lin0"], init_weights=False, save_projection=False)
+        msg = re.escape(
+            "FRoD projection weights must be saved for all adapters or none, but got multiple different values: "
+            "[False, True]"
+        )
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config1)
+
+    def test_frod_mixing_runtime_offload_base_weight_raises(self):
+        config0 = FrodConfig(target_modules=["lin0"], init_weights=False)
+        model = get_peft_model(self.get_model(), config0)
+
+        config1 = FrodConfig(target_modules=["lin0"], init_weights=False, runtime_offload_base_weight=True)
+        msg = re.escape(
+            "FRoD runtime base-weight offloading must be enabled for all adapters or none, but got multiple "
+            "different values: [False, True]"
+        )
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config1)
+
+    def test_frod_add_second_adapter_with_different_prng_key_raises(self):
+        config0 = FrodConfig(target_modules=["lin0"], init_weights=False)
+        model = get_peft_model(self.get_model(), config0)
+
+        config1 = FrodConfig(target_modules=["lin0"], init_weights=False, projection_prng_key=123)
+        msg = re.escape(
+            "FRoD projection initialization key must be the same for all adapters. Got "
+            "config.projection_prng_key=123 but previous config had 0."
+        )
         with pytest.raises(ValueError, match=msg):
             model.add_adapter("other", config1)
 
@@ -3828,13 +4077,11 @@ class TestHotSwapping:
         torch.manual_seed(0)
         return ConvModel().to(self.torch_device)
 
-    # this works with all adapters except prompt learning, but we don't test all
-    # as it is unnecessary and would be slow
     @pytest.mark.parametrize(
         "config",
         [
-            LoraConfig(init_lora_weights=0, target_modules=["lin0"]),
-            LoraConfig(init_lora_weights=0, target_modules=["lin0", "lin1"]),
+            LoraConfig(init_lora_weights=False, target_modules=["lin0"]),
+            LoraConfig(init_lora_weights=False, target_modules=["lin0", "lin1"]),
         ],
     )
     @pytest.mark.parametrize("do_compile", [False, True])
