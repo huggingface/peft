@@ -291,7 +291,8 @@ class TinyLoraModel(BaseTuner):
 
         # Remove the adapter's cached target-key mapping so that re-adding an adapter with the same name (but
         # potentially different target_modules) rebuilds the mapping instead of reusing a stale one.
-        if hasattr(self, "_target_key_to_idx") and adapter_name in self._target_key_to_idx:
+        # `_target_key_to_idx` is always assigned in `__init__` before injection, so no `hasattr` guard is needed.
+        if adapter_name in self._target_key_to_idx:
             del self._target_key_to_idx[adapter_name]
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
