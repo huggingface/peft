@@ -25,7 +25,15 @@ from peft.utils.other import transpose
 
 
 class UniLoraLayer(BaseTunerLayer):
-    other_param_names = ("unilora_theta_d", "unilora_scales_A", "unilora_scales_B")
+    other_param_names = (
+        "r",
+        "unilora_theta_d",
+        "unilora_indices_A",
+        "unilora_indices_B",
+        "unilora_scales_A",
+        "unilora_scales_B",
+        "unilora_dropout",
+    )
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer

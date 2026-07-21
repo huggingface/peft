@@ -1660,9 +1660,11 @@ class BaseTunerLayer(ABC):
                 del getattr(self, attr)[adapter_name]
 
         if adapter_name in self.frozen_peft_weight_names:
-            frozen_peft_weight_names = self.frozen_peft_weight_names.copy()
-            del frozen_peft_weight_names[adapter_name]
-            self.frozen_peft_weight_names = frozen_peft_weight_names
+            # Delete in place (like the containers above) rather than copy-and-rebind: once an adapter
+            # has been registered the instance already owns its own dict (see
+            # `_register_frozen_peft_weight`), so this can't mutate the class-level default, and it keeps
+            # the deletion visible to any already-held reference to the dict.
+            del self.frozen_peft_weight_names[adapter_name]
 
         if adapter_name in self.active_adapters:
             # choose a new active adapter
@@ -2224,11 +2226,11 @@ def delete_adapter(
             The name of remaining adapter(s) after deletion, or `None` if there are no active adapters left. Use this
             to set the new active adapter of the model if necessary.
     """
-    key_list = [key for key, _ in model.named_modules() if prefix not in key]
     new_adapter = None
 
-    for key in key_list:
-        _, target, _ = _get_submodules(model, key)
+    for key, target in model.named_modules():
+        if prefix in key:
+            continue
         if isinstance(target, layer_cls):
             target.delete_adapter(adapter_name)
             if new_adapter is None:

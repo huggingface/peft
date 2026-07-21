@@ -36,6 +36,7 @@ class DeftLayer(BaseTunerLayer):
         "deft_init_scale",
         "deft_para",
         "deft_scaling",
+        "deft_dropout",
     )
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
