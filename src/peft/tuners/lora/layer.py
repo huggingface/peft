@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import math
 import warnings
 from collections.abc import Callable
@@ -102,9 +103,23 @@ class LoraVariant:
 
 class LoraLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
-    adapter_layer_names: tuple[str, ...] = ("lora_A", "lora_B", "lora_embedding_A", "lora_embedding_B")
+    adapter_layer_names: tuple[str, ...] = (
+        "lora_A",
+        "lora_B",
+        "lora_embedding_A",
+        "lora_embedding_B",
+        "lora_magnitude_vector",
+    )
     # All names of other parameters that may contain adapter-related parameters
-    other_param_names: tuple[str, ...] = ("r", "lora_alpha", "scaling", "lora_dropout")
+    other_param_names: tuple[str, ...] = (
+        "r",
+        "lora_alpha",
+        "scaling",
+        "lora_dropout",
+        "use_dora",
+        "use_rslora",
+        "lora_bias",
+    )
 
     def __init__(self, base_layer: nn.Module, ephemeral_gpu_offload: bool = False, **kwargs) -> None:
         self.base_layer = base_layer
@@ -143,19 +158,59 @@ class LoraLayer(BaseTunerLayer):
     def _get_in_out_features(self, module: nn.Module) -> tuple[int, int] | tuple[None, None]:
         return _get_in_out_features(module)
 
-    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        """Return a matching LoRA variant for this layer type.
-
-        Given the init arguments of this layer, return the correct LoRA variant, if any. E.g., if `use_dora=True`, this
-        method should return the DoRA variant for the given layer. If `use_alora=True`, same for aLoRA.
-
-        If there is no fitting variant, return None.
-
-        Note: If this layer type does not support the LoRA variant at all, please raise an error during __init__ as is
-        convention, and not here.
-
+    @property
+    def lora_variants(self):
         """
-        return None
+        A dictionary mapping the active LoRA variants to their respective classes.
+
+        To extend this, subclasses should override this property and return a dictionary where the keys are tuples of
+        variant field names (from LoraConfig) and the values are the specific LoraVariant subclasses.
+
+        Tuples are used as keys because they are immutable and hashable, allowing us to safely map combinations of
+        active variants (e.g., DoRA + another variant) to a specific composed variant class.
+        """
+        return {(): None}
+
+    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
+        """Resolves the appropriate LoRA variant class based on the given configuration.
+        This method inspects the LoraConfig to identify active variants (such as matching the string value of
+        init_lora_weights to the registered metadata) and retrieves the corresponding class from the layer's variant
+        registry."""
+        # mapping from declared variant to the LoraVariant class, keys are tuples to allow for multi variants
+        lora_variant_mapping = self.lora_variants
+        if any(tuple(sorted(k)) != k for k in lora_variant_mapping.keys()):
+            raise ValueError("Keys in lora_variants must be sorted tuples (e.g ('a', 'b'), not ('b', 'a')).")
+
+        # for each LoRA variant, determine if they are configured as active or not
+        requested_lora_variants: dict[str, bool] = {}
+        for field in dataclasses.fields(config):
+            # for init_lora_weights, we collect the field's lora_variants and check the value to determine if the
+            # variant is requested
+            if field.name == "init_lora_weights":
+                for init_variant_option in field.metadata["lora_variants"]:
+                    requested_lora_variants[init_variant_option] = config.init_lora_weights == init_variant_option
+            # for all other fields, if the metadata declares them as is_lora_variant and we check if the value is truthy
+            # to determine if the variant is requested
+            elif field.metadata.get("is_lora_variant"):
+                requested_lora_variants[field.name] = bool(getattr(config, field.name))
+
+        # sanity check: each mapping key must be present in the LoraConfig
+        all_variant_names = {name for variant_keys in lora_variant_mapping.keys() for name in variant_keys}
+        missing_variants = all_variant_names - requested_lora_variants.keys()
+        if missing_variants:
+            raise ValueError(
+                f"variant(s) {sorted(missing_variants)} found in lora_variants but neither tagged with "
+                f"'is_lora_variant' in LoraConfig, nor declared as a LoRA variant in init_lora_weights."
+            )
+
+        # collect active variants: keys are sorted tuples of strings
+        requested_keys = tuple(sorted(k for k, v in requested_lora_variants.items() if v))
+        if requested_keys not in lora_variant_mapping:
+            raise ValueError(f"Invalid or unsupported variant combination: {requested_keys}")
+
+        # return the found variant or None for vanilla LoRA
+        variant_class = lora_variant_mapping[requested_keys]
+        return variant_class() if variant_class else None
 
     def update_layer(
         self,
@@ -837,41 +892,20 @@ class Linear(nn.Module, LoraLayer):
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def resolve_lora_variant(self, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if config.velora_config is not None:
-            from .variants import VeloraLinearVariant
+    @property
+    def lora_variants(self):
+        from . import variants
 
-            return VeloraLinearVariant()
-
-        if config.arrow_config is not None:
-            from .variants import ArrowLinearVariant
-
-            return ArrowLinearVariant()
-
-        if config.monteclora_config is not None:
-            from .variants import MontecloraLinearVariant
-
-            return MontecloraLinearVariant()
-        if config.use_bdlora is not None:
-            from .variants import BdLoraLinearVariant
-
-            return BdLoraLinearVariant()
-
-        if isinstance(config.init_lora_weights, str) and config.init_lora_weights.lower() == "mica":
-            from .variants import MiCALinearVariant
-
-            return MiCALinearVariant()
-
-        use_alora = config.alora_invocation_tokens is not None
-        if not config.use_dora and not use_alora:
-            return None
-
-        from .variants import ALoraLinearVariant, DoraLinearVariant
-
-        if use_alora:
-            return ALoraLinearVariant()
-        else:
-            return DoraLinearVariant()
+        return {
+            (): None,
+            ("use_dora",): variants.DoraLinearVariant,
+            ("arrow_config",): variants.ArrowLinearVariant,
+            ("use_bdlora",): variants.BdLoraLinearVariant,
+            ("alora_invocation_tokens",): variants.ALoraLinearVariant,
+            ("velora_config",): variants.VeloraLinearVariant,
+            ("monteclora_config",): variants.MontecloraLinearVariant,
+            ("mica",): variants.MiCALinearVariant,
+        }
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -991,10 +1025,6 @@ class Linear(nn.Module, LoraLayer):
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
 
-            # cast back the weights
-            self.lora_A[adapter].weight.data = weight_A.to(dtype)
-            self.lora_B[adapter].weight.data = weight_B.to(dtype)
-
         return output_tensor
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
@@ -1108,19 +1138,15 @@ class Embedding(nn.Module, LoraLayer):
             config=config,
         )
 
-    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if config.velora_config is not None:
-            raise ValueError("VeLoRA does not support adapting embedding layers.")
-        if isinstance(config.init_lora_weights, str) and config.init_lora_weights.lower() == "mica":
-            from .variants import MiCAEmbeddingVariant
+    @property
+    def lora_variants(self):
+        from . import variants
 
-            return MiCAEmbeddingVariant()
-        if not config.use_dora:
-            return None
-
-        from .variants import DoraEmbeddingVariant
-
-        return DoraEmbeddingVariant()
+        return {
+            (): None,
+            ("use_dora",): variants.DoraEmbeddingVariant,
+            ("mica",): variants.MiCAEmbeddingVariant,
+        }
 
     def update_layer(
         self,
@@ -1318,10 +1344,6 @@ class Embedding(nn.Module, LoraLayer):
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
-
-            # cast back the weights
-            self.lora_embedding_A[adapter] = weight_A.to(dtype)
-            self.lora_embedding_B[adapter] = weight_B.to(dtype)
 
         return output_tensor
 
@@ -1619,7 +1641,7 @@ class _ConvNd(nn.Module, LoraLayer):
                 else:
                     if active_adapter not in self.lora_variant:  # vanilla LoRA
                         delta_weight = self.get_delta_weight(active_adapter)
-                        base_layer.weight.data += delta_weight.to(orig_dtype)
+                        base_layer.weight.data += delta_weight
                     else:
                         self.lora_variant[active_adapter].merge_unsafe(self, active_adapter, base_layer.weight)
 
@@ -1694,10 +1716,6 @@ class _ConvNd(nn.Module, LoraLayer):
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
 
-            # cast back the weights
-            self.lora_A[adapter].weight.data = weight_A.to(dtype)
-            self.lora_B[adapter].weight.data = weight_B.to(dtype)
-
         return output_tensor
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
@@ -1754,15 +1772,14 @@ class Conv2d(_ConvNd):
             raise ValueError(f"Conv2d layer kernel must have 4 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv2d
 
-    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if config.velora_config is not None:
-            raise ValueError("VeLoRA does not support adapting conv layers.")
-        if not config.use_dora:
-            return None
+    @property
+    def lora_variants(self):
+        from . import variants
 
-        from .variants import DoraConv2dVariant
-
-        return DoraConv2dVariant()
+        return {
+            (): None,
+            ("use_dora",): variants.DoraConv2dVariant,
+        }
 
 
 class Conv1d(_ConvNd):
@@ -1773,15 +1790,14 @@ class Conv1d(_ConvNd):
             raise ValueError(f"Conv1d layer kernel must have 3 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv1d
 
-    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if config.velora_config is not None:
-            raise ValueError("VeLoRA does not support adapting conv layers.")
-        if not config.use_dora:
-            return None
+    @property
+    def lora_variants(self):
+        from . import variants
 
-        from .variants import DoraConv1dVariant
-
-        return DoraConv1dVariant()
+        return {
+            (): None,
+            ("use_dora",): variants.DoraConv1dVariant,
+        }
 
 
 class Conv3d(_ConvNd):
@@ -1792,15 +1808,14 @@ class Conv3d(_ConvNd):
             raise ValueError(f"Conv3d layer kernel must have 5 dimensions, not {self._kernel_dim}")
         self.conv_fn = F.conv3d
 
-    def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
-        if config.velora_config is not None:
-            raise ValueError("VeLoRA does not support adapting conv layers.")
-        if not config.use_dora:
-            return None
+    @property
+    def lora_variants(self):
+        from . import variants
 
-        from .variants import DoraConv3dVariant
-
-        return DoraConv3dVariant()
+        return {
+            (): None,
+            ("use_dora",): variants.DoraConv3dVariant,
+        }
 
 
 class MultiheadAttention(nn.Module, LoraLayer):

@@ -28,7 +28,15 @@ from .config import FrodConfig
 
 class FrodLayer(BaseTunerLayer):
     adapter_layer_names = ("frod_lambda_l", "frod_lambda_s_values")
-    other_param_names = ("frod_V", "frod_U", "frod_s_indices", "frod_s_size", "runtime_offload_base_weight")
+    other_param_names = (
+        "r",
+        "frod_V",
+        "frod_U",
+        "frod_s_indices",
+        "frod_s_size",
+        "runtime_offload_base_weight",
+        "frod_dropout",
+    )
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer

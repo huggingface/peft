@@ -35,7 +35,7 @@ class ScriptArguments(SFTConfig):
         default=True,
         metadata={
             "help": (
-                "True -> MiSS efficience and balance; `bat` -> Bat, `mini` -> smaller MiSS efficience and balance"
+                "True -> MiSS efficiency and balance; `bat` -> Bat, `mini` -> smaller MiSS efficiency and balance"
             ),
         },
     )

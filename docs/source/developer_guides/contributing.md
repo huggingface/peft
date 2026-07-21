@@ -20,7 +20,43 @@ We are happy to accept contributions to PEFT. If you plan to contribute, please 
 
 ## Installation
 
-For code contributions to PEFT, you should choose the ["source"](../install#source) installation method.
+Follow these steps to start contributing:
+
+1. Fork the [repository](https://github.com/huggingface/peft) by clicking on the 'Fork' button on the repository's page. This creates a copy of the code under your GitHub user account.
+
+2. Clone your fork to your local disk, and add the base repository as a remote. The following command assumes you have your public SSH key uploaded to GitHub. See the following guide for more [information](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository).
+
+   ```bash
+   git clone git@github.com:<your Github handle>/peft.git
+   cd peft
+   git remote add upstream https://github.com/huggingface/peft.git
+   ```
+
+3. Create a new branch to hold your development changes, and do this for every new PR you work on.
+
+   Start by synchronizing your `main` branch with the `upstream/main` branch (more details in the [GitHub Docs](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/syncing-a-fork)):
+
+   ```bash
+   git checkout main
+   git fetch upstream
+   git merge upstream/main
+   ```
+
+   Once your `main` branch is synchronized, create a new branch from it:
+
+   ```bash
+   git checkout -b a-descriptive-name-for-my-changes
+   ```
+
+   **Do not** work on the `main` branch.
+
+4. Set up a development environment by running the following command in a conda or a virtual environment you've created for working on this library:
+
+   ```bash
+   pip install -e ".[test]"
+   ```
+
+   (If PEFT was already installed in the virtual environment, remove it with `pip uninstall peft` before reinstalling it.)
 
 If you are new to creating a pull request, follow the [Creating a pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request) guide by GitHub.
 

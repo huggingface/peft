@@ -115,10 +115,10 @@ def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
 
     if hasattr(bnb.functional, "int8_vectorwise_dequant"):
         # Use bitsandbytes API if available (requires v0.45.0+)
-        dequantized = bnb.functional.int8_vectorwise_dequant(weight.data, state.SCB)
+        dequantized = bnb.functional.int8_vectorwise_dequant(weight.data, state.SCB.to(weight.data.device))
     else:
         # Multiply by (scale/127) to dequantize.
-        dequantized = weight.data * state.SCB.view(-1, 1) * 7.874015718698502e-3
+        dequantized = weight.data * state.SCB.to(weight.data.device).view(-1, 1) * 7.874015718698502e-3
 
     return dequantized
 

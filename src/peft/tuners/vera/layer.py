@@ -30,7 +30,7 @@ from .config import VeraConfig
 class VeraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
     adapter_layer_names = ("vera_lambda_b", "vera_lambda_d")
-    other_param_names = ("vera_A", "vera_B")
+    other_param_names = ("vera_A", "vera_B", "vera_dropout", "r")
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer

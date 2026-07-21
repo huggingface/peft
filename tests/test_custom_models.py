@@ -2394,6 +2394,32 @@ class TestPeftCustomModel(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_safe_merge(model_id, config_cls, config_kwargs)
 
+    def test_glora_safe_merge_does_not_corrupt_base_layer_on_non_finite_adapter(self):
+        # Regression test: GLoRA's merge() used to accumulate the merged weights directly onto
+        # base_layer.weight.data/bias.data *before* the safe_merge isfinite check, so a broken
+        # (non-finite) adapter would permanently corrupt the base layer even though safe_merge
+        # raises -- defeating the whole point of safe_merge ("check for NaNs before merging").
+        torch.manual_seed(0)
+        model = MLP()
+        orig_weight = model.lin0.weight.data.clone()
+        orig_bias = model.lin0.bias.data.clone()
+
+        config = GloraConfig(target_modules=["lin0"])
+        model = get_peft_model(model, config)
+
+        # Deliberately break the adapter (e.g. a corrupted checkpoint or an fp16 overflow) so that
+        # the merged weights would contain non-finite values.
+        glora_b = model.base_model.model.lin0.glora_B["default"]
+        next(glora_b.parameters()).data.fill_(float("inf"))
+
+        with pytest.raises(ValueError, match="NaNs detected in the merged weights"):
+            model.base_model.model.lin0.merge(safe_merge=True)
+
+        # The base layer must be untouched after the failed safe_merge.
+        assert torch.equal(model.base_model.model.lin0.base_layer.weight.data, orig_weight)
+        assert torch.equal(model.base_model.model.lin0.base_layer.bias.data, orig_bias)
+        assert model.base_model.model.lin0.merged_adapters == []
+
     @pytest.mark.parametrize("safe_merge", [False, True])
     @pytest.mark.parametrize("module_type", ["linear", "conv2d"])
     def test_merge_with_lora_bias_when_base_layer_has_no_bias_warns_and_raises(self, safe_merge, module_type):
@@ -3497,6 +3523,46 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_delete_adapter(self, test_name, model_id, config_cls, config_kwargs):
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_delete_adapter_properly_cleans_up_after_itself(self, test_name, model_id, config_cls, config_kwargs):
+        # Generic guard against dangling per-adapter state: after `delete_adapter`, no adapter-specific attributes
+        # should remain on the model or its tuner layers. This test discovers every dict-like per-adapter container
+        # automatically, so a newly added PEFT method that forgets to register one is still caught here.
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(**config_kwargs)
+        model = get_peft_model(model, config, adapter_name="foobar")
+
+        def get_dict_like_attrs(obj):
+            for attr_name in dir(obj):
+                if attr_name.startswith("_"):
+                    continue
+                try:
+                    attr = getattr(obj, attr_name)
+                except AttributeError:
+                    continue
+                is_dict_like = (
+                    callable(getattr(attr, "keys", None))
+                    and hasattr(attr, "__getitem__")
+                    and hasattr(attr, "__contains__")
+                )
+                if not is_dict_like:
+                    continue
+                if "foobar" in attr:
+                    yield attr_name, attr
+
+        # collect dict-like attributes holding the adapter before deletion
+        dict_attrs = list(get_dict_like_attrs(model))
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayer):
+                dict_attrs.extend(list(get_dict_like_attrs(module)))
+
+        # sanity check: there should be at least one such attribute
+        assert dict_attrs, f"No dict-like attributes found on {config.peft_type}, please check the test"
+
+        model.delete_adapter(adapter_name="foobar")
+        dangling_attrs = [attr_name for attr_name, attr in dict_attrs if "foobar" in attr]
+        assert not dangling_attrs, f"Found dangling attributes after adapter deletion: {sorted(dangling_attrs)}"
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_inactive_adapter(self, test_name, model_id, config_cls, config_kwargs):

@@ -148,7 +148,9 @@ def infer_device() -> str:
     return "cpu"
 
 
-def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs=None):
+def prepare_model_for_kbit_training(
+    model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs=None, auto_clear_cache=True
+):
     r"""
     Note this method only works for `transformers` models.
 
@@ -166,6 +168,10 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
             Keyword arguments to pass to the gradient checkpointing function, please refer to the documentation of
             `torch.utils.checkpoint.checkpoint` for more details about the arguments that you can pass to that method.
             Note this is only available in the latest transformers versions (> 4.34.1).
+        auto_clear_cache (`bool`, *optional*, defaults to `True`):
+            Whether to empty the accelerator cache after upcasting parameters to fp32. This releases memory held by the
+            caching allocator, which is especially helpful on devices that share host and accelerator memory. Set to
+            `False` to skip this step.
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
     is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
@@ -194,6 +200,16 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
                 (param.dtype == torch.float16) or (param.dtype == torch.bfloat16)
             ) and param.__class__.__name__ != "Params4bit":
                 param.data = param.data.to(torch.float32)
+
+        # Release CUDA allocator cache after bulk fp16→fp32 casts to reduce
+        # reserved-but-unused memory to free up system memory in devices
+        # that share host and accelerator memory (issue #3265)
+        if auto_clear_cache:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            if is_xpu_available():
+                torch.xpu.empty_cache()
 
     if (
         loaded_in_kbit

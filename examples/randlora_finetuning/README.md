@@ -80,7 +80,7 @@ python randlora_finetuning.py \
 ```
 
 ## RandLora vs. LoRA
-RandLora differs from LoRA and other related low rank approximation algorithms by chanllenging the low rank paradigm. RandLora adapters learn **full-rank** updates as the [paper](https://huggingface.co/papers/2502.00987) shows that the low rank constraint of LoRA can constrain performance gains as trainable parameters increase (with higher ranks). As a result, using RandLora is specifically recommended for difficult tasks that are underfit by LoRA. RandLoRA however also often improves performance for common tasks. If increasing LoRA's rank improves performance for your task, RandLora will most likely outperform.
+RandLora differs from LoRA and other related low rank approximation algorithms by challenging the low rank paradigm. RandLora adapters learn **full-rank** updates as the [paper](https://huggingface.co/papers/2502.00987) shows that the low rank constraint of LoRA can constrain performance gains as trainable parameters increase (with higher ranks). As a result, using RandLora is specifically recommended for difficult tasks that are underfit by LoRA. RandLoRA however also often improves performance for common tasks. If increasing LoRA's rank improves performance for your task, RandLora will most likely outperform.
 
 RandLora is expected to increase performance over LoRA for equivalent amounts of trainable parameters, mostly for larger equivalent amounts (> LoRA rank 4).
 

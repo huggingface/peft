@@ -4928,7 +4928,7 @@ class TestAutoCast(unittest.TestCase):
     device = infer_device()
 
     # This test makes sure, that Lora dtypes are consistent with the types
-    # infered by torch.autocast under tested PRECISIONS
+    # inferred by torch.autocast under tested PRECISIONS
     @parameterized.expand(PRECISIONS)
     def test_simple_model(self, *args, **kwargs):
         self._test_model(SimpleModel(), *args, **kwargs)
@@ -5285,7 +5285,7 @@ class TestEvaInitializationGPU:
             model = AutoModelForCausalLM.from_pretrained(
                 model_id,
                 quantization_config=bnb_config,
-                attn_implementation="eager",  # gpt2 doesnt support flash attention
+                attn_implementation="eager",  # gpt2 doesn't support flash attention
             )
             model.transformer.h = model.transformer.h[:2]  # truncate to 2 layers
             model = prepare_model_for_kbit_training(model)
@@ -5839,7 +5839,7 @@ class TestHotSwapping:
             model = get_peft_model(model, config)
             strong_init(model)
             # Note: For compilation, use eager backend, as the parameter targeting, which uses nn.utils.parametrize,
-            # leads to recompiles/graph breaks, which can signficantly affect the outputs, even if weights are correctly
+            # leads to recompiles/graph breaks, which can significantly affect the outputs, even if weights are correctly
             # loaded.
             model = torch.compile(model, backend="eager")
             with torch.inference_mode():
