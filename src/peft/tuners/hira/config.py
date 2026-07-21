@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import ClassVar, Literal, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -66,6 +66,13 @@ class HiraConfig(PeftConfig):
             The mapping from layer names or regexp expression to ranks which are different from the default r specified
             by `r`. For example, `{'^model.decoder.layers.0.encoder_attn.k_proj': 16}`.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "HIRA": Paper(
+            title="HiRA: Parameter-Efficient Hadamard High-Rank Adaptation for Large Language Models",
+            url="https://openreview.net/forum?id=TwJrTz9cRS",
+        ),
+    }
 
     r: int = field(default=32, metadata={"help": "HiRA intermediate r configuration"})
     target_modules: Optional[Union[list[str], str]] = field(

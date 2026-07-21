@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -48,6 +48,9 @@ class TrainableTokensConfig(PeftConfig):
             makes TrainableTokens a no-op when not trained. If set to `False` the weights will be random values. Do not
             change this setting unless you know exactly what you're doing.
     """
+
+    # this method is not based on any paper
+    papers: ClassVar[dict[str, Paper]] = {}
 
     token_indices: list[int] = field(
         default_factory=list,

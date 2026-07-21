@@ -16,12 +16,12 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import ClassVar, Literal, Optional, Union
 
 import packaging.version
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -83,6 +83,13 @@ class OFTConfig(PeftConfig):
         block_share (`bool`):
             Whether to share the OFT parameters between blocks or not. This is `False` by default.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "OFT": Paper(
+            title="Controlling Text-to-Image Diffusion by Orthogonal Finetuning",
+            url="https://huggingface.co/papers/2306.07280",
+        ),
+    }
 
     r: int = field(default=0, metadata={"help": "OFT rank, number of OFT blocks per injected layer."})
     oft_block_size: int = field(

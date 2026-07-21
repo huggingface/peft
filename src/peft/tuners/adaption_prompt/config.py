@@ -14,9 +14,10 @@
 
 from collections import namedtuple
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 from .utils import gpt2_compute_query_states, llama_compute_query_states
 
@@ -24,6 +25,13 @@ from .utils import gpt2_compute_query_states, llama_compute_query_states
 @dataclass
 class AdaptionPromptConfig(PeftConfig):
     """Stores the configuration of an [`AdaptionPromptModel`]."""
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "ADAPTION_PROMPT": Paper(
+            title="LLaMA-Adapter: Efficient Fine-tuning of Language Models with Zero-init Attention",
+            url="https://huggingface.co/papers/2303.16199",
+        ),
+    }
 
     target_modules: str = field(
         default=None, metadata={"help": "Name of the attention submodules to insert adaption prompts into."}

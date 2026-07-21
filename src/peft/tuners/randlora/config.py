@@ -14,10 +14,10 @@
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -80,6 +80,13 @@ class RandLoraConfig(PeftConfig):
             The layer pattern name, used only if `layers_to_transform` is different from `None` and if the layer
             pattern is not in the common layers pattern.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "RANDLORA": Paper(
+            title="RandLoRA: Full-rank parameter-efficient fine-tuning of large models",
+            url="https://huggingface.co/papers/2502.00987",
+        ),
+    }
 
     r: int = field(default=32, metadata={"help": "RandLora random basis rank"})
 

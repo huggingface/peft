@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import ClassVar, Literal, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -98,6 +98,13 @@ class PsoftConfig(PeftConfig):
             The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
             `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "PSOFT": Paper(
+            title="PSOFT: Efficient Orthogonal Fine-Tuning with Principal Subspace Adaptation",
+            url="https://arxiv.org/abs/2505.11235",
+        ),
+    }
 
     r: int = field(
         default=32,

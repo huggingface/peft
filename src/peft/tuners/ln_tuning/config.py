@@ -14,10 +14,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -40,6 +40,13 @@ class LNTuningConfig(PeftConfig):
             Classification or Token Classification tasks, the final layer `classifier/score` are randomly initialized
             and as such need to be trainable and saved.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "LN_TUNING": Paper(
+            title="Tuning LayerNorm in Attention: Towards Efficient Multi-Modal LLM Finetuning",
+            url="https://huggingface.co/papers/2312.11420",
+        ),
+    }
 
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,

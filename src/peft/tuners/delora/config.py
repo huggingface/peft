@@ -14,10 +14,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import ClassVar, Literal, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -69,6 +69,13 @@ class DeloraConfig(PeftConfig):
         modules_to_save (`Optional[List[str]]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "DELORA": Paper(
+            title="Decoupling Angles and Strength in Low-rank Adaptation",
+            url="https://huggingface.co/papers/2503.18225",
+        ),
+    }
 
     r: int = field(default=8, metadata={"help": "DeLoRA rank"})
     delora_lambda: int = field(

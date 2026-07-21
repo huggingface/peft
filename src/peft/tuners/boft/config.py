@@ -18,10 +18,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -68,6 +68,13 @@ class BOFTConfig(PeftConfig):
             pattern is not in the common layers pattern. This should target the `nn.ModuleList` of the model, which is
             often called `'layers'` or `'h'`.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "BOFT": Paper(
+            title="Parameter-Efficient Orthogonal Finetuning via Butterfly Factorization",
+            url="https://huggingface.co/papers/2311.06243",
+        ),
+    }
 
     boft_block_size: int = field(
         default=4,

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -24,6 +24,13 @@ class OSFConfig(PeftConfig):
             A dictionary of regex patterns to override `effective_rank` for specific modules. Values can be absolute
             integers or fractions in (0, 1], interpreted as a fraction of the smaller matrix dimension per target.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "OSF": Paper(
+            title="Sculpting Subspaces: Constrained Full Fine-Tuning in LLMs for Continual Learning",
+            url="https://huggingface.co/papers/2504.07097",
+        ),
+    }
 
     effective_rank: Optional[Union[int, float]] = field(
         default=None,

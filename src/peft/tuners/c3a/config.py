@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import ClassVar, Literal, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -49,6 +49,13 @@ class C3AConfig(PeftConfig):
             Defaults to 'xavier_uniform'. Setting this to `False` also uses 'xavier_uniform'. To set the weights to
             zeros (thus making C3A a no-op), set the value to `True`.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "C3A": Paper(
+            title="Parameter-Efficient Fine-Tuning via Circular Convolution",
+            url="https://huggingface.co/papers/2407.19342",
+        ),
+    }
 
     block_size: int = field(
         default=256,

@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from peft.config import PeftConfig
-from peft.utils import PeftType
+from peft.utils import Paper, PeftType
 
 
 @dataclass
@@ -58,6 +58,13 @@ class HRAConfig(PeftConfig):
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
     """
+
+    papers: ClassVar[dict[str, Paper]] = {
+        "HRA": Paper(
+            title="Bridging The Gap between Low-rank and Orthogonal Adaptation via Householder Reflection Adaptation",
+            url="https://huggingface.co/papers/2405.17484",
+        ),
+    }
 
     r: int = field(
         default=8,
