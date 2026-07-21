@@ -2210,7 +2210,7 @@ class PeftModelForCausalLM(PeftModel):
                     outputs = self.base_model.generate(*args, **kwargs)
             else:
                 outputs = self.base_model.generate(*args, **kwargs)
-        except:
+        except Exception:
             self.base_model.prepare_inputs_for_generation = self.base_model_prepare_inputs_for_generation
             raise
         else:
@@ -2571,7 +2571,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
                     return self.base_model.generate(**kwargs)
                 else:
                     raise NotImplementedError
-        except:
+        except Exception:
             self.base_model.prepare_inputs_for_generation = self.base_model_prepare_inputs_for_generation
             self.base_model._prepare_encoder_decoder_kwargs_for_generation = (
                 self.base_model_prepare_encoder_decoder_kwargs_for_generation
