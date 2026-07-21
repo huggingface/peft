@@ -2783,22 +2783,22 @@ def quantize_dequantize_weight(weight, num_bits):
     """Round-trip a weight through bitsandbytes quantization to induce a realistic quantization error.
 
     Uses the same quantization as loftq_init from peft.utils.loftq_utils, i.e. nf4 for 4 bits and int8 vectorwise for 8
-    bits. Since bitsandbytes does not support quantization on CPU, the computation happens on the accelerator and the
-    result is moved back to the original device.
+    bits.
     """
     import bitsandbytes as bnb
 
-    device = weight.device
     if num_bits == 4:
-        qweight, quant_state = bnb.functional.quantize_4bit(weight.to(torch_device), quant_type="nf4")
+        qweight, quant_state = bnb.functional.quantize_4bit(weight, quant_type="nf4")
         dequantized_weight = bnb.functional.dequantize_4bit(qweight, quant_state)
     elif num_bits == 8:
         # Int8Params quantizes when being moved from CPU to the accelerator
-        int8_weight = bnb.nn.Int8Params(weight.to("cpu"), requires_grad=False).to(torch_device)
+        int8_weight = bnb.nn.Int8Params(weight.to("cpu"), requires_grad=False)
+        # Int8Params it needs to be moved to a device via .to() for the quantization to happen.
+        int8_weight = int8_weight.to(weight.device)
         dequantized_weight = bnb.functional.int8_vectorwise_dequant(int8_weight.data, int8_weight.SCB)
     else:
         raise ValueError("Only 4 and 8 bit quantization is supported")
-    return dequantized_weight.to(device=device, dtype=weight.dtype)
+    return dequantized_weight.to(dtype=weight.dtype)
 
 
 @pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
