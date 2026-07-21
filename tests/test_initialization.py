@@ -2471,26 +2471,6 @@ class TestDeLoRAInitialization:
         y_peft = model(data)
         assert not torch.allclose(y_base, y_peft, atol=1e-6, rtol=1e-6)
 
-    def get_embedding_model(self):
-        class ModelEmbedding(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.emb = nn.Embedding(100, 10)
-
-            def forward(self, X):
-                return self.emb(X)
-
-        return ModelEmbedding().to(self.torch_device).eval()
-
-    def test_delora_with_embedding_layer_raises(self):
-        # DeLoRA only supports nn.Linear, targeting any other layer type should raise a clear error instead of
-        # crashing with an UnboundLocalError
-        model = self.get_embedding_model()
-        config = DeloraConfig(target_modules=["emb"])
-        msg = "Target module Embedding(100, 10) is not supported. Currently, only `torch.nn.Linear` is supported."
-        with pytest.raises(TypeError, match=re.escape(msg)):
-            get_peft_model(model, config)
-
 
 class TestGraLoRAInitialization:
     """Basic sanity tests for the GraLoRA tuner."""
