@@ -224,6 +224,7 @@ def test_lorafa_init_embedding_target_module():
     optimizer.step()
 
 
+# TODO remove after 2026-11-01
 def test_lorafa_scaling_factor_deprecation_warning():
     """
     Test that using the legacy scaling_factor emits a FutureWarning
@@ -245,7 +246,6 @@ def test_lorafa_scaling_factor_deprecation_warning():
     )
     param.grad = torch.ones_like(param)
 
-    # TODO remove after 2026-11-01
     with warnings.catch_warnings(record=True) as caught_warnings:
         warnings.simplefilter("always")
         optimizer.step()

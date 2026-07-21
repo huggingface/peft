@@ -97,7 +97,7 @@ class LoraFAOptimizer(Optimizer):
             param_list = []
             name_list = []
 
-            # TODO remove after 2026-11-01
+            # TODO remove after 2026-11-01 and default to `group["scaling_factors"]
             if "scaling_factors" in group:
                 scaling_factors = group["scaling_factors"]
             elif "scaling_factor" in group:
@@ -275,7 +275,7 @@ def create_lorafa_optimizer(
             raise ValueError(
                 f"`use_rslora={use_rslora}` was passed to create_lorafa_optimizer, but the following active adapters "
                 f"have `use_rslora` set differently in the model config: {mismatched_adapters}. Please configure "
-                "rsLoRA via LoraConfig and remove the `use_rslora` argument from create_lorafa_optimizer."
+                "rsLoRA via LoraConfig and remove the `use_rslora` argument from create_lorafa_optimizer as the parameter is deprecated."
             )
         warnings.warn(
             "`use_rslora` in create_lorafa_optimizer is deprecated and will be removed after 2026-11-01. "
