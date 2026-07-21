@@ -100,7 +100,7 @@ If training appears healthy (the loss goes down, checkpoints are saved without e
 sample_param = next(p for p in model.parameters() if p.requires_grad)
 before = sample_param.detach().clone()
 
-# ... train for at least one optimizer step ...
+# ... train for at least three optimizer steps ...
 
 after = next(p for p in model.parameters() if p.requires_grad)
 print("weights updated:", not torch.allclose(before, after.detach().cpu()))
