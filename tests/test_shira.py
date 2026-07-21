@@ -15,12 +15,14 @@
 # This test file is for tests specific to SHiRA.
 
 import os
+import warnings
 
 import pytest
 import torch
 from accelerate.utils.imports import is_bf16_available
 from torch import nn
 
+import peft
 from peft import PeftModel, ShiraConfig, get_peft_model
 
 
@@ -290,8 +292,6 @@ class TestShira:
         # ShiRA by default uses an efficient forward pass that only uses the base layer's weights,
         # not its forward. This means that forward/backward hooks on the base layer are not called.
         # We test that a warning is issued to the user to highlight this fact.
-        import peft
-
         model = MLP()
         hook_setter(model.lin1)
 
@@ -306,6 +306,7 @@ class TestShira:
         # Test multiple invocations of the layers to make sure the warning is only issued once.
         # This violates PT031, so we disable it.
         with pytest.warns() as record:  # noqa: PT031
+            warnings.warn("Dummy warning to silence failure when expected warnings is 0")
             _ = peft_model(inputs)
             _ = peft_model(inputs)
 
