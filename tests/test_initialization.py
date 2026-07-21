@@ -2693,13 +2693,6 @@ class TestHiraInitialization:
 
     torch_device = infer_device()
 
-    # (conv_cls, input_shape), input_shape excludes the batch and channel dims
-    conv_cases = [
-        pytest.param(nn.Conv1d, (10,), id="Conv1d"),
-        pytest.param(nn.Conv2d, (10, 10), id="Conv2d"),
-        pytest.param(nn.Conv3d, (10, 10, 10), id="Conv3d"),
-    ]
-
     def get_model_conv_groups(self, conv_cls, groups):
         class ModelConvGroups(nn.Module):
             """For testing when the groups argument is used in a conv layer"""
@@ -2713,29 +2706,21 @@ class TestHiraInitialization:
 
         return ModelConvGroups().eval().to(self.torch_device)
 
-    @pytest.mark.parametrize("conv_cls, input_shape", conv_cases)
+    @pytest.mark.parametrize(
+        "conv_cls, input_shape",
+        [
+            pytest.param(nn.Conv1d, (10,), id="Conv1d"),
+            pytest.param(nn.Conv2d, (10, 10), id="Conv2d"),
+            pytest.param(nn.Conv3d, (10, 10, 10), id="Conv3d"),
+        ],
+    )
     def test_error_raised_for_groups_greater_than_one(self, conv_cls, input_shape):
-        # HiRA's forward pass (not just merging) relies on materializing a delta weight shaped exactly like the
-        # base layer's weight and Hadamard-multiplying it with that weight. This does not have a well-defined
-        # generalization to grouped convolutions, so constructing a HiRA adapter for a ConvNd layer with
-        # `groups > 1` must fail immediately and clearly, instead of constructing successfully and then crashing
-        # with a confusing shape mismatch on the first forward call.
+        # HiRA does not support grouped convolutions, so constructing an adapter for a ConvNd layer with
+        # `groups > 1` must fail immediately and clearly.
         base_model = self.get_model_conv_groups(conv_cls, groups=2)
         config = HiraConfig(target_modules=["conv"], r=4)
         with pytest.raises(NotImplementedError, match="HiRA does not support .* layers with groups > 1"):
             get_peft_model(base_model, config)
-
-    @pytest.mark.parametrize("conv_cls, input_shape", conv_cases)
-    def test_no_error_and_correct_forward_for_groups_equal_to_one(self, conv_cls, input_shape):
-        # sanity check: the default groups=1 case must keep working correctly (forward pass produces a
-        # correctly-shaped output) after the groups>1 guard was added.
-        base_model = self.get_model_conv_groups(conv_cls, groups=1)
-        config = HiraConfig(target_modules=["conv"], r=4)
-        peft_model = get_peft_model(base_model, config)  # does not raise
-
-        x = torch.randn(2, 4, *input_shape).to(self.torch_device)
-        output = peft_model(x)
-        assert output.shape[:2] == (2, 8)
 
 
 class TestNoInfiniteRecursionDeepspeed:

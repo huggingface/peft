@@ -509,10 +509,7 @@ class _ConvNd(nn.Module, HiraLayer):
             # HiRA's forward pass (and merge) rely on `base_weight * get_delta_weight(...)`, a Hadamard product
             # that requires the delta weight to be shaped exactly like the base layer's weight, i.e.
             # (out_channels, in_channels // groups, *kernel_size). The low-rank hira_A/hira_B factors used to build
-            # that delta weight do not have a well-defined generalization to grouped convolutions, so instead of
-            # silently constructing a layer that crashes with a confusing shape mismatch on the very first forward
-            # call, raise immediately and clearly (mirrors the equivalent, albeit merge-only, restriction in LoRA's
-            # _ConvNd, see https://github.com/huggingface/peft/pull/2403).
+            # that delta weight do not have a well-defined generalization to grouped convolutions.
             raise NotImplementedError(
                 f"HiRA does not support {type(base).__name__} layers with groups > 1 (got groups={groups}). This "
                 "applies to both the forward pass and to merging."
@@ -576,10 +573,6 @@ class _ConvNd(nn.Module, HiraLayer):
 
         base_layer = self.get_base_layer()
         orig_dtype = base_layer.weight.dtype
-
-        if base_layer.groups > 1:
-            # https://github.com/huggingface/peft/pull/2403
-            raise NotImplementedError("Merging is not supported for _ConvNd layers with groups > 1!")
 
         merged_delta = torch.zeros_like(base_layer.weight.data, dtype=orig_dtype)
 
@@ -653,8 +646,7 @@ class _ConvNd(nn.Module, HiraLayer):
             # conv2d 1x1
             output_tensor = (weight_B.squeeze(3).squeeze(2) @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(3)
         else:
-            # Note: `groups > 1` is rejected in `update_layer`, so this is always a groups == 1 base layer and the
-            # transpose below is required to match the base layer's (out_channels, in_channels, *kernel_size)
+            # The transpose below is required to match the base layer's (out_channels, in_channels, *kernel_size)
             # weight shape.
             output_tensor = self.conv_fn(weight_A.transpose(0, 1), weight_B).transpose(0, 1)
 
