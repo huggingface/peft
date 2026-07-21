@@ -52,3 +52,10 @@ class MontecloraTrainer(MontecloraTrainerMixin, Trainer):
 ```
 
 A complete working example is available at [`examples/monteclora_finetuning`](https://github.com/huggingface/peft/tree/main/examples/monteclora_finetuning).
+
+
+# API
+
+## MonteCloraConfig
+
+[[autodoc]] tuners.lora.config.MontecloraConfig

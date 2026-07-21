@@ -146,3 +146,9 @@ print(model.linear.lora_A["default"].weight.device.type == "meta")  # should be 
 set_peft_model_state_dict(model, peft_state_dict, low_cpu_mem_usage=True)
 print(model.linear.lora_A["default"].weight.device.type == "cpu")  # should be True
 ```
+
+For loading weights from the hub there's the low-level [`load_peft_weights`] function:
+
+```python
+state_dict = load_peft_weights("my-account/my-adapter-repo")
+```
