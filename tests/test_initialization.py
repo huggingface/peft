@@ -4543,6 +4543,21 @@ class TestHotSwapping:
             elif "lora_B" in name:
                 assert param.shape[1] * model.base_model.model.conv.base_layer.groups == new_rank
 
+    def test_prepare_model_for_compiled_hotswap_conv2d_groups_rank_not_divisible_raises(self):
+        # when trying to pad a grouped Conv2d LoRA adapter to a rank that is not divisible by the number of groups, raise an error
+        config = LoraConfig(target_modules=["conv"], r=2)
+        model = self.get_model_conv2d_groups()
+        model = get_peft_model(model, config)
+
+        groups = model.base_model.model.conv.base_layer.groups
+        target_rank = 3
+        msg = (
+            f"Trying to pad a Conv2d LoRA adapter with groups={groups} to target rank {target_rank}, but the target rank "
+            f"is not divisible by {groups}. Please choose a target rank that is divisible by {groups}."
+        )
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            prepare_model_for_compiled_hotswap(model, target_rank=target_rank)
+
     def test_prepare_model_for_compiled_hotswap_lower_rank_padding_raises(self):
         # when trying to pad to a lower rank, raise an error
         old_rank0 = 8
