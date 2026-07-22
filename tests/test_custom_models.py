@@ -3091,7 +3091,7 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, (LoHaConfig, LoKrConfig)) and model_id in ("Conv2dGroups", "Conv2dGroups2"):
             # LoHa/LoKr recombine their delta weight from several low-rank factors (Hadamard/Kronecker products)
             # before merging into a grouped conv's weight, which accumulates more floating-point rounding than a
-            # plain LoRA `B @ A` merge, similar in spirit to the "more instability with Conv" case above.
+            # plain LoRA `B @ A` merge
             atol, rtol = 1e-3, 1e-3
 
         if issubclass(config_cls, OFTConfig):

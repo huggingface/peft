@@ -1881,7 +1881,7 @@ class TestLokrInitialization:
 
 class TestLoHaLoKrGroupedConv:
     """Regression tests for LoHa and LoKr crashing on a plain (unmerged) forward pass whenever the wrapped
-    Conv1d/Conv2d layer has `groups > 1` (e.g. depthwise/grouped convolutions, common in vision models).
+    Conv1d layer has `groups > 1` (e.g. depthwise/grouped convolutions, common in vision models).
 
     Both tuners built their low-rank adapter parameters using the base layer's full `in_channels` instead of
     `in_channels // groups`, so `get_delta_weight`'s `reshape(base_layer.weight.shape)` raised a `RuntimeError`
@@ -1890,6 +1890,10 @@ class TestLoHaLoKrGroupedConv:
     LoHa/LoKr use their delta weight as an independent conv kernel (`F.conv2d(input, delta_weight,
     groups=base_layer.groups)`, already present before this fix), so sizing the low-rank factors with
     `in_channels // groups` is sufficient to fully support grouped convolutions, not just reject them.
+
+    Only Conv1d is covered here: Conv2d + groups > 1 for LoHa/LoKr is already exercised by the "Conv2d
+    Groups(2) LOHA/LOKR" entries in `test_custom_models.py`'s shared `TEST_CASES` battery (forward, merge,
+    disable/enable, save/load, etc.), so a duplicate Conv2d check here would add nothing.
     """
 
     torch_device = infer_device()
@@ -1897,7 +1901,6 @@ class TestLoHaLoKrGroupedConv:
     # (conv_cls, input_shape), input_shape excludes the batch and channel dims
     conv_cases = [
         pytest.param(nn.Conv1d, (9,), id="Conv1d"),
-        pytest.param(nn.Conv2d, (9, 9), id="Conv2d"),
     ]
 
     def get_model_conv_groups(self, conv_cls, groups):
@@ -1954,19 +1957,6 @@ class TestLoHaLoKrGroupedConv:
         assert not torch.allclose(out_unmerged, torch.zeros_like(out_unmerged))
         assert torch.allclose(out_unmerged, out_merged, atol=1e-5, rtol=1e-5)
         assert torch.allclose(out_unmerged, out_unmerged_again, atol=1e-6, rtol=1e-6)
-
-    @pytest.mark.parametrize("config_cls", [LoHaConfig, LoKrConfig])
-    @pytest.mark.parametrize("conv_cls, input_shape", conv_cases)
-    def test_no_regression_for_groups_equal_to_one(self, config_cls, conv_cls, input_shape):
-        # sanity check: the default groups=1 case must keep working correctly after the groups>1 fix, since
-        # `update_layer` now always divides by `groups` (which is 1 here, a no-op).
-        base_model = self.get_model_conv_groups(conv_cls, groups=1)
-        config = config_cls(target_modules=["conv"], r=4)
-        peft_model = get_peft_model(base_model, config)  # does not raise
-
-        x = torch.randn(2, 8, *input_shape).to(self.torch_device)
-        output = peft_model(x)  # does not raise
-        assert output.shape[:2] == (2, 8)
 
 
 class TestAdaLoraInitialization:

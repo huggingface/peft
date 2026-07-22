@@ -204,11 +204,6 @@ class LoKrLayer(nn.Module, LycorisLayer):
             use_w2 = not (r < max(shape[0][1], shape[1][1]) / 2)
             use_effective_conv2d = False
         elif isinstance(base_layer, nn.Conv2d):
-            # Conv*d weights are shaped (out_channels, in_channels // groups, *kernel_size), not
-            # (out_channels, in_channels, *kernel_size); the latter is only correct for groups == 1. Using the
-            # per-group channel count here keeps `get_delta_weight`'s `reshape(base_layer.weight.shape)` valid for
-            # groups > 1 as well, and `_get_delta_activations` already forwards `groups=base_layer.groups` to
-            # `F.conv2d`, so this is all that's needed to make grouped convolutions work.
             in_dim, out_dim = base_layer.in_channels // base_layer.groups, base_layer.out_channels
             k_size = base_layer.kernel_size
 
@@ -225,7 +220,6 @@ class LoKrLayer(nn.Module, LycorisLayer):
             # without affecting the mathematical equivalence of the operation.
             use_effective_conv2d = use_effective_conv2d and base_layer.kernel_size != (1, 1)
         elif isinstance(base_layer, nn.Conv1d):
-            # See the analogous Conv2d branch above for why this must be divided by `groups`.
             in_dim, out_dim = base_layer.in_channels // base_layer.groups, base_layer.out_channels
             k_size = (base_layer.kernel_size[0],)  # Convert to a tuple with single element
 

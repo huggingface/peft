@@ -142,11 +142,6 @@ class LoHaLayer(nn.Module, LycorisLayer):
             # similar to how Linear layers work. This optimization reduces computational cost
             # without affecting the mathematical equivalence of the operation.
             use_effective_conv2d = use_effective_conv2d and base_layer.kernel_size != (1, 1)
-            # Conv*d weights are shaped (out_channels, in_channels // groups, *kernel_size), not
-            # (out_channels, in_channels, *kernel_size); the latter is only correct for groups == 1. Using the
-            # per-group channel count here keeps `get_delta_weight`'s `reshape(base_layer.weight.shape)` valid for
-            # groups > 1 as well, and `_get_delta_activations` already forwards `groups=base_layer.groups` to
-            # `F.conv2d`, so this is all that's needed to make grouped convolutions work.
             in_channels = base_layer.in_channels // base_layer.groups
             if use_effective_conv2d:
                 shape = (base_layer.out_channels, in_channels, *base_layer.kernel_size)
@@ -161,7 +156,6 @@ class LoHaLayer(nn.Module, LycorisLayer):
             # to a Linear layer applied across the channel dimension. Using flattened representation
             # avoids unnecessary reshaping and improves computational efficiency.
             use_effective_conv2d = use_effective_conv2d and base_layer.kernel_size[0] != 1
-            # See the analogous Conv2d branch above for why this must be divided by `groups`.
             in_channels = base_layer.in_channels // base_layer.groups
             if use_effective_conv2d:
                 shape = (base_layer.out_channels, in_channels, base_layer.kernel_size[0])
