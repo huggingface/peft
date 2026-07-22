@@ -616,7 +616,12 @@ TEST_CASES = [
     ("Vanilla MLP 5 MiSS", "MLP", MissConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2}),
     ("Vanilla MLP 1 MiSS", "MLP", MissConfig, {"target_modules": "lin0", "r": 2, "init_weights": "bat"}),
     ("Vanilla MLP 2 MiSS", "MLP", MissConfig, {"target_modules": ["lin0"], "r": 2, "init_weights": "bat"}),
-    ("Vanilla MLP 3 MiSS", "MLP", MissConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "init_weights": "bat"}),
+    (
+        "Vanilla MLP 3 MiSS with bat",
+        "MLP",
+        MissConfig,
+        {"target_modules": ["lin0", "lin1"], "r": 2, "init_weights": "bat"},
+    ),
     (
         "Vanilla MLP 5 MiSS",
         "MLP",
