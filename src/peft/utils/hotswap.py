@@ -290,7 +290,8 @@ def _pad_lora_weights(model: torch.nn.Module, target_rank: int) -> bool:
             if target_rank % base_layer_groups != 0:
                 raise ValueError(
                     f"Trying to pad a Conv2d LoRA adapter with groups={base_layer_groups} to target rank "
-                    f"{target_rank}, but the target rank is not divisible by {base_layer_groups}."
+                    f"{target_rank}, but the target rank is not divisible by {base_layer_groups}. Please choose a "
+                    f"target rank that is divisible by {base_layer_groups}."
                 )
         else:
             # Skip any other module types
@@ -543,11 +544,14 @@ def hotswap_adapter_from_state_dict(
             # Linear or Conv2d: the check for dim 0 or 1 works for both of these layer types
             if old_val.shape[0] > new_val.shape[0]:
                 old_val.data.fill_(0)
-                if isinstance(module, Conv2d) and ".lora_A." in key and module.get_base_layer().groups > 1:
+                requires_grouped_conv2d_lora_a_copy = (
+                    isinstance(module, Conv2d) and ".lora_A." in key and module.get_base_layer().groups > 1
+                )
+                if not requires_grouped_conv2d_lora_a_copy:
+                    old_val.data[: new_val.shape[0]].copy_(new_val.data)
+                else:
                     groups = module.get_base_layer().groups
                     _copy_grouped_conv2d_lora_a_weights(old_val.data, new_val.data, groups)
-                else:
-                    old_val.data[: new_val.shape[0]].copy_(new_val.data)
             elif old_val.shape[1] > new_val.shape[1]:
                 old_val.data.fill_(0)
                 old_val.data[:, : new_val.shape[1]].copy_(new_val.data)
