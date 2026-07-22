@@ -111,11 +111,10 @@ class TestDeftMerge:
         assert torch.allclose(layer.base_layer.weight, w0, atol=1e-5)
 
     def test_merge_unmerge_roundtrip_precise_for_bf16_base(self):
-        # User-facing guarantee: merging then unmerging a DEFT adapter restores the base weights. This requires
-        # the cached factor to stay in float32: rounding it to the base dtype first makes unmerge recompute a
-        # delta that differs from the one merge applied, so the roundtrip drifts further than plain bf16 storage
-        # rounding alone. Measure the base-weight roundtrip error both ways and assert the float32-cached factor
-        # is meaningfully more accurate.
+        # Test that a merge->unmerge roundtrip is as precise as possible (see discussion in #3412). In
+        # the previous implementation, an intermediate value was cast to the dtype of the base weight,
+        # which introduced extra source of imprecision. This test ensures that with the current
+        # implementation, that error is meaningfully reduced.
         #
         # `deft_P` is scaled well above its default init so the effect is large enough to observe over ordinary
         # bf16 storage rounding.
@@ -144,7 +143,5 @@ class TestDeftMerge:
 
         err_float32 = roundtrip_max_abs_error(downcast_cached_factor=False)
         err_downcast = roundtrip_max_abs_error(downcast_cached_factor=True)
-        # Require a real margin, not mere inequality: two error values simply differing isn't on its own a
-        # reliable signal that the difference is meaningful, so require the float32 path to be at least 10% more
-        # accurate.
+        # Require the float32 path to be at least 10% more accurate.
         assert err_float32 < 0.9 * err_downcast
