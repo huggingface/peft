@@ -37,6 +37,7 @@ from peft import (
     EvaConfig,
     FrodConfig,
     GraloraConfig,
+    HiraConfig,
     IA3Config,
     LilyConfig,
     LoftQConfig,
@@ -2685,6 +2686,41 @@ class TestBeftInitialization:
 
         with pytest.raises(ValueError, match="Base layer has no bias, cannot merge bias adapter"):
             model.merge_and_unload()
+
+
+class TestHiraInitialization:
+    """Test class to check the initialization of HiRA adapters."""
+
+    torch_device = infer_device()
+
+    def get_model_conv_groups(self, conv_cls, groups):
+        class ModelConvGroups(nn.Module):
+            """For testing when the groups argument is used in a conv layer"""
+
+            def __init__(self):
+                super().__init__()
+                self.conv = conv_cls(4, 8, kernel_size=3, groups=groups)
+
+            def forward(self, X):
+                return self.conv(X)
+
+        return ModelConvGroups().eval().to(self.torch_device)
+
+    @pytest.mark.parametrize(
+        "conv_cls, input_shape",
+        [
+            pytest.param(nn.Conv1d, (10,), id="Conv1d"),
+            pytest.param(nn.Conv2d, (10, 10), id="Conv2d"),
+            pytest.param(nn.Conv3d, (10, 10, 10), id="Conv3d"),
+        ],
+    )
+    def test_error_raised_for_groups_greater_than_one(self, conv_cls, input_shape):
+        # HiRA does not support grouped convolutions, so constructing an adapter for a ConvNd layer with
+        # `groups > 1` must fail immediately and clearly.
+        base_model = self.get_model_conv_groups(conv_cls, groups=2)
+        config = HiraConfig(target_modules=["conv"], r=4)
+        with pytest.raises(NotImplementedError, match="HiRA does not support .* layers with groups > 1"):
+            get_peft_model(base_model, config)
 
 
 class TestNoInfiniteRecursionDeepspeed:
