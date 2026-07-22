@@ -37,7 +37,7 @@ import time
 from collections.abc import Callable
 
 import torch
-from run import evaluate, generate_sample_images, measure_drift
+from run import evaluate, generate_sample_images, measure_drift, precompute_prompt_caches
 from transformers import set_seed
 from utils import (
     FILE_NAME_TRAIN_PARAMS,
@@ -72,11 +72,12 @@ def evaluate_checkpoint(
     *,
     pipeline,
     train_config: TrainConfig,
+    test_dataset,
+    prompt_cache: dict[str, torch.Tensor],
     print_verbose: Callable[..., None],
 ) -> TrainResult:
     metrics = []
     device_type = infer_device()
-    _, _, test_dataset = get_train_valid_test_datasets(train_config=train_config, print_fn=print_verbose)
     processor, dino_model = get_dino_encoder(train_config.dino_model_id, train_config.dino_image_size)
 
     torch_accelerator_module = getattr(torch, device_type, torch.cuda)
@@ -105,11 +106,18 @@ def evaluate_checkpoint(
             ds_eval=test_dataset,
             processor=processor,
             dino_model=dino_model,
+            prompt_cache=prompt_cache,
             config=train_config,
             num_repeats=3,
         )
         print_verbose("Calculating drift.")
-        test_drift = measure_drift(pipeline=pipeline, processor=processor, dino_model=dino_model, config=train_config)
+        test_drift = measure_drift(
+            pipeline=pipeline,
+            processor=processor,
+            dino_model=dino_model,
+            prompt_cache=prompt_cache,
+            config=train_config,
+        )
         metrics.append(
             {
                 "test dino_similarity": test_similarity,
@@ -184,6 +192,25 @@ def main(*, path_checkpoint: str, experiment_name: str) -> None:
         autocast_adapter_dtype=train_config.autocast_adapter_dtype,
         use_gc=train_config.use_gc,
     )
+
+    device_type = infer_device()
+    _, _, test_dataset = get_train_valid_test_datasets(train_config=train_config, print_fn=print_verbose)
+    eval_prompts = (
+        [sample["prompt"] for sample in test_dataset]
+        + list(train_config.drift_image_prompts)
+        + list(train_config.sample_image_prompts)
+    )
+    _, _, prompt_cache = precompute_prompt_caches(
+        pipeline,
+        train_prompts=[],
+        eval_prompts=eval_prompts,
+        device_type=device_type,
+        train_config=train_config,
+    )
+    # All prompts used in this run are cached now, so the text encoder is no longer needed. Drop it from the pipeline to
+    # free memory
+    pipeline.text_encoder = None
+
     pipeline.transformer = PeftModel.from_pretrained(
         pipeline.transformer,
         path_checkpoint,
@@ -197,6 +224,8 @@ def main(*, path_checkpoint: str, experiment_name: str) -> None:
     eval_result = evaluate_checkpoint(
         pipeline=pipeline,
         train_config=train_config,
+        test_dataset=test_dataset,
+        prompt_cache=prompt_cache,
         print_verbose=print_verbose,
     )
 
@@ -224,6 +253,7 @@ def main(*, path_checkpoint: str, experiment_name: str) -> None:
             generate_sample_images(
                 pipeline=pipeline,
                 train_config=train_config,
+                prompt_cache=prompt_cache,
                 sample_image_dir=SAMPLE_IMAGE_PATH_TEST,
                 file_stem=file_stem,
             )
