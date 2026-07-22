@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from functools import update_wrapper
 from types import MethodType
-from typing import Optional
+from typing import Any, Iterator, Optional, Union
 
 import torch
 from torch import nn
@@ -167,7 +167,7 @@ def check_if_peft_model(model_name_or_path: str) -> bool:
 
 
 @contextmanager
-def rescale_adapter_scale(model, multiplier):
+def rescale_adapter_scale(model: nn.Module, multiplier: Union[float, int]) -> Iterator[None]:
     """
     Context manager to temporarily rescale the scaling of the LoRA adapter in a model.
 
@@ -303,7 +303,9 @@ class MontecloraTrainerMixin:
         ```
     """
 
-    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+    def compute_loss(
+        self, model: nn.Module, inputs: dict[str, Any], return_outputs: bool = False, **kwargs: Any
+    ) -> Union[torch.Tensor, tuple[torch.Tensor, Any]]:
         """
         Compute loss with Monteclora variational regularization.
 
