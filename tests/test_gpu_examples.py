@@ -1540,7 +1540,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             config = PveraConfig(
                 r=16,
                 target_modules=["q_proj", "v_proj"],
-                vera_dropout=0.05,
+                pvera_dropout=0.05,
                 bias="none",
                 task_type="CAUSAL_LM",
             )
@@ -4283,6 +4283,7 @@ class PeftEetqGPUTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             quantization_config = EetqConfig("int8")
 
+            # TODO: remove try/except once/if EETQ kernel for CUDA 13+
             try:
                 model = AutoModelForCausalLM.from_pretrained(
                     self.causal_lm_model_id, device_map="auto", quantization_config=quantization_config
@@ -4342,11 +4343,15 @@ class PeftEetqGPUTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             quantization_config = EetqConfig("int8")
 
-            model = AutoModelForCausalLM.from_pretrained(
-                self.causal_lm_model_id,
-                device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
-                quantization_config=quantization_config,
-            )
+            # TODO: remove try/except once/if EETQ kernel for CUDA 13+
+            try:
+                model = AutoModelForCausalLM.from_pretrained(
+                    self.causal_lm_model_id,
+                    device_map=DEVICE_MAP_MAP[self.causal_lm_model_id],
+                    quantization_config=quantization_config,
+                )
+            except FileNotFoundError:
+                pytest.skip("There is no kernel for EETQ on this architecture, skipping this test.")
 
             assert set(model.hf_device_map.values()) == set(range(device_count))
             assert {p.device.index for p in model.parameters()} == set(range(device_count))
@@ -4728,7 +4733,7 @@ class TestPeftTorchao:
         )
 
         msg = re.escape("TorchaoLoraLinear only supports int8 weights for now")
-        with pytest.raises(ValueError, match=msg):
+        with pytest.raises(TypeError, match=msg):
             get_peft_model(model, config)
 
     @pytest.mark.single_gpu_tests
