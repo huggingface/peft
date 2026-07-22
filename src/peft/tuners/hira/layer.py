@@ -274,15 +274,6 @@ class Linear(nn.Module, HiraLayer):
 
         return result
 
-    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
-        # The generic LoRA conversion path only works for additive adapters, i.e. adapters that can be written as
-        # W' = W + Delta and expose that additive residual via get_delta_weight(). HiRA is different: its effective
-        # update is multiplicative, W' = W * (1 + Delta_hira), so the actual additive residual would be
-        # W * Delta_hira and depends on the current base weight. Returning Delta_hira from get_delta_weight() is
-        # sufficient for HiRA merge/unmerge, but it is not the quantity that the generic LoRA converter factorizes.
-        # Mark conversion as unsupported to avoid producing a LoRA adapter that does not preserve HiRA behavior.
-        return False
-
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "hira." + rep
