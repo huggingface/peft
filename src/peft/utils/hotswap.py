@@ -148,6 +148,28 @@ def _get_padded_linear(lora_module: torch.nn.Module, target_rank: int, is_lora_A
     return new_layer
 
 
+def _copy_grouped_conv2d_lora_a_weights(destination: torch.Tensor, source: torch.Tensor, groups: int) -> None:
+    """
+    Copy grouped Conv2d LoRA A weights while preserving the rank block for each group.
+
+    Args:
+        destination (`torch.Tensor`):
+            The destination tensor with the padded rank dimension.
+        source (`torch.Tensor`):
+            The source tensor with the original rank dimension.
+        groups (`int`):
+            The number of groups in the base Conv2d layer.
+    """
+    destination_rank_per_group = destination.shape[0] // groups
+    source_rank_per_group = source.shape[0] // groups
+    for group_idx in range(groups):
+        destination_start = group_idx * destination_rank_per_group
+        source_start = group_idx * source_rank_per_group
+        destination[destination_start : destination_start + source_rank_per_group].copy_(
+            source[source_start : source_start + source_rank_per_group]
+        )
+
+
 def _get_padded_conv2d(
     lora_module: torch.nn.Module, target_rank: int, is_lora_A: bool, base_layer_groups: int = 1
 ) -> torch.nn.Conv2d:
@@ -190,12 +212,7 @@ def _get_padded_conv2d(
         if base_layer_groups == 1:
             padded[:out_channels, :, :, :] = weight
         else:
-            rank_per_group = out_channels // base_layer_groups
-            target_rank_per_group = target_rank // base_layer_groups
-            for group_idx in range(base_layer_groups):
-                old_start = group_idx * rank_per_group
-                new_start = group_idx * target_rank_per_group
-                padded[new_start : new_start + rank_per_group] = weight[old_start : old_start + rank_per_group]
+            _copy_grouped_conv2d_lora_a_weights(padded, weight, base_layer_groups)
         new_layer = torch.nn.Conv2d(
             in_channels,
             target_rank,
@@ -528,14 +545,7 @@ def hotswap_adapter_from_state_dict(
                 old_val.data.fill_(0)
                 if isinstance(module, Conv2d) and ".lora_A." in key and module.get_base_layer().groups > 1:
                     groups = module.get_base_layer().groups
-                    old_rank_per_group = old_val.shape[0] // groups
-                    new_rank_per_group = new_val.shape[0] // groups
-                    for group_idx in range(groups):
-                        old_start = group_idx * old_rank_per_group
-                        new_start = group_idx * new_rank_per_group
-                        old_val.data[old_start : old_start + new_rank_per_group].copy_(
-                            new_val.data[new_start : new_start + new_rank_per_group]
-                        )
+                    _copy_grouped_conv2d_lora_a_weights(old_val.data, new_val.data, groups)
                 else:
                     old_val.data[: new_val.shape[0]].copy_(new_val.data)
             elif old_val.shape[1] > new_val.shape[1]:
