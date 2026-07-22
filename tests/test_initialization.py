@@ -5859,13 +5859,13 @@ class TestTinyLoraInitialization:
         """Adding a 2nd adapter whose target_modules overlap with (but differ from) a prior adapter's must not reuse
         the first adapter's stale layer-index mapping to compute the `weight_tying` groups.
 
-        This is a regression test for a bug in `TinyLoraModel._create_and_replace` where the model-level mapping
-        from module key to layer index (used to derive the number of `weight_tying` groups) was only rebuilt when
-        the current module's key was missing from the existing mapping, instead of whenever a new adapter's
-        injection cycle starts. Because `PeftModel.add_adapter` calls `inject_adapter` directly (bypassing
-        `_pre_injection_hook`), a second adapter whose target_modules overlapped with the first adapter's kept
-        reusing the first adapter's mapping (wrong layer index and module count) for any overlapping module, which
-        silently corrupted the `weight_tying` group assignment with no error or warning.
+        This is a regression test for a bug in `TinyLoraModel._create_and_replace` where the model-level mapping from
+        module key to layer index (used to derive the number of `weight_tying` groups) was only rebuilt when the
+        current module's key was missing from the existing mapping, instead of whenever a new adapter's injection cycle
+        starts. Because `PeftModel.add_adapter` calls `inject_adapter` directly (bypassing `_pre_injection_hook`), a
+        second adapter whose target_modules overlapped with the first adapter's kept reusing the first adapter's
+        mapping (wrong layer index and module count) for any overlapping module, which silently corrupted the
+        `weight_tying` group assignment with no error or warning.
         """
         # First adapter targets all 4 linear layers. This seeds the model-level layer-index cache that must not
         # leak into the second adapter's group computation below.
