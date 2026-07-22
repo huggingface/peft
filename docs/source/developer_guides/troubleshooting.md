@@ -91,6 +91,29 @@ Disadvantages of half precision adapter:
 
 Note that for most use cases, overall runtime and memory cost will be determined by the size of the base model and by the dataset, while the dtype of the PEFT adapter will only have a small impact.
 
+## Training runs but the model does not improve
+
+If training appears healthy (the loss goes down, checkpoints are saved without errors) but the resulting model performs no better than the base model, check whether the trainable parameters actually changed during training:
+
+```python
+# before training
+sample_param = next(p for p in model.parameters() if p.requires_grad)
+before = sample_param.detach().clone()
+
+# ... train for at least three optimizer steps ...
+
+after = next(p for p in model.parameters() if p.requires_grad)
+print("weights updated:", not torch.allclose(before, after.detach().cpu()))
+```
+
+If the weights did not move, a likely cause is that parameter references were captured before the parameters were materialized on their target device. This can happen when the base model is wrapped with [`get_peft_model`] while its parameters have not yet been moved to the target device, and a third-party library then registers forward/backward hooks (for example, per-sample gradient hooks from a differential privacy framework) or an optimizer is created before the first forward call. When the parameters are materialized later, those hooks and optimizer references point at stale tensors and every update becomes a silent no-op.
+
+To avoid this, use the following order:
+
+1. Load the base model and move it to the target device (e.g. `model.to(device)`).
+2. Wrap it with [`get_peft_model`].
+3. Only then register hooks or create the optimizer.
+
 ## Bad results from a loaded PEFT model
 
 There can be several reasons for getting a poor result from a loaded PEFT model which are listed below. If you're still unable to troubleshoot the problem, see if anyone else had a similar [issue](https://github.com/huggingface/peft/issues) on GitHub, and if you can't find any, open a new issue.
