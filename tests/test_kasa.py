@@ -431,6 +431,19 @@ def test_kasa_regularization_zero_when_no_kasa_layers():
     model = get_peft_model(copy.deepcopy(MLP()), LoraConfig(target_modules=["lin0"], r=4))
     loss = get_kasa_regularization_loss(model)
     assert float(loss) == 0.0
+    # The zero must live on the model's device, so adding it to a task loss never causes a device mismatch.
+    assert loss.device == next(model.parameters()).device
+
+
+def test_kasa_does_not_support_lora_conversion():
+    """KaSA cannot be converted to vanilla LoRA: the update depends on lora_diag and on the destructive truncation of
+    the base weight, neither of which is representable as scaling * B @ A on the unmodified base."""
+    model = get_peft_model(copy.deepcopy(MLP()), _make_kasa_config(r=4))
+    assert model.supports_lora_conversion() is False
+
+    # Vanilla LoRA is unaffected by the variant-aware check.
+    vanilla = get_peft_model(copy.deepcopy(MLP()), LoraConfig(target_modules=["lin0"], r=4))
+    assert vanilla.supports_lora_conversion() is True
 
 
 def test_kasa_regularization_l2_matches_closed_form():

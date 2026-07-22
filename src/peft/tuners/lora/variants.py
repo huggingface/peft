@@ -1345,6 +1345,10 @@ class KasaLinearVariant(LoraVariant):
       their task loss. Without them, the SVD interpretation of the update is only approximate.
     """
 
+    # The KaSA update depends on lora_diag and on the destructive truncation of the base weight, neither of which is
+    # representable in a vanilla scaling * B @ A adapter on the unmodified base.
+    supports_lora_conversion = False
+
     @staticmethod
     def _truncate_base_weight(module: Linear, r: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Replace the frozen base weight in-place with its rank-``(k - r)`` SVD approximation (drop the ``r`` smallest
@@ -1615,5 +1619,7 @@ def get_kasa_regularization_loss(
             total = layer_loss if total is None else total + layer_loss
 
     if total is None:
-        return torch.zeros(())
+        # Return the zero on the model's device so that `task_loss + get_kasa_regularization_loss(model)` does not
+        # fail with a device mismatch when the model has no KaSA layers.
+        return torch.zeros((), device=next(model.parameters()).device)
     return total
