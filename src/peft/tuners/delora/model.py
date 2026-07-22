@@ -100,5 +100,9 @@ class DeloraModel(BaseTuner):
 
         if isinstance(target_base_layer, torch.nn.Linear):
             new_module = DeloraLinear(target, adapter_name, config=delora_config, **kwargs)
+        else:
+            raise TypeError(
+                f"Target module {target} is not supported. Currently, only `torch.nn.Linear` is supported."
+            )
 
         return new_module
