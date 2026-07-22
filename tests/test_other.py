@@ -766,12 +766,3 @@ class TestPrepareModelForKbitTraining:
         ):
             prepare_model_for_kbit_training(fp16_model, use_gradient_checkpointing=False, auto_clear_cache=False)
         mock_empty_cache.assert_not_called()
-
-
-# TODO for PEFT 0.20 remove this
-class TestLoftQDeprecation:
-    def test_nfquantizer_deprecation(self):
-        from peft.utils.loftq_utils import NFQuantizer
-
-        with pytest.warns(match="NFQuantizer is deprecated") as record:
-            _ = NFQuantizer(device="cpu")
