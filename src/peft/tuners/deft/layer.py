@@ -23,6 +23,7 @@ from transformers.pytorch_utils import Conv1D
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.other import transpose
 
+from .._buffer_dict import BufferDict
 from .config import DeftConfig
 
 
@@ -37,6 +38,7 @@ class DeftLayer(BaseTunerLayer):
         "deft_para",
         "deft_scaling",
         "deft_dropout",
+        "_cached_merge_factor",
     )
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
@@ -54,8 +56,9 @@ class DeftLayer(BaseTunerLayer):
         # The residual projection (I - P_proj) @ W is not invertible, so unmerge cannot recover the delta from the
         # merged weight. Rather than cache the full out x in delta, cache only its base-weight-dependent factor
         # right.T @ W (shape r x in_features) per adapter; unmerge recomputes the exact delta from it (~r/out_features
-        # of the memory).
-        self._cached_merge_factor = {}
+        # of the memory). A BufferDict so `model.to(device)` and `_move_adapter_to_device_of_base_layer` keep it in
+        # sync with the base layer; `persistent=False` since it's a recomputable cache, not real adapter state.
+        self._cached_merge_factor = BufferDict({}, persistent=False)
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
@@ -280,8 +283,10 @@ class DeftLinear(nn.Module, DeftLayer):
                 base_layer.weight.data = new_weight
             else:
                 base_layer.weight.data = base_layer.weight.data + delta_weight
-            # cache only the small r x in_features factor (not the full out x in delta) for an exact unmerge
-            self._cached_merge_factor[active_adapter] = factor.to(base_layer.weight.dtype)
+            # Cache only the small r x in_features factor (not the full out x in delta) for an exact unmerge.
+            # Kept in float32 (the dtype _merge_factor already returns) so unmerge recomputes the exact delta
+            # merge applied here, not a rounded approximation of it.
+            self._cached_merge_factor[active_adapter] = factor
             self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -293,7 +298,10 @@ class DeftLinear(nn.Module, DeftLayer):
             active_adapter = self.merged_adapters.pop()
             if active_adapter not in self.deft_P.keys():
                 continue
-            factor = self._cached_merge_factor.pop(active_adapter, None)
+            # Unlike dict.pop(), BufferDict.pop() takes no default value, so membership is checked first.
+            factor = (
+                self._cached_merge_factor.pop(active_adapter) if active_adapter in self._cached_merge_factor else None
+            )
             if factor is not None:
                 delta_weight = self._delta_from_factor(active_adapter, factor.to(torch.float32))
             else:
