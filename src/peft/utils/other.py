@@ -797,6 +797,11 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
         However, if the wrapped module is itself a tuner, we'll call merge on it before.
         """
+        if not self.active_adapters:
+            # none of the modules_to_save adapters of this module are active, e.g. because the model's active adapter
+            # does not use modules_to_save on this module; like in forward, the original module is used in this case
+            return self.original_module
+
         new_module = self.modules_to_save[self.active_adapter]
 
         # TODO: not sure if this is still a sensible thing to do. We would basically have to

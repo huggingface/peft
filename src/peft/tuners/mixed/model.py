@@ -257,12 +257,9 @@ class MixedModel(BaseTuner):
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
             elif isinstance(target, ModulesToSaveWrapper):
                 # save any additional trainable modules part of `modules_to_save`
-                new_module = target.modules_to_save[target.active_adapter]
-                if hasattr(new_module, "base_layer"):
-                    # check if the module is itself a tuner layer
-                    if merge:
-                        new_module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-                    new_module = new_module.get_base_layer()
+                new_module = target.unload_and_optionally_merge_module(
+                    merge=merge, safe_merge=safe_merge, adapter_names=adapter_names
+                )
                 setattr(parent, target_name, new_module)
 
         # Clean up peft_config from the model since all PEFT modules have been removed.
