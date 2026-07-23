@@ -2,19 +2,19 @@
 """Check documentation coverage of a Python package.
 
 The tool inspects the public API (via __all__ exports) of a given package using
-``griffe``, filters for objects that carry a docstring, and then scans the
+`griffe`, filters for objects that carry a docstring, and then scans the
 markdown documentation tree to see whether those objects are mentioned.  Mentions
 are detected by looking at
 
-* inline code spans / markdown headings (`` `Foo` `` or ``## Foo``)
-* explicit ``[[autodoc]]`` blocks (HF doc-builder syntax)
+* inline code spans / markdown headings (` `Foo` ` or `## Foo`)
+* explicit `[[autodoc]]` blocks (HF doc-builder syntax)
 
 Usage::
 
     python scripts/check_doc_coverage.py --package peft --src src --docs docs/source
 
 The command exits with code 0 and prints a coverage table.  By default the tool
-outputs a short summary; pass ``--verbose`` to see every detected / missing
+outputs a short summary; pass `--verbose` to see every detected / missing
 object.
 """
 
@@ -35,7 +35,7 @@ from griffe import Alias, AliasResolutionError, Class, Function, Module
 # hf-doc-builder autodoc blocks: [[autodoc]] path.to.ClassOrFunction
 RE_AUTODOC = re.compile(r"\[\[autodoc\]\]\s+(\S+)")
 
-# Inline code span `foo` or ``foo``  (or longer runs)
+# Inline code span `foo` or `foo`  (or longer runs)
 RE_INLINE_CODE = re.compile(r"`{1,2}([^`\s]+)`{1,2}")
 
 # Markdown heading text (we strip the hashes)
@@ -72,8 +72,8 @@ def extract_public_api_items(
 ) -> dict[str, str]:
     """Return a mapping *exported_short_name* -> *canonical_path*.
 
-    The set is derived from ``__all__`` lists.  By default only the root
-    package's ``__all__`` is inspected; enable *recursive* to also inspect
+    The set is derived from `__all__` lists.  By default only the root
+    package's `__all__` is inspected; enable *recursive* to also inspect
     every submodule.
 
     Only objects that actually carry a docstring are kept.
@@ -119,11 +119,11 @@ def walk_modules(package: Module, package_name: str | None = None) -> Iterable[M
 
 
 def resolve_all(module: Module) -> list[str]:
-    """Return the names from ``__all__`` for *module*, or empty list.
+    """Return the names from `__all__` for *module*, or empty list.
 
-    Griffe stores ``__all__`` as an Attribute whose ``value`` is an
-    ``ExprList`` (or similar expression node).  We convert it to a string and
-    use ``ast.literal_eval`` to recover the plain Python list of names.
+    Griffe stores `__all__` as an Attribute whose `value` is an
+    `ExprList` (or similar expression node).  We convert it to a string and
+    use `ast.literal_eval` to recover the plain Python list of names.
     """
     attr = module.members.get("__all__")
     if attr is None:
@@ -158,8 +158,8 @@ def _add_mention(raw: str, into: set[str]) -> None:
 
 
 def extract_doc_mentions(docs_dir: str) -> set[str]:
-    """Walk every ``*.md`` under *docs_dir* and return the set of names that
-    are referenced either inline or via ``[[autodoc]]``."""
+    """Walk every `*.md` under *docs_dir* and return the set of names that
+    are referenced either inline or via `[[autodoc]]`."""
     mentions: set[str] = set()
     root = Path(docs_dir)
     for path in root.rglob("*.md"):
