@@ -376,6 +376,7 @@ TEST_CASES = [
     ("Conv1d LOHA", "Conv1d", LoHaConfig, {"target_modules": ["conv1d"]}),
     ("Conv1d LOHA 1", "Conv1d", LoHaConfig, {"target_modules": ["conv1d"]}),
     ("Conv1d LOHA 2", "Conv1d", LoHaConfig, {"target_modules": ["conv1d"], "r": 2}),
+    ("Conv1d Groups LOHA", "Conv1dGroups", LoHaConfig, {"target_modules": ["conv1d"], "r": 4}),
     (
         "Conv1d LOHA 3",
         "Conv1dBigger",
@@ -389,6 +390,8 @@ TEST_CASES = [
         {"target_modules": ["conv1d"], "r": 2, "use_effective_conv2d": False},
     ),
     ("Conv2d 1x1 LOHA", "Conv2d1x1", LoHaConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d Groups LOHA", "Conv2dGroups", LoHaConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d Groups2 LOHA", "Conv2dGroups2", LoHaConfig, {"target_modules": ["conv2d"]}),
     # LoKr
     ("Vanilla MLP 1 LOKR", "MLP", LoKrConfig, {"target_modules": "lin0"}),
     ("Vanilla MLP 2 LOKR", "MLP", LoKrConfig, {"target_modules": ["lin0"]}),
@@ -409,6 +412,7 @@ TEST_CASES = [
     ("Vanilla MLP 8 LOKR", "MLP", LoKrConfig, {"target_modules": "lin0", "decompose_both": True, "r": 1, "alpha": 1}),
     ("Conv1d LOKR 1", "Conv1d", LoKrConfig, {"target_modules": ["conv1d"]}),
     ("Conv1d LOKR 2", "Conv1d", LoKrConfig, {"target_modules": ["conv1d"], "r": 2}),
+    ("Conv1d Groups LOKR", "Conv1dGroups", LoKrConfig, {"target_modules": ["conv1d"], "r": 4}),
     (
         "Conv1d LOKR 3",
         "Conv1dBigger",
@@ -449,6 +453,8 @@ TEST_CASES = [
             "decompose_factor": 4,
         },
     ),
+    ("Conv2d Groups LOKR", "Conv2dGroups", LoKrConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d Groups2 LOKR", "Conv2dGroups2", LoKrConfig, {"target_modules": ["conv2d"]}),
     ########
     # OFT #
     ########
@@ -2041,6 +2047,26 @@ class ModelConv1DBigger(nn.Module):
         return X
 
 
+class ModelConv1DGroups(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1d = nn.Conv1d(8, 8, 3, groups=2)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(64, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
+
+    def forward(self, X):
+        X = X.to(self.dtype).reshape(-1, 1, 10)
+        X = torch.concat([X] * 8, dim=1)
+        X = self.conv1d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin0(X)
+        return self.sm(X)
+
+
 class ModelConv2D(nn.Module):
     def __init__(self, bias=True):
         super().__init__()
@@ -2276,6 +2302,9 @@ class MockTransformerWrapper:
 
         if model_id == "Conv1dBigger":
             return ModelConv1DBigger().to(dtype)
+
+        if model_id == "Conv1dGroups":
+            return ModelConv1DGroups().to(dtype)
 
         if model_id == "Conv2d":
             return ModelConv2D().to(dtype)
@@ -3088,6 +3117,14 @@ class TestPeftCustomModel(PeftCommonTester):
 
         conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
         if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
+            atol, rtol = 1e-3, 1e-3
+
+        if issubclass(config_cls, (LoHaConfig, LoKrConfig)) and model_id in (
+            "Conv1dGroups",
+            "Conv2dGroups",
+            "Conv2dGroups2",
+        ):
+            # Grouped LoHa/LoKr merges need a wider tolerance than a LoRA `B @ A` merge.
             atol, rtol = 1e-3, 1e-3
 
         if issubclass(config_cls, OFTConfig):
