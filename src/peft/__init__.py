@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.19.2.dev0"
+__version__ = "0.20.0"
 
 from .auto import (
     MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
@@ -65,11 +65,17 @@ from .tuners import (
     CartridgeEncoder,
     CPTConfig,
     CPTEmbedding,
+    DeftConfig,
+    DeftModel,
     DeloraConfig,
     DeloraModel,
     EvaConfig,
     FourierFTConfig,
     FourierFTModel,
+    FrodConfig,
+    FrodModel,
+    GloraConfig,
+    GloraModel,
     GraloraConfig,
     GraloraModel,
     HiraConfig,
@@ -128,6 +134,8 @@ from .tuners import (
     TinyLoraModel,
     TrainableTokensConfig,
     TrainableTokensModel,
+    UniLoraConfig,
+    UniLoraModel,
     VBLoRAConfig,
     VBLoRAModel,
     VeloraConfig,
@@ -197,11 +205,17 @@ __all__ = [
     "CPTEmbedding",
     "CartridgeConfig",
     "CartridgeEncoder",
+    "DeftConfig",
+    "DeftModel",
     "DeloraConfig",
     "DeloraModel",
     "EvaConfig",
     "FourierFTConfig",
     "FourierFTModel",
+    "FrodConfig",
+    "FrodModel",
+    "GloraConfig",
+    "GloraModel",
     "GraloraConfig",
     "GraloraModel",
     "HRAConfig",
@@ -273,7 +287,8 @@ __all__ = [
     "TinyLoraModel",
     "TrainableTokensConfig",
     "TrainableTokensModel",
-    "VBLoRAConfig",
+    "UniLoraConfig",
+    "UniLoraModel",
     "VBLoRAConfig",
     "VBLoRAModel",
     "VeloraConfig",

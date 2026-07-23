@@ -165,7 +165,7 @@ class TestLoraConversion:
         assert not lora_config.alpha_pattern
 
     def test_dynamic_rank_lora_config(self, lokr_model):
-        # with a dynmaic rank, we expect rank_pattern and alpha_pattern to be set
+        # with a dynamic rank, we expect rank_pattern and alpha_pattern to be set
         lora_config, state_dict = convert_to_lora(lokr_model, rank=0.5)
         assert lora_config.r == 1  # dummy value
         assert lora_config.lora_alpha == 1  # dummy value
@@ -178,7 +178,7 @@ class TestLoraConversion:
         assert 2 * len(lora_config.rank_pattern) == len(state_dict)
 
     def test_dynamic_rank_1_lora_config(self, lokr_model):
-        # with a dynmaic rank, we expect rank_pattern and alpha_pattern to be set
+        # with a dynamic rank, we expect rank_pattern and alpha_pattern to be set
         lora_config, state_dict = convert_to_lora(lokr_model, rank=1.0)
         assert lora_config.r == 1  # dummy value
         assert lora_config.lora_alpha == 1  # dummy value

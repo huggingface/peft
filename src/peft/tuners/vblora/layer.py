@@ -29,6 +29,8 @@ from .config import VBLoRAConfig
 class VBLoRALayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
     adapter_layer_names = ("vblora_logits_A", "vblora_logits_B", "vblora_vector_bank")
+    # All names of other parameters that may contain adapter-related parameters
+    other_param_names = ("r", "topk", "vblora_dropout")
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer
@@ -222,7 +224,10 @@ class Linear(nn.Linear, VBLoRALayer):
         """
         device = self.vblora_logits_A[adapter].device
         dtype = self.vblora_logits_A[adapter].dtype
-        cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
+        # In case users wants to merge the adapter weights that are in
+        # (b)float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
+        # (b)float16 because some CPUs have slow bf16/fp16 matmuls.
+        cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
         A, B = self._get_lora_matrices(adapter, cast_to_fp32)
         output_tensor = transpose(B @ A, self.fan_in_fan_out)
         return output_tensor

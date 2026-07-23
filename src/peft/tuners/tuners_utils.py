@@ -148,7 +148,7 @@ def _check_lora_target_modules_mamba(peft_config: PeftConfig, model: nn.Module, 
 
     lora_like_types = {"LORA", "ADALORA", "XLORA", "RANDLORA"}
     incompatible_modules = {"out_proj", "conv1d"}
-    mamba_model_types = {"falcon_h1", "mamba", "mamba2", "falcon_mamba"}
+    mamba_model_types = {"falcon_h1", "mamba", "mamba2", "falcon_mamba", "nemotron_h"}
 
     if (
         peft_config.peft_type in lora_like_types
@@ -501,6 +501,10 @@ class BaseTuner(nn.Module, ABC):
             else:
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
 
+        for module in model.modules():
+            if isinstance(module, self.tuner_layer_cls):
+                module._freeze_non_trainable_peft_weights()
+
     def _enable_adapter_layers(self, enabled: bool = True) -> None:
         for module in self.model.modules():
             if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
@@ -551,7 +555,7 @@ class BaseTuner(nn.Module, ABC):
         Enable or disable gradients on the given adapter(s).
 
         Args:
-            adapter_name (`str` or `Sequence[str]`):
+            adapter_names (`str` or `Sequence[str]`):
                 The name of the adapter(s) whose gradients should be enabled/disabled.
             requires_grad (`bool`, *optional*)
                 Whether to enable (`True`, default) or disable (`False`).
@@ -1081,8 +1085,27 @@ class BaseTuner(nn.Module, ABC):
                 module_name = prefix + suffix
             return module_name
 
+        def find_existing_param_wrapper(module, parameter_name):
+            # When adding a further adapter, the parameter may already be wrapped by a (possibly nested) ParamWrapper
+            # that was created for a previous adapter. In that case, return that wrapper so the new adapter can be added
+            # to it (via update_layer) instead of nesting yet another wrapper.
+            while isinstance(module, BaseTunerLayer) and (module.__class__.__name__ == "ParamWrapper"):
+                if module.parameter_name == parameter_name:
+                    return module
+                module = module.base_layer
+            return None
+
         def create_and_replace_param(module_name, key, param_name):
             # helper function to avoid duplication
+            if module_name == "":
+                # nn.Parameters that are registered directly on the top-level module (i.e. the module passed to
+                # get_peft_model) cannot be targeted. Wrapping the parameter would require replacing the module that
+                # holds it with lora.ParamWrapper, but that module is its own parent, so the wrapper ends up registered
+                # as a submodule of the very module it wraps. This creates a cyclic module graph, resulting in an error.
+                raise ValueError(
+                    f"Targeting an nn.Parameter on the top-level module is not supported (parameter '{param_name}'). "
+                )
+
             parent, target, target_name = _get_submodules(model, module_name)
             unwrapped_module_name = strip_base_layer_from_name(module_name)
             unwrapped_module = model.get_submodule(unwrapped_module_name)
@@ -1095,6 +1118,12 @@ class BaseTuner(nn.Module, ABC):
                     "try setting `target_modules=[]` to prevent it."
                 )
 
+            short_param_name = param_name.rpartition(".")[-1]  # "foo.bar.gate_up_proj" -> "gate_up_proj"
+            # If a previous adapter already wraps this parameter, reuse that wrapper instead of nesting a new one.
+            existing_wrapper = find_existing_param_wrapper(unwrapped_module, short_param_name)
+            if existing_wrapper is not None:
+                target = existing_wrapper
+
             self._check_target_module_compatiblity(peft_config, model, target_name)
             ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
             with ctx():
@@ -1105,7 +1134,7 @@ class BaseTuner(nn.Module, ABC):
                     target_name,
                     parent,
                     current_key=key,
-                    parameter_name=param_name.rpartition(".")[-1],
+                    parameter_name=short_param_name,
                 )
 
         # TODO very simple matching, might not cover all use cases
@@ -1142,7 +1171,7 @@ class BaseTuner(nn.Module, ABC):
 
     def _replace_module(self, parent, child_name, new_module, child) -> None:
         """
-        Replace the sub-module of a given moduel with a new PEFT module.
+        Replace the sub-module of a given module with a new PEFT module.
 
         This also deals with device placement of the new module to be in line with the child module.
 
@@ -1301,7 +1330,7 @@ class BaseTuner(nn.Module, ABC):
 
     def _check_tied_modules(self, model: nn.Module, peft_config):
         """
-        Checks if any of the tied layers are targetted via `modules_to_save` or `target_modules`. Updates the
+        Checks if any of the tied layers are targeted via `modules_to_save` or `target_modules`. Updates the
         `peft_config` in place with any layers/adapters that needs to be tied
         """
         modules_to_save = set(getattr(peft_config, "modules_to_save", []) or [])
@@ -1391,6 +1420,8 @@ class BaseTunerLayer(ABC):
     adapter_layer_names: tuple[str, ...] = ()
     # All names of other parameters that may contain adapter-related parameters
     other_param_names: tuple[str, ...] = ()
+    # This dict maps from the adapter name to the layer(s) whose weights should stay frozen
+    frozen_peft_weight_names: dict[str, tuple[str, ...]] = {}
 
     # indicates whether all adapters should be disabled
     _disable_adapters: bool = False
@@ -1549,6 +1580,32 @@ class BaseTunerLayer(ABC):
                     _set_layer_requires_grad(layer, False)
             self._disable_adapters = True
 
+    def _freeze_non_trainable_peft_weights(self, adapter_names: str | Sequence[str] | None = None) -> None:
+        """Freeze PEFT weights that adapter variants declare as non-trainable.
+
+        Some variants intentionally train only a subset of their adapter weights. This method reapplies those
+        declarations after code paths that may otherwise mark adapter weights as trainable, such as adapter setup or
+        adapter switching.
+        """
+        if not self.frozen_peft_weight_names:
+            return
+
+        if adapter_names is None:
+            adapter_names = self.frozen_peft_weight_names.keys()
+        elif isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+
+        for adapter_name in adapter_names:
+            for layer_name in self.frozen_peft_weight_names.get(adapter_name, ()):
+                if layer_name not in self.adapter_layer_names:
+                    continue
+
+                module_dict = getattr(self, layer_name)
+                if adapter_name not in module_dict:
+                    continue
+
+                _set_layer_requires_grad(module_dict[adapter_name], False)
+
     def set_adapter(self, adapter_names: str | list[str], inference_mode: bool = False) -> None:
         """Set the active adapter(s).
 
@@ -1556,7 +1613,7 @@ class BaseTunerLayer(ABC):
         inference_mode is True.
 
         Args:
-            adapter_name (`str` or `list[str]`):
+            adapter_names (`str` or `list[str]`):
                  The name(s) of the adapter(s) to set as active.
             inference_mode (bool, optional):
                  Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
@@ -1571,6 +1628,7 @@ class BaseTunerLayer(ABC):
                 should_require_grad = (key in adapter_names) and (not inference_mode)
                 _set_layer_requires_grad(layer, should_require_grad)
 
+        self._freeze_non_trainable_peft_weights(adapter_names)
         self._active_adapter = adapter_names
 
     def _all_available_adapter_names(self) -> list[str]:
@@ -1601,6 +1659,13 @@ class BaseTunerLayer(ABC):
             if adapter_name in getattr(self, attr):
                 del getattr(self, attr)[adapter_name]
 
+        if adapter_name in self.frozen_peft_weight_names:
+            # Delete in place (like the containers above) rather than copy-and-rebind: once an adapter
+            # has been registered the instance already owns its own dict (see
+            # `_register_frozen_peft_weight`), so this can't mutate the class-level default, and it keeps
+            # the deletion visible to any already-held reference to the dict.
+            del self.frozen_peft_weight_names[adapter_name]
+
         if adapter_name in self.active_adapters:
             # choose a new active adapter
             active_adapters = self.active_adapters[:]
@@ -1626,7 +1691,7 @@ class BaseTunerLayer(ABC):
         Enable or disable gradients on the given adapter(s).
 
         Args:
-            adapter_name (`str` or `Sequence[str]`):
+            adapter_names (`str` or `Sequence[str]`):
                 The name of the adapter(s) whose gradients should be enabled/disabled.
             requires_grad (`bool`, *optional*)
                 Whether to enable (`True`, default) or disable (`False`).
@@ -1641,6 +1706,9 @@ class BaseTunerLayer(ABC):
             for key, layer in module_dict.items():
                 if key in adapter_names_set:
                     _set_layer_requires_grad(layer, requires_grad)
+
+        if requires_grad:
+            self._freeze_non_trainable_peft_weights(adapter_names_set)
 
     def _get_base_layer_device_and_dtype(self, base_layer):
         """
@@ -2023,7 +2091,7 @@ def clone_module(module: nn.Module, share_weights=False):
 
 
 def replicate_layers(model: nn.Module, layer_map: list[tuple[int, int]]):
-    """Replicate layers in a transfomer model with weight sharing.
+    """Replicate layers in a transformer model with weight sharing.
 
     This function looks for a module list attribute at model[(.model)*].layers and replicates the layers in the module
     list according to the layer map. For example the map `[[0, 4], [2, 5]]` will take the set of layers `[0, 1, 2, 3,
@@ -2158,11 +2226,11 @@ def delete_adapter(
             The name of remaining adapter(s) after deletion, or `None` if there are no active adapters left. Use this
             to set the new active adapter of the model if necessary.
     """
-    key_list = [key for key, _ in model.named_modules() if prefix not in key]
     new_adapter = None
 
-    for key in key_list:
-        _, target, _ = _get_submodules(model, key)
+    for key, target in model.named_modules():
+        if prefix in key:
+            continue
         if isinstance(target, layer_cls):
             target.delete_adapter(adapter_name)
             if new_adapter is None:
@@ -2226,8 +2294,8 @@ def set_requires_grad(model, adapter_names: str | Sequence[str], requires_grad: 
 
     Args:
         model (`nn.Module`):
-            The model from which the adapter should be deleted.
-        adapter_name (`str` or `Sequence[str]`):
+            The model whose adapter gradient requirements should be updated.
+        adapter_names (`str` or `Sequence[str]`):
             The name of the adapter(s) whose gradients should be enabled/disabled.
         requires_grad (`bool`, *optional*)
             Whether to enable (`True`, default) or disable (`False`).

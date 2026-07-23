@@ -16,6 +16,9 @@ rendered properly in your Markdown viewer.
 
 # IA3
 
+> [!TIP]
+> IA3 is an excellent choice when you need the smallest possible adapter size — it uses learned vectors instead of low-rank matrices, making it one of the most parameter-efficient methods available. If your priority is minimal disk/memory footprint and fast training, IA3 is a strong candidate.
+
 <div class="flex justify-center">
     <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/ia3.png"/>
 </div>
@@ -50,13 +53,29 @@ can be determined based on the size of the weight matrices.
 
 ## Usage
 
+> [!TIP]
+> For autoregressive models, target `k_proj`, `v_proj`, and `down_proj` — these are the layers the authors found to be most effective. Set `feedforward_modules=["down_proj"]` so IA3 knows which modules are feedforward layers and can apply the correct scaling.
+
 For the task of sequence classification, one can initialize the IA3 config for a Llama model as follows:
 
 ```py
+from peft import IA3Config, TaskType, get_peft_model
+from transformers import AutoModelForCausalLM
+
+model = AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM-135M")
 peft_config = IA3Config(
-    task_type=TaskType.SEQ_CLS, target_modules=["k_proj", "v_proj", "down_proj"], feedforward_modules=["down_proj"]
+    task_type=TaskType.CAUSAL_LM,
+    target_modules=["k_proj", "v_proj", "down_proj"],
+    feedforward_modules=["down_proj"],
 )
+model = get_peft_model(model, peft_config)
+model.print_trainable_parameters()
 ```
+
+
+### When to use IA3 vs LoRA
+
+IA3 is particularly effective when you need the smallest possible adapters for storage-constrained deployments, or when you want fast convergence with fewer trainable parameters. LoRA may be preferable when you need the broader ecosystem of LoRA variants (DoRA, QLoRA, etc.) or want the most widely-tested approach with extensive community support.
 
 ## Benchmark overview
 

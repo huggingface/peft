@@ -20,7 +20,7 @@ import torch
 
 def reshape_weight_task_tensors(task_tensors: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
     """
-    Reshapes `weights` to match the shape of `task_tensors` by unsqeezing in the remaining dimenions.
+    Reshapes `weights` to match the shape of `task_tensors` by unsqueezing in the remaining dimensions.
 
     Args:
         task_tensors (`torch.Tensor`): The tensors that will be used to reshape `weights`.
