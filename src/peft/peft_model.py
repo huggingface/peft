@@ -436,7 +436,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         r"""
         Instantiate a PEFT model from a pretrained model and loaded PEFT weights.
 
-        Note that the passed `model` may be modified inplace.
+        Note that the passed `model` may be modified inplace. If you want to keep the model unmodified, pass a copy
+        created with [`~peft.utils.detached_copy`] instead.
 
         Args:
             model ([`torch.nn.Module`]):

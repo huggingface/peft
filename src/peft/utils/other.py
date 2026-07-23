@@ -1419,6 +1419,79 @@ def id_tensor_storage(tensor: torch.Tensor) -> tuple[torch.device, int, int]:
     return tensor.device, unique_id, storage_size(tensor)
 
 
+def detached_copy(module: torch.nn.Module, share_buffers: bool = True) -> torch.nn.Module:
+    """
+    Create a copy of a module that shares the parameters, and optionally the buffers, of the original module.
+
+    The returned module is a fully independent module tree consisting of new module instances, whose parameters,
+    however, are the very same objects as those of the original module. The same applies to the quantization state
+    attached to quantized parameters (e.g. from bitsandbytes) and, by default, to the buffers.
+
+    Thus the copy requires practically no extra memory and can be modified structurally. This is useful because
+    normally, creating a PEFT adapter mutates the base model in-place, e.g. by injecting LoRA layers when using LoRA.
+    This means that the base model behavior is changed, which can be surprising and troublesome in some circumstances.
+
+    Caveats:
+
+    - Since the parameters are shared, in-place modifications of them affect the original module and all of its copies
+      alike. This concerns, for instance, merging PEFT adapters into the base weights, casting the dtype or moving to a
+      different device (both work by assigning to `param.data`), and changing the `requires_grad` attribute. In
+      particular, creating a PEFT model from the copy freezes the base weights of the original module as well.
+    - By default, buffers are shared in the same way, meaning that e.g. the running statistics of batch norm layers
+      recorded while training one copy are seen by the original module and all other copies. Pass `share_buffers=False`
+      to give the copy its own independent buffers (initialized to the current values), at the cost of the memory they
+      occupy.
+    - Tensors that are neither registered as parameters nor as buffers but stored as plain attributes of a module are
+      not shared but copied.
+    - The module must be copyable with `copy.deepcopy`.
+    - This function is not tested with all possible quantization options. When not using bitsandbytes, carefully check
+      that everything works as expected.
+
+    Args:
+        module (`torch.nn.Module`):
+            The module to copy.
+        share_buffers (`bool`, *optional*, defaults to `True`):
+            Whether the buffers of the module should be shared as well. Set this to `False` if the copies should not
+            influence each other through their buffers, e.g. through the running statistics of batch norm layers, which
+            are updated during training.
+
+    Returns:
+        `torch.nn.Module`: The copy of the module, sharing its parameters and optionally its buffers.
+
+    Example:
+
+        ```py
+        >>> from peft import LoraConfig, detached_copy, get_peft_model
+
+        >>> # create two PEFT models with different adapters from the same base model, e.g. for teacher/student
+        >>> # training; the base model itself is left unmodified
+        >>> peft_model_1 = get_peft_model(detached_copy(base_model), LoraConfig(task_type="CAUSAL_LM"))
+        >>> peft_model_2 = get_peft_model(detached_copy(base_model), LoraConfig(task_type="CAUSAL_LM"))
+        ```
+    """
+    # deepcopy consults the memo before copying an object; pre-seeding it with all parameters and buffers, each mapped
+    # to itself, means that the module structure is copied but the tensors are shared. This also preserves weight tying
+    # inside the copy and across the copy and the original module.
+    memo = {}
+    for param in module.parameters():
+        memo[id(param)] = param
+        # Quantization libraries like bitsandbytes store the quantization state as an attribute of the parameter and
+        # possibly also as an attribute of the module, referencing the same object. The state on the parameter is
+        # implicitly shared, as the parameter itself is not copied, but the reference on the module is not. Add the
+        # state to the memo so that it is shared instead of being duplicated (which would waste memory and risk the
+        # two states diverging).
+        for attr_name in ("quant_state", "SCB"):
+            attr = getattr(param, attr_name, None)
+            if attr is not None:
+                memo[id(attr)] = attr
+
+    if share_buffers:
+        for buffer in module.buffers():
+            memo[id(buffer)] = buffer
+
+    return copy.deepcopy(module, memo)
+
+
 def cast_mixed_precision_params(model: torch.nn.Module, dtype: torch.dtype) -> None:
     """
     Cast all non-trainable parameters of the model to the given `dtype`. The `dtype` can be `torch.float16` or

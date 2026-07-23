@@ -82,6 +82,7 @@ from peft import (
     TaskType,
     VeraConfig,
     create_arrow_model,
+    detached_copy,
     get_eva_state_dict,
     get_peft_model,
     get_peft_model_state_dict,
@@ -109,6 +110,7 @@ from .testing_utils import (
     DEVICE_MAP_MAP,
     device_count,
     load_dataset_english_quotes,
+    memory_allocated_func,
     require_aqlm,
     require_bitsandbytes,
     require_deterministic_for_xpu,
@@ -7001,3 +7003,138 @@ def test_kappatune_with_4bit_model():
     assert "target_modules" in targets
     assert isinstance(targets["target_modules"], list)
     assert len(targets["target_modules"]) > 0, "Should return at least some target modules"
+
+
+@require_non_cpu
+class TestDetachedCopy:
+    model_id = "peft-internal-testing/opt-125m"
+
+    def get_input_ids(self):
+        return torch.tensor([[0, 1, 2, 3, 4, 5]], device=torch_device)
+
+    def load_quantized_model(self, bits):
+        if bits == 4:
+            quantization_config = BitsAndBytesConfig(load_in_4bit=True)
+        else:
+            quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+
+        with hub_online_once(self.model_id):
+            return AutoModelForCausalLM.from_pretrained(
+                self.model_id, quantization_config=quantization_config, device_map="auto"
+            )
+
+    @pytest.mark.single_gpu_tests
+    def test_cast_device_propagates_to_original_model(self):
+        with hub_online_once(self.model_id):
+            model = AutoModelForCausalLM.from_pretrained(self.model_id)
+            peft_model = get_peft_model(detached_copy(model), LoraConfig())
+            assert next(iter(peft_model.parameters())).device.type == "cpu"
+
+            peft_model.to(torch_device)
+            assert next(iter(peft_model.parameters())).device.type == torch_device
+            assert next(iter(peft_model.parameters())).device.type == torch_device
+
+    @pytest.mark.single_gpu_tests
+    def test_device_map_auto_detached_leaves_base_model_unmodified(self):
+        # note: when the device map ends up using a single device, as is the case here, accelerate does not attach any
+        # hooks to the modules, so this only covers the simple case; see the multi device test below for hooks
+        with hub_online_once(self.model_id):
+            model = AutoModelForCausalLM.from_pretrained(self.model_id, device_map="auto")
+            input_ids = self.get_input_ids().to(torch_device)
+            logits_base = model(input_ids).logits
+
+            config = LoraConfig(task_type="CAUSAL_LM", target_modules=["q_proj", "v_proj"])
+            peft_model = get_peft_model(detached_copy(model), config)
+
+            assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
+            # LoRA B is initialized to zero, so the outputs are identical
+            logits_peft = peft_model(input_ids).logits
+            assert torch.allclose(logits_base, logits_peft, atol=1e-5, rtol=1e-5)
+            assert torch.allclose(model(input_ids).logits, logits_base, atol=1e-5, rtol=1e-5)
+
+    @pytest.mark.multi_gpu_tests
+    @require_torch_multi_accelerator
+    def test_device_map_multi_device_detached_leaves_base_model_unmodified(self):
+        # in contrast to the single device case, when the model is spread across multiple devices, accelerate attaches
+        # alignment hooks to the modules, which reference the modules they're attached to and carry additional state
+        # (e.g. per-device allocations of tied parameters); this test ensures that detached_copy handles those
+        with hub_online_once(self.model_id):
+            model = AutoModelForCausalLM.from_pretrained(self.model_id, device_map="balanced")
+            # sanity check that the setup is as intended: multiple devices are used and hooks are attached
+            assert len(set(model.hf_device_map.values())) > 1
+            assert any(hasattr(module, "_hf_hook") for module in model.modules())
+
+            input_ids = self.get_input_ids().to(torch_device)
+            logits_base = model(input_ids).logits
+
+            config = LoraConfig(task_type="CAUSAL_LM", target_modules=["q_proj", "v_proj"])
+            peft_model = get_peft_model(detached_copy(model), config)
+
+            assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
+            # LoRA B is initialized to zero, so the outputs are identical
+            logits_peft = peft_model(input_ids).logits
+            assert torch.allclose(logits_base, logits_peft, atol=1e-5, rtol=1e-5)
+            assert torch.allclose(model(input_ids).logits, logits_base, atol=1e-5, rtol=1e-5)
+
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    @pytest.mark.parametrize("bits", [4, 8])
+    def test_detached_leaves_quantized_base_model_unmodified(self, bits):
+        model = self.load_quantized_model(bits)
+        input_ids = self.get_input_ids()
+        logits_base = model(input_ids).logits
+
+        config = LoraConfig(task_type="CAUSAL_LM", target_modules=["q_proj", "v_proj"])
+        peft_model = get_peft_model(detached_copy(model), config)
+
+        assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
+        # the quantized weight is shared by identity, which includes its quantization state
+        layer_base = model.model.decoder.layers[0].self_attn.q_proj
+        layer_peft = peft_model.base_model.model.model.decoder.layers[0].self_attn.q_proj
+        assert layer_peft.base_layer.weight is layer_base.weight
+
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    @pytest.mark.parametrize("bits", [4, 8])
+    def test_detached_copy_allocates_no_significant_device_memory(self, bits):
+        # if this fails, some device tensors were duplicated instead of shared, e.g. tensors that are stored as plain
+        # attributes instead of being registered as parameters or buffers
+        model = self.load_quantized_model(bits)
+        memory_before = memory_allocated_func()
+        model_copy = detached_copy(model)
+        memory_after = memory_allocated_func()
+        assert memory_after - memory_before < 2**20  # 1 MB tolerance
+        del model_copy
+
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    @pytest.mark.parametrize("bits", [4, 8])
+    def test_detached_gradients_flow_to_adapter_only_4bit(self, bits):
+        model = self.load_quantized_model(bits)
+        config = LoraConfig(task_type="CAUSAL_LM", target_modules=["q_proj", "v_proj"])
+        peft_model = get_peft_model(detached_copy(model), config)
+
+        peft_model(self.get_input_ids()).logits.mean().backward()
+        layer = peft_model.base_model.model.model.decoder.layers[0].self_attn.q_proj
+        assert layer.lora_A["default"].weight.grad is not None
+        assert layer.lora_B["default"].weight.grad is not None
+        assert all(param.grad is None for param in model.parameters())
+
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_from_pretrained_detached_on_quantized_model(self, tmp_path):
+        model = self.load_quantized_model(bits=4)
+        input_ids = self.get_input_ids()
+        logits_base = model(input_ids).logits
+
+        config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["q_proj", "v_proj"])
+        peft_model = get_peft_model(detached_copy(model), config)
+        logits_peft = peft_model(input_ids).logits
+        peft_model.save_pretrained(tmp_path)
+        del peft_model
+
+        # since the base model was left unmodified, it can be used directly to load the adapter
+        loaded = PeftModel.from_pretrained(detached_copy(model), tmp_path)
+        assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
+        assert torch.allclose(loaded(input_ids).logits, logits_peft, atol=1e-5, rtol=1e-5)
+        assert torch.allclose(model(input_ids).logits, logits_base, atol=1e-5, rtol=1e-5)
