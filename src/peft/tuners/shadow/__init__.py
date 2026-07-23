@@ -15,10 +15,10 @@
 from peft.utils import register_peft_method
 
 from .config import ShadowConfig
-from .layers import DetachedShadowModel, ShadowCarrier, ShadowLayer
+from .layers import DetachedShadowModel, ShadowCache, ShadowCarrier, ShadowLayer
 from .model import ShadowModel
 
 
-__all__ = ["DetachedShadowModel", "ShadowCarrier", "ShadowConfig", "ShadowLayer", "ShadowModel"]
+__all__ = ["DetachedShadowModel", "ShadowCache", "ShadowCarrier", "ShadowConfig", "ShadowLayer", "ShadowModel"]
 
 register_peft_method(name="shadow", config_cls=ShadowConfig, model_cls=ShadowModel, prefix="shadow_")

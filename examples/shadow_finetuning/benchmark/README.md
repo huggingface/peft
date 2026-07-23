@@ -19,7 +19,7 @@ each example with a chat template, supervises only the answer tokens (the prompt
 by **generating** an answer and extracting the final number (`#### N`) for exact-match accuracy. Eval skips the
 teacher-forced loss pass by default (use `--gsm8k_eval_loss` to enable it). With multiple processes, generation eval
 runs on **rank 0 only** by default (use `--gsm8k_distributed_eval` to eval on every rank). Generation is batched,
-uses **KV cache** for LoRA (`use_cache=False` for ShadowPEFT), and uses a single FSDP `summon_full_params` with
+uses **KV cache** (including ShadowPEFT's dual base+shadow cache), and uses a single FSDP `summon_full_params` with
 `synced_gpus=False`. Per-batch timing is printed on rank 0. Use
 `--gsm8k_answer_mode {thinking,final}` (full chain-of-thought target vs. number-only) and `--generation_max_length` to
 control eval generation length.
@@ -87,7 +87,7 @@ CUDA_VISIBLE_DEVICES=1 python run_benchmark.py --mode eval --task gsm8k --method
 # 3. GSM8k, shadow backbone initialized from a pretrained model.
 #    --shadow_model_name accepts a plain model id (e.g. Qwen/Qwen3-0.6B) or a "projected" shadow checkpoint that also
 #    carries a trained hidden-size projection (model_type causal_lm_with_hidden_projection, e.g. shadow-llm/Qwen3-0.6B-H8B).
-CUDA_VISIBLE_DEVICES=2,3 accelerate launch --num_processes 2 --main_process_port 1235 run_benchmark.py --task gsm8k --methods shadow --bf16 --max_seq_length 512 --shadow_model_name shadow-llm/Qwen3-0.6B-H8B --per_device_train_batch_size 8 --per_device_eval_batch_size 8 --output_dir benchmark_outputs/gsm8k-pretrained-shadow --mode train --num_train_epochs 2 --learning_rate 1e-3 --shadow_lr_scale 0.05 --save_steps 500 --save_total_limit 4 --shadow_alpha 0.5 --shadow_loss_weight 1.0
+CUDA_VISIBLE_DEVICES=2,3 accelerate launch --num_processes 2 --main_process_port 1235 run_benchmark.py --task gsm8k --methods shadow --bf16 --max_seq_length 512 --shadow_model_name shadow-llm/Qwen3-0.6B-H8B --per_device_train_batch_size 8 --per_device_eval_batch_size 8 --output_dir benchmark_outputs/gsm8k-pretrained-shadow --mode train --num_train_epochs 2 --learning_rate 5e-4 --shadow_lr_scale 0.05 --save_steps 500 --save_total_limit 4 --shadow_alpha 0.5 --shadow_loss_weight 1.0
 
 # eval base_shadow
 CUDA_VISIBLE_DEVICES=2 python run_benchmark.py --mode eval --task gsm8k --methods shadow --bf16 --adapter_dir benchmark_outputs/gsm8k-pretrained-shadow --generation_max_length 256
@@ -116,10 +116,3 @@ mirror shadow (detached)     29,668,160      0.361%          721.7        0.0136
 pretrained-shadow            454,394,432     5.163%          877.0        0.8165
 pretrained-shadow (detached) 454,394,432     5.163%          877.0        0.4932
 ```
-
-## Notes
-
-- ShadowPEFT disables the KV cache (full-sequence processing); this only affects generation, not the loss/accuracy
-  metrics computed here.
-- For a fair comparison, keep the shared training flags identical across methods and only vary the method-specific
-  capacity knobs. The defaults are reasonable starting points, not tuned optima.

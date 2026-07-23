@@ -32,6 +32,57 @@ class ShadowCarrier:
         self.shadow = shadow
 
 
+class ShadowCache:
+    """Paired KV caches for incremental ShadowPEFT decoding.
+
+    Autoregressive generation needs a base-model cache (keys/values computed under shadow injection) *and* a separate
+    shadow-backbone cache (to advance `s^(0)` token-by-token). Generation only inspects Cache-like methods on the object
+    stored as `past_key_values` (seq length, reorder, crop); those delegate to the base half. The shadow half is unpacked
+    before the base forward and re-packed on the way out -- see [`ShadowModel`] hooks.
+    """
+
+    __slots__ = ("base", "shadow")
+
+    def __init__(self, base: Any = None, shadow: Any = None) -> None:
+        self.base = base
+        self.shadow = shadow
+
+    def get_seq_length(self, layer_idx: int = 0) -> int:
+        if self.base is None:
+            return 0
+        return self.base.get_seq_length(layer_idx)
+
+    def get_max_cache_shape(self, layer_idx: int = 0) -> int:
+        if self.base is None:
+            return -1
+        return self.base.get_max_cache_shape(layer_idx)
+
+    @property
+    def is_compileable(self) -> bool:
+        # Dual-cache decoding is not a single compileable Cache layout.
+        return False
+
+    def has_previous_state(self, layer_idx: Optional[int] = None) -> bool:
+        if self.base is None:
+            return False
+        return self.base.has_previous_state(layer_idx)
+
+    def reorder_cache(self, beam_idx: torch.LongTensor) -> None:
+        if self.base is not None and hasattr(self.base, "reorder_cache"):
+            self.base.reorder_cache(beam_idx)
+        if self.shadow is not None and hasattr(self.shadow, "reorder_cache"):
+            self.shadow.reorder_cache(beam_idx)
+
+    def crop(self, max_length: int) -> None:
+        if self.base is not None and hasattr(self.base, "crop"):
+            self.base.crop(max_length)
+        if self.shadow is not None and hasattr(self.shadow, "crop"):
+            self.shadow.crop(max_length)
+
+    def __repr__(self) -> str:
+        return f"ShadowCache(base={self.base!r}, shadow={self.shadow!r})"
+
+
 class ShadowLayer(nn.Module, BaseTunerLayer):
     # Trainable, per-adapter sub-modules (`shadow_dropout` is parameter-free but listed here so its per-adapter entry
     # is created/deleted alongside the others).
@@ -201,8 +252,8 @@ class DetachedShadowModel(PreTrainedModel, GenerationMixin):
     deployed on its own for high-efficiency / edge inference (Section 3.5 of the paper).
 
     Because it is just the shadow backbone with a task head, it behaves like a normal task model. For a causal-LM head
-    it returns a [`~transformers.modeling_outputs.CausalLMOutputWithPast`] and supports `generate()` and KV caching
-    (which the full ShadowPEFT model cannot). For a sequence-classification head it pools the last token and returns a
+    it returns a [`~transformers.modeling_outputs.CausalLMOutputWithPast`] and supports `generate()` and KV caching.
+    For a sequence-classification head it pools the last token and returns a
     [`~transformers.modeling_outputs.SequenceClassifierOutput`]. This is how you evaluate the shadow path's own
     performance, independent of the base model.
     """

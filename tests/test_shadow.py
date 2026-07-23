@@ -32,7 +32,7 @@ from peft import (
     ShadowConfig,
     get_peft_model,
 )
-from peft.tuners.shadow import DetachedShadowModel, ShadowModel
+from peft.tuners.shadow import DetachedShadowModel, ShadowCache, ShadowModel
 from peft.tuners.shadow.layers import ShadowLayer
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import PeftType, get_peft_model_state_dict
@@ -50,6 +50,17 @@ def make_llama_causal(hidden_size=32, num_layers=3, vocab_size=128):
         max_position_embeddings=64,
     )
     return LlamaForCausalLM(cfg)
+
+
+def _train_shadow_briefly(model, ids, steps=3, lr=0.5):
+    """Break the zero-init no-op so cache alignment tests exercise a real adapter."""
+    opt = torch.optim.SGD([p for p in model.parameters() if p.requires_grad], lr=lr)
+    model.train()
+    for _ in range(steps):
+        opt.zero_grad()
+        model(input_ids=ids, labels=ids.clone()).loss.backward()
+        opt.step()
+    model.eval()
 
 
 def make_llama_seqcls(num_labels=3, hidden_size=32, num_layers=3, vocab_size=128):
@@ -185,7 +196,7 @@ class TestShadowCausalLM:
     def test_generate(self):
         model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
         ids = torch.randint(0, 128, (2, 4))
-        gen = model.generate(input_ids=ids, max_new_tokens=4, use_cache=False, do_sample=False)
+        gen = model.generate(input_ids=ids, max_new_tokens=4, do_sample=False)
         assert gen.shape[1] == 8
 
     def test_merge_raises(self):
@@ -304,7 +315,7 @@ class TestShadowCausalLM:
         out = model(input_ids=ids, labels=ids.clone())
         assert out.logits.dtype == torch.bfloat16
         out.loss.backward()
-        gen = model.generate(input_ids=ids[:, :3], max_new_tokens=3, use_cache=False, do_sample=False)
+        gen = model.generate(input_ids=ids[:, :3], max_new_tokens=3, do_sample=False)
         assert gen.shape[1] == 6
 
     def test_wrapped_layer_delegates_base_attributes(self):
@@ -326,6 +337,153 @@ class TestShadowCausalLM:
         out = model(input_ids=ids, labels=ids.clone())
         assert out.logits.shape == (2, 6, 128)
         out.loss.backward()
+
+
+class TestShadowKVCache:
+    """Dual KV cache (base + shadow) incremental decode must match full-sequence recompute."""
+
+    def test_generate_cached_matches_uncached(self):
+        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
+        ids = torch.randint(0, 128, (2, 5))
+        _train_shadow_briefly(model, ids)
+        with torch.no_grad():
+            cached = model.generate(input_ids=ids, max_new_tokens=5, use_cache=True, do_sample=False)
+            uncached = model.generate(input_ids=ids, max_new_tokens=5, use_cache=False, do_sample=False)
+        assert torch.equal(cached, uncached)
+
+    def test_generate_cached_matches_uncached_with_projection(self):
+        # Mirror shadow with a smaller hidden size (projection 16->32) must still align under caching.
+        model = get_peft_model(
+            make_llama_causal(hidden_size=32, num_layers=4),
+            ShadowConfig(task_type="CAUSAL_LM", shadow_num_hidden_layers=1, shadow_hidden_size=16),
+        )
+        ids = torch.randint(0, 128, (1, 4))
+        _train_shadow_briefly(model, ids)
+        with torch.no_grad():
+            cached = model.generate(input_ids=ids, max_new_tokens=6, use_cache=True, do_sample=False)
+            uncached = model.generate(input_ids=ids, max_new_tokens=6, use_cache=False, do_sample=False)
+        assert torch.equal(cached, uncached)
+
+    def test_prefill_returns_shadow_cache(self):
+        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
+        model.eval()
+        ids = torch.randint(0, 128, (1, 4))
+        with torch.no_grad():
+            out = model(input_ids=ids, use_cache=True)
+        assert isinstance(out.past_key_values, ShadowCache)
+        assert out.past_key_values.get_seq_length() == 4
+        assert out.past_key_values.base is not None
+        assert out.past_key_values.shadow is not None
+        assert out.past_key_values.shadow.get_seq_length() == 4
+
+    def test_prefill_then_decode_logits_match_full_sequence(self):
+        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
+        ids = torch.randint(0, 128, (1, 4))
+        _train_shadow_briefly(model, ids)
+        next_token = torch.tensor([[77]])
+        full_ids = torch.cat([ids, next_token], dim=1)
+        with torch.no_grad():
+            out_prefill = model(input_ids=ids, use_cache=True)
+            assert isinstance(out_prefill.past_key_values, ShadowCache)
+            out_decode = model(
+                input_ids=next_token, past_key_values=out_prefill.past_key_values, use_cache=True
+            )
+            out_full = model(input_ids=full_ids, use_cache=False)
+        assert torch.allclose(out_decode.logits[:, -1, :], out_full.logits[:, -1, :], atol=1e-4)
+
+    def test_step_by_step_logits_alignment(self):
+        # Prefill once, then decode token-by-token with the dual cache; each step's logits must match a full-sequence
+        # recompute of the growing prefix (proves inject/update stay correct under incremental decoding).
+        model = get_peft_model(make_llama_causal(num_layers=4), ShadowConfig(task_type="CAUSAL_LM"))
+        prefix = torch.randint(0, 128, (1, 3))
+        _train_shadow_briefly(model, prefix)
+        max_new_tokens = 5
+
+        with torch.no_grad():
+            out = model(input_ids=prefix, use_cache=True)
+            cache = out.past_key_values
+            assert isinstance(cache, ShadowCache)
+            cached_logits = out.logits[:, -1, :]
+            full_logits = model(input_ids=prefix, use_cache=False).logits[:, -1, :]
+            assert torch.allclose(cached_logits, full_logits, atol=1e-4)
+
+            generated = []
+            for step in range(max_new_tokens):
+                next_tok = cached_logits.argmax(dim=-1, keepdim=True)
+                generated.append(next_tok.item())
+                full_ids = torch.cat([prefix] + [torch.tensor([[t]]) for t in generated], dim=1)
+                full_logits = model(input_ids=full_ids, use_cache=False).logits[:, -1, :]
+                if step < max_new_tokens - 1:
+                    out = model(input_ids=next_tok, past_key_values=cache, use_cache=True)
+                    cache = out.past_key_values
+                    cached_logits = out.logits[:, -1, :]
+                    assert torch.allclose(cached_logits, full_logits, atol=1e-4), f"mismatch at step {step}"
+
+            # Manual greedy path should agree with generate(use_cache=True) up to an early EOS stop.
+            gen = model.generate(input_ids=prefix, max_new_tokens=max_new_tokens, use_cache=True, do_sample=False)
+            gen_tokens = gen[0, prefix.shape[1] :].tolist()
+            assert generated[: len(gen_tokens)] == gen_tokens
+
+    def test_uncached_forward_does_not_return_shadow_cache(self):
+        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
+        model.eval()
+        ids = torch.randint(0, 128, (1, 5))
+        with torch.no_grad():
+            out = model(input_ids=ids, use_cache=False)
+        assert not isinstance(getattr(out, "past_key_values", None), ShadowCache)
+        assert out.past_key_values is None or (
+            hasattr(out.past_key_values, "get_seq_length") and out.past_key_values.get_seq_length() == 0
+        )
+
+    def test_disable_adapter_uses_plain_base_cache(self):
+        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
+        model.eval()
+        ids = torch.randint(0, 128, (1, 4))
+        with torch.no_grad():
+            with model.disable_adapter():
+                out = model(input_ids=ids, use_cache=True)
+        # Shadow path inactive: past should be a plain base cache, not a ShadowCache.
+        assert not isinstance(out.past_key_values, ShadowCache)
+        assert out.past_key_values is not None
+        assert out.past_key_values.get_seq_length() == 4
+
+    def test_explicit_shadow_model_cached_generate(self, tmp_path):
+        from transformers import LlamaModel
+
+        shadow_cfg = LlamaConfig(
+            vocab_size=128,
+            hidden_size=16,
+            intermediate_size=32,
+            num_hidden_layers=1,
+            num_attention_heads=4,
+            num_key_value_heads=2,
+            max_position_embeddings=64,
+        )
+        LlamaModel(shadow_cfg).save_pretrained(tmp_path)
+        model = get_peft_model(
+            make_llama_causal(hidden_size=32, num_layers=3),
+            ShadowConfig(task_type="CAUSAL_LM", shadow_model=str(tmp_path)),
+        )
+        ids = torch.randint(0, 128, (1, 4))
+        _train_shadow_briefly(model, ids)
+        with torch.no_grad():
+            cached = model.generate(input_ids=ids, max_new_tokens=4, use_cache=True, do_sample=False)
+            uncached = model.generate(input_ids=ids, max_new_tokens=4, use_cache=False, do_sample=False)
+        assert torch.equal(cached, uncached)
+
+    def test_shadow_cache_reorder_and_crop(self):
+        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
+        model.eval()
+        ids = torch.randint(0, 128, (2, 4))
+        with torch.no_grad():
+            out = model(input_ids=ids, use_cache=True)
+        cache = out.past_key_values
+        assert isinstance(cache, ShadowCache)
+        cache.reorder_cache(torch.tensor([1, 0]))
+        assert cache.get_seq_length() == 4
+        cache.crop(3)
+        assert cache.get_seq_length() == 3
+        assert cache.shadow.get_seq_length() == 3
 
 
 class TestShadowMultiAdapter:
@@ -538,7 +696,7 @@ class TestShadowBackboneVariants:
             out = detached(input_ids=ids)
         # head(projection(backbone(x))) -> vocab logits (CausalLMOutputWithPast)
         assert out.logits.shape == (2, 5, 128)
-        # It behaves like a normal causal LM, so it can generate (KV cache is fine for the standalone shadow path).
+        # It behaves like a normal causal LM, so it can generate with KV caching.
         gen = detached.generate(input_ids=ids[:, :3], max_new_tokens=3, do_sample=False)
         assert gen.shape[1] == 6
 

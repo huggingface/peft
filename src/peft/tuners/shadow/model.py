@@ -25,7 +25,7 @@ from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import TaskType
 
 from .config import ShadowConfig
-from .layers import DetachedShadowModel, ShadowCarrier, ShadowLayer
+from .layers import DetachedShadowModel, ShadowCache, ShadowCarrier, ShadowLayer
 
 
 # --------------------------------------------------------------------------------------------------- backbone helpers
@@ -175,6 +175,8 @@ class ShadowModel(BaseTuner):
             # already registered under `self.model`); a direct attribute assignment would duplicate their parameters.
             self._boundary_layers: list = []
             self._seed_shadow_state: Optional[torch.Tensor] = None
+            self._shadow_past_out: Any = None
+            self._should_pack_shadow_cache: bool = False
             self._shadow_share_embeddings: dict[str, bool] = {}
             self._shadow_head_is_lm: dict[str, bool] = {}
 
@@ -275,8 +277,6 @@ class ShadowModel(BaseTuner):
             _set_config_attr(cfg, ("intermediate_size", "ffn_dim", "n_inner"), config.shadow_intermediate_size)
         if config.shadow_num_attention_heads is not None:
             _set_config_attr(cfg, ("num_attention_heads", "n_head", "num_heads"), config.shadow_num_attention_heads)
-        if hasattr(cfg, "use_cache"):
-            cfg.use_cache = False
         _normalize_layer_config(cfg)
         return base_backbone.__class__(cfg)
 
@@ -350,11 +350,9 @@ class ShadowModel(BaseTuner):
     # -------------------------------------------------------------------------------------------- boundary hooks
 
     def _post_injection_hook(self, model: nn.Module, config: ShadowConfig, adapter_name: str) -> None:
-        # Disable KV caching on the base model: the shadow path reprocesses the full sequence, so cached decoding is
-        # not supported (see the docs). The shadow state rides the base decoder loop; we only bridge the two ends.
+        # The shadow state rides the base decoder loop; boundary hooks seed `s^(0)`, wrap/unwrap the carrier, and pack
+        # the dual KV cache (`ShadowCache`) when `use_cache=True`.
         self._ensure_shadow_containers()
-        if hasattr(self.model, "config") and hasattr(self.model.config, "use_cache"):
-            self.model.config.use_cache = False
         self._register_boundary_hooks()
 
     def _register_boundary_hooks(self) -> None:
@@ -370,9 +368,15 @@ class ShadowModel(BaseTuner):
         entry, exit_ = wrapped[0], wrapped[-1]
         self._boundary_layers = [entry, exit_]
         # Seed `s^(0)` from the *raw* model inputs (input_ids / 2D attention mask), which are only available at the top
-        # of the base model's forward -- inside a decoder block the mask is already a 4D causal mask.
+        # of the base model's forward -- inside a decoder block the mask is already a 4D causal mask. Also unpack a
+        # `ShadowCache` so the base model only sees its own past.
         self._boundary_hook_handles.append(
             self.model.register_forward_pre_hook(self._seed_shadow_pre_hook, with_kwargs=True)
+        )
+        # Re-pack base + shadow pasts into a `ShadowCache` on the way out (generation threads this object as
+        # `past_key_values`).
+        self._boundary_hook_handles.append(
+            self.model.register_forward_hook(self._pack_shadow_cache_hook, with_kwargs=True)
         )
         # Wrap the first wrapped block's input into a carrier, and unwrap the last block's output back to a tensor.
         self._boundary_hook_handles.append(
@@ -389,26 +393,70 @@ class ShadowModel(BaseTuner):
         active = self.active_adapters
         return bool(active) and active[0] in entry.shadow_down
 
+    @staticmethod
+    def _unpack_past_key_values(past: Any) -> tuple[Any, Any]:
+        """Split a [`ShadowCache`] into `(base_past, shadow_past)`; plain pasts are treated as base-only."""
+        if isinstance(past, ShadowCache):
+            return past.base, past.shadow
+        return past, None
+
     def _seed_shadow_pre_hook(self, module: nn.Module, args: tuple, kwargs: dict):
         self._seed_shadow_state = None
+        self._shadow_past_out = None
+        self._should_pack_shadow_cache = False
+
+        past = kwargs.get("past_key_values")
+        base_past, shadow_past = self._unpack_past_key_values(past)
+        # Always rewrite kwargs when a ShadowCache was supplied -- the base model cannot consume it.
+        if isinstance(past, ShadowCache):
+            kwargs = {**kwargs, "past_key_values": base_past}
+
         if not self._shadow_path_active():
-            return
+            return args, kwargs
+
+        use_cache = kwargs.get("use_cache")
+        if use_cache is None:
+            use_cache = bool(getattr(getattr(self.model, "config", None), "use_cache", False))
+
         input_ids = kwargs.get("input_ids")
         if input_ids is None and args:
             input_ids = args[0]
-        self._seed_shadow_state = self._compute_initial_shadow_state(
+        self._seed_shadow_state, self._shadow_past_out = self._compute_initial_shadow_state(
             self.active_adapters[0],
             input_ids=input_ids,
             attention_mask=kwargs.get("attention_mask"),
             position_ids=kwargs.get("position_ids"),
             inputs_embeds=kwargs.get("inputs_embeds"),
+            past_key_values=shadow_past,
+            use_cache=use_cache,
         )
+        self._should_pack_shadow_cache = bool(use_cache)
+        return args, kwargs
+
+    def _pack_shadow_cache_hook(self, module: nn.Module, args: tuple, kwargs: dict, output: Any):
+        """Attach a [`ShadowCache`] so the next decode step can advance both paths incrementally."""
+        if not self._should_pack_shadow_cache:
+            return output
+        self._should_pack_shadow_cache = False
+        shadow_past = self._shadow_past_out
+        self._shadow_past_out = None
+
+        if hasattr(output, "past_key_values"):
+            output.past_key_values = ShadowCache(base=output.past_key_values, shadow=shadow_past)
+            return output
+        return output
 
     def _wrap_entry_pre_hook(self, module: ShadowLayer, args: tuple, kwargs: dict):
         """Wrap the first block's input (the embeddings) into a [`ShadowCarrier`] seeded with `s^(0)` (Eq. 1)."""
         if self._seed_shadow_state is None:
             return
         hidden = args[0] if args else kwargs["hidden_states"]
+        if hidden.shape[:-1] != self._seed_shadow_state.shape[:-1]:
+            raise ValueError(
+                f"Shadow state sequence shape {tuple(self._seed_shadow_state.shape[:-1])} does not match base hidden "
+                f"states {tuple(hidden.shape[:-1])}. When using a KV cache, both the base model and the shadow "
+                "backbone must see the same new-token length (pass a `ShadowCache` as `past_key_values`)."
+            )
         carrier = ShadowCarrier(hidden, self._seed_shadow_state)
         if args:
             return (carrier, *args[1:]), kwargs
@@ -427,11 +475,18 @@ class ShadowModel(BaseTuner):
         attention_mask: Optional[torch.Tensor],
         position_ids: Optional[torch.Tensor],
         inputs_embeds: Optional[torch.Tensor],
-    ) -> torch.Tensor:
+        past_key_values: Any = None,
+        use_cache: bool = False,
+    ) -> tuple[torch.Tensor, Any]:
         backbone = self.shadow_backbone[adapter_name]
         share = self._shadow_share_embeddings.get(adapter_name, False)
 
-        kwargs = {"attention_mask": attention_mask, "use_cache": False, "return_dict": True}
+        kwargs = {
+            "attention_mask": attention_mask,
+            "use_cache": use_cache,
+            "return_dict": True,
+            "past_key_values": past_key_values,
+        }
         if position_ids is not None:
             kwargs["position_ids"] = position_ids
 
@@ -447,7 +502,8 @@ class ShadowModel(BaseTuner):
 
         if not hasattr(out, "last_hidden_state"):
             raise TypeError("The shadow backbone did not return a `last_hidden_state`; architecture is unsupported.")
-        return self.shadow_projection[adapter_name](out.last_hidden_state)
+        shadow_state = self.shadow_projection[adapter_name](out.last_hidden_state)
+        return shadow_state, getattr(out, "past_key_values", None)
 
     # ------------------------------------------------------------------------------------------ trainability
 
@@ -569,8 +625,8 @@ class ShadowModel(BaseTuner):
         The ShadowPEFT analogue of `merge_and_unload`: where that would hand back the base model with the adaptation
         baked in, this hands back only the lightweight shadow network for high-efficiency / edge inference. It runs
         `head(projection(backbone(x)))` -- the per-block updates require the base outputs and so do not exist
-        standalone. The result behaves like a normal causal LM (supports `generate()`), which is how you evaluate the
-        shadow path's own performance, independent of the base model.
+        standalone. The result behaves like a normal causal LM (supports `generate()` and KV caching), which is how you
+        evaluate the shadow path's own performance, independent of the base model.
 
         Assign the result to a variable; this is not an in-place operation.
         """

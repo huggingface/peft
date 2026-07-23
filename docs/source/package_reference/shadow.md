@@ -40,7 +40,18 @@ Compared to LoRA-style methods, ShadowPEFT adds more parameters and compute (it 
 
 ## KV cache
 
-ShadowPEFT disables the base model's KV cache (`use_cache` is forced to `False`). During autoregressive decoding a KV cache lets each step attend to cached keys/values and process only the newest token, but the shadow state `s^(0)` is seeded by running the shadow backbone over the **current input sequence**, and the injected correction at each block depends on that full-sequence shadow state. A per-step base model that only sees one new token cannot reconstruct the shadow trajectory for the prefix. In principle a *separate* KV cache for the shadow backbone could restore incremental decoding, but the initial integration keeps the design simple and correct by reprocessing the full sequence each step. Always pass `use_cache=False` during generation.
+ShadowPEFT supports incremental decoding with a **dual** KV cache: one for the frozen base model and one for the
+shadow backbone. Inject/update are token-local, so a new token only needs its own shadow state `s`; causality keeps
+prefix base keys/values (computed under injection) valid. The paired object is a [`~tuners.shadow.layers.ShadowCache`],
+returned as `past_key_values` when `use_cache=True`. You can pass `use_cache=True` to `generate()` as usual.
+
+```py
+out = model.generate(input_ids, max_new_tokens=32)  # dual KV cache enabled by default
+# or explicitly:
+out = model.generate(input_ids, use_cache=True, max_new_tokens=32)
+```
+
+`use_cache=False` still works and reprocesses the full sequence each step (useful for debugging).
 
 ## Usage
 
@@ -53,8 +64,7 @@ config = ShadowConfig(r=8, shadow_num_hidden_layers=1, task_type="CAUSAL_LM")
 model = get_peft_model(model, config)
 model.print_trainable_parameters()
 
-# Generation requires `use_cache=False` because the shadow path needs the full sequence.
-out = model.generate(input_ids, use_cache=False, max_new_tokens=32)
+out = model.generate(input_ids, max_new_tokens=32)
 ```
 
 To initialize the shadow backbone from a smaller pre-trained model, pass its id or path as `shadow_model`:
@@ -74,14 +84,14 @@ on its own.
 To evaluate the **standalone shadow network** (the detachable, lightweight model — the ShadowPEFT analogue of
 `merge_and_unload`), use `unload_shadow()`. It returns `head(projection(backbone(x)))` as a normal task model that you
 can evaluate like any other: for a causal-LM task it is a generation-capable causal LM (supports `generate()` and KV
-caching, which the full ShadowPEFT model cannot), and for a sequence-classification task it pools the last token and
+caching), and for a sequence-classification task it pools the last token and
 returns class logits.
 
 ```py
 shadow = model.base_model.unload_shadow()  # a DetachedShadowModel (a PreTrainedModel)
 shadow.eval()
 # causal LM:
-out = shadow.generate(input_ids, max_new_tokens=32)   # KV cache is fine here
+out = shadow.generate(input_ids, max_new_tokens=32)
 # sequence classification:
 logits = shadow(input_ids=input_ids, attention_mask=attention_mask).logits  # (batch, num_labels)
 shadow.save_pretrained("standalone-shadow")
@@ -96,3 +106,7 @@ shadow.save_pretrained("standalone-shadow")
 ## ShadowModel
 
 [[autodoc]] tuners.shadow.model.ShadowModel
+
+## ShadowCache
+
+[[autodoc]] tuners.shadow.layers.ShadowCache

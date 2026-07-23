@@ -682,11 +682,7 @@ class GSM8KTrainer(ShadowOptimizerTrainer):
         return None
 
     def _generation_use_cache(self):
-        """ShadowPEFT disables KV cache; LoRA and other methods can use it for faster eval."""
-        peft_model = self._generation_model()
-        peft_config = getattr(peft_model, "peft_config", None)
-        if peft_config:
-            return all(config.peft_type != PeftType.SHADOW for config in peft_config.values())
+        """Use KV cache during generation eval (including ShadowPEFT's dual base+shadow cache)."""
         return True
 
     def _configure_generation_cache(self, gen_model, use_cache):
@@ -737,11 +733,6 @@ class GSM8KTrainer(ShadowOptimizerTrainer):
             f"{num_samples} samples, batch_size={self.args.per_device_eval_batch_size}, "
             f"max_new_tokens={self.gen_max_new_tokens}, use_cache={use_cache}, synced_gpus={synced_gpus}"
         )
-        if not use_cache:
-            print(
-                "ShadowPEFT eval disables KV cache, so generation reruns the full sequence each token and is much "
-                "slower. For faster checks use --gsm8k_answer_mode final --generation_max_length 32."
-            )
 
     def _generate_batch(
         self, gen_model, prompt_ids, prompt_mask, gold_answers, pad_id, eos_id, use_cache, synced_gpus, sample_idx
