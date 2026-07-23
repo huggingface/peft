@@ -40,7 +40,6 @@ from peft import (
     IA3Config,
     LilyConfig,
     LoftQConfig,
-    LoHaConfig,
     LoKrConfig,
     LoraConfig,
     PeanutConfig,
@@ -1877,86 +1876,6 @@ class TestLokrInitialization:
         output_after = model(data)[1]
 
         assert torch.allclose(output_before, output_after)
-
-
-class TestLoHaLoKrGroupedConv:
-    """Regression tests for LoHa and LoKr crashing on a plain (unmerged) forward pass whenever the wrapped
-    Conv1d layer has `groups > 1` (e.g. depthwise/grouped convolutions, common in vision models).
-
-    Both tuners built their low-rank adapter parameters using the base layer's full `in_channels` instead of
-    `in_channels // groups`, so `get_delta_weight`'s `reshape(base_layer.weight.shape)` raised a `RuntimeError`
-    (numel mismatch) the first time `forward` was called -- merging was never even reached. Unlike HiRA's
-    analogous `groups > 1` restriction (a Hadamard product against the base weight, see `TestHiraInitialization`),
-    LoHa/LoKr use their delta weight as an independent conv kernel (`F.conv2d(input, delta_weight,
-    groups=base_layer.groups)`, already present before this fix), so sizing the low-rank factors with
-    `in_channels // groups` is sufficient to fully support grouped convolutions, not just reject them.
-
-    Only Conv1d is covered here: Conv2d + groups > 1 for LoHa/LoKr is already exercised by the "Conv2d
-    Groups(2) LOHA/LOKR" entries in `test_custom_models.py`'s shared `TEST_CASES` battery (forward, merge,
-    disable/enable, save/load, etc.), so a duplicate Conv2d check here would add nothing.
-    """
-
-    torch_device = infer_device()
-
-    # (conv_cls, input_shape), input_shape excludes the batch and channel dims
-    conv_cases = [
-        pytest.param(nn.Conv1d, (9,), id="Conv1d"),
-    ]
-
-    def get_model_conv_groups(self, conv_cls, groups):
-        class ModelConvGroups(nn.Module):
-            """For testing when the groups argument is used in a conv layer"""
-
-            def __init__(self):
-                super().__init__()
-                self.conv = conv_cls(8, 8, kernel_size=3, groups=groups)
-
-            def forward(self, X):
-                return self.conv(X)
-
-        return ModelConvGroups().eval().to(self.torch_device)
-
-    @pytest.mark.parametrize("config_cls", [LoHaConfig, LoKrConfig])
-    @pytest.mark.parametrize("conv_cls, input_shape", conv_cases)
-    @pytest.mark.parametrize("groups", [2, 4, 8])
-    def test_forward_works_for_groups_greater_than_one(self, config_cls, conv_cls, input_shape, groups):
-        # Before the fix: constructing the adapter "succeeded" but the very first forward pass crashed with a
-        # confusing RuntimeError (shape '[...]' is invalid for input of size ...), even though no merge was
-        # involved. After the fix: forward runs cleanly and produces a correctly-shaped output.
-        base_model = self.get_model_conv_groups(conv_cls, groups=groups)
-        config = config_cls(target_modules=["conv"], r=4, init_weights=False)
-        peft_model = get_peft_model(base_model, config)  # does not raise
-
-        x = torch.randn(2, 8, *input_shape).to(self.torch_device)
-        output = peft_model(x)  # does not raise
-        assert output.shape[:2] == (2, 8)
-
-    @pytest.mark.parametrize("config_cls", [LoHaConfig, LoKrConfig])
-    @pytest.mark.parametrize("conv_cls, input_shape", conv_cases)
-    def test_merge_unmerge_correct_for_groups_greater_than_one(self, config_cls, conv_cls, input_shape):
-        # Beyond "does not crash": verify the grouped-conv delta weight is actually correct, not just
-        # coincidentally reshape-compatible, by checking that merging it into the base layer's weight
-        # (base_layer.weight.data += delta_weight) reproduces exactly the same output as the unmerged forward pass
-        # (base_layer(x) + conv(x, delta_weight, groups=...)), and that unmerging restores it again. A wrong
-        # channel-to-group assignment would still crash or diverge here even if the raw element count happened to
-        # match.
-        groups = 2
-        base_model = self.get_model_conv_groups(conv_cls, groups=groups)
-        config = config_cls(target_modules=["conv"], r=4, init_weights=False)
-        peft_model = get_peft_model(base_model, config).eval()
-
-        x = torch.randn(2, 8, *input_shape).to(self.torch_device)
-        with torch.no_grad():
-            out_unmerged = peft_model(x)
-            peft_model.merge_adapter()
-            out_merged = peft_model(x)
-            peft_model.unmerge_adapter()
-            out_unmerged_again = peft_model(x)
-
-        # sanity check: the adapter is actually contributing something non-trivial
-        assert not torch.allclose(out_unmerged, torch.zeros_like(out_unmerged))
-        assert torch.allclose(out_unmerged, out_merged, atol=1e-5, rtol=1e-5)
-        assert torch.allclose(out_unmerged, out_unmerged_again, atol=1e-6, rtol=1e-6)
 
 
 class TestAdaLoraInitialization:

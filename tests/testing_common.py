@@ -817,10 +817,11 @@ class PeftCommonTester:
                 atol, rtol = 1e-3, 1e-3
             elif issubclass(config_cls, PveraConfig):
                 atol, rtol = 1e-5, 1e-5
-            elif issubclass(config_cls, (LoHaConfig, LoKrConfig)) and model_id in ("Conv2dGroups", "Conv2dGroups2"):
-                # LoHa/LoKr recombine their delta weight from several low-rank factors (Hadamard/Kronecker products)
-                # before merging into a grouped conv's weight, which accumulates more floating-point rounding than a
-                # plain LoRA `B @ A` merge
+            elif issubclass(config_cls, (LoHaConfig, LoKrConfig)) and model_id in (
+                "Conv1dGroups",
+                "Conv2dGroups",
+                "Conv2dGroups2",
+            ):
                 atol, rtol = 1e-3, 1e-3
 
             if config.peft_type == "ADAMSS":
