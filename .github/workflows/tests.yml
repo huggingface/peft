@@ -48,6 +48,10 @@ jobs:
       matrix:
         python-version: ["3.13"]
         os: ["ubuntu-latest", "windows-latest"]
+      include:
+        - os: ubuntu-latest
+          python-version: "3.13"
+          coverage: true
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -135,8 +139,23 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           TRANSFORMERS_IS_CI: 1
           CI: 1
+        if: matrix.coverage != true
         run: |
           make test
+          # clean up all pytest temporary directories that are kept due to retention since space
+          # is a scarce resource on the runners and tasks like model cache creation (further below)
+          # fail if there's not enough space available.
+          (rm -r "/tmp/pytest-of-$(id -u -n)" || true)
+      - name: Test with pytest coverage
+        if: matrix.coverage == true
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          TRANSFORMERS_IS_CI: 1
+          CI: 1
+        if: matrix.coverage != true
+        run: |
+          make test_with_coverage
           # clean up all pytest temporary directories that are kept due to retention since space
           # is a scarce resource on the runners and tasks like model cache creation (further below)
           # fail if there's not enough space available.
