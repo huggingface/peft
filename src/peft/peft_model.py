@@ -1297,6 +1297,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         prefix = "base_model.model."
         # rename offload index weight and model names
         adapter_names = list(self.peft_config.keys())
+        named_modules = dict(self.named_modules())
         for adapter_name in adapter_names:
             keys = list(offload_index.keys())
             block_id = keys[0].split(".")[0] + "."  # for writing safetensors key,
@@ -1305,7 +1306,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             for key in keys:
                 suffix_pos = key.rfind(".")
                 extended_prefix = prefix + key[:suffix_pos]
-                module = dict(self.named_modules())[extended_prefix]
+                module = named_modules[extended_prefix]
                 if isinstance(module, BaseTunerLayer):
                     new_key = prefix + key[:suffix_pos] + ".base_layer" + key[suffix_pos:]
                 else:
@@ -1335,8 +1336,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         safe_tensor = f.get_tensor(safe_key)
                         metadata = f.metadata()
                         suffix_pos = safe_key.rfind(".")
+                        # depending on how the checkpoint was saved, its keys may or may not contain the name of the
+                        # root container module (`block_id`), e.g. gpt2 keys lack the "transformer." prefix, whereas opt
+                        # keys start with "model."; so try both.
                         extended_prefix = prefix + block_id + safe_key[:suffix_pos]
-                        safe_module = dict(self.named_modules())[extended_prefix]
+                        if extended_prefix not in named_modules:
+                            extended_prefix = prefix + safe_key[:suffix_pos]
+                        safe_module = named_modules[extended_prefix]
                         if isinstance(safe_module, BaseTunerLayer):
                             final_key = extended_prefix + ".base_layer" + safe_key[suffix_pos:]
                             lora_dict = {key: val for key, val in adapters_weights.items() if extended_prefix in key}
@@ -1347,7 +1353,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                                 new_key = lora_key[:divide] + f".{adapter_name}" + lora_key[divide:]
                                 safe_dict[new_key] = lora_val
                         else:
-                            final_key = prefix + block_id + safe_key
+                            final_key = extended_prefix + safe_key[suffix_pos:]
                         safe_dict[final_key] = safe_tensor
                     files_seen.add(new_fname)
 

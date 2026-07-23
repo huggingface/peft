@@ -2700,36 +2700,75 @@ class TestOffloadSave:
         Test the loading of a LoRA model with CPU- and disk-offloaded modules
         """
         torch.manual_seed(0)
-        model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
-        tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
-        memory_limits = {"cpu": "0.4GIB"}  # no "disk" for PeftModel.from_pretrained() compatibility
+        with hub_online_once(self.causal_lm_model_id):
+            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            memory_limits = {"cpu": "0.4GIB"}  # no "disk" for PeftModel.from_pretrained() compatibility
 
-        # offload around half of all transformer modules to the disk
-        device_map = infer_auto_device_map(model, max_memory=memory_limits)
-        assert "cpu" in device_map.values()
-        assert "disk" in device_map.values()
+            # offload around half of all transformer modules to the disk
+            device_map = infer_auto_device_map(model, max_memory=memory_limits)
+            assert "cpu" in device_map.values()
+            assert "disk" in device_map.values()
 
-        config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["c_attn"])
+            config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["c_attn"])
 
-        model = get_peft_model(model, config)
-        model.save_pretrained(tmp_path)
-        del model
+            model = get_peft_model(model, config)
+            model.save_pretrained(tmp_path)
+            del model
 
-        model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map="cpu")
-        lora_model = PeftModel.from_pretrained(model, tmp_path).eval()
-        input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
-        output = lora_model(input_tokens)[0]
+            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map="cpu")
+            lora_model = PeftModel.from_pretrained(model, tmp_path).eval()
+            input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
+            output = lora_model(input_tokens)[0]
 
-        # load the model with device_map
-        offloaded_model = AutoModelForCausalLM.from_pretrained(
-            self.causal_lm_model_id, device_map=device_map, offload_folder=tmp_path
-        )
-        assert len({p.device for p in offloaded_model.parameters()}) == 2  # 'cpu' and 'meta'
-        offloaded_lora_model = PeftModel.from_pretrained(
-            offloaded_model, tmp_path, max_memory=memory_limits, offload_folder=tmp_path
-        ).eval()
-        offloaded_output = offloaded_lora_model(input_tokens)[0]
-        assert torch.allclose(output, offloaded_output, atol=1e-5)
+            # load the model with device_map
+            offloaded_model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id, device_map=device_map, offload_folder=tmp_path
+            )
+            assert len({p.device for p in offloaded_model.parameters()}) == 2  # 'cpu' and 'meta'
+            offloaded_lora_model = PeftModel.from_pretrained(
+                offloaded_model, tmp_path, max_memory=memory_limits, offload_folder=tmp_path
+            ).eval()
+            offloaded_output = offloaded_lora_model(input_tokens)[0]
+            assert torch.allclose(output, offloaded_output, atol=1e-5)
+
+    def test_offload_load_checkpoint_keys_with_container_prefix(self, tmp_path):
+        """
+        Same as test_offload_load, but with a model whose checkpoint safetensors keys contain the name of the root
+        container module ("model." for opt, whereas e.g. gpt2 keys lack the "transformer." prefix).
+        """
+        torch.manual_seed(0)
+        model_id = "peft-internal-testing/opt-125m"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            memory_limits = {"cpu": "0.2GIB"}  # no "disk" for PeftModel.from_pretrained() compatibility
+
+            # offload around half of all transformer modules to the disk
+            device_map = infer_auto_device_map(model, max_memory=memory_limits)
+            assert "cpu" in device_map.values()
+            assert "disk" in device_map.values()
+
+            config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["q_proj", "v_proj"])
+
+            model = get_peft_model(model, config)
+            model.save_pretrained(tmp_path)
+            del model
+
+            model = AutoModelForCausalLM.from_pretrained(model_id, device_map="cpu")
+            lora_model = PeftModel.from_pretrained(model, tmp_path).eval()
+            input_tokens = torch.tensor([[0, 1, 2, 3, 4, 5]])
+            output = lora_model(input_tokens)[0]
+
+            # load the model with device_map
+            offloaded_model = AutoModelForCausalLM.from_pretrained(
+                model_id, device_map=device_map, offload_folder=tmp_path
+            )
+            assert len({p.device for p in offloaded_model.parameters()}) == 2  # 'cpu' and 'meta'
+            offloaded_lora_model = PeftModel.from_pretrained(
+                offloaded_model, tmp_path, max_memory=memory_limits, offload_folder=tmp_path
+            ).eval()
+            offloaded_output = offloaded_lora_model(input_tokens)[0]
+            assert torch.allclose(output, offloaded_output, atol=1e-5)
 
     @pytest.mark.single_gpu_tests
     def test_offload_merge(self, tmp_path):
@@ -2737,46 +2776,47 @@ class TestOffloadSave:
         Test merging, unmerging, and unloading of a model with CPU- and disk- offloaded modules.
         """
         torch.manual_seed(0)
-        model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
-        tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
-        memory_limits = {0: "0.2GIB", "cpu": "0.2GIB"}  # no "disk" for PeftModel.from_pretrained() compatibility
-        # offloads around half of all transformer modules
-        device_map = infer_auto_device_map(model, max_memory=memory_limits)
-        assert 0 in device_map.values()
-        assert "cpu" in device_map.values()
-        assert "disk" in device_map.values()
+        with hub_online_once(self.causal_lm_model_id):
+            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            memory_limits = {0: "0.2GIB", "cpu": "0.2GIB"}  # no "disk" for PeftModel.from_pretrained() compatibility
+            # offloads around half of all transformer modules
+            device_map = infer_auto_device_map(model, max_memory=memory_limits)
+            assert 0 in device_map.values()
+            assert "cpu" in device_map.values()
+            assert "disk" in device_map.values()
 
-        config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["c_attn"])
+            config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["c_attn"])
 
-        model = get_peft_model(model, config)
-        model.save_pretrained(tmp_path)
-        del model
-        # load the model with device_map
-        model = AutoModelForCausalLM.from_pretrained(
-            self.causal_lm_model_id, device_map=device_map, offload_folder=tmp_path
-        ).eval()
-        assert len({p.device for p in model.parameters()}) == 2
+            model = get_peft_model(model, config)
+            model.save_pretrained(tmp_path)
+            del model
+            # load the model with device_map
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id, device_map=device_map, offload_folder=tmp_path
+            ).eval()
+            assert len({p.device for p in model.parameters()}) == 2
 
-        model = PeftModel.from_pretrained(model, tmp_path, max_memory=memory_limits, offload_folder=tmp_path)
+            model = PeftModel.from_pretrained(model, tmp_path, max_memory=memory_limits, offload_folder=tmp_path)
 
-        input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
-        model.eval()
+            input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
+            model.eval()
 
-        # test peft model adapter merge
-        pre_merge_olayer = model(input_tokens)[0]
-        model.merge_adapter()
-        post_merge_olayer = model(input_tokens)[0]
-        assert torch.allclose(post_merge_olayer, pre_merge_olayer)
+            # test peft model adapter merge
+            pre_merge_olayer = model(input_tokens)[0]
+            model.merge_adapter()
+            post_merge_olayer = model(input_tokens)[0]
+            assert torch.allclose(post_merge_olayer, pre_merge_olayer)
 
-        # test peft model adapter unmerge
-        model.unmerge_adapter()
-        post_unmerge_olayer = model(input_tokens)[0]
-        assert torch.allclose(post_unmerge_olayer, pre_merge_olayer)
+            # test peft model adapter unmerge
+            model.unmerge_adapter()
+            post_unmerge_olayer = model(input_tokens)[0]
+            assert torch.allclose(post_unmerge_olayer, pre_merge_olayer)
 
-        # test LoRA merge and unload
-        model = model.merge_and_unload()
-        post_unload_merge_olayer = model(input_tokens)[0]
-        assert torch.allclose(post_unload_merge_olayer, pre_merge_olayer)
+            # test LoRA merge and unload
+            model = model.merge_and_unload()
+            post_unload_merge_olayer = model(input_tokens)[0]
+            assert torch.allclose(post_unload_merge_olayer, pre_merge_olayer)
 
 
 def quantize_dequantize_weight(weight, num_bits):
