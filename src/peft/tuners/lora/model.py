@@ -178,6 +178,21 @@ class LoraModel(BaseTuner):
     def _check_new_adapter_config(self, config: LoraConfig) -> None:
         super()._check_new_adapter_config(config)
 
+        # KaSA destructively truncates the base weight when the adapter is initialized, so the base weight that any
+        # other adapter sees depends on whether a KaSA adapter was added before it. To avoid silently inconsistent
+        # results, mixing KaSA and non-KaSA adapters on the same model is not supported.
+        new_uses_kasa = getattr(config, "kasa_config", None) is not None
+        for adapter_name, other_conf in self.peft_config.items():
+            if other_conf is config:
+                continue
+            other_uses_kasa = getattr(other_conf, "kasa_config", None) is not None
+            if new_uses_kasa is not other_uses_kasa:
+                raise ValueError(
+                    "KaSA cannot be combined with adapters that don't use KaSA, since KaSA modifies the base "
+                    f"weights: the new adapter {'uses' if new_uses_kasa else 'does not use'} KaSA but adapter "
+                    f"'{adapter_name}' {'does not' if new_uses_kasa else 'does'}."
+                )
+
         # Multiple adapters that use `target_parameters` are supported, but they must all target the same set of
         # parameters. The reason is that the targeted parameters are wrapped with (possibly nested) lora.ParamWrapper
         # layers, and which parameter a LoRA weight belongs to is encoded by its position in that nesting. If different
@@ -1019,6 +1034,60 @@ class LoraModel(BaseTuner):
         if num_monte_layers == 0:
             return 0.0
         return var_loss_sum / num_monte_layers
+
+    def _get_kasa_loss(self, adapter_names: Optional[Union[str, list[str]]] = None) -> torch.Tensor | float:
+        """
+        Compute the KaSA auxiliary regularization loss summed over all KaSA-adapted layers.
+
+        The KaSA paper (https://huggingface.co/papers/2412.06071) optimizes the task loss together with two auxiliary
+        terms (Eq. 9-12): an L2 penalty on the learnable singular values `sum(lora_diag ** 2)` (weighted by `beta`) and
+        an orthogonal regularization `||B^T B - I||_F + ||A A^T - I||_F` on the adapter factors (weighted by `gamma`),
+        which softly enforces the semi-orthogonality assumed by the SVD parametrization. The coefficients are taken
+        from the `KasaConfig` of each adapter. Returns `0.0` if no matching KaSA layers are present (e.g. KaSA is not
+        used, or none of the requested adapters use KaSA).
+
+        Typical usage during training (after computing the task loss):
+
+        ```py
+        task_loss = ...  # standard loss from the model
+        kasa_loss = model._get_kasa_loss()
+        total_loss = task_loss + kasa_loss
+        ```
+
+        Args:
+            adapter_names (`str` or `list[str]`, *optional*):
+                Name(s) of the adapter(s) to include in the loss computation. If `None` (the default), the model's
+                currently active adapters (`self.active_adapters`) are used.
+
+        Returns:
+            The summed regularization loss as a tensor (or `0.0` if no KaSA layers match).
+        """
+        from .variants import _kasa_layer_regularization_loss
+
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+        elif isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+
+        total: torch.Tensor | float = 0.0
+        num_kasa_layers = 0
+        for module in self.modules():
+            if not isinstance(module, LoraLayer):
+                continue
+            lora_diag = getattr(module, "lora_diag", None)
+            if lora_diag is None:
+                continue
+            for adapter_name in adapter_names:
+                if adapter_name not in lora_diag:
+                    continue
+                kasa_config = self.peft_config[adapter_name].kasa_config
+                layer_loss = _kasa_layer_regularization_loss(module, adapter_name, kasa_config.beta, kasa_config.gamma)
+                total = total + layer_loss
+                num_kasa_layers += 1
+
+        if num_kasa_layers == 0:
+            return 0.0
+        return total
 
     def _add_modules_to_save_to_tie(self, peft_config: LoraConfig, tied_weight_keys: list[str]):
         """

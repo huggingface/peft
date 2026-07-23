@@ -24,6 +24,7 @@ from torch import nn
 
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.lora.config import BdLoraConfig, MontecloraConfig
+from peft.utils.integrations import gather_params_ctx
 from peft.utils.other import transpose
 
 from .arrow import ArrowLoraLinearLayer
@@ -1310,3 +1311,249 @@ class MiCAEmbeddingVariant(LoraVariant):
             adapter_output = adapter_output * embed_scale.to(adapter_output.dtype)
 
         return result + adapter_output
+
+
+class KasaLinearVariant(LoraVariant):
+    """
+    KaSA (Knowledge-aware Singular-value Adaptation) variant for linear layers.
+
+    Reference: "KaSA: Knowledge-Aware Singular-Value Adaptation of Large Language Models"
+    ([arXiv:2412.06071](https://huggingface.co/papers/2412.06071)), reference implementation:
+    https://github.com/juyongjiang/KaSA.
+
+    KaSA changes vanilla LoRA in two ways:
+
+    1. Knowledge-based SVD truncation of the frozen base weight (one-time, non-trainable). At init the base weight `W`
+       is SVD-factored `W = U S V^T` and its `r` smallest ("noisy"/long-tail) singular components are discarded,
+       leaving the rank-`(k - r)` approximation (`k = min(in_features, out_features)`) as the new frozen base. The
+       trainable LoRA branch then re-learns in the discarded residual subspace.
+
+    2. Knowledge-aware singular-value adaptation (trainable update). The update is parametrized in SVD form with a
+       learnable diagonal of singular values `lora_diag` (`ΔΣ`) inserted between the LoRA `A` and `B` factors: `ΔW =
+       scaling * B @ diag(ΔΣ) @ A`. `lora_diag` is a learnable `r`-vector (the only new parameter per layer); `B` is
+       zero-initialized as in vanilla LoRA, so the update is zero at init.
+
+    See the `KasaConfig` docstring for user-facing notes on the destructive base-weight truncation and the auxiliary
+    regularizers.
+    """
+
+    # The KaSA update depends on lora_diag and on the destructive truncation of the base weight, neither of which is
+    # representable in a vanilla scaling * B @ A adapter on the unmodified base.
+    supports_lora_conversion = False
+
+    @staticmethod
+    def _truncate_base_weight(module: Linear, r: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Replace the frozen base weight in-place with its rank-`(k - r)` SVD approximation (drop the `r` smallest
+        singular components). `k = min(in_features, out_features)`.
+
+        Returns the dropped low-rank component as fp32 factors `(U_d * S_d, Vh_d)` with shapes `(out, r)` and `(r,
+        in)`, so callers on the deferred path can cheaply correct an output that was computed with the un-truncated
+        weight (see `forward`).
+        """
+        base_layer = module.get_base_layer()
+        weight = base_layer.weight
+        orig_dtype = weight.dtype
+        # `nn.Linear.weight` has shape (out_features, in_features). For Conv1D (transposed storage) the variant is not
+        # dispatched, so we always deal with a standard linear weight here.
+        out_features, in_features = weight.shape
+        k = min(in_features, out_features)
+        if r >= k:
+            raise ValueError(
+                f"KaSA requires `r` ({r}) to be smaller than min(in_features, out_features) ({k}) so that at least one "
+                "singular component of the base weight is preserved after truncation."
+            )
+        svd_rank = k - r
+        # SVD must run on a dequantized fp32 weight for numerical stability and to support (b)float16 CPU weights.
+        weight_fp32 = weight.detach().to(torch.float32)
+        U, S, Vh = torch.linalg.svd(weight_fp32, full_matrices=False)
+        # Keep the principal (largest-sigma) `svd_rank` components; discard the `r` smallest.
+        U_p = U[:, :svd_rank]
+        S_p = S[:svd_rank]
+        Vh_p = Vh[:svd_rank, :]
+        truncated = (U_p * S_p) @ Vh_p
+        base_layer.weight.data = truncated.to(orig_dtype)
+        return U[:, svd_rank:] * S[svd_rank:], Vh[svd_rank:, :]
+
+    @staticmethod
+    def _apply_deferred_truncation(module: Linear, active_adapter: str) -> Optional[tuple[torch.Tensor, torch.Tensor]]:
+        """Apply the SVD truncation that was deferred at init (meta device / low_cpu_mem_usage), if still pending.
+
+        The destructive base-weight truncation cannot run at init when the base weight is on the meta device, so it is
+        applied lazily on the first operation that needs the real base weight: `forward`, but also `merge_safe` /
+        `merge_unsafe`, which would otherwise silently merge into the un-truncated weight (and, once merged, the
+        variant `forward` is never called, so the truncation would never happen at all). `lora_diag` is re-created on
+        the real device if it is still a meta tensor.
+
+        Returns the dropped low-rank factors from `_truncate_base_weight` if the truncation ran now, or `None` if
+        nothing was pending.
+        """
+        deferred = getattr(module, "_lora_kasa_truncation_deferred", None)
+        if not deferred or active_adapter not in deferred:
+            return None
+        base_weight = module.get_base_layer().weight
+        if base_weight.device.type == "meta":
+            raise RuntimeError(
+                "KaSA could not apply its SVD base-weight truncation because the base weight is still on the "
+                "meta device. Materialize the base model weights before running a forward pass or merging."
+            )
+        r = module.r[active_adapter]
+        old_diag = module.lora_diag[active_adapter]
+        if old_diag.device.type == "meta":
+            module.lora_diag[active_adapter] = nn.Parameter(
+                torch.randn(r, device=base_weight.device, dtype=base_weight.dtype)
+            )
+        with gather_params_ctx(base_weight):
+            dropped = KasaLinearVariant._truncate_base_weight(module, r)
+        deferred.discard(active_adapter)
+        return dropped
+
+    @staticmethod
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
+        if getattr(module, "fan_in_fan_out", False):
+            # The reference implementation is for nn.Linear (out, in) weights only. fan_in_fan_out (e.g. Conv1D) would
+            # require transposing the weight before SVD; this is not supported to avoid a silently wrong truncation.
+            raise ValueError(
+                "KaSA does not support `fan_in_fan_out=True` layers (e.g. Conv1D). Please target nn.Linear layers."
+            )
+
+        if not hasattr(module, "lora_diag"):
+            # First KaSA layer being added: register `lora_diag` as a learnable adapter parameter so it is saved/loaded.
+            module.lora_diag = nn.ParameterDict({})
+            module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_diag",)
+        if not hasattr(module, "_lora_kasa_truncation_deferred"):
+            # Set of adapters whose destructive base-weight truncation could not run at init (meta device) and must
+            # therefore be applied lazily at the first forward, once a real base weight is available.
+            module._lora_kasa_truncation_deferred = set()
+
+        r = module.r[adapter_name]
+        lora_A = module.lora_A[adapter_name].weight
+        device = lora_A.device
+        dtype = lora_A.dtype
+
+        if device.type == "meta":
+            # With low_cpu_mem_usage=True adapters may be initialized on the meta device. We cannot SVD a meta tensor,
+            # so we only create the (meta) lora_diag parameter and defer the destructive truncation to the first
+            # forward (see KasaLinearVariant.forward), which mirrors the deferral pattern used by Monteclora. Without
+            # this re-trigger the SVD truncation would be silently skipped on the low_cpu_mem_usage path and the model
+            # would compute the wrong thing (full base + an adapter trained against the truncated base).
+            module.lora_diag[adapter_name] = nn.Parameter(torch.randn(r, device=device, dtype=dtype))
+            module._lora_kasa_truncation_deferred.add(adapter_name)
+            return
+
+        # The learnable diagonal of singular values (ΔΣ). randn is fine because lora_B is zero-init, so the update is
+        # zero at step 0 regardless of the diag values (see reference reset_lora_parameters).
+        module.lora_diag[adapter_name] = nn.Parameter(torch.randn(r, device=device, dtype=dtype))
+
+        # One-time destructive SVD truncation of the frozen base weight. gather_params_ctx is used so the weight is
+        # materialized when using DeepSpeed ZeRO-3, consistent with the other SVD-based inits (pissa/corda).
+        with gather_params_ctx(module.get_base_layer().weight):
+            KasaLinearVariant._truncate_base_weight(module, r)
+
+    @staticmethod
+    def _get_delta_weight(module: Linear, adapter: str) -> torch.Tensor:
+        """Compute ΔW = scaling * B @ diag(lora_diag) @ A (transposed for fan_in_fan_out)."""
+        device = module.lora_B[adapter].weight.device
+        dtype = module.lora_B[adapter].weight.dtype
+        cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
+
+        weight_A = module.lora_A[adapter].weight
+        weight_B = module.lora_B[adapter].weight
+        diag = module.lora_diag[adapter]
+
+        if cast_to_fp32:
+            weight_A = weight_A.float()
+            weight_B = weight_B.float()
+            diag = diag.float()
+
+        # (out, r) * (r,) -> scale columns of B by the diagonal, then (out, r) @ (r, in) -> (out, in).
+        delta = (weight_B * diag) @ weight_A
+        output_tensor = transpose(delta, module.fan_in_fan_out) * module.scaling[adapter]
+
+        if cast_to_fp32:
+            output_tensor = output_tensor.to(dtype=dtype)
+
+        return output_tensor
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        if KasaLinearVariant._apply_deferred_truncation(module, active_adapter) is not None:
+            # The passed `orig_weight` was cloned from the base weight before the truncation ran; refresh it so the
+            # delta is merged into the truncated weight.
+            orig_weight = module.get_base_layer().weight.data.clone()
+        orig_dtype = orig_weight.dtype
+        delta_weight = KasaLinearVariant._get_delta_weight(module, active_adapter)
+        return orig_weight + delta_weight.to(orig_dtype)
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        # `orig_weight` is the live base weight Parameter, so it reflects the truncation if one just ran.
+        KasaLinearVariant._apply_deferred_truncation(module, active_adapter)
+        orig_dtype = orig_weight.dtype
+        delta_weight = KasaLinearVariant._get_delta_weight(module, active_adapter)
+        orig_weight.data += delta_weight.to(orig_dtype)
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        delta_weight = KasaLinearVariant._get_delta_weight(module, active_adapter)
+        return orig_weight - delta_weight.to(orig_dtype)
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        # A truncation is only pending here on the first forward after the adapter was initialized on the meta device
+        # (e.g. PeftModel.from_pretrained(..., low_cpu_mem_usage=True)); in the regular init path it already ran.
+        dropped = KasaLinearVariant._apply_deferred_truncation(module, active_adapter)
+        if dropped is not None:
+            # `result` was computed by the caller using the *un-truncated* base weight (the base forward runs before
+            # this variant forward). Subtract the dropped low-rank component so this first forward already reflects
+            # the truncated weight, matching every subsequent call. Correcting instead of recomputing the base forward
+            # preserves the contributions other active adapters may already have added to `result`, and stays in the
+            # right dtype (`x` was cast to the adapter dtype by the caller, which may differ from the base dtype).
+            dropped_us, dropped_vh = dropped
+            correction = F.linear(F.linear(x.to(dropped_vh.dtype), dropped_vh), dropped_us)
+            result = result - correction.to(result.dtype)
+
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+        diag = module.lora_diag[active_adapter]
+
+        # h = h_base + scaling * B( diag(ΔΣ) * A(dropout(x)) ). The diagonal multiply is an elementwise scaling of the
+        # r-dim intermediate, equivalent to (and cheaper than) constructing torch.diag(diag).
+        after_A = lora_A(dropout(x))
+        result = result + lora_B(after_A * diag) * scaling
+        return result
+
+
+def _kasa_layer_regularization_loss(module: Linear, adapter_name: str, beta: float, gamma: float) -> torch.Tensor:
+    """Per-layer KaSA regularization for a single adapter, used by `LoraModel._get_kasa_loss`.
+
+    Returns `beta * L2 + gamma * L3` where (paper Eq. 9-11):
+
+    - `L2 = ||lora_diag||_F^2 = sum(lora_diag ** 2)` (singular-value penalty), and
+    - `L3 = ||B^T B - I||_F + ||A A^T - I||_F` (orthogonal regularization of the adapter factors).
+    """
+    diag = module.lora_diag[adapter_name]
+    weight_A = module.lora_A[adapter_name].weight  # (r, in)
+    weight_B = module.lora_B[adapter_name].weight  # (out, r)
+    r = diag.shape[0]
+
+    # Compute in fp32 for numerical stability, regardless of the adapter dtype.
+    diag_f = diag.float()
+    A = weight_A.float()
+    B = weight_B.float()
+    eye = torch.eye(r, device=diag.device, dtype=torch.float32)
+
+    l2 = (diag_f**2).sum()
+    gram_B = B.transpose(-1, -2) @ B  # (r, r) == ΔU^T ΔU
+    gram_A = A @ A.transpose(-1, -2)  # (r, r) == ΔV^T ΔV
+    l3 = torch.linalg.norm(gram_B - eye) + torch.linalg.norm(gram_A - eye)
+
+    return beta * l2 + gamma * l3
