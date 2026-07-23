@@ -2760,7 +2760,9 @@ class TestOffloadSave:
             output = lora_model(input_tokens)[0]
 
             # load the model with device_map
-            offloaded_model = AutoModelForCausalLM.from_pretrained(model_id, device_map=device_map, offload_folder=tmp_path)
+            offloaded_model = AutoModelForCausalLM.from_pretrained(
+                model_id, device_map=device_map, offload_folder=tmp_path
+            )
             assert len({p.device for p in offloaded_model.parameters()}) == 2  # 'cpu' and 'meta'
             offloaded_lora_model = PeftModel.from_pretrained(
                 offloaded_model, tmp_path, max_memory=memory_limits, offload_folder=tmp_path
