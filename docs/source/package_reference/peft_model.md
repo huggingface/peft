@@ -64,6 +64,8 @@ A `PeftModel` for mixing different adapter types (e.g. LoRA and LoHa).
 
 [[autodoc]] utils.cast_mixed_precision_params
 
+[[autodoc]] utils.detached_copy
+
 [[autodoc]] get_peft_model
 
 [[autodoc]] inject_adapter_in_model

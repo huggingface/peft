@@ -479,3 +479,81 @@ trainer.train()
 
 > [!TIP]
 > This section deals with using multiple adapters _of the same type_ on the same model, for example, using multiple LoRA adapters at the same time. It does not apply to using _different types_ of adapters on the same model, for example one LoRA adapter and one LoHa adapter. For this, please check [`PeftMixedModel`](https://huggingface.co/docs/peft/developer_guides/mixed_models).
+
+### Having PEFT model instances with different active adapters
+
+Let's imagine some Python package provides a function that looks like this:
+
+```python
+def compare_model_outputs(model1, model2, inputs):
+    torch.manual_seed(0)
+    output1 = model1.generate(**inputs, max_new_tokens=5)
+    torch.manual_seed(0)
+    output2 = model2.generate(**inputs, max_new_tokens=5)
+    if (output1 != output2).any():
+        print("The models produce different outputs!")
+    else:
+        print("The outputs are identical")
+```
+
+Normally, this function expects you to pass two different models. But what if you want to pass the same PEFT model, first with one adapter being active, second with another adapter being active (or even no adapter being active), how would you achieve that? Generally, when we want to run tests with different adapters, we activate or deactivate the adapters by calling [`PeftModel.set_adapter`] or [`PeftModel.disable_adapter`]. But if the external function does not explicitly support that, as in this example, this is not an option. We could load the PEFT model twice, once with the first and once with the second adapter enabled, but that requires twice as much memory.
+
+To achieve this goal without loading the model twice, PEFT provides a function that allows copying the base model while sharing the parameters and buffers, [`detached_copy`]. This way, you can create a copy of the base model with almost no extra memory. Use the original base model to load one adapter and the copied base model to load the other:
+
+```python
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import PeftModel, detached_copy
+
+model_id = "facebook/opt-125m"
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+base_model = AutoModelForCausalLM.from_pretrained(model_id)
+
+peft_model_1 = PeftModel.from_pretrained(detached_copy(base_model), path_to_adapter1)
+peft_model_2 = PeftModel.from_pretrained(detached_copy(base_model), path_to_adapter2)
+
+# parameters are shared:
+assert (
+    base_model.model.decoder.layers[0].self_attn.q_proj.weight.data_ptr() == 
+    peft_model_2.base_model.model.model.decoder.layers[0].self_attn.q_proj.weight.data_ptr()
+)
+assert (
+    peft_model_1.base_model.model.model.decoder.layers[0].self_attn.q_proj.weight.data_ptr() == 
+    peft_model_2.base_model.model.model.decoder.layers[0].self_attn.q_proj.weight.data_ptr()
+)
+
+inputs = tokenizer("The capital of Australia is:", return_tensors="pt")
+compare_model_outputs(peft_model_1, peft_model_2, inputs)
+```
+
+You can also make use of this function to prevent the base model from being mutated by PEFT. Normally, when you call [`get_peft_model`] or [`PeftModel.from_pretrained`], PEFT will mutate the base model in-place. If you pass `detached_copy(base_model)` to these functions, you can afterwards use your `base_model` without having to worry about mutations introduced by PEFT:
+
+```python
+import torch
+from transformers import AutoModelForCausalLM
+from peft import LoraConfig, get_peft_model, detached_copy
+
+model_id = "facebook/opt-125m"
+base_model = AutoModelForCausalLM.from_pretrained(model_id)
+inputs = torch.arange(10).view(1, -1)
+
+with torch.inference_mode():
+    output_before = base_model(inputs).logits
+
+config = LoraConfig(init_lora_weights=False)  # <= init LoRA so that it's not a no-op
+model = get_peft_model(detached_copy(base_model), config)
+
+with torch.inference_mode():
+    output_after = base_model(inputs).logits
+
+# without detached_copy, this check would fail
+assert torch.allclose(output_before, output_after)
+```
+
+In the example above, if we had used `model = get_peft_model(base_model, config)` without `detached_copy`, the assertion would have failed because the base model outputs would include the contribution of the LoRA adapter.
+
+#### Caveats
+
+Be aware that since the parameters are shared between the copies, mutating them will affect all copies of the model. This includes, but is not limited to, moving the device of the parameter, changing `requires_grad`, and merging PEFT weights into the base weights. Moreover, the [`detached_copy`] function requires the model support `copy.deepcopy`. For instance, In the example above, it means that the weights of `base_model` are frozen after the [`get_peft_model`] call. Therefore, depending on what you intend to do with the different instances, you might run into issues.
+
+Furthermore, by default, [`detached_copy`] also results in shared buffers. If you don't want that, pass `share_buffers=False`.

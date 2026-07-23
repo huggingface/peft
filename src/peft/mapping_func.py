@@ -37,7 +37,8 @@ def get_peft_model(
     low_cpu_mem_usage: bool = False,
 ) -> PeftModel | PeftMixedModel:
     """
-    Returns a Peft model object from a model and a config, where the model will be modified in-place.
+    Returns a Peft model object from a model and a config, where the model will be modified in-place. If you want to
+    keep the model unmodified, pass a copy created with [`~peft.utils.detached_copy`] instead.
 
     Args:
         model ([`transformers.PreTrainedModel`]):
@@ -71,7 +72,8 @@ def get_peft_model(
     if any(isinstance(module, BaseTunerLayer) for module in model.modules()):
         warnings.warn(
             "You are trying to modify a model with PEFT for a second time. If you want to reload the model with a "
-            "different config, make sure to call `.unload()` before."
+            "different config, make sure to call `.unload()` before. If you want to create multiple PEFT models from "
+            "the same base model, pass copies created with `peft.detached_copy` instead."
         )
 
     if (old_name is not None) and (old_name != new_name):
