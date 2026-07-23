@@ -19,6 +19,7 @@ This module contains the implementation of the LoRA-FA optimizer.
 from __future__ import annotations
 
 import math
+import warnings
 from collections.abc import Callable, Iterable
 
 import torch
@@ -77,6 +78,8 @@ class LoraFAOptimizer(Optimizer):
             "correct_bias": correct_bias,
         }
         super().__init__(params, defaults)
+        # Warn once per optimizer instance so the deprecation path does not spam every training step
+        self._legacy_scaling_factor_warned = False
 
     @torch.no_grad()
     def step(self, closure: Callable | None = None):
@@ -91,10 +94,25 @@ class LoraFAOptimizer(Optimizer):
             loss = closure()
 
         for group in self.param_groups:
-            scaling_factor = group["scaling_factor"]
             param_list = []
             name_list = []
-            for p, n in zip(group["params"], group["names"]):
+
+            # TODO remove after 2026-11-01 and default to `group["scaling_factors"]
+            if "scaling_factors" in group:
+                scaling_factors = group["scaling_factors"]
+            elif "scaling_factor" in group:
+                if not self._legacy_scaling_factor_warned:
+                    warnings.warn(
+                        "`scaling_factor` is deprecated and will be removed after 2026-11-01. "
+                        "Please use `scaling_factors` instead.",
+                        FutureWarning,
+                    )
+                    self._legacy_scaling_factor_warned = True
+                scaling_factors = [group["scaling_factor"]] * len(group["params"])
+            else:
+                raise KeyError("Expected optimizer param group to define `scaling_factors`.")
+
+            for p, n, scaling_factor in zip(group["params"], group["names"], scaling_factors):
                 # Skip non-lora no-grad module, since we need lora_A which is no-grad.
                 if "lora" not in n and p.grad is None:
                     continue
@@ -211,7 +229,12 @@ class LoraFAOptimizer(Optimizer):
 
 
 def create_lorafa_optimizer(
-    model: PeftModel, r: int, lora_alpha: int, lr: float, weight_decay: float = 0.0, use_rslora: bool = False
+    model: PeftModel,
+    r: int,
+    lora_alpha: int,
+    lr: float,
+    weight_decay: float = 0.0,
+    use_rslora: bool | None = None,
 ) -> Optimizer:
     """
     Helper function to instantiate a lorafa optimizer specifically configured for a given model using the LoRA method.
@@ -219,6 +242,7 @@ def create_lorafa_optimizer(
     This function will:
     - Disable gradient updates for the "lora_A" parameters (these are typically frozen during LoRA training).
     - Compute the scaling factor based on provided `lora_alpha` and rank `r` for proper gradient projection.
+    - Get the scaling factor for each lora parameter based on the layer-specific configuration.
     - Create and configure parameter groups for the optimizer including specified learning rate, weight decay, and
       additional optimizer options.
 
@@ -231,23 +255,71 @@ def create_lorafa_optimizer(
         lora_alpha (int): Scaling factor for LoRA parameterization.
         lr (float): Learning rate for optimizer updates.
         weight_decay (float): Weight decay for AdamW.
-        use_rslora (bool):
-            whether to use rslora. In rslora, the lora scaling factor becomes to lora_alpha / math.sqrt(r) instead of
-            lora_alpha / r.
+        use_rslora (bool | None, optional):
+            Deprecated. Whether to use rsLoRA. If not `None`, it must match the `use_rslora` setting of all active
+            adapters in the model config. Configure rsLoRA via `LoraConfig` instead.
 
     Returns:
         Optimizer: Configured lorafa optimizer instance ready for training.
     """
+    active_adapters = [adapter for adapter in model.active_adapters if adapter in model.peft_config]
+    active_adapter_use_rslora = {
+        adapter: bool(getattr(model.peft_config[adapter], "use_rslora", False)) for adapter in active_adapters
+    }
+    # TODO remove after 2026-11-01
+    if use_rslora is not None:
+        mismatched_adapters = [
+            adapter for adapter, is_rslora in active_adapter_use_rslora.items() if is_rslora != use_rslora
+        ]
+        if mismatched_adapters:
+            raise ValueError(
+                f"`use_rslora={use_rslora}` was passed to create_lorafa_optimizer, but the following active adapters "
+                f"have `use_rslora` set differently in the model config: {mismatched_adapters}. Please configure "
+                "rsLoRA via LoraConfig and remove the `use_rslora` argument from create_lorafa_optimizer as the parameter is deprecated."
+            )
+        warnings.warn(
+            "`use_rslora` in create_lorafa_optimizer is deprecated and will be removed after 2026-11-01. "
+            "Please configure rsLoRA via LoraConfig instead.",
+            FutureWarning,
+        )
+        model_use_rslora = use_rslora
+    else:
+        model_use_rslora = all(active_adapter_use_rslora.values()) if active_adapter_use_rslora else False
+
     for name, param in model.named_parameters():
         if "lora_A" in name:
             param.requires_grad_(False)
-    lora_scaling = lora_alpha / math.sqrt(r) if use_rslora else lora_alpha / r
+    lora_scaling = lora_alpha / math.sqrt(r) if model_use_rslora else lora_alpha / r
+
+    # this func maps a flattened parameter name back to its LoRA module and adapter
+    # Returns None for non-LoRA parameters and unresolved names
+    def get_scaling_factor(parameter_name: str):
+        if ".lora_" not in parameter_name:
+            return None
+
+        # Split the parameter name to extract the module name and the adapter name
+        module_name, _, lora_suffix = parameter_name.rpartition(".lora_")
+        lora_parts = lora_suffix.split(".")
+        if len(lora_parts) < 2:
+            return None
+
+        adapter_name = lora_parts[1]
+
+        # Get the module corresponding to the parameter and check if it has a scaling factor for the adapter
+        module = model.get_submodule(module_name)
+        if hasattr(module, "scaling") and adapter_name in module.scaling:
+            return module.scaling[adapter_name]
+
+        return None
+
+    named_parameters = list(model.named_parameters())
     param_groups = [
         {
-            "params": model.parameters(),
+            "params": [param for _, param in named_parameters],
             "lr": lr,
-            "names": [name for name, _ in model.named_parameters()],
-            "scaling_factor": lora_scaling,
+            "names": [name for name, _ in named_parameters],
+            "scaling_factors": [get_scaling_factor(name) for name, _ in named_parameters],
+            "scaling_factor": lora_scaling,  # TODO remove after 2026-11-01
             "betas": (0.9, 0.999),
             "weight_decay": weight_decay,
         }
