@@ -272,5 +272,7 @@
       title: Functions for PEFT integration
     - local: package_reference/lora_conversion
       title: Converting non-LoRA adapters to LoRA
+    - local: package_reference/warnings
+      title: Warnings emitted by PEFT
     title: Utilities
   title: API reference

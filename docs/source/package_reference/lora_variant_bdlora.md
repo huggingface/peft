@@ -18,3 +18,9 @@ BD-LoRA achieves similar performance to LoRA (see image below, or the `method_co
 <img src="https://github.com/huggingface/peft/blob/main/examples/bdlora_finetuning/bdlora-performance.png?raw=true" width="600"/>
 </div>
 
+
+# API
+
+## BdLoraConfig
+
+[[autodoc]] tuners.lora.config.BdLoraConfig
