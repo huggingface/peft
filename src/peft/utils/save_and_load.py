@@ -384,11 +384,7 @@ def get_peft_model_state_dict(
             module_state_dict = {
                 k.removeprefix(f"{name}."): v for k, v in state_dict.items() if k.startswith(f"{name}.")
             }
-            # A tuner's own key-selection filter above matches keys with a plain substring check (e.g. LoRA collects
-            # every key containing "lora_"), so it can accidentally sweep up this module's raw attributes if its name
-            # happens to contain the tuner's prefix (e.g. a module named "lora_head" listed in `modules_to_save`).
-            # This module is the sole source of truth for which of its own keys should be saved, so any such stale
-            # entries are dropped before being correctly repopulated from `adapter_state_dict` below.
+            # Remove keys selected only because the module name contains a tuner prefix.
             for stale_key in [k for k in to_return if k.startswith(f"{name}.")]:
                 del to_return[stale_key]
             to_return.update(
@@ -470,7 +466,9 @@ def get_peft_model_state_dict(
             if not embedding_is_targeted or has_valid_embedding_base_layer(layer):
                 embedding_module_name = get_embedding_layer_name(model, layer, embedding_is_targeted)
                 if embedding_module_name:
-                    to_return.update({k: v for k, v in state_dict.items() if embedding_module_name in k})
+                    to_return.update(
+                        {k: v for k, v in state_dict.items() if k.startswith(f"{embedding_module_name}.")}
+                    )
     elif save_embedding_layers:
         warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
 
@@ -551,11 +549,7 @@ def _insert_adapter_name_into_state_dict(
             if "." in suffix:
                 suffix_to_replace = ".".join(suffix.split(".")[1:])
                 if "." in suffix_to_replace:
-                    # A genuine adapter parameter attribute (e.g. "lora_A" in "...q_proj.lora_A.weight") is always
-                    # followed by at most one more path component. If more than one remains after the match, the
-                    # occurrence of `parameter_prefix` is part of an unrelated, earlier path segment instead, e.g. a
-                    # `modules_to_save` module whose own name happens to start with the prefix (such as "lora_head"
-                    # in "...lora_head.modules_to_save.default.weight"). Leave such keys untouched.
+                    # Adapter parameters are leaf attributes; a longer suffix means the prefix matched a module name.
                     peft_model_state_dict[key] = val
                     continue
                 # only replace the substring if the key ends on the substring to avoid accidental replacement inside of

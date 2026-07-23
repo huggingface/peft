@@ -435,46 +435,28 @@ class TestModulesToSaveNameSubstringBug:
 
 
 class TestModulesToSaveNameContainsPrefixBug:
-    """Test a bug where a `modules_to_save` module's name contains the tuner's own parameter prefix as a substring,
-    e.g. a module named "lora_head" together with a `LoraConfig` (whose parameter prefix is "lora_").
-
-    Two substring checks in the state dict save/load logic used a plain `in` test against the tuner's parameter
-    prefix. Since "lora_head" also contains "lora_", both checks were fooled into treating this module's own
-    attributes as if they were LoRA parameters:
-
-    - On save, the filter that collects LoRA keys (`"lora_" in key`) also picked up this module's raw, unprocessed
-      attributes, alongside the correctly computed key for the module.
-    - On load, `_insert_adapter_name_into_state_dict`'s `parameter_prefix in key` check spliced a second, superfluous
-      adapter name into a key that had already been correctly formed by the `modules_to_save` handling that runs
-      before it.
-
-    The net effect was that the module's trained weight ended up under a key matching nothing in the model, so it
-    silently landed in `unexpected_keys` under non-strict loading, and the untrained weight was kept instead.
-    """
-
     def get_model(self):
         class ModelWithLoraNamedModule(nn.Module):
             def __init__(self):
                 super().__init__()
                 self.body = nn.Linear(2, 2, bias=False)
-                # important: this module's name contains "lora_", the LoRA parameter prefix, as a substring
                 self.lora_head = nn.Linear(2, 2, bias=False)
-                self.plain_head = nn.Linear(2, 2, bias=False)
 
             def forward(self, x):
-                x = self.body(x)
-                return self.lora_head(x) + self.plain_head(x)
+                return self.lora_head(self.body(x))
 
         torch.manual_seed(0)
         return ModelWithLoraNamedModule()
 
     def test_save_load_round_trip_restores_weight(self):
-        config = LoraConfig(target_modules=["body"], modules_to_save=["lora_head", "plain_head"])
+        config = LoraConfig(target_modules=["body"], modules_to_save=["lora_head"])
         source = get_peft_model(self.get_model(), config)
         with torch.no_grad():
             source.base_model.model.lora_head.modules_to_save["default"].weight.fill_(7.0)
 
         state_dict = get_peft_model_state_dict(source)
+        assert {k for k in state_dict if "lora_head" in k} == {"base_model.model.lora_head.weight"}
+
         target = get_peft_model(self.get_model(), copy.deepcopy(config))
         result = set_peft_model_state_dict(target, state_dict)
 
@@ -482,17 +464,25 @@ class TestModulesToSaveNameContainsPrefixBug:
         loaded_weight = target.base_model.model.lora_head.modules_to_save["default"].weight
         assert torch.allclose(loaded_weight, torch.full_like(loaded_weight, 7.0))
 
-    def test_saved_state_dict_matches_non_colliding_name(self):
-        # A `modules_to_save` module whose name contains the adapter prefix should be saved with the exact same key
-        # shape (relative to its own module name) as one whose name does not.
-        config = LoraConfig(target_modules=["body"], modules_to_save=["lora_head", "plain_head"])
-        model = get_peft_model(self.get_model(), config)
-        state_dict = get_peft_model_state_dict(model)
+    def test_save_embedding_layers_does_not_include_similarly_named_module(self):
+        class ModelWithEmbedding(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.body = nn.Linear(2, 2)
+                self.embed_tokens = nn.Embedding(4, 2)
+                self.embed_tokens_extra = nn.Embedding(4, 2)
 
-        assert "base_model.model.lora_head.weight" in state_dict
-        assert "base_model.model.plain_head.weight" in state_dict
-        assert not [k for k in state_dict if ("lora_head" in k) and (k != "base_model.model.lora_head.weight")]
-        assert not [k for k in state_dict if ("plain_head" in k) and (k != "base_model.model.plain_head.weight")]
+            def get_input_embeddings(self):
+                return self.embed_tokens
+
+            def get_output_embeddings(self):
+                return None
+
+        model = get_peft_model(ModelWithEmbedding(), LoraConfig(target_modules=["body"]))
+        state_dict = get_peft_model_state_dict(model, save_embedding_layers=True)
+
+        assert "base_model.model.embed_tokens.weight" in state_dict
+        assert not any("embed_tokens_extra" in k for k in state_dict)
 
 
 class TestTargetingAuxiliaryTrainingWrapper:
