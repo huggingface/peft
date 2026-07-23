@@ -1323,26 +1323,18 @@ class KasaLinearVariant(LoraVariant):
 
     KaSA changes vanilla LoRA in two ways:
 
-    1. **Knowledge-based SVD truncation of the frozen base weight (one-time, non-trainable).** At init the base weight
-       ``W`` is SVD-factored ``W = U S V^T`` and its ``r`` smallest ("noisy"/long-tail) singular components are
-       discarded, leaving the rank-``(k - r)`` approximation (``k = min(in_features, out_features)``) as the new frozen
-       base. The trainable LoRA branch then re-learns in the discarded residual subspace.
+    1. Knowledge-based SVD truncation of the frozen base weight (one-time, non-trainable). At init the base weight `W`
+       is SVD-factored `W = U S V^T` and its `r` smallest ("noisy"/long-tail) singular components are discarded,
+       leaving the rank-`(k - r)` approximation (`k = min(in_features, out_features)`) as the new frozen base. The
+       trainable LoRA branch then re-learns in the discarded residual subspace.
 
-    2. **Knowledge-aware singular-value adaptation (trainable update).** The update is parametrized in SVD form with a
-       learnable diagonal of singular values ``lora_diag`` (``ΔΣ``) inserted between the LoRA ``A`` and ``B`` factors:
-       ``ΔW = scaling * B @ diag(ΔΣ) @ A``. ``lora_diag`` is a learnable ``r``-vector (the only new parameter per
-       layer); ``B`` is zero-initialized as in vanilla LoRA, so the update is zero at init.
+    2. Knowledge-aware singular-value adaptation (trainable update). The update is parametrized in SVD form with a
+       learnable diagonal of singular values `lora_diag` (`ΔΣ`) inserted between the LoRA `A` and `B` factors: `ΔW =
+       scaling * B @ diag(ΔΣ) @ A`. `lora_diag` is a learnable `r`-vector (the only new parameter per layer); `B` is
+       zero-initialized as in vanilla LoRA, so the update is zero at init.
 
-    Important notes on faithfulness and behavior:
-
-    - The base-weight truncation is **destructive**: adding a KaSA adapter permanently changes the layer's clean
-      forward output (the base is now the truncated ``W_world``, not the original ``W``). Disabling/unloading the
-      adapter does **not** restore the original weight, and ``merge`` followed by ``unmerge`` round-trips to the
-      truncated weight, not the original one. This is inherent to the method.
-    - The KaSA paper trains with two auxiliary regularizers (an L2 penalty on ``lora_diag`` and an orthogonal
-      regularization on ``A``/``B``). These cannot be injected through the variant ``forward`` (which has no
-      loss-return channel), so they are exposed via [`~peft.get_kasa_regularization_loss`], which the user must add to
-      their task loss. Without them, the SVD interpretation of the update is only approximate.
+    See the `KasaConfig` docstring for user-facing notes on the destructive base-weight truncation and the auxiliary
+    regularizers.
     """
 
     # The KaSA update depends on lora_diag and on the destructive truncation of the base weight, neither of which is
@@ -1351,17 +1343,17 @@ class KasaLinearVariant(LoraVariant):
 
     @staticmethod
     def _truncate_base_weight(module: Linear, r: int) -> tuple[torch.Tensor, torch.Tensor]:
-        """Replace the frozen base weight in-place with its rank-``(k - r)`` SVD approximation (drop the ``r`` smallest
-        singular components). ``k = min(in_features, out_features)``.
+        """Replace the frozen base weight in-place with its rank-`(k - r)` SVD approximation (drop the `r` smallest
+        singular components). `k = min(in_features, out_features)`.
 
-        Returns the dropped low-rank component as fp32 factors ``(U_d * S_d, Vh_d)`` with shapes ``(out, r)`` and ``(r,
-        in)``, so callers on the deferred path can cheaply correct an output that was computed with the un-truncated
-        weight (see ``forward``).
+        Returns the dropped low-rank component as fp32 factors `(U_d * S_d, Vh_d)` with shapes `(out, r)` and `(r,
+        in)`, so callers on the deferred path can cheaply correct an output that was computed with the un-truncated
+        weight (see `forward`).
         """
         base_layer = module.get_base_layer()
         weight = base_layer.weight
         orig_dtype = weight.dtype
-        # ``nn.Linear.weight`` has shape (out_features, in_features). For Conv1D (transposed storage) the variant is not
+        # `nn.Linear.weight` has shape (out_features, in_features). For Conv1D (transposed storage) the variant is not
         # dispatched, so we always deal with a standard linear weight here.
         out_features, in_features = weight.shape
         k = min(in_features, out_features)
@@ -1374,7 +1366,7 @@ class KasaLinearVariant(LoraVariant):
         # SVD must run on a dequantized fp32 weight for numerical stability and to support (b)float16 CPU weights.
         weight_fp32 = weight.detach().to(torch.float32)
         U, S, Vh = torch.linalg.svd(weight_fp32, full_matrices=False)
-        # Keep the principal (largest-sigma) ``svd_rank`` components; discard the ``r`` smallest.
+        # Keep the principal (largest-sigma) `svd_rank` components; discard the `r` smallest.
         U_p = U[:, :svd_rank]
         S_p = S[:svd_rank]
         Vh_p = Vh[:svd_rank, :]
@@ -1387,12 +1379,12 @@ class KasaLinearVariant(LoraVariant):
         """Apply the SVD truncation that was deferred at init (meta device / low_cpu_mem_usage), if still pending.
 
         The destructive base-weight truncation cannot run at init when the base weight is on the meta device, so it is
-        applied lazily on the first operation that needs the real base weight: ``forward``, but also ``merge_safe`` /
-        ``merge_unsafe``, which would otherwise silently merge into the un-truncated weight (and, once merged, the
-        variant ``forward`` is never called, so the truncation would never happen at all). ``lora_diag`` is re-created
-        on the real device if it is still a meta tensor.
+        applied lazily on the first operation that needs the real base weight: `forward`, but also `merge_safe` /
+        `merge_unsafe`, which would otherwise silently merge into the un-truncated weight (and, once merged, the
+        variant `forward` is never called, so the truncation would never happen at all). `lora_diag` is re-created on
+        the real device if it is still a meta tensor.
 
-        Returns the dropped low-rank factors from ``_truncate_base_weight`` if the truncation ran now, or `None` if
+        Returns the dropped low-rank factors from `_truncate_base_weight` if the truncation ran now, or `None` if
         nothing was pending.
         """
         deferred = getattr(module, "_lora_kasa_truncation_deferred", None)
@@ -1428,9 +1420,6 @@ class KasaLinearVariant(LoraVariant):
             # First KaSA layer being added: register `lora_diag` as a learnable adapter parameter so it is saved/loaded.
             module.lora_diag = nn.ParameterDict({})
             module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_diag",)
-        if not hasattr(module, "_lora_kasa_config"):
-            module._lora_kasa_config = {}
-        module._lora_kasa_config[adapter_name] = config.kasa_config
         if not hasattr(module, "_lora_kasa_truncation_deferred"):
             # Set of adapters whose destructive base-weight truncation could not run at init (meta device) and must
             # therefore be applied lazily at the first forward, once a real base weight is available.
@@ -1517,6 +1506,8 @@ class KasaLinearVariant(LoraVariant):
         result: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
+        # A truncation is only pending here on the first forward after the adapter was initialized on the meta device
+        # (e.g. PeftModel.from_pretrained(..., low_cpu_mem_usage=True)); in the regular init path it already ran.
         dropped = KasaLinearVariant._apply_deferred_truncation(module, active_adapter)
         if dropped is not None:
             # `result` was computed by the caller using the *un-truncated* base weight (the base forward runs before
@@ -1542,12 +1533,12 @@ class KasaLinearVariant(LoraVariant):
 
 
 def _kasa_layer_regularization_loss(module: Linear, adapter_name: str, beta: float, gamma: float) -> torch.Tensor:
-    """Per-layer KaSA regularization for a single adapter.
+    """Per-layer KaSA regularization for a single adapter, used by `LoraModel._get_kasa_loss`.
 
-    Returns ``beta * L2 + gamma * L3`` where (paper Eq. 9-11):
+    Returns `beta * L2 + gamma * L3` where (paper Eq. 9-11):
 
-    - ``L2 = ||lora_diag||_F^2 = sum(lora_diag ** 2)`` (singular-value penalty), and
-    - ``L3 = ||B^T B - I||_F + ||A A^T - I||_F`` (orthogonal regularization of the adapter factors).
+    - `L2 = ||lora_diag||_F^2 = sum(lora_diag ** 2)` (singular-value penalty), and
+    - `L3 = ||B^T B - I||_F + ||A A^T - I||_F` (orthogonal regularization of the adapter factors).
     """
     diag = module.lora_diag[adapter_name]
     weight_A = module.lora_A[adapter_name].weight  # (r, in)
@@ -1566,60 +1557,3 @@ def _kasa_layer_regularization_loss(module: Linear, adapter_name: str, beta: flo
     l3 = torch.linalg.norm(gram_B - eye) + torch.linalg.norm(gram_A - eye)
 
     return beta * l2 + gamma * l3
-
-
-def get_kasa_regularization_loss(
-    model, beta: Optional[float] = None, gamma: Optional[float] = None, adapter_name: Optional[str] = None
-) -> torch.Tensor:
-    """Compute the KaSA auxiliary regularization loss summed over all KaSA-adapted linear layers of ``model``.
-
-    The KaSA paper ([arXiv:2412.06071](https://huggingface.co/papers/2412.06071)) optimizes the task loss together with
-    two auxiliary terms (Eq. 9-12):
-
-    - an L2 penalty on the learnable singular values ``sum(lora_diag ** 2)`` (weighted by ``β``), and
-    - an orthogonal regularization ``||B^T B - I||_F + ||A A^T - I||_F`` on the adapter factors (weighted by ``γ``),
-      which softly enforces the semi-orthogonality assumed by the SVD parametrization.
-
-    Because the PEFT LoRA-variant API has no channel to inject an additional loss term into the training loop, this
-    helper must be called explicitly and its result added to the task loss, e.g.::
-
-        loss = task_loss + get_kasa_regularization_loss(model)
-
-    Args:
-        model: A PEFT model whose LoRA layers were configured with a `KasaConfig`.
-        beta (`Optional[float]`):
-            Override for the L2 coefficient ``β``. If `None`, the per-layer value from each layer's `KasaConfig` is
-            used.
-        gamma (`Optional[float]`):
-            Override for the orthogonal-regularization coefficient ``γ``. If `None`, the per-layer value from each
-            layer's `KasaConfig` is used.
-        adapter_name (`Optional[str]`):
-            If given, only accumulate the loss for this adapter. If `None`, all KaSA adapters found on each layer are
-            included.
-
-    Returns:
-        `torch.Tensor`: A scalar tensor (0-dim) with the accumulated regularization loss. Returns ``0.0`` if the model
-        contains no KaSA layers.
-    """
-    total = None
-    for module in model.modules():
-        if not isinstance(module, Linear):
-            continue
-        if not hasattr(module, "lora_diag"):
-            continue
-        kasa_configs = getattr(module, "_lora_kasa_config", {})
-        adapters = [adapter_name] if adapter_name is not None else list(module.lora_diag.keys())
-        for name in adapters:
-            if name not in module.lora_diag:
-                continue
-            cfg = kasa_configs.get(name)
-            b = beta if beta is not None else (cfg.beta if cfg is not None else 0.0)
-            g = gamma if gamma is not None else (cfg.gamma if cfg is not None else 0.0)
-            layer_loss = _kasa_layer_regularization_loss(module, name, b, g)
-            total = layer_loss if total is None else total + layer_loss
-
-    if total is None:
-        # Return the zero on the model's device so that `task_loss + get_kasa_regularization_loss(model)` does not
-        # fail with a device mismatch when the model has no KaSA layers.
-        return torch.zeros((), device=next(model.parameters()).device)
-    return total

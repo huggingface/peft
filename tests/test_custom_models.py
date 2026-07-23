@@ -44,6 +44,7 @@ from peft import (
     HiraConfig,
     HRAConfig,
     IA3Config,
+    KasaConfig,
     LilyConfig,
     LNTuningConfig,
     LoHaConfig,
@@ -136,6 +137,13 @@ TEST_CASES = [
     ),
     ("Vanilla MLP 7 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": ["lin0"], "use_dora": True}),
     ("Vanilla MLP 8 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"], "use_dora": True}),
+    (
+        "Vanilla MLP 1 LoRA with KaSA",
+        "MLP",
+        LoraConfig,
+        # lin1 is (20, 2), so with r=4 only lin0 can be targeted (KaSA requires r < min(in_features, out_features)).
+        {"target_modules": ["lin0"], "kasa_config": KasaConfig(), "r": 4},
+    ),
     (
         "Vanilla MLP 1 LoRA with MiCA",
         "MLP",
@@ -2903,6 +2911,11 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_disable_adapters(self, test_name, model_id, config_cls, config_kwargs):
         # Test that it's possible to disable the adapter, in which case the model output should be identical to that of
         # the base model.
+        if config_kwargs.get("kasa_config", None) is not None:
+            pytest.skip(
+                "KaSA destructively truncates the base weight at adapter init, so the output with disabled adapters "
+                "intentionally differs from the base model"
+            )
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device).eval()
         outputs_base = model(**X)

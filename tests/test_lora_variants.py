@@ -422,3 +422,89 @@ class TestActivatedLora:
                 lora_model.forward(**inputs)
 
             lora_model.forward(**inputs)
+
+
+class TestKasaRegularization:
+    """Tests for the KaSA auxiliary regularization loss (LoraModel._get_kasa_loss)."""
+
+    class MLP(nn.Module):
+        def __init__(self, in_features=16, hidden=12, out_features=10, bias=False):
+            super().__init__()
+            self.lin0 = nn.Linear(in_features, hidden, bias=bias)
+            self.lin1 = nn.Linear(hidden, out_features, bias=bias)
+
+        def forward(self, x):
+            return self.lin1(torch.relu(self.lin0(x)))
+
+    def get_config(self, r=4, **kasa_kwargs):
+        return LoraConfig(target_modules=["lin0", "lin1"], r=r, lora_alpha=8, kasa_config=KasaConfig(**kasa_kwargs))
+
+    def test_kasa_loss_zero_when_no_kasa_layers(self):
+        torch.manual_seed(0)
+        model = get_peft_model(self.MLP(), LoraConfig(target_modules=["lin0"], r=4))
+        assert model._get_kasa_loss() == 0.0
+
+    def test_kasa_loss_l2_matches_closed_form(self):
+        # With gamma=0 the loss reduces to beta * sum(lora_diag**2).
+        torch.manual_seed(0)
+        beta = 0.3
+        model = get_peft_model(self.MLP(), self.get_config(beta=beta, gamma=0.0))
+        with torch.no_grad():
+            for module in model.modules():
+                if isinstance(module, LoraLinear):
+                    module.lora_diag["default"].copy_(torch.arange(1.0, 5.0))  # [1,2,3,4]
+
+        expected_per_layer = beta * (1.0**2 + 2.0**2 + 3.0**2 + 4.0**2)  # = beta * 30
+        expected = 2 * expected_per_layer  # two layers
+        loss = model._get_kasa_loss()
+        assert pytest.approx(loss.item(), rel=1e-5) == expected
+
+    def test_kasa_orthogonal_reg_zero_for_orthonormal_factors(self):
+        # L3 = ||B^T B - I|| + ||A A^T - I|| must be ~0 when A and B have orthonormal rows/cols, and > 0 otherwise.
+        torch.manual_seed(0)
+        # Use square-ish factors so A (r x in) can have orthonormal rows and B (out x r) orthonormal columns.
+        model = get_peft_model(
+            self.MLP(in_features=16, hidden=12, out_features=12), self.get_config(beta=0.0, gamma=1.0)
+        )
+
+        with torch.no_grad():
+            for module in model.modules():
+                if isinstance(module, LoraLinear):
+                    A = module.lora_A["default"].weight  # (r, in)
+                    B = module.lora_B["default"].weight  # (out, r)
+                    # orthonormal rows of A
+                    qa, _ = torch.linalg.qr(A.T)  # (in, r) with orthonormal columns
+                    module.lora_A["default"].weight.copy_(qa[:, : A.shape[0]].T)
+                    # orthonormal columns of B
+                    qb, _ = torch.linalg.qr(B)  # (out, r) with orthonormal columns
+                    module.lora_B["default"].weight.copy_(qb)
+                    module.lora_diag["default"].zero_()  # kill L2 so we isolate L3
+
+        loss_ortho = model._get_kasa_loss()
+        assert loss_ortho.item() < 1e-4
+
+        # Now make B clearly non-orthonormal and confirm the penalty becomes strictly positive.
+        with torch.no_grad():
+            for module in model.modules():
+                if isinstance(module, LoraLinear):
+                    module.lora_B["default"].weight.mul_(3.0)
+        loss_non_ortho = model._get_kasa_loss()
+        assert loss_non_ortho.item() > 1e-3
+
+    def test_kasa_loss_has_gradients(self):
+        # The regularization loss must be differentiable w.r.t. the KaSA parameters.
+        torch.manual_seed(0)
+        model = get_peft_model(self.MLP(), self.get_config())
+        with torch.no_grad():
+            for name, param in model.named_parameters():
+                if "lora_B" in name:
+                    nn.init.normal_(param, std=0.1)
+                elif "lora_diag" in name:
+                    param.copy_(torch.randn_like(param))
+
+        loss = model._get_kasa_loss()
+        loss.backward()
+        for module in model.modules():
+            if isinstance(module, LoraLinear):
+                assert module.lora_diag["default"].grad is not None
+                assert module.lora_A["default"].weight.grad is not None

@@ -302,21 +302,29 @@ class KasaConfig:
     KaSA is a LoRA variant that (1) refines the frozen base weight by discarding its `r` smallest ("noisy"/long-tail)
     singular components via a one-time SVD truncation, and (2) parametrizes the trainable update in SVD form, inserting
     a learnable diagonal of singular values `lora_diag` (`ΔΣ`) between the LoRA `A` and `B` factors, i.e. `ΔW = scaling
-    * B @ diag(ΔΣ) @ A`. The paper additionally trains with two auxiliary regularizers (a singular-value L2 penalty and
-    an orthogonal regularization on the adapter factors); these are exposed through
-    [`~peft.get_kasa_regularization_loss`] and must be added to the task loss by the user, since the PEFT variant API
-    has no channel to inject an extra loss term into the training loop.
+    * B @ diag(ΔΣ) @ A`.
+
+    Important notes on behavior:
+
+    - The base-weight truncation is destructive: adding a KaSA adapter permanently changes the layer's base weight.
+      Disabling or unloading the adapter does not restore the original weight, and `merge` followed by `unmerge`
+      round-trips to the truncated weight, not the original one. This is inherent to the method; keep the original
+      checkpoint if you need to recover the unmodified base model. For the same reason, KaSA adapters cannot be
+      combined with non-KaSA adapters on the same model, and `convert_to_lora` is not supported.
+    - The KaSA paper trains with two auxiliary regularizers (an L2 penalty on `lora_diag` and an orthogonal
+      regularization on `A`/`B`). These cannot be injected into the training loop by PEFT, so they are exposed through
+      `LoraModel._get_kasa_loss`, which the user should add to their task loss. Without them, the SVD interpretation of
+      the update is only approximate.
 
     Args:
         beta (`float`):
             Coefficient `β` for the L2 (singular-value) regularization `||ΔΣ||_F^2 = sum(lora_diag ** 2)` (paper Eq.
-            9-10). Only takes effect if the user adds [`~peft.get_kasa_regularization_loss`] to their loss. Defaults to
-            `1e-4` (the value used in the reference GLUE configs).
+            9-10). Only takes effect if the user adds `LoraModel._get_kasa_loss` to their loss. Defaults to `1e-4` (the
+            value used in the reference GLUE configs).
         gamma (`float`):
             Coefficient `γ` for the orthogonal regularization `||B^T B - I||_F + ||A A^T - I||_F` (paper Eq. 11), which
             softly enforces the semi-orthogonality of `ΔU`/`ΔV` assumed by the SVD parametrization. Only takes effect
-            if the user adds [`~peft.get_kasa_regularization_loss`] to their loss. Defaults to `1e-3` (the reference
-            GLUE value).
+            if the user adds `LoraModel._get_kasa_loss` to their loss. Defaults to `1e-3` (the reference GLUE value).
     """
 
     beta: float = field(
@@ -324,7 +332,7 @@ class KasaConfig:
         metadata={
             "help": (
                 "Coefficient `β` for the L2 (singular-value) regularization `sum(lora_diag ** 2)` (KaSA paper "
-                "Eq. 9-10). Only takes effect if the user adds `get_kasa_regularization_loss` to their training loss. "
+                "Eq. 9-10). Only takes effect if the user adds `LoraModel._get_kasa_loss` to their training loss. "
                 "Defaults to 1e-4 (the reference GLUE value)."
             )
         },
@@ -335,7 +343,7 @@ class KasaConfig:
             "help": (
                 "Coefficient `γ` for the orthogonal regularization `||B^T B - I||_F + ||A A^T - I||_F` (KaSA paper "
                 "Eq. 11), which softly enforces the semi-orthogonality of the adapter factors assumed by the SVD "
-                "parametrization. Only takes effect if the user adds `get_kasa_regularization_loss` to their training "
+                "parametrization. Only takes effect if the user adds `LoraModel._get_kasa_loss` to their training "
                 "loss. Defaults to 1e-3 (the reference GLUE value)."
             )
         },
