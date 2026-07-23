@@ -107,6 +107,14 @@ If your code makes some non-trivial changes, it may also be a good idea to add c
 
 If relevant, indicate how you tested the change, e.g. by showing the `pytest` test command or reproducer code.
 
+## Reviewer feedback
+
+After submitting your PR, a maintainer will typically give feedback within a couple of days. If you don't get any feedback within two weeks, your PR might have slipped their notice; feel free to ping the maintainers then, but no earlier.
+
+If the reviewer provides in-line comments, don't mark them as resolved if you addressed them. Leave these comments open, as they are helping the reviewer to resume their work.
+
+After working through reviewer feedback, ping the reviewer so that they know the PR is ready to review.
+
 ## Bugfixes
 
 Please give a description of the circumstances that led to the bug. If there is an existing issue, please link to it (e.g., “Resolves #12345”).
@@ -127,7 +135,6 @@ New parameter-efficient fine-tuning methods are developed all the time. If you w
 2. Start with the core integration work listed below.
 3. Check recent commits for new PEFT methods being added to take as inspiration.
 4. It can be useful to open a draft PR early once the method basically works and first tests pass, then ask for feedback.
-5. After working through reviewer feedback, ping the reviewer so that they know the PR is ready to review.
 
 ### Core integration of a new PEFT method
 
