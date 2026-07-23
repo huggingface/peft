@@ -101,7 +101,19 @@ It can happen that while you’re working on your PR, the underlying code base c
 
 When opening a PR, please provide a nice description of the change you're proposing. If it relates to other issues or PRs, please reference them. Providing a good description not only helps the reviewers review your code better and faster, it can also be used later (as a basis) for the commit message which helps with long term maintenance of the project.
 
+Keep the length and complexity of the PR description in line with the change. We don't need ten paragraphs of explanation for a trivial one-line change. Don't restate what is obvious from looking at the diff (e.g. "Fixed the typo in 'foobaar').
+
 If your code makes some non-trivial changes, it may also be a good idea to add comments to the code to explain those changes. For example, if you had to iterate on your implementation multiple times because the most obvious way didn’t work, it’s a good indication that a code comment is needed.
+
+If relevant, indicate how you tested the change, e.g. by showing the `pytest` test command or reproducer code.
+
+## Reviewer feedback
+
+After submitting your PR, a maintainer will typically give feedback within a couple of days. If you don't get any feedback within two weeks, your PR might have slipped their notice; feel free to ping the maintainers then, but no earlier.
+
+If the reviewer provides in-line comments, don't mark them as resolved if you addressed them. Leave these comments open, as they are helping the reviewer to resume their work.
+
+After working through reviewer feedback, ping the reviewer so that they know the PR is ready to review.
 
 ## Bugfixes
 
@@ -123,7 +135,6 @@ New parameter-efficient fine-tuning methods are developed all the time. If you w
 2. Start with the core integration work listed below.
 3. Check recent commits for new PEFT methods being added to take as inspiration.
 4. It can be useful to open a draft PR early once the method basically works and first tests pass, then ask for feedback.
-5. After working through reviewer feedback, ping the reviewer so that they know the PR is ready to review.
 
 ### Core integration of a new PEFT method
 
