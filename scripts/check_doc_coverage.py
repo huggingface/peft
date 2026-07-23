@@ -1,31 +1,65 @@
 #!/usr/bin/env python
 """Check documentation coverage of a Python package.
 
-The tool inspects the public API (via __all__ exports) of a given package using
-`griffe`, filters for objects that carry a docstring, and then scans the
+The tool inspects the public API (objects exported via ``__all__``) of a given
+package, filters for the ones that carry a docstring, and then scans the
 markdown documentation tree to see whether those objects are mentioned.  Mentions
 are detected by looking at
 
-* inline code spans / markdown headings (` `Foo` ` or `## Foo`)
-* explicit `[[autodoc]]` blocks (HF doc-builder syntax)
+* inline code spans / markdown headings (`` `Foo` `` or ``## Foo``)
+* explicit ``[[autodoc]]`` blocks (HF doc-builder syntax)
+* identifier tokens inside fenced code blocks
+
+Public API resolution
+---------------------
+
+By default the ``__all__`` of each module is read *statically* with `griffe`
+(neither the package nor its dependencies are imported).  This works for
+packages that define ``__all__`` as a plain list at import time, e.g. PEFT.
+
+Some packages — notably `transformers`, whose top-level ``__init__`` builds
+``__all__`` at *runtime* via a lazy ``_LazyModule`` — expose no static
+``__all__``.  For those, pass ``--inspect``: the package is imported once purely
+to read its runtime ``__all__`` (a cheap operation that does not pull in the
+submodules), and every other piece of information (docstrings, canonical paths)
+is still obtained statically from griffe.  Per-object failures while walking the
+static tree are tolerated and reported rather than aborting the whole run.
 
 Usage::
 
+    # PEFT (static __all__)
     python scripts/check_doc_coverage.py --package peft --src src --docs docs/source
 
-The command exits with code 0 and prints a coverage table.  By default the tool
-outputs a short summary; pass `--verbose` to see every detected / missing
-object.
+    # transformers (runtime __all__, lives in doc_check/transformers/src)
+    python scripts/check_doc_coverage.py --package transformers \\
+        --src doc_check/transformers/src --docs doc_check/transformers/docs/source/en \\
+        --inspect
+
+The command exits with code 0 and prints a coverage summary.  Pass ``--verbose``
+to see every covered / missing object, plus any names that could not be resolved
+to a griffe object.
 """
 
 import argparse
+import importlib
 import re
 import sys
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import griffe
-from griffe import Alias, AliasResolutionError, Class, Function, Module
+from griffe import (
+    Alias,
+    AliasResolutionError,
+    Class,
+    CyclicAliasError,
+    Function,
+    LoadingError,
+    Module,
+    NameResolutionError,
+    UnimportableModuleError,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +69,7 @@ from griffe import Alias, AliasResolutionError, Class, Function, Module
 # hf-doc-builder autodoc blocks: [[autodoc]] path.to.ClassOrFunction
 RE_AUTODOC = re.compile(r"\[\[autodoc\]\]\s+(\S+)")
 
-# Inline code span `foo` or `foo`  (or longer runs)
+# Inline code span `foo` or ``foo`` (or longer runs)
 RE_INLINE_CODE = re.compile(r"`{1,2}([^`\s]+)`{1,2}")
 
 # Markdown heading text (we strip the hashes)
@@ -49,9 +83,23 @@ RE_CODE_BLOCK = re.compile(r"```[\w]*\n(.*?)```", re.DOTALL)
 # Griffe helpers
 # ---------------------------------------------------------------------------
 
+# Griffe exception types we tolerate while traversing the static tree.  Any of
+# these raised for a single member is reported and skipped, never fatal.
+_GRIFFE_ERRORS: tuple[type[BaseException], ...] = (
+    AliasResolutionError,
+    CyclicAliasError,
+    LoadingError,
+    NameResolutionError,
+    UnimportableModuleError,
+)
+
 
 def resolve_alias(obj: Alias | Module | Class | Function) -> Alias | Module | Class | Function | None:
-    """Follow a chain of aliases until a concrete object is reached."""
+    """Follow a chain of aliases until a concrete object is reached.
+
+    Returns ``None`` if the chain cannot be resolved (missing target, cycle,
+    or any other griffe alias-resolution error).
+    """
     seen: set[int] = set()
     while isinstance(obj, Alias):
         obj_id = id(obj)
@@ -60,45 +108,34 @@ def resolve_alias(obj: Alias | Module | Class | Function) -> Alias | Module | Cl
         seen.add(obj_id)
         try:
             obj = obj.target
-        except AliasResolutionError:
+        except (AliasResolutionError, CyclicAliasError):
             return None
     return obj
 
 
-def extract_public_api_items(
-    package_name: str,
-    src_path: str | None = None,
-    recursive: bool = False,
-) -> dict[str, str]:
-    """Return a mapping *exported_short_name* -> *canonical_path*.
+def _safe_docstring(obj: Module | Class | Function) -> str:
+    """Return the stripped docstring of *obj*, or "" on any resolution error.
 
-    The set is derived from `__all__` lists.  By default only the root
-    package's `__all__` is inspected; enable *recursive* to also inspect
-    every submodule.
+    Accessing ``obj.docstring`` can trigger alias/target resolution that raises
+    for partially-loaded trees; we never want a single unreadable object to
+    abort the whole run.
+    """
+    try:
+        ds = obj.docstring
+    except _GRIFFE_ERRORS:
+        return ""
+    return ds.value.strip() if ds is not None else ""
 
-    Only objects that actually carry a docstring are kept.
+
+def _load_package(package_name: str, src_path: str | None) -> Module:
+    """Statically load *package_name* with griffe (no runtime import).
+
+    ``src_path`` is honoured: it is put on griffe's search path so the checkout
+    is loaded rather than whatever happens to be installed.
     """
     search_paths = [src_path] if src_path else ["."]
-    package: Module = griffe.load(package_name, search_paths=search_paths)
-
-    items: dict[str, str] = {}
-    modules = walk_modules(package) if recursive else [package]
-    for module in modules:
-        exports = resolve_all(module)
-        if not exports:
-            continue
-        for name in exports:
-            obj = module.members.get(name)
-            if obj is None:
-                continue
-            obj = resolve_alias(obj)
-            if obj is None:
-                continue
-            if obj.docstring is None or not obj.docstring.value.strip():
-                continue
-            if isinstance(obj, (Module, Class, Function)):
-                items[name] = obj.path
-    return items
+    package: Module = griffe.load(package_name, search_paths=search_paths, submodules=True)
+    return package
 
 
 def walk_modules(package: Module, package_name: str | None = None) -> Iterable[Module]:
@@ -112,33 +149,208 @@ def walk_modules(package: Module, package_name: str | None = None) -> Iterable[M
         elif isinstance(member, Alias):
             try:
                 target = member.target
-            except AliasResolutionError:
+            except (AliasResolutionError, CyclicAliasError):
                 continue
             if isinstance(target, Module) and target.path.startswith(package_name + "."):
                 yield from walk_modules(target, package_name)
 
 
-def resolve_all(module: Module) -> list[str]:
-    """Return the names from `__all__` for *module*, or empty list.
+# ---------------------------------------------------------------------------
+# Report container
+# ---------------------------------------------------------------------------
 
-    Griffe stores `__all__` as an Attribute whose `value` is an
-    `ExprList` (or similar expression node).  We convert it to a string and
-    use `ast.literal_eval` to recover the plain Python list of names.
+
+@dataclass
+class Diagnostics:
+    """Collected while resolving the public API; printed at the end."""
+
+    # ``__all__`` entries (or runtime names) we could not map to a griffe object
+    unresolved: list[str] = field(default_factory=list)
+    # short names dropped because several distinct objects shared them
+    collisions: list[tuple[str, str, str]] = field(default_factory=list)  # (name, kept, dropped)
+    # reason the dynamic import (``--inspect``) failed, if it did
+    import_error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Static public-API resolution
+# ---------------------------------------------------------------------------
+
+
+def _items_from_exports(modules: Iterable[Module], diagnostics: Diagnostics) -> dict[str, str]:
+    """Public items from the static ``__all__`` of each module in *modules*.
+
+    Uses griffe's ``module.exports`` (which reflects ``__all__``).  Only
+    Class/Function/Module objects with a non-empty docstring are kept.
     """
-    attr = module.members.get("__all__")
-    if attr is None:
-        return []
-    val = getattr(attr, "value", None)
-    if val is None:
-        return []
-    import ast
+    items: dict[str, str] = {}
+    for module in modules:
+        exports = module.exports
+        if not exports:
+            continue
+        for name in exports:
+            member = module.members.get(name)
+            if member is None:
+                diagnostics.unresolved.append(f"{module.path}.__all__ -> {name}")
+                continue
+            obj = resolve_alias(member)
+            if obj is None:
+                diagnostics.unresolved.append(f"{module.path}.__all__ -> {name}")
+                continue
+            if not isinstance(obj, (Class, Function, Module)):
+                continue
+            if not _safe_docstring(obj):
+                continue
+            _record(items, name, obj, diagnostics)
+    return items
 
+
+def _record(items: dict[str, str], short_name: str, obj: Module | Class | Function, diagnostics: Diagnostics) -> None:
+    """Insert *short_name* -> *obj.path*, recording collisions without overwriting."""
+    existing = items.get(short_name)
+    if existing is not None and existing != obj.path:
+        diagnostics.collisions.append((short_name, existing, obj.path))
+        return
+    if existing is None:
+        items[short_name] = obj.path
+
+
+# ---------------------------------------------------------------------------
+# ``--inspect``: dynamic __all__, static everything else
+# ---------------------------------------------------------------------------
+
+
+def _dynamic_all(package_name: str, diagnostics: Diagnostics) -> list[str] | None:
+    """Import *package_name* once and return its runtime ``__all__``.
+
+    Reading ``__all__`` is cheap and, crucially, does not trigger the import of
+    every submodule (transformers' ``__all__`` is built by ``_LazyModule`` at
+    ``__init__`` time).  Returns ``None`` if the import itself failed.
+    """
     try:
-        parsed = ast.literal_eval(str(val))
-        if isinstance(parsed, (list, tuple)):
-            return [str(v) for v in parsed]
-    except Exception:
-        return []
+        mod = importlib.import_module(package_name)
+    except Exception as exc:
+        diagnostics.import_error = f"could not import '{package_name}': {type(exc).__name__}: {exc}"
+        return None
+    all_ = getattr(mod, "__all__", None)
+    if all_ is None:
+        # Fall back to public top-level names; static griffe will still filter
+        # these down to documented Class/Function/Module objects.
+        all_ = [n for n in dir(mod) if not n.startswith("_")]
+    return list(all_)
+
+
+def _build_short_name_index(package: Module, diagnostics: Diagnostics) -> dict[str, Module | Class | Function]:
+    """Walk the whole static tree once, mapping ``object.name -> object``.
+
+    Used by ``--inspect`` to resolve the short names from the runtime
+    ``__all__`` to griffe objects (and thus their docstrings / canonical paths).
+    Only modules and their *direct* members are indexed: recursing into class
+    bodies would surface method names, which are not part of the public API and
+    would cause spurious matches.
+    """
+    index: dict[str, Module | Class | Function] = {}
+    stack: list[Module] = [package]
+    seen: set[str] = set()
+    while stack:
+        module = stack.pop()
+        if module.path in seen:
+            continue
+        seen.add(module.path)
+        for member in module.members.values():
+            try:
+                obj = resolve_alias(member) if isinstance(member, Alias) else member
+            except _GRIFFE_ERRORS:
+                continue
+            if obj is None:
+                continue
+            if isinstance(obj, Module):
+                stack.append(obj)
+            if not isinstance(obj, (Class, Function, Module)):
+                continue
+            short = obj.name
+            existing = index.get(short)
+            if existing is not None and existing.path != obj.path:
+                diagnostics.collisions.append((short, existing.path, obj.path))
+            elif existing is None:
+                index[short] = obj
+    return index
+
+
+def _items_from_index(
+    names: Iterable[str],
+    index: dict[str, Module | Class | Function],
+    diagnostics: Diagnostics,
+) -> dict[str, str]:
+    """Map runtime ``__all__`` names to griffe objects via the short-name index.
+
+    ``__all__`` entries may be dotted (e.g. transformers lists ``"models.bert"``);
+    the *last* segment is the object's own short name and is what the docs and
+    this tool match on.
+    """
+    items: dict[str, str] = {}
+    for raw in names:
+        short = raw.rsplit(".", 1)[-1]
+        obj = index.get(short)
+        if obj is None:
+            diagnostics.unresolved.append(raw)
+            continue
+        if not _safe_docstring(obj):
+            continue
+        _record(items, short, obj, diagnostics)
+    return items
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
+
+def extract_public_api_items(
+    package_name: str,
+    src_path: str | None = None,
+    recursive: bool = False,
+    inspect: bool = False,
+    diagnostics: Diagnostics | None = None,
+) -> dict[str, str]:
+    """Return a mapping *exported_short_name -> canonical_path* for documented objects.
+
+    Parameters
+    ----------
+    package_name:
+        Dotted package name to inspect, e.g. ``"peft"`` or ``"transformers"``.
+    src_path:
+        Directory on ``sys.path`` (and griffe's search path) that contains the
+        package checkout.  Honoured by both the static loader and the dynamic
+        import under ``--inspect``.
+    recursive:
+        Inspect ``__all__`` in every submodule, not just the root package.
+        (Static mode only.)
+    inspect:
+        Resolve the export names at runtime by importing the package once; the
+        rest (docstrings, paths) is still done statically.  Required for
+        packages without a static ``__all__`` such as transformers.
+    diagnostics:
+        Optional container collecting unresolved names / collisions / import
+        errors for the final report.
+    """
+    if diagnostics is None:
+        diagnostics = Diagnostics()
+
+    package = _load_package(package_name, src_path)
+
+    if inspect:
+        names = _dynamic_all(package_name, diagnostics)
+        if names is None:
+            # Dynamic import failed (e.g. missing deps).  Fall back to the static
+            # path so the tool still produces *something* useful, and surface the
+            # failure in the report.
+            return _items_from_exports([package], diagnostics)
+        index = _build_short_name_index(package, diagnostics)
+        return _items_from_index(names, index, diagnostics)
+
+    modules = walk_modules(package) if recursive else [package]
+    return _items_from_exports(modules, diagnostics)
 
 
 # ---------------------------------------------------------------------------
@@ -158,8 +370,8 @@ def _add_mention(raw: str, into: set[str]) -> None:
 
 
 def extract_doc_mentions(docs_dir: str) -> set[str]:
-    """Walk every `*.md` under *docs_dir* and return the set of names that
-    are referenced either inline or via `[[autodoc]]`."""
+    """Walk every ``*.md`` under *docs_dir* and return the set of names that
+    are referenced either inline or via ``[[autodoc]]``."""
     mentions: set[str] = set()
     root = Path(docs_dir)
     for path in root.rglob("*.md"):
@@ -192,6 +404,7 @@ def extract_doc_mentions(docs_dir: str) -> set[str]:
 def print_report(
     api_items: dict[str, str],
     mentions: set[str],
+    diagnostics: Diagnostics | None = None,
     verbose: bool = False,
 ) -> None:
     covered: list[str] = []
@@ -225,6 +438,25 @@ def print_report(
         if len(uncovered) > 20:
             print(f"  ... and {len(uncovered) - 20} more")
 
+    if diagnostics is not None:
+        if diagnostics.import_error:
+            print()
+            print(f"Import (--inspect) failed: {diagnostics.import_error}")
+        if diagnostics.unresolved:
+            print()
+            print(f"Could not resolve {len(diagnostics.unresolved)} exported name(s) to a griffe object:")
+            for name in diagnostics.unresolved[:20]:
+                print(f"  - {name}")
+            if len(diagnostics.unresolved) > 20:
+                print(f"  ... and {len(diagnostics.unresolved) - 20} more")
+        if diagnostics.collisions:
+            print()
+            print(f"Short-name collisions ({len(diagnostics.collisions)}, kept the first hit):")
+            for short, kept, dropped in diagnostics.collisions[:20]:
+                print(f"  - {short}: kept {kept}, dropped {dropped}")
+            if len(diagnostics.collisions) > 20:
+                print(f"  ... and {len(diagnostics.collisions) - 20} more")
+
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -232,12 +464,24 @@ def print_report(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--package", default="peft", help="Package name to inspect.")
     parser.add_argument("--src", default="src", help="Path to the source tree root (containing the package dir).")
     parser.add_argument("--docs", default="docs/source", help="Path to the markdown docs directory.")
     parser.add_argument(
         "--recursive", action="store_true", help="Inspect __all__ in every submodule, not just the root package."
+    )
+    parser.add_argument(
+        "--inspect",
+        action="store_true",
+        help=(
+            "Resolve __all__ at runtime by importing the package once (the rest "
+            "is still done statically). Required for packages without a static "
+            "__all__, e.g. transformers."
+        ),
     )
     parser.add_argument("--verbose", action="store_true", help="Print every covered/missing item.")
     args = parser.parse_args(argv)
@@ -249,8 +493,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: docs path not found: {args.docs}", file=sys.stderr)
         return 1
 
+    # Both griffe's search path and ``importlib.import_module`` (for --inspect)
+    # need the checkout's source root ahead of whatever is installed.
+    if args.src not in sys.path:
+        sys.path.insert(0, args.src)
+
     print(f"Loading package '{args.package}' from {args.src} ...")
-    api_items = extract_public_api_items(args.package, args.src, recursive=args.recursive)
+    diagnostics = Diagnostics()
+    api_items = extract_public_api_items(
+        args.package,
+        args.src,
+        recursive=args.recursive,
+        inspect=args.inspect,
+        diagnostics=diagnostics,
+    )
     print(f"Found {len(api_items)} public objects with docstrings.")
 
     print(f"Scanning docs in {args.docs} ...")
@@ -258,7 +514,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Found {len(mentions)} unique name mentions in docs.")
 
     print()
-    print_report(api_items, mentions, verbose=args.verbose)
+    print_report(api_items, mentions, diagnostics=diagnostics, verbose=args.verbose)
     return 0
 
 
