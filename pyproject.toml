@@ -51,7 +51,7 @@ doctest_optionflags = [
     "NUMBER",
 ]
 
-addopts = ["--cov=src/peft", "--cov-report=term-missing", "--durations=10"]
+addopts = ["--cov=src/peft", "--cov-report=term-missing", "--durations=200"]
 
 markers = [
     "single_gpu_tests: tests that run on a single GPU",
