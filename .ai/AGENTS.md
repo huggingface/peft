@@ -88,3 +88,7 @@ PEFT follows a rigorous structure for the test location. Don't just put the test
 - Run `grep "python-version:\s\[" .github/workflows/tests.yml` to check which Python versions should be supported. Don't use defensive features required for older Python versions (e.g. `from __future__ import annotations`).
 - Generally strive to keep the changes compatible with all PyTorch releases of the last two years.
 - Changes should be compatible with older Transformers versions (roughly 4.33 upwards). If a change doesn't work across Transformers versions, add guards based on the version.
+
+## Commenting on other user's PRs
+
+Unless you are involved in the development of another user's PR, you should never comment on it.
