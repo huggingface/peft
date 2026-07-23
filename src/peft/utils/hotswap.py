@@ -80,7 +80,7 @@ def _convert_scalings_to_tensor(model) -> bool:
     return found_adapter
 
 
-def _get_padded_linear(lora_module: torch.nn.Module, target_rank: int, is_lora_A: bool) -> torch.nn.Linear:
+def _get_padded_linear(lora_module: torch.nn.Module, target_rank: int, is_lora_A: bool, **kwargs) -> torch.nn.Linear:
     """
     Get a new Linear layer for LoRA with padded weights according to the target rank.
 
@@ -170,9 +170,7 @@ def _copy_grouped_conv2d_lora_a_weights(destination: torch.Tensor, source: torch
         )
 
 
-def _get_padded_conv2d(
-    lora_module: torch.nn.Module, target_rank: int, is_lora_A: bool, base_layer_groups: int = 1
-) -> torch.nn.Conv2d:
+def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A: bool, **kwargs) -> torch.nn.Conv2d:
     """
     Get a new Conv2d layer for LoRA with padded weights according to the target rank.
 
@@ -192,6 +190,7 @@ def _get_padded_conv2d(
     # For Conv2d: [out_channels, in_channels, kernel_height, kernel_width]
     out_channels, in_channels, kh, kw = weight.shape
     groups = lora_module.groups
+    base_layer_groups = kwargs.get("base_layer_groups", 1)
     # For lora_B with groups > 1, the effective rank is in_channels * groups because weight.shape[1] contains the
     # rank per group. lora_A is created with groups=1, so its rank is out_channels.
     original_rank = out_channels if is_lora_A else in_channels * groups
@@ -284,6 +283,7 @@ def _pad_lora_weights(model: torch.nn.Module, target_rank: int) -> bool:
         # Decide which pad function to call based on module type
         if isinstance(module, Linear):
             pad_fn = _get_padded_linear
+            base_layer_groups = 1  # Linear layers do not have grouped-convolution layout
         elif isinstance(module, Conv2d):
             pad_fn = _get_padded_conv2d
             base_layer_groups = module.get_base_layer().groups
@@ -299,22 +299,16 @@ def _pad_lora_weights(model: torch.nn.Module, target_rank: int) -> bool:
 
         # Pad LoRA A
         for adapter_name, lora_A_module in module.lora_A.items():
-            if isinstance(module, Conv2d):
-                new_layer = pad_fn(
-                    lora_A_module, target_rank=target_rank, is_lora_A=True, base_layer_groups=base_layer_groups
-                )
-            else:
-                new_layer = pad_fn(lora_A_module, target_rank=target_rank, is_lora_A=True)
+            new_layer = pad_fn(
+                lora_A_module, target_rank=target_rank, is_lora_A=True, base_layer_groups=base_layer_groups
+            )
             module.lora_A[adapter_name] = new_layer
 
         # Pad LoRA B
         for adapter_name, lora_B_module in module.lora_B.items():
-            if isinstance(module, Conv2d):
-                new_layer = pad_fn(
-                    lora_B_module, target_rank=target_rank, is_lora_A=False, base_layer_groups=base_layer_groups
-                )
-            else:
-                new_layer = pad_fn(lora_B_module, target_rank=target_rank, is_lora_A=False)
+            new_layer = pad_fn(
+                lora_B_module, target_rank=target_rank, is_lora_A=False, base_layer_groups=base_layer_groups
+            )
             module.lora_B[adapter_name] = new_layer
 
         found_adapter = True
