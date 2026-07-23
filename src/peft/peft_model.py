@@ -386,7 +386,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 )
             inference_mode = peft_config.inference_mode
             peft_config.inference_mode = True
-
             if peft_config.task_type is None:
                 # deal with auto mapping
                 base_model_class = self._get_base_model_class(
@@ -1056,7 +1055,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.prepare_inputs_for_generation = old_prepare_inputs_for_generation
                 self._adapters_disabled = False
 
-        elif self.peft_config[self.active_adapter].is_adaption_prompt:
+        elif (
+            self.peft_config[self.active_adapter].is_adaption_prompt or self.peft_config[self.active_adapter].is_shadow
+        ):
             try:
                 self.base_model.disable_adapter_layers()
                 self._adapters_disabled = True

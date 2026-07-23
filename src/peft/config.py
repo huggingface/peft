@@ -346,6 +346,11 @@ class PeftConfigMixin(PushToHubMixin):
         """Return True if this is an adaption prompt config."""
         return False
 
+    @property
+    def is_shadow(self) -> bool:
+        """Return True if this is a ShadowPEFT config."""
+        return False
+
 
 @dataclass
 class PeftConfig(PeftConfigMixin):
