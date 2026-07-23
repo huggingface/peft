@@ -79,6 +79,8 @@
         title: DEFT
       - local: package_reference/delora
         title: DeLoRA
+      - local: package_reference/ewora
+        title: EWoRA
       - local: package_reference/fourierft
         title: FourierFT
       - local: package_reference/gralora
@@ -174,6 +176,8 @@
       title: DEFT
     - local: package_reference/delora
       title: DeLoRA
+    - local: package_reference/ewora
+      title: EWoRA
     - local: package_reference/fourierft
       title: FourierFT
     - local: package_reference/gralora
