@@ -101,6 +101,11 @@ class AdaLoraConfig(LoraConfig):
         if self.total_step is None or self.total_step <= 0:
             raise ValueError("AdaLoRA does not work when `total_step` is None, supply a value > 0.")
 
+        if self.orth_reg_weight < 0:
+            raise ValueError(
+                f"`orth_reg_weight` should be greater than or equal to 0, but the value passed is {self.orth_reg_weight}"
+            )
+
         if self.tinit >= (self.total_step - self.tfinal):
             raise ValueError(
                 "The supplied schedule values don't allow for a budgeting phase. Decrease `tfinal`/`tinit` or "

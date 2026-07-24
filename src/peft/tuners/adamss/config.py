@@ -83,22 +83,24 @@ class AdamssConfig(PeftConfig):
             Target total number of active subspaces across all layers when ASA is enabled. ASA will progressively prune
             subspaces until this target is reached. Lower values result in more aggressive pruning and fewer trainable
             parameters. Should be less than `num_subspaces * num_target_modules`. Typical values range from 20 to 100
-            depending on model size. Default is 50.
+            depending on model size. Default is 50. Must be a positive integer when `use_asa=True`.
 
         init_warmup (`int`):
             Number of training steps to wait before starting ASA pruning. During warmup, all subspaces remain active to
             allow importance scores to stabilize. Higher values give more time for accurate importance estimation but
-            delay pruning. Typical values range from 50 to 200. Default is 50.
+            delay pruning. Typical values range from 50 to 200. Default is 50. Must be smaller than `final_warmup`
+            when `use_asa=True`.
 
         final_warmup (`int`):
             Training step at which ASA completes pruning and reaches `asa_target_subspaces` active subspaces. The
             pruning is distributed between `init_warmup` and `final_warmup`. Should be set based on total training
-            steps; typically 1/3 to 1/2 of total training steps. Default is 1000.
+            steps; typically 1/3 to 1/2 of total training steps. Default is 1000. Must be larger than `init_warmup`
+            when `use_asa=True`.
 
         mask_interval (`int`):
             Number of training steps between ASA mask updates. Lower values allow more frequent adaptation but increase
             overhead. Higher values provide more stable importance estimates between updates. Typical values range from
-            50 to 200. Default is 100.
+            50 to 200. Default is 100. Must be a positive integer when `use_asa=True`.
 
         asa_importance_beta (`float`):
             Exponential moving average (EMA) coefficient for smoothing subspace importance scores. Higher values
@@ -115,7 +117,9 @@ class AdamssConfig(PeftConfig):
             warmup. Higher values result in faster initial pruning (more aggressive early reduction), while lower
             values provide a more gradual, linear-like decay. The formula is: current_active_subspaces =
             asa_target_subspaces + (asa_total_subspaces - asa_target_subspaces) * (progress ** exponent). Typical
-            values range from 1.0 (linear) to 5.0 (aggressive). Default is 3.0.
+            values range from 1.0 (linear) to 5.0 (aggressive). Default is 3.0. Must be a positive number when
+            `use_asa=True` (a zero or negative exponent either degenerates the schedule to a permanent no-op or, once
+            `progress` reaches exactly 0.0, raises a `ZeroDivisionError`).
 
         use_dynamic_rank (`bool`):
             Whether to dynamically determine subspace ranks based on singular value magnitudes. When True, each
@@ -227,7 +231,8 @@ class AdamssConfig(PeftConfig):
             "help": (
                 "Target total number of active subspaces across all layers when ASA is enabled. "
                 "ASA progressively prunes subspaces until this target is reached. Lower values "
-                "result in more aggressive pruning. Typical values: 20-100. Default: 50."
+                "result in more aggressive pruning. Typical values: 20-100. Default: 50. Must be "
+                "a positive integer when use_asa=True."
             )
         },
     )
@@ -237,7 +242,8 @@ class AdamssConfig(PeftConfig):
             "help": (
                 "Training steps to wait before starting ASA pruning. During warmup, all subspaces "
                 "remain active to allow importance scores to stabilize. Higher values give more "
-                "time for accurate estimation. Typical values: 50-200. Default: 50."
+                "time for accurate estimation. Typical values: 50-200. Default: 50. Must be smaller "
+                "than final_warmup when use_asa=True."
             )
         },
     )
@@ -247,7 +253,7 @@ class AdamssConfig(PeftConfig):
             "help": (
                 "Training step at which ASA completes pruning and reaches asa_target_subspaces. "
                 "Should be set based on total training steps; typically 1/3 to 1/2 of total steps. "
-                "Default: 1000."
+                "Default: 1000. Must be larger than init_warmup when use_asa=True."
             )
         },
     )
@@ -257,7 +263,7 @@ class AdamssConfig(PeftConfig):
             "help": (
                 "Training steps between ASA mask updates. Lower values allow more frequent "
                 "adaptation but increase overhead. Higher values provide more stable estimates. "
-                "Typical values: 50-200. Default: 100."
+                "Typical values: 50-200. Default: 100. Must be a positive integer when use_asa=True."
             )
         },
     )
@@ -290,7 +296,8 @@ class AdamssConfig(PeftConfig):
                 "asa_target_subspaces. Higher values result in faster initial pruning (aggressive "
                 "early reduction), lower values provide gradual linear-like decay. Formula: "
                 "current_active_subspaces = asa_target_subspaces + (total - target) * (progress ** exponent). "
-                "Typical values: 1.0 (linear) to 5.0 (aggressive). Default: 3.0."
+                "Typical values: 1.0 (linear) to 5.0 (aggressive). Default: 3.0. Must be a positive "
+                "number when use_asa=True."
             )
         },
     )
@@ -341,6 +348,32 @@ class AdamssConfig(PeftConfig):
         # Validate initialization method
         if self.init_weights not in ["orthogonal", None]:
             raise ValueError(f"init_weights must be 'orthogonal' or None, got {self.init_weights}")
+
+        # Validate ASA scheduling parameters only when ASA is enabled.
+        if self.use_asa:
+            if self.mask_interval <= 0:
+                raise ValueError(
+                    f"`mask_interval` must be a positive integer when `use_asa=True`, got {self.mask_interval}."
+                )
+
+            if self.init_warmup >= self.final_warmup:
+                raise ValueError(
+                    "`init_warmup` must be smaller than `final_warmup` when `use_asa=True` so that ASA has a "
+                    f"non-empty pruning ramp, got init_warmup={self.init_warmup} and "
+                    f"final_warmup={self.final_warmup}."
+                )
+
+            if self.asa_target_subspaces <= 0:
+                raise ValueError(
+                    "`asa_target_subspaces` must be a positive integer when `use_asa=True`, got "
+                    f"{self.asa_target_subspaces}."
+                )
+
+            if self.asa_schedule_exponent <= 0:
+                raise ValueError(
+                    "`asa_schedule_exponent` must be a positive number when `use_asa=True`, got "
+                    f"{self.asa_schedule_exponent}."
+                )
 
         # Early check for scikit-learn availability
         try:

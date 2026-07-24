@@ -1307,7 +1307,7 @@ TEST_CASES = [
         "Vanilla MLP 1 AdaLoRA",
         "MLP",
         AdaLoraConfig,
-        {"target_modules": ["lin0"], "init_lora_weights": False, "total_step": 1},
+        {"target_modules": ["lin0"], "init_lora_weights": False, "total_step": 1, "orth_reg_weight": 0},
     ),
     (
         "Vanilla MLP 2 AdaLoRA",
