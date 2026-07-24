@@ -155,14 +155,14 @@ class _BaseAutoPeftModel:
 
         base_model = target_class.from_pretrained(base_model_path, revision=base_model_revision, **kwargs)
 
+        token = kwargs.get("token", None)
+        if token is None:
+            token = kwargs.get("use_auth_token", None)
+
         tokenizer_exists = False
         if os.path.exists(os.path.join(pretrained_model_name_or_path, TOKENIZER_CONFIG_NAME)):
             tokenizer_exists = True
         else:
-            token = kwargs.get("token", None)
-            if token is None:
-                token = kwargs.get("use_auth_token", None)
-
             tokenizer_exists = check_file_exists_on_hf_hub(
                 repo_id=pretrained_model_name_or_path,
                 filename=TOKENIZER_CONFIG_NAME,
@@ -173,7 +173,10 @@ class _BaseAutoPeftModel:
 
         if tokenizer_exists and hasattr(base_model, "get_input_embeddings"):
             tokenizer = AutoTokenizer.from_pretrained(
-                pretrained_model_name_or_path, trust_remote_code=kwargs.get("trust_remote_code", False)
+                pretrained_model_name_or_path,
+                revision=revision,
+                token=token,
+                trust_remote_code=kwargs.get("trust_remote_code", False),
             )
             embedding_size = base_model.get_input_embeddings().weight.shape[0]
             if len(tokenizer) > embedding_size:
@@ -186,6 +189,7 @@ class _BaseAutoPeftModel:
             adapter_name=adapter_name,
             is_trainable=is_trainable,
             config=config,
+            revision=revision,
             **kwargs,
         )
 

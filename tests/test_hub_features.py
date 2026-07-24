@@ -16,7 +16,7 @@ import copy
 import pytest
 import torch
 from huggingface_hub import ModelCard
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import AutoPeftModelForCausalLM, LoraConfig, PeftConfig, PeftModel, TaskType, get_peft_model
 
@@ -113,6 +113,14 @@ class TestBaseModelRevision:
 
         assert peft_model.peft_config["default"].base_model_name_or_path == base_model_id
         assert peft_model.peft_config["default"].revision == base_model_revision
+
+    def test_auto_peft_model_forwards_revision_to_tokenizer(self):
+        model_id = "peft-internal-testing/opt-tokenizer-revision"
+        revision = "my-revision"
+
+        model = AutoPeftModelForCausalLM.from_pretrained(model_id, revision=revision)
+        tokenizer = AutoTokenizer.from_pretrained(model_id, revision=revision)
+        assert model.get_input_embeddings().weight.shape[0] == len(tokenizer)
 
 
 class TestModelCard:
