@@ -82,7 +82,8 @@ def _get_layer_kv_target_shape(base_config, layer_idx: int) -> tuple[int, int] |
     if not layer_types:
         return None
 
-    # New transformers (>= 5.15) use per_layer_config instead of global_head_dim / num_global_key_value_heads
+    # New transformers (>= 5.15) use per_layer_config instead of global_head_dim / num_global_key_value_heads.
+    # per_layer_config can be indexed by layer_idx (what we do here) or by layer_type.
     per_layer_config = getattr(base_config, "per_layer_config", None)
     if per_layer_config is not None:
         layer_cfg = per_layer_config[layer_idx]

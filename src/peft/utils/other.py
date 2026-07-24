@@ -1192,9 +1192,13 @@ def _prepare_prompt_learning_config(peft_config, model_config):
             head_dim = model_config["global_head_dim"]
             num_key_value_heads = model_config.get("num_global_key_value_heads") or model_config["num_key_value_heads"]
         elif model_config.get("per_layer_config") is not None:
-            # New transformers (>= 5.15): per_layer_config stores only the *overrides*; the base head_dim and
-            # num_key_value_heads come from the top-level config. Resolve the effective per-layer values and
-            # provision the prefix for the largest KV footprint (typically the full-attention layers).
+            # New transformers (>= 5.15): global_head_dim / num_global_key_value_heads were replaced by
+            # per_layer_config. Here model_config is a plain dict (from config.to_dict()), so
+            # per_layer_config contains only the *overrides*; the base head_dim and num_key_value_heads
+            # come from the top-level config. (The per_layer_config property on the config object
+            # returns the full config with overrides applied, but that's not available here.)
+            # Resolve the effective per-layer values and provision the prefix for the largest KV
+            # footprint (typically the full-attention layers).
             per_layer = model_config["per_layer_config"]
             base_head_dim = model_config.get("head_dim", peft_config.token_dim // peft_config.num_attention_heads)
             base_num_kv_heads = model_config["num_key_value_heads"]
