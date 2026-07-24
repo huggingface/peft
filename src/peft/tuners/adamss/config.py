@@ -88,8 +88,8 @@ class AdamssConfig(PeftConfig):
         init_warmup (`int`):
             Number of training steps to wait before starting ASA pruning. During warmup, all subspaces remain active to
             allow importance scores to stabilize. Higher values give more time for accurate importance estimation but
-            delay pruning. Typical values range from 50 to 200. Default is 50. Must be smaller than `final_warmup`
-            when `use_asa=True`.
+            delay pruning. Typical values range from 50 to 200. Default is 50. Must be smaller than `final_warmup` when
+            `use_asa=True`.
 
         final_warmup (`int`):
             Training step at which ASA completes pruning and reaches `asa_target_subspaces` active subspaces. The
