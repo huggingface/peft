@@ -31,6 +31,7 @@ from transformers import AutoModelForCausalLM
 
 from peft import (
     AdaLoraConfig,
+    AdamssConfig,
     BeftConfig,
     C3AConfig,
     DeloraConfig,
@@ -1895,6 +1896,11 @@ class TestAdaLoraInitialization:
         with pytest.raises(ValueError, match="ADALORA does not support LOFTQ"):
             AdaLoraConfig(init_lora_weights="loftq", loftq_config={"loftq": "config"}, total_step=1)
 
+    def test_adalora_negative_orth_reg_weight_raises(self):
+        msg = "`orth_reg_weight` should be greater than or equal to 0, but the value passed is -0.5"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            AdaLoraConfig(target_modules=["linear"], total_step=1, orth_reg_weight=-0.5)
+
     def get_model(self):
         class MyModule(nn.Module):
             def __init__(self):
@@ -1922,6 +1928,36 @@ class TestAdaLoraInitialization:
         model = get_peft_model(model, config)
         output_after = model(data)
         assert torch.allclose(output_before, output_after)
+
+
+class TestAdamssInitialization:
+    @pytest.mark.parametrize(
+        "adamss_kwargs,message",
+        [
+            (
+                {"mask_interval": 0},
+                "`mask_interval` must be a positive integer when `use_asa=True`, got 0.",
+            ),
+            (
+                {"init_warmup": 10, "final_warmup": 10},
+                "`init_warmup` must be smaller than `final_warmup` when `use_asa=True` so that ASA has a "
+                "non-empty pruning ramp, got init_warmup=10 and final_warmup=10.",
+            ),
+            (
+                {"asa_target_subspaces": 0},
+                "`asa_target_subspaces` must be a positive integer when `use_asa=True`, got 0.",
+            ),
+            (
+                {"asa_schedule_exponent": 0.0},
+                "`asa_schedule_exponent` must be a positive number when `use_asa=True`, got 0.0.",
+            ),
+        ],
+    )
+    def test_invalid_asa_schedule_raises(self, adamss_kwargs, message):
+        kwargs = {"use_asa": True, "init_warmup": 0, "final_warmup": 100, "mask_interval": 10}
+        kwargs.update(adamss_kwargs)
+        with pytest.raises(ValueError, match=re.escape(message)):
+            AdamssConfig(**kwargs)
 
 
 class TestPromptTuningInitialization:
@@ -2334,6 +2370,25 @@ class TestWaveFTInitialization:
         with pytest.raises(ValueError, match=re.escape(msg)):
             WaveFTConfig(target_modules=["linear"], wavelet_family=invalid_family)
 
+    def test_waveft_proportional_parameters_does_not_zero_out_small_layer(self):
+        class Imbalanced(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.big = nn.Linear(4096, 4096)
+                self.tiny = nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.tiny(x[:, :4])
+
+        model = Imbalanced().eval().to(self.torch_device)
+        config = WaveFTConfig(target_modules=["big", "tiny"], n_frequency=1, proportional_parameters=True)
+        model = get_peft_model(model, config)
+
+        tiny_layer = model.base_model.model.tiny
+        big_layer = model.base_model.model.big
+        assert tiny_layer.waveft_n_frequency["default"] >= 1
+        assert big_layer.waveft_n_frequency["default"] >= 1
+
 
 class TestRoadInitialization:
     torch_device = infer_device()
@@ -2504,6 +2559,13 @@ class TestGraLoRAInitialization:
         gralora_k = 4
         # msg = f"r should be divisible by gralora_k, but got {config.r} and {config.gralora_k}"
         msg = f"r should be divisible by gralora_k, but got {r} and {gralora_k}"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            GraloraConfig(target_modules=["lin0"], r=r, gralora_k=gralora_k)
+
+    @pytest.mark.parametrize("gralora_k", [0, -1])
+    def test_gralora_with_non_positive_gralora_k_raises(self, gralora_k):
+        r = 32
+        msg = f"`gralora_k` should be a positive integer value but the value passed is {gralora_k}"
         with pytest.raises(ValueError, match=re.escape(msg)):
             GraloraConfig(target_modules=["lin0"], r=r, gralora_k=gralora_k)
 
