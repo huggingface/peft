@@ -101,7 +101,7 @@ def _load_adapter_into_lora_model(
     This method emulates the behavior of `PeftModel.from_pretrained`. Updates to `PeftModel.from_pretrained` may need
     to be reflected here.
 
-    All params pertain to the adapter (adapter name, model id, `i` is the adapter number in 0 indexing).
+    All params pertain to the adapter (adapter name, model id).
     """
     from peft.peft_model import PeftModel
     from peft.tuners.lora.config import LoraConfig
@@ -241,6 +241,12 @@ class XLoraModel(BaseTuner):
         else:
             conf = config
 
+        if adapter_name in conf.adapters:
+            raise ValueError(
+                f"X-LoRA expert name {adapter_name!r} conflicts with the outer adapter name. "
+                "Use a different name for the expert."
+            )
+
         # Create an empty LoraModel
         base_lora_config = copy.copy(conf)
         base_lora_config.target_modules = DUMMY_TARGET_MODULES
@@ -264,10 +270,10 @@ class XLoraModel(BaseTuner):
             adapters_items = peft_config.adapters.items()
 
         if hasattr(self.xlora_config, "_subfolders"):
-            for i, (_adapter_name, model_id), subfolder in enumerate(adapters_items):
+            for (_adapter_name, model_id), subfolder in adapters_items:
                 _load_adapter_into_lora_model(
                     lora_model=self.lora_model,
-                    adapter_name=str(i),
+                    adapter_name=_adapter_name,
                     model_id=model_id,
                     torch_device=torch_device,
                     ephemeral_gpu_offload=ephemeral_gpu_offload,
@@ -276,10 +282,10 @@ class XLoraModel(BaseTuner):
                     **kwargs,
                 )
         else:
-            for i, (_adapter_name, model_id) in enumerate(adapters_items):
+            for _adapter_name, model_id in adapters_items:
                 _load_adapter_into_lora_model(
                     lora_model=self.lora_model,
-                    adapter_name=str(i),
+                    adapter_name=_adapter_name,
                     model_id=model_id,
                     torch_device=torch_device,
                     ephemeral_gpu_offload=ephemeral_gpu_offload,
@@ -401,6 +407,33 @@ class XLoraModel(BaseTuner):
             if name == "lora_model":  # see #1892: prevent infinite recursion if class is not initialized
                 raise
             return getattr(self.lora_model, name)
+
+    @property
+    def active_adapter(self) -> str | list[str]:
+        """Forward active-adapter state to the wrapped LoRA model."""
+        return self.lora_model.active_adapter
+
+    @active_adapter.setter
+    def active_adapter(self, value: str | list[str]) -> None:
+        self.lora_model.active_adapter = value
+
+    def delete_adapter(self, adapter_name: str) -> None:
+        """This method is not supported for X-LoRA."""
+        raise TypeError(
+            f"{self.__class__.__name__} does not support `delete_adapter` because its classifier output is fixed "
+            "at construction time."
+        )
+
+    def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
+        """Activate the complete expert set in its original order."""
+        adapter_names = [adapter_name] if isinstance(adapter_name, str) else list(adapter_name)
+        full_adapter_names = list(self.xlora_config.adapters.keys())
+        if adapter_names != full_adapter_names:
+            raise ValueError(
+                f"{self.__class__.__name__} only supports the original expert order {full_adapter_names}, "
+                f"but received {adapter_names}."
+            )
+        super().set_adapter(adapter_name, inference_mode=inference_mode)
 
     @staticmethod
     def _prepare_adapter_config(peft_config, _model_config):
