@@ -115,6 +115,8 @@ class TestBaseModelRevision:
         assert peft_model.peft_config["default"].revision == base_model_revision
 
     def test_auto_peft_model_forwards_revision_to_tokenizer(self):
+        # Regression test for #3442: revision was not forwarded when loading the tokenizer, so the adapter's
+        # saved embeddings could be incompatible with the tokenizer loaded from the default revision.
         model_id = "peft-internal-testing/opt-tokenizer-revision"
         revision = "my-revision"
 
