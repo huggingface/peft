@@ -60,6 +60,7 @@ from peft import (
     get_peft_model_state_dict,
     inject_adapter_in_model,
     prepare_model_for_kbit_training,
+    set_base_model_state_dict,
     set_peft_model_state_dict,
 )
 from peft.import_utils import is_transformers_ge_v5
@@ -1952,3 +1953,20 @@ class PeftCommonTester:
 
         for key in original_state_dict:
             assert torch.allclose(original_state_dict[key], extracted_state_dict[key]), f"Value mismatch for key {key}"
+
+        # set_base_model_state_dict is the inverse of get_base_model_state_dict, so we check the roundtrip here as
+        # well: perturb the base weights, load the original state dict back and expect the original weights again.
+        # Doing it in the same test gives the setter the same method/model coverage as the getter without paying for a
+        # second parametrization over the whole matrix.
+        with torch.no_grad():
+            for param in peft_model.get_base_model().parameters():
+                if param.is_floating_point():
+                    param.add_(torch.randn_like(param) * 0.1)
+
+        result = set_base_model_state_dict(peft_model, original_state_dict, strict=False)
+        assert not result.missing_keys, f"Missing keys: {result.missing_keys}"
+        assert not result.unexpected_keys, f"Unexpected keys: {result.unexpected_keys}"
+
+        restored_state_dict = get_base_model_state_dict(peft_model)
+        for key in original_state_dict:
+            assert torch.allclose(original_state_dict[key], restored_state_dict[key]), f"Roundtrip failed for {key}"
