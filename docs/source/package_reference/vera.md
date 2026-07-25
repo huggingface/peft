@@ -50,6 +50,27 @@ The abstract from the paper is:
 
 > Low-rank adaptation (LoRA) is a popular method that reduces the number of trainable parameters when finetuning large language models, but still faces acute storage challenges when scaling to even larger models or deploying numerous per-user or per-task adapted models. In this work, we present Vector-based Random Matrix Adaptation (VeRA), which significantly reduces the number of trainable parameters compared to LoRA, yet maintains the same performance. It achieves this by using a single pair of low-rank matrices shared across all layers and learning small scaling vectors instead. We demonstrate its effectiveness on the GLUE and E2E benchmarks, image classification tasks, and show its application in instruction-tuning of 7B and 13B language models.
 
+## When to use VeRA
+
+VeRA is a good choice when:
+
+- You want to **minimize the number of trainable parameters** while maintaining performance comparable to LoRA.
+- You need to **store or deploy many task-specific adapters**, where smaller adapter checkpoints reduce storage requirements.
+- You are fine-tuning **very large language models** under tight memory or parameter budgets.
+- You want a LoRA-like method that shares projection matrices across layers to improve parameter efficiency.
+
+Choose LoRA instead if you prefer independent low-rank matrices for each layer or require greater flexibility in the learned adapter parameters.
+
+## Practical considerations
+
+When configuring VeRA, keep the following points in mind:
+
+- The number of trainable parameters grows with both the adapter rank (`r`) and the number of adapted layers, but remains substantially smaller than LoRA because the projection matrices are shared across layers.
+- VeRA initializes shared random projection matrices only once and reuses them across all adapted layers. As a result, increasing the number of adapted layers has a smaller impact on the number of trainable parameters than in LoRA.
+- Setting `save_projection=False` produces smaller adapter checkpoints by regenerating the shared projection matrices from the configured random seed during loading. For maximum reproducibility across hardware and future PyTorch versions, keep `save_projection=True`.
+- Since VeRA currently supports only `nn.Linear` layers, models requiring adapter support for other module types may require a different PEFT method.
+- If your model contains linear layers with different input or output dimensions, PEFT automatically creates shared projection matrices large enough for the biggest layer and slices the required submatrices during the forward pass.
+
 ## Benchmark overview
 
 <iframe
