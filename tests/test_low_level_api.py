@@ -25,6 +25,7 @@ from transformers import (
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
     CLIPTextModel,
+    CLIPTextModelWithProjection,
 )
 
 from peft import (
@@ -167,7 +168,7 @@ class TestInjectAdapterFromStateDict:
 
             sd_after = get_peft_model_state_dict(model)
 
-            # We exepct the same keys and the same shapes of the weights. Don't check the values: injection is only
+            # We expect the same keys and the same shapes of the weights. Don't check the values: injection is only
             # about creating the PEFT adapter, not about loading the actual weights
             assert len(sd_before) > 0
             assert sd_before.keys() == sd_after.keys()
@@ -188,7 +189,7 @@ class TestInjectAdapterFromStateDict:
             model = inject_adapter_in_model(config, model, state_dict=sd_before)
             sd_after = get_peft_model_state_dict(model)
 
-            # We exepct the same keys and the same shapes of the weights. Don't check the values: injection is only
+            # We expect the same keys and the same shapes of the weights. Don't check the values: injection is only
             # about creating the PEFT adapter, not about loading the actual weights
             assert len(sd_before) > 0
             assert sd_before.keys() == sd_after.keys()
@@ -212,7 +213,7 @@ class TestInjectAdapterFromStateDict:
             model = inject_adapter_in_model(config, model, state_dict=sd_before)
             sd_after = get_peft_model_state_dict(model)
 
-            # We exepct the same keys and the same shapes of the weights. Don't check the values: injection is only
+            # We expect the same keys and the same shapes of the weights. Don't check the values: injection is only
             # about creating the PEFT adapter, not about loading the actual weights
             assert len(sd_before) > 0
             assert sd_before.keys() == sd_after.keys()
@@ -302,7 +303,7 @@ class TestInjectAdapterFromStateDict:
             sd_te_after = get_peft_model_state_dict(pipe.text_encoder)
             sd_unet_after = get_peft_model_state_dict(pipe.unet)
 
-            # We exepct the same keys and the same shapes of the weights. Don't check the values: injection is only
+            # We expect the same keys and the same shapes of the weights. Don't check the values: injection is only
             # about creating the PEFT adapter, not about loading the actual weights
             assert len(sd_te_before) > 0
             assert sd_te_before.keys() == sd_te_after.keys()
@@ -331,7 +332,7 @@ class TestInjectAdapterFromStateDict:
             assert {p.device.type for p in get_peft_model_state_dict(model).values()} == {"meta"}
 
     def test_inject_from_state_dict_missing_keys_warning(self):
-        # check that if the PEFT config specifies **more** taget modules than the state_dict, we get a warning for that
+        # check that if the PEFT config specifies **more** target modules than the state_dict, we get a warning for that
         model_id = "peft-internal-testing/opt-125m"
         config = LoraConfig()
 
@@ -365,7 +366,7 @@ class TestInjectAdapterFromStateDict:
                 assert sd_before[key].shape == sd_after[key].shape
 
     def test_inject_from_state_dict_extra_keys_warning(self):
-        # check that if the PEFT config specifies **fewer** taget modules than the state_dict, we get a warning for that
+        # check that if the PEFT config specifies **fewer** target modules than the state_dict, we get a warning for that
         model_id = "peft-internal-testing/opt-125m"
         config = LoraConfig()
 
@@ -424,7 +425,7 @@ class TestInjectAdapterFromStateDict:
                 # work
                 sd_after = {k.removeprefix("_orig_mod."): v for k, v in sd_after.items()}
 
-            # We exepct the same keys and the same shapes of the weights. Don't check the values: injection is only
+            # We expect the same keys and the same shapes of the weights. Don't check the values: injection is only
             # about creating the PEFT adapter, not about loading the actual weights
             assert len(sd_before) > 0
             assert sd_before.keys() == sd_after.keys()
@@ -472,6 +473,32 @@ class TestInjectAdapterFromStateDict:
 
             # sanity check:
             assert (model.encoder.layers[0].self_attn.v_proj.lora_B.default.weight == 555).all()
+
+    def test_prefix_removal_is_undone(self):
+        # See discussion starting here: https://github.com/huggingface/peft/pull/3212#issuecomment-4402677775.
+        # For some models like CLIPTextModelWithProjection, transformers would add a removal of the 'text_model.' prefix
+        # to the conversions, but this removal is incorrect. Therefore, there is a logic in transformers to undo the
+        # removal if there is not entry in the state_dict for the renamed key. This logic was missing in PEFT, resulting
+        # in missing and unexpected keys.
+        config = LoraConfig(target_modules=["q_proj", "v_proj"])
+        model_id = "peft-internal-testing/tiny-clip-text-2"
+
+        with hub_online_once(model_id):
+            model = CLIPTextModelWithProjection.from_pretrained(model_id)
+            inject_adapter_in_model(config, model)
+            # sanity check:
+            assert (model.text_model.encoder.layers[0].self_attn.v_proj.lora_B.default.weight == 0).all()
+
+            state_dict = get_peft_model_state_dict(model)
+            state_dict = {k: torch.ones_like(v) * 555 for k, v in state_dict.items()}
+            load_result = set_peft_model_state_dict(model, state_dict)
+
+            assert not load_result.unexpected_keys
+            # base model weights may be missing, but LoRA weights should never be missing
+            assert not any("lora" in k for k in load_result.missing_keys)
+
+            # sanity check:
+            assert (model.text_model.encoder.layers[0].self_attn.v_proj.lora_B.default.weight == 555).all()
 
 
 class TestPeftStateDict:

@@ -204,7 +204,7 @@ class ArrowLoraLinearLayer(nn.Module):
         Usually, we want to enable this to align the input dtype with the dtype of the weight, but by setting
         layer.cast_input_dtype=False, this can be disabled if necessary.
 
-        Enabling or disabling can be managed via the peft.helpers.disable_lora_input_dtype_casting context manager.
+        Enabling or disabling can be managed via the peft.helpers.disable_input_dtype_casting context manager.
         """
         if x is None:  # useful e.g. if x is the bias, which can be None
             return None

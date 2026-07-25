@@ -88,7 +88,7 @@ def _check_if_tensor(array: Any) -> torch.Tensor:
 
 def _check_axes_argument(axes: Sequence[int]) -> None:
     if len(set(axes)) != len(axes):
-        raise ValueError("Cant transform the same axis twice.")
+        raise ValueError("Can't transform the same axis twice.")
 
 
 def _check_same_device(tensor: torch.Tensor, torch_device: torch.device) -> torch.Tensor:

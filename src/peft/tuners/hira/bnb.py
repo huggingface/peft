@@ -184,7 +184,6 @@ if is_bnb_available():
             return result
 
         def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-            self._check_forward_args(x, *args, **kwargs)
             adapter_names = kwargs.pop("adapter_names", None)
 
             if self.disable_adapters:
@@ -398,7 +397,6 @@ if is_bnb_4bit_available():
             return result
 
         def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-            self._check_forward_args(x, *args, **kwargs)
             adapter_names = kwargs.pop("adapter_names", None)
 
             if self.disable_adapters:

@@ -30,9 +30,19 @@ class BOFTConfig(PeftConfig):
     This is the configuration class to store the configuration of a [`BOFTModel`].
 
     Args:
-        boft_block_size (`int`): BOFT block size across different layers.
-        boft_block_num (`int`): Number of BOFT blocks per injected layer.
-        boft_n_butterfly_factor (`int`): Number of butterfly factors across different layers.
+        boft_block_size (`int`): BOFT matrix block size across different layers, expressed in `int`. Bigger
+            block sizes results in more dense update matrices with more trainable parameters. Choose `boft_block_size`
+            to be divisible by most layer's input dimension (`in_features`), e.g., 4, 8, 16. Also, please only specify
+            either `boft_block_size` or `boft_block_num`, but not both simultaneously or leaving both to 0, because
+            `boft_block_size` x `boft_block_num` must equal the layer's input dimension.
+        boft_block_num (`int`): Number of BOFT blocks per injected layer. Bigger `boft_block_num` result in sparser
+            update matrices with **fewer** trainable parameters. **Note**, please choose `boft_block_num` to be
+            divisible by most layer's input dimension (`in_features`), e.g., 4, 8, 16. Only specify either
+            `boft_block_size` or `boft_block_num`, but not both simultaneously or leaving both to 0, because
+            `boft_block_size` x `boft_block_num` must equal the layer's input dimension.
+        boft_n_butterfly_factor (`int`): Number of butterfly factors across different layers. For
+            `boft_n_butterfly_factor=1`, BOFT is the same as vanilla OFT, for `boft_n_butterfly_factor=2`, the
+            effective block size of OFT becomes twice as big and the number of blocks become half.
         target_modules (`Union[List[str],str]`): The names of the modules to apply the adapter to.
         exclude_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.

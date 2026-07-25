@@ -31,7 +31,7 @@ these numbers a bit.
 
 Note that this method does not add tokens for you, you have to add tokens to the tokenizer yourself and resize the
 embedding matrix of the model accordingly. This method will only re-train the embeddings for the tokens you specify.
-This method can also be used in conjunction with LoRA layers! See [the LoRA developer guide](../developer_guides/lora#efficiently-train-tokens-alongside-lora).
+This method can also be used in conjunction with LoRA layers! See [the LoRA documentation](lora#efficiently-train-tokens-alongside-lora).
 
 > [!TIP]
 > Saving the model with [`~PeftModel.save_pretrained`] or retrieving the state dict using
@@ -39,6 +39,17 @@ This method can also be used in conjunction with LoRA layers! See [the LoRA deve
 > as a precaution because the embedding matrix was resized. To save space you can disable this behavior by setting
 > `save_embedding_layers=False` when calling `save_pretrained`. This is safe to do as long as you don't modify the
 > embedding matrix through other means as well, as such changes will be not tracked by trainable tokens.
+
+## Benchmark overview
+
+<iframe
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=TRAINABLE_TOKENS"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
+
+# API
 
 ## TrainableTokensConfig
 

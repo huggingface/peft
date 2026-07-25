@@ -135,7 +135,7 @@ def prepare_model_inputs_fn_language_modeling(model_input, peft_config: LoraConf
 ### prepare_layer_inputs_fn
 
 `prepare_layer_inputs_fn` can be used to preprocess the layer inputs before passing them to the SVD algorithm. `prepare_layer_inputs_fn` receives three arguments: `layer_input`, `model_input` and `layer_name`. It can either be a callable or a dictionary where the keys are the layer names and the values are callables. If it is a dictionary, functions are assigned to adapter layers based on the layer names. By default a language modeling setting is assumed where model_inputs are the outputs of `prepare_model_inputs_fn_language_modeling` which is a mask of indices. If this parameter is set to None, only two modifications are made to the layer inputs
-- take the first element incase of a tuple or list. 
+- take the first element in case of a tuple or list. 
 - if the input has more than 2 dimensions, we flatten all but the last dimension.
 
 Must always return a tensor. The default logic is:

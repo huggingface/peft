@@ -15,7 +15,9 @@
 import copy
 from dataclasses import asdict, replace
 
+import diffusers
 import numpy as np
+import packaging.version
 import pytest
 import torch
 from diffusers import AutoModel, StableDiffusionPipeline
@@ -37,6 +39,10 @@ from peft.tuners.tuners_utils import BaseTunerLayer
 
 from .testing_common import PeftCommonTester
 from .testing_utils import hub_online_once, set_init_weights_false, temp_seed
+
+
+# TODO: remove once Diffusers 0.40 is released
+is_diffusers_ge_v040 = packaging.version.parse(diffusers.__version__) >= packaging.version.parse("0.40.0.dev0")
 
 
 PEFT_DIFFUSERS_SD_MODELS_TO_TEST = ["hf-internal-testing/tiny-sd-pipe"]
@@ -227,7 +233,11 @@ class TestStableDiffusionModel(PeftCommonTester):
     """
 
     transformers_class = StableDiffusionPipeline
-    sd_model = StableDiffusionPipeline.from_pretrained("hf-internal-testing/tiny-sd-pipe")
+
+    @pytest.fixture(scope="class", autouse=True)
+    def load_sd_pipeline(self, request):
+        # warning: don't use self.sd_model = ... because this is a class fixture
+        request.cls.sd_model = StableDiffusionPipeline.from_pretrained("hf-internal-testing/tiny-sd-pipe")
 
     def instantiate_sd_peft(self, model_id, config_cls, config_kwargs):
         # Instantiate StableDiffusionPipeline
@@ -344,6 +354,9 @@ class TestStableDiffusionModel(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DIFFUSERS_SD_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", DIFFUSERS_CONFIGS)
     def test_disable_adapter(self, model_id, config_cls, config_kwargs):
+        # TODO: remove once Diffusers 0.40 is released
+        if not is_diffusers_ge_v040:
+            pytest.skip("This test fails with Diffusers < 0.40 due to a change in huggingface_hub")
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_disable_adapter(model_id, config_cls, config_kwargs)
 

@@ -170,8 +170,9 @@ class XLoraModel(BaseTuner):
 
     Example:
         ```py
+        >>> import torch
         >>> from transformers import AutoModelForCausalLM, AutoConfig, BitsAndBytesConfig
-        >>> from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
+        >>> from peft import XLoraConfig, get_peft_model, prepare_model_for_kbit_training
 
         >>> model_config = AutoConfig.from_pretrained("mistralai/Mistral-7B-Instruct-v0.1")
         >>> config = XLoraConfig(
@@ -193,7 +194,7 @@ class XLoraModel(BaseTuner):
         ...     torch_dtype=torch.bfloat16,
         ...     quantization_config=int8_config,
         ... )
-        >>> model = prepare_model_for_kbit_training(4)
+        >>> model = prepare_model_for_kbit_training(model)
         >>> xlora_model = get_peft_model(model, config)
         ```
     """
@@ -420,7 +421,7 @@ class XLoraModel(BaseTuner):
         self.disabled = False
 
     """
-    This diasables the X-LoRA adapter.
+    This disables the X-LoRA adapter.
     """
 
     def disable_adapter_layers(self) -> None:

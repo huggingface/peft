@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import dataclasses
+from unittest.mock import PropertyMock, patch
+
 import pytest
 import torch
 from torch import nn
@@ -22,6 +25,7 @@ from peft.tuners.lora.layer import Conv1d as LoraConv1d
 from peft.tuners.lora.layer import Conv2d as LoraConv2d
 from peft.tuners.lora.layer import Embedding as LoraEmbedding
 from peft.tuners.lora.layer import Linear as LoraLinear
+from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.lora.variants import (
     ALoraLinearVariant,
     DoraConv1dVariant,
@@ -173,6 +177,88 @@ class TestLoraVariants:
 
         for layer in layer_names:
             assert getattr(peft_model.base_model.model, layer).lora_magnitude_vector["default"].weight.grad is not None
+
+    def test_unregistered_variant_raises_error(self):
+        # 1. Create a config and dummy linear layer
+        config = LoraConfig()
+        base_layer = nn.Linear(10, 10)
+        layer = LoraLinear(base_layer, "default", config, r=8, lora_alpha=8)
+
+        # 2. Monkey-patch the lora_variants property to include a fake variant
+        with patch("peft.tuners.lora.layer.Linear.lora_variants", new_callable=PropertyMock) as mock_variants:
+            mock_variants.return_value = {("fake_unregistered_variant",): None}
+
+            # 3. Assert that the sanity check catches it and throws the right error
+            with pytest.raises(
+                ValueError,
+                match=".*found in lora_variant.*",
+            ):
+                layer.resolve_lora_variant(config=config)
+
+    def test_invalid_variant_combination_raises_error(self):
+        # 1. Create a config with no variants active
+        config = LoraConfig()
+        base_layer = nn.Linear(10, 10)
+        layer = LoraLinear(base_layer, "default", config, r=8, lora_alpha=8)
+
+        # 2. Monkey-patch lora_variants to include a valid tagged combo that isn't active
+        with patch("peft.tuners.lora.layer.Linear.lora_variants", new_callable=PropertyMock) as mock_variants:
+            mock_variants.return_value = {
+                ("use_dora",): None,  # only use_dora is valid, empty combo not listed
+            }
+            # 3. Assert invalid combination error is raised
+            with pytest.raises(ValueError, match="Invalid or unsupported variant combination"):
+                layer.resolve_lora_variant(config=config)
+
+    def test_unsorted_variant_keys_raises_error(self):
+        config = LoraConfig()
+        base_layer = nn.Linear(10, 10)
+        layer = LoraLinear(base_layer, "default", config, r=8, lora_alpha=8)
+
+        with patch("peft.tuners.lora.layer.Linear.lora_variants", new_callable=PropertyMock) as mock_variants:
+            mock_variants.return_value = {
+                ("use_dora", "use_bdlora"): None,
+            }
+            with pytest.raises(ValueError, match="must be sorted tuples"):
+                layer.resolve_lora_variant(config=config)
+
+    def test_multiple_string_variants_in_init_lora_weights(self):
+        """
+        Verify that multiple variant names originating from the same configuration field (init_lora_weights) resolve to
+        different LoraVariant implementations.
+        """
+
+        @dataclasses.dataclass
+        class MockConfig:
+            init_lora_weights: str = dataclasses.field(
+                default="foobar", metadata={"lora_variants": ["mica", "foobar"]}
+            )
+
+        class MockMiCAVariant:
+            pass
+
+        class MockFoobarVariant:
+            pass
+
+        class MockLayer(LoraLayer):
+            @property
+            def lora_variants(self):
+                return {
+                    ("mica",): MockMiCAVariant,
+                    ("foobar",): MockFoobarVariant,
+                }
+
+        layer = MockLayer(base_layer=nn.Linear(10, 10))
+
+        # Resolve and verify the correct variants
+        for value, expected_class in [
+            ("mica", MockMiCAVariant),
+            ("foobar", MockFoobarVariant),
+        ]:
+            config = MockConfig(init_lora_weights=value)
+            resolved_instance = layer.resolve_lora_variant(config=config)
+
+            assert isinstance(resolved_instance, expected_class)
 
 
 class TestActivatedLora:

@@ -28,7 +28,7 @@ from .config import RandLoraConfig
 
 
 class UniqueBaseGrad(torch.autograd.Function):
-    # Memory efficent for a unique base
+    # Memory efficient for a unique base
     @staticmethod
     def forward(ctx, randlora_A, randlora_lambda, randlora_gamma):
         out = randlora_lambda[:, :, None] * randlora_A * randlora_gamma[None,]
@@ -51,7 +51,7 @@ class UniqueBaseGrad(torch.autograd.Function):
 class RandLoraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
     adapter_layer_names = ("randlora_lambda", "randlora_gamma")
-    other_param_names = ("randlora_A", "randlora_B")
+    other_param_names = ("randlora_A", "randlora_B", "randlora_dropout", "r", "scaling")
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer

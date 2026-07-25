@@ -1,0 +1,23 @@
+{
+  "alpha": null,
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "bias": "none",
+  "decomposition_method": "qr",
+  "deft_dropout": 0.0,
+  "exclude_modules": null,
+  "fan_in_fan_out": false,
+  "inference_mode": false,
+  "init_scale": 1.0,
+  "init_weights": true,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "modules_to_save": null,
+  "para": true,
+  "peft_type": "DEFT",
+  "peft_version": "0.19.2.dev0@UNKNOWN",
+  "r": 32,
+  "revision": null,
+  "target_modules": null,
+  "task_type": "CAUSAL_LM"
+}

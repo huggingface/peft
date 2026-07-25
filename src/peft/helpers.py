@@ -44,7 +44,8 @@ def update_forward_signature(model: PeftModel) -> None:
 
     ```python
     >>> from transformers import WhisperForConditionalGeneration
-    >>> from peft import get_peft_model, LoraConfig, update_forward_signature
+    >>> from peft import get_peft_model, LoraConfig
+    >>> from peft.helpers import update_forward_signature
 
     >>> model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-tiny.en")
     >>> peft_config = LoraConfig(r=8, lora_alpha=32, lora_dropout=0.1, target_modules=["q_proj", "v_proj"])
@@ -77,7 +78,8 @@ def update_generate_signature(model: PeftModel) -> None:
 
     ```python
     >>> from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-    >>> from peft import get_peft_model, LoraConfig, TaskType, update_generate_signature
+    >>> from peft import get_peft_model, LoraConfig, TaskType
+    >>> from peft.helpers import update_generate_signature
 
     >>> model_name_or_path = "bigscience/mt0-large"
     >>> tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
@@ -117,7 +119,8 @@ def update_signature(model: PeftModel, method: str = "all") -> None:
     Example:
     ```python
     >>> from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-    >>> from peft import get_peft_model, LoraConfig, TaskType, update_signature
+    >>> from peft import get_peft_model, LoraConfig, TaskType
+    >>> from peft.helpers import update_signature
 
     >>> model_name_or_path = "bigscience/mt0-large"
     >>> tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
@@ -295,7 +298,7 @@ class MontecloraTrainerMixin:
 
         # Get PEFT model and train
         model = get_peft_model(base_model, lora_config)
-        trainer = MontecloraTrainer(model=model, args=training_args, ...)
+        trainer = MontecloraTrainer(model=model, args=training_args)
         trainer.train()
         ```
     """
@@ -354,7 +357,7 @@ class DoraCaching:
     Example:
 
         ```py
-        >>> from peft.helpers import enable_dora_scaling
+        >>> from peft.helpers import DoraCaching
 
         >>> model.eval()  # put in eval model for caching to work
 

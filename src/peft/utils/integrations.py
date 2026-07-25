@@ -115,10 +115,10 @@ def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
 
     if hasattr(bnb.functional, "int8_vectorwise_dequant"):
         # Use bitsandbytes API if available (requires v0.45.0+)
-        dequantized = bnb.functional.int8_vectorwise_dequant(weight.data, state.SCB)
+        dequantized = bnb.functional.int8_vectorwise_dequant(weight.data, state.SCB.to(weight.data.device))
     else:
         # Multiply by (scale/127) to dequantize.
-        dequantized = weight.data * state.SCB.view(-1, 1) * 7.874015718698502e-3
+        dequantized = weight.data * state.SCB.to(weight.data.device).view(-1, 1) * 7.874015718698502e-3
 
     return dequantized
 
@@ -279,7 +279,7 @@ def skip_init_on_device(func):
     """
 
     # The need for this functionality arose when working on MultiheadAttention, where we have to call _restore_weights
-    # repeatedly as parametes are overwritten and need to be re-registered. When using low_cpu_mem_usage=True, as
+    # repeatedly as parameters are overwritten and need to be re-registered. When using low_cpu_mem_usage=True, as
     # register_parameter is patched inside of the init_empty_weights context, this would result in those parameters
     # suddenly being moved to meta device. Using this decorator allows us to avoid this.
     @functools.wraps(func)

@@ -82,6 +82,8 @@ same underlying checkpoint.
 
 To concatenate independently trained cartridges into a single adapter, use `compose_cartridge_adapters(...)`.
 
+# API
+
 ## CartridgeConfig
 
 [[autodoc]] tuners.cartridge.config.CartridgeConfig

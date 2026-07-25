@@ -1,0 +1,28 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "bias": "none",
+  "config_A_B": "lora",
+  "config_C": "lora",
+  "config_D_E": "constant",
+  "inference_mode": false,
+  "init_weights": true,
+  "modules_to_save": null,
+  "peft_type": "GLORA",
+  "r": 32,
+  "target_modules": [
+    "to_out.0",
+    "to_add_out",
+    "to_qkv_mlp_proj",
+    "add_k_proj",
+    "add_q_proj",
+    "add_v_proj",
+    "to_add_out",
+    "to_k",
+    "to_q",
+    "to_v",
+    "linear_in",
+    "linear_out"
+  ],
+  "task_type": null
+}

@@ -116,7 +116,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         # config can be None when update_layer is called through _set_trainable, in which case the relevant
         # arguments should be in kwargs
         if tied_adapter is not None:
-            # as a tied adapter, we're just following whatever the adpater we're tied to does, we don't update anything.
+            # as a tied adapter, we're just following whatever the adapter we're tied to does, we don't update anything.
             return
 
         token_indices = config.token_indices if (config is not None) else kwargs["token_indices"]

@@ -175,6 +175,30 @@ class LoraModel(BaseTuner):
         if peft_config.layer_replication:
             replicate_layers(model, peft_config.layer_replication)
 
+    def _check_new_adapter_config(self, config: LoraConfig) -> None:
+        super()._check_new_adapter_config(config)
+
+        # Multiple adapters that use `target_parameters` are supported, but they must all target the same set of
+        # parameters. The reason is that the targeted parameters are wrapped with (possibly nested) lora.ParamWrapper
+        # layers, and which parameter a LoRA weight belongs to is encoded by its position in that nesting. If different
+        # adapters targeted different parameters, the nesting (and thus the state_dict keys) would differ between
+        # adapters, which is not supported.
+        target_parameters = getattr(config, "target_parameters", None)
+        if not target_parameters:
+            return
+
+        target_parameters = set(target_parameters)  # set is okay as we don't support str for this arg
+        for adapter_name, other_conf in self.peft_config.items():
+            if other_conf is config:
+                continue
+            other_target_parameters = getattr(other_conf, "target_parameters", None)
+            if other_target_parameters and (set(other_target_parameters) != target_parameters):
+                raise ValueError(
+                    "When using multiple adapters with `target_parameters`, all adapters must target the same set of "
+                    f"parameters, but got {sorted(target_parameters)} for the new adapter and "
+                    f"{sorted(other_target_parameters)} for adapter '{adapter_name}'."
+                )
+
     def _create_and_replace(
         self,
         lora_config,
@@ -188,18 +212,6 @@ class LoraModel(BaseTuner):
     ) -> None:
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
-
-        if lora_config.target_parameters:
-            # Right now, unfortunately, we don't support multiple adapters with target_parameters on the same model.
-            other_configs_use_target_params = any(
-                conf.target_parameters for key, conf in self.peft_config.items() if key != adapter_name
-            )
-            if other_configs_use_target_params:
-                raise ValueError(
-                    f"Adding a LoRA config with `target_parameters={lora_config.target_parameters}` but there are "
-                    "already other LoRA adapters on this model that use `target_parameters`. At the moment, only "
-                    "one LoRA adapter per model with `target_parameters` is allowed."
-                )
 
         # Regexp matching - Find key which matches current target_name in patterns provided
         r_key = get_pattern_key(lora_config.rank_pattern.keys(), current_key)
@@ -318,7 +330,7 @@ class LoraModel(BaseTuner):
                         device_mesh,
                     )
                 else:  # embedding_rowwise
-                    # TP hooks are  handled in the `_embed` method in lora/layer.py where they are explicitely called.
+                    # TP hooks are  handled in the `_embed` method in lora/layer.py where they are explicitly called.
                     # Here we simply register the TP plans.
                     tp_plan_keys.append(f"{generic_key}.base_layer.weight")
                     tp_plan_keys.append(f"{generic_key}.lora_embedding_A.{adapter_name}")
@@ -369,7 +381,7 @@ class LoraModel(BaseTuner):
 
         if lora_config._custom_modules:
             # Experimental custom LoRA module support. Allows users to pass a custom mapping for unsupported layer
-            # types by impelementing their own LoRA layers.
+            # types by implementing their own LoRA layers.
             def dynamic_dispatch_func(target, adapter_name, config, **kwargs):
                 new_module = None
 
@@ -907,10 +919,21 @@ class LoraModel(BaseTuner):
         return lora_deltas
 
     def subtract_mutated_init(self, output_state_dict: dict[str, torch.Tensor], adapter_name: str, kwargs=None):
-        """
-        This function can calculate the updates of the PiSSA/CorDA/OLoRA by comparing the parameters of the
+        r"""
+        This function can calculate the updates of PiSSA/CorDA/OLoRA by comparing the parameters of the
         PiSSA/CorDA/OLoRA adapter in `output_state_dict` with the initial values of PiSSA/CorDA/OLoRA in
         `adapter_name`, thus converting PiSSA/CorDA/OLoRA to LoRA.
+
+        Methods like PiSSA remove a portion of the model base weights for training and therefore are not easily
+        swapped. But if you know both the initial pre-training and the post-training weights, you can compute the
+        \Delta W and use that as a LoRA adapter.
+
+        Compute steps:
+
+        - $W = W_{res} + A_0 B_0$ (PiSSA init)
+        - $W + \Delta W = W_{res} + A B$ (PiSSA after training)
+        - $\Delta W = W_{res} + AB - W = W_{res} + AB - W_{res} - A_0 B_0$ (Deriving dW for LoRA)
+        - $\Delta W = AB - A_0 B_0$
         """
         for name, param in self.model.named_parameters():
             if (

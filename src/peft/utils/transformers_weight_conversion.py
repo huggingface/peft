@@ -14,6 +14,7 @@
 
 # NOTE: don't import from this module unless transformers v5+ is used
 import copy
+import itertools
 import re
 from typing import Any
 
@@ -34,7 +35,9 @@ from transformers.core_model_loading import (
     rename_source_key,
 )
 
-from peft import PeftType
+from peft import PeftConfig, PeftType
+from peft.tuners.tuners_utils import _maybe_include_all_linear_layers, check_target_module_exists
+from peft.utils.constants import INCLUDE_LINEAR_LAYERS_SHORTHAND
 
 
 # https://github.com/huggingface/transformers/pull/45340#issuecomment-4222734042
@@ -162,7 +165,7 @@ class FlattenDims(ConversionOps):
 
     @property
     def reverse_op(self) -> ConversionOps:
-        raise NotImplementedError("Reversing flatteing operatio is not supported.")
+        raise NotImplementedError("Reversing flatteing operation is not supported.")
 
     def __repr__(self):
         return f"{self.__class__.__name__}(dims={self.dims})"
@@ -190,7 +193,7 @@ class PermuteDims(ConversionOps):
 
     @property
     def reverse_op(self) -> ConversionOps:
-        raise NotImplementedError("Reversing flatteing operatio is not supported yet.")
+        raise NotImplementedError("Reversing flatteing operation is not supported yet.")
 
     def __repr__(self):
         return f"{self.__class__.__name__}(dims={self.dims})"
@@ -349,13 +352,65 @@ _MOE_FUSED_TARGETS: dict[str, dict[str, set[str]]] = {
 }
 
 
-def _convert_peft_config_moe(peft_config, model_type: str) -> None:
+def _resolve_string_target_modules(
+    peft_config: PeftConfig, model: torch.nn.Module, target_module_mapping: dict[str, str]
+) -> set[str]:
+    """Resolve a string `target_modules` (a regex or `"all-linear"`) to the concrete leaf names it targets.
+
+    The keys of `target_module_mapping` are the v4 projection names that were renamed/fused on v5: the expert
+    projections (`gate_proj`, `up_proj`, `down_proj`) and the router `gate`. Resolving the string to leaf names up
+    front lets the list-based remap downstream stay unchanged for a regex and for `"all-linear"` alike.
+
+    `"all-linear"` matched every `nn.Linear` on the v4 model, so it targeted all of those projections; on v5 they are
+    no longer `nn.Linear` (the experts are fused into stacked parameters, the router became a custom module), so they
+    are added directly by name. A regex only targets what it spells out, so the experts -- which no longer exist as
+    real keys -- are recovered by probing each reconstructed v4 key against the pattern.
+    """
+    if peft_config.target_modules.lower() == INCLUDE_LINEAR_LAYERS_SHORTHAND:
+        # attention projections are still `nn.Linear` on v5, so resolve them by type; the experts and router were
+        # `nn.Linear` in v4 too but are now parameters / a custom module, so add their v4 names (the mapping keys).
+        resolved = _maybe_include_all_linear_layers(copy.copy(peft_config), model).target_modules
+        return {name.rsplit(".", 1)[-1] for name in resolved} | target_module_mapping.keys()
+
+    # regex: leaf names of the real module/parameter keys it matches (q/k/v_proj, the router module, `down_proj`, ...)
+    module_keys = [name for name, _ in model.named_modules()]
+    param_keys = [name for name, _ in model.named_parameters()]
+    matched = {
+        key.rsplit(".", 1)[-1]
+        for key in itertools.chain(module_keys, param_keys)
+        if check_target_module_exists(peft_config, key)
+    }
+
+    # The pre-fusion experts (`gate_proj`, `up_proj`) live inside the stacked `gate_up_proj` parameter, so a regex
+    # naming them matches no real key. Recover them from that parameter's container: e.g. for the parameter
+    # `model.layers.0.mlp.experts.gate_up_proj`, probe the reconstructed v4 key `model.layers.0.mlp.experts.gate_proj`.
+    new_name_to_containers: dict[str, set[str]] = {}
+    for name in param_keys:
+        container, _, leaf = name.rpartition(".")
+        new_name_to_containers.setdefault(leaf, set()).add(container)
+    for old_name, new_name in target_module_mapping.items():
+        if old_name in matched:
+            continue
+        # one hit suffices -- `matched` holds leaf names, so stop at the first container (layer) the regex matches
+        for container in new_name_to_containers.get(new_name, ()):
+            if check_target_module_exists(peft_config, f"{container}.{old_name}"):
+                matched.add(old_name)
+                break
+    return matched
+
+
+def _convert_peft_config_moe(peft_config: PeftConfig, model: torch.nn.Module) -> None:
     """
     In-place convert the PEFT config of MoE models whose architecture changed from transformers v4 to v5.
 
     Since the model architecture changed, the targets have to updated accordingly. Moreover, when weights are fused, it
     requires updating the rank and alpha values of those parameters.
+
+    A string `target_modules` (a regex, or `"all-linear"`) is resolved against the model up front (see
+    `_resolve_string_target_modules`), so the list-based remap below applies to lists, regexes and `"all-linear"`
+    alike.
     """
+    model_type = getattr(model.config, "model_type", None)
     base_model_type = _MODEL_TO_CONVERSION_PATTERN.get(model_type, None)
     if base_model_type is None:
         return
@@ -368,12 +423,19 @@ def _convert_peft_config_moe(peft_config, model_type: str) -> None:
     if not fused_targets:
         return
 
-    peft_config.target_parameters = set(peft_config.target_parameters or [])
-    peft_config.target_modules = set(peft_config.target_modules or [])
+    if isinstance(peft_config.target_modules, str):
+        resolved = _resolve_string_target_modules(peft_config, model, target_module_mapping)
+        if not resolved:
+            # nothing matched (e.g. bare "q_proj", invalid as a regex) -- leave it for the standard not-found error
+            return
+        peft_config.target_modules = resolved
+
     if not hasattr(peft_config, "rank_pattern") or peft_config.rank_pattern is None:
         peft_config.rank_pattern = {}
     if not hasattr(peft_config, "alpha_pattern") or peft_config.alpha_pattern is None:
         peft_config.alpha_pattern = {}
+    peft_config.target_parameters = set(peft_config.target_parameters or [])
+    peft_config.target_modules = set(peft_config.target_modules or [])
 
     new_target_parameters = peft_config.target_parameters.copy()
     remaining_target_modules = set()
@@ -441,7 +503,7 @@ def convert_peft_config_for_transformers(peft_config, model: torch.nn.Module, co
 
     model_type = getattr(model.config, "model_type", None)
     if get_checkpoint_conversion_mapping(model_type) is not None:
-        _convert_peft_config_moe(peft_config, model_type)
+        _convert_peft_config_moe(peft_config, model)
 
 
 def _convert_to_peft_serialized_keys(
@@ -508,7 +570,11 @@ def convert_peft_adapter_state_dict_for_transformers(
         # no architecture-level conversion registered for this model
         return adapter_state_dict
 
-    weight_conversions = get_model_conversion_mapping(model)
+    # pass the base model to get_model_conversion_mapping, as Transformers may not correctly deal with base_model.model
+    # prefix, see the introduction of scope_prefix in https://github.com/huggingface/transformers/pull/45661
+    base_model = model.get_base_model() if hasattr(model, "get_base_model") else model
+    prefix: str = getattr(model, "base_model_prefix", "")
+    weight_conversions = get_model_conversion_mapping(base_model)
     peft_weight_conversions = build_peft_weight_mapping(
         weight_conversions, adapter_name=adapter_name, peft_config=peft_config
     )
@@ -534,11 +600,31 @@ def convert_peft_adapter_state_dict_for_transformers(
 
     param_name_to_load: dict[str, WeightRenaming | WeightConverter] = {}
 
+    def str_rreplace(s, old, new, count=-1):
+        # this is the same as str.replace(...) but counting from the right side instead of left side
+        return new.join(s.rsplit(old, count))
+
     # Mirror transformers.core_model_loading flow: stable ordering + same rename logic.
     # https://github.com/huggingface/transformers/blob/1bd97f246318456c1b87cf8ef8dc043ec1a53fff/src/transformers/core_model_loading.py#L997
     state_items = sorted(lora_like_state_dict.items(), key=lambda kv: dot_natural_key(kv[0]))
     for original_key, tensor in state_items:
         renamed_key, source_pattern = rename_source_key(original_key, renamings, converters)
+        renamed_key_without_adapter_name = str_rreplace(renamed_key, f".{adapter_name}", "", count=1)
+        new_key_is_suffix_of_old_key = original_key.endswith(renamed_key_without_adapter_name)
+
+        # https://github.com/huggingface/transformers/pull/44396 introduced code to undo the renaming:
+        # https://github.com/huggingface/transformers/blob/027d1a97025295a1346c2eb5c361259e69eedfe7/src/transformers/core_model_loading.py#L1361-L1365
+        # This logic is copied here but with an extra caveat: We only undo the key renaming if it is due to a missing
+        # prefix, e.g. "text_model.foo.bar" => "foo.bar". This is why we check if the renamed key is a suffix of the
+        # original key. However, strictly checking for the suffix is not enough because the renamed key also introduces
+        # the adapter name, which is not in the original key. Therefore, we need to remove the adapter name first.
+        if (
+            (renamed_key not in adapter_state_dict)
+            and (original_key in adapter_state_dict)
+            and new_key_is_suffix_of_old_key
+        ):
+            # Key should probably not have been renamed but we might need the `prefix` to be added.
+            renamed_key, source_pattern = rename_source_key(original_key, [], [], prefix, adapter_state_dict)
 
         if source_pattern is not None:
             new_converter = copy.deepcopy(pattern_to_converter[source_pattern])

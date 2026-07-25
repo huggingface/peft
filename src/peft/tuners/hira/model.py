@@ -54,13 +54,13 @@ class HiraModel(BaseTuner):
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.
-        config ([`LoraConfig`]): The configuration of the Lora model.
+        config ([`HiraConfig`]): The configuration of the HiRA model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             Create empty adapter weights on meta device. Useful to speed up the loading process.
 
     Returns:
-        `torch.nn.Module`: The Lora model.
+        `torch.nn.Module`: The HiRA model.
 
     Example:
 
@@ -113,7 +113,7 @@ class HiraModel(BaseTuner):
 
     **Attributes**:
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
-        - **peft_config** ([`LoraConfig`]): The configuration of the Lora model.
+        - **peft_config** ([`HiraConfig`]): The configuration of the HiRA model.
     """
 
     prefix: str = "hira_"

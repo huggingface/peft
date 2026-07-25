@@ -108,13 +108,8 @@ class LoftQConfig:
     This is the sub-configuration class to store the configuration of a [`LoraModel`].
 
     Args:
-        bits_pattern (`dict`): The mapping from layer names or regexp expression to bits which are different from the
-            default bits specified by `bits`. For example, `{model.decoder.layers.0.encoder_attn.k_proj: 2`}.
-        bits (`int`): Quantization bits for LoftQ.
-        iter (`int`): Alternating iterations for LoftQ.
-        fake (`bool`): True: use fp16/fp32; used for first time to save weights. False: use bitsandbytes 4bit linear
-            models. weights can't be saved. Recommend to set to True, save the weights and load the saved weights in 4
-            bits.
+        loftq_bits (`int`): Quantization bits for LoftQ.
+        loftq_iter (`int`): Alternating iterations for LoftQ.
     """
 
     loftq_bits: int = field(default=4, metadata={"help": "Quantization bits for LoftQ"})
@@ -197,6 +192,10 @@ class BdLoraConfig:
             Modules where the LoRA-B is block-diagonal. Matches each pattern in the list against the module name via
             `pattern is in target_name`. Example: ['out_proj', 'down_proj']
         nblocks: Number of blocks in block-diagonal matrices
+        match_strict:
+            If set to true, requires each target_module to have either a block-diagonal LoRA-A or LoRA-B, and raises an
+            error otherwise. You can set this to False to mix LoRA and BD-LoRA training, e.g. if some layers in your
+            module do not benefit from BD-LoRA.
     """
 
     target_modules_bd_a: Optional[list[str]] = field(
@@ -216,14 +215,12 @@ class BdLoraConfig:
             "Example: ['out_proj', 'down_proj']"
         },
     )
-    nblocks: int = (
-        field(
-            default=1,
-            metadata={
-                "help": "Number of blocks each block-diagonal matrix has. If using BD-LoRA to speed up inference, "
-                "set it to be equal to the desired sharding degree during serving."
-            },
-        ),
+    nblocks: int = field(
+        default=1,
+        metadata={
+            "help": "Number of blocks each block-diagonal matrix has. If using BD-LoRA to speed up inference, "
+            "set it to be equal to the desired sharding degree during serving."
+        },
     )
     match_strict: bool = field(
         default=True,
@@ -408,7 +405,7 @@ class LoraConfig(PeftConfig):
             use the original default value of `lora_alpha/r`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
-        init_lora_weights (`bool` | `Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "loftq", "orthogonal"]`):
+        init_lora_weights (`bool` | `Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "loftq", "orthogonal", "mica"]`):
             How to initialize the weights of the adapter layers. Passing True (default) results in the default
             initialization from the reference implementation from Microsoft, with the LoRA B weight being set to 0.
             This means that without further training, the LoRA adapter will be a no-op. Setting the initialization to
@@ -428,9 +425,13 @@ class LoraConfig(PeftConfig):
             using SVD. Passing `'corda'` results in the initialization of <a
             href='https://huggingface.co/papers/2406.05223' >Context-Oriented Decomposition Adaptation</a>, which
             converges even more rapidly than PiSSA in Instruction-Previewed Mode, and preserves world knowledge better
-            than LoRA in Knowledge-Preserved Mode. Passing `"orthogonal"` results in LoRA A and B being intialized
+            than LoRA in Knowledge-Preserved Mode. Passing `"orthogonal"` results in LoRA A and B being initialized
             orthogonally; in this, it resembles `"olora"`, but the base weights are left untouched (requires `r` to be
-            even, only supported for linear layers for now).
+            even, only supported for linear layers for now). Passing `"mica"` results in the initialization of <a
+            href='https://arxiv.org/abs/2604.01694' >Minor Component Adaptation (MiCA)</a>, which initializes B from
+            the r left singular vectors of the base weight associated with the smallest singular values, sets A to
+            zero, and freezes B during training; only A is updated. Currently supported for linear and embedding
+            layers.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -468,6 +469,9 @@ class LoraConfig(PeftConfig):
         corda_config (`Optional[CordaConfig]`):
             The configuration of CorDA. If this is not None, then CorDA will be used to build the adapter layers. Also
             pass `init_lora_weights='corda'`.
+        lora_ga_config (`Optional[LoraGAConfig]`):
+            The configuration of LoRA-GA. If this is passed, then LoRA-GA will be used to initialize the adapter
+            layers. Also set `init_lora_weights='lora_ga'` in this case.
         use_dora (`bool`):
             Enable 'Weight-Decomposed Low-Rank Adaptation' (DoRA). This technique decomposes the updates of the weights
             into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is
@@ -489,6 +493,21 @@ class LoraConfig(PeftConfig):
             operations. Overall adapter inference speedups of an order of magnitude or more can occur on vLLM,
             depending on the length of the shared context. Note that merging is not possible due to the selective
             application of the weights.
+        use_qalora (`bool`):
+            It is only implemented in GPTQ for now. Enable <a
+            href='https://huggingface.co/papers/2309.14717'>Quantization-Aware Low-Rank Adaptation (QALoRA)</a>. This
+            technique combines quantization-aware training with LoRA to improve performance for quantized models. This
+            can improve the performance of LoRA, especially at low ranks. Right now, QALoRA only supports linear
+            layers.
+        qalora_group_size (`int`):
+            Group size parameter for QALoRA pooling, controlling the dimension reduction factor. Input dimensions are
+            pooled into groups of this size, reducing the computational cost. Higher values provide more compression
+            but may reduce model quality. This parameter determines how many original features are averaged together to
+            create one pooled feature. Only used when `use_qalora=True`.
+        monteclora_config (`Optional[MontecloraConfig]`):
+            The configuration of Monteclora (Monte Carlo Low-Rank Adaptation). If passed, Monteclora will be used to
+            add variational Monte Carlo sampling on top of the LoRA adapters. See `MontecloraConfig` for details on the
+            individual hyperparameters.
         layer_replication (`List[Tuple[int, int]]`):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
@@ -500,15 +519,23 @@ class LoraConfig(PeftConfig):
             disabled. The main use case for this is when the LoRA weights were extracted from fully fine-tuned
             parameters so the bias of those parameters can be taken into account.
         target_parameters (`List[str]`, *optional*)
-            List of parameter names or regex expression of the parameter names to replace with LoRA. This argument
-            behaves similarly to `target_modules`, except that the parameter name should be passed. Generally, you
-            should use `target_modules` to target the module (e.g. `nn.Linear`). However, in some circumstances, this
-            is not possible. E.g., in many mixture of expert (MoE) layers in HF Transformers, instead of using
-            `nn.Linear`, an `nn.Parameter` is used. PEFT normally overwrites the `forward` method for LoRA, but for
-            `nn.Parameter`, there is none. Therefore, to apply LoRA to that parameter, it needs to be targeted with
+            List of parameter names of the parameter names to replace with LoRA. This argument behaves similarly to
+            `target_modules`, except that the parameter name should be passed. Generally, you should use
+            `target_modules` to target the module (e.g. `nn.Linear`). However, in some circumstances, this is not
+            possible. E.g., in many mixture of expert (MoE) layers in HF Transformers, instead of using `nn.Linear`, an
+            `nn.Parameter` is used. PEFT normally overwrites the `forward` method for LoRA, but for `nn.Parameter`,
+            there is none. Therefore, to apply LoRA to that parameter, it needs to be targeted with
             `target_parameters`. As an example, for Llama4, you can pass:
             `target_parameters=['feed_forward.experts.gate_up_proj', 'feed_forward.experts.down_proj]`. Passing a
-            string for regex matching is not implemented yet.
+            string for regex matching is not implemented yet. Note that when the model is compiled and uses
+            `target_parameters`, re-compilation and/or graph breaks are expected. It is recommended not to use both at
+            the same time.
+        use_bdlora (`Optional[BdLoraConfig]`):
+            Enable BD-LoRA (Block-Diagonal LoRA) by providing a BdLoraConfig. This technique uses block-diagonal
+            matrices for LoRA-A or LoRA-B factors to enable faster multi-LoRA serving by eliminating communication
+            overheads in distributed settings.
+        arrow_config (`Optional[ArrowConfig]`):
+            The necessary config to apply arrow routing on the model.
         ensure_weight_tying (`bool`, *optional*)
             Whether to tie weights or not after peft initialization. This will ensure that the adapters added to the
             tied layers are also tied. This is only applicable for layers passed via `modules_to_save` and
@@ -521,7 +548,7 @@ class LoraConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "List of module names or regex expression of the module names to replace with LoRA. "
+                "List of module names of the module names to replace with LoRA. "
                 "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. "
                 "This can also be a wildcard 'all-linear' which matches all linear/Conv1D "
                 "(if the model is a PreTrainedModel, the output layer excluded). "
@@ -566,7 +593,17 @@ class LoraConfig(PeftConfig):
     )
     init_lora_weights: (
         bool
-        | Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "loftq", "orthogonal"]
+        | Literal[
+            "gaussian",
+            "eva",
+            "olora",
+            "pissa",
+            "pissa_niter_[number of iters]",
+            "corda",
+            "loftq",
+            "orthogonal",
+            "mica",
+        ]
     ) = field(
         default=True,
         metadata={
@@ -586,8 +623,14 @@ class LoraConfig(PeftConfig):
                 "nonnegative integer. "
                 "Passing `'corda'` results in CorDA initialization. "
                 "Pass `'loftq'` to use LoftQ initialization. "
-                "Pass `'orthogonal'` for orthogonal initialization of LoRA A and B."
+                "Pass `'orthogonal'` for orthogonal initialization of LoRA A and B. "
+                "Pass `'mica'` to use MiCA initialization, where B is set to the r left singular vectors of the "
+                "base weight associated with the smallest singular values, A is set to zero, and B is frozen during "
+                "training (only A is updated)."
             ),
+            # lora_variants: lists the string values (or prefixes) of init_lora_weights
+            # that activate a LoRA variant (e.g. "mica" activates MiCALinearVariant).
+            "lora_variants": ["mica"],
         },
     )
     layers_to_transform: Optional[Union[list[int], int]] = field(
@@ -709,7 +752,8 @@ class LoraConfig(PeftConfig):
                 "magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, "
                 "especially at low ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger"
                 "overhead than pure LoRA, so it is recommended to merge weights for inference."
-            )
+            ),
+            "is_lora_variant": True,
         },
     )
     velora_config: Optional[Union[VeloraConfig, dict]] = field(
@@ -718,7 +762,8 @@ class LoraConfig(PeftConfig):
             "help": (
                 "Enable VeLoRA as a LoRA variant by providing a VeloraConfig. VeLoRA swaps in a custom backward pass "
                 "for the LoRA A projection that stores compressed activations instead of the full input activations."
-            )
+            ),
+            "is_lora_variant": True,
         },
     )
     alora_invocation_tokens: Optional[list[int]] = field(
@@ -735,7 +780,8 @@ class LoraConfig(PeftConfig):
                 "operations. Overall adapter inference speedups of an order of magnitude or more can occur on vLLM, "
                 "depending on the length of the shared context. Note that merging is not possible due to the selective "
                 "application of the weights."
-            )
+            ),
+            "is_lora_variant": True,
         },
     )
     use_qalora: bool = field(
@@ -769,7 +815,8 @@ class LoraConfig(PeftConfig):
                 "The configuration of Monteclora (Monte Carlo Low-Rank Adaptation). If passed, Monteclora will be "
                 "used to add variational Monte Carlo sampling on top of the LoRA adapters. See `MontecloraConfig` "
                 "for details on the individual hyperparameters."
-            )
+            ),
+            "is_lora_variant": True,
         },
     )
     # Enables replicating layers in a model to expand it to a larger model.
@@ -817,7 +864,9 @@ class LoraConfig(PeftConfig):
                 "method for LoRA, but for `nn.Parameter`, there is none. Therefore, to apply LoRA to that parameter, "
                 "it needs to be targeted with `target_parameters`. As an example, for Llama4, you can pass: "
                 "`target_parameters=['feed_forward.experts.gate_up_proj', 'feed_forward.experts.down_proj]`. Passing a "
-                "string for regex matching is not implemented yet."
+                "string for regex matching is not implemented yet. Note that when the model is compiled and uses "
+                "`target_parameters`, re-compilation and/or graph breaks are expected. It is recommended not to use "
+                "both at the same time."
             )
         },
     )
@@ -827,11 +876,16 @@ class LoraConfig(PeftConfig):
             "help": (
                 "Enable BD-LoRA (Block-Diagonal LoRA) by providing a BdLoraConfig. This technique uses block-diagonal matrices for LoRA-A or LoRA-B "
                 "factors to enable faster multi-LoRA serving by eliminating communication overheads in distributed settings."
-            )
+            ),
+            "is_lora_variant": True,
         },
     )
     arrow_config: Optional[ArrowConfig] = field(
-        default=None, metadata={"help": "The necessary config to apply arrow routing on the model."}
+        default=None,
+        metadata={
+            "help": "The necessary config to apply arrow routing on the model.",
+            "is_lora_variant": True,
+        },
     )
     ensure_weight_tying: bool = field(
         default=False,
@@ -1021,7 +1075,7 @@ class MontecloraConfig:
     Monteclora introduces variational inference into LoRA by adding Monte Carlo sampling to the adapter weights.
 
     In practice you can think of Monteclora as adding stochastic, learned perturbations on top of the LoRA weights to
-    obtain a better-calibrated and better-regularized adapter. The argments below let you trade off stability,
+    obtain a better-calibrated and better-regularized adapter. The arguments below let you trade off stability,
     regularization strength, and compute cost.
 
     Args:

@@ -31,6 +31,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    OFTConfig,
     PeftMixedModel,
     PrefixTuningConfig,
     get_peft_model,
@@ -691,6 +692,17 @@ class TestMixedAdapterTypes(unittest.TestCase):
         # remove 2 params because we need to exclude "ranknum" for AdaLora trainable params
         assert trainable_params2 == (((params_lora + params_loha) + params_adalora) - 2)
         assert all_param2 == (((params_base + params_lora) + params_loha) + params_adalora)
+
+    def test_bias_only_honored_for_non_lora_tuner(self):
+        # `bias="<prefix>_only"` should be honored for any mixed-compatible tuner, not just LoRA. Previously the
+        # mixed model hardcoded `bias == "lora_only"` and raised `ValueError: Requested bias: oft_only, is not
+        # implemented.` for e.g. OFT, even though standalone OFT supports `bias="oft_only"`.
+        model = SimpleNet().eval().to(self.torch_device)
+        config = OFTConfig(target_modules=["lin1"], oft_block_size=8, bias="oft_only")
+        peft_model = get_peft_model(model, config, "adapter0", mixed=True)
+
+        trainable_biases = [n for n, p in peft_model.named_parameters() if n.endswith("bias") and p.requires_grad]
+        assert trainable_biases, "expected at least one trainable bias with bias='oft_only'"
 
     def test_incompatible_config_raises(self):
         model = SimpleNet().eval().to(self.torch_device)

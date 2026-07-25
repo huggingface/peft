@@ -24,7 +24,7 @@ from peft.utils import PeftType
 @dataclass
 class HiraConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a [`HiRAModel`].
+    This is the configuration class to store the configuration of a [`HiraModel`].
 
     Args:
         r (`int`):
@@ -49,6 +49,12 @@ class HiraConfig(PeftConfig):
             `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
+        init_weights (`bool` | `Literal["gaussian"]`):
+            How to initialize the weights of the HiRA layers. Passing True (default) results in the default
+            initialization, with the HiRA B weight being set to 0. This means that without further training, the HiRA
+            adapter will be a no-op. Setting the initialization to False leads to random initialization of HiRA A and
+            B, meaning that HiRA is not a no-op before training; this setting is intended for debugging purposes.
+            Passing `'gaussian'` results in Gaussian initialization scaled by the HiRA rank for linear and layers.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
