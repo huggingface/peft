@@ -26,7 +26,7 @@ from transformers import (
     LlavaForConditionalGeneration,
 )
 
-from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model
+from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model, get_peft_model_state_dict, set_peft_model_state_dict
 from peft.import_utils import is_transformers_ge_v5_1_0, is_transformers_ge_v5_6_0
 from peft.utils.other import (
     ModulesToSaveWrapper,
@@ -425,6 +425,62 @@ class TestModulesToSaveNameSubstringBug:
             param_merged = sd_merged[key]
             param_unmerged = sd_unmerged[key]
             assert torch.allclose(param_merged, param_unmerged)
+
+
+class TestModulesToSaveNameContainsPrefixBug:
+    """modules_to_save modules whose names contain a tuner prefix (e.g. ``lora_``)
+    were misclassified by unanchored substring matching during save/load (#3433).
+    """
+
+    def get_model(self):
+        class ModelWithLoraNamedModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.body = nn.Linear(2, 2, bias=False)
+                # Ordinary module whose name contains the LoRA parameter prefix.
+                self.lora_head = nn.Linear(2, 2, bias=False)
+
+            def forward(self, x):
+                return self.lora_head(self.body(x))
+
+        torch.manual_seed(0)
+        return ModelWithLoraNamedModule()
+
+    def test_save_load_round_trip_restores_weight(self):
+        config = LoraConfig(target_modules=["body"], modules_to_save=["lora_head"])
+        source = get_peft_model(self.get_model(), config)
+        with torch.no_grad():
+            source.base_model.model.lora_head.modules_to_save["default"].weight.fill_(7.0)
+
+        state_dict = get_peft_model_state_dict(source)
+        assert {k for k in state_dict if "lora_head" in k} == {"base_model.model.lora_head.weight"}
+
+        target = get_peft_model(self.get_model(), copy.deepcopy(config))
+        result = set_peft_model_state_dict(target, state_dict)
+
+        assert not [k for k in result.unexpected_keys if "lora_head" in k]
+        loaded_weight = target.base_model.model.lora_head.modules_to_save["default"].weight
+        assert torch.allclose(loaded_weight, torch.full_like(loaded_weight, 7.0))
+
+    def test_save_embedding_layers_does_not_include_similarly_named_module(self):
+        class ModelWithEmbedding(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.body = nn.Linear(2, 2)
+                self.embed_tokens = nn.Embedding(4, 2)
+                self.embed_tokens_extra = nn.Embedding(4, 2)
+
+            def get_input_embeddings(self):
+                return self.embed_tokens
+
+            def get_output_embeddings(self):
+                return None
+
+        model = get_peft_model(ModelWithEmbedding(), LoraConfig(target_modules=["body"]))
+        state_dict = get_peft_model_state_dict(model, save_embedding_layers=True)
+
+        assert "base_model.model.embed_tokens.weight" in state_dict
+        assert not any("embed_tokens_extra" in k for k in state_dict)
 
 
 class TestTargetingAuxiliaryTrainingWrapper:

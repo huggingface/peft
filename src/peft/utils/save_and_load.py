@@ -384,6 +384,11 @@ def get_peft_model_state_dict(
             module_state_dict = {
                 k.removeprefix(f"{name}."): v for k, v in state_dict.items() if k.startswith(f"{name}.")
             }
+            # Drop keys that were selected only because the module name contains a
+            # tuner prefix (e.g. "lora_head.weight" matched by prefix "lora_"). The
+            # wrapper then re-inserts the correct modules_to_save keys (#3433).
+            for stale_key in [k for k in to_return if k.startswith(f"{name}.")]:
+                del to_return[stale_key]
             to_return.update(
                 {f"{name}.{k}": v for k, v in module.adapter_state_dict(adapter_name, module_state_dict).items()}
             )
@@ -463,7 +468,12 @@ def get_peft_model_state_dict(
             if not embedding_is_targeted or has_valid_embedding_base_layer(layer):
                 embedding_module_name = get_embedding_layer_name(model, layer, embedding_is_targeted)
                 if embedding_module_name:
-                    to_return.update({k: v for k, v in state_dict.items() if embedding_module_name in k})
+                    # Anchor on the module path boundary so a sibling such as
+                    # `embed_tokens_extra` is not selected by a substring match
+                    # against `embed_tokens` (#3433 / embedding-key boundary).
+                    to_return.update(
+                        {k: v for k, v in state_dict.items() if k.startswith(f"{embedding_module_name}.")}
+                    )
     elif save_embedding_layers:
         warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
 
@@ -543,6 +553,13 @@ def _insert_adapter_name_into_state_dict(
             _, _, suffix = key.rpartition(parameter_prefix)
             if "." in suffix:
                 suffix_to_replace = ".".join(suffix.split(".")[1:])
+                # Adapter parameters are leaf attributes (e.g. "lora_A.weight"). A longer
+                # suffix means the prefix matched a module name that happens to contain
+                # the adapter prefix (e.g. "lora_head.weight" with prefix "lora_"), not
+                # a real adapter parameter — leave those keys untouched (#3433).
+                if "." in suffix_to_replace:
+                    peft_model_state_dict[key] = val
+                    continue
                 # only replace the substring if the key ends on the substring to avoid accidental replacement inside of
                 # the key if a module happens to have a name that contains the substring
                 key = re.sub(re.escape(suffix_to_replace) + r"$", f"{adapter_name}.{suffix_to_replace}", key)
