@@ -731,6 +731,11 @@ class LoraModel(BaseTuner):
             target_modules=new_target_modules,
             alpha_pattern={},
             rank_pattern={},
+            # The combined weights already have each source adapter's scaling baked in, so the
+            # merged adapter must apply a scaling of exactly 1 (== lora_alpha / r). use_rslora is
+            # copied from adapters[0]; if left True the scaling becomes lora_alpha / sqrt(r) ==
+            # sqrt(new_rank), which re-scales the merged delta incorrectly. Force it off here.
+            use_rslora=False,
         )
         self.inject_adapter(self.model, adapter_name)
 

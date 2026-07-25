@@ -4011,6 +4011,45 @@ class TestPeftCustomModel(PeftCommonTester):
                 dw_negative = module.get_delta_weight("merged_negative")
                 assert torch.allclose(dw_adapter1, -dw_negative, atol=1e-6)
 
+    def test_add_weighted_adapter_preserves_rslora_scaling(self):
+        # The merged adapter bakes each source adapter's scaling into its weights and is created
+        # with lora_alpha == r, so its own scaling must be exactly 1. If use_rslora leaks into the
+        # merged config, the scaling becomes lora_alpha / sqrt(r) == sqrt(new_rank), inflating the
+        # merged delta. Regression test for that.
+
+        # Single-adapter merge (coerced to "linear"): the identity merge must reproduce the source.
+        torch.manual_seed(42)
+        model = MLP()
+        config = LoraConfig(target_modules=["lin0"], r=8, lora_alpha=8, use_rslora=True, init_lora_weights=False)
+        model = get_peft_model(model, config, adapter_name="adapter1")
+        model.add_weighted_adapter(adapters=["adapter1"], weights=[1.0], adapter_name="merged")
+        assert model.peft_config["merged"].use_rslora is False
+        for module in model.modules():
+            if isinstance(module, lora.LoraLayer) and "merged" in module.scaling:
+                assert module.scaling["merged"] == 1.0
+                dw_source = module.get_delta_weight("adapter1")
+                dw_merged = module.get_delta_weight("merged")
+                assert torch.allclose(dw_source, dw_merged, atol=1e-5)
+
+        # Two-adapter merges genuinely exercise the cat / svd rank paths; the merged adapter's
+        # scaling must still be exactly 1 (i.e. use_rslora must not leak into the merged config).
+        for combination_type in ["cat", "svd"]:
+            torch.manual_seed(42)
+            model = MLP()
+            config = LoraConfig(target_modules=["lin0"], r=8, lora_alpha=8, use_rslora=True, init_lora_weights=False)
+            model = get_peft_model(model, config, adapter_name="a1")
+            model.add_adapter("a2", config)
+            merged_name = f"merged_{combination_type}"
+            model.add_weighted_adapter(
+                adapters=["a1", "a2"], weights=[1.0, 1.0], adapter_name=merged_name, combination_type=combination_type
+            )
+            assert model.peft_config[merged_name].use_rslora is False
+            for module in model.modules():
+                if isinstance(module, lora.LoraLayer) and merged_name in module.scaling:
+                    assert module.scaling[merged_name] == 1.0, (
+                        f"combination_type={combination_type}: merged adapter scaling != 1"
+                    )
+
     def test_add_weighted_adapter_subtraction_with_negative_weights(self):
         # Test that merging two identical adapters with weights [1.0, -1.0] results in approximately zero weights
         model = MLP()
