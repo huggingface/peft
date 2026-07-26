@@ -122,23 +122,24 @@ def onload_layer(layer):
         layer.base_layer._hf_hook.pre_forward(layer.base_layer)
         base_layer_offload = True
 
-    yield
+    try:
+        yield
+    finally:
+        for module in offloaded_modules:
+            module._hf_hook.post_forward(module, torch.tensor([]))
 
-    for module in offloaded_modules:
-        module._hf_hook.post_forward(module, torch.tensor([]))
-
-    if base_layer_offload:
-        # re-make weights map (must be on cpu to send params to the disk via memmap if disk offload)
-        layer.base_layer._hf_hook.weights_map = {
-            name: param.to("cpu") for name, param in named_module_tensors(layer.base_layer)
-        }
-        # offload weights map to disk if original device is the disk
-        if torch.device("meta") in layer.base_layer._hf_hook.original_devices.values() and hasattr(
-            layer.base_layer._hf_hook.weights_map, "dataset"
-        ):
-            # rewrite directory with merged weights
-            offload_state_dict(safetensors_filename, layer.base_layer._hf_hook.weights_map)
-        layer.base_layer._hf_hook.post_forward(layer.base_layer, torch.tensor([]))
+        if base_layer_offload:
+            # re-make weights map (must be on cpu to send params to the disk via memmap if disk offload)
+            layer.base_layer._hf_hook.weights_map = {
+                name: param.to("cpu") for name, param in named_module_tensors(layer.base_layer)
+            }
+            # offload weights map to disk if original device is the disk
+            if torch.device("meta") in layer.base_layer._hf_hook.original_devices.values() and hasattr(
+                layer.base_layer._hf_hook.weights_map, "dataset"
+            ):
+                # rewrite directory with merged weights
+                offload_state_dict(safetensors_filename, layer.base_layer._hf_hook.weights_map)
+            layer.base_layer._hf_hook.post_forward(layer.base_layer, torch.tensor([]))
 
 
 def _check_lora_target_modules_mamba(peft_config: PeftConfig, model: nn.Module, target_name: str):

@@ -147,7 +147,8 @@ class RoadModel(BaseTuner):
 
         # TODO LoRA also has hooks for beam search, ignore this for now
 
-        yield
-
-        for handle in hook_handles:
-            handle.remove()
+        try:
+            yield
+        finally:
+            for handle in hook_handles:
+                handle.remove()

@@ -554,10 +554,11 @@ class LoraModel(BaseTuner):
                         handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                         hook_handles.append(handle)
 
-        yield
-
-        for handle in hook_handles:
-            handle.remove()
+        try:
+            yield
+        finally:
+            for handle in hook_handles:
+                handle.remove()
 
     def _check_merge_allowed(self):
         """Verify that the configuration supports merging.
