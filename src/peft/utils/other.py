@@ -1419,13 +1419,23 @@ def id_tensor_storage(tensor: torch.Tensor) -> tuple[torch.device, int, int]:
     return tensor.device, unique_id, storage_size(tensor)
 
 
-def detached_copy(module: torch.nn.Module, share_buffers: bool = True) -> torch.nn.Module:
+def _is_bitsandbytes_param(param) -> bool:
+    cls_name = param.__class__.__name__
+    if cls_name in ("Params4bit", "Int8Params"):
+        return True
+
+    return hasattr(param, "quant_state") or hasattr(param, "SCB")
+
+
+def detached_copy(
+    module: torch.nn.Module, *, copy_on_write: bool = True, share_buffers: bool = True
+) -> torch.nn.Module:
     """
     Create a copy of a module that shares the parameters, and optionally the buffers, of the original module.
 
-    The returned module is a fully independent module tree consisting of new module instances, whose parameters,
-    however, are the very same objects as those of the original module. The same applies to the quantization state
-    attached to quantized parameters (e.g. from bitsandbytes) and, by default, to the buffers.
+    The returned module is a fully independent module tree consisting of new module instances, whose underlying data is
+    the same as that of the original module. The same applies to the quantization state attached to quantized
+    parameters (e.g. from bitsandbytes) and, by default, to the buffers.
 
     Thus the copy requires practically no extra memory and can be modified structurally. This is useful because
     normally, creating a PEFT adapter mutates the base model in-place, e.g. by injecting LoRA layers when using LoRA.
@@ -1433,10 +1443,18 @@ def detached_copy(module: torch.nn.Module, share_buffers: bool = True) -> torch.
 
     Caveats:
 
-    - Since the parameters are shared, in-place modifications of them affect the original module and all of its copies
-      alike. This concerns, for instance, merging PEFT adapters into the base weights, casting the dtype or moving to a
-      different device (both work by assigning to `param.data`), and changing the `requires_grad` attribute. In
-      particular, creating a PEFT model from the copy freezes the base weights of the original module as well.
+    - By default, the model is copied with copy-on-write. This means that if the base weights are modified, a new copy
+      is created, requiring extra memory. As an example, if you merge the LoRA weights into the base weights, the
+      underlying tensors are cloned to prevent the original model from being mutated.
+    - This behavior can be disabled by passing `copy_on_write=False`. Since in that case, the parameters are shared,
+      in-place modifications of them affect the original module and all of its copies alike. This concerns, for
+      instance, merging PEFT adapters into the base weights, casting the dtype or moving to a different device (both
+      work by assigning to `param.data`), and changing the `requires_grad` attribute. In particular, creating a PEFT
+      model from the copy freezes the base weights of the original module as well.
+    - Copy-on-write does not work for weights that are memory-mapped from a checkpoint. This happens, for instance,
+      when loading a model with safetenors in its storage dtype on CPU (safetensors is used by Transformers). In that
+      case, the tensor is fully cloned. Since the OS can reclaim the memory from the memory-mapped tensors, this
+      should, however, not become a memory bottleneck.
     - By default, buffers are shared in the same way, meaning that e.g. the running statistics of batch norm layers
       recorded while training one copy are seen by the original module and all other copies. Pass `share_buffers=False`
       to give the copy its own independent buffers (initialized to the current values), at the cost of the memory they
@@ -1450,6 +1468,10 @@ def detached_copy(module: torch.nn.Module, share_buffers: bool = True) -> torch.
     Args:
         module (`torch.nn.Module`):
             The module to copy.
+        copy_on_write (`bool`, *optional*, defaults to `True`):
+            Creates a copy of the tensor when there is a write operation to prevent mutating the original tensor. This
+            can lead to memory requirement doubling if each parameter is touched. Use this option to prevent the
+            tensors of the original model to be modified, e.g. because you merge an adapter into the copied model.
         share_buffers (`bool`, *optional*, defaults to `True`):
             Whether the buffers of the module should be shared as well. Set this to `False` if the copies should not
             influence each other through their buffers, e.g. through the running statistics of batch norm layers, which
@@ -1474,7 +1496,25 @@ def detached_copy(module: torch.nn.Module, share_buffers: bool = True) -> torch.
     # inside the copy and across the copy and the original module.
     memo = {}
     for param in module.parameters():
-        memo[id(param)] = param
+        if not copy_on_write:
+            memo[id(param)] = param
+        elif _is_bitsandbytes_param(param):
+            # bitsandbytes parameters cannot be lazy-cloned because that would lose their extra state, but that is fine
+            # as they are basically immutable anyways (cannot be trained, merge creates new tensors instead of mutating,
+            # etc.)
+            memo[id(param)] = param
+        elif param.device.type != "cpu":
+            # detaching is needed or else we can't set requires_grad
+            memo[id(param)] = torch.nn.Parameter(param.detach()._lazy_clone(), requires_grad=param.requires_grad)
+        else:
+            # If the model was loaded with safetensors on CPU in its native dtype, the tensors are actually
+            # memomory-mapped, which prevents calling _lazy_clone. In that case, we create a full clone of the tensor.
+            # This is fine, because the memory of the original mmapped files will be reclaimed if needed.
+            try:
+                memo[id(param)] = param.detach()._lazy_clone()
+            except RuntimeError:
+                memo[id(param)] = torch.nn.Parameter(param.detach().clone(), requires_grad=param.requires_grad)
+
         # Quantization libraries like bitsandbytes store the quantization state as an attribute of the parameter and
         # possibly also as an attribute of the module, referencing the same object. The state on the parameter is
         # implicitly shared, as the parameter itself is not copied, but the reference on the module is not. Add the

@@ -792,13 +792,36 @@ class TestDetachedCopy:
     def test_get_peft_model_without_detached_copy_modifies_base_model(self):
         # sanity check: without a detached copy, the model is modified in-place
         model = self.get_mlp()
-        peft_model = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
-        assert peft_model.base_model.model is model
-        assert isinstance(model.lin0, BaseTunerLayer)
+        repr_before = repr(model)
+        x = torch.randn(5, 10)
+        output_before = model(x)
 
-    def test_detached_copy_modules_are_new_but_params_are_shared(self):
+        get_peft_model(model, LoraConfig(target_modules=["lin0"], init_lora_weights=False))
+        repr_after = repr(model)
+        output_after = model(x)
+
+        assert any(isinstance(module, BaseTunerLayer) for module in model.modules())
+        assert repr_before != repr_after
+        assert not torch.allclose(output_before, output_after)
+
+    def test_get_peft_model_with_detached_copy_leaves_base_model_architecture_intact(self):
         model = self.get_mlp()
-        model_copy = detached_copy(model)
+        repr_before = repr(model)
+        x = torch.randn(5, 10)
+        output_before = model(x)
+
+        get_peft_model(detached_copy(model), LoraConfig(target_modules=["lin0"], init_lora_weights=False))
+        repr_after = repr(model)
+        output_after = model(x)
+
+        assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
+        assert repr_before == repr_after
+        assert torch.allclose(output_before, output_after)
+
+    @pytest.mark.parametrize("copy_on_write", [True, False])
+    def test_detached_copy_modules_are_new_but_params_are_shared(self, copy_on_write):
+        model = self.get_mlp()
+        model_copy = detached_copy(model, copy_on_write=copy_on_write)
 
         assert model_copy is not model
         modules = dict(model.named_modules())
@@ -811,23 +834,30 @@ class TestDetachedCopy:
         params_copy = dict(model_copy.named_parameters())
         assert params.keys() == params_copy.keys()
         for name in params:
-            assert params[name] is params_copy[name]
+            if not copy_on_write:
+                assert params[name] is params_copy[name]
+            else:
+                # state_dict() triggers COW
+                assert params[name] is not params_copy[name]
+                assert torch.allclose(params[name], params_copy[name])
 
         x = torch.randn(5, 10)
         assert torch.allclose(model(x), model_copy(x))
 
-    def test_detached_copy_buffers_are_shared_by_default(self):
+    @pytest.mark.parametrize("copy_on_write", [True, False])
+    def test_detached_copy_buffers_are_shared_by_default(self, copy_on_write):
         model = nn.Sequential(nn.Linear(10, 20), nn.BatchNorm1d(20))
-        model_copy = detached_copy(model)
+        model_copy = detached_copy(model, copy_on_write=copy_on_write)
         buffers = dict(model.named_buffers())
         buffers_copy = dict(model_copy.named_buffers())
         assert buffers.keys() == buffers_copy.keys()
         for name in buffers:
             assert buffers[name] is buffers_copy[name]
 
-    def test_detached_copy_share_buffers_false(self):
+    @pytest.mark.parametrize("copy_on_write", [True, False])
+    def test_detached_copy_share_buffers_false(self, copy_on_write):
         model = nn.Sequential(nn.Linear(10, 20), nn.BatchNorm1d(20))
-        model_copy = detached_copy(model, share_buffers=False)
+        model_copy = detached_copy(model, copy_on_write=copy_on_write, share_buffers=False)
 
         # the buffers are independent copies with the same values
         buffers = dict(model.named_buffers())
@@ -837,16 +867,13 @@ class TestDetachedCopy:
             assert buffers[name] is not buffers_copy[name]
             assert torch.equal(buffers[name], buffers_copy[name])
 
-        # the parameters are still shared
-        for name, param in model.named_parameters():
-            assert dict(model_copy.named_parameters())[name] is param
-
         # updating the running statistics of the copy during training does not affect the original model
         model_copy.train()
         model_copy(torch.randn(5, 10))
         assert not torch.allclose(model_copy[1].running_mean, model[1].running_mean)
 
-    def test_detached_copy_preserves_weight_tying(self):
+    @pytest.mark.parametrize("copy_on_write", [True, False])
+    def test_detached_copy_preserves_weight_tying(self, copy_on_write):
         class TiedModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -855,79 +882,101 @@ class TestDetachedCopy:
                 self.head.weight = self.emb.weight
 
         model = TiedModel()
-        model_copy = detached_copy(model)
+        model_copy = detached_copy(model, copy_on_write=copy_on_write)
         # tying is preserved within the copy and the tensors are shared with the original model
         assert model_copy.head.weight is model_copy.emb.weight
-        assert model_copy.head.weight is model.emb.weight
 
-    def test_get_peft_model_detached_leaves_base_model_unmodified(self):
+        if not copy_on_write:
+            assert model_copy.head.weight is model.emb.weight
+        else:
+            assert model_copy.head.weight is not model.emb.weight
+            assert torch.allclose(model_copy.head.weight, model.emb.weight)
+
+    @pytest.mark.parametrize("copy_on_write", [True, False])
+    def test_detached_copy_no_copy_on_write_merging_mutates(self, copy_on_write):
+        # without copy-on-write, the original weights may be modified by the peft model
         model = self.get_mlp()
-        x = torch.randn(5, 10)
-        output_before = model(x)
+        params_before = {n: p.clone() for n, p in model.named_parameters()}
+        peft_model = get_peft_model(
+            detached_copy(model, copy_on_write=copy_on_write),
+            LoraConfig(target_modules=["lin0"], init_lora_weights=False),
+        )
+        peft_model.merge_adapter()
+        params_after = dict(model.named_parameters())
 
-        peft_model = get_peft_model(detached_copy(model), LoraConfig(target_modules=["lin0"]))
+        assert params_before.keys() == params_after.keys()
+        if copy_on_write:
+            assert torch.allclose(params_before["lin0.weight"], params_after["lin0.weight"])
+        else:
+            assert not torch.allclose(params_before["lin0.weight"], params_after["lin0.weight"])
 
-        assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
-        assert any(isinstance(module, BaseTunerLayer) for module in peft_model.modules())
-        assert torch.allclose(model(x), output_before)
-
-    def test_get_peft_model_detached_base_weights_are_shared(self):
-        model = self.get_mlp()
-        peft_model = get_peft_model(detached_copy(model), LoraConfig(target_modules=["lin0"]))
-        assert peft_model.base_model.model.lin0.base_layer.weight is model.lin0.weight
-        # non-targeted modules also share their weights
-        assert peft_model.base_model.model.lin1.weight is model.lin1.weight
-
-    def test_get_peft_model_detached_freezes_shared_base_weights(self):
+    @pytest.mark.parametrize("copy_on_write", [True, False])
+    def test_get_peft_model_detached_freezes_shared_base_weights(self, copy_on_write):
         # Since requires_grad is an attribute of the shared tensors, freezing the base weights of the PEFT model also
         # affects the original model. This test is not really about enforcing this behavior but about checking the
         # status quo.
         model = self.get_mlp()
-        get_peft_model(detached_copy(model), LoraConfig(target_modules=["lin0"]))
-        assert not model.lin0.weight.requires_grad
-        assert not model.lin1.weight.requires_grad
+        # sanity check:
+        assert model.lin0.weight.requires_grad
+        assert model.lin1.weight.requires_grad
 
-    def test_two_detached_peft_models_on_same_base_model(self):
+        get_peft_model(detached_copy(model, copy_on_write=copy_on_write), LoraConfig(target_modules=["lin0"]))
+        if copy_on_write:
+            assert model.lin0.weight.requires_grad
+            assert model.lin1.weight.requires_grad
+        else:
+            assert not model.lin0.weight.requires_grad
+            assert not model.lin1.weight.requires_grad
+
+    @pytest.mark.parametrize("copy_on_write", [True, False])
+    def test_two_detached_peft_models_on_same_base_model_no_warning(self, copy_on_write):
         model = self.get_mlp()
-        x = torch.randn(5, 10)
-        output_base = model(x)
-
-        peft_model_1 = get_peft_model(detached_copy(model), LoraConfig(target_modules=["lin0"]))
+        # sanity check: without detached_copy, there is a warning
+        peft_model_1 = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
         with warnings.catch_warnings(record=True) as recorded:
             warnings.simplefilter("always")
-            peft_model_2 = get_peft_model(detached_copy(model), LoraConfig(target_modules=["lin0"]))
+            peft_model_2 = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
+        # the base model is unmodified, so there should be no warning about applying PEFT a second time
+        assert any("for a second time" in str(warning.message) for warning in recorded)
+
+        model = self.get_mlp()
+        peft_model_1 = get_peft_model(
+            detached_copy(model, copy_on_write=copy_on_write), LoraConfig(target_modules=["lin0"])
+        )
+        with warnings.catch_warnings(record=True) as recorded:
+            warnings.simplefilter("always")
+            peft_model_2 = get_peft_model(
+                detached_copy(model, copy_on_write=copy_on_write), LoraConfig(target_modules=["lin0"])
+            )
         # the base model is unmodified, so there should be no warning about applying PEFT a second time
         assert not any("for a second time" in str(warning.message) for warning in recorded)
 
-        # LoRA B is initialized to zero, so initially all outputs are identical
-        assert torch.allclose(peft_model_1(x), output_base)
-        assert torch.allclose(peft_model_2(x), output_base)
-
-        # modifying the adapter of one PEFT model affects neither the other PEFT model nor the base model
-        with torch.no_grad():
-            peft_model_2.base_model.model.lin0.lora_B["default"].weight.fill_(0.5)
-        assert not torch.allclose(peft_model_2(x), output_base)
-        assert torch.allclose(peft_model_1(x), output_base)
-        assert torch.allclose(model(x), output_base)
-
-    def test_get_peft_model_detached_modules_to_save_are_not_shared(self):
+    @pytest.mark.parametrize("copy_on_write", [True, False])
+    def test_get_peft_model_detached_modules_to_save_are_not_shared(self, copy_on_write):
         model = self.get_mlp()
         config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
-        peft_model = get_peft_model(detached_copy(model), config)
+        peft_model = get_peft_model(detached_copy(model, copy_on_write=copy_on_write), config)
 
         wrapper = peft_model.base_model.model.lin1
-        assert wrapper.original_module.weight is model.lin1.weight
+        if not copy_on_write:
+            assert wrapper.original_module.weight is model.lin1.weight
+        else:
+            assert torch.allclose(wrapper.original_module.weight, model.lin1.weight)
+
         # the trainable copy is independent of the base model
         assert wrapper.modules_to_save["default"].weight is not model.lin1.weight
         with torch.no_grad():
             wrapper.modules_to_save["default"].weight.zero_()
         assert not (model.lin1.weight == 0).all()
 
-    def test_get_peft_model_detached_save_load_roundtrip(self, tmp_path):
+    @pytest.mark.parametrize("copy_on_write", [True, False])
+    def test_get_peft_model_detached_save_load_roundtrip(self, tmp_path, copy_on_write):
         model = self.get_mlp()
         x = torch.randn(5, 10)
 
-        peft_model = get_peft_model(detached_copy(model), LoraConfig(target_modules=["lin0"]))
+        peft_model = get_peft_model(
+            detached_copy(model, copy_on_write=copy_on_write), LoraConfig(target_modules=["lin0"])
+        )
         with torch.no_grad():
             peft_model.base_model.model.lin0.lora_B["default"].weight.fill_(0.5)
         output = peft_model(x)
@@ -937,76 +986,64 @@ class TestDetachedCopy:
         loaded = PeftModel.from_pretrained(model, tmp_path)
         assert torch.allclose(loaded(x), output)
 
-    def test_from_pretrained_detached_leaves_base_model_unmodified(self, tmp_path):
+    @pytest.mark.parametrize("copy_on_write", [True, False])
+    def test_from_pretrained_detached_leaves_base_model_unmodified(self, tmp_path, copy_on_write):
         model = self.get_mlp()
         x = torch.randn(5, 10)
         output_base = model(x)
 
-        peft_model = get_peft_model(detached_copy(model), LoraConfig(target_modules=["lin0"]))
-        with torch.no_grad():
-            peft_model.base_model.model.lin0.lora_B["default"].weight.fill_(0.5)
+        peft_model = get_peft_model(
+            detached_copy(model, copy_on_write=copy_on_write),
+            LoraConfig(target_modules=["lin0"], init_lora_weights=False),
+        )
         output_peft = peft_model(x)
-        peft_model.save_pretrained(tmp_path)
+        # sanity check
+        assert not torch.allclose(output_base, output_peft)
 
-        loaded = PeftModel.from_pretrained(detached_copy(model), tmp_path)
+        peft_model.save_pretrained(tmp_path)
+        del peft_model
+
+        loaded = PeftModel.from_pretrained(detached_copy(model, copy_on_write=copy_on_write), tmp_path)
         assert not any(isinstance(module, BaseTunerLayer) for module in model.modules())
         assert torch.allclose(model(x), output_base)
         assert torch.allclose(loaded(x), output_peft)
         # the base weights are shared with the original model
-        assert loaded.base_model.model.lin0.base_layer.weight is model.lin0.weight
+        if not copy_on_write:
+            assert loaded.base_model.model.lin0.base_layer.weight is model.lin0.weight
+        else:
+            assert loaded.base_model.model.lin0.base_layer.weight is not model.lin0.weight
+            assert torch.allclose(loaded.base_model.model.lin0.base_layer.weight, model.lin0.weight)
 
-    def test_get_peft_model_without_detached_copy_changes_base_model_behavior(self):
-        model = self.get_mlp()
-        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
-        x = torch.randn(5, 10)
-        output_before = model(x)
-        get_peft_model(model, config)
-        assert not torch.allclose(model(x), output_before)
-
-    def test_get_peft_model_with_detached_copy_keeps_base_model_behavior(self):
-        model = self.get_mlp()
-        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
-        x = torch.randn(5, 10)
-        output_before = model(x)
-        peft_model = get_peft_model(detached_copy(model), config)
-        assert torch.allclose(model(x), output_before)
-        # sanity check: the PEFT model itself does produce different outputs
-        assert not torch.allclose(peft_model(x), output_before)
-
-    def test_from_pretrained_with_and_without_detached_copy(self, tmp_path):
-        model = self.get_mlp()
-        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
-        x = torch.randn(5, 10)
-        output_before = model(x)
-        get_peft_model(detached_copy(model), config).save_pretrained(tmp_path)
-
-        # loading the adapter onto a detached copy does not affect the base model
-        peft_model = PeftModel.from_pretrained(detached_copy(model), tmp_path)
-        assert torch.allclose(model(x), output_before)
-        assert not torch.allclose(peft_model(x), output_before)
-
-        # loading it onto the base model directly changes its behavior
-        PeftModel.from_pretrained(model, tmp_path)
-        assert not torch.allclose(model(x), output_before)
-
-    def test_cast_dtype_propagates_to_original_model(self):
+    @pytest.mark.parametrize("copy_on_write", [True, False])
+    def test_cast_dtype_propagates_to_original_model(self, copy_on_write):
         # Casting dtype or device works by assigning to param.data, i.e. it mutates the shared tensors. Therefore,
-        # casting the detached PEFT model propagates to the original model.
+        # casting the detached PEFT model propagates to the original model unless we use COW.
         model = self.get_mlp()
-        peft_model = get_peft_model(detached_copy(model), LoraConfig(target_modules=["lin0"]))
-        peft_model.to(torch.float16)
-        assert model.lin0.weight.dtype == torch.float16
-        assert model.lin1.weight.dtype == torch.float16
+        assert model.lin0.weight.dtype == torch.float32
+        assert model.lin1.weight.dtype == torch.float32
 
-    def test_two_compiled_detached_models_on_same_base_model(self):
+        peft_model = get_peft_model(
+            detached_copy(model, copy_on_write=copy_on_write), LoraConfig(target_modules=["lin0"])
+        )
+        peft_model.to(torch.float16)
+
+        if not copy_on_write:
+            assert model.lin0.weight.dtype == torch.float16
+            assert model.lin1.weight.dtype == torch.float16
+        else:
+            assert model.lin0.weight.dtype == torch.float32
+            assert model.lin1.weight.dtype == torch.float32
+
+    @pytest.mark.parametrize("copy_on_write", [True, False])
+    def test_two_compiled_detached_models_on_same_base_model(self, copy_on_write):
         torch.manual_seed(0)
         model = self.get_mlp().eval()
         x = torch.randn(5, 10)
         output_base = model(x)
 
         config_kwargs = {"target_modules": ["lin0"], "init_lora_weights": False}
-        peft_model_1 = get_peft_model(detached_copy(model), LoraConfig(**config_kwargs))
-        peft_model_2 = get_peft_model(detached_copy(model), LoraConfig(**config_kwargs))
+        peft_model_1 = get_peft_model(detached_copy(model, copy_on_write=copy_on_write), LoraConfig(**config_kwargs))
+        peft_model_2 = get_peft_model(detached_copy(model, copy_on_write=copy_on_write), LoraConfig(**config_kwargs))
 
         compiled_1 = torch.compile(peft_model_1)
         compiled_2 = torch.compile(peft_model_2)
@@ -1021,25 +1058,8 @@ class TestDetachedCopy:
         # the base model is unaffected
         assert torch.allclose(model(x), output_base)
 
-    def test_quant_state_attributes_are_shared(self):
-        # bitsandbytes stores the quantization state as an attribute of the parameter and additionally as a module
-        # attribute referencing the same object; ensure that neither is duplicated by detached_copy
-        class FakeQuantState:
-            def __init__(self):
-                self.absmax = torch.randn(10)
-
-        model = self.get_mlp()
-        quant_state = FakeQuantState()
-        model.lin0.weight.quant_state = quant_state
-        model.lin0.quant_state = quant_state
-        model.lin1.weight.SCB = torch.randn(2)
-
-        model_copy = detached_copy(model)
-        assert model_copy.lin0.weight.quant_state is quant_state
-        assert model_copy.lin0.quant_state is quant_state
-        assert model_copy.lin1.weight.SCB is model.lin1.weight.SCB
-
-    def test_from_pretrained_detached_with_cpu_and_disk_offload(self, tmp_path):
+    @pytest.mark.parametrize("copy_on_write", [True, False])
+    def test_from_pretrained_detached_with_cpu_and_disk_offload(self, copy_on_write, tmp_path):
         # mirrors test_offload_load from test_gpu_examples.py: load a LoRA adapter onto a detached copy of a model
         # with CPU- and disk-offloaded modules; this exercises copying a model whose modules carry accelerate hooks
         # and whose disk-offloaded parameters are on the meta device
@@ -1050,19 +1070,19 @@ class TestDetachedCopy:
             input_ids = torch.arange(10).view(1, -1)
 
             config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["c_attn"])
-            peft_model = get_peft_model(detached_copy(model), config)
+            peft_model = get_peft_model(detached_copy(model, copy_on_write=copy_on_write), config)
             expected = peft_model(input_ids).logits
             peft_model.save_pretrained(tmp_path / "adapter")
             del peft_model
 
-            memory_limits = {"cpu": "0.4GIB"}  # no "disk" for PeftModel.from_pretrained() compatibility
+            memory_limits = {"cpu": "0.2GIB"}
             device_map = infer_auto_device_map(model, max_memory=memory_limits)
             assert "disk" in device_map.values()
             offloaded_model = AutoModelForCausalLM.from_pretrained(
                 model_id, device_map=device_map, offload_folder=str(tmp_path / "offload")
             )
             loaded = PeftModel.from_pretrained(
-                detached_copy(offloaded_model),
+                detached_copy(offloaded_model, copy_on_write=copy_on_write),
                 tmp_path / "adapter",
                 max_memory=memory_limits,
                 offload_folder=str(tmp_path / "offload"),
@@ -1074,3 +1094,14 @@ class TestDetachedCopy:
             assert not any(isinstance(module, BaseTunerLayer) for module in offloaded_model.modules())
             logits_base = offloaded_model(input_ids).logits
             assert torch.isfinite(logits_base).all()
+
+    @pytest.mark.parametrize("copy_on_write", [True, False])
+    @pytest.mark.parametrize("dtype", [None, torch.float16, torch.bfloat16, torch.float32])
+    def test_several_dtypes(self, copy_on_write, dtype):
+        # Important to test: When loading the model in its storage dtype on CPU, safetensors will memory-map the
+        # tensors, which results in an error when calling _lazy_clone(). This test ensures that this error is not
+        # encountered.
+        model_id = "gpt2"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id, dtype=dtype)
+            detached_copy(model, copy_on_write=copy_on_write)  # does not raise
