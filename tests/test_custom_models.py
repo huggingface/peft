@@ -1828,6 +1828,16 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
     ),
 ]
 
+SEQUENTIAL_MERGE_TEST_CASES = []
+for test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2 in MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES:
+    if not test_name.endswith(" Same"):
+        continue
+    # QR is used above to amplify DEFT adapter outputs for a different assertion; use its default variant here.
+    if tuner_method == "deft":
+        config_kwargs_1 = {**config_kwargs_1, "decomposition_method": "relu"}
+        config_kwargs_2 = {**config_kwargs_2, "decomposition_method": "relu"}
+    SEQUENTIAL_MERGE_TEST_CASES.append((test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2))
+
 
 def _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs):
     if (config_cls == LoraConfig) and config_kwargs.get("target_parameters"):
@@ -4714,6 +4724,60 @@ class TestMultipleActiveAdapters:
             disabled_adapter_output = peft_model(**X)
 
         assert torch.allclose(disabled_adapter_output, base_output, atol=1e-4)
+
+    @pytest.mark.parametrize(
+        "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", SEQUENTIAL_MERGE_TEST_CASES
+    )
+    def test_sequential_merge_matches_batch_merge(
+        self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
+    ):
+        _skip_if_merging_not_supported(test_name, config_cls, config_kwargs_1)
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
+
+        torch.manual_seed(0)
+        model = self.resolve_model_cls(tuner_method).to(self.torch_device).eval()
+        config_1 = config_cls(**config_kwargs_1)
+        config_2 = config_cls(**config_kwargs_2)
+        model = get_peft_model(model, config_1, adapter_name="adapter_1").eval()
+        model.add_adapter("adapter_2", config_2)
+        sequential_model = copy.deepcopy(model)
+        X = self.prepare_inputs_for_testing()
+
+        model.merge_adapter(["adapter_1", "adapter_2"])
+        batch_output = model(**X)
+
+        sequential_model.merge_adapter(["adapter_1"])
+        sequential_model.merge_adapter(["adapter_2"])
+        sequential_output = sequential_model(**X)
+
+        assert torch.allclose(sequential_output, batch_output, atol=1e-3, rtol=1e-3)
+
+    @pytest.mark.parametrize(
+        "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", SEQUENTIAL_MERGE_TEST_CASES
+    )
+    def test_unmerge_after_sequential_merge_restores_base(
+        self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
+    ):
+        _skip_if_merging_not_supported(test_name, config_cls, config_kwargs_1)
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
+
+        torch.manual_seed(0)
+        model = self.resolve_model_cls(tuner_method).to(self.torch_device).eval()
+        X = self.prepare_inputs_for_testing()
+        base_output = model(**X)
+        config_1 = config_cls(**config_kwargs_1)
+        config_2 = config_cls(**config_kwargs_2)
+        model = get_peft_model(model, config_1, adapter_name="adapter_1").eval()
+        model.add_adapter("adapter_2", config_2)
+
+        model.merge_adapter(["adapter_1"])
+        model.merge_adapter(["adapter_2"])
+        model.unmerge_adapter()
+
+        with model.disable_adapter():
+            unmerged_output = model(**X)
+
+        assert torch.allclose(unmerged_output, base_output, atol=1e-3, rtol=1e-3)
 
     @pytest.mark.parametrize(
         "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES

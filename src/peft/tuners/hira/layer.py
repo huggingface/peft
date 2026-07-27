@@ -76,6 +76,42 @@ class HiraLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
+    def _merge_adapter_weights(
+        self, safe_merge: bool, adapter_names: Optional[list[str]], available_adapters: nn.ParameterDict
+    ) -> None:
+        adapter_names = check_adapters_to_merge(self, adapter_names)
+        adapter_names = [name for name in adapter_names if name in available_adapters]
+        if not adapter_names:
+            return
+
+        weight = self.get_base_layer().weight
+        if not self.merged_adapters:
+            self._caches["base_weight_before_merge"] = weight.data.detach().clone().cpu()
+
+        merged_delta = torch.zeros_like(weight.data)
+        for active_adapter in [*self.merged_adapters, *adapter_names]:
+            merged_delta += self.get_delta_weight(active_adapter).to(weight.dtype)
+
+        base_weight = self._caches["base_weight_before_merge"].to(device=weight.device, dtype=weight.dtype)
+        merged_weight = base_weight * (1 + merged_delta)
+        if safe_merge and not torch.isfinite(merged_weight).all():
+            raise ValueError(
+                f"NaNs detected in the merged weights. The adapter {','.join(adapter_names)} seems to be broken"
+            )
+
+        weight.data.copy_(merged_weight)
+        self.merged_adapters.extend(adapter_names)
+
+    def _unmerge_adapter_weights(self) -> None:
+        if not self.merged:
+            warnings.warn("Already unmerged. Nothing to do.")
+            return
+
+        weight = self.get_base_layer().weight
+        base_weight = self._caches.pop("base_weight_before_merge")
+        weight.data.copy_(base_weight.to(device=weight.device, dtype=weight.dtype))
+        self.merged_adapters.clear()
+
     def update_layer(
         self,
         adapter_name,
@@ -160,57 +196,13 @@ class Linear(nn.Module, HiraLayer):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
         """
-        adapter_names = check_adapters_to_merge(self, adapter_names)
-        if not adapter_names:
-            # no adapter to merge
-            return
-
-        base_layer = self.get_base_layer()
-        orig_dtype = base_layer.weight.data.dtype
-
-        merged_delta = torch.zeros_like(base_layer.weight.data, dtype=orig_dtype)
-        for active_adapter in adapter_names:
-            if active_adapter in self.hira_A.keys():
-                merged_delta = merged_delta + self.get_delta_weight(active_adapter).to(orig_dtype)
-                self.merged_adapters.append(active_adapter)
-
-        if safe_merge:
-            orig_weight = base_layer.weight.data.clone()
-            merged_weight = orig_weight * (1 + merged_delta)
-
-            if not torch.isfinite(merged_weight).all():
-                raise ValueError(
-                    f"NaNs detected in the merged weights. The adapter {','.join(adapter_names)} seems to be broken"
-                )
-
-            base_layer.weight.data = merged_weight
-        else:
-            base_layer.weight.data *= 1 + merged_delta
+        self._merge_adapter_weights(safe_merge, adapter_names, self.hira_A)
 
     def unmerge(self) -> None:
         """
         This method unmerges all merged adapter layers from the base weights.
         """
-        if not self.merged:
-            warnings.warn("Already unmerged. Nothing to do.")
-            return
-        weight = self.get_base_layer().weight
-        orig_dtype = weight.dtype
-        merged_delta = torch.zeros_like(weight.data, dtype=torch.float32)
-
-        for active_adapter in self.merged_adapters:
-            if active_adapter in self.hira_A.keys():
-                merged_delta = merged_delta + self.get_delta_weight(active_adapter).to(torch.float32)
-
-        # avoid NaN error, cast to fp32
-        w32 = weight.data.to(torch.float32)
-        den32 = 1 + merged_delta
-        tiny = torch.finfo(den32.dtype).tiny  # ~1e-45 for float32
-        den32 = torch.where(den32 == 0, tiny, den32)
-        w32 = w32 / den32
-        weight.data.copy_(w32.to(orig_dtype))
-
-        self.merged_adapters.clear()
+        self._unmerge_adapter_weights()
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -345,54 +337,13 @@ class Embedding(nn.Module, HiraLayer):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
         """
-        adapter_names = check_adapters_to_merge(self, adapter_names)
-        if not adapter_names:
-            # no adapter to merge
-            return
-
-        base_layer = self.get_base_layer()
-        orig_dtype = base_layer.weight.dtype
-        merged_delta = torch.zeros_like(base_layer.weight.data, dtype=orig_dtype)
-
-        for active_adapter in adapter_names:
-            if active_adapter in self.hira_embedding_A.keys():
-                merged_delta = merged_delta + self.get_delta_weight(active_adapter).to(orig_dtype)
-                self.merged_adapters.append(active_adapter)
-
-        if safe_merge:
-            orig_weight = base_layer.weight.data.clone()
-            merged_weight = orig_weight * (1 + merged_delta)
-            if not torch.isfinite(merged_weight).all():
-                raise ValueError(
-                    f"NaNs detected in the merged weights. The adapter {','.join(adapter_names)} seems to be broken"
-                )
-            base_layer.weight.data = merged_weight
-        else:
-            base_layer.weight.data *= 1 + merged_delta
+        self._merge_adapter_weights(safe_merge, adapter_names, self.hira_embedding_A)
 
     def unmerge(self) -> None:
         """
         This method unmerges all merged adapter layers from the base weights.
         """
-        if not self.merged:
-            warnings.warn("Already unmerged. Nothing to do.")
-            return
-        weight = self.get_base_layer().weight
-        orig_dtype = weight.dtype
-        merged_delta = torch.zeros_like(weight.data, dtype=torch.float32)
-
-        for active_adapter in self.merged_adapters:
-            if active_adapter in self.hira_embedding_A.keys():
-                merged_delta = merged_delta + self.get_delta_weight(active_adapter).to(torch.float32)
-
-        w32 = weight.data.to(torch.float32)
-        den32 = 1 + merged_delta
-        tiny = torch.finfo(den32.dtype).tiny  # ~1e-45 for float32
-        den32 = torch.where(den32 == 0, tiny, den32)
-        w32 = w32 / den32
-        weight.data.copy_(w32.to(orig_dtype))
-
-        self.merged_adapters.clear()
+        self._unmerge_adapter_weights()
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -566,58 +517,13 @@ class _ConvNd(nn.Module, HiraLayer):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
         """
-        adapter_names = check_adapters_to_merge(self, adapter_names)
-        if not adapter_names:
-            # no adapter to merge
-            return
-
-        base_layer = self.get_base_layer()
-        orig_dtype = base_layer.weight.dtype
-
-        merged_delta = torch.zeros_like(base_layer.weight.data, dtype=orig_dtype)
-
-        for active_adapter in adapter_names:
-            if active_adapter in self.hira_A.keys():
-                merged_delta = merged_delta + self.get_delta_weight(active_adapter).to(orig_dtype)
-                self.merged_adapters.append(active_adapter)
-
-        if safe_merge:
-            orig_weight = base_layer.weight.data.clone()
-            merged_weight = orig_weight * (1 + merged_delta)
-
-            if not torch.isfinite(merged_weight).all():
-                raise ValueError(
-                    f"NaNs detected in the merged weights. The adapter {','.join(adapter_names)} seems to be broken"
-                )
-
-            base_layer.weight.data = merged_weight
-
-        else:
-            base_layer.weight.data *= 1 + merged_delta.to(orig_dtype)
+        self._merge_adapter_weights(safe_merge, adapter_names, self.hira_A)
 
     def unmerge(self) -> None:
         """
         This method unmerges all merged adapter layers from the base weights.
         """
-        if not self.merged:
-            warnings.warn("Already unmerged. Nothing to do.")
-            return
-        weight = self.get_base_layer().weight
-        orig_dtype = weight.dtype
-        merged_delta = torch.zeros_like(weight.data, dtype=torch.float32)
-
-        for active_adapter in self.merged_adapters:
-            if active_adapter in self.hira_A.keys():
-                merged_delta = merged_delta + self.get_delta_weight(active_adapter).to(torch.float32)
-
-        w32 = weight.data.to(torch.float32)
-        den32 = 1 + merged_delta
-        tiny = torch.finfo(den32.dtype).tiny  # ~1e-45 for float32
-        den32 = torch.where(den32 == 0, tiny, den32)
-        w32 = w32 / den32
-        weight.data.copy_(w32.to(orig_dtype))
-
-        self.merged_adapters.clear()
+        self._unmerge_adapter_weights()
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
