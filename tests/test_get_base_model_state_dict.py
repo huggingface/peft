@@ -16,9 +16,9 @@
 
 The per-method and per-model coverage lives in ``PeftCommonTester._test_get_base_model_state_dict`` (see
 ``testing_common.py``), which is called from ``test_decoder_models.py``, ``test_encoder_decoder_models.py`` and
-``test_custom_models.py`` and covers key matching, value matching and the get/set roundtrip for every tuner
-config in those matrices. What remains here are the cases that are independent of the tuner method and are
-therefore not worth running once per config: the ``strict`` bookkeeping and multiple adapters.
+``test_custom_models.py`` and covers key matching, value matching and the get/set roundtrip for every tuner config in
+those matrices. What remains here are the cases that are independent of the tuner method and are therefore not worth
+running once per config: the ``strict`` bookkeeping and multiple adapters.
 """
 
 import pytest
