@@ -23,6 +23,7 @@ extras["quality"] = [
     "hf-doc-builder",
     # when upgrading this, also upgrade required version in pyproject.toml and pre-commit-config.yaml
     "ruff~=0.15.12",
+    "griffe",  # for ./scripts/check_doc_coverage.py
 ]
 extras["docs_specific"] = [
     "black",  # doc-builder has an implicit dependency on Black, see huggingface/doc-builder#434
