@@ -345,17 +345,25 @@ def convert_to_lora(
     ##################
 
     if (peft_config is not None) and getattr(peft_config, "modules_to_save", None):
-        # logic to take care of modules_to_save; might not cover all edge cases, like sharded model
+        # Match the normal PEFT serialization contract, which includes persistent buffers in addition to parameters.
         lora_config.modules_to_save = copy.copy(peft_config.modules_to_save)
 
+        model_state_dict = model.state_dict()  # this gets the full state dict, including buffers, not only params
         for module_name, module in model.named_modules():
             if isinstance(module, ModulesToSaveWrapper):
-                for param_name, param in module.modules_to_save.named_parameters():
-                    # it is expected that '.modules_to_save.' is not part of the key
-                    prefix, _, _ = module_name.partition(".modules_to_save.")
-                    # remove the adapter name
-                    _, _, suffix = param_name.rpartition(".")
-                    state_dict[f"{prefix}.{suffix}"] = param.data
+                # extract only the keys that belong to this wrapper, and remove the prefix
+                module_state_dict = {
+                    key.removeprefix(f"{module_name}."): value
+                    for key, value in model_state_dict.items()
+                    if key.startswith(f"{module_name}.")
+                }
+                # update the state dict with the adapter's state dict, which includes both parameters and buffers
+                state_dict.update(
+                    {
+                        f"{module_name}.{key}": value
+                        for key, value in module.adapter_state_dict(adapter_name, module_state_dict).items()
+                    }
+                )
 
     return lora_config, state_dict
 
