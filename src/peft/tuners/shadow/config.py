@@ -43,9 +43,9 @@ class ShadowConfig(PeftConfig):
         r (`int`):
             The rank of the low-rank injection bottleneck `W_down` / `W_up`. Defaults to `8`.
         shadow_alpha (`float`):
-            The strength of the injected correction added onto the block input (Eq. 4). Defaults to `1.0`.
+            The strength of the injected correction added onto the block input (Eq. 4). Defaults to `0.1`.
         shadow_dropout (`float`):
-            The dropout probability applied to the discrepancy signal before the bottleneck (Eq. 3). Defaults to `0.0`.
+            The dropout probability applied to the discrepancy signal before the bottleneck (Eq. 3). Defaults to `0.2`.
         init_weights (`bool`):
             Whether to zero-initialize `W_up` so the injection is a no-op at the start of training (mirroring LoRA's
             `B=0` convention). Don't change this unless you know what you are doing. Defaults to `True`.
@@ -65,7 +65,7 @@ class ShadowConfig(PeftConfig):
             The number of attention heads of the auto-built shadow backbone. Defaults to `None` (same as the base
             model).
         shadow_intermediate_size (`Optional[int]`):
-            The feed-forward width of the auto-built shadow backbone. Defaults to `None` (same as the base model).
+            The feed-forward width of the auto-built shadow backbone. Defaults to `256`.
         share_embeddings (`bool`):
             Whether to reuse the frozen base input embeddings to feed the shadow backbone (via `inputs_embeds`) instead
             of the shadow backbone's own embedding table. Defaults to `True`.
@@ -140,8 +140,8 @@ class ShadowConfig(PeftConfig):
         metadata={"help": "Number of attention heads of the auto-built shadow backbone (default: None = base)."},
     )
     shadow_intermediate_size: Optional[int] = field(
-        default=None,
-        metadata={"help": "Feed-forward width of the auto-built shadow backbone (default: None = base)."},
+        default=256,
+        metadata={"help": "Feed-forward width of the auto-built shadow backbone (default: 256)."},
     )
     share_embeddings: bool = field(
         default=True,
