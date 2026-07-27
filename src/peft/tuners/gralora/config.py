@@ -182,5 +182,9 @@ class GraloraConfig(PeftConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
+        if self.gralora_k <= 0:
+            raise ValueError(
+                f"`gralora_k` should be a positive integer value but the value passed is {self.gralora_k}"
+            )
         if self.r % self.gralora_k != 0:
             raise ValueError(f"r should be divisible by gralora_k, but got {self.r} and {self.gralora_k}")
