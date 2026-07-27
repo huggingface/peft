@@ -493,6 +493,56 @@ class TestLoraConversion:
         # here we expect an actual loss of 0, since only the modules_to_save affect the result, and those are identical
         assert mse_converted == 0.0
 
+    def test_convert_model_with_modules_to_save_buffers(self):
+        # ModulesToSaveWrapper can wrap modules with persistent buffers (e.g. BatchNorm)
+        # The converted state dict must include those buffers, not only parameters
+        class ModelWithBatchNorm(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(4, 4)
+                self.head = nn.BatchNorm1d(4)
+
+            def forward(self, x):
+                return self.head(self.linear(x))
+
+        torch.manual_seed(0)
+        base_model = ModelWithBatchNorm().eval()
+        lokr_model = get_peft_model(
+            copy.deepcopy(base_model),
+            LoKrConfig(target_modules=["linear"], modules_to_save=["head"]),
+        ).eval()
+
+        # modify the saved BatchNorm buffers so we can verify they are preserved
+        source_head = lokr_model.base_model.model.head.modules_to_save.default
+        source_head.running_mean.copy_(torch.tensor([1.0, -2.0, 3.0, -4.0]))
+        source_head.running_var.copy_(torch.tensor([0.25, 0.5, 2.0, 4.0]))
+        source_head.num_batches_tracked.fill_(17)
+
+        lora_config, state_dict = convert_to_lora(lokr_model, rank=4)
+
+        # buffers must be present in the converted checkpoint
+        expected_buffer_keys = {
+            "base_model.model.head.running_mean",
+            "base_model.model.head.running_var",
+            "base_model.model.head.num_batches_tracked",
+        }
+        assert expected_buffer_keys <= state_dict.keys()
+
+        # loading into a fresh LoRA model should not miss any saved-module keys
+        lora_model = get_peft_model(copy.deepcopy(base_model), lora_config).eval()
+        load_result = set_peft_model_state_dict(lora_model, state_dict)
+        assert not [key for key in load_result.missing_keys if ".modules_to_save." in key]
+
+        # the loaded buffers must match the source buffers exactly
+        target_head = lora_model.base_model.model.head.modules_to_save.default
+        assert torch.equal(target_head.running_mean, source_head.running_mean)
+        assert torch.equal(target_head.running_var, source_head.running_var)
+        assert torch.equal(target_head.num_batches_tracked, source_head.num_batches_tracked)
+
+        # inference outputs must match since only the saved module changed
+        inputs = torch.tensor([[1.0, 2.0, 3.0, 4.0], [-1.0, 0.0, 2.0, 1.0]])
+        assert torch.allclose(lora_model(inputs), lokr_model(inputs))
+
     @pytest.mark.parametrize("bias", ["c3a_only", "all"])
     def test_convert_model_with_trainable_bias_raises(self, bias):
         # If the original adapter includes trainable bias terms, we raise. LoKr doesn't support this, so taking C3A
