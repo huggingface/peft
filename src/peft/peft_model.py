@@ -72,13 +72,26 @@ from .utils import (
 def _get_layer_kv_target_shape(base_config, layer_idx: int) -> tuple[int, int] | None:
     """Per-layer (num_kv_heads, head_dim) for prefix-tuning injection, or None for uniform models.
 
-    Models with heterogeneous attention (e.g. Gemma4) expose `global_head_dim` / `num_global_key_value_heads` alongside
-    the sliding-layer `head_dim` / `num_key_value_heads`. The provisioned prefix is sized for the global footprint;
-    this returns the shape each layer actually expects so the caller can slice down or skip layers that don't fit.
+    Models with heterogeneous attention (e.g. Gemma4) expose per-layer config via
+    `config.per_layer_config[layer_idx].head_dim` / `.num_key_value_heads`. Older versions used `global_head_dim` /
+    `num_global_key_value_heads` alongside the sliding-layer `head_dim` / `num_key_value_heads`. The provisioned prefix
+    is sized for the global footprint; this returns the shape each layer actually expects so the caller can slice down
+    or skip layers that don't fit.
     """
     layer_types = getattr(base_config, "layer_types", None)
+    if not layer_types:
+        return None
+
+    # New transformers (>= 5.15) use per_layer_config instead of global_head_dim / num_global_key_value_heads.
+    # per_layer_config can be indexed by layer_idx (what we do here) or by layer_type.
+    per_layer_config = getattr(base_config, "per_layer_config", None)
+    if per_layer_config is not None:
+        layer_cfg = per_layer_config[layer_idx]
+        return layer_cfg.num_key_value_heads, layer_cfg.head_dim
+
+    # Fallback for older transformers that still use global_head_dim / num_global_key_value_heads
     global_head_dim = getattr(base_config, "global_head_dim", None)
-    if not layer_types or global_head_dim is None:
+    if global_head_dim is None:
         return None
 
     is_sliding = layer_types[layer_idx] == "sliding_attention"

@@ -80,7 +80,7 @@ def _convert_scalings_to_tensor(model) -> bool:
     return found_adapter
 
 
-def _get_padded_linear(lora_module: torch.nn.Module, target_rank: int, is_lora_A: bool) -> torch.nn.Linear:
+def _get_padded_linear(lora_module: torch.nn.Module, target_rank: int, is_lora_A: bool, **kwargs) -> torch.nn.Linear:
     """
     Get a new Linear layer for LoRA with padded weights according to the target rank.
 
@@ -148,7 +148,29 @@ def _get_padded_linear(lora_module: torch.nn.Module, target_rank: int, is_lora_A
     return new_layer
 
 
-def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A: bool) -> torch.nn.Conv2d:
+def _copy_grouped_conv2d_lora_a_weights(destination: torch.Tensor, source: torch.Tensor, groups: int) -> None:
+    """
+    Copy grouped Conv2d LoRA A weights while preserving the rank block for each group.
+
+    Args:
+        destination (`torch.Tensor`):
+            The destination tensor with the padded rank dimension.
+        source (`torch.Tensor`):
+            The source tensor with the original rank dimension.
+        groups (`int`):
+            The number of groups in the base Conv2d layer.
+    """
+    destination_rank_per_group = destination.shape[0] // groups
+    source_rank_per_group = source.shape[0] // groups
+    for group_idx in range(groups):
+        destination_start = group_idx * destination_rank_per_group
+        source_start = group_idx * source_rank_per_group
+        destination[destination_start : destination_start + source_rank_per_group].copy_(
+            source[source_start : source_start + source_rank_per_group]
+        )
+
+
+def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A: bool, **kwargs) -> torch.nn.Conv2d:
     """
     Get a new Conv2d layer for LoRA with padded weights according to the target rank.
 
@@ -167,7 +189,11 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
     weight = lora_module.weight
     # For Conv2d: [out_channels, in_channels, kernel_height, kernel_width]
     out_channels, in_channels, kh, kw = weight.shape
-    original_rank = out_channels if is_lora_A else in_channels
+    groups = lora_module.groups
+    base_layer_groups = kwargs.get("base_layer_groups", 1)
+    # For lora_B with groups > 1, the effective rank is in_channels * groups because weight.shape[1] contains the
+    # rank per group. lora_A is created with groups=1, so its rank is out_channels.
+    original_rank = out_channels if is_lora_A else in_channels * groups
 
     if original_rank == target_rank:
         return lora_module
@@ -182,7 +208,10 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
     if is_lora_A:
         # LoRA A affects out_channels
         padded = torch.zeros(target_rank, in_channels, kh, kw, device=weight.device, dtype=weight.dtype)
-        padded[:out_channels, :, :, :] = weight
+        if base_layer_groups == 1:
+            padded[:out_channels, :, :, :] = weight
+        else:
+            _copy_grouped_conv2d_lora_a_weights(padded, weight, base_layer_groups)
         new_layer = torch.nn.Conv2d(
             in_channels,
             target_rank,
@@ -190,11 +219,18 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
             stride=lora_module.stride,
             padding=lora_module.padding,
             bias=lora_module.bias is not None,
-            groups=lora_module.groups,
+            groups=groups,
         )
     else:
-        # LoRA B affects in_channels
-        padded = torch.zeros(out_channels, target_rank, kh, kw, device=weight.device, dtype=weight.dtype)
+        # LoRA B affects in_channels. When groups > 1, the target rank must be divisible by groups and the weight
+        # tensor's second dimension is target_rank // groups.
+        if target_rank % groups != 0:
+            raise ValueError(
+                f"Trying to pad a Conv2d LoRA B with groups={groups} to target rank {target_rank}, but the target "
+                f"rank is not divisible by {groups}. Please choose a target rank that is divisible by groups."
+            )
+        target_in_channels = target_rank // groups
+        padded = torch.zeros(out_channels, target_in_channels, kh, kw, device=weight.device, dtype=weight.dtype)
         padded[:, :in_channels, :, :] = weight
         new_layer = torch.nn.Conv2d(
             target_rank,
@@ -203,7 +239,7 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
             stride=lora_module.stride,
             padding=lora_module.padding,
             bias=lora_module.bias is not None,
-            groups=lora_module.groups,
+            groups=groups,
         )
     new_layer.weight.requires_grad_(lora_module.weight.requires_grad)
 
@@ -247,20 +283,32 @@ def _pad_lora_weights(model: torch.nn.Module, target_rank: int) -> bool:
         # Decide which pad function to call based on module type
         if isinstance(module, Linear):
             pad_fn = _get_padded_linear
+            base_layer_groups = 1  # Linear layers do not have grouped-convolution layout
         elif isinstance(module, Conv2d):
             pad_fn = _get_padded_conv2d
+            base_layer_groups = module.get_base_layer().groups
+            if target_rank % base_layer_groups != 0:
+                raise ValueError(
+                    f"Trying to pad a Conv2d LoRA adapter with groups={base_layer_groups} to target rank "
+                    f"{target_rank}, but the target rank is not divisible by {base_layer_groups}. Please choose a "
+                    f"target rank that is divisible by {base_layer_groups}."
+                )
         else:
             # Skip any other module types
             continue
 
         # Pad LoRA A
         for adapter_name, lora_A_module in module.lora_A.items():
-            new_layer = pad_fn(lora_A_module, target_rank=target_rank, is_lora_A=True)
+            new_layer = pad_fn(
+                lora_A_module, target_rank=target_rank, is_lora_A=True, base_layer_groups=base_layer_groups
+            )
             module.lora_A[adapter_name] = new_layer
 
         # Pad LoRA B
         for adapter_name, lora_B_module in module.lora_B.items():
-            new_layer = pad_fn(lora_B_module, target_rank=target_rank, is_lora_A=False)
+            new_layer = pad_fn(
+                lora_B_module, target_rank=target_rank, is_lora_A=False, base_layer_groups=base_layer_groups
+            )
             module.lora_B[adapter_name] = new_layer
 
         found_adapter = True
@@ -490,7 +538,14 @@ def hotswap_adapter_from_state_dict(
             # Linear or Conv2d: the check for dim 0 or 1 works for both of these layer types
             if old_val.shape[0] > new_val.shape[0]:
                 old_val.data.fill_(0)
-                old_val.data[: new_val.shape[0]].copy_(new_val.data)
+                requires_grouped_conv2d_lora_a_copy = (
+                    isinstance(module, Conv2d) and ".lora_A." in key and module.get_base_layer().groups > 1
+                )
+                if not requires_grouped_conv2d_lora_a_copy:
+                    old_val.data[: new_val.shape[0]].copy_(new_val.data)
+                else:
+                    groups = module.get_base_layer().groups
+                    _copy_grouped_conv2d_lora_a_weights(old_val.data, new_val.data, groups)
             elif old_val.shape[1] > new_val.shape[1]:
                 old_val.data.fill_(0)
                 old_val.data[:, : new_val.shape[1]].copy_(new_val.data)
