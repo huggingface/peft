@@ -126,6 +126,7 @@ ALL_CONFIG_CLASSES = (
 
 class TestPeftConfig:
     def test_prepare_prompt_learning_config_uses_largest_per_layer_kv_footprint(self):
+        # Regression test for https://github.com/huggingface/peft/issues/3478
         config = PrefixTuningConfig(task_type=TaskType.CAUSAL_LM, num_virtual_tokens=4)
         model_config = {
             "num_hidden_layers": 2,
