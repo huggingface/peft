@@ -68,6 +68,7 @@ from peft import (
     WaveFTConfig,
     XLoraConfig,
 )
+from peft.utils.other import _prepare_prompt_learning_config
 
 
 class TestingCommitHashError(Exception):
@@ -124,6 +125,24 @@ ALL_CONFIG_CLASSES = (
 
 
 class TestPeftConfig:
+    def test_prepare_prompt_learning_config_uses_largest_per_layer_kv_footprint(self):
+        config = PrefixTuningConfig(task_type=TaskType.CAUSAL_LM, num_virtual_tokens=4)
+        model_config = {
+            "num_hidden_layers": 2,
+            "hidden_size": 1024,
+            "num_attention_heads": 8,
+            "num_key_value_heads": 4,
+            "head_dim": 128,
+            "per_layer_config": {
+                1: {"head_dim": 128, "num_key_value_heads": 8},
+            },
+        }
+
+        _prepare_prompt_learning_config(config, model_config)
+
+        assert config.num_attention_heads == 8
+        assert config.token_dim == 1024
+
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
     def test_methods(self, config_class, mandatory_kwargs):
         r"""

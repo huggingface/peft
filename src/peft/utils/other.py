@@ -1207,7 +1207,7 @@ def _prepare_prompt_learning_config(peft_config, model_config):
             for layer_cfg in per_layer.values():
                 layer_head_dim = layer_cfg.get("head_dim", base_head_dim)
                 layer_num_kv = layer_cfg.get("num_key_value_heads", base_num_kv_heads)
-                if layer_head_dim > head_dim:
+                if layer_head_dim * layer_num_kv > head_dim * num_key_value_heads:
                     head_dim = layer_head_dim
                     num_key_value_heads = layer_num_kv
         elif model_config.get("head_dim", None) is not None:
