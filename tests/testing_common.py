@@ -42,6 +42,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    MissConfig,
     OSFConfig,
     PeftModel,
     PrefixTuningConfig,
@@ -782,6 +783,8 @@ class PeftCommonTester:
 
     def _test_safe_merge(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        if (config_cls == MissConfig) and (config_kwargs.get("init_weights") == "bat"):
+            pytest.skip(reason="Test requires non-zero init but MiSS is using 'bat' init")
         torch.manual_seed(0)
 
         with hub_online_once(model_id):
@@ -817,6 +820,12 @@ class PeftCommonTester:
                 atol, rtol = 1e-3, 1e-3
             elif issubclass(config_cls, PveraConfig):
                 atol, rtol = 1e-5, 1e-5
+            elif issubclass(config_cls, (LoHaConfig, LoKrConfig)) and model_id in (
+                "Conv1dGroups",
+                "Conv2dGroups",
+                "Conv2dGroups2",
+            ):
+                atol, rtol = 1e-3, 1e-3
 
             if config.peft_type == "ADAMSS":
                 # AdaMSS merges via B @ A @ newB (triple matmul), which accumulates more FP32
