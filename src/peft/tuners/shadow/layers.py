@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 import torch
 from torch import nn
-from transformers import GenerationConfig, GenerationMixin, PreTrainedModel
+from transformers import Cache, GenerationConfig, GenerationMixin, PreTrainedModel
 from transformers.modeling_outputs import CausalLMOutputWithPast, SequenceClassifierOutput
 
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -32,52 +32,158 @@ class ShadowCarrier:
         self.shadow = shadow
 
 
-class ShadowCache:
+class ShadowCache(Cache):
     """Paired KV caches for incremental ShadowPEFT decoding.
 
     Autoregressive generation needs a base-model cache (keys/values computed under shadow injection) *and* a separate
-    shadow-backbone cache (to advance `s^(0)` token-by-token). Generation only inspects Cache-like methods on the object
-    stored as `past_key_values` (seq length, reorder, crop); those delegate to the base half. The shadow half is unpacked
-    before the base forward and re-packed on the way out -- see [`ShadowModel`] hooks.
+    shadow model cache (to advance `s^(0)` token-by-token). This is a Transformers [`Cache`] subclass: operations
+    that affect the batch or sequence layout (reset, reorder, crop, repeat, and select) are applied to both caches,
+    while attention metadata and updates delegate to the base cache. Unknown cache attributes also delegate to the
+    base cache for compatibility with architecture-specific cache implementations.
+
+    The wrapper is intentionally not compileable because the two caches can have different layer layouts and hidden
+    sizes. Legacy tuple conversion is not supported, since a single legacy tuple cannot represent both paths.
+    The shadow half is unpacked before the base forward and re-packed on the way out -- see [`ShadowModel`] hooks.
     """
 
     __slots__ = ("base", "shadow")
 
     def __init__(self, base: Any = None, shadow: Any = None) -> None:
+        # Do not call Cache.__init__: its signature and internal layer representation vary across Transformers
+        # versions, and the actual storage remains owned by the two wrapped Cache instances.
         self.base = base
         self.shadow = shadow
+
+    def __getattr__(self, name: str) -> Any:
+        base = object.__getattribute__(self, "base")
+        if base is None:
+            raise AttributeError(name)
+        return getattr(base, name)
+
+    @staticmethod
+    def _apply(cache: Any, method: str, *args, **kwargs) -> Any:
+        if cache is None:
+            return None
+        fn = getattr(cache, method, None)
+        if fn is None:
+            return None
+        return fn(*args, **kwargs)
+
+    def update(
+        self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, *args, **kwargs
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if self.base is None:
+            raise RuntimeError("Cannot update a ShadowCache without a base cache.")
+        return self.base.update(key_states, value_states, layer_idx, *args, **kwargs)
+
+    def update_conv_state(self, conv_states: torch.Tensor, layer_idx: int, **kwargs) -> torch.Tensor:
+        return self.base.update_conv_state(conv_states, layer_idx, **kwargs)
+
+    def update_recurrent_state(self, recurrent_states: torch.Tensor, layer_idx: int, **kwargs) -> torch.Tensor:
+        return self.base.update_recurrent_state(recurrent_states, layer_idx, **kwargs)
+
+    def update_indexer(self, indexer_key_states: torch.Tensor, layer_idx: int) -> torch.Tensor:
+        return self.base.update_indexer(indexer_key_states, layer_idx)
 
     def get_seq_length(self, layer_idx: int = 0) -> int:
         if self.base is None:
             return 0
         return self.base.get_seq_length(layer_idx)
 
+    def get_mask_sizes(self, query_length: int, layer_idx: int) -> tuple[int, int]:
+        if self.base is None:
+            return query_length, 0
+        return self.base.get_mask_sizes(query_length, layer_idx)
+
     def get_max_cache_shape(self, layer_idx: int = 0) -> int:
         if self.base is None:
             return -1
         return self.base.get_max_cache_shape(layer_idx)
+
+    def get_max_length(self) -> Optional[int]:
+        if self.base is None:
+            return None
+        fn = getattr(self.base, "get_max_length", None)
+        return fn() if fn is not None else self.get_max_cache_shape()
+
+    def get_usable_length(self, new_seq_length: int, layer_idx: int = 0) -> int:
+        if self.base is None:
+            return 0
+        fn = getattr(self.base, "get_usable_length", None)
+        if fn is not None:
+            return fn(new_seq_length, layer_idx)
+        max_length = self.get_max_length()
+        previous_seq_length = self.get_seq_length(layer_idx)
+        if max_length is not None and previous_seq_length + new_seq_length > max_length:
+            return max_length - new_seq_length
+        return previous_seq_length
 
     @property
     def is_compileable(self) -> bool:
         # Dual-cache decoding is not a single compileable Cache layout.
         return False
 
+    @property
+    def is_initialized(self) -> bool:
+        caches = [cache for cache in (self.base, self.shadow) if cache is not None]
+        return bool(caches) and all(getattr(cache, "is_initialized", True) for cache in caches)
+
+    @property
+    def is_sliding(self) -> list[bool]:
+        return [] if self.base is None else self.base.is_sliding
+
+    @property
+    def max_batch_size(self) -> int:
+        if self.base is None:
+            return 0
+        return self.base.max_batch_size
+
+    @property
+    def max_cache_len(self) -> int:
+        if self.base is None:
+            return 0
+        return self.base.max_cache_len
+
     def has_previous_state(self, layer_idx: Optional[int] = None) -> bool:
         if self.base is None:
             return False
         return self.base.has_previous_state(layer_idx)
 
+    def reset(self) -> None:
+        self._apply(self.base, "reset")
+        self._apply(self.shadow, "reset")
+
     def reorder_cache(self, beam_idx: torch.LongTensor) -> None:
-        if self.base is not None and hasattr(self.base, "reorder_cache"):
-            self.base.reorder_cache(beam_idx)
-        if self.shadow is not None and hasattr(self.shadow, "reorder_cache"):
-            self.shadow.reorder_cache(beam_idx)
+        self._apply(self.base, "reorder_cache", beam_idx)
+        self._apply(self.shadow, "reorder_cache", beam_idx)
 
     def crop(self, max_length: int) -> None:
-        if self.base is not None and hasattr(self.base, "crop"):
-            self.base.crop(max_length)
-        if self.shadow is not None and hasattr(self.shadow, "crop"):
-            self.shadow.crop(max_length)
+        self._apply(self.base, "crop", max_length)
+        self._apply(self.shadow, "crop", max_length)
+
+    def batch_repeat_interleave(self, repeats: int) -> None:
+        self._apply(self.base, "batch_repeat_interleave", repeats)
+        self._apply(self.shadow, "batch_repeat_interleave", repeats)
+
+    def batch_select_indices(self, indices: torch.Tensor) -> None:
+        self._apply(self.base, "batch_select_indices", indices)
+        self._apply(self.shadow, "batch_select_indices", indices)
+
+    def to_legacy_cache(self):
+        raise NotImplementedError("ShadowCache cannot be represented by a single legacy cache tuple.")
+
+    @classmethod
+    def from_legacy_cache(cls, past_key_values=None):
+        raise NotImplementedError("ShadowCache requires separate base and shadow Cache instances.")
+
+    def __getitem__(self, layer_idx: int) -> Any:
+        return self.base[layer_idx]
+
+    def __iter__(self):
+        return iter(self.base)
+
+    def __len__(self) -> int:
+        return 0 if self.base is None else len(self.base)
 
     def __repr__(self) -> str:
         return f"ShadowCache(base={self.base!r}, shadow={self.shadow!r})"

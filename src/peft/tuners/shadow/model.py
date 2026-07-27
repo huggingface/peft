@@ -330,15 +330,12 @@ class ShadowModel(BaseTuner):
     def _build_shadow_head(self, config: ShadowConfig) -> tuple[Optional[nn.Module], bool]:
         """The task head applied to the final shadow state for the auxiliary loss (Eq. 8-9).
 
-        Returns `(head, head_is_lm)`. For the (large) causal-LM head we avoid storing a copy unless the user opts into
-        training it via `modules_to_save=["shadow_lm_head"]`; otherwise the frozen base head is reused at loss time
-        (`shadow_auxiliary_loss`). The (small) classifier head is copied and trained by default.
+        Returns `(head, head_is_lm)`. For causal LM, the base model's output head is reused at loss time. Users can
+        train and save that head through PEFT's normal `modules_to_save=["lm_head"]` mechanism. The (small) classifier
+        head is copied and trained by default.
         """
         if config.task_type == TaskType.CAUSAL_LM:
-            if "shadow_lm_head" not in set(config.modules_to_save or []):
-                return None, True  # reuse the frozen base LM head at loss time
-            base_head = self.model.get_output_embeddings()
-            return (deepcopy(base_head), True) if base_head is not None else (None, True)
+            return None, True
         if config.task_type == TaskType.SEQ_CLS:
             for attr in ("score", "classifier"):
                 candidate = getattr(self.model, attr, None)
@@ -421,12 +418,22 @@ class ShadowModel(BaseTuner):
         input_ids = kwargs.get("input_ids")
         if input_ids is None and args:
             input_ids = args[0]
+        inputs_embeds = kwargs.get("inputs_embeds")
+        if input_ids is None and inputs_embeds is None:
+            # Custom decoder models may expose a differently named main input that already represents hidden states.
+            main_input_name = getattr(self.model, "main_input_name", None)
+            main_input = kwargs.get(main_input_name) if main_input_name else None
+            if isinstance(main_input, torch.Tensor):
+                if main_input_name == "input_ids":
+                    input_ids = main_input
+                else:
+                    inputs_embeds = main_input
         self._seed_shadow_state, self._shadow_past_out = self._compute_initial_shadow_state(
             self.active_adapters[0],
             input_ids=input_ids,
             attention_mask=kwargs.get("attention_mask"),
             position_ids=kwargs.get("position_ids"),
-            inputs_embeds=kwargs.get("inputs_embeds"),
+            inputs_embeds=inputs_embeds,
             past_key_values=shadow_past,
             use_cache=use_cache,
         )
@@ -529,8 +536,8 @@ class ShadowModel(BaseTuner):
                 self._freeze_backbone_embeddings(backbone)
         for adapter_name, projection in self.shadow_projection.items():
             projection.requires_grad_(adapter_name in self.active_adapters)
-        # A head is only stored when it is meant to be trained (the SEQ_CLS classifier, or an opt-in copy of the LM head
-        # via `modules_to_save=["shadow_lm_head"]`); the frozen base LM head is reused directly and never stored.
+        # Only the SEQ_CLS classifier is stored here. The causal-LM head is managed by the base model and PEFT's normal
+        # modules_to_save mechanism.
         for adapter_name, head in self.shadow_head.items():
             head.requires_grad_(adapter_name in self.active_adapters)
 
@@ -590,14 +597,13 @@ class ShadowModel(BaseTuner):
 
     # ------------------------------------------------------------------------------------- PEFT tuner interface
 
-    @property
-    def active_adapters(self) -> list[str]:
-        adapter_names = super().active_adapters
-        if len(adapter_names) > 1:
+    def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
+        adapter_names = [adapter_name] if isinstance(adapter_name, str) else adapter_name
+        if len(adapter_names) != 1:
             raise ValueError(
-                f"ShadowPEFT supports only one active adapter at a time, but {len(adapter_names)} are active."
+                f"ShadowPEFT requires exactly one active adapter, but got {len(adapter_names)} adapters."
             )
-        return adapter_names
+        super().set_adapter(adapter_name, inference_mode=inference_mode)
 
     def _check_merge_allowed(self):
         raise NotImplementedError(

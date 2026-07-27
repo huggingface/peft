@@ -60,6 +60,7 @@ from peft import (
     PveraConfig,
     RandLoraConfig,
     RoadConfig,
+    ShadowConfig,
     ShiraConfig,
     TaskType,
     TinyLoraConfig,
@@ -97,6 +98,15 @@ def _reset_unilora_theta_d(model, config, adapter_name="default"):
 # EmbConv1D has an embedding and a Conv1D layer
 # Conv2D has a Conv2D layer
 TEST_CASES = [
+    ##########
+    # Shadow #
+    ##########
+    (
+        "Tiny decoder Shadow",
+        "TinyDecoder",
+        ShadowConfig,
+        {"r": 2, "shadow_num_hidden_layers": 1},
+    ),
     ########
     # GLoRA #
     ########
@@ -1941,6 +1951,74 @@ class Block(nn.Module):
         return X
 
 
+class TinyDecoderConfig:
+    def __init__(self, hidden_size=10, num_hidden_layers=3, name_or_path="TinyDecoder"):
+        self.hidden_size = hidden_size
+        self.num_hidden_layers = num_hidden_layers
+        self.use_cache = False
+        self._name_or_path = name_or_path
+
+    def to_dict(self):
+        return {
+            "hidden_size": self.hidden_size,
+            "num_hidden_layers": self.num_hidden_layers,
+            "use_cache": self.use_cache,
+            "_name_or_path": self._name_or_path,
+        }
+
+
+class TinyDecoderBlock(nn.Module):
+    def __init__(self, hidden_size):
+        super().__init__()
+        self.lin0 = nn.Linear(hidden_size, hidden_size)
+        self.act = nn.ReLU()
+        self.lin1 = nn.Linear(hidden_size, hidden_size)
+
+    def forward(self, hidden_states):
+        hidden_states = hidden_states.to(self.lin0.weight.dtype)
+        return self.lin1(self.act(self.lin0(hidden_states)))
+
+
+class TinyDecoderModel(nn.Module):
+    """Small decoder-like custom model used to exercise ShadowPEFT's common API."""
+
+    main_input_name = "X"
+
+    def __init__(self, config=None):
+        super().__init__()
+        self.config = config or TinyDecoderConfig()
+        self.name_or_path = self.config._name_or_path
+        self.layers = nn.ModuleList(
+            [TinyDecoderBlock(self.config.hidden_size) for _ in range(self.config.num_hidden_layers)]
+        )
+        self.out = nn.Linear(self.config.hidden_size, 2)
+
+    def forward(
+        self,
+        X=None,
+        input_ids=None,
+        inputs_embeds=None,
+        attention_mask=None,
+        position_ids=None,
+        past_key_values=None,
+        use_cache=False,
+        return_dict=False,
+        **kwargs,
+    ):
+        hidden_states = X if X is not None else inputs_embeds
+        if hidden_states is None:
+            raise ValueError("TinyDecoderModel requires `X` or `inputs_embeds`.")
+        for layer in self.layers:
+            hidden_states = layer(hidden_states)
+        if return_dict:
+            return type(
+                "TinyDecoderOutput",
+                (),
+                {"last_hidden_state": hidden_states, "past_key_values": None},
+            )()
+        return self.out(hidden_states)
+
+
 class DeepMLP(nn.Module):
     def __init__(self, bias=True, num_hidden_layers=12, size=10):
         super().__init__()
@@ -2294,6 +2372,9 @@ class MockTransformerWrapper:
         if model_id == "MLP":
             return MLP().to(dtype)
 
+        if model_id == "TinyDecoder":
+            return TinyDecoderModel().to(dtype)
+
         if model_id == "EmbConv1D":
             return ModelEmbConv1D().to(dtype)
 
@@ -2388,6 +2469,8 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_load_model_low_cpu_mem_usage(self, test_name, model_id, config_cls, config_kwargs):
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
+        if config_cls is ShadowConfig:
+            pytest.skip("Low-memory loading through inject_adapter_in_model is not supported for ShadowPEFT")
         self._test_load_model_low_cpu_mem_usage(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
@@ -2482,6 +2565,13 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_training_custom_models(self, test_name, model_id, config_cls, config_kwargs):
+        if config_cls is ShadowConfig:
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            model = get_peft_model(model, config_cls(base_model_name_or_path=model_id, **config_kwargs))
+            output = model(**self.prepare_inputs_for_testing())[0]
+            output.sum().backward()
+            assert any(param.grad is not None for param in model.parameters() if param.requires_grad)
+            return
         self._test_training(model_id, config_cls, config_kwargs)
 
     # Note: skipping _test_training_layer_indexing because layer indexing only works when layer names conform to a
@@ -2501,6 +2591,8 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_in_features_out_features_exposed(self, test_name, model_id, config_cls, config_kwargs):
         # the PEFT layer should expose the .in_features and .out_features attributes
+        if config_cls is ShadowConfig:
+            pytest.skip("ShadowPEFT wraps whole decoder blocks, which do not expose linear dimensions")
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -2709,6 +2801,8 @@ class TestPeftCustomModel(PeftCommonTester):
         - with and without autocasting adapter dtype
         - with and without low_cpu_mem_usage (which only makes sense for loading adapters)
         """
+        if config_cls is ShadowConfig:
+            pytest.skip("Shadow backbones follow the base dtype while lightweight adapter layers may be autocast")
         if autocast_adapter_dtype and (config_cls == LNTuningConfig):
             # LN Tuning basically copies the base weight and makes it trainable, hence it makes sense to keep the dtype
             # of the base model weight.
@@ -2758,6 +2852,25 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_only_params_are_updated(self, test_name, model_id, config_cls, config_kwargs):
         # An explicit test that when using an adapter on a custom model, only the adapter parameters are updated during
         # training
+        if config_cls is ShadowConfig:
+            inputs = self.prepare_inputs_for_testing()
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            model = get_peft_model(model, config_cls(base_model_name_or_path=model_id, **config_kwargs))
+            params_before = {name: param.detach().clone() for name, param in model.named_parameters()}
+            optimizer = torch.optim.SGD((param for param in model.parameters() if param.requires_grad), lr=0.5)
+            for _ in range(3):
+                optimizer.zero_grad()
+                model(**inputs).sum().backward()
+                optimizer.step()
+            changed = {
+                name
+                for name, param in model.named_parameters()
+                if not torch.equal(params_before[name], param.detach())
+            }
+            assert changed
+            assert all(model.prefix in name for name in changed)
+            return
+
         if issubclass(config_cls, AdamssConfig):
             # AdaMSS initializes B=0 which blocks gradient flow to A parameters.
             config_kwargs = set_init_weights_false(config_cls, config_kwargs)
@@ -3212,6 +3325,8 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_active_adapter(self, test_name, model_id, config_cls, config_kwargs):
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
+        if config_cls is ShadowConfig:
+            pytest.skip("ShadowPEFT only supports one active adapter at a time")
         if config_kwargs.get("modules_to_save", []) or config_kwargs.get("trainable_token_indices", []):
             pytest.skip("Multiple active adapters with modules_to_save/trainable_token_indices is not supported.")
 
@@ -3254,6 +3369,8 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(reason="Model has no embedding layer, skipping TrainableTokensConfig.")
         if config_cls is AdaLoraConfig:
             pytest.skip(reason="AdaLoRA supports only a single trainable adapter")
+        if config_cls is ShadowConfig:
+            pytest.skip(reason="ShadowPEFT only supports one active adapter at a time")
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
@@ -3309,6 +3426,8 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
         if config_cls is AdaLoraConfig:
             pytest.skip(reason="AdaLoRA supports only a single trainable adapter")
+        if config_cls is ShadowConfig:
+            pytest.skip(reason="ShadowPEFT only supports one active adapter at a time")
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
@@ -3407,6 +3526,8 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
         if config_cls is AdaLoraConfig:
             pytest.skip(reason="AdaLoRA supports only a single trainable adapter")
+        if config_cls is ShadowConfig:
+            pytest.skip(reason="ShadowPEFT only supports one active adapter at a time")
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
@@ -3429,6 +3550,8 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
         if config_cls is AdaLoraConfig:
             pytest.skip(reason="AdaLoRA supports only a single trainable adapter")
+        if config_cls is ShadowConfig:
+            pytest.skip(reason="ShadowPEFT only supports one active adapter at a time")
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
@@ -3455,6 +3578,8 @@ class TestPeftCustomModel(PeftCommonTester):
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
         if config_cls is AdaLoraConfig:
             pytest.skip(reason="AdaLoRA supports only a single trainable adapter")
+        if config_cls is ShadowConfig:
+            pytest.skip(reason="ShadowPEFT only supports one active adapter at a time")
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         if config_cls == IA3Config:
@@ -3755,6 +3880,8 @@ class TestPeftCustomModel(PeftCommonTester):
             )
         if config_cls is AdaLoraConfig:
             pytest.skip("AdaLoRA supports only a single trainable adapter")
+        if config_cls is ShadowConfig:
+            pytest.skip("ShadowPEFT only supports one active adapter at a time")
         config_kwargs = {"target_modules": ["layers.0.lin0"]}
         if config_cls == IA3Config:
             config_kwargs["feedforward_modules"] = []
@@ -6498,6 +6625,8 @@ class TestRequiresGrad:
     def test_loading_model_requires_grad_set_correctly(self, config_cls, is_trainable, tmp_path):
         # Test that when loading PeftModel and then loading another adapter, the requires_grad is set correctly and
         # is_trainable is respected.
+        if config_cls is ShadowConfig:
+            pytest.skip("ShadowPEFT only supports one active adapter at a time")
         # See #2759
         # AdaLoRA's `ranknum` parameter is keyed by adapter name (so name contains ".default") but is intentionally
         # requires_grad=False, so we exclude it from the trainable-param check below.
@@ -6558,6 +6687,8 @@ class TestRequiresGrad:
         # Same test as above, but with modules_to_save
         if config_cls == TrainableTokensConfig:
             pytest.skip(reason="Trainable tokens does not support modules_to_save")
+        if config_cls is ShadowConfig:
+            pytest.skip("ShadowPEFT only supports one active adapter at a time")
         # See note in test_loading_model_requires_grad_set_correctly: AdaLoRA's `ranknum.default` is intentionally
         # non-trainable, so we exclude it from the trainable-param check below.
         skip_ranknum = config_cls is AdaLoraConfig

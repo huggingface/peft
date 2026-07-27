@@ -18,6 +18,7 @@ import pytest
 import torch
 from safetensors import safe_open
 from transformers import (
+    Cache,
     GPT2Config,
     GPT2LMHeadModel,
     LlamaConfig,
@@ -144,7 +145,7 @@ class TestShadowCausalLM:
         # must use the initial shadow state s^(0), not the final s^(L) which does not exist standalone.)
         model = get_peft_model(
             make_llama_causal(),
-            ShadowConfig(task_type="CAUSAL_LM", auxiliary_loss_weight=1.0, modules_to_save=["shadow_lm_head"]),
+            ShadowConfig(task_type="CAUSAL_LM", auxiliary_loss_weight=1.0, modules_to_save=["lm_head"]),
         )
         ids = torch.randint(0, 128, (4, 8))
         labels = ids.clone()
@@ -193,6 +194,16 @@ class TestShadowCausalLM:
         assert not torch.allclose(on, off, atol=1e-6)
         assert torch.allclose(on, on_again, atol=1e-6)
 
+    def test_switches_adapters_but_rejects_multiple_active_adapters(self):
+        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
+        model.add_adapter("other", ShadowConfig(task_type="CAUSAL_LM"))
+        model.set_adapter("other")
+        assert model.active_adapters == ["other"]
+
+        with pytest.raises(ValueError, match="exactly one active adapter"):
+            model.base_model.set_adapter(["default", "other"])
+        assert model.active_adapters == ["other"]
+
     def test_generate(self):
         model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
         ids = torch.randint(0, 128, (2, 4))
@@ -235,6 +246,26 @@ class TestShadowCausalLM:
             got = loaded(input_ids=ids).logits
         assert torch.allclose(ref, got, atol=1e-6)
 
+    def test_load_checkpoint_under_different_adapter_name(self, tmp_path):
+        base = make_llama_causal()
+        base_state = copy.deepcopy(base.state_dict())
+        model = get_peft_model(base, ShadowConfig(task_type="CAUSAL_LM"))
+        ids = torch.randint(0, 128, (2, 6))
+        _train_shadow_briefly(model, ids)
+        model.save_pretrained(tmp_path)
+
+        reloaded_base = make_llama_causal()
+        reloaded_base.load_state_dict(base_state)
+        loaded = PeftModel.from_pretrained(reloaded_base, tmp_path)
+        loaded.load_adapter(tmp_path, adapter_name="other")
+        loaded.eval()
+        with torch.no_grad():
+            loaded.set_adapter("default")
+            default_logits = loaded(input_ids=ids).logits
+            loaded.set_adapter("other")
+            other_logits = loaded(input_ids=ids).logits
+        assert torch.allclose(default_logits, other_logits, atol=1e-6)
+
     def test_save_includes_shadow_modules_but_not_frozen_head(self, tmp_path):
         model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
         model.save_pretrained(tmp_path)
@@ -246,17 +277,18 @@ class TestShadowCausalLM:
         # The frozen copy of the base LM head is not stored (it is rebuilt from the base model on load).
         assert not any(".shadow_head." in key for key in keys)
 
-    def test_save_includes_trainable_shadow_lm_head(self, tmp_path):
+    def test_save_includes_trainable_lm_head(self, tmp_path):
         model = get_peft_model(
             make_llama_causal(),
-            ShadowConfig(task_type="CAUSAL_LM", modules_to_save=["shadow_lm_head"]),
+            ShadowConfig(task_type="CAUSAL_LM", modules_to_save=["lm_head"]),
         )
-        head = model.base_model.shadow_head["default"]
-        assert all(p.requires_grad for p in head.parameters())
+        head = model.get_output_embeddings()
+        assert any(p.requires_grad for p in head.parameters())
         model.save_pretrained(tmp_path)
         with safe_open(tmp_path / SAFETENSORS_WEIGHTS_NAME, framework="pt") as f:
             keys = list(f.keys())
-        assert any(".shadow_head." in key for key in keys)
+        assert any("lm_head" in key for key in keys)
+        assert not any(".shadow_head." in key for key in keys)
 
     def test_save_fsdp_prefixed_state_dict(self, tmp_path):
         model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
@@ -371,6 +403,9 @@ class TestShadowKVCache:
         with torch.no_grad():
             out = model(input_ids=ids, use_cache=True)
         assert isinstance(out.past_key_values, ShadowCache)
+        assert isinstance(out.past_key_values, Cache)
+        assert not out.past_key_values.is_compileable
+        assert len(out.past_key_values) == len(out.past_key_values.base)
         assert out.past_key_values.get_seq_length() == 4
         assert out.past_key_values.base is not None
         assert out.past_key_values.shadow is not None

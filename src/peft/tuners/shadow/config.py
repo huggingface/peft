@@ -82,9 +82,8 @@ class ShadowConfig(PeftConfig):
             The layer pattern name, used only if `layers_to_transform` is different from `None`. This is the name of the
             `nn.ModuleList` that holds the decoder blocks (often `"layers"` or `"h"`). Defaults to `None`.
         modules_to_save (`Optional[list[str]]`):
-            The extra modules to set as trainable and save in the final checkpoint (e.g. a classifier head). The special
-            name `"shadow_lm_head"` unfreezes the (otherwise frozen) copy of the base LM head used for the auxiliary
-            loss. Defaults to `None`.
+            The extra modules to set as trainable and save in the final checkpoint (e.g. `"lm_head"` or a classifier
+            head). Defaults to `None`.
     """
 
     target_modules: Optional[Union[list[str], str]] = field(
@@ -102,12 +101,12 @@ class ShadowConfig(PeftConfig):
         default=8, metadata={"help": "Rank of the low-rank injection bottleneck W_down / W_up. Default: 8."}
     )
     shadow_alpha: float = field(
-        default=1.0,
-        metadata={"help": "Strength of the injected correction added onto the block input (Eq. 4). Default: 1.0."},
+        default=0.1,
+        metadata={"help": "Strength of the injected correction added onto the block input (Eq. 4). Default: 0.1."},
     )
     shadow_dropout: float = field(
-        default=0.0,
-        metadata={"help": "Dropout applied to the discrepancy signal before the bottleneck (Eq. 3). Default: 0.0."},
+        default=0.2,
+        metadata={"help": "Dropout applied to the discrepancy signal before the bottleneck (Eq. 3). Default: 0.2."},
     )
     init_weights: bool = field(
         default=True,

@@ -36,7 +36,7 @@ The shadow backbone can be built in two ways, controlled by `ShadowConfig.shadow
 - `"mirror"` (default): a smaller copy of the base architecture (fewer layers via `shadow_num_hidden_layers`, optionally smaller hidden size / heads / MLP) is created automatically from the base model's config and randomly initialized. When the shadow hidden size matches the base, the frozen base input embeddings are shared (`share_embeddings`); when it differs, a trained projection bridges the gap.
 - a model id or local path: the backbone is loaded with Transformers `AutoModel`, letting you initialize the shadow network from a smaller pre-trained model.
 
-Compared to LoRA-style methods, ShadowPEFT adds more parameters and compute (it runs a parallel network and wraps whole decoder blocks), but the adapter is a self-contained network that can be trained centrally, reused across tasks, and initialized from a pre-trained small model. An optional auxiliary loss (`auxiliary_loss_weight`) applies a copy of the task head to the final shadow state and adds it to the task loss, encouraging the shadow path to solve the task on its own.
+Compared to LoRA-style methods, ShadowPEFT adds more parameters and compute (it runs a parallel network and wraps whole decoder blocks), but the adapter is a self-contained network that can be trained centrally, reused across tasks, and initialized from a pre-trained small model. An optional auxiliary loss (`auxiliary_loss_weight`) applies the task head to the initial shadow state `s^(0)` and adds it to the task loss, encouraging the detachable shadow path to solve the task on its own. For causal LM, the base output head is reused; include `"lm_head"` in `modules_to_save` to train and save it through the standard PEFT mechanism.
 
 ## KV cache
 

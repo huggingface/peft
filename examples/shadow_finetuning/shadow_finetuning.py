@@ -94,14 +94,14 @@ def main():
     model.save_pretrained(args.output_dir)
     print(f"Saved adapter to {args.output_dir}")
 
-    # Reload and run generation. ShadowPEFT disables the KV cache, so use_cache=False is required.
+    # Reload and run generation. ShadowPEFT maintains separate base and shadow KV caches.
     reloaded_base = AutoModelForCausalLM.from_pretrained(args.base_model_name_or_path)
     model = PeftModel.from_pretrained(reloaded_base, args.output_dir).to(device)
     model.eval()
 
     prompt = tokenizer("ShadowPEFT", return_tensors="pt").to(device)
     with torch.no_grad():
-        generated = model.generate(**prompt, max_new_tokens=20, use_cache=False, do_sample=False)
+        generated = model.generate(**prompt, max_new_tokens=20, use_cache=True, do_sample=False)
     print(tokenizer.decode(generated[0], skip_special_tokens=True))
 
 

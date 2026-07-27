@@ -22,7 +22,8 @@ MLP/attention). This is the default `shadow_model="mirror"`:
 python shadow_finetuning.py --base_model_name_or_path Qwen/Qwen3-0.6B --shadow_num_hidden_layers 1 --r 8
 ```
 
-Note that the KV cache is disabled by ShadowPEFT, so generation always uses `use_cache=False`.
+ShadowPEFT supports cached generation by maintaining separate KV caches for the frozen base model and the shadow
+backbone. Both `use_cache=True` and uncached generation are supported.
 
 ### Pretrained shadow backbone
 

@@ -106,7 +106,7 @@ def main():
 
     prompt = tokenizer("Shadow adaptation", return_tensors="pt").to(device)
     with torch.no_grad():
-        generated = model.generate(**prompt, max_new_tokens=20, use_cache=False, do_sample=False)
+        generated = model.generate(**prompt, max_new_tokens=20, use_cache=True, do_sample=False)
     print(tokenizer.decode(generated[0], skip_special_tokens=True))
 
     # Recover the standalone shadow network (backbone + projection + head). It behaves like a normal causal LM (it

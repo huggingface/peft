@@ -51,6 +51,7 @@ from peft import (
     PromptTuningConfig,
     PveraConfig,
     RoadConfig,
+    ShadowConfig,
     UniLoraConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -88,6 +89,8 @@ def _skip_if_merging_not_supported(model_id, config_cls, config_kwargs):
         pytest.skip("Merging conv layers with groups>1 and LoRA is not supported.")
     if issubclass(config_cls, LilyConfig):
         pytest.skip("Lily does not support merging adapters, skipping this test.")
+    if issubclass(config_cls, ShadowConfig):
+        pytest.skip("ShadowPEFT does not support merging adapters, skipping this test.")
 
 
 def _skip_if_adding_weighted_adapters_not_supported(config):
