@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import copy
+import platform
 import warnings
 from contextlib import contextmanager
 from unittest.mock import patch
@@ -1034,6 +1035,7 @@ class TestDetachedCopy:
             assert model.lin0.weight.dtype == torch.float32
             assert model.lin1.weight.dtype == torch.float32
 
+    @pytest.mark.skipif(platform.system() != "Linux", reason="Run torch.compile tests only on Linux")
     @pytest.mark.parametrize("copy_on_write", [True, False])
     def test_two_compiled_detached_models_on_same_base_model(self, copy_on_write):
         torch.manual_seed(0)
