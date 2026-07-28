@@ -65,6 +65,7 @@ from peft import (
 )
 from peft.import_utils import is_transformers_ge_v5
 from peft.tuners._buffer_dict import BufferDict
+from peft.tuners.ln_tuning.layer import LNTuningLayer
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import (
@@ -157,11 +158,19 @@ class PeftCommonTester:
         if hasattr(model, "config"):  # custom models don't have a config attribute
             assert config["base_model_name_or_path"] == model.config.to_dict()["_name_or_path"]
 
-    def perturb_trainable_token_weights_if_used(self, model, config_kwargs, adapter_name="default", scale=1.0):
-        """TrainableTokensLayer is initialized to be a no-op by default. Since there's currently no way to pass
-        `init_weights=False` to the trainable tokens layer when used in conjunction with LoRA, we have to do it like
-        this to make sure that it is *not* a no-op (essentially simulating "training" of the adapter).
+    def perturb_no_op_adapter_weights_if_used(self, model, config_kwargs, adapter_name="default", scale=1.0):
+        """Perturb adapter weights for methods that cannot be initialized as non-identity transforms.
+
+        TrainableTokensLayer and LN Tuning are initialized to be no-ops by default. Since there's currently no way to
+        pass `init_weights=False` for these methods, we have to perturb their adapter weights manually (essentially
+        simulating "training" of the adapter).
         """
+        if isinstance(model.peft_config[adapter_name], LNTuningConfig):
+            for module in model.modules():
+                if isinstance(module, LNTuningLayer):
+                    for parameter in module.ln_tuning_layers[adapter_name].parameters():
+                        parameter.data.add_(torch.rand_like(parameter.data) * scale)
+
         if "trainable_token_indices" not in config_kwargs:
             return
 
@@ -530,6 +539,8 @@ class PeftCommonTester:
     def _test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
         _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs)
+        if issubclass(config_cls, LNTuningConfig):
+            pytest.skip("LN Tuning does not implement safe merge checks, skipping this test.")
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
@@ -541,7 +552,7 @@ class PeftCommonTester:
             model = get_peft_model(model, config)
             model = model.to(self.torch_device)
 
-            self.perturb_trainable_token_weights_if_used(model, config_kwargs)
+            self.perturb_no_op_adapter_weights_if_used(model, config_kwargs)
 
             dummy_input = self.prepare_inputs_for_testing()
 
@@ -602,7 +613,7 @@ class PeftCommonTester:
             model = get_peft_model(model, config)
             model = model.to(self.torch_device)
 
-            self.perturb_trainable_token_weights_if_used(model, config_kwargs)
+            self.perturb_no_op_adapter_weights_if_used(model, config_kwargs)
 
             dummy_input = self.prepare_inputs_for_testing()
             model.eval()
@@ -679,6 +690,8 @@ class PeftCommonTester:
         if issubclass(config_cls, AdaLoraConfig):
             # AdaLora does not support adding more than 1 adapter
             pytest.skip("AdaLoRA does not support multiple adapters, skipping this test.")
+        if issubclass(config_cls, LNTuningConfig):
+            pytest.skip("LN Tuning does not support merging multiple adapters, skipping this test.")
         if config_kwargs.get("trainable_token_indices", None) is not None:
             pytest.skip(
                 "Merging two adapters with trainable tokens is tested elsewhere since adapters with "
@@ -862,8 +875,8 @@ class PeftCommonTester:
             model.add_adapter("adapter1", config)
             model = model.to(self.torch_device).eval()
 
-        self.perturb_trainable_token_weights_if_used(model, config_kwargs, adapter_name="adapter0")
-        self.perturb_trainable_token_weights_if_used(model, config_kwargs, adapter_name="adapter1")
+        self.perturb_no_op_adapter_weights_if_used(model, config_kwargs, adapter_name="adapter0")
+        self.perturb_no_op_adapter_weights_if_used(model, config_kwargs, adapter_name="adapter1")
 
         dummy_input = self.prepare_inputs_for_testing()
         # ensure that we have at least 3 samples for this test
@@ -1492,7 +1505,7 @@ class PeftCommonTester:
             with pytest.raises(AttributeError):
                 model = model.unload()
         else:
-            self.perturb_trainable_token_weights_if_used(model, config_kwargs)
+            self.perturb_no_op_adapter_weights_if_used(model, config_kwargs)
             with torch.inference_mode():
                 logits_with_adapter = model(**dummy_input)[0]
 
@@ -1803,8 +1816,8 @@ class PeftCommonTester:
                 )
                 peft_model = get_peft_model(model, config)
 
-            # trainable_token_indices doesn't have support for `init_weights` so we have to do this manually
-            self.perturb_trainable_token_weights_if_used(model, config_kwargs)
+            # Some methods don't support `init_weights=False`, so perturb their adapter weights manually.
+            self.perturb_no_op_adapter_weights_if_used(model, config_kwargs)
 
             output_peft = get_output(peft_model)
 
@@ -1887,6 +1900,9 @@ class PeftCommonTester:
         torch.manual_seed(0)
         if "qwen2" in model_id:  # dummy qwen2 has very small weights
             rank = 4
+        elif (config_cls == LoKrConfig) and ("Llama" in model_id):
+            # LoKr needs a higher rank for an accurate LoRA approximation on the tiny Llama model.
+            rank = 16
         else:
             rank = 8
 
