@@ -190,10 +190,9 @@ class Linear(nn.Linear, FrodLayer):
 
         base_layer = self.get_base_layer()
         adapter_deltas = []
-        reference_weight = self._get_base_weight_before_merge()
         for active_adapter in adapter_names:
             if active_adapter in self.frod_lambda_l.keys():
-                adapter_deltas.append((active_adapter, self.get_delta_weight(active_adapter, reference_weight)))
+                adapter_deltas.append((active_adapter, self.get_delta_weight(active_adapter)))
 
         for active_adapter, delta_weight in adapter_deltas:
             delta_weight = delta_weight.to(device=base_layer.weight.device, dtype=base_layer.weight.dtype)
@@ -229,14 +228,12 @@ class Linear(nn.Linear, FrodLayer):
         self._base_weight_before_merge = None
         self.merged_adapters.clear()
 
-    def get_delta_weight(self, adapter, reference_weight: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def get_delta_weight(self, adapter) -> torch.Tensor:
         self._move_base_weight_to_device_of_adapter(adapter)
         weight = self.get_base_layer().weight
         device = weight.device
         dtype = weight.dtype
-        if reference_weight is None:
-            reference_weight = weight
-        reference_weight = reference_weight.to(device=device, dtype=dtype)
+        reference_weight = self._get_base_weight_before_merge()
         base_weight = transpose(reference_weight, self.fan_in_fan_out)
         U, V, S_sparse, lambda_l = self._get_frod_tensors(adapter, device=device, dtype=dtype)
         S = S_sparse.to_dense()
