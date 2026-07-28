@@ -556,6 +556,13 @@ class LoraModel(BaseTuner):
 
         try:
             yield
+        except BaseException:
+            # On the exception path no .backward() will run, so _peft_gradient_checkpointing_forward_hooks
+            # would never be drained by backward_hook. Drain them here so the model stays usable.
+            for _, layer in self.named_modules():
+                while getattr(layer, "_peft_gradient_checkpointing_forward_hooks", None):
+                    layer._peft_gradient_checkpointing_forward_hooks.pop().remove()
+            raise
         finally:
             for handle in hook_handles:
                 handle.remove()
