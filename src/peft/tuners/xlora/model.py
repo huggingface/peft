@@ -523,3 +523,12 @@ class XLoraModel(BaseTuner):
         """
         classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         return classifier._get_bucketed_scalings()
+
+    @classmethod
+    def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
+        return {k: state_dict[k] for k in state_dict if "internal_xlora_classifier" in k}
+
+    @classmethod
+    def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
+        # X-LoRA state dict keys are stored without the adapter name, so there is nothing to remap
+        return state_dict

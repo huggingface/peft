@@ -315,3 +315,54 @@ class FrodModel(BaseTuner):
             bias=bias,
             **kwargs,
         )
+
+    @classmethod
+    def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
+        projection_prefixes = ("base_model.frod_V.", "base_model.frod_s_indices.", "base_model.frod_s_size.")
+        layer_projection_parts = (".frod_V.", ".frod_s_indices.", ".frod_s_size.", ".frod_U.")
+        to_return = {
+            k: state_dict[k]
+            for k in state_dict
+            if (cls.prefix in k) and (adapter_name in k) and not any(part in k for part in layer_projection_parts)
+        }
+        if config.save_projection:
+            to_return.update(
+                {
+                    k: state_dict[k]
+                    for k in state_dict
+                    if k.startswith(projection_prefixes) and k.endswith(f".{adapter_name}")
+                }
+            )
+        return to_return
+
+    @classmethod
+    def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
+        # The model-level projection keys don't follow the standard "{prefix}.{adapter_name}" pattern, so extract them
+        # before the adapter name is inserted into the remaining keys.
+        frod_projection_state_dict = {}
+        frod_projection_prefixes = ("base_model.frod_V.", "base_model.frod_s_indices.", "base_model.frod_s_size.")
+        frod_projection_keys = [k for k in state_dict if k.startswith(frod_projection_prefixes)]
+        for k in frod_projection_keys:
+            frod_projection_state_dict[f"{k}.{adapter_name}"] = state_dict.pop(k)
+
+        peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
+        peft_model_state_dict.update(frod_projection_state_dict)
+
+        has_projection = any(
+            k.startswith(("base_model.frod_V.", "base_model.frod_s_indices.", "base_model.frod_s_size."))
+            for k in peft_model_state_dict
+        )
+        if config.save_projection and not has_projection:
+            raise ValueError(
+                "Specified to load FRoD projection tensors from state dictionary however they were not present. "
+                "If this checkpoint was saved with `save_projection=False`, set `peft_config.save_projection` "
+                "to `False` before loading so the projections are regenerated from the base model weights. "
+                "Otherwise, re-save the adapter with `save_projection=True` to include these tensors."
+            )
+        elif not config.save_projection and has_projection:
+            warnings.warn(
+                "Specified to not load FRoD projection tensors from state dictionary however they are present. "
+                "Consider using them to ensure checkpoint loading is correct by setting "
+                "`peft_config.save_projection = True`."
+            )
+        return peft_model_state_dict

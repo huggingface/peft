@@ -13,8 +13,10 @@
 # limitations under the License.
 from __future__ import annotations
 
+import copy
 import math
 import operator
+import os
 import re
 import warnings
 from contextlib import contextmanager
@@ -967,6 +969,104 @@ class LoraModel(BaseTuner):
 
         return tensors_lora
 
+    @classmethod
+    def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
+        to_return = super()._get_adapter_state_dict(model, config, adapter_name, state_dict, unwanted_adapter_names)
+
+        bias = config.bias
+        if bias == "none":
+            pass
+        elif bias == "all":
+            to_return.update({k: v for k, v in state_dict.items() if (k == "bias") or k.endswith(".bias")})
+        elif bias == "lora_only":
+            for module_name, module in model.named_modules():
+                if module_name.startswith("_fsdp_wrapped_module."):
+                    module_name = module_name.removeprefix("_fsdp_wrapped_module.")
+                if not isinstance(module, LoraLayer):
+                    continue
+                # the bias of the targeted module is located on the base layer of the tuner layer
+                bias_name = f"{module_name}.base_layer.bias" if module_name else "base_layer.bias"
+                if bias_name in state_dict:
+                    to_return[bias_name] = state_dict[bias_name]
+        else:
+            raise NotImplementedError
+
+        if config.use_dora:
+            # Here we take care of a refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a
+            # ModuleDict with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. Since
+            # we want the state_dict format not to change, we remove the "weight" part.
+            new_dora_suffix = f"lora_magnitude_vector.{adapter_name}.weight"
+
+            def renamed_dora_weights(k):
+                if k.endswith(new_dora_suffix):
+                    k = k[:-7]  # remove ".weight"
+                return k
+
+            to_return = {renamed_dora_weights(k): v for k, v in to_return.items()}
+        return to_return
+
+    @classmethod
+    def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
+        # Here we take care of a refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a
+        # ModuleDict with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. As the
+        # checkpoint format did not change (the keys still end with lora_magnitude_vector, without ".weight"), the
+        # suffix needs to be appended before the keys are remapped to the model format.
+        def renamed_dora_weights(k):
+            if k.endswith("lora_magnitude_vector"):
+                k = k + ".weight"
+            return k
+
+        state_dict = {renamed_dora_weights(k): v for k, v in state_dict.items()}
+        peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
+
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            _maybe_shard_state_dict_for_tp(model, peft_model_state_dict, adapter_name)
+
+        return peft_model_state_dict
+
+    @classmethod
+    def _save_mutated_as_lora(
+        cls, peft_model, peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
+    ):
+        if peft_config.use_rslora and (peft_config.rank_pattern or peft_config.alpha_pattern):
+            msg = (
+                "Passing `path_initial_model_for_weight_conversion` to `save_pretrained` is not supported when "
+                "using `rank_pattern` or `alpha_pattern` at the same time as `use_rslora=True`."
+            )
+            raise ValueError(msg)
+
+        if not any(
+            str(peft_config.init_lora_weights).lower().startswith(prefix)
+            for prefix in ["pissa", "corda", "olora", "lora_ga", "true"]
+        ):
+            warnings.warn(
+                "`path_initial_model_for_weight_conversion` only works for converting a PiSSA/CorDA/OLoRA/LoRA-GA adapter to "
+                "a LoRA adapter"
+            )
+        initial_adapter_name = os.path.basename(path_initial_model_for_weight_conversion)
+        try:
+            peft_model.load_adapter(
+                os.path.dirname(path_initial_model_for_weight_conversion),
+                subfolder=initial_adapter_name,
+                adapter_name=initial_adapter_name,
+            )
+            is_pissa = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower().startswith("pissa")
+            is_corda = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "corda"
+            is_olora = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "olora"
+            is_lora_ga = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "lora_ga"
+            if is_pissa or is_corda or is_olora or is_lora_ga:
+                raise ValueError(
+                    "The `init_lora_weights` parameter of the initial adapter should be set to `True`. "
+                    "Otherwise, `self.load_adapter` will subtract the decomposed values again based on the "
+                    "residual model."
+                )
+            output_state_dict = peft_model.base_model.subtract_mutated_init(
+                output_state_dict, initial_adapter_name, kwargs
+            )
+        finally:
+            peft_model.delete_adapter(initial_adapter_name)
+        return output_state_dict
+
     def _get_monteclora_loss(self, adapter_names: Optional[Union[str, list[str]]] = None) -> torch.Tensor | float:
         """
         Compute the MonteCLoRA variational regularization loss.
@@ -1097,3 +1197,120 @@ class LoraModel(BaseTuner):
                     break
 
         peft_config.target_modules = target_modules
+
+
+def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
+    """
+    Shard LoRA adapter weights in-place in `state_dict` according to the tensor-parallel plan of the model.
+
+    Args:
+        model (`nn.Module`): The TP base model (with `_hf_tp_plan` and `_hf_device_mesh` set on its layers).
+        state_dict (`dict`): The adapter state dict to shard in-place (as loaded from a checkpoint).
+        adapter_name (`str`): The name of the adapter whose weights are being sharded.
+    """
+    tp_lora_modules = []
+    for name, module in model.named_modules():
+        if not isinstance(module, LoraLayer):
+            continue
+
+        base_layer = module.get_base_layer()
+        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+        device_mesh = getattr(base_layer, "_hf_device_mesh", None)
+        if tp_plan is None or device_mesh is None:
+            continue
+
+        tp_lora_modules.append((name, module, base_layer, tp_plan, device_mesh))
+
+    if not tp_lora_modules:
+        return
+
+    from transformers.integrations.tensor_parallel import (
+        ALL_PARALLEL_STYLES,
+        ColwiseParallel,
+        EmbeddingParallel,
+        RowwiseParallel,
+    )
+
+    should_check = True
+    prefix_to_remove = None
+    prefix_to_add = None
+    adapter_name_in_key = ""
+
+    possible_prefixes = ["base_model.model.", "base_model."]
+
+    for name, module, base_layer, tp_plan, device_mesh in tp_lora_modules:
+        device = base_layer.weight.device
+
+        # One time check to make sure we are adding / removing a potential prefix to get the proper key in the state
+        # dict. Same thing for the adapter name.
+        if should_check:
+            for key in state_dict:
+                if adapter_name in key:
+                    adapter_name_in_key = f".{adapter_name}"
+                    break
+
+            for key in state_dict:
+                key_prefix = ""
+                name_prefix = ""
+                for p in possible_prefixes:
+                    if key.startswith(p):
+                        key_prefix = p
+                        break
+                for p in possible_prefixes:
+                    if name.startswith(p):
+                        name_prefix = p
+                        break
+                if key_prefix != name_prefix:
+                    prefix_to_add = key_prefix
+                    prefix_to_remove = name_prefix
+                    break
+
+            should_check = False
+
+        if prefix_to_remove:
+            name = name.removeprefix(prefix_to_remove)
+        if prefix_to_add:
+            name = prefix_to_add + name
+
+        # We create and initialize the TensorParallelLayer on the fly,
+        # and we set the `empty_param` attribute depending on the proper
+        # state dict key to shard.
+        # This attribute is used by the sharding logic for shape reference,
+        # it must be of the same shape as the parameter to shard.
+        tp_layer = copy.deepcopy(ALL_PARALLEL_STYLES[tp_plan])
+        tp_layer.device_mesh = device_mesh
+        tp_layer.rank = device_mesh.get_local_rank()
+
+        weight = None
+        sharded = None
+        if isinstance(tp_layer, ColwiseParallel):
+            key = f"{name}.lora_B{adapter_name_in_key}.weight"
+        elif isinstance(tp_layer, RowwiseParallel):
+            key = f"{name}.lora_A{adapter_name_in_key}.weight"
+        elif isinstance(tp_layer, EmbeddingParallel):
+            # The state dict can contain the original base embedding weights if `save_embedding_layers` is
+            # set to `True` and the embedding layer is targeted. In that case, we need to shard those
+            # weights as well.
+            embedding_key = f"{name}.base_layer.weight"
+            if embedding_key in state_dict:
+                tp_layer.empty_param = state_dict[embedding_key]
+                state_dict[embedding_key] = tp_layer.shard_tensor(state_dict[embedding_key], device=device)
+            key = f"{name}.lora_embedding_A{adapter_name_in_key}"
+            # We transpose the lora_embedding_A weights because they are of shape (rank, num_embeddings) in
+            # the state dict
+            weight = state_dict[key].T
+            tp_layer.empty_param = weight
+            sharded = tp_layer.shard_tensor(weight, device=device)
+            # We transpose back because LoraEmbedding expects the weights to be of shape (rank, num_embeddings)
+            sharded = sharded.T
+        else:
+            raise TypeError(f"Unknown tensor parallel plan {tp_plan} for {module.__class__.__name__}.")
+
+        if weight is None:
+            weight = state_dict[key]
+        if sharded is None:
+            tp_layer.empty_param = weight
+            sharded = tp_layer.shard_tensor(weight, device=device)
+
+        tp_layer.empty_param = weight
+        state_dict[key] = sharded

@@ -731,6 +731,35 @@ class TestPeftStateDict:
         )
         self.check_peft_model_weights_loaded_correctly(MyModel, config, nested=nested, adapter_name="foo")
 
+    @pytest.mark.parametrize("config_cls", [LoraConfig, LoKrConfig])
+    def test_base_model_module_named_like_peft_prefix(self, config_cls):
+        # Here the base model contains a module whose name contains the PEFT prefix of the method (e.g. "lora_"). Such
+        # a module must be treated like any other base model module: it must not be included in the PEFT state_dict
+        # (it would needlessly blow up the checkpoint size) and it must not be trainable.
+        prefix = {LoraConfig: "lora_", LoKrConfig: "lokr_"}[config_cls]
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(5, 5)
+                # module whose name contains the PEFT prefix, e.g. "lora_foobar"
+                setattr(self, f"{prefix}foobar", nn.Linear(5, 5))
+
+            def forward(self, x):
+                return getattr(self, f"{prefix}foobar")(self.lin0(x))
+
+        torch.manual_seed(0)
+        model = get_peft_model(MyModel(), config_cls(target_modules=["lin0"]))
+        imposter = getattr(model.base_model.model, f"{prefix}foobar")
+        assert not imposter.weight.requires_grad
+        assert not imposter.bias.requires_grad
+
+        sd = get_peft_model_state_dict(model)
+        assert len(sd) > 0  # sanity check
+        assert not any(f"{prefix}foobar" in key for key in sd)
+        # sanity check: the keys of the actual adapter are present
+        assert any("lin0" in key for key in sd)
+
 
 class TestGetBaseModelStateDict:
     # Tests for get_base_model_state_dict / set_base_model_state_dict. The per-method and per-model coverage lives in
