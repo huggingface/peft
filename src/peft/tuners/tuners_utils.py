@@ -122,10 +122,17 @@ def onload_layer(layer):
         layer.base_layer._hf_hook.pre_forward(layer.base_layer)
         base_layer_offload = True
 
+    # `merged` separates the two responsibilities of the finally block: releasing the execution
+    # device (always right) vs. persisting the merged weights (only right after a clean merge).
+    # If the caller raises mid-merge the weights_map rebuild below is skipped, so post_forward
+    # drops the half-merged parameters from the device and sets them to meta; the next
+    # pre_forward then reloads from the untouched original weights_map rather than persisting a
+    # partial merge.  Without the flag the two paths were coupled and a failed merge would have
+    # written back whatever half-merged state happened to be in memory.
     merged = False
     try:
         yield
-        merged = True
+        merged = True  # set only after a clean return; stays False if the caller raises
     finally:
         for module in offloaded_modules:
             module._hf_hook.post_forward(module, torch.tensor([]))
@@ -142,6 +149,9 @@ def onload_layer(layer):
                 ):
                     # rewrite directory with merged weights
                     offload_state_dict(safetensors_filename, layer.base_layer._hf_hook.weights_map)
+            # post_forward always runs regardless of merged: on the success path it moves the
+            # freshly built weights_map to CPU/disk; on the failure path it releases the
+            # execution device so the layer is not stranded in GPU memory after a partial merge.
             layer.base_layer._hf_hook.post_forward(layer.base_layer, torch.tensor([]))
 
 
