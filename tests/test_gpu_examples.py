@@ -5581,11 +5581,11 @@ class TestALoRAInferenceGPU:
             assert cos > 0.9
 
 
-@pytest.mark.multi_gpu_tests
 class TestPrefixTuning:
     device = infer_device()
     causal_lm_model_id = "peft-internal-testing/opt-125m"
 
+    @pytest.mark.multi_gpu_tests
     @require_torch_multi_accelerator
     def test_prefix_tuning_multiple_devices_decoder_model(self):
         # See issue 2134
@@ -5611,6 +5611,7 @@ class TestPrefixTuning:
         model = get_peft_model(model, peft_config)
         model.generate(**inputs)  # does not raise
 
+    @pytest.mark.multi_gpu_tests
     @require_torch_multi_accelerator
     def test_prefix_tuning_multiple_devices_encoder_decoder_model(self):
         # See issue 2134
