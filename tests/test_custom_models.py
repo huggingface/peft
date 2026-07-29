@@ -6886,15 +6886,21 @@ class TestMixedAdapterBatches:
 
         from transformers.modeling_layers import GradientCheckpointingLayer
 
+        # Subclass to provide a real forward; bare GradientCheckpointingLayer raises
+        # NotImplementedError, which would make the "model still usable" check below fail
+        # for a reason unrelated to hooks.
+        class GradCkptLinear(GradientCheckpointingLayer):
+            def forward(self, X):
+                return self.linear(X)
+
         # Build a tiny model where lin0 is wrapped in a GradientCheckpointingLayer.
         class MLPWithGradCkpt(nn.Module):
             def __init__(self):
                 super().__init__()
-                inner = nn.Linear(10, 10)
-                self.lin0 = GradientCheckpointingLayer()
+                self.lin0 = GradCkptLinear()
                 self.lin0.gradient_checkpointing = True
                 # Attach the linear as a sub-module so LoRA can target it.
-                self.lin0.linear = inner
+                self.lin0.linear = nn.Linear(10, 10)
                 self.lin1 = nn.Linear(10, 10)
 
             def forward(self, X):
@@ -6926,6 +6932,10 @@ class TestMixedAdapterBatches:
         # A second call must not raise "Multiple invocations of PEFT forward hooks".
         with peft_model.base_model._enable_peft_forward_hooks(alora_offsets=alora_offsets):
             pass
+
+        # The model must still be usable afterwards.
+        inputs = {"X": torch.arange(90).view(-1, 10).float().to(self.torch_device)}
+        peft_model(**inputs)
 
     @pytest.mark.parametrize(
         "test_name, config0, config1",
