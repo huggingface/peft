@@ -5178,16 +5178,8 @@ class TestRequiresGrad:
             "base_model.model.lin0.ia3_l.adapter1",
         )
 
-    @pytest.mark.xfail(strict=True)
     def test_requires_grad_adalora_different_targets(self):
         # test two different AdaLora adapters that target different modules
-
-        # Note: This test is expected to fail because first loading one adapter, then the next adapter with
-        # inference_mode=True incorrectly leads to the requires_grad of the first adapter being turned to False. This is
-        # of course not desired but has yet to be fixed. In practice, it's unlikely that a user would pass
-        # inference_mode=True for add_adapter, this flag is mostly being used when calling PeftModel.from_pretrained, so
-        # we accept this issue for now. Note that only for AdaLoRA do we even need to pass inference_mode=True here,
-        # other PEFT methods don't require this.
         config0 = AdaLoraConfig(target_modules=["lin0"], total_step=1)
         peft_model = get_peft_model(MLP(), config0)
 
@@ -5233,16 +5225,8 @@ class TestRequiresGrad:
             "base_model.model.lin1.lora_E.adapter1",
         )
 
-    @pytest.mark.xfail(strict=True)
     def test_requires_grad_adalora_same_targets(self):
         # same as previous test, except that AdaLora adapters target the same layer
-
-        # Note: This test is expected to fail because first loading one adapter, then the next adapter with
-        # inference_mode=True incorrectly leads to the requires_grad of the first adapter being turned to False. This is
-        # of course not desired but has yet to be fixed. In practice, it's unlikely that a user would pass
-        # inference_mode=True for add_adapter, this flag is mostly being used when calling PeftModel.from_pretrained, so
-        # we accept this issue for now. Note that only for AdaLoRA do we even need to pass inference_mode=True here,
-        # other PEFT methods don't require this.
         config0 = AdaLoraConfig(target_modules=["lin0"], total_step=1)
         peft_model = get_peft_model(MLP(), config0)
 
@@ -5288,6 +5272,33 @@ class TestRequiresGrad:
             "base_model.model.lin0.lora_B.adapter1",
             "base_model.model.lin0.lora_E.adapter1",
         )
+
+    def test_requires_grad_inject_adapter_does_not_change_active_adapter(self):
+        # Injecting a new adapter should not apply the new adapter's inference_mode to the already active adapter, see
+        # #3487.
+
+        # add an adapter with inference_mode=True to a model whose active adapter is trainable: the active adapter
+        # should stay trainable
+        config0 = LoraConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = LoraConfig(target_modules=["lin0"], inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.lora_A.default.weight",
+            "base_model.model.lin0.lora_B.default.weight",
+        )
+
+        # add a trainable adapter to a model whose active adapter is frozen: the active adapter should stay frozen
+        config0 = LoraConfig(target_modules=["lin0"], inference_mode=True)
+        peft_model = get_peft_model(MLP(), config0)
+        self.check_requires_grad(peft_model)
+
+        config1 = LoraConfig(target_modules=["lin0"])
+        peft_model.add_adapter("adapter1", config1)
+        self.check_requires_grad(peft_model)
 
     def test_requires_grad_lora_conv2d(self):
         # test two different LoRA adapters that target different modules
@@ -6645,9 +6656,9 @@ class TestRequiresGrad:
     @pytest.mark.parametrize("config_cls", [LoraConfig])  # no need to check each method, they all fail
     def test_loading_model_requires_grad_set_correctly_switch_inference_mode(self, config_cls, tmp_path):
         # Same as test_loading_model_requires_grad_set_correctly but this time we first load with is_trainable=False and
-        # then with is_trainable=True. Loading the second adapter should not affect the requires_grad of the first
-        # adapter, but it does. The reason is that is_training/inference_mode is taken from the current PEFT config, but
-        # that config does not necessarily belong to the active adapter, creating a mismatch.
+        # then with is_trainable=True. Loading the second adapter no longer affects the requires_grad of the first
+        # adapter (see #3487), but the second adapter, which is not automatically activated, is loaded frozen despite
+        # is_trainable=True, since requires_grad currently follows the active adapters.
         # When/If this is fixed, the check can be integrated into test_loading_model_requires_grad_set_correctly and
         # this test can be deleted.
         model = DeepMLP(size=256)  # a size that works with all adapters
@@ -6671,14 +6682,10 @@ class TestRequiresGrad:
         # this fails, instead with get ...lora_A.default.weight and ...lora_B.default.weight
         assert params_with_grad == expected
 
-    @pytest.mark.xfail(strict=True)
-    @pytest.mark.parametrize("config_cls", [LoraConfig])  # no need to check each method, they all fail
+    @pytest.mark.parametrize("config_cls", [LoraConfig])  # no need to check each method
     def test_loading_model_requires_grad_load_adapter_then_add_adapter(self, config_cls, tmp_path):
-        # When adding a new adapter with model.add_adapter, through the set_adapter call in update_layer, we activate
-        # the gradients of the first adapter, even if it's not desired. Since there is no is_trainable argument on
-        # add_adapter, there is no way to disable that at the moment.
-        # When/If this is fixed, the check can be integrated into test_loading_model_requires_grad_set_correctly and
-        # this test can be deleted.
+        # Adding a new adapter with model.add_adapter should not activate the gradients of the first, frozen adapter
+        # (see #3487).
         model = DeepMLP(size=256)  # a size that works with all adapters
         extra_kwargs = {}
         config = config_cls(target_modules=["layers.0.lin0"])
