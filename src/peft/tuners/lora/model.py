@@ -13,7 +13,6 @@
 # limitations under the License.
 from __future__ import annotations
 
-import copy
 import math
 import operator
 import os
@@ -49,6 +48,7 @@ from peft.utils import (
 from peft.utils.integrations import TpInfo
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 from peft.utils.other import get_pattern_key
+from peft.utils.save_and_load import _maybe_shard_state_dict_for_tp
 
 from .aqlm import dispatch_aqlm
 from .awq import dispatch_awq
@@ -1197,120 +1197,3 @@ class LoraModel(BaseTuner):
                     break
 
         peft_config.target_modules = target_modules
-
-
-def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
-    """
-    Shard LoRA adapter weights in-place in `state_dict` according to the tensor-parallel plan of the model.
-
-    Args:
-        model (`nn.Module`): The TP base model (with `_hf_tp_plan` and `_hf_device_mesh` set on its layers).
-        state_dict (`dict`): The adapter state dict to shard in-place (as loaded from a checkpoint).
-        adapter_name (`str`): The name of the adapter whose weights are being sharded.
-    """
-    tp_lora_modules = []
-    for name, module in model.named_modules():
-        if not isinstance(module, LoraLayer):
-            continue
-
-        base_layer = module.get_base_layer()
-        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
-        device_mesh = getattr(base_layer, "_hf_device_mesh", None)
-        if tp_plan is None or device_mesh is None:
-            continue
-
-        tp_lora_modules.append((name, module, base_layer, tp_plan, device_mesh))
-
-    if not tp_lora_modules:
-        return
-
-    from transformers.integrations.tensor_parallel import (
-        ALL_PARALLEL_STYLES,
-        ColwiseParallel,
-        EmbeddingParallel,
-        RowwiseParallel,
-    )
-
-    should_check = True
-    prefix_to_remove = None
-    prefix_to_add = None
-    adapter_name_in_key = ""
-
-    possible_prefixes = ["base_model.model.", "base_model."]
-
-    for name, module, base_layer, tp_plan, device_mesh in tp_lora_modules:
-        device = base_layer.weight.device
-
-        # One time check to make sure we are adding / removing a potential prefix to get the proper key in the state
-        # dict. Same thing for the adapter name.
-        if should_check:
-            for key in state_dict:
-                if adapter_name in key:
-                    adapter_name_in_key = f".{adapter_name}"
-                    break
-
-            for key in state_dict:
-                key_prefix = ""
-                name_prefix = ""
-                for p in possible_prefixes:
-                    if key.startswith(p):
-                        key_prefix = p
-                        break
-                for p in possible_prefixes:
-                    if name.startswith(p):
-                        name_prefix = p
-                        break
-                if key_prefix != name_prefix:
-                    prefix_to_add = key_prefix
-                    prefix_to_remove = name_prefix
-                    break
-
-            should_check = False
-
-        if prefix_to_remove:
-            name = name.removeprefix(prefix_to_remove)
-        if prefix_to_add:
-            name = prefix_to_add + name
-
-        # We create and initialize the TensorParallelLayer on the fly,
-        # and we set the `empty_param` attribute depending on the proper
-        # state dict key to shard.
-        # This attribute is used by the sharding logic for shape reference,
-        # it must be of the same shape as the parameter to shard.
-        tp_layer = copy.deepcopy(ALL_PARALLEL_STYLES[tp_plan])
-        tp_layer.device_mesh = device_mesh
-        tp_layer.rank = device_mesh.get_local_rank()
-
-        weight = None
-        sharded = None
-        if isinstance(tp_layer, ColwiseParallel):
-            key = f"{name}.lora_B{adapter_name_in_key}.weight"
-        elif isinstance(tp_layer, RowwiseParallel):
-            key = f"{name}.lora_A{adapter_name_in_key}.weight"
-        elif isinstance(tp_layer, EmbeddingParallel):
-            # The state dict can contain the original base embedding weights if `save_embedding_layers` is
-            # set to `True` and the embedding layer is targeted. In that case, we need to shard those
-            # weights as well.
-            embedding_key = f"{name}.base_layer.weight"
-            if embedding_key in state_dict:
-                tp_layer.empty_param = state_dict[embedding_key]
-                state_dict[embedding_key] = tp_layer.shard_tensor(state_dict[embedding_key], device=device)
-            key = f"{name}.lora_embedding_A{adapter_name_in_key}"
-            # We transpose the lora_embedding_A weights because they are of shape (rank, num_embeddings) in
-            # the state dict
-            weight = state_dict[key].T
-            tp_layer.empty_param = weight
-            sharded = tp_layer.shard_tensor(weight, device=device)
-            # We transpose back because LoraEmbedding expects the weights to be of shape (rank, num_embeddings)
-            sharded = sharded.T
-        else:
-            raise TypeError(f"Unknown tensor parallel plan {tp_plan} for {module.__class__.__name__}.")
-
-        if weight is None:
-            weight = state_dict[key]
-        if sharded is None:
-            tp_layer.empty_param = weight
-            sharded = tp_layer.shard_tensor(weight, device=device)
-
-        tp_layer.empty_param = weight
-        state_dict[key] = sharded
