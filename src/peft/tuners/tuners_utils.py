@@ -1489,8 +1489,8 @@ class BaseTuner(nn.Module, ABC):
         keys contain the adapter name) and apply method-specific conversions.
 
         The mapping is built structurally by enumerating the adapter parameters of the model and computing the
-        corresponding checkpoint key for each of them via `_remove_adapter_name_from_key`, guaranteeing that saving
-        and loading are symmetric. Checkpoint entries with no corresponding adapter parameter (e.g. saved biases or
+        corresponding checkpoint key for each of them via `_remove_adapter_name_from_key`, guaranteeing that saving and
+        loading are symmetric. Checkpoint entries with no corresponding adapter parameter (e.g. saved biases or
         embedding weights) are passed through unchanged.
         """
         prefixes = _get_tuner_state_dict_key_prefixes(model, adapter_name=adapter_name)
