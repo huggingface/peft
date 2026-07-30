@@ -54,26 +54,17 @@ The abstract from the paper is:
 
 VeRA is a good choice when:
 
-- You want to **minimize the number of trainable parameters** while maintaining performance comparable to LoRA.
-- You need to **store or deploy many task-specific adapters**, where **smaller adapter checkpoints** reduce storage requirements.
-- You are fine-tuning **very large language models** under **tight memory or parameter budgets**.
+- You want to minimize the number of trainable parameters while maintaining performance comparable to LoRA.
+- You need to store or deploy many task-specific adapters, where smaller adapter checkpoints reduce storage requirements.
+- You are fine-tuning very large language models under tight memory or parameter budgets.
 
 ## When not to use VeRA
 
 VeRA may not be the best choice when:
 
-- You require **independent low-rank matrices** for each adapted layer, providing greater flexibility in the learned adapter parameters.
-- Your model requires adapting module types other than **`nn.Linear`**, since VeRA currently supports only linear layers.
-- Your model contains adapted linear layers with **widely different input and output dimensions**. Because VeRA shares a single pair of projection matrices across all adapted layers, these matrices must be sized for the **largest layer**. Models with a large variation in layer shapes (for example, transformer up- and down-projection layers) can therefore require **over-provision the shared projection matrices**, reducing some of VeRA's **parameter-efficiency advantage**.
-
-## Practical considerations
-
-When using VeRA, consider the following:
-
-- The number of trainable parameters grows with both the adapter rank (`r`) and the number of adapted layers, but remains **substantially smaller than LoRA** because the projection matrices are shared across layers.
-- VeRA initializes the **shared random projection matrices only once** and reuses them across all adapted layers. As a result, increasing the number of adapted layers has a **much smaller impact** on the number of trainable parameters than in LoRA.
-- Setting **`save_projection=False`** produces **smaller adapter checkpoints** by regenerating the shared projection matrices from the configured random seed during loading. For **maximum reproducibility** across hardware and future PyTorch versions, keep **`save_projection=True`**.
-- When adapted layers have different dimensions, PEFT automatically allocates shared projection matrices large enough for the **largest input and output dimensions** and slices the required submatrices during the forward pass. Models with **widely varying layer shapes** may therefore use **larger shared projection matrices than necessary**, reducing some of VeRA's **parameter-efficiency advantage**.
+- You require independent low-rank matrices for each adapted layer, providing greater flexibility in the learned adapter parameters.
+- Your model requires adapting module types other than `nn.Linear`, since VeRA currently supports only linear layers.
+- Your model contains adapted linear layers with widely different input and output dimensions. Because VeRA shares a single pair of projection matrices across all adapted layers, these matrices must be sized for the largest input and output dimensions (overall shape). Models with a large variation in layer shapes (for example, transformer up- and down-projection layers) can therefore require over-provision shared projection matrices, reducing some of VeRA's parameter-efficiency advantage.
 
 ## Benchmark overview
 
