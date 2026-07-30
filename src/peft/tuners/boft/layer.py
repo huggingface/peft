@@ -591,6 +591,27 @@ class Linear(nn.Module, BOFTLayer):
 
         return butterfly_oft_mat, boft_s
 
+    def get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        """Return the additive delta W' - W for BOFT.
+
+        BOFT is a multiplicative method: W' = (W @ R^T) * s, where R is the orthogonal rotation matrix and s is the
+        scaling vector. The additive delta is thus (W @ R^T) * s - W.
+        """
+        butterfly_oft_mat, boft_s = self.get_delta_weight(adapter_name)
+        base_weight = self.get_base_weight()
+        orig_dtype = base_weight.dtype
+        # compute in float32 for numerical stability
+        weight = base_weight.float()
+        # W @ R^T (same as (R @ W^T)^T, matching the merge logic)
+        effective_weight = torch.mm(weight, butterfly_oft_mat.float().t())
+        # apply scaling: boft_s is (out_features, 1), broadcasts over in_features
+        effective_weight = effective_weight * boft_s.float()
+        delta = effective_weight - weight
+        return delta.to(orig_dtype)
+
+    def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
+        return True
+
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
 

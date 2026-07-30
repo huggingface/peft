@@ -269,6 +269,9 @@ class DeloraLinear(nn.Module, DeloraLayer):
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         return True
 
+    def get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        return self.get_delta_weight(adapter_name)
+
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "delora." + rep
