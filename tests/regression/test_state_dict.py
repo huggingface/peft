@@ -53,6 +53,7 @@ import tempfile
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 import pytest
 import torch
@@ -194,11 +195,11 @@ class Case:
     config_kwargs: dict
     model_id: str = MODEL_OPT
     model_cls: str = "AutoModelForCausalLM"
-    inputs: dict = field(default_factory=lambda: INPUTS_DECODER)
+    inputs: dict = field(default_factory=lambda: dict(INPUTS_DECODER))
     atol: float = 1e-6
     rtol: float = 1e-6
     # special creation flows that go beyond get_peft_model + save_pretrained
-    variant: str | None = None  # None | "multi_adapter" | "pissa_conversion"
+    variant: None | Literal["multi_adapter", "pissa_conversion"] = None
     notes: str = ""
 
 
@@ -451,10 +452,15 @@ def create_artifact(case, case_dir, tmp_path):
         save_kwargs["path_initial_model_for_weight_conversion"] = init_dir
     elif case.variant == "multi_adapter":
         # A second adapter is present in the model but not saved; its weights must not leak into the checkpoint.
-        model.add_adapter("other", case.config_cls(**case.config_kwargs))
-        save_kwargs["selected_adapters"] = ["default"]
+        model.add_adapter("default2", case.config_cls(**case.config_kwargs))
+        model.base_model.set_adapter(["default", "default2"])  # make both trainable so that their weights are altered
+        save_kwargs["selected_adapters"] = ["default"]  # we're only interested in saving and loading 'default'
 
     fill_trainable_params(model)
+
+    if case.variant == "multi_adapter":
+        model.base_model.set_adapter(["default"])  # for generating outputs, switch back to 'default'
+
     logits = get_output(model, case.inputs)
 
     assert torch.isfinite(logits).all(), "the model output must be finite"
