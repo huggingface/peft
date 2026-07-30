@@ -128,6 +128,52 @@ class TestRiemannianOptimizer:
         with pytest.raises(TypeError, match="subclass of torch.optim.Optimizer"):
             create_riemannian_optimizer(model, dict, lr=1e-3)  # type: ignore[arg-type]
 
+    def test_closure_path_preconditions_lora_gradients(self):
+        # Regression test for the closure-ordering bug: torch optimizers evaluate the closure at the top of their
+        # own step (typical body is zero_grad(); loss.backward()), which overwrites .grad. If preconditioning ran
+        # before super().step(closure), the base optimizer would consume raw gradients on the LoRA A/B factors.
+        # Two runs with the same seed and data must land on identical parameters after one step.
+        def _step_no_closure(model, opt):
+            opt.zero_grad()
+            _forward_backward(model)
+            opt.step()
+
+        def _step_with_closure(model, opt):
+            def closure():
+                opt.zero_grad()
+                _forward_backward(model)
+
+            opt.step(closure)
+
+        torch.manual_seed(0)
+        model_a = _make_lora_model(seed=0)
+        opt_a = create_riemannian_optimizer(model_a, torch.optim.SGD, lr=0.1)
+        torch.manual_seed(0)
+        _step_no_closure(model_a, opt_a)
+
+        torch.manual_seed(0)
+        model_b = _make_lora_model(seed=0)
+        opt_b = create_riemannian_optimizer(model_b, torch.optim.SGD, lr=0.1)
+        torch.manual_seed(0)
+        _step_with_closure(model_b, opt_b)
+
+        lora_names = [n for n, _ in model_a.named_parameters() if "lora_" in n and "weight" in n]
+        assert lora_names, "no lora_A/lora_B weights found on model"
+        for name in lora_names:
+            pa = dict(model_a.named_parameters())[name]
+            pb = dict(model_b.named_parameters())[name]
+            assert torch.allclose(pa, pb, atol=1e-6, rtol=1e-5), (
+                f"closure and no-closure paths diverged at {name!r}; closure path did NOT precondition."
+            )
+
+    def test_raises_when_optimizer_requires_closure(self):
+        # LBFGS.step has a required closure and re-evaluates the objective inside step(); the preconditioner would
+        # be recomputed each iteration, invalidating the optimizer's secant-condition curvature estimate. Reject
+        # at construction time. Detection is by signature so we don't hardcode the class name.
+        model = _make_lora_model()
+        with pytest.raises(ValueError, match="requires a closure"):
+            create_riemannian_optimizer(model, torch.optim.LBFGS, lr=0.1)
+
     @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
     def test_low_precision_gradients_preconditioned_stably(self, dtype):
         # bf16/fp16 factors on their own would overflow / NaN the small-r inverse; the preconditioner promotes to

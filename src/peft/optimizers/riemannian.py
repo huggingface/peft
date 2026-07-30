@@ -16,6 +16,7 @@
 This module contains the implementation of the Riemannian-preconditioned LoRA optimizer.
 """
 
+import inspect
 from collections.abc import Callable
 from typing import Optional
 
@@ -154,11 +155,37 @@ def create_riemannian_optimizer(
     preconditioner = _RiemannianPreconditioner(lora_pairs, reg=reg)
     trainable_params = [param for param in model.parameters() if param.requires_grad]
 
+    # Reject closure-required optimizers (LBFGS) at construction. Even with
+    # correct ordering the preconditioner breaks LBFGS's secant-condition
+    # curvature estimate. Detect by signature so we don't hardcode a class name.
+    step_sig = inspect.signature(optimizer_cls.step)
+    closure_param = step_sig.parameters.get("closure")
+    if closure_param is not None and closure_param.default is inspect.Parameter.empty:
+        raise ValueError(
+            f"{optimizer_cls.__name__} requires a closure and re-evaluates the "
+            "objective inside step(); the Riemannian preconditioner would be "
+            "recomputed each iteration, invalidating the optimizer's curvature "
+            "or line-search state. Use an optimizer whose step() has an "
+            "optional closure (SGD, AdamW, etc)."
+        )
+
     class RiemannianPreconditionedOptimizer(optimizer_cls):
         @torch.no_grad()
         def step(self, closure: Optional[Callable] = None):
-            preconditioner.step()
-            return super().step(closure)
+            if closure is None:
+                preconditioner.step()
+                return super().step()
+
+            # Closures typically do ``zero_grad(); loss.backward()``, which
+            # overwrites ``.grad``; preconditioning has to run inside the
+            # closure so it operates on the freshly-computed gradients the
+            # base optimizer will actually consume.
+            def preconditioned_closure():
+                loss = closure()
+                preconditioner.step()
+                return loss
+
+            return super().step(preconditioned_closure)
 
     optimizer = RiemannianPreconditionedOptimizer(trainable_params, lr=lr, **kwargs)
     return optimizer
