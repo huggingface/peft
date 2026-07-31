@@ -58,9 +58,7 @@ def _make_unilora_config(**kwargs):
 def _get_unilora_index_state(model):
     # note: the indices are non-persistent buffers unless save_indices is set, so they need to be collected from the
     # modules instead of from the state_dict
-    return {
-        name: buffer.detach().cpu().clone() for name, buffer in model.named_buffers() if "unilora_indices" in name
-    }
+    return {name: buffer.detach().cpu().clone() for name, buffer in model.named_buffers() if "unilora_indices" in name}
 
 
 class TestUniLora:
