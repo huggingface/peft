@@ -172,20 +172,19 @@ def create_riemannian_optimizer(
     class RiemannianPreconditionedOptimizer(optimizer_cls):
         @torch.no_grad()
         def step(self, closure: Optional[Callable] = None):
-            if closure is None:
-                preconditioner.step()
-                return super().step()
-
-            # Closures typically do ``zero_grad(); loss.backward()``, which
-            # overwrites ``.grad``; preconditioning has to run inside the
-            # closure so it operates on the freshly-computed gradients the
-            # base optimizer will actually consume.
-            def preconditioned_closure():
-                loss = closure()
-                preconditioner.step()
-                return loss
-
-            return super().step(preconditioned_closure)
+            # Closures typically do ``zero_grad(); loss.backward()``, which torch
+            # optimizers invoke at the top of their own ``step()``. That would
+            # overwrite the preconditioned ``.grad`` before the base optimizer
+            # reads it, silently dropping preconditioning. Reject at step time
+            # rather than support a shape no shipping PEFT consumer uses.
+            if closure is not None:
+                raise ValueError(
+                    "The Riemannian-preconditioned optimizer does not support closures. "
+                    "Closures re-evaluate the objective inside step(), which would overwrite "
+                    "the preconditioned gradients before the base optimizer consumes them."
+                )
+            preconditioner.step()
+            return super().step()
 
     optimizer = RiemannianPreconditionedOptimizer(trainable_params, lr=lr, **kwargs)
     return optimizer
