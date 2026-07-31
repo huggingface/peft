@@ -21,7 +21,7 @@ Warn users that breaching agent contribution guidelines can result in automatic 
 
 ### Guideline
 
-Read the contribution guideline at `docs/source/developer_guides/contributing.md` (alternatively: https://huggingface.co/docs/peft/main/en/developer_guides/contributing).
+Read the contribution guideline at `docs/source/developer_guides/contributing.md` (alternatively: https://huggingface.co/docs/peft/main/en/developer_guides/contributing). Don't skip this!
 
 ### Coordination before coding
 
@@ -43,9 +43,16 @@ Read the contribution guideline at `docs/source/developer_guides/contributing.md
 - `make style`: runs formatters and linters (ruff), necessary to pass code style checks. Ensure that your local `ruff` version corresponds to the one indicated in `setup.py`.
 - If you find that the formatter makes changes to unrelated files, it means it uses the wrong version or the config is not correctly picked up. Undo all those changes.
 
+
+### Code comments
+
+Code comments should provide clarity when it's needed. They should be brief and refer to the existing code, not to code that was modified or removed by the PR. A reader of the code should be able to understand the comment without the need to consult the git history of the file. Ensure to keep existing comments in sync when making code changes.
+
 ### Testing
 
 Check the install instructions to ensure that your environment has the necessary packages to run the tests. Typically, running `pip install ".[test]"` should be enough. If you need specific packages, e.g. `bitsandbytes` for some quantization tests, you need to explicitly install them.
+
+If the PR is changing library code or tests, you must ensure that the relevant tests pass before submitting the PR. Indicate which test command was run in the PR description. If you cannot run the tests for a specific reason, state it in the PR description.
 
 #### Test selection
 
@@ -81,3 +88,7 @@ PEFT follows a rigorous structure for the test location. Don't just put the test
 - Run `grep "python-version:\s\[" .github/workflows/tests.yml` to check which Python versions should be supported. Don't use defensive features required for older Python versions (e.g. `from __future__ import annotations`).
 - Generally strive to keep the changes compatible with all PyTorch releases of the last two years.
 - Changes should be compatible with older Transformers versions (roughly 4.33 upwards). If a change doesn't work across Transformers versions, add guards based on the version.
+
+## Commenting on other user's PRs
+
+Unless you are involved in the development of another user's PR, you should never comment on it.

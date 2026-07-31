@@ -136,7 +136,11 @@ jobs:
           TRANSFORMERS_IS_CI: 1
           CI: 1
         run: |
-          make test
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" && "${{ matrix.python-version }}" == "3.13" ]]; then
+            make test
+          else
+            PYTEST_ADDOPTS="--no-cov" make test
+          fi
           # clean up all pytest temporary directories that are kept due to retention since space
           # is a scarce resource on the runners and tasks like model cache creation (further below)
           # fail if there's not enough space available.
