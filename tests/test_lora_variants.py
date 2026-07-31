@@ -492,15 +492,13 @@ class TestKasaRegularization:
         assert loss_non_ortho.item() > 1e-3
 
     def test_kasa_loss_has_gradients(self):
-        # The regularization loss must be differentiable w.r.t. the KaSA parameters.
+        # The regularization loss must be differentiable w.r.t. the KaSA parameters. init_lora_weights=False makes
+        # lora_B non-zero (lora_diag is already randomly initialized).
         torch.manual_seed(0)
-        model = get_peft_model(self.MLP(), self.get_config())
-        with torch.no_grad():
-            for name, param in model.named_parameters():
-                if "lora_B" in name:
-                    nn.init.normal_(param, std=0.1)
-                elif "lora_diag" in name:
-                    param.copy_(torch.randn_like(param))
+        config = LoraConfig(
+            target_modules=["lin0", "lin1"], r=4, lora_alpha=8, init_lora_weights=False, kasa_config=KasaConfig()
+        )
+        model = get_peft_model(self.MLP(), config)
 
         loss = model._get_kasa_loss()
         loss.backward()

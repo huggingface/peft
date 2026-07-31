@@ -1337,9 +1337,10 @@ class KasaLinearVariant(LoraVariant):
     regularizers.
     """
 
-    # The KaSA update depends on lora_diag and on the destructive truncation of the base weight, neither of which is
-    # representable in a vanilla scaling * B @ A adapter on the unmodified base.
-    supports_lora_conversion = False
+    def supports_lora_conversion(self) -> bool:
+        # The KaSA update depends on lora_diag and on the destructive truncation of the base weight, neither of which
+        # is representable in a vanilla scaling * B @ A adapter on the unmodified base.
+        return False
 
     @staticmethod
     def _truncate_base_weight(module: Linear, r: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -1399,6 +1400,8 @@ class KasaLinearVariant(LoraVariant):
         r = module.r[active_adapter]
         old_diag = module.lora_diag[active_adapter]
         if old_diag.device.type == "meta":
+            # lora_diag was not overwritten by a loaded state dict, so this is the point where its values first
+            # materialize; randn mirrors the initialization of the regular (non-deferred) init path.
             module.lora_diag[active_adapter] = nn.Parameter(
                 torch.randn(r, device=base_weight.device, dtype=base_weight.dtype)
             )
@@ -1435,8 +1438,10 @@ class KasaLinearVariant(LoraVariant):
             # so we only create the (meta) lora_diag parameter and defer the destructive truncation to the first
             # forward (see KasaLinearVariant.forward), which mirrors the deferral pattern used by Monteclora. Without
             # this re-trigger the SVD truncation would be silently skipped on the low_cpu_mem_usage path and the model
-            # would compute the wrong thing (full base + an adapter trained against the truncated base).
-            module.lora_diag[adapter_name] = nn.Parameter(torch.randn(r, device=device, dtype=dtype))
+            # would compute the wrong thing (full base + an adapter trained against the truncated base). A meta tensor
+            # has no values, so empty is used; the values are either loaded from a state dict or initialized when the
+            # deferred truncation is applied.
+            module.lora_diag[adapter_name] = nn.Parameter(torch.empty(r, device=device, dtype=dtype))
             module._lora_kasa_truncation_deferred.add(adapter_name)
             return
 

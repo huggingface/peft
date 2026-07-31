@@ -62,6 +62,10 @@ class LoraVariant:
     discretion.
     """
 
+    def supports_lora_conversion(self) -> bool:
+        """Whether an adapter using this variant can be converted to vanilla LoRA (see `convert_to_lora`)."""
+        return True
+
     @staticmethod
     def init(module: LoraLayer, adapter_name: str) -> None:
         """Initialization code for the LoRA variant, it's called within `update_layer`"""
@@ -1072,10 +1076,10 @@ class Linear(nn.Module, LoraLayer):
         return result
 
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
-        # Variants that cannot be expressed as a vanilla scaling * B @ A on the unmodified base weight (e.g. KaSA)
-        # opt out by setting supports_lora_conversion = False on their class.
         variant = self.lora_variant.get(adapter_name)
-        return getattr(variant, "supports_lora_conversion", True)
+        if variant is not None:
+            return variant.supports_lora_conversion()
+        return True
 
     def __repr__(self) -> str:
         rep = super().__repr__()

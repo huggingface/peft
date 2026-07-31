@@ -2115,17 +2115,16 @@ class TestKasaInitialization:
         def forward(self, x):
             return self.lin1(torch.relu(self.lin0(x)))
 
-    def get_config(self, r=4, **kasa_kwargs):
-        return LoraConfig(target_modules=["lin0", "lin1"], r=r, lora_alpha=8, kasa_config=KasaConfig(**kasa_kwargs))
-
-    def randomize_adapter(self, model):
-        # Give the adapter a non-trivial value so merge/forward differences are observable (B and diag both non-zero).
-        with torch.no_grad():
-            for name, param in model.named_parameters():
-                if "lora_B" in name:
-                    nn.init.normal_(param, std=0.1)
-                elif "lora_diag" in name:
-                    param.copy_(torch.randn_like(param))
+    def get_config(self, r=4, init_lora_weights=True, **kasa_kwargs):
+        # Tests that need a non-trivial adapter contribution pass init_lora_weights=False, which makes lora_B non-zero
+        # (lora_diag is already randomly initialized).
+        return LoraConfig(
+            target_modules=["lin0", "lin1"],
+            r=r,
+            lora_alpha=8,
+            init_lora_weights=init_lora_weights,
+            kasa_config=KasaConfig(**kasa_kwargs),
+        )
 
     def test_kasa_config_invalid_type_raises(self):
         with pytest.raises(TypeError, match="`kasa_config` must be a `KasaConfig`"):
@@ -2174,8 +2173,7 @@ class TestKasaInitialization:
         torch.manual_seed(0)
         base = self.MLP()
         original_state = deepcopy(base.state_dict())
-        model = get_peft_model(deepcopy(base), self.get_config())
-        self.randomize_adapter(model)
+        model = get_peft_model(deepcopy(base), self.get_config(init_lora_weights=False))
         model.eval()
         x = torch.randn(3, 16)
         with torch.no_grad():
@@ -2205,8 +2203,7 @@ class TestKasaInitialization:
         torch.manual_seed(0)
         base = self.MLP()
         original_state = deepcopy(base.state_dict())
-        model = get_peft_model(deepcopy(base), self.get_config())
-        self.randomize_adapter(model)
+        model = get_peft_model(deepcopy(base), self.get_config(init_lora_weights=False))
         model.eval()
         x = torch.randn(3, 16)
         with torch.no_grad():
@@ -2224,6 +2221,16 @@ class TestKasaInitialization:
             out_merged = reloaded(x)
         assert torch.allclose(out_trained, out_merged, atol=1e-5)
 
+        # merge_and_unload goes through the same merge path and must also apply the deferred truncation first.
+        fresh_base = self.MLP()
+        fresh_base.load_state_dict(original_state)
+        reloaded = PeftModel.from_pretrained(fresh_base, tmp_path / "kasa_adapter", low_cpu_mem_usage=True)
+        reloaded.eval()
+        unloaded = reloaded.merge_and_unload(safe_merge=safe_merge)
+        with torch.no_grad():
+            out_unloaded = unloaded(x)
+        assert torch.allclose(out_trained, out_unloaded, atol=1e-5)
+
     def test_kasa_deferred_truncation_with_bf16_base_and_fp32_adapter(self, tmp_path):
         # With a bf16 base model, the adapter weights are upcast to fp32 by default (autocast_adapter_dtype=True). The
         # first forward after a low_cpu_mem_usage=True load must handle the dtype mismatch between the cast input and
@@ -2231,8 +2238,7 @@ class TestKasaInitialization:
         torch.manual_seed(0)
         base = self.MLP().to(torch.bfloat16)
         original_state = deepcopy(base.state_dict())
-        model = get_peft_model(deepcopy(base), self.get_config())
-        self.randomize_adapter(model)
+        model = get_peft_model(deepcopy(base), self.get_config(init_lora_weights=False))
         model.eval()
         x = torch.randn(3, 16, dtype=torch.bfloat16)
 
@@ -2264,7 +2270,7 @@ class TestKasaInitialization:
         torch.manual_seed(0)
         base = self.MLP()
         original_state = deepcopy(base.state_dict())
-        model = get_peft_model(deepcopy(base), self.get_config())
+        model = get_peft_model(deepcopy(base), self.get_config(init_lora_weights=False))
         model.eval()
 
         model.save_pretrained(tmp_path / "kasa_adapter")
@@ -2275,8 +2281,7 @@ class TestKasaInitialization:
 
         # Add a second KaSA adapter with a non-trivial contribution and activate it FIRST, so it is processed before
         # the deferred adapter in the same forward pass.
-        reloaded.add_adapter("other", self.get_config())
-        self.randomize_adapter(reloaded)
+        reloaded.add_adapter("other", self.get_config(init_lora_weights=False))
         reloaded.base_model.set_adapter(["other", "default"])
         reloaded.eval()
 
@@ -2286,16 +2291,17 @@ class TestKasaInitialization:
             out2 = reloaded(x)  # subsequent forwards: steady state
         assert torch.allclose(out1, out2, atol=1e-6)
 
-    def test_kasa_mixing_with_non_kasa_adapter_raises(self):
+    @pytest.mark.parametrize("kasa_first", [True, False])
+    def test_kasa_mixing_with_non_kasa_adapter_raises(self, kasa_first):
         msg = "KaSA cannot be combined with adapters that don't use KaSA"
-        # KaSA first, then vanilla LoRA.
-        model = get_peft_model(self.MLP(), self.get_config())
+        vanilla_config = LoraConfig(target_modules=["lin0"], r=4)
+        if kasa_first:
+            first_config, second_config = self.get_config(), vanilla_config
+        else:
+            first_config, second_config = vanilla_config, self.get_config()
+        model = get_peft_model(self.MLP(), first_config)
         with pytest.raises(ValueError, match=msg):
-            model.add_adapter("vanilla", LoraConfig(target_modules=["lin0"], r=4))
-        # Vanilla LoRA first, then KaSA.
-        model = get_peft_model(self.MLP(), LoraConfig(target_modules=["lin0"], r=4))
-        with pytest.raises(ValueError, match=msg):
-            model.add_adapter("kasa", self.get_config())
+            model.add_adapter("second", second_config)
 
     def test_kasa_multiple_kasa_adapters_allowed(self):
         model = get_peft_model(self.MLP(), self.get_config())

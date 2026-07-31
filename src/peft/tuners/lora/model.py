@@ -1070,7 +1070,6 @@ class LoraModel(BaseTuner):
             adapter_names = [adapter_names]
 
         total: torch.Tensor | float = 0.0
-        num_kasa_layers = 0
         for module in self.modules():
             if not isinstance(module, LoraLayer):
                 continue
@@ -1081,12 +1080,11 @@ class LoraModel(BaseTuner):
                 if adapter_name not in lora_diag:
                     continue
                 kasa_config = self.peft_config[adapter_name].kasa_config
-                layer_loss = _kasa_layer_regularization_loss(module, adapter_name, kasa_config.beta, kasa_config.gamma)
+                layer_loss = _kasa_layer_regularization_loss(
+                    module, adapter_name=adapter_name, beta=kasa_config.beta, gamma=kasa_config.gamma
+                )
                 total = total + layer_loss
-                num_kasa_layers += 1
 
-        if num_kasa_layers == 0:
-            return 0.0
         return total
 
     def _add_modules_to_save_to_tie(self, peft_config: LoraConfig, tied_weight_keys: list[str]):
