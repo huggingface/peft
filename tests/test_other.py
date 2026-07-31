@@ -803,7 +803,7 @@ class TestDetachedCopy:
 
         assert any(isinstance(module, BaseTunerLayer) for module in model.modules())
         assert repr_before != repr_after
-        assert not torch.allclose(output_before, output_after)
+        assert not torch.allclose(output_before, output_after, atol=1e-6, rtol=1e-5)
 
     def test_get_peft_model_with_detached_copy_leaves_base_model_architecture_intact(self):
         model = self.get_mlp()
@@ -1107,3 +1107,39 @@ class TestDetachedCopy:
         with hub_online_once(model_id):
             model = AutoModelForCausalLM.from_pretrained(model_id, dtype=dtype)
             detached_copy(model, copy_on_write=copy_on_write)  # does not raise
+
+    @pytest.mark.parametrize("copy_on_write", [True, False])
+    def test_detached_copy_of_peft_model_with_multiple_adapters(self, copy_on_write):
+        # Create a detached copy of a *PEFT model* with two adapters, activates adapter 1 on original and adapter 2 on
+        # copy, checks that those adapters are active
+        model = self.get_mlp()
+        torch.manual_seed(0)
+        model = get_peft_model(model, LoraConfig(target_modules=["lin0"], init_lora_weights=False))
+
+        x = torch.randn(5, 10)
+        output_default_before = model(x)
+
+        model.add_adapter("other", LoraConfig(target_modules=["lin0"], init_lora_weights=False))
+        model.set_adapter("other")
+        output_other_before = model(x)
+
+        # sanity check
+        assert not torch.allclose(output_default_before, output_other_before, atol=1e-6, rtol=1e-5)
+
+        model_copy = detached_copy(model, copy_on_write=copy_on_write)
+        # 'other' should still be the active adapter
+        output_other_copy_after = model(x)
+        assert torch.allclose(output_other_before, output_other_copy_after, atol=1e-6, rtol=1e-5)
+
+        # switch the copy to 'default'
+        model_copy.set_adapter("default")
+        output_default_copy_after = model_copy(x)
+        assert torch.allclose(output_default_before, output_default_copy_after, atol=1e-6, rtol=1e-5)
+
+        # after switching the copy to 'default', the original should still use 'other'
+        assert model_copy.active_adapters == ["default"]
+        assert model.active_adapters == ["other"]
+
+        # the output from the original model should still be the 'other' output
+        output_other_orig_after = model(x)
+        assert torch.allclose(output_other_before, output_other_orig_after, atol=1e-6, rtol=1e-5)
