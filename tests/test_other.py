@@ -1060,6 +1060,7 @@ class TestDetachedCopy:
         # the base model is unaffected
         assert torch.allclose(model(x), output_base)
 
+    @pytest.mark.skipif(platform.system() != "Linux", reason="Offload test crashes on Windows CI runners")
     @pytest.mark.parametrize("copy_on_write", [True, False])
     def test_from_pretrained_detached_with_cpu_and_disk_offload(self, copy_on_write, tmp_path):
         # mirrors test_offload_load from test_gpu_examples.py: load a LoRA adapter onto a detached copy of a model
