@@ -110,6 +110,7 @@ from peft import (
     WaveFTConfig,
     get_peft_model,
 )
+from peft.tuners.tuners_utils import BaseTunerLayer
 
 
 def strtobool(val):
@@ -400,8 +401,16 @@ def build_base_model(model_cls_name, model_id):
     return model
 
 
+def _deterministic_fill(tensor, name):
+    # Even if the RNG is not stable between torch releases, this is fine, as we only test that the weights can be loaded
+    # correctly, it doesn't really matter under which RNG they were created.
+    generator = torch.Generator().manual_seed(zlib.crc32(name.encode("utf-8")))
+    values = torch.rand(tensor.shape, generator=generator, dtype=torch.float32) * 0.2 - 0.1
+    tensor.copy_(values.to(dtype=tensor.dtype))
+
+
 def fill_trainable_params(model):
-    """Overwrite all trainable parameters with deterministic values (simulates training).
+    """Overwrite all trainable parameters and persistent adapter buffers with deterministic values.
 
     The values are derived from the parameter name, so that they depend neither on the order of iteration nor on the
     global RNG state. Why this approach:
@@ -420,14 +429,36 @@ def fill_trainable_params(model):
     """
     with torch.no_grad():
         for name, param in model.named_parameters():
-            if not param.requires_grad:
-                continue
+            if param.requires_grad:
+                _deterministic_fill(param, name)
 
-            # Even if RNG is not stable between torch releases, this is fine, as we only test that the weights can be
-            # loaded correctly, it doesn't really matter under which RNG they were created.
-            generator = torch.Generator().manual_seed(zlib.crc32(name.encode("utf-8")))
-            values = torch.rand(param.shape, generator=generator, dtype=torch.float32) * 0.2 - 0.1
-            param.copy_(values.to(dtype=param.dtype))
+        # Additionally fill the adapter buffers declared in other_param_names, e.g. the shared projections of VeRA.
+        # They are not trained, but if they are part of the checkpoint, their restoration needs to be verified as well:
+        # they are typically generated from a fixed random seed, so on the same machine, a failure to restore them would
+        # otherwise be masked by the identical re-generated values. Only persistent buffers are filled, as
+        # non-persistent ones (e.g. projections with save_projection=False) are meant to be re-generated instead of
+        # restored, and only float buffers, as integer buffers like indices cannot hold arbitrary values. Note that a
+        # buffer shared between layers (like the VeRA projections, which each layer holds a reference to) is yielded
+        # only once by named_buffers, which de-duplicates by storage, so it is filled exactly once, under a
+        # deterministic name.
+        buffer_prefixes = set()
+        for module_name, module in model.named_modules():
+            if not isinstance(module, BaseTunerLayer):
+                continue
+            for attr_name in module.other_param_names:
+                buffer_prefixes.add(f"{module_name}.{attr_name}" if module_name else attr_name)
+
+        # note: torch's state_dict is used to determine persistence, not get_peft_model_state_dict, so this check does
+        # not depend on the very code that this test is supposed to verify
+        state_dict_keys = set(model.state_dict().keys())
+        for name, buffer in model.named_buffers():
+            if not buffer.dtype.is_floating_point:
+                continue
+            if name not in state_dict_keys:  # non-persistent
+                continue
+            if not any((name == prefix) or name.startswith(prefix + ".") for prefix in buffer_prefixes):
+                continue
+            _deterministic_fill(buffer, name)
 
 
 def get_output(model, inputs):
