@@ -1616,6 +1616,21 @@ def _get_tuner_state_dict_key_prefixes(model: nn.Module, adapter_name: Optional[
 
     If `adapter_name` is passed, attributes that are containers keyed by the adapter name (`ModuleDict`,
     `ParameterDict`, `BufferDict`) are restricted to the entry of the given adapter.
+
+    Example:
+
+    ```py
+    >>> model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+    >>> model = get_peft_model(model, LoraConfig(target_modules=["all-linear"]))
+    >>> sorted(_get_tuner_state_dict_key_prefixes(model))
+    ['base_model.model.model.decoder.layers.0.fc1.lora_A',
+     'base_model.model.model.decoder.layers.0.fc1.lora_B',
+     'base_model.model.model.decoder.layers.0.fc1.lora_dropout',
+     ...
+     'base_model.model.model.decoder.layers.9.self_attn.v_proj.lora_embedding_A',
+     'base_model.model.model.decoder.layers.9.self_attn.v_proj.lora_embedding_B',
+     'base_model.model.model.decoder.layers.9.self_attn.v_proj.lora_magnitude_vector']
+    ```
     """
     from ._buffer_dict import BufferDict
 
