@@ -50,6 +50,22 @@ The abstract from the paper is:
 
 > Low-rank adaptation (LoRA) is a popular method that reduces the number of trainable parameters when finetuning large language models, but still faces acute storage challenges when scaling to even larger models or deploying numerous per-user or per-task adapted models. In this work, we present Vector-based Random Matrix Adaptation (VeRA), which significantly reduces the number of trainable parameters compared to LoRA, yet maintains the same performance. It achieves this by using a single pair of low-rank matrices shared across all layers and learning small scaling vectors instead. We demonstrate its effectiveness on the GLUE and E2E benchmarks, image classification tasks, and show its application in instruction-tuning of 7B and 13B language models.
 
+## When to use VeRA
+
+VeRA is a good choice when:
+
+- You want to minimize the number of trainable parameters while maintaining performance comparable to LoRA.
+- You need to store or deploy many task-specific adapters, where smaller adapter checkpoints reduce storage requirements.
+- You are fine-tuning very large language models under tight memory or parameter budgets.
+
+## When not to use VeRA
+
+VeRA may not be the best choice when:
+
+- You require independent low-rank matrices for each adapted layer, providing greater flexibility in the learned adapter parameters.
+- Your model requires adapting module types other than `nn.Linear`, since VeRA currently supports only linear layers.
+- Your model contains adapted linear layers with widely different input and output dimensions. Because VeRA shares a single pair of projection matrices across all adapted layers, these matrices must be sized for the largest shape. Models with a large variation in layer shapes (for example, transformer up- and down-projection layers) can therefore require over-provisioning shared projection matrices, reducing some of VeRA's parameter-efficiency advantage.
+
 ## Benchmark overview
 
 <iframe
