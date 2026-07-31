@@ -486,6 +486,10 @@ def print_report(
 
     print(f"Documentation coverage: {covered_n}/{total} ({pct:.1f}%)")
     if uncovered:
+        print(
+            "\nThere are functions with a docstring in the public API (part of `peft.__all__`) \n"
+            "that are not mentioned in the docs. Please add them to the docs.\n"
+        )
         print(f"Missing ({len(uncovered)}):")
         for name in sorted(uncovered)[:20]:
             print(f"  - {name}")
