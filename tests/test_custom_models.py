@@ -5238,16 +5238,10 @@ class TestRequiresGrad:
             "base_model.model.lin0.ia3_l.adapter1",
         )
 
-    @pytest.mark.xfail(strict=True)
     def test_requires_grad_adalora_different_targets(self):
         # test two different AdaLora adapters that target different modules
+        # adding an inference-only adapter must not freeze the active adapter, see #3487
 
-        # Note: This test is expected to fail because first loading one adapter, then the next adapter with
-        # inference_mode=True incorrectly leads to the requires_grad of the first adapter being turned to False. This is
-        # of course not desired but has yet to be fixed. In practice, it's unlikely that a user would pass
-        # inference_mode=True for add_adapter, this flag is mostly being used when calling PeftModel.from_pretrained, so
-        # we accept this issue for now. Note that only for AdaLoRA do we even need to pass inference_mode=True here,
-        # other PEFT methods don't require this.
         config0 = AdaLoraConfig(target_modules=["lin0"], total_step=1)
         peft_model = get_peft_model(MLP(), config0)
 
@@ -5293,16 +5287,9 @@ class TestRequiresGrad:
             "base_model.model.lin1.lora_E.adapter1",
         )
 
-    @pytest.mark.xfail(strict=True)
     def test_requires_grad_adalora_same_targets(self):
         # same as previous test, except that AdaLora adapters target the same layer
 
-        # Note: This test is expected to fail because first loading one adapter, then the next adapter with
-        # inference_mode=True incorrectly leads to the requires_grad of the first adapter being turned to False. This is
-        # of course not desired but has yet to be fixed. In practice, it's unlikely that a user would pass
-        # inference_mode=True for add_adapter, this flag is mostly being used when calling PeftModel.from_pretrained, so
-        # we accept this issue for now. Note that only for AdaLoRA do we even need to pass inference_mode=True here,
-        # other PEFT methods don't require this.
         config0 = AdaLoraConfig(target_modules=["lin0"], total_step=1)
         peft_model = get_peft_model(MLP(), config0)
 
@@ -6731,16 +6718,10 @@ class TestRequiresGrad:
         # this fails, instead with get ...lora_A.default.weight and ...lora_B.default.weight
         assert params_with_grad == expected
 
-    @pytest.mark.xfail(strict=True)
-    @pytest.mark.parametrize("config_cls", [LoraConfig])  # no need to check each method, they all fail
+    @pytest.mark.parametrize("config_cls", [LoraConfig])  # no need to check each method
     def test_loading_model_requires_grad_load_adapter_then_add_adapter(self, config_cls, tmp_path):
-        # When adding a new adapter with model.add_adapter, through the set_adapter call in update_layer, we activate
-        # the gradients of the first adapter, even if it's not desired. Since there is no is_trainable argument on
-        # add_adapter, there is no way to disable that at the moment.
-        # When/If this is fixed, the check can be integrated into test_loading_model_requires_grad_set_correctly and
-        # this test can be deleted.
+        # Adding an adapter must not unfreeze an existing inference-only model, see #3487.
         model = DeepMLP(size=256)  # a size that works with all adapters
-        extra_kwargs = {}
         config = config_cls(target_modules=["layers.0.lin0"])
         model = get_peft_model(model, config)
         model.save_pretrained(tmp_path)
@@ -6752,7 +6733,6 @@ class TestRequiresGrad:
 
         # add a new adapter
         model.add_adapter(adapter_name="other", peft_config=config)
-        params_with_grad = [n for n, p in model.named_parameters() if p.requires_grad]
         assert all(not p.requires_grad for p in model.parameters())
 
 
