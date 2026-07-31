@@ -49,7 +49,7 @@ def has_valid_embedding_base_layer(layer):
     return hasattr(layer, "base_layer") and isinstance(layer.base_layer, (torch.nn.Linear, torch.nn.Embedding))
 
 
-def get_embedding_layer_name(model, layer, is_embedding_in_target_modules):
+def get_embedding_layer_name(model, layer, is_embedding_in_target_modules) -> str | None:
     """Get the name of the embedding module for a given layer."""
     for name, module in model.named_modules():
         if (not is_embedding_in_target_modules and module == layer) or module == getattr(layer, "base_layer", None):
@@ -271,7 +271,8 @@ def get_peft_model_state_dict(
             if not embedding_is_targeted or has_valid_embedding_base_layer(layer):
                 embedding_module_name = get_embedding_layer_name(model, layer, embedding_is_targeted)
                 if embedding_module_name:
-                    to_return.update({k: v for k, v in state_dict.items() if embedding_module_name in k})
+                    embedding_prefix = f"{embedding_module_name}."
+                    to_return.update({k: v for k, v in state_dict.items() if k.startswith(embedding_prefix)})
     elif save_embedding_layers:
         warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
 

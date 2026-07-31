@@ -760,6 +760,35 @@ class TestPeftStateDict:
         # sanity check: the keys of the actual adapter are present
         assert any("lin0" in key for key in sd)
 
+    def test_trained_modules_to_save_module_named_like_peft_prefix_round_trip(self):
+        # Similar to test_base_model_module_named_like_peft_prefix but with modules_to_save: the colliding module is
+        # trained via modules_to_save and must survive a save/load round trip.
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(5, 5)
+                self.lora_head = nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.lora_head(self.lin0(x))
+
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lora_head"])
+        torch.manual_seed(0)
+        source = get_peft_model(MyModel(), config)
+        with torch.no_grad():
+            source.base_model.model.lora_head.modules_to_save["default"].weight.fill_(123.0)
+
+        state_dict = get_peft_model_state_dict(source)
+
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lora_head"])
+        torch.manual_seed(0)
+        target = get_peft_model(MyModel(), config)
+        result = set_peft_model_state_dict(target, state_dict)
+
+        assert not [key for key in result.unexpected_keys if "lora_head" in key]
+        weight = target.base_model.model.lora_head.modules_to_save["default"].weight
+        assert torch.allclose(weight, torch.full_like(weight, 123.0))
+
 
 class TestGetBaseModelStateDict:
     # Tests for get_base_model_state_dict / set_base_model_state_dict. The per-method and per-model coverage lives in
