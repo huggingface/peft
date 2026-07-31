@@ -514,6 +514,8 @@ def print_report(
             if len(diagnostics.collisions) > 20:
                 print(f"  ... and {len(diagnostics.collisions) - 20} more")
 
+    return bool(uncovered)
+
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -583,8 +585,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Found {len(mentions)} unique name mentions in docs.")
 
     print()
-    print_report(api_items, mentions, diagnostics=diagnostics, verbose=args.verbose)
-    return 0
+    has_uncovered = print_report(api_items, mentions, diagnostics=diagnostics, verbose=args.verbose)
+    return 1 if has_uncovered else 0
 
 
 if __name__ == "__main__":
