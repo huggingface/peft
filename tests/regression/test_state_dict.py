@@ -132,7 +132,8 @@ REGRESSION_DIR = tempfile.mkdtemp(prefix="peft_state_dict_regression_")
 
 
 def check_clean_git_status(force):
-    """Ensure that the worktree is not dirty, so that possibly buggy code states are not "blessed" as the reference.
+    """Ensure that the worktree is not dirty and that we're on main, so that possibly buggy code states are not
+    "blessed" as the reference.
 
     In contrast to test_regression.py, there is no check for a tagged release, as the artifacts are typically created
     from a clean main commit right before a refactoring, not from a release. The manifest records the exact commit.
@@ -145,6 +146,13 @@ def check_clean_git_status(force):
         else:
             raise RuntimeError("Git worktree is dirty") from exc
 
+    branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip()
+    if branch != "main":
+        if force:
+            print(f"Overriding despite being on branch '{branch}' instead of main", file=sys.stderr)
+        else:
+            raise RuntimeError(f"Not on main branch (currently on '{branch}')")
+
 
 def get_git_commit():
     try:
@@ -154,7 +162,7 @@ def get_git_commit():
 
 
 MANIFEST_NAME = "manifest.json"
-OUTPUT_NAME = "output.safetensors"
+MODEL_OUTPUT_FILENAME = "output.safetensors"
 ADAPTER_WEIGHTS_NAME = "adapter_model.safetensors"
 
 MODEL_OPT = "peft-internal-testing/tiny-random-OPTForCausalLM"
@@ -325,7 +333,7 @@ CASES = [
     Case("psoft", PsoftConfig, {"task_type": "CAUSAL_LM", "r": 4, "psoft_alpha": 4}),
     Case("pvera", PveraConfig, {"task_type": "CAUSAL_LM", "r": 8}),
     Case("randlora", RandLoraConfig, {"target_modules": ["q_proj", "v_proj"], "r": 4}),
-    Case("road", RoadConfig, {"task_type": "CAUSAL_LM", "variant": "road_1", "group_size": 2}),
+    Case("road", RoadConfig, {"task_type": "CAUSAL_LM", "group_size": 2}),
     Case("shira", ShiraConfig, {"task_type": "CAUSAL_LM", "r": 1, "init_weights": False}),
     Case("tinylora", TinyLoraConfig, {"task_type": "CAUSAL_LM"}),
     Case(
@@ -489,7 +497,7 @@ def create_artifact(case, case_dir, tmp_path):
     }
     with open(case_dir / MANIFEST_NAME, "w") as f:
         json.dump(manifest, f, indent=2)
-    safe_save_file({"logits": logits}, case_dir / OUTPUT_NAME)
+    safe_save_file({"logits": logits}, case_dir / MODEL_OUTPUT_FILENAME)
     return manifest
 
 
@@ -514,8 +522,9 @@ class TestCreateArtifacts:
 
             # sanity check: the artifact must be restorable by the version that created it
             model = load_model_from_artifact(case_dir, manifest)
-            expected = safe_load_file(case_dir / OUTPUT_NAME)["logits"]
+            expected = safe_load_file(case_dir / MODEL_OUTPUT_FILENAME)["logits"]
             logits = get_output(model, case.inputs)
+            # defensively use small tolerances for non-deterministic outputs
             torch.testing.assert_close(logits, expected, atol=case.atol, rtol=case.rtol)
         except Exception:
             # don't leave partial artifacts behind, they would be uploaded at the end of the session
@@ -537,7 +546,7 @@ class TestStateDictRegression:
         manifest = self.load_manifest(case_dir)
         model = load_model_from_artifact(case_dir, manifest)
         logits = get_output(model, manifest["inputs"])
-        expected = safe_load_file(case_dir / OUTPUT_NAME)["logits"]
+        expected = safe_load_file(case_dir / MODEL_OUTPUT_FILENAME)["logits"]
         torch.testing.assert_close(logits, expected, atol=manifest["atol"], rtol=manifest["rtol"])
 
     @pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
@@ -547,7 +556,7 @@ class TestStateDictRegression:
         manifest = self.load_manifest(case_dir)
         model = load_model_from_artifact(case_dir, manifest, adapter_name="other")
         logits = get_output(model, manifest["inputs"])
-        expected = safe_load_file(case_dir / OUTPUT_NAME)["logits"]
+        expected = safe_load_file(case_dir / MODEL_OUTPUT_FILENAME)["logits"]
         torch.testing.assert_close(logits, expected, atol=manifest["atol"], rtol=manifest["rtol"])
 
     @pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
