@@ -31,12 +31,14 @@ from transformers import AutoModelForCausalLM
 
 from peft import (
     AdaLoraConfig,
+    AdamssConfig,
     BeftConfig,
     C3AConfig,
     DeloraConfig,
     EvaConfig,
     FrodConfig,
     GraloraConfig,
+    HiraConfig,
     IA3Config,
     LilyConfig,
     LoftQConfig,
@@ -56,6 +58,7 @@ from peft import (
     PromptTuningConfig,
     PsoftConfig,
     RoadConfig,
+    TinyLoraConfig,
     VBLoRAConfig,
     VeloraConfig,
     VeraConfig,
@@ -1893,6 +1896,11 @@ class TestAdaLoraInitialization:
         with pytest.raises(ValueError, match="ADALORA does not support LOFTQ"):
             AdaLoraConfig(init_lora_weights="loftq", loftq_config={"loftq": "config"}, total_step=1)
 
+    def test_adalora_negative_orth_reg_weight_raises(self):
+        msg = "`orth_reg_weight` should be greater than or equal to 0, but the value passed is -0.5"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            AdaLoraConfig(target_modules=["linear"], total_step=1, orth_reg_weight=-0.5)
+
     def get_model(self):
         class MyModule(nn.Module):
             def __init__(self):
@@ -1920,6 +1928,36 @@ class TestAdaLoraInitialization:
         model = get_peft_model(model, config)
         output_after = model(data)
         assert torch.allclose(output_before, output_after)
+
+
+class TestAdamssInitialization:
+    @pytest.mark.parametrize(
+        "adamss_kwargs,message",
+        [
+            (
+                {"mask_interval": 0},
+                "`mask_interval` must be a positive integer when `use_asa=True`, got 0.",
+            ),
+            (
+                {"init_warmup": 10, "final_warmup": 10},
+                "`init_warmup` must be smaller than `final_warmup` when `use_asa=True` so that ASA has a "
+                "non-empty pruning ramp, got init_warmup=10 and final_warmup=10.",
+            ),
+            (
+                {"asa_target_subspaces": 0},
+                "`asa_target_subspaces` must be a positive integer when `use_asa=True`, got 0.",
+            ),
+            (
+                {"asa_schedule_exponent": 0.0},
+                "`asa_schedule_exponent` must be a positive number when `use_asa=True`, got 0.0.",
+            ),
+        ],
+    )
+    def test_invalid_asa_schedule_raises(self, adamss_kwargs, message):
+        kwargs = {"use_asa": True, "init_warmup": 0, "final_warmup": 100, "mask_interval": 10}
+        kwargs.update(adamss_kwargs)
+        with pytest.raises(ValueError, match=re.escape(message)):
+            AdamssConfig(**kwargs)
 
 
 class TestPromptTuningInitialization:
@@ -2332,6 +2370,25 @@ class TestWaveFTInitialization:
         with pytest.raises(ValueError, match=re.escape(msg)):
             WaveFTConfig(target_modules=["linear"], wavelet_family=invalid_family)
 
+    def test_waveft_proportional_parameters_does_not_zero_out_small_layer(self):
+        class Imbalanced(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.big = nn.Linear(4096, 4096)
+                self.tiny = nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.tiny(x[:, :4])
+
+        model = Imbalanced().eval().to(self.torch_device)
+        config = WaveFTConfig(target_modules=["big", "tiny"], n_frequency=1, proportional_parameters=True)
+        model = get_peft_model(model, config)
+
+        tiny_layer = model.base_model.model.tiny
+        big_layer = model.base_model.model.big
+        assert tiny_layer.waveft_n_frequency["default"] >= 1
+        assert big_layer.waveft_n_frequency["default"] >= 1
+
 
 class TestRoadInitialization:
     torch_device = infer_device()
@@ -2502,6 +2559,13 @@ class TestGraLoRAInitialization:
         gralora_k = 4
         # msg = f"r should be divisible by gralora_k, but got {config.r} and {config.gralora_k}"
         msg = f"r should be divisible by gralora_k, but got {r} and {gralora_k}"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            GraloraConfig(target_modules=["lin0"], r=r, gralora_k=gralora_k)
+
+    @pytest.mark.parametrize("gralora_k", [0, -1])
+    def test_gralora_with_non_positive_gralora_k_raises(self, gralora_k):
+        r = 32
+        msg = f"`gralora_k` should be a positive integer value but the value passed is {gralora_k}"
         with pytest.raises(ValueError, match=re.escape(msg)):
             GraloraConfig(target_modules=["lin0"], r=r, gralora_k=gralora_k)
 
@@ -2685,6 +2749,41 @@ class TestBeftInitialization:
 
         with pytest.raises(ValueError, match="Base layer has no bias, cannot merge bias adapter"):
             model.merge_and_unload()
+
+
+class TestHiraInitialization:
+    """Test class to check the initialization of HiRA adapters."""
+
+    torch_device = infer_device()
+
+    def get_model_conv_groups(self, conv_cls, groups):
+        class ModelConvGroups(nn.Module):
+            """For testing when the groups argument is used in a conv layer"""
+
+            def __init__(self):
+                super().__init__()
+                self.conv = conv_cls(4, 8, kernel_size=3, groups=groups)
+
+            def forward(self, X):
+                return self.conv(X)
+
+        return ModelConvGroups().eval().to(self.torch_device)
+
+    @pytest.mark.parametrize(
+        "conv_cls, input_shape",
+        [
+            pytest.param(nn.Conv1d, (10,), id="Conv1d"),
+            pytest.param(nn.Conv2d, (10, 10), id="Conv2d"),
+            pytest.param(nn.Conv3d, (10, 10, 10), id="Conv3d"),
+        ],
+    )
+    def test_error_raised_for_groups_greater_than_one(self, conv_cls, input_shape):
+        # HiRA does not support grouped convolutions, so constructing an adapter for a ConvNd layer with
+        # `groups > 1` must fail immediately and clearly.
+        base_model = self.get_model_conv_groups(conv_cls, groups=2)
+        config = HiraConfig(target_modules=["conv"], r=4)
+        with pytest.raises(NotImplementedError, match="HiRA does not support .* layers with groups > 1"):
+            get_peft_model(base_model, config)
 
 
 class TestNoInfiniteRecursionDeepspeed:
@@ -4077,6 +4176,18 @@ class TestHotSwapping:
         torch.manual_seed(0)
         return ConvModel().to(self.torch_device)
 
+    def get_model_conv2d_groups(self):
+        class ConvModelGroups(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(4, 4, kernel_size=3, groups=2)
+
+            def forward(self, X):
+                return self.conv(X)
+
+        torch.manual_seed(0)
+        return ConvModelGroups().to(self.torch_device)
+
     @pytest.mark.parametrize(
         "config",
         [
@@ -4366,6 +4477,65 @@ class TestHotSwapping:
         # real check: model now behaves again like adapter 0
         assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
 
+    @pytest.mark.parametrize("ranks", [(2, 4), (4, 2)])
+    def test_hotswap_works_different_ranks_conv2d_groups(self, ranks, tmp_path):
+        # same as previous test, but for a grouped Conv2d model
+        atol, rtol = 1e-4, 1e-4
+        inputs = torch.rand(1, 4, 8, 8).to(self.torch_device)
+
+        # create adapter 0
+        config0 = LoraConfig(target_modules=["conv"], r=ranks[0], init_lora_weights=False)
+        model = self.get_model_conv2d_groups()
+        torch.manual_seed(0)
+        model = get_peft_model(model, config0)
+        model.eval()
+        with torch.inference_mode():
+            output0 = model(inputs)
+        model.save_pretrained(tmp_path / "adapter0")
+
+        del model
+
+        # create adapter 1
+        config1 = LoraConfig(target_modules=["conv"], r=ranks[1], init_lora_weights=False)
+        model = self.get_model_conv2d_groups()
+        torch.manual_seed(1)
+        model = get_peft_model(model, config1)
+        model.eval()
+        with torch.inference_mode():
+            output1 = model(inputs)
+        model.save_pretrained(tmp_path / "adapter1")
+
+        # sanity check: they're not the same
+        assert not torch.allclose(output0, output1, atol=atol, rtol=rtol)
+
+        del model
+
+        # load adapter 0 and pad to max rank to allow hotswapping
+        model = self.get_model_conv2d_groups()
+        model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
+        prepare_model_for_compiled_hotswap(model, target_rank=max(ranks))
+        with torch.inference_mode():
+            output_loaded0 = model(inputs)
+
+        # sanity check: same output after loading and padding for adapter 0
+        assert torch.allclose(output0, output_loaded0, atol=atol, rtol=rtol)
+
+        # hotswap with adapter 1
+        hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+        with torch.inference_mode():
+            output_loaded1 = model(inputs)
+
+        # real check: model now behaves like adapter 1
+        assert torch.allclose(output1, output_loaded1, atol=atol, rtol=rtol)
+
+        # hotswap back to adapter 0
+        hotswap_adapter(model, tmp_path / "adapter0", adapter_name="default")
+        with torch.inference_mode():
+            output_loaded_back0 = model(inputs)
+
+        # real check: model now behaves again like adapter 0
+        assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
+
     def test_prepare_model_for_compiled_hotswap_scalings_are_tensors(self):
         config = LoraConfig(target_modules=["lin0", "lin1"])
         model = self.get_model()
@@ -4448,6 +4618,44 @@ class TestHotSwapping:
                 assert param.shape[0] == new_rank
             elif "lora_B" in name:
                 assert param.shape[1] == new_rank
+
+    def test_prepare_model_for_compiled_hotswap_conv2d_groups_rank_padding_works(self):
+        # same as previous test, but for a grouped Conv2d model (groups > 1)
+        old_rank = 2
+        config = LoraConfig(target_modules=["conv"], r=old_rank)
+        model = self.get_model_conv2d_groups()
+        model = get_peft_model(model, config)
+
+        # sanity check: lora_A rank is out_channels; lora_B rank is in_channels * groups
+        for name, param in model.named_parameters():
+            if "lora_A" in name:
+                assert param.shape[0] == old_rank
+            elif "lora_B" in name:
+                assert param.shape[1] * model.base_model.model.conv.base_layer.groups == old_rank
+
+        new_rank = 4
+        prepare_model_for_compiled_hotswap(model, target_rank=new_rank)
+
+        for name, param in model.named_parameters():
+            if "lora_A" in name:
+                assert param.shape[0] == new_rank
+            elif "lora_B" in name:
+                assert param.shape[1] * model.base_model.model.conv.base_layer.groups == new_rank
+
+    def test_prepare_model_for_compiled_hotswap_conv2d_groups_rank_not_divisible_raises(self):
+        # when trying to pad a grouped Conv2d LoRA adapter to a rank that is not divisible by the number of groups, raise an error
+        config = LoraConfig(target_modules=["conv"], r=2)
+        model = self.get_model_conv2d_groups()
+        model = get_peft_model(model, config)
+
+        groups = model.base_model.model.conv.base_layer.groups
+        target_rank = 3
+        msg = (
+            f"Trying to pad a Conv2d LoRA adapter with groups={groups} to target rank {target_rank}, but the target rank "
+            f"is not divisible by {groups}. Please choose a target rank that is divisible by {groups}."
+        )
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            prepare_model_for_compiled_hotswap(model, target_rank=target_rank)
 
     def test_prepare_model_for_compiled_hotswap_lower_rank_padding_raises(self):
         # when trying to pad to a lower rank, raise an error
@@ -5824,3 +6032,97 @@ class TestWeightTying:
             lm_lora_B = model.base_model.model.lm_head.lora_B[adapter_name].weight
             assert embed_lora_A.data_ptr() != lm_lora_B.data_ptr()
             assert embed_lora_B.data_ptr() != lm_lora_A.data_ptr()
+
+
+class TestTinyLoraInitialization:
+    """Regression tests for the model-level `_target_key_to_idx` cache used to compute `weight_tying` groups."""
+
+    def get_mlp(self):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 10, bias=bias)
+                self.lin1 = nn.Linear(10, 10, bias=bias)
+                self.lin2 = nn.Linear(10, 10, bias=bias)
+                self.lin3 = nn.Linear(10, 10, bias=bias)
+                self.relu = nn.ReLU()
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.relu(X)
+                X = self.lin1(X)
+                X = self.relu(X)
+                X = self.lin2(X)
+                X = self.relu(X)
+                X = self.lin3(X)
+                X = self.sm(X)
+                return X
+
+        torch.manual_seed(0)
+        return MLP()
+
+    def test_second_adapter_overlapping_target_modules_matches_fresh_control(self):
+        """Adding a 2nd adapter whose target_modules overlap with (but differ from) a prior adapter's must not reuse
+        the first adapter's stale layer-index mapping to compute the `weight_tying` groups.
+
+        This is a regression test for a bug in `TinyLoraModel._create_and_replace` where the model-level mapping from
+        module key to layer index (used to derive the number of `weight_tying` groups) was only rebuilt when the
+        current module's key was missing from the existing mapping, instead of whenever a new adapter's injection cycle
+        starts. Because `PeftModel.add_adapter` calls `inject_adapter` directly (bypassing `_pre_injection_hook`), a
+        second adapter whose target_modules overlapped with the first adapter's kept reusing the first adapter's
+        mapping (wrong layer index and module count) for any overlapping module, which silently corrupted the
+        `weight_tying` group assignment with no error or warning.
+        """
+        # First adapter targets all 4 linear layers. This seeds the model-level layer-index cache that must not
+        # leak into the second adapter's group computation below.
+        mlp = self.get_mlp()
+        config_default = TinyLoraConfig(target_modules=["lin0", "lin1", "lin2", "lin3"], r=2, u=4, weight_tying=0.0)
+        model = get_peft_model(mlp, config_default)
+
+        # Second adapter targets a different (strict subset) but overlapping set of modules, with partial
+        # weight_tying, so lin1 and lin2 are expected to share a single trainable v (1 group, not 2).
+        config_b = TinyLoraConfig(target_modules=["lin1", "lin2"], r=2, u=4, weight_tying=1 / 3)
+        model.add_adapter("b", config_b)
+
+        # Control: a freshly built model with ONLY the second adapter's config, so nothing precedes it.
+        mlp_control = self.get_mlp()
+        model_control = get_peft_model(mlp_control, config_b, adapter_name="b")
+
+        b_groups = model.tinylora_v["b"]
+        control_groups = model_control.tinylora_v["b"]
+
+        # Both should resolve to exactly 1 group (full tying between the 2 targeted modules) with u=4 parameters.
+        assert len(control_groups) == 1
+        assert sum(p.numel() for p in control_groups.values()) == 4
+        assert len(b_groups) == len(control_groups)
+        assert sum(p.numel() for p in b_groups.values()) == sum(p.numel() for p in control_groups.values())
+
+        # lin1 and lin2 must share the exact same trainable vector (full tying), matching the control model.
+        lin1_v = model.base_model.model.lin1._tinylora_v_ref["b"]
+        lin2_v = model.base_model.model.lin2._tinylora_v_ref["b"]
+        assert lin1_v.data_ptr() == lin2_v.data_ptr()
+
+        control_lin1_v = model_control.base_model.model.lin1._tinylora_v_ref["b"]
+        control_lin2_v = model_control.base_model.model.lin2._tinylora_v_ref["b"]
+        assert control_lin1_v.data_ptr() == control_lin2_v.data_ptr()
+
+    def test_second_adapter_overlapping_target_modules_after_delete_and_readd(self):
+        """Deleting an adapter and re-adding one with the same name but different target_modules must also rebuild
+        the layer-index mapping instead of reusing the stale one left behind by the deleted adapter.
+        """
+        mlp = self.get_mlp()
+        config_default = TinyLoraConfig(target_modules=["lin0", "lin1", "lin2", "lin3"], r=2, u=4, weight_tying=0.0)
+        model = get_peft_model(mlp, config_default)
+
+        config_b1 = TinyLoraConfig(target_modules=["lin0", "lin1", "lin2", "lin3"], r=2, u=4, weight_tying=0.0)
+        model.add_adapter("b", config_b1)
+        model.delete_adapter("b")
+
+        config_b2 = TinyLoraConfig(target_modules=["lin1", "lin2"], r=2, u=4, weight_tying=1 / 3)
+        model.add_adapter("b", config_b2)
+
+        mlp_control = self.get_mlp()
+        model_control = get_peft_model(mlp_control, config_b2, adapter_name="b")
+
+        assert len(model.tinylora_v["b"]) == len(model_control.tinylora_v["b"]) == 1
