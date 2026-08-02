@@ -18,8 +18,6 @@ This module contains the implementation of the LoraPlus optimizer.
 
 from __future__ import annotations
 
-from operator import attrgetter
-
 from torch import nn
 from torch.optim import Optimizer
 from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
@@ -71,7 +69,18 @@ def create_loraplus_optimizer(
         if not param.requires_grad:
             continue
 
-        module = attrgetter(name)(model)
+        parts = name.split(".")
+
+        # LoRA params end with ".default"
+        if "lora_" in name:
+            module_path = parts[:-2]
+        else:
+            module_path = parts[:-1]
+
+        module = model
+        for part in module_path:
+            module = getattr(module, part)
+
         if isinstance(module, Embedding):
             param_groups["embedding"][name] = param
         elif "lora_B" in name or param.ndim == 1:

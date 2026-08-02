@@ -16,6 +16,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
+from peft import LoraConfig, get_peft_model
 from peft.import_utils import is_bnb_available
 from peft.optimizers import create_loraplus_optimizer
 
@@ -97,3 +98,38 @@ def test_lora_plus_optimizer_sucess():
     loss_value = loss(output, label)
     loss_value.backward()
     optim.step()
+
+
+def test_loraplus_embedding_parameters_are_grouped_correctly():
+    model = get_peft_model(
+        SimpleNet(),
+        LoraConfig(target_modules=["embedding", "lin0"]),
+    )
+
+    optimizer = create_loraplus_optimizer(
+        model=model,
+        optimizer_cls=torch.optim.AdamW,
+        lr=5e-5,
+        loraplus_lr_ratio=1.2,
+        loraplus_lr_embedding=1e-6,
+    )
+
+    id_to_name = {id(p): n for n, p in model.named_parameters()}
+
+    group_a_names = {
+        id_to_name[id(p)]
+        for p in optimizer.param_groups[0]["params"]
+    }
+
+    embedding_names = {
+        id_to_name[id(p)]
+        for p in optimizer.param_groups[1]["params"]
+    }
+
+    assert embedding_names == {
+        "base_model.model.embedding.lora_embedding_A.default",
+        "base_model.model.embedding.lora_embedding_B.default",
+    }
+
+    assert "base_model.model.embedding.lora_embedding_A.default" not in group_a_names
+    assert "base_model.model.embedding.lora_embedding_B.default" not in group_a_names
