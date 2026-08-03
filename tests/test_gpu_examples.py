@@ -6631,9 +6631,8 @@ TP_PLAN = {
 def _get_tp_kwargs(tp_plan=None, tp_size=WORLD_SIZE):
     """Build kwargs for from_pretrained to enable tensor parallelism.
 
-    transformers >= 5.13.0 uses the ``distributed_config`` kwarg (a ``DistributedConfig`` instance). Older versions use
-    the ``tp_plan`` and ``tp_size`` kwargs directly. The ``tp_plan``/``tp_size`` kwargs were removed in transformers
-    5.15.0.
+    transformers >= 5.13.0 uses the `distributed_config` kwarg (a `DistributedConfig` instance). Older versions use the
+    `tp_plan` and `tp_size` kwargs directly. The `tp_plan`/`tp_size` kwargs were removed in transformers 5.15.0.
     """
     if is_transformers_ge_v5_13_0:
         from transformers.distributed import DistributedConfig

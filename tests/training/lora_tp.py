@@ -55,7 +55,7 @@ GRAD_NORM_REDUCTION_THRESHOLD = 0.9
 def _get_tp_kwargs(tp_plan, tp_size=2):
     """Build kwargs for from_pretrained to enable tensor parallelism.
 
-    transformers >= 5.13.0 uses the ``distributed_config`` kwarg. Older versions use ``tp_plan`` and ``tp_size`` kwargs
+    transformers >= 5.13.0 uses the `distributed_config` kwarg. Older versions use `tp_plan` and `tp_size` kwargs
     directly (removed in 5.15.0).
     """
     if is_transformers_ge_v5_13_0:
