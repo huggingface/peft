@@ -401,23 +401,6 @@ class TestShadowKVCache:
 
 
 class TestShadowSequenceClassification:
-    @pytest.fixture(autouse=True)
-    def _silence_unrelated_core_deprecation(self):
-        # PeftModelForSequenceClassification.forward reads `self.config.use_return_dict`, which newer transformers
-        # versions emit a deprecation warning for. The test suite's conftest escalates transformers deprecations to
-        # errors; this one originates in PEFT core (it reproduces identically with LoRA) and is unrelated to the Shadow
-        # method, so we raise the transformers logger level for these tests to avoid a spurious failure.
-        # TODO: remove this fixture once the core issue is fixed (tracked separately, issue link to be added).
-        import logging
-
-        logger = logging.getLogger("transformers")
-        previous = logger.level
-        logger.setLevel(logging.ERROR)
-        try:
-            yield
-        finally:
-            logger.setLevel(previous)
-
     def test_classifier_head_trainable_by_default(self):
         model = get_peft_model(make_llama_seqcls(num_labels=3), ShadowConfig(task_type="SEQ_CLS"))
         trainable = {n for n, p in model.named_parameters() if p.requires_grad}
