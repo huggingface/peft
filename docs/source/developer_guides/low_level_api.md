@@ -147,6 +147,12 @@ set_peft_model_state_dict(model, peft_state_dict, low_cpu_mem_usage=True)
 print(model.linear.lora_A["default"].weight.device.type == "cpu")  # should be True
 ```
 
+For loading weights from the hub there's the low-level [`load_peft_weights`] function:
+
+```python
+state_dict = load_peft_weights("my-account/my-adapter-repo")
+```
+
 ## Setting and loading base weights
 
 The functions above deal with the state dict of the *adapter*. There are also situations where the *base model* weights need to be read or written through the PEFT wrapper. This is not entirely trivial because PEFT renames the parameters of targeted modules (e.g. `q_proj.weight` becomes `q_proj.base_layer.weight`) and adds adapter parameters that don't exist in the base model. Use [`get_base_model_state_dict`] and [`set_base_model_state_dict`] to translate between the two namings:
