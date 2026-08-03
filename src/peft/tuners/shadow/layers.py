@@ -357,6 +357,10 @@ class DetachedShadowModel(PreTrainedModel, GenerationMixin):
     depend on the base model's outputs and so do not exist standalone. This is the lightweight component that can be
     deployed on its own for high-efficiency / edge inference (Section 3.5 of the paper).
 
+    Modules may be shared with the parent [`ShadowModel`] when `unload_shadow(copy=False)` (the default), or owned
+    privately when `copy=True`. If the shadow backbone shared the base embeddings, an external `input_embeddings`
+    reference may be supplied so the model can run from `input_ids` without re-parenting the embedding module.
+
     Because it is just the shadow backbone with a task head, it behaves like a normal task model. For a causal-LM head
     it returns a [`~transformers.modeling_outputs.CausalLMOutputWithPast`] and supports `generate()` and KV caching.
     For a sequence-classification head it pools the last token and returns a
@@ -383,12 +387,16 @@ class DetachedShadowModel(PreTrainedModel, GenerationMixin):
         projection: Optional[nn.Module] = None,
         head: Optional[nn.Module] = None,
         is_classification: bool = False,
+        input_embeddings: Optional[nn.Module] = None,
     ) -> None:
         super().__init__(backbone.config)
         self.backbone = backbone
         self.shadow_hidden_projection = projection if projection is not None else nn.Identity()
         self.head = head
         self.is_classification = is_classification
+        # Held in a list so the embedding module is *not* re-registered as a child of this model (it may already
+        # belong to the base model when `unload_shadow(copy=False)` shares modules).
+        self._shared_input_embeddings: list[Optional[nn.Module]] = [input_embeddings]
         base_generation_config = getattr(backbone, "generation_config", None)
         if base_generation_config is not None:
             self.generation_config = base_generation_config
@@ -401,9 +409,15 @@ class DetachedShadowModel(PreTrainedModel, GenerationMixin):
         return getattr(self, "head", None) is not None and not getattr(self, "is_classification", False)
 
     def get_input_embeddings(self):
+        shared = self._shared_input_embeddings[0]
+        if shared is not None:
+            return shared
         return self.backbone.get_input_embeddings()
 
     def set_input_embeddings(self, value):
+        if self._shared_input_embeddings[0] is not None:
+            self._shared_input_embeddings[0] = value
+            return
         self.backbone.set_input_embeddings(value)
 
     def get_output_embeddings(self):
@@ -428,6 +442,13 @@ class DetachedShadowModel(PreTrainedModel, GenerationMixin):
         for key in self._causal_lm_only_kwargs:
             kwargs.pop(key, None)
         kwargs["return_dict"] = True
+        # When embeddings are shared from the base model (not registered on the backbone), drive the backbone via
+        # `inputs_embeds` so we never re-parent the embedding module.
+        if self._shared_input_embeddings[0] is not None and kwargs.get("inputs_embeds") is None:
+            if input_ids is None:
+                raise ValueError("Either `input_ids` or `inputs_embeds` must be provided.")
+            kwargs["inputs_embeds"] = self.get_input_embeddings()(input_ids)
+            input_ids = None
         out = self.backbone(input_ids=input_ids, attention_mask=attention_mask, **kwargs)
         hidden = self.shadow_hidden_projection(out.last_hidden_state)
         if self.head is None:

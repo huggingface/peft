@@ -33,26 +33,44 @@ from .layers import DetachedShadowModel, ShadowCache, ShadowCarrier, ShadowLayer
 
 def _get_backbone(model: nn.Module) -> nn.Module:
     """Return the module that holds the transformer decoder stack (e.g. `LlamaModel` inside `LlamaForCausalLM`)."""
+
+    def _has_layer_stack(module: nn.Module) -> bool:
+        return isinstance(getattr(module, "layers", None), nn.ModuleList) or isinstance(
+            getattr(module, "h", None), nn.ModuleList
+        )
+
     for attr in ("model", "transformer", "base_model", "decoder"):
         backbone = getattr(model, attr, None)
-        if isinstance(backbone, nn.Module):
+        if not isinstance(backbone, nn.Module):
+            continue
+        # Some architectures nest the layer stack one level deeper (e.g. OPT: `model.decoder.layers`).
+        nested = getattr(backbone, "decoder", None)
+        if isinstance(nested, nn.Module) and _has_layer_stack(nested):
+            return nested
+        if _has_layer_stack(backbone):
             return backbone
-    if hasattr(model, "layers") and isinstance(model.layers, nn.ModuleList):
+        # Fall back to the first matching container even if layers are not yet recognizable; callers that need the
+        # layer stack will raise a more specific error from `_get_decoder_layers`.
+        return backbone
+    if _has_layer_stack(model):
         return model
-    if hasattr(model, "h") and isinstance(model.h, nn.ModuleList):
-        return model
-    raise AttributeError("Unable to locate the transformer backbone inside the supplied model.")
+    raise AttributeError(
+        "Unable to automatically locate the transformer backbone inside the supplied model "
+        "(required when `target_modules` is not set). Please set `target_modules` explicitly "
+        "to the decoder blocks you want to wrap, e.g. `r'.*\\.layers\\.\\d+$'`."
+    )
 
 
-def _get_decoder_layers(model: nn.Module) -> tuple[nn.ModuleList, str]:
-    """Return `(layers, attr_name)` for the decoder-layer `nn.ModuleList` of a model."""
-    backbone = _get_backbone(model)
+def _get_decoder_layers(backbone: nn.Module) -> tuple[nn.ModuleList, str]:
+    """Return `(layers, attr_name)` for the decoder-layer `nn.ModuleList` of a backbone."""
     for attr in ("layers", "h"):
         candidate = getattr(backbone, attr, None)
         if isinstance(candidate, nn.ModuleList):
             return candidate, attr
     raise AttributeError(
-        "Unsupported model: cannot find a `nn.ModuleList` of decoder layers (expected `.layers`/`.h`)."
+        "Unable to automatically find a `nn.ModuleList` of decoder layers (expected `.layers`/`.h`) "
+        "inside the backbone (required when `target_modules` is not set). Please set `target_modules` "
+        "explicitly to the decoder blocks you want to wrap, e.g. `r'.*\\.layers\\.\\d+$'`."
     )
 
 
@@ -63,16 +81,28 @@ def _get_hidden_size(config: Any) -> int:
     raise AttributeError("Unable to infer the hidden size from the model config.")
 
 
-def _set_config_attr(config: Any, names: tuple[str, ...], value: int) -> bool:
+def _set_config_attr(config: Any, names: tuple[str, ...], value: int) -> None:
     for attr in names:
         if hasattr(config, attr):
             setattr(config, attr, int(value))
-            return True
-    return False
+            return
+    raise AttributeError(
+        f"Unable to update the model config: none of the expected attributes {names} are defined. "
+        "This is required when building a mirrored shadow backbone (`shadow_model=\"mirror\"`). "
+        "Please use a supported decoder architecture, or set `shadow_model` to a pretrained model "
+        "id/path instead."
+    )
 
 
 def _normalize_layer_config(config: Any) -> Any:
-    """Keep per-layer config lists consistent with a reduced `num_hidden_layers` (e.g. Qwen3 `layer_types`)."""
+    """Keep per-layer config fields consistent after reducing `num_hidden_layers`.
+
+    When building a mirrored shadow backbone we deepcopy the base config and shrink
+    `num_hidden_layers` (often to 1). Some architectures also store per-layer lists
+    or layer-count-dependent fields (e.g. Qwen3 `layer_types`, `max_window_layers`)
+    sized for the full base model. Leaving those unchanged would leave them longer
+    than the new layer count and break construction, so truncate/pad them here.
+    """
     try:
         num_layers = int(config.num_hidden_layers)
     except Exception:
@@ -147,8 +177,8 @@ class ShadowModel(BaseTuner):
     def _prepare_adapter_config(self, peft_config: ShadowConfig, model_config: dict) -> ShadowConfig:
         if peft_config.target_modules is None:
             # Default to wrapping *every* decoder block (contiguous, which the shadow carrier requires).
-            layers, attr = _get_decoder_layers(self.model)
             backbone = _get_backbone(self.model)
+            layers, attr = _get_decoder_layers(backbone)
             prefix = None
             for name, module in self.model.named_modules():
                 if module is backbone:
@@ -612,6 +642,32 @@ class ShadowModel(BaseTuner):
             "`unload_shadow()` for a standalone shadow model."
         )
 
+    def _replace_module(self, parent: nn.Module, child_name: str, new_module: nn.Module, child: nn.Module) -> None:
+        # Shadow wraps whole decoder blocks (not Linear), so there is no single `.weight` to rebind as in LoRA.
+        setattr(parent, child_name, new_module)
+        meta = torch.device("meta")
+        for param in child.parameters():
+            if param.device != meta:
+                new_module.to(param.device)
+                break
+
+    def _unload_and_optionally_merge(
+        self,
+        merge: bool = True,
+        progressbar: bool = False,
+        safe_merge: bool = False,
+        adapter_names: Optional[list[str]] = None,
+    ):
+        # Drop boundary hooks before unwrapping so they are not left dangling on removed modules.
+        for handle in getattr(self, "_boundary_hook_handles", []):
+            handle.remove()
+        if hasattr(self, "_boundary_hook_handles"):
+            self._boundary_hook_handles = []
+            self._boundary_layers = []
+        return super()._unload_and_optionally_merge(
+            merge=merge, progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
+        )
+
     def delete_adapter(self, adapter_name: str) -> None:
         super().delete_adapter(adapter_name)
         for container in (self.shadow_backbone, self.shadow_projection, self.shadow_head):
@@ -625,7 +681,7 @@ class ShadowModel(BaseTuner):
         # Coverage may have changed (the deleted adapter's blocks could be unwrapped now); rebind the boundary hooks.
         self._register_boundary_hooks()
 
-    def unload_shadow(self, adapter_name: Optional[str] = None) -> nn.Module:
+    def unload_shadow(self, adapter_name: Optional[str] = None, copy: bool = False) -> nn.Module:
         """Return the shadow backbone (+ head) as a standalone model, *without* the base model.
 
         The ShadowPEFT analogue of `merge_and_unload`: where that would hand back the base model with the adaptation
@@ -634,25 +690,46 @@ class ShadowModel(BaseTuner):
         standalone. The result behaves like a normal causal LM (supports `generate()` and KV caching), which is how you
         evaluate the shadow path's own performance, independent of the base model.
 
-        Assign the result to a variable; this is not an in-place operation.
+        Args:
+            adapter_name (`str`, *optional*):
+                The adapter whose shadow network to unload. Defaults to the active adapter.
+            copy (`bool`, *optional*, defaults to `False`):
+                If `True`, deep-copy the shadow modules so the returned model is independent of this one (uses more
+                memory). If `False` (default), share the modules -- similar to `merge_and_unload`, which reuses modules
+                rather than cloning them. Mutating one model then affects the other.
+
+        Assign the result to a variable and use it; with `copy=False` the modules remain shared with this model.
         """
         self._ensure_shadow_containers()
         if adapter_name is None:
             adapter_name = self.active_adapters[0]
         if adapter_name not in self.shadow_backbone:
             raise ValueError(f"No shadow backbone found for adapter '{adapter_name}'.")
-        backbone = deepcopy(self.shadow_backbone[adapter_name])
-        # If the backbone shared the frozen base embeddings (its own `embed_tokens` was removed), re-attach a copy so
-        # the detached model is self-contained and can run from `input_ids`.
+
+        maybe_copy = deepcopy if copy else (lambda module: module)
+        backbone = maybe_copy(self.shadow_backbone[adapter_name])
+        projection = maybe_copy(self.shadow_projection[adapter_name])
+        head = self._resolve_shadow_head(adapter_name)
+        if head is not None:
+            head = maybe_copy(head)
+
+        # If the backbone shared the frozen base embeddings (its own `embed_tokens` was removed), restore access so the
+        # detached model can run from `input_ids`. With `copy=True`, re-attach a private copy on the backbone. With
+        # `copy=False`, pass a shared reference into `DetachedShadowModel` without re-parenting the module.
+        shared_input_embeddings = None
         if self._shadow_share_embeddings.get(adapter_name, False) and hasattr(backbone, "embed_tokens"):
             if getattr(backbone, "embed_tokens", None) is None:
-                backbone.embed_tokens = deepcopy(self.model.get_input_embeddings())
-        projection = deepcopy(self.shadow_projection[adapter_name])
-        head = self._resolve_shadow_head(adapter_name)
+                embeds = self.model.get_input_embeddings()
+                if copy:
+                    backbone.embed_tokens = deepcopy(embeds)
+                else:
+                    shared_input_embeddings = embeds
+
         is_classification = self.peft_config[adapter_name].task_type == TaskType.SEQ_CLS
         return DetachedShadowModel(
             backbone,
             projection,
-            deepcopy(head) if head is not None else None,
+            head,
             is_classification=is_classification,
+            input_embeddings=shared_input_embeddings,
         )
