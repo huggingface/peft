@@ -30,7 +30,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
 from transformers.testing_utils import ColoredFormatter, Colors
 
 from peft import LoraConfig, get_peft_model
-from peft.import_utils import is_transformers_ge_v5_4_0
+from peft.import_utils import is_transformers_ge_v5_4_0, is_transformers_ge_v5_13_0
 
 
 TINY_MODEL_ID = "peft-internal-testing/zephyr-smol_llama-100m-sft-full"
@@ -50,6 +50,19 @@ BATCH_SIZE = 4
 LEARNING_RATE = 1e-3
 LOSS_REDUCTION_THRESHOLD = 0.9
 GRAD_NORM_REDUCTION_THRESHOLD = 0.9
+
+
+def _get_tp_kwargs(tp_plan, tp_size=2):
+    """Build kwargs for from_pretrained to enable tensor parallelism.
+
+    transformers >= 5.13.0 uses the ``distributed_config`` kwarg. Older versions use ``tp_plan`` and ``tp_size`` kwargs
+    directly (removed in 5.15.0).
+    """
+    if is_transformers_ge_v5_13_0:
+        from transformers.distributed import DistributedConfig
+
+        return {"distributed_config": DistributedConfig(tp_plan=tp_plan, tp_size=tp_size)}
+    return {"tp_plan": tp_plan, "tp_size": tp_size}
 
 
 def init_test_logger(rank):
@@ -88,7 +101,9 @@ def main(model_id: str, target_modules: list[str]):
     set_seed(42)
 
     tokenizer = AutoTokenizer.from_pretrained(model_id)
-    model = AutoModelForCausalLM.from_pretrained(model_id, tp_plan=TP_PLAN)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id, **_get_tp_kwargs(tp_plan=TP_PLAN, tp_size=dist.get_world_size())
+    )
     config = model.config
 
     torch.cuda.set_device(rank)
