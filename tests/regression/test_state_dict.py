@@ -348,7 +348,7 @@ CASES = [
     ),
     Case("prefix_tuning", PrefixTuningConfig, {"task_type": "CAUSAL_LM", "num_virtual_tokens": 10}),
     Case(
-        "prefix_tuning",
+        "prefix_tuning_gemma4",
         PrefixTuningConfig,
         {"task_type": "CAUSAL_LM", "num_virtual_tokens": 10},
         model_id=MODEL_GEMMA4,
