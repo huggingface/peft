@@ -13,17 +13,16 @@
 # limitations under the License.
 
 import copy
+import json
 
 import pytest
 import torch
 from safetensors import safe_open
 from transformers import (
+    AutoModelForCausalLM,
+    AutoModelForSequenceClassification,
     Cache,
-    GPT2Config,
-    GPT2LMHeadModel,
     LlamaConfig,
-    LlamaForCausalLM,
-    LlamaForSequenceClassification,
 )
 
 from peft import (
@@ -39,44 +38,23 @@ from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import PeftType, get_peft_model_state_dict
 from peft.utils.constants import SAFETENSORS_WEIGHTS_NAME
 
-
-def make_llama_causal(hidden_size=32, num_layers=3, vocab_size=128):
-    cfg = LlamaConfig(
-        vocab_size=vocab_size,
-        hidden_size=hidden_size,
-        intermediate_size=2 * hidden_size,
-        num_hidden_layers=num_layers,
-        num_attention_heads=4,
-        num_key_value_heads=2,
-        max_position_embeddings=64,
-    )
-    return LlamaForCausalLM(cfg)
+from .testing_utils import hub_online_once
 
 
-def _train_shadow_briefly(model, ids, steps=3, lr=0.5):
-    """Break the zero-init no-op so cache alignment tests exercise a real adapter."""
-    opt = torch.optim.SGD([p for p in model.parameters() if p.requires_grad], lr=lr)
-    model.train()
-    for _ in range(steps):
-        opt.zero_grad()
-        model(input_ids=ids, labels=ids.clone()).loss.backward()
-        opt.step()
-    model.eval()
+LLAMA_CAUSAL_MODEL_ID = "peft-internal-testing/tiny-random-LlamaForCausalLM"
+LLAMA_SEQCLS_MODEL_ID = "trl-internal-testing/tiny-LlamaForSequenceClassification-3.2"
 
 
-def make_llama_seqcls(num_labels=3, hidden_size=32, num_layers=3, vocab_size=128):
-    cfg = LlamaConfig(
-        vocab_size=vocab_size,
-        hidden_size=hidden_size,
-        intermediate_size=2 * hidden_size,
-        num_hidden_layers=num_layers,
-        num_attention_heads=4,
-        num_key_value_heads=2,
-        max_position_embeddings=64,
-        num_labels=num_labels,
-        pad_token_id=0,
-    )
-    return LlamaForSequenceClassification(cfg)
+def make_llama_causal():
+    with hub_online_once(LLAMA_CAUSAL_MODEL_ID):
+        return AutoModelForCausalLM.from_pretrained(LLAMA_CAUSAL_MODEL_ID)
+
+
+def make_llama_seqcls(num_labels=3):
+    with hub_online_once(LLAMA_SEQCLS_MODEL_ID):
+        return AutoModelForSequenceClassification.from_pretrained(
+            LLAMA_SEQCLS_MODEL_ID, num_labels=num_labels, ignore_mismatched_sizes=True
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -85,33 +63,11 @@ def _seed():
 
 
 class TestShadowCausalLM:
-    def test_get_peft_model_wraps_correctly(self):
-        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
-        assert isinstance(model, PeftModelForCausalLM)
-        assert isinstance(model.base_model, ShadowModel)
-        assert model.peft_config["default"].peft_type == PeftType.SHADOW
-
-    def test_conforms_to_peft_api(self):
-        # ShadowPEFT must be a proper `BaseTuner` and its layers proper `BaseTunerLayer`s.
-        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
-        assert isinstance(model.base_model, BaseTuner)
-        shadow_layers = [m for m in model.modules() if isinstance(m, ShadowLayer)]
-        assert shadow_layers
-        assert all(isinstance(layer, BaseTunerLayer) for layer in shadow_layers)
-
-    def test_only_shadow_params_trainable(self):
-        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
-        trainable = {n for n, p in model.named_parameters() if p.requires_grad}
-        assert trainable  # non-empty
-        # Every trainable parameter belongs to a shadow module.
-        for name in trainable:
-            assert "shadow_" in name, name
-
     def test_forward_and_auxiliary_loss_backward(self):
         model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
         ids = torch.randint(0, 128, (2, 6))
         out = model(input_ids=ids, labels=ids.clone())
-        assert out.logits.shape == (2, 6, 128)
+        assert out.logits.shape == (2, 6, model.config.vocab_size)
         assert out.loss is not None
         out.loss.backward()
         grads = [p for p in model.parameters() if p.requires_grad and p.grad is not None]
@@ -176,24 +132,6 @@ class TestShadowCausalLM:
                 off = model(input_ids=ids).logits
         assert torch.allclose(on, off, atol=1e-6)
 
-    def test_disable_adapter_changes_trained_output(self):
-        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
-        ids = torch.randint(0, 128, (2, 6))
-        opt = torch.optim.SGD([p for p in model.parameters() if p.requires_grad], lr=0.5)
-        for _ in range(3):
-            opt.zero_grad()
-            out = model(input_ids=ids, labels=ids.clone())
-            out.loss.backward()
-            opt.step()
-        model.eval()
-        with torch.no_grad():
-            on = model(input_ids=ids).logits
-            with model.disable_adapter():
-                off = model(input_ids=ids).logits
-            on_again = model(input_ids=ids).logits
-        assert not torch.allclose(on, off, atol=1e-6)
-        assert torch.allclose(on, on_again, atol=1e-6)
-
     def test_switches_adapters_but_rejects_multiple_active_adapters(self):
         model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
         model.add_adapter("other", ShadowConfig(task_type="CAUSAL_LM"))
@@ -204,12 +142,6 @@ class TestShadowCausalLM:
             model.base_model.set_adapter(["default", "other"])
         assert model.active_adapters == ["other"]
 
-    def test_generate(self):
-        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
-        ids = torch.randint(0, 128, (2, 4))
-        gen = model.generate(input_ids=ids, max_new_tokens=4, do_sample=False)
-        assert gen.shape[1] == 8
-
     def test_merge_raises(self):
         # ShadowPEFT cannot be merged: it must raise an explicit error rather than silently doing the wrong thing.
         model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
@@ -217,54 +149,6 @@ class TestShadowCausalLM:
             model.merge_and_unload()
         with pytest.raises(NotImplementedError):
             model.base_model.merge_adapter()
-
-    def test_save_load_roundtrip(self, tmp_path):
-        base = make_llama_causal()
-        base_sd = copy.deepcopy(base.state_dict())
-        model = get_peft_model(base, ShadowConfig(task_type="CAUSAL_LM"))
-        ids = torch.randint(0, 128, (2, 6))
-        opt = torch.optim.SGD([p for p in model.parameters() if p.requires_grad], lr=0.3)
-        for _ in range(2):
-            opt.zero_grad()
-            out = model(input_ids=ids, labels=ids.clone())
-            out.loss.backward()
-            opt.step()
-        model.eval()
-        with torch.no_grad():
-            ref = model(input_ids=ids).logits
-
-        model.save_pretrained(tmp_path)
-        files = {p.name for p in tmp_path.iterdir()}
-        assert "adapter_config.json" in files
-        assert "adapter_model.safetensors" in files
-
-        base2 = make_llama_causal()
-        base2.load_state_dict(base_sd)
-        loaded = PeftModel.from_pretrained(base2, tmp_path)
-        loaded.eval()
-        with torch.no_grad():
-            got = loaded(input_ids=ids).logits
-        assert torch.allclose(ref, got, atol=1e-6)
-
-    def test_load_checkpoint_under_different_adapter_name(self, tmp_path):
-        base = make_llama_causal()
-        base_state = copy.deepcopy(base.state_dict())
-        model = get_peft_model(base, ShadowConfig(task_type="CAUSAL_LM"))
-        ids = torch.randint(0, 128, (2, 6))
-        _train_shadow_briefly(model, ids)
-        model.save_pretrained(tmp_path)
-
-        reloaded_base = make_llama_causal()
-        reloaded_base.load_state_dict(base_state)
-        loaded = PeftModel.from_pretrained(reloaded_base, tmp_path)
-        loaded.load_adapter(tmp_path, adapter_name="other")
-        loaded.eval()
-        with torch.no_grad():
-            loaded.set_adapter("default")
-            default_logits = loaded(input_ids=ids).logits
-            loaded.set_adapter("other")
-            other_logits = loaded(input_ids=ids).logits
-        assert torch.allclose(default_logits, other_logits, atol=1e-6)
 
     def test_save_includes_shadow_modules_but_not_frozen_head(self, tmp_path):
         model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
@@ -329,26 +213,14 @@ class TestShadowCausalLM:
 
     def test_requires_two_layers(self):
         # A single decoder block means the shadow carrier has no loop to ride; injection needs >= 2 blocks.
-        # The default targets every block, so a 1-layer model wraps just one block and cannot form a trajectory.
-        model = get_peft_model(make_llama_causal(num_layers=1), ShadowConfig(task_type="CAUSAL_LM"))
+        # Target only one block of the tiny 2-layer model so entry == exit.
+        model = get_peft_model(
+            make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM", layers_to_transform=[0])
+        )
         ids = torch.randint(0, 128, (2, 6))
         # A single wrapped block still runs (entry == exit); just assert it does not crash.
         out = model(input_ids=ids, labels=ids.clone())
-        assert out.logits.shape == (2, 6, 128)
-
-    def test_bf16_base_model(self):
-        # transformers keeps the checkpoint dtype (often bf16). The shadow backbone matches the base dtype, while the
-        # per-block adapters are upcast to fp32 by `autocast_adapter_dtype` (standard PEFT); the forward must bridge the
-        # two dtypes rather than crash.
-        base = make_llama_causal().to(torch.bfloat16)
-        model = get_peft_model(base, ShadowConfig(task_type="CAUSAL_LM"))
-        assert next(model.base_model.shadow_backbone["default"].parameters()).dtype == torch.bfloat16
-        ids = torch.randint(0, 128, (2, 6))
-        out = model(input_ids=ids, labels=ids.clone())
-        assert out.logits.dtype == torch.bfloat16
-        out.loss.backward()
-        gen = model.generate(input_ids=ids[:, :3], max_new_tokens=3, do_sample=False)
-        assert gen.shape[1] == 6
+        assert out.logits.shape == (2, 6, model.config.vocab_size)
 
     def test_wrapped_layer_delegates_base_attributes(self):
         # The base model's forward reads attributes off the decoder block it iterates over (e.g. newer transformers
@@ -362,35 +234,33 @@ class TestShadowCausalLM:
         ids = torch.randint(0, 128, (2, 6))
         model(input_ids=ids, labels=ids.clone()).loss.backward()
 
-    def test_gpt2_backbone(self):
-        cfg = GPT2Config(vocab_size=128, n_embd=32, n_inner=64, n_layer=3, n_head=4, n_positions=64)
-        model = get_peft_model(GPT2LMHeadModel(cfg), ShadowConfig(task_type="CAUSAL_LM"))
-        ids = torch.randint(0, 128, (2, 6))
-        out = model(input_ids=ids, labels=ids.clone())
-        assert out.logits.shape == (2, 6, 128)
-        out.loss.backward()
-
 
 class TestShadowKVCache:
     """Dual KV cache (base + shadow) incremental decode must match full-sequence recompute."""
 
     def test_generate_cached_matches_uncached(self):
-        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
+        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM", init_weights=False))
+        model.eval()
         ids = torch.randint(0, 128, (2, 5))
-        _train_shadow_briefly(model, ids)
         with torch.no_grad():
             cached = model.generate(input_ids=ids, max_new_tokens=5, use_cache=True, do_sample=False)
             uncached = model.generate(input_ids=ids, max_new_tokens=5, use_cache=False, do_sample=False)
         assert torch.equal(cached, uncached)
 
     def test_generate_cached_matches_uncached_with_projection(self):
-        # Mirror shadow with a smaller hidden size (projection 16->32) must still align under caching.
+        # Mirror shadow with a smaller hidden size must still align under caching.
+        base = make_llama_causal()
         model = get_peft_model(
-            make_llama_causal(hidden_size=32, num_layers=4),
-            ShadowConfig(task_type="CAUSAL_LM", shadow_num_hidden_layers=1, shadow_hidden_size=16),
+            base,
+            ShadowConfig(
+                task_type="CAUSAL_LM",
+                shadow_num_hidden_layers=1,
+                shadow_hidden_size=base.config.hidden_size // 2,
+                init_weights=False,
+            ),
         )
+        model.eval()
         ids = torch.randint(0, 128, (1, 4))
-        _train_shadow_briefly(model, ids)
         with torch.no_grad():
             cached = model.generate(input_ids=ids, max_new_tokens=6, use_cache=True, do_sample=False)
             uncached = model.generate(input_ids=ids, max_new_tokens=6, use_cache=False, do_sample=False)
@@ -412,9 +282,9 @@ class TestShadowKVCache:
         assert out.past_key_values.shadow.get_seq_length() == 4
 
     def test_prefill_then_decode_logits_match_full_sequence(self):
-        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
+        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM", init_weights=False))
+        model.eval()
         ids = torch.randint(0, 128, (1, 4))
-        _train_shadow_briefly(model, ids)
         next_token = torch.tensor([[77]])
         full_ids = torch.cat([ids, next_token], dim=1)
         with torch.no_grad():
@@ -429,9 +299,9 @@ class TestShadowKVCache:
     def test_step_by_step_logits_alignment(self):
         # Prefill once, then decode token-by-token with the dual cache; each step's logits must match a full-sequence
         # recompute of the growing prefix (proves inject/update stay correct under incremental decoding).
-        model = get_peft_model(make_llama_causal(num_layers=4), ShadowConfig(task_type="CAUSAL_LM"))
+        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM", init_weights=False))
+        model.eval()
         prefix = torch.randint(0, 128, (1, 3))
-        _train_shadow_briefly(model, prefix)
         max_new_tokens = 5
 
         with torch.no_grad():
@@ -457,6 +327,8 @@ class TestShadowKVCache:
             # Manual greedy path should agree with generate(use_cache=True) up to an early EOS stop.
             gen = model.generate(input_ids=prefix, max_new_tokens=max_new_tokens, use_cache=True, do_sample=False)
             gen_tokens = gen[0, prefix.shape[1] :].tolist()
+            # Guard against a trivial pass if generation immediately hits EOS.
+            assert len(gen_tokens) >= 2
             assert generated[: len(gen_tokens)] == gen_tokens
 
     def test_uncached_forward_does_not_return_shadow_cache(self):
@@ -465,6 +337,8 @@ class TestShadowKVCache:
         ids = torch.randint(0, 128, (1, 5))
         with torch.no_grad():
             out = model(input_ids=ids, use_cache=False)
+        # With caching off we must not wrap a dual ShadowCache. Depending on transformers version the base model
+        # may return `past_key_values=None` or an empty Cache; either is fine as long as nothing is stored.
         assert not isinstance(getattr(out, "past_key_values", None), ShadowCache)
         assert out.past_key_values is None or (
             hasattr(out.past_key_values, "get_seq_length") and out.past_key_values.get_seq_length() == 0
@@ -483,24 +357,29 @@ class TestShadowKVCache:
         assert out.past_key_values.get_seq_length() == 4
 
     def test_explicit_shadow_model_cached_generate(self, tmp_path):
+        # Unlike `test_generate_cached_matches_uncached_with_projection` (which uses the default `shadow_model="mirror"`
+        # builder with a smaller hidden size), this exercises loading an explicit external shadow backbone via
+        # `shadow_model=<path>` (`_load_shadow_backbone`) and checks that dual-cache generate still matches uncached.
         from transformers import LlamaModel
 
+        base = make_llama_causal()
+        shadow_hidden = base.config.hidden_size // 2
         shadow_cfg = LlamaConfig(
-            vocab_size=128,
-            hidden_size=16,
-            intermediate_size=32,
+            vocab_size=base.config.vocab_size,
+            hidden_size=shadow_hidden,
+            intermediate_size=2 * shadow_hidden,
             num_hidden_layers=1,
-            num_attention_heads=4,
-            num_key_value_heads=2,
-            max_position_embeddings=64,
+            num_attention_heads=base.config.num_attention_heads,
+            num_key_value_heads=getattr(base.config, "num_key_value_heads", base.config.num_attention_heads),
+            max_position_embeddings=base.config.max_position_embeddings,
         )
         LlamaModel(shadow_cfg).save_pretrained(tmp_path)
         model = get_peft_model(
-            make_llama_causal(hidden_size=32, num_layers=3),
-            ShadowConfig(task_type="CAUSAL_LM", shadow_model=str(tmp_path)),
+            base,
+            ShadowConfig(task_type="CAUSAL_LM", shadow_model=str(tmp_path), init_weights=False),
         )
+        model.eval()
         ids = torch.randint(0, 128, (1, 4))
-        _train_shadow_briefly(model, ids)
         with torch.no_grad():
             cached = model.generate(input_ids=ids, max_new_tokens=4, use_cache=True, do_sample=False)
             uncached = model.generate(input_ids=ids, max_new_tokens=4, use_cache=False, do_sample=False)
@@ -521,48 +400,6 @@ class TestShadowKVCache:
         assert cache.shadow.get_seq_length() == 3
 
 
-class TestShadowMultiAdapter:
-    def test_add_switch_delete_adapter(self):
-        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"), adapter_name="first")
-        model.add_adapter("second", ShadowConfig(task_type="CAUSAL_LM"))
-        assert set(model.peft_config) == {"first", "second"}
-        assert "second" in model.base_model.shadow_backbone
-
-        ids = torch.randint(0, 128, (2, 5))
-        model.set_adapter("second")
-        assert model.base_model.active_adapters == ["second"]
-        model(input_ids=ids, labels=ids.clone()).loss.backward()
-
-        model.set_adapter("first")
-        assert model.base_model.active_adapters == ["first"]
-
-        model.delete_adapter("second")
-        assert set(model.peft_config) == {"first"}
-        assert "second" not in model.base_model.shadow_backbone
-        # Still works after deletion.
-        model(input_ids=ids, labels=ids.clone())
-
-    def test_switching_adapter_changes_output(self):
-        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"), adapter_name="first")
-        model.add_adapter("second", ShadowConfig(task_type="CAUSAL_LM"))
-        ids = torch.randint(0, 128, (2, 6))
-
-        # Train adapter "a" only.
-        model.set_adapter("first")
-        opt = torch.optim.SGD([p for p in model.parameters() if p.requires_grad], lr=0.5)
-        for _ in range(3):
-            opt.zero_grad()
-            model(input_ids=ids, labels=ids.clone()).loss.backward()
-            opt.step()
-
-        model.eval()
-        with torch.no_grad():
-            out_a = model(input_ids=ids).logits
-            model.set_adapter("second")
-            out_b = model(input_ids=ids).logits
-        assert not torch.allclose(out_a, out_b, atol=1e-6)
-
-
 class TestShadowSequenceClassification:
     @pytest.fixture(autouse=True)
     def _silence_unrelated_core_deprecation(self):
@@ -579,16 +416,6 @@ class TestShadowSequenceClassification:
             yield
         finally:
             logger.setLevel(previous)
-
-    def test_forward_and_backward(self):
-        model = get_peft_model(make_llama_seqcls(num_labels=3), ShadowConfig(task_type="SEQ_CLS"))
-        assert isinstance(model, PeftModelForSequenceClassification)
-        ids = torch.randint(1, 128, (2, 6))
-        am = torch.ones_like(ids)
-        labels = torch.tensor([0, 2])
-        out = model(input_ids=ids, attention_mask=am, labels=labels)
-        assert out.logits.shape == (2, 3)
-        out.loss.backward()
 
     def test_classifier_head_trainable_by_default(self):
         model = get_peft_model(make_llama_seqcls(num_labels=3), ShadowConfig(task_type="SEQ_CLS"))
@@ -612,49 +439,29 @@ class TestShadowSequenceClassification:
         assert isinstance(out, SequenceClassifierOutput)
         assert out.logits.shape == (4, 3)
 
-    def test_save_load_roundtrip(self, tmp_path):
-        base = make_llama_seqcls(num_labels=3)
-        base_sd = copy.deepcopy(base.state_dict())
-        model = get_peft_model(base, ShadowConfig(task_type="SEQ_CLS"))
-        ids = torch.randint(1, 128, (2, 6))
-        am = torch.ones_like(ids)
-        labels = torch.tensor([0, 2])
-        opt = torch.optim.SGD([p for p in model.parameters() if p.requires_grad], lr=0.3)
-        for _ in range(2):
-            opt.zero_grad()
-            out = model(input_ids=ids, attention_mask=am, labels=labels)
-            out.loss.backward()
-            opt.step()
-        model.eval()
-        with torch.no_grad():
-            ref = model(input_ids=ids, attention_mask=am).logits
-        model.save_pretrained(tmp_path)
-
-        base2 = make_llama_seqcls(num_labels=3)
-        base2.load_state_dict(base_sd)
-        loaded = PeftModel.from_pretrained(base2, tmp_path)
-        loaded.eval()
-        with torch.no_grad():
-            got = loaded(input_ids=ids, attention_mask=am).logits
-        assert torch.allclose(ref, got, atol=1e-6)
-
 
 class TestShadowBackboneVariants:
     def test_smaller_shadow_hidden_size_inserts_projection(self):
+        base = make_llama_causal()
+        shadow_hidden = base.config.hidden_size // 2
         model = get_peft_model(
-            make_llama_causal(hidden_size=32, num_layers=4),
-            ShadowConfig(task_type="CAUSAL_LM", shadow_num_hidden_layers=2, shadow_hidden_size=16),
+            base,
+            ShadowConfig(
+                task_type="CAUSAL_LM",
+                shadow_num_hidden_layers=2,
+                shadow_hidden_size=shadow_hidden,
+            ),
         )
         projection = model.base_model.shadow_projection["default"]
         assert isinstance(projection, torch.nn.Linear)
-        assert (projection.in_features, projection.out_features) == (16, 32)
+        assert (projection.in_features, projection.out_features) == (shadow_hidden, base.config.hidden_size)
         ids = torch.randint(0, 128, (2, 6))
         out = model(input_ids=ids, labels=ids.clone())
         out.loss.backward()
 
     def test_matching_shadow_hidden_size_uses_identity(self):
         model = get_peft_model(
-            make_llama_causal(hidden_size=32, num_layers=4),
+            make_llama_causal(),
             ShadowConfig(task_type="CAUSAL_LM", shadow_num_hidden_layers=2),
         )
         assert isinstance(model.base_model.shadow_projection["default"], torch.nn.Identity)
@@ -663,20 +470,21 @@ class TestShadowBackboneVariants:
         # A "projected" shadow checkpoint (model_type == causal_lm_with_hidden_projection, e.g.
         # shadow-llm/Qwen3-0.6B-H8B) bundles a small backbone + a trained shadow_hidden -> base_hidden projection.
         # ShadowPEFT must load the pretrained backbone and reuse the trained projection.
-        import json
-
         from safetensors.torch import save_file
-        from transformers import LlamaConfig, LlamaModel
+        from transformers import LlamaModel
 
-        shadow_hidden, base_hidden, vocab = 16, 32, 128
+        base = make_llama_causal()
+        base_hidden = base.config.hidden_size
+        shadow_hidden = base_hidden // 2
+        vocab = base.config.vocab_size
         inner_cfg = LlamaConfig(
             vocab_size=vocab,
             hidden_size=shadow_hidden,
             intermediate_size=2 * shadow_hidden,
             num_hidden_layers=2,
-            num_attention_heads=4,
-            num_key_value_heads=2,
-            max_position_embeddings=64,
+            num_attention_heads=base.config.num_attention_heads,
+            num_key_value_heads=getattr(base.config, "num_key_value_heads", base.config.num_attention_heads),
+            max_position_embeddings=base.config.max_position_embeddings,
         )
         shadow_backbone = LlamaModel(inner_cfg)
         projection = torch.nn.Linear(shadow_hidden, base_hidden, bias=False)
@@ -693,7 +501,6 @@ class TestShadowBackboneVariants:
         }
         (tmp_path / "config.json").write_text(json.dumps(raw_config))
 
-        base = make_llama_causal(hidden_size=base_hidden, num_layers=3)
         model = get_peft_model(base, ShadowConfig(task_type="CAUSAL_LM", shadow_model=str(tmp_path)))
 
         proj = model.base_model.shadow_projection["default"]
@@ -712,7 +519,7 @@ class TestShadowBackboneVariants:
         assert not embed.weight.requires_grad
         trainable = {n for n, p in model.named_parameters() if p.requires_grad}
         assert not any("shadow_backbone" in n and "embed_tokens" in n for n in trainable)
-        ids = torch.randint(0, vocab, (2, 6))
+        ids = torch.randint(0, 128, (2, 6))
         model(input_ids=ids, labels=ids.clone()).loss.backward()
         assert embed.weight.grad is None
 
@@ -720,30 +527,50 @@ class TestShadowBackboneVariants:
         # unload_shadow returns the standalone shadow network (backbone + projection + head) as a causal LM. This is how
         # the shadow path's own performance is evaluated, independent of the base model.
         model = get_peft_model(
-            make_llama_causal(hidden_size=32, num_layers=4),
+            make_llama_causal(),
             ShadowConfig(task_type="CAUSAL_LM", shadow_num_hidden_layers=2),
         )
         detached = model.base_model.unload_shadow()
         assert isinstance(detached, DetachedShadowModel)
         assert detached.can_generate()
+        # Default is copy=False: share modules with the PEFT model (like merge_and_unload, no extra memory).
+        assert detached.backbone is model.base_model.shadow_backbone["default"]
         ids = torch.randint(0, 128, (2, 5))
         with torch.no_grad():
             out = detached(input_ids=ids)
         # head(projection(backbone(x))) -> vocab logits (CausalLMOutputWithPast)
-        assert out.logits.shape == (2, 5, 128)
+        assert out.logits.shape == (2, 5, model.config.vocab_size)
         # It behaves like a normal causal LM, so it can generate with KV caching.
         gen = detached.generate(input_ids=ids[:, :3], max_new_tokens=3, do_sample=False)
         assert gen.shape[1] == 6
 
+    def test_unload_shadow_copy_returns_independent_modules(self):
+        model = get_peft_model(
+            make_llama_causal(),
+            ShadowConfig(task_type="CAUSAL_LM", shadow_num_hidden_layers=2),
+        )
+        detached = model.base_model.unload_shadow(copy=True)
+        assert detached.backbone is not model.base_model.shadow_backbone["default"]
+        assert detached.shadow_hidden_projection is not model.base_model.shadow_projection["default"]
+        ids = torch.randint(0, 128, (2, 5))
+        with torch.no_grad():
+            out = detached(input_ids=ids)
+        assert out.logits.shape == (2, 5, model.config.vocab_size)
+
     def test_unload_shadow_applies_projection(self):
         # With a smaller shadow hidden size the standalone model must apply the trained projection so the head receives
         # the correct (base) hidden width.
+        base = make_llama_causal()
         model = get_peft_model(
-            make_llama_causal(hidden_size=32, num_layers=4),
-            ShadowConfig(task_type="CAUSAL_LM", shadow_num_hidden_layers=2, shadow_hidden_size=16),
+            base,
+            ShadowConfig(
+                task_type="CAUSAL_LM",
+                shadow_num_hidden_layers=2,
+                shadow_hidden_size=base.config.hidden_size // 2,
+            ),
         )
         detached = model.base_model.unload_shadow()
         ids = torch.randint(0, 128, (2, 5))
         with torch.no_grad():
             out = detached(input_ids=ids)
-        assert out.logits.shape == (2, 5, 128)
+        assert out.logits.shape == (2, 5, model.config.vocab_size)

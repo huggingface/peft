@@ -64,7 +64,8 @@ PEFT_ENCODER_DECODER_MODELS_TO_TEST = [
     "peft-internal-testing/tiny-random-BartForConditionalGeneration",
 ]
 
-# TODO Missing from this list are LoKr, LoHa, LN Tuning, add them
+# TODO Missing from this list are LoKr, LoHa, LN Tuning, add them.
+# ShadowPEFT is intentionally omitted: it only supports decoder-only models.
 ALL_CONFIGS = [
     (
         AdaLoraConfig,
