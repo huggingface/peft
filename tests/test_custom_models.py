@@ -376,6 +376,7 @@ TEST_CASES = [
     ("Conv1d LOHA", "Conv1d", LoHaConfig, {"target_modules": ["conv1d"]}),
     ("Conv1d LOHA 1", "Conv1d", LoHaConfig, {"target_modules": ["conv1d"]}),
     ("Conv1d LOHA 2", "Conv1d", LoHaConfig, {"target_modules": ["conv1d"], "r": 2}),
+    ("Conv1d Groups LOHA", "Conv1dGroups", LoHaConfig, {"target_modules": ["conv1d"], "r": 4}),
     (
         "Conv1d LOHA 3",
         "Conv1dBigger",
@@ -389,6 +390,8 @@ TEST_CASES = [
         {"target_modules": ["conv1d"], "r": 2, "use_effective_conv2d": False},
     ),
     ("Conv2d 1x1 LOHA", "Conv2d1x1", LoHaConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d Groups LOHA", "Conv2dGroups", LoHaConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d Groups2 LOHA", "Conv2dGroups2", LoHaConfig, {"target_modules": ["conv2d"]}),
     # LoKr
     ("Vanilla MLP 1 LOKR", "MLP", LoKrConfig, {"target_modules": "lin0"}),
     ("Vanilla MLP 2 LOKR", "MLP", LoKrConfig, {"target_modules": ["lin0"]}),
@@ -409,6 +412,7 @@ TEST_CASES = [
     ("Vanilla MLP 8 LOKR", "MLP", LoKrConfig, {"target_modules": "lin0", "decompose_both": True, "r": 1, "alpha": 1}),
     ("Conv1d LOKR 1", "Conv1d", LoKrConfig, {"target_modules": ["conv1d"]}),
     ("Conv1d LOKR 2", "Conv1d", LoKrConfig, {"target_modules": ["conv1d"], "r": 2}),
+    ("Conv1d Groups LOKR", "Conv1dGroups", LoKrConfig, {"target_modules": ["conv1d"], "r": 4}),
     (
         "Conv1d LOKR 3",
         "Conv1dBigger",
@@ -449,6 +453,8 @@ TEST_CASES = [
             "decompose_factor": 4,
         },
     ),
+    ("Conv2d Groups LOKR", "Conv2dGroups", LoKrConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d Groups2 LOKR", "Conv2dGroups2", LoKrConfig, {"target_modules": ["conv2d"]}),
     ########
     # OFT #
     ########
@@ -616,7 +622,12 @@ TEST_CASES = [
     ("Vanilla MLP 5 MiSS", "MLP", MissConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "r": 2}),
     ("Vanilla MLP 1 MiSS", "MLP", MissConfig, {"target_modules": "lin0", "r": 2, "init_weights": "bat"}),
     ("Vanilla MLP 2 MiSS", "MLP", MissConfig, {"target_modules": ["lin0"], "r": 2, "init_weights": "bat"}),
-    ("Vanilla MLP 3 MiSS", "MLP", MissConfig, {"target_modules": ["lin0", "lin1"], "r": 2, "init_weights": "bat"}),
+    (
+        "Vanilla MLP 3 MiSS with bat",
+        "MLP",
+        MissConfig,
+        {"target_modules": ["lin0", "lin1"], "r": 2, "init_weights": "bat"},
+    ),
     (
         "Vanilla MLP 5 MiSS",
         "MLP",
@@ -1117,7 +1128,8 @@ TEST_CASES = [
         LoraConfig,
         {
             "target_modules": ["lin0", "lin1"],
-            "use_bdlora": BdLoraConfig(target_modules_bd_a=["lin0"], nblocks=2, match_strict=False),
+            # No `nblocks` here on purpose: exercise the default so the config default is covered.
+            "use_bdlora": BdLoraConfig(target_modules_bd_a=["lin0"], match_strict=False),
         },
     ),
     (
@@ -1295,7 +1307,7 @@ TEST_CASES = [
         "Vanilla MLP 1 AdaLoRA",
         "MLP",
         AdaLoraConfig,
-        {"target_modules": ["lin0"], "init_lora_weights": False, "total_step": 1},
+        {"target_modules": ["lin0"], "init_lora_weights": False, "total_step": 1, "orth_reg_weight": 0},
     ),
     (
         "Vanilla MLP 2 AdaLoRA",
@@ -2035,6 +2047,26 @@ class ModelConv1DBigger(nn.Module):
         return X
 
 
+class ModelConv1DGroups(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1d = nn.Conv1d(8, 8, 3, groups=2)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(64, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
+
+    def forward(self, X):
+        X = X.to(self.dtype).reshape(-1, 1, 10)
+        X = torch.concat([X] * 8, dim=1)
+        X = self.conv1d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin0(X)
+        return self.sm(X)
+
+
 class ModelConv2D(nn.Module):
     def __init__(self, bias=True):
         super().__init__()
@@ -2271,6 +2303,9 @@ class MockTransformerWrapper:
         if model_id == "Conv1dBigger":
             return ModelConv1DBigger().to(dtype)
 
+        if model_id == "Conv1dGroups":
+            return ModelConv1DGroups().to(dtype)
+
         if model_id == "Conv2d":
             return ModelConv2D().to(dtype)
 
@@ -2393,6 +2428,32 @@ class TestPeftCustomModel(PeftCommonTester):
         # calling merge twice with the same arguments should not change the output
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_safe_merge(model_id, config_cls, config_kwargs)
+
+    def test_glora_safe_merge_does_not_corrupt_base_layer_on_non_finite_adapter(self):
+        # Regression test: GLoRA's merge() used to accumulate the merged weights directly onto
+        # base_layer.weight.data/bias.data *before* the safe_merge isfinite check, so a broken
+        # (non-finite) adapter would permanently corrupt the base layer even though safe_merge
+        # raises -- defeating the whole point of safe_merge ("check for NaNs before merging").
+        torch.manual_seed(0)
+        model = MLP()
+        orig_weight = model.lin0.weight.data.clone()
+        orig_bias = model.lin0.bias.data.clone()
+
+        config = GloraConfig(target_modules=["lin0"])
+        model = get_peft_model(model, config)
+
+        # Deliberately break the adapter (e.g. a corrupted checkpoint or an fp16 overflow) so that
+        # the merged weights would contain non-finite values.
+        glora_b = model.base_model.model.lin0.glora_B["default"]
+        next(glora_b.parameters()).data.fill_(float("inf"))
+
+        with pytest.raises(ValueError, match="NaNs detected in the merged weights"):
+            model.base_model.model.lin0.merge(safe_merge=True)
+
+        # The base layer must be untouched after the failed safe_merge.
+        assert torch.equal(model.base_model.model.lin0.base_layer.weight.data, orig_weight)
+        assert torch.equal(model.base_model.model.lin0.base_layer.bias.data, orig_bias)
+        assert model.base_model.model.lin0.merged_adapters == []
 
     @pytest.mark.parametrize("safe_merge", [False, True])
     @pytest.mark.parametrize("module_type", ["linear", "conv2d"])
@@ -3058,6 +3119,14 @@ class TestPeftCustomModel(PeftCommonTester):
         if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
             atol, rtol = 1e-3, 1e-3
 
+        if issubclass(config_cls, (LoHaConfig, LoKrConfig)) and model_id in (
+            "Conv1dGroups",
+            "Conv2dGroups",
+            "Conv2dGroups2",
+        ):
+            # Grouped LoHa/LoKr merges need a wider tolerance than a LoRA `B @ A` merge.
+            atol, rtol = 1e-3, 1e-3
+
         if issubclass(config_cls, OFTConfig):
             atol, rtol = 1e-4, 1e-4
 
@@ -3499,6 +3568,46 @@ class TestPeftCustomModel(PeftCommonTester):
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_delete_adapter_properly_cleans_up_after_itself(self, test_name, model_id, config_cls, config_kwargs):
+        # Generic guard against dangling per-adapter state: after `delete_adapter`, no adapter-specific attributes
+        # should remain on the model or its tuner layers. This test discovers every dict-like per-adapter container
+        # automatically, so a newly added PEFT method that forgets to register one is still caught here.
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(**config_kwargs)
+        model = get_peft_model(model, config, adapter_name="foobar")
+
+        def get_dict_like_attrs(obj):
+            for attr_name in dir(obj):
+                if attr_name.startswith("_"):
+                    continue
+                try:
+                    attr = getattr(obj, attr_name)
+                except AttributeError:
+                    continue
+                is_dict_like = (
+                    callable(getattr(attr, "keys", None))
+                    and hasattr(attr, "__getitem__")
+                    and hasattr(attr, "__contains__")
+                )
+                if not is_dict_like:
+                    continue
+                if "foobar" in attr:
+                    yield attr_name, attr
+
+        # collect dict-like attributes holding the adapter before deletion
+        dict_attrs = list(get_dict_like_attrs(model))
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayer):
+                dict_attrs.extend(list(get_dict_like_attrs(module)))
+
+        # sanity check: there should be at least one such attribute
+        assert dict_attrs, f"No dict-like attributes found on {config.peft_type}, please check the test"
+
+        model.delete_adapter(adapter_name="foobar")
+        dangling_attrs = [attr_name for attr_name, attr in dict_attrs if "foobar" in attr]
+        assert not dangling_attrs, f"Found dangling attributes after adapter deletion: {sorted(dangling_attrs)}"
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_inactive_adapter(self, test_name, model_id, config_cls, config_kwargs):
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
         self._test_delete_inactive_adapter(model_id, config_cls, config_kwargs)
@@ -3622,6 +3731,10 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_get_base_model_state_dict(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_get_base_model_state_dict(model_id, config_cls, config_kwargs.copy())
 
     @staticmethod
     def _check_requires_grad(module, adapter_name, requires_grad):
@@ -4686,6 +4799,66 @@ class TestMultipleActiveAdapters:
             outputs_merged_adapter_default = model_merged_adapter_default(**dummy_input)
 
         assert torch.allclose(outputs_merged_adapter_default, outputs_adapter_1, atol=1e-3, rtol=1e-3)
+
+    @pytest.mark.parametrize(
+        "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
+    )
+    def test_sequential_merge_matches_batch_merge(
+        self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
+    ):
+        _skip_if_merging_not_supported(test_name, config_cls, config_kwargs_1)
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
+        if tuner_method == "deft":
+            config_kwargs_1 = {**config_kwargs_1, "decomposition_method": "relu"}
+            config_kwargs_2 = {**config_kwargs_2, "decomposition_method": "relu"}
+
+        torch.manual_seed(0)
+        model = self.resolve_model_cls(tuner_method).to(self.torch_device).eval()
+        config_1 = config_cls(**config_kwargs_1)
+        config_2 = config_cls(**config_kwargs_2)
+        model = get_peft_model(model, config_1, adapter_name="adapter_1").eval()
+        model.add_adapter("adapter_2", config_2)
+        sequential_model = copy.deepcopy(model)
+        X = self.prepare_inputs_for_testing()
+
+        model.merge_adapter(["adapter_1", "adapter_2"])
+        batch_output = model(**X)
+
+        sequential_model.merge_adapter(["adapter_1"])
+        sequential_model.merge_adapter(["adapter_2"])
+        sequential_output = sequential_model(**X)
+
+        assert torch.allclose(sequential_output, batch_output, atol=1e-3, rtol=1e-3)
+
+    @pytest.mark.parametrize(
+        "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
+    )
+    def test_unmerge_after_sequential_merge_restores_base(
+        self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
+    ):
+        _skip_if_merging_not_supported(test_name, config_cls, config_kwargs_1)
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
+        if tuner_method == "deft":
+            config_kwargs_1 = {**config_kwargs_1, "decomposition_method": "relu"}
+            config_kwargs_2 = {**config_kwargs_2, "decomposition_method": "relu"}
+
+        torch.manual_seed(0)
+        model = self.resolve_model_cls(tuner_method).to(self.torch_device).eval()
+        X = self.prepare_inputs_for_testing()
+        base_output = model(**X)
+        config_1 = config_cls(**config_kwargs_1)
+        config_2 = config_cls(**config_kwargs_2)
+        model = get_peft_model(model, config_1, adapter_name="adapter_1").eval()
+        model.add_adapter("adapter_2", config_2)
+
+        model.merge_adapter(["adapter_1"])
+        model.merge_adapter(["adapter_2"])
+        model.unmerge_adapter()
+
+        with model.disable_adapter():
+            unmerged_output = model(**X)
+
+        assert torch.allclose(unmerged_output, base_output, atol=1e-3, rtol=1e-3)
 
 
 class MLP_2x_same_shape(nn.Module):

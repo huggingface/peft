@@ -149,7 +149,7 @@ class TestScalingAdapters:
 
         model = get_peft_model(model, lora_config)
 
-        # we expect a type error here becuase of wrong datatpye of multiplier
+        # we expect a type error here because of wrong datatype of multiplier
         multiplier = "a"
         with pytest.raises(TypeError, match=f"Argument multiplier should be of type float, got {type(multiplier)}"):
             with rescale_adapter_scale(model=model, multiplier=multiplier):
@@ -289,7 +289,7 @@ class TestScalingAdapters:
         model = get_peft_model(model, lora_config)
         inputs = tokenizer("hello world", return_tensors="pt")
 
-        # add another adaper and activate it
+        # add another adapter and activate it
         model.add_adapter("other", lora_config)
         model.set_adapter("other")
 
@@ -491,7 +491,7 @@ class TestDoraCaching:
 
     @pytest.fixture(autouse=True)
     def disable_dora_caching(self):
-        # auto-fixture to ensure that no test accidentically permanently enables DoRA caching
+        # auto-fixture to ensure that no test accidentally permanently enables DoRA caching
         DoraCaching()(enabled=False)
 
     def get_caches(self, model):

@@ -65,7 +65,9 @@ class WaveFTModel(BaseTuner):
         n_frequency_dict = {}
         for name, input_dim, output_dim in target_modules_info:
             layer_ratio = (input_dim * output_dim) / total_sum
-            n_freq = round(layer_ratio * total_budget)
+            # A plain round() can floor a small layer's proportional share of the budget down to 0.
+            # Guarantee every target layer gets at least 1 frequency component.
+            n_freq = max(1, round(layer_ratio * total_budget))
             n_frequency_dict[name] = n_freq
 
         return n_frequency_dict

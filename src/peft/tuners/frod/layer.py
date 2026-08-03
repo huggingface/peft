@@ -28,7 +28,15 @@ from .config import FrodConfig
 
 class FrodLayer(BaseTunerLayer):
     adapter_layer_names = ("frod_lambda_l", "frod_lambda_s_values")
-    other_param_names = ("frod_V", "frod_U", "frod_s_indices", "frod_s_size", "runtime_offload_base_weight")
+    other_param_names = (
+        "r",
+        "frod_V",
+        "frod_U",
+        "frod_s_indices",
+        "frod_s_size",
+        "runtime_offload_base_weight",
+        "frod_dropout",
+    )
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer
@@ -49,7 +57,7 @@ class FrodLayer(BaseTunerLayer):
 
         self._disable_adapters = False
         self.merged_adapters = []
-        self._frod_merged_delta = {}
+        self._base_weight_before_merge: Optional[torch.Tensor] = None
 
         self.in_features, self.out_features = _get_in_out_features(self.get_base_layer())
         self.kwargs = kwargs
@@ -142,6 +150,12 @@ class FrodLayer(BaseTunerLayer):
             with torch.no_grad():
                 nn.init.zeros_(self.frod_lambda_s_values[adapter_name])
 
+    def _get_base_weight_before_merge(self) -> torch.Tensor:
+        base_weight = self.get_base_layer().weight
+        if self._base_weight_before_merge is None:
+            self._base_weight_before_merge = base_weight.data.detach().clone().cpu()
+        return self._base_weight_before_merge.to(device=base_weight.device, dtype=base_weight.dtype)
+
 
 class Linear(nn.Linear, FrodLayer):
     def __init__(
@@ -176,7 +190,6 @@ class Linear(nn.Linear, FrodLayer):
 
         base_layer = self.get_base_layer()
         adapter_deltas = []
-        # FRoD deltas are computed against the current base weight, so compute all deltas before mutating it.
         for active_adapter in adapter_names:
             if active_adapter in self.frod_lambda_l.keys():
                 adapter_deltas.append((active_adapter, self.get_delta_weight(active_adapter)))
@@ -193,7 +206,6 @@ class Linear(nn.Linear, FrodLayer):
                 base_layer.weight.data = orig_weights
             else:
                 base_layer.weight.data += delta_weight
-            self._frod_merged_delta[active_adapter] = delta_weight
             self.merged_adapters.append(active_adapter)
 
     def unload_and_optionally_merge_module(
@@ -211,22 +223,18 @@ class Linear(nn.Linear, FrodLayer):
             warnings.warn("Already unmerged. Nothing to do.")
             return
 
-        while len(self.merged_adapters) > 0:
-            active_adapter = self.merged_adapters.pop()
-            if active_adapter in self.frod_lambda_l.keys():
-                delta_weight = self._frod_merged_delta.pop(active_adapter, None)
-                if delta_weight is None:
-                    delta_weight = self.get_delta_weight(active_adapter)
-                base_weight = self.get_base_layer().weight
-                delta_weight = delta_weight.to(device=base_weight.device, dtype=base_weight.dtype)
-                base_weight.data -= delta_weight
+        base_weight = self.get_base_layer().weight
+        base_weight.data.copy_(self._base_weight_before_merge.to(device=base_weight.device, dtype=base_weight.dtype))
+        self._base_weight_before_merge = None
+        self.merged_adapters.clear()
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         self._move_base_weight_to_device_of_adapter(adapter)
         weight = self.get_base_layer().weight
         device = weight.device
         dtype = weight.dtype
-        base_weight = transpose(weight, self.fan_in_fan_out)
+        reference_weight = self._get_base_weight_before_merge()
+        base_weight = transpose(reference_weight, self.fan_in_fan_out)
         U, V, S_sparse, lambda_l = self._get_frod_tensors(adapter, device=device, dtype=dtype)
         S = S_sparse.to_dense()
         L = torch.diag_embed(lambda_l)
