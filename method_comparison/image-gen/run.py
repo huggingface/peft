@@ -283,6 +283,7 @@ def train(
     accelerator_memory_init: int,
     is_adalora: bool,
     print_verbose: Callable[..., None],
+    device_type: str,
 ) -> tuple[TrainResult, dict[str, torch.Tensor]]:
     accelerator_memory_allocated_log = []
     accelerator_memory_reserved_log = []
@@ -291,7 +292,6 @@ def train(
     metrics = []
     total_samples = 0
 
-    device_type = infer_device()
     train_dataset, valid_dataset, test_dataset = get_train_valid_test_datasets(
         train_config=train_config, print_fn=print_verbose
     )
@@ -642,6 +642,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool, bucket_name
     accelerator_memory_init = init_accelerator()
     set_seed(train_config.seed)
 
+    device_type = infer_device()
     model_info = get_base_model_info(train_config.model_id)
     dataset_info = get_dataset_info(train_config.dataset_id)
     pipeline = get_pipeline(
@@ -651,6 +652,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool, bucket_name
         peft_config=peft_config,
         autocast_adapter_dtype=train_config.autocast_adapter_dtype,
         use_gc=train_config.use_gc,
+        device_type=device_type,
     )
     print_verbose(pipeline.transformer)
 
@@ -660,6 +662,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool, bucket_name
         accelerator_memory_init=accelerator_memory_init,
         is_adalora=peft_config is not None and peft_config.peft_type == "ADALORA",
         print_verbose=print_verbose,
+        device_type=device_type,
     )
 
     if train_result.status == TrainStatus.FAILED:
