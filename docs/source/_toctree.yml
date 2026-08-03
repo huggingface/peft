@@ -102,6 +102,8 @@
           title: "Variant: BD-LoRA"
         - local: package_reference/lora_variant_dora
           title: "Variant: DoRA"
+        - local: package_reference/lora_variant_kasa
+          title: "Variant: KaSA"
         - local: package_reference/lora_variant_monteclora
           title: "Variant: MonteCLoRA"
         - local: package_reference/lora_variant_velora
