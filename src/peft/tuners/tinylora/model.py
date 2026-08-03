@@ -68,6 +68,11 @@ class TinyLoraModel(BaseTuner):
     target_module_mapping = TRANSFORMERS_MODELS_TO_TINYLORA_TARGET_MODULES_MAPPING
 
     def __init__(self, model, config, adapter_name, low_cpu_mem_usage=False, **kwargs):
+        # Model-level cache from adapter name to a mapping of target-module key -> deterministic layer index (see
+        # `_build_target_key_mapping`), used to derive `weight_tying` groups. Must be assigned before calling
+        # `super().__init__`, since that call triggers the first injection cycle (`_create_and_replace`), which
+        # reads this attribute.
+        self._target_key_to_idx: dict[str, dict[str, int]] = {}
         super().__init__(model, config, adapter_name, low_cpu_mem_usage, **kwargs)
 
     def _init_tinylora_v(self, config: TinyLoraConfig, adapter_name: str) -> None:
@@ -130,14 +135,17 @@ class TinyLoraModel(BaseTuner):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
-        # Build the target key mapping lazily on first call per injection cycle.
-        # This is needed because add_adapter calls inject_adapter directly without _pre_injection_hook.
-        if not hasattr(self, "_target_key_to_idx") or current_key not in self._target_key_to_idx:
-            self._target_key_to_idx = self._build_target_key_mapping(tinylora_config)
+        # Build the target key mapping lazily on first call per adapter's injection cycle. This is needed because
+        # add_adapter calls inject_adapter directly without _pre_injection_hook. The mapping must not be shared
+        # across adapters: each adapter can target a different (and possibly overlapping) subset of modules, so
+        # reusing a mapping built for a different adapter would silently corrupt the layer index and group count
+        # used for `weight_tying` whenever `current_key` happens to also appear in that stale mapping.
+        if adapter_name not in self._target_key_to_idx or current_key not in self._target_key_to_idx[adapter_name]:
+            self._target_key_to_idx[adapter_name] = self._build_target_key_mapping(tinylora_config)
 
         # Look up the deterministic index for this module
-        layer_idx = self._target_key_to_idx[current_key]
-        num_target_layers = len(self._target_key_to_idx)
+        layer_idx = self._target_key_to_idx[adapter_name][current_key]
+        num_target_layers = len(self._target_key_to_idx[adapter_name])
 
         # Determine the group for this layer based on weight_tying
         # weight_tying=0.0 → num_groups = num_target_layers (no sharing)
@@ -280,6 +288,12 @@ class TinyLoraModel(BaseTuner):
         # Remove the adapter's shared v parameters from the model-level ModuleDict
         if adapter_name in self.tinylora_v:
             del self.tinylora_v[adapter_name]
+
+        # Remove the adapter's cached target-key mapping so that re-adding an adapter with the same name (but
+        # potentially different target_modules) rebuilds the mapping instead of reusing a stale one.
+        # `_target_key_to_idx` is always assigned in `__init__` before injection, so no `hasattr` guard is needed.
+        if adapter_name in self._target_key_to_idx:
+            del self._target_key_to_idx[adapter_name]
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         """

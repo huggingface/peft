@@ -27,6 +27,7 @@ from peft import (
     IA3Config,
     LNTuningConfig,
     LoraConfig,
+    MissConfig,
     PromptLearningConfig,
     TinyLoraConfig,
     VBLoRAConfig,
@@ -301,6 +302,9 @@ def set_init_weights_false(config_cls, kwargs):
     if issubclass(config_cls, PromptLearningConfig):
         return kwargs
     if config_cls in (LNTuningConfig, VBLoRAConfig):
+        return kwargs
+    if (config_cls == MissConfig) and (kwargs.get("init_weights") == "bat"):
+        # don't override 'bat' init or else it's not being properly tested
         return kwargs
 
     if config_cls in (LoraConfig, AdaLoraConfig):

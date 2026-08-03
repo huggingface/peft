@@ -45,7 +45,7 @@ from transformers import (
 
 import peft
 from peft import PeftConfig, get_peft_model
-from peft.optimizers import create_lorafa_optimizer, create_loraplus_optimizer
+from peft.optimizers import create_lorafa_optimizer, create_loraplus_optimizer, create_riemannian_optimizer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 
 
@@ -133,7 +133,9 @@ class TrainConfig:
             raise ValueError(f"Invalid eval_steps: {self.eval_steps} > max_steps: {self.max_steps}")
         if self.grad_norm_clip < 0:
             raise ValueError(f"Invalid grad_norm_clip: {self.grad_norm_clip}")
-        if self.optimizer_type not in ["lora+", "lora-fa"] and not hasattr(torch.optim, self.optimizer_type):
+        if self.optimizer_type not in ["lora+", "lora-fa", "riemannian"] and not hasattr(
+            torch.optim, self.optimizer_type
+        ):
             raise ValueError(f"Invalid optimizer_type: {self.optimizer_type}")
         if self.lr_scheduler not in [None, "cosine"]:
             raise ValueError(f"Invalid lr_scheduler: {self.lr_scheduler}, must be None or 'cosine'")
@@ -281,6 +283,8 @@ def get_optimizer_and_scheduler(
         optimizer = create_loraplus_optimizer(model, optimizer_cls=torch.optim.AdamW, **optimizer_kwargs)
     elif optimizer_type == "lora-fa":
         optimizer = create_lorafa_optimizer(model, **optimizer_kwargs)
+    elif optimizer_type == "riemannian":
+        optimizer = create_riemannian_optimizer(model, optimizer_cls=torch.optim.AdamW, **optimizer_kwargs)
     else:
         cls = getattr(torch.optim, optimizer_type)
         optimizer = cls(model.parameters(), **optimizer_kwargs)
@@ -519,7 +523,9 @@ def get_dataset_info(dataset_id: str) -> Optional[huggingface_hub.DatasetInfo]:
 
 
 def get_git_hash(module) -> Optional[str]:
-    if "site-packages" in module.__path__[0]:
+    module_path = module.__path__[0]
+    if "site-packages" in module_path or "dist-packages" in module_path:
+        # dist-packages is required for Kaggle installs.
         return None
 
     return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=os.path.dirname(module.__file__)).decode().strip()
