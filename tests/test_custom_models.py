@@ -3747,6 +3747,11 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_get_base_model_state_dict(self, test_name, model_id, config_cls, config_kwargs):
+        if config_kwargs.get("kasa_config", None) is not None:
+            pytest.skip(
+                "KaSA destructively truncates the base weight at adapter init, so the extracted base state dict "
+                "intentionally differs from the original base model"
+            )
         self._test_get_base_model_state_dict(model_id, config_cls, config_kwargs.copy())
 
     @staticmethod
