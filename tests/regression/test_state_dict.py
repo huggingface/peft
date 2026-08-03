@@ -169,6 +169,10 @@ ADAPTER_WEIGHTS_NAME = "adapter_model.safetensors"
 MODEL_OPT = "peft-internal-testing/tiny-random-OPTForCausalLM"
 MODEL_LLAMA = "trl-internal-testing/tiny-random-LlamaForCausalLM"
 MODEL_T5 = "peft-internal-testing/tiny-random-T5ForConditionalGeneration-calibrated"
+# decoder model with a more exotic architecture than opt
+MODEL_GEMMA4 = "peft-internal-testing/tiny-random-gemma4-E2B"
+# model for targeting MoE parameters
+MODEL_GPTOSS = "trl-internal-testing/tiny-GptOssForCausalLM"
 
 MODEL_CLASSES = {
     "AutoModelForCausalLM": AutoModelForCausalLM,
@@ -265,7 +269,25 @@ CASES = [
     ),
     Case("loha", LoHaConfig, {"target_modules": ["q_proj", "v_proj"]}),
     Case("lokr", LoKrConfig, {"target_modules": ["q_proj", "v_proj"]}),
-    Case("lora", LoraConfig, {"task_type": "CAUSAL_LM", "r": 8, "lora_alpha": 32}),
+    Case("lora", LoraConfig, {"task_type": "CAUSAL_LM", "r": 8, "lora_alpha": 16}),
+    Case("lora_rslora", LoraConfig, {"task_type": "CAUSAL_LM", "r": 8, "use_rslora": True}),
+    Case(
+        "lora_rank_alpha_pattern",
+        LoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "r": 8,
+            "rank_pattern": {"layers.1.self_attn.k_proj": 16, "layers.2.self_attn.k_proj": 32},
+            "alpha_pattern": {"layers.2.self_attn.k_proj": 4, "layers.3.self_attn.k_proj": 16},
+        },
+    ),
+    Case("lora_gemma4", LoraConfig, {"task_type": "CAUSAL_LM"}, model_id=MODEL_GEMMA4),
+    Case(
+        "lora_gptoss",
+        LoraConfig,
+        {"task_type": "CAUSAL_LM", "target_parameters": ["mlp.experts.down_proj", "mlp.experts.gate_up_proj"]},
+        model_id=MODEL_GPTOSS,
+    ),
     Case("lora_alora", LoraConfig, {"task_type": "CAUSAL_LM", "r": 8, "alora_invocation_tokens": [1]}),
     Case("lora_bias_all", LoraConfig, {"task_type": "CAUSAL_LM", "r": 8, "bias": "all"}),
     Case("lora_dora", LoraConfig, {"task_type": "CAUSAL_LM", "r": 8, "use_dora": True}),
@@ -325,6 +347,12 @@ CASES = [
         inputs={**INPUTS_SEQ2SEQ, "task_ids": [0, 1]},
     ),
     Case("prefix_tuning", PrefixTuningConfig, {"task_type": "CAUSAL_LM", "num_virtual_tokens": 10}),
+    Case(
+        "prefix_tuning",
+        PrefixTuningConfig,
+        {"task_type": "CAUSAL_LM", "num_virtual_tokens": 10},
+        model_id=MODEL_GEMMA4,
+    ),
     Case(
         "prompt_encoder",
         PromptEncoderConfig,
