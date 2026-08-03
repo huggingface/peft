@@ -35,9 +35,10 @@
 #
 # `HF_TOKEN=<token> REGRESSION_CREATION_MODE=True pytest tests/regression/test_state_dict.py --regression`
 #
-# This will fail if the git worktree is dirty, to ensure that possibly buggy states are not "blessed" as the
-# reference; override with REGRESSION_FORCE_MODE=True if you know what you're doing. The commit that created the
-# artifacts is recorded in their manifest.json.
+# This will fail if the git worktree is dirty, to ensure that possibly buggy states are not "blessed" as the reference;
+# override with REGRESSION_FORCE_MODE=True if you know what you're doing. The commit that created the artifacts is
+# recorded in their manifest.json. Tip: A fake HF_TOKEN can be used to test the creation mode without actually uploading
+# anything.
 #
 # The token requires write access to the repo below. With `-k`, only the selected cases are created and uploaded,
 # leaving the other artifacts on the Hub untouched. This is also the way to go when a change to PEFT intentionally
@@ -209,8 +210,6 @@ class Case:
     model_id: str = MODEL_OPT
     model_cls: str = "AutoModelForCausalLM"
     inputs: dict = field(default_factory=lambda: dict(INPUTS_DECODER))
-    atol: float = 1e-6
-    rtol: float = 1e-6
     # special creation flows that go beyond get_peft_model + save_pretrained
     variant: None | Literal["multi_adapter", "pissa_conversion"] = None
     notes: str = ""
@@ -307,8 +306,6 @@ CASES = [
         "lora_pissa_conversion",
         LoraConfig,
         {"task_type": "CAUSAL_LM", "r": 8, "init_lora_weights": "pissa", "target_modules": ["q_proj", "v_proj"]},
-        atol=1e-5,
-        rtol=1e-4,
         variant="pissa_conversion",
         notes="saved via path_initial_model_for_weight_conversion, loadable as a plain LoRA on the unmutated base",
     ),
@@ -382,8 +379,6 @@ CASES = [
         "vblora_topk",
         VBLoRAConfig,
         {"task_type": "CAUSAL_LM", "vector_length": 1, "num_vectors": 2, "save_only_topk_weights": True},
-        atol=1e-5,
-        rtol=1e-4,
         notes="topk saving is intentionally lossy, the logits are reconstructed from topk weights when loading",
     ),
     Case(
@@ -481,10 +476,13 @@ def fill_trainable_params(model):
         state_dict_keys = set(model.state_dict().keys())
         for name, buffer in model.named_buffers():
             if not buffer.dtype.is_floating_point:
+                # don't randomize tensors containing indices etc., as they cannot be safely randomized
                 continue
             if name not in state_dict_keys:  # non-persistent
                 continue
             if not any((name == prefix) or name.startswith(prefix + ".") for prefix in buffer_prefixes):
+                # only include buffers listed in `other_param_names` as we assume those contain all relevant buffers; we
+                # test elsewhere that `other_param_names` is complete
                 continue
             _deterministic_fill(buffer, name)
 
@@ -549,8 +547,6 @@ def create_artifact(case, case_dir, tmp_path):
         "base_model_id": case.model_id,
         "model_cls": case.model_cls,
         "inputs": case.inputs,
-        "atol": case.atol,
-        "rtol": case.rtol,
         "state_dict_keys": sorted(state_dict.keys()),
         "notes": case.notes,
     }
@@ -583,8 +579,8 @@ class TestCreateArtifacts:
             model = load_model_from_artifact(case_dir, manifest)
             expected = safe_load_file(case_dir / MODEL_OUTPUT_FILENAME)["logits"]
             logits = get_output(model, case.inputs)
-            # defensively use small tolerances for non-deterministic outputs
-            torch.testing.assert_close(logits, expected, atol=case.atol, rtol=case.rtol)
+            # defensively use small tolerances in case non-deterministic functions are used by the model
+            torch.testing.assert_close(logits, expected)
         except Exception:
             # don't leave partial artifacts behind, they would be uploaded at the end of the session
             shutil.rmtree(case_dir, ignore_errors=True)
@@ -606,7 +602,7 @@ class TestStateDictRegression:
         model = load_model_from_artifact(case_dir, manifest)
         logits = get_output(model, manifest["inputs"])
         expected = safe_load_file(case_dir / MODEL_OUTPUT_FILENAME)["logits"]
-        torch.testing.assert_close(logits, expected, atol=manifest["atol"], rtol=manifest["rtol"])
+        torch.testing.assert_close(logits, expected)
 
     @pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
     def test_load_with_different_adapter_name(self, case):
@@ -616,7 +612,7 @@ class TestStateDictRegression:
         model = load_model_from_artifact(case_dir, manifest, adapter_name="other")
         logits = get_output(model, manifest["inputs"])
         expected = safe_load_file(case_dir / MODEL_OUTPUT_FILENAME)["logits"]
-        torch.testing.assert_close(logits, expected, atol=manifest["atol"], rtol=manifest["rtol"])
+        torch.testing.assert_close(logits, expected)
 
     @pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
     def test_save_load_roundtrip(self, case, tmp_path):
@@ -634,7 +630,5 @@ class TestStateDictRegression:
             torch.testing.assert_close(
                 new_state_dict[key],
                 old_state_dict[key],
-                atol=manifest["atol"],
-                rtol=manifest["rtol"],
                 msg=lambda m, key=key: f"Mismatch in key {key}:\n{m}",
             )
