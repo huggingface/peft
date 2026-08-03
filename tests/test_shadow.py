@@ -407,6 +407,7 @@ class TestShadowSequenceClassification:
         # versions emit a deprecation warning for. The test suite's conftest escalates transformers deprecations to
         # errors; this one originates in PEFT core (it reproduces identically with LoRA) and is unrelated to the Shadow
         # method, so we raise the transformers logger level for these tests to avoid a spurious failure.
+        # TODO: remove this fixture once the core issue is fixed (tracked separately, issue link to be added).
         import logging
 
         logger = logging.getLogger("transformers")
@@ -574,3 +575,4 @@ class TestShadowBackboneVariants:
         with torch.no_grad():
             out = detached(input_ids=ids)
         assert out.logits.shape == (2, 5, model.config.vocab_size)
+
