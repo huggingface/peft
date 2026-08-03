@@ -36,9 +36,11 @@ from peft import (
     C3AConfig,
     CartridgeConfig,
     CPTConfig,
+    DeftConfig,
     DeloraConfig,
     FourierFTConfig,
     FrodConfig,
+    GloraConfig,
     GraloraConfig,
     HiraConfig,
     HRAConfig,
@@ -58,6 +60,7 @@ from peft import (
     ShiraConfig,
     TaskType,
     TinyLoraConfig,
+    UniLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -131,6 +134,13 @@ ALL_CONFIGS = [
         },
     ),
     (
+        DeftConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+        },
+    ),
+    (
         DeloraConfig,
         {
             "task_type": "CAUSAL_LM",
@@ -176,6 +186,22 @@ ALL_CONFIGS = [
             "gralora_dropout": 0.05,
             "gralora_k": 4,
             "hybrid_r": 4,
+        },
+    ),
+    (
+        GloraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "init_weights": True,
+        },
+    ),
+    (
+        GloraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "init_weights": False,
         },
     ),
     (
@@ -328,6 +354,14 @@ ALL_CONFIGS = [
         },
     ),
     (
+        UniLoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "theta_d_length": 257,
+        },
+    ),
+    (
         TinyLoraConfig,
         {
             "task_type": "CAUSAL_LM",
@@ -379,6 +413,7 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
     if "GPT2LMHeadModel" in model_id and config_cls in [
         BeftConfig,
         BOFTConfig,
+        GloraConfig,
         HRAConfig,
         OFTConfig,
         OSFConfig,
@@ -389,7 +424,7 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         DeloraConfig,
         PsoftConfig,
     ]:
-        pytest.skip("Skipping Beft/BOFT/HRA/OFT/Road/SHiRA/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel")
+        pytest.skip("Skipping Beft/BOFT/GLoRA/HRA/OFT/Road/SHiRA/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel")
 
 
 def _skip_alora_no_activation(config_cls, config_kwargs):
@@ -1108,6 +1143,12 @@ class TestDecoderModels(PeftCommonTester):
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_lora_conversion(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_get_base_model_state_dict(self, model_id, config_cls, config_kwargs):
+        _skip_if_not_conv1d_supported(model_id, config_cls)
+        self._test_get_base_model_state_dict(model_id, config_cls, config_kwargs.copy())
 
     def test_merge_and_unload_fixes_tie_word_embeddings_config(self):
         # See https://github.com/huggingface/transformers/issues/45127

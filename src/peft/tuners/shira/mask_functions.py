@@ -55,18 +55,20 @@ from typing import Optional
 import torch
 from torch import nn
 
+from peft.tuners.tuners_utils import _get_in_out_features
+
 
 def random_mask(base_layer: nn.Module, r: int, random_seed: Optional[int] = None, **kwargs) -> torch.tensor:
-    shape = base_layer.weight.shape
+    shape = _get_in_out_features(base_layer)[::-1]
+    num_base_weights = shape[0] * shape[1]
     num_shira_weights = r * (shape[0] + shape[1])
     random_generator = torch.Generator()
     if random_seed is not None:
         random_generator.manual_seed(random_seed)
-    idx = (torch.randperm(base_layer.weight.numel(), generator=random_generator)[:num_shira_weights]).to(
-        base_layer.weight.device
-    )
-    val = torch.ones_like(idx.type(base_layer.weight.dtype))
-    mask = torch.zeros_like(base_layer.weight.view(1, -1))
+    device = base_layer.weight.device
+    idx = (torch.randperm(num_base_weights, generator=random_generator)[:num_shira_weights]).to(device)
+    val = torch.ones(*idx.shape, dtype=bool).to(device)
+    mask = torch.zeros(*shape).to(val).view(1, -1).to(device)
     mask = mask.scatter_(1, idx.unsqueeze(0), val.unsqueeze(0)).view(shape)
 
     return mask

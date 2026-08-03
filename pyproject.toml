@@ -21,6 +21,7 @@ extend-select = [
     "W", # PEP8 warnings
     "PT009", # Pytest assertions
     "RUF022", # Sorting of __all__
+    "RUF068", # Duplicates in __all__
 ]
 ignore = [
     "C901", # Function too complex

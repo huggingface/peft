@@ -343,6 +343,12 @@ class MissLinear(nn.Module, MissLayer):
             non_bat_adapters = [a for a in active_adapters if self.miss_fn[a] != "bat"]
 
             if bat_adapters:
+                if (self.quantization_backend is not None) and (not self.quantization_backend.supports_merge):
+                    raise ValueError(
+                        "Using MiSS with `init_weights='bat'` is not supported because quantization backend "
+                        f"{self.quantization_backend.backend_name} does not support dequantization. Use a different "
+                        "quantization backend or a different MiSS initialization method."
+                    )
                 orig_weight = self.get_base_weight().clone()
                 for active_adapter in bat_adapters:
                     delta_weight = self.get_delta_weight(active_adapter, orig_weight)
