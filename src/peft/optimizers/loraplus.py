@@ -18,8 +18,6 @@ This module contains the implementation of the LoraPlus optimizer.
 
 from __future__ import annotations
 
-from operator import attrgetter
-
 from torch import nn
 from torch.optim import Optimizer
 from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
@@ -60,6 +58,11 @@ def create_loraplus_optimizer(
 
     decay_parameters = get_parameter_names(model, ALL_LAYERNORM_LAYERS)
     decay_parameters = [name for name in decay_parameters if "bias" not in name]
+    # The LoRA weights of an embedding layer are stored in `ParameterDict`s below the tuner layer, so the parameter
+    # name cannot be resolved to the tuner layer directly and has to be matched against the module prefix instead.
+    embedding_prefixes = tuple(
+        f"{module_name}." for module_name, module in model.named_modules() if isinstance(module, Embedding)
+    )
     param_groups = {
         "groupA": {},
         "groupB": {},
@@ -71,8 +74,7 @@ def create_loraplus_optimizer(
         if not param.requires_grad:
             continue
 
-        module = attrgetter(name)(model)
-        if isinstance(module, Embedding):
+        if name.startswith(embedding_prefixes):
             param_groups["embedding"][name] = param
         elif "lora_B" in name or param.ndim == 1:
             if name in decay_parameters:

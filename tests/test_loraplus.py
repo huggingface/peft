@@ -13,9 +13,12 @@
 # limitations under the License.
 from __future__ import annotations
 
+import collections
+
 import torch
 from torch import nn
 
+from peft import LoraConfig, get_peft_model
 from peft.import_utils import is_bnb_available
 from peft.optimizers import create_loraplus_optimizer
 
@@ -97,3 +100,30 @@ def test_lora_plus_optimizer_sucess():
     loss_value = loss(output, label)
     loss_value.backward()
     optim.step()
+
+
+def test_lora_plus_embedding_lr():
+    # LoRA weights of embedding layers must land in the embedding param group and thus use
+    # loraplus_lr_embedding, see #1915
+    model = get_peft_model(SimpleNet(), LoraConfig(target_modules=["embedding", "lin0"]))
+    lr = 5e-5
+    loraplus_lr_ratio = 1.2
+    loraplus_lr_embedding = 1e-6
+    optim = create_loraplus_optimizer(
+        model=model,
+        optimizer_cls=torch.optim.AdamW,
+        lr=lr,
+        loraplus_lr_ratio=loraplus_lr_ratio,
+        loraplus_lr_embedding=loraplus_lr_embedding,
+    )
+
+    param_to_name = {id(param): name for name, param in model.named_parameters()}
+    group_names = collections.defaultdict(set)
+    for group in optim.param_groups:
+        group_names[group["lr"]].update(param_to_name[id(param)] for param in group["params"])
+    assert group_names[loraplus_lr_embedding] == {
+        "base_model.model.embedding.lora_embedding_A.default",
+        "base_model.model.embedding.lora_embedding_B.default",
+    }
+    assert group_names[lr] == {"base_model.model.lin0.lora_A.default.weight"}
+    assert group_names[lr * loraplus_lr_ratio] == {"base_model.model.lin0.lora_B.default.weight"}
