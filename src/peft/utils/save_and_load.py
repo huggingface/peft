@@ -954,7 +954,29 @@ def set_peft_model_state_dict(
         model, peft_model_state_dict, ignore_mismatched_sizes=ignore_mismatched_sizes
     )
     if low_cpu_mem_usage:
+        # assign=True swaps the checkpoint tensor object into the module, so anything it
+        # loads takes the checkpoint's dtype and device instead of the model's. That is
+        # what makes the fast path fast for freshly injected adapter weights, which live
+        # on meta until they are replaced. It is wrong for every other key the checkpoint
+        # can carry: modules_to_save weights, and the base weights that
+        # save_embedding_layers writes in when the adapter targets an embedding. Those
+        # already exist as real tensors on the model, so record what they were and put it
+        # back for exactly the entries that changed.
+        expected_dtype_device = {}
+        for name, tensor in list(model.named_parameters()) + list(model.named_buffers()):
+            if name in peft_model_state_dict and tensor.device.type != "meta":
+                expected_dtype_device[name] = (tensor.dtype, tensor.device)
+
         load_result = model.load_state_dict(peft_model_state_dict, strict=False, assign=True)
+
+        for name, tensor in list(model.named_parameters()) + list(model.named_buffers()):
+            expected = expected_dtype_device.get(name)
+            if expected is None:
+                continue
+            dtype, device = expected
+            if tensor.dtype != dtype or tensor.device != device:
+                tensor.data = tensor.data.to(device=device, dtype=dtype)
+
         # ensure that the correct device is set
         for module in model.modules():
             if hasattr(module, "_move_adapter_to_device_of_base_layer"):
