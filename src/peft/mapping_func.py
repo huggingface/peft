@@ -40,74 +40,66 @@ if TYPE_CHECKING:
 
     class _TunerPeftModel(PeftModel, BaseTuner):  # type: ignore[misc]
         ...
-else:
-    _LoraPeftModel = PeftModel
-    _TunerPeftModel = PeftModel
 
+    # The overloads only affect static type checking, the returned types are chosen based on what attributes are
+    # reachable through __getattr__ forwarding: LoRA has extra methods like add_weighted_adapter, other tuners provide
+    # the BaseTuner API (e.g. merge_and_unload), and prompt learning wraps the base model directly, i.e. there is no
+    # tuner model whose attributes could be forwarded. Overloads need to be defined before the actual function.
+    @overload
+    def get_peft_model(
+        model: nn.Module,
+        peft_config: PeftConfig,
+        adapter_name: str = ...,
+        *,
+        mixed: Literal[True],
+        autocast_adapter_dtype: bool = ...,
+        revision: Optional[str] = ...,
+        low_cpu_mem_usage: bool = ...,
+    ) -> PeftMixedModel: ...
 
-# The overloads only affect static type checking, the returned types are chosen based on what attributes are reachable
-# through __getattr__ forwarding: LoRA has extra methods like add_weighted_adapter, other tuners provide the BaseTuner
-# API (e.g. merge_and_unload), and prompt learning wraps the base model directly, i.e. there is no tuner model whose
-# attributes could be forwarded. Overloads need to be defined before the actual function.
-@overload
-def get_peft_model(
-    model: nn.Module,
-    peft_config: PeftConfig,
-    adapter_name: str = ...,
-    *,
-    mixed: Literal[True],
-    autocast_adapter_dtype: bool = ...,
-    revision: Optional[str] = ...,
-    low_cpu_mem_usage: bool = ...,
-) -> PeftMixedModel: ...
+    @overload
+    def get_peft_model(
+        model: nn.Module,
+        peft_config: LoraConfig,
+        adapter_name: str = ...,
+        mixed: Literal[False] = ...,
+        autocast_adapter_dtype: bool = ...,
+        revision: Optional[str] = ...,
+        low_cpu_mem_usage: bool = ...,
+    ) -> _LoraPeftModel: ...
 
+    @overload
+    def get_peft_model(
+        model: nn.Module,
+        peft_config: PromptLearningConfig,
+        adapter_name: str = ...,
+        mixed: Literal[False] = ...,
+        autocast_adapter_dtype: bool = ...,
+        revision: Optional[str] = ...,
+        low_cpu_mem_usage: bool = ...,
+    ) -> PeftModel: ...
 
-@overload
-def get_peft_model(
-    model: nn.Module,
-    peft_config: LoraConfig,
-    adapter_name: str = ...,
-    mixed: Literal[False] = ...,
-    autocast_adapter_dtype: bool = ...,
-    revision: Optional[str] = ...,
-    low_cpu_mem_usage: bool = ...,
-) -> _LoraPeftModel: ...
+    @overload
+    def get_peft_model(
+        model: nn.Module,
+        peft_config: PeftConfig,
+        adapter_name: str = ...,
+        mixed: Literal[False] = ...,
+        autocast_adapter_dtype: bool = ...,
+        revision: Optional[str] = ...,
+        low_cpu_mem_usage: bool = ...,
+    ) -> _TunerPeftModel: ...
 
-
-@overload
-def get_peft_model(
-    model: nn.Module,
-    peft_config: PromptLearningConfig,
-    adapter_name: str = ...,
-    mixed: Literal[False] = ...,
-    autocast_adapter_dtype: bool = ...,
-    revision: Optional[str] = ...,
-    low_cpu_mem_usage: bool = ...,
-) -> PeftModel: ...
-
-
-@overload
-def get_peft_model(
-    model: nn.Module,
-    peft_config: PeftConfig,
-    adapter_name: str = ...,
-    mixed: Literal[False] = ...,
-    autocast_adapter_dtype: bool = ...,
-    revision: Optional[str] = ...,
-    low_cpu_mem_usage: bool = ...,
-) -> _TunerPeftModel: ...
-
-
-@overload
-def get_peft_model(
-    model: nn.Module,
-    peft_config: PeftConfig,
-    adapter_name: str = ...,
-    mixed: bool = ...,
-    autocast_adapter_dtype: bool = ...,
-    revision: Optional[str] = ...,
-    low_cpu_mem_usage: bool = ...,
-) -> PeftModel | PeftMixedModel: ...
+    @overload
+    def get_peft_model(
+        model: nn.Module,
+        peft_config: PeftConfig,
+        adapter_name: str = ...,
+        mixed: bool = ...,
+        autocast_adapter_dtype: bool = ...,
+        revision: Optional[str] = ...,
+        low_cpu_mem_usage: bool = ...,
+    ) -> PeftModel | PeftMixedModel: ...
 
 
 def get_peft_model(
