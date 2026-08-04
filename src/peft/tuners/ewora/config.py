@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,7 +28,8 @@ class EworaConfig(PeftConfig):
 
     Args:
         r (`int`):
-            Ewora expert ranks.
+            The rank of each individual expert adapter (defaults to 256). EWoRA partitions the adaptation into
+            `num_experts` independent rank-`r` experts, so the LoRA-equivalent total rank is `r * num_experts`.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
@@ -37,10 +38,15 @@ class EworaConfig(PeftConfig):
             excluding the output layer. If this is not specified, modules will be chosen according to the model
             architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
             the target modules manually.
-        ewora_alpha (`int`):
-            The alpha parameter for Ewora scaling.
+        num_experts (`int`):
+            The number of independent low-rank experts the adapter is partitioned into (defaults to 8). Their outputs
+            are aggregated per input by a learned routing matrix.
         ewora_dropout (`float`):
-            The dropout probability for Ewora layers.
+            The dropout probability for Ewora layers (defaults to 0.0).
+        init_weights (`bool`):
+            Whether to initialize the adapter as an identity transform, i.e. with the expert `B` matrices set to zero
+            (defaults to `True`). Setting this to `False` gives a non-identity initialization and is mainly useful for
+            testing.
         fan_in_fan_out (`bool`):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
             `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
@@ -48,10 +54,6 @@ class EworaConfig(PeftConfig):
             Bias type for EWoRA. Can be 'none', 'all' or 'ewora_only'. If 'all' or 'ewora_only', the corresponding
             biases will be updated during training. Be aware that this means that, even when disabling the adapters,
             the model will not produce the same output as the base model would have without adaptation.
-        use_rslora (`bool`):
-            When set to True, uses <a href='https://doi.org/10.48550/arXiv.2312.03732'>Rank-Stabilized EWoRA</a> which
-            sets the adapter scaling factor to `ewora_alpha/math.sqrt(r)`, since it was proven to work better.
-            Otherwise, it will use the original default value of `ewora_alpha/r`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
         layers_to_transform (`Union[List[int], int]`):
@@ -63,9 +65,6 @@ class EworaConfig(PeftConfig):
         rank_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default rank
             specified by `r`.
-        alpha_pattern (`dict`):
-            The mapping from layer names or regexp expression to alphas which are different from the default alpha
-            specified by `ewora_alpha`.
         megatron_config (`Optional[dict]`):
             The TransformerConfig arguments for Megatron. It is used to create EWoRA's parallel linear layer. You can
             get it like this, `core_transformer_config_from_args(get_args())`, these two functions being from Megatron.
@@ -87,7 +86,7 @@ class EworaConfig(PeftConfig):
             all have separate EWoRA adapters attached to them.
     """
 
-    r: int = field(default=256, metadata={"help": "LoRA rank"})
+    r: int = field(default=256, metadata={"help": "Rank of each expert adapter"})
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
@@ -102,27 +101,24 @@ class EworaConfig(PeftConfig):
     )
     num_experts: int = field(
         default=8,
-        metadata={"help": ("Num Experts.")},
+        metadata={"help": "Number of independent low-rank experts"},
     )
-    ewora_alpha: int = field(default=8, metadata={"help": "Ewora alpha"})
     ewora_dropout: float = field(default=0.0, metadata={"help": "Ewora dropout"})
+    init_weights: bool = field(
+        default=True,
+        metadata={
+            "help": (
+                "Whether to initialize the adapter as an identity transform (expert `B` matrices set to zero). "
+                "Set to False for a non-identity initialization, which is mainly useful for testing."
+            )
+        },
+    )
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
     bias: Literal["none", "all", "ewora_only"] = field(
         default="none", metadata={"help": "Bias type for Ewora. Can be 'none', 'all' or 'ewora_only'"}
-    )
-    use_rslora: bool = field(
-        default=False,
-        metadata={
-            "help": (
-                "When set to True, uses Rank-Stabilized EWoRA doi.org/10.48550/arXiv.2312.03732"
-                " which sets the adapter scaling factor to `ewora_alpha/math.sqrt(r)`, since it"
-                " was proven to work better. Otherwise, it will use the original default"
-                " value of `ewora_alpha/r`."
-            )
-        },
     )
     modules_to_save: Optional[list[str]] = field(
         default=None,
@@ -152,15 +148,6 @@ class EworaConfig(PeftConfig):
             "help": (
                 "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
                 "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
-            )
-        },
-    )
-    alpha_pattern: Optional[dict] = field(
-        default_factory=dict,
-        metadata={
-            "help": (
-                "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `ewora_alpha`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`}"
             )
         },
     )

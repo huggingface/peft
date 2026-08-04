@@ -37,6 +37,7 @@ from peft import (
     C3AConfig,
     DeftConfig,
     DeloraConfig,
+    EworaConfig,
     FourierFTConfig,
     FrodConfig,
     GloraConfig,
@@ -728,6 +729,13 @@ TEST_CASES = [
         ShiraConfig,
         {"r": 1, "target_modules": ["lin0"]},
     ),
+    #########
+    # EWoRA #
+    #########
+    ("Vanilla MLP 1 EWoRA", "MLP", EworaConfig, {"r": 2, "num_experts": 2, "target_modules": "lin0"}),
+    ("Vanilla MLP 2 EWoRA", "MLP", EworaConfig, {"r": 2, "num_experts": 2, "target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 EWoRA", "MLP", EworaConfig, {"r": 2, "num_experts": 2, "target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 EWoRA", "MLP", EworaConfig, {"r": 2, "num_experts": 4, "target_modules": ["lin0", "lin1"]}),
     ########
     # VeRA #
     ########
@@ -2834,7 +2842,7 @@ class TestPeftCustomModel(PeftCommonTester):
             lr = 0.1  # otherwise we get nan
         elif "mha" in model_id.lower():
             lr = 1e-3  # we get exploding gradients with MHA when learning rate is too high
-        elif issubclass(config_cls, (VBLoRAConfig, RandLoraConfig, UniLoraConfig, OSFConfig)):
+        elif issubclass(config_cls, (VBLoRAConfig, RandLoraConfig, UniLoraConfig, OSFConfig, EworaConfig)):
             lr = 0.01  # otherwise we get nan
         elif issubclass(config_cls, AdaLoraConfig):
             lr = 1e-4  # AdaLoRA + init_lora_weights=False can blow up with multi-target SGD
