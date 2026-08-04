@@ -1451,15 +1451,20 @@ class BaseTuner(nn.Module, ABC):
         """
         Select the entries belonging to this PEFT method from the model state_dict.
 
-        The entries are determined structurally by visiting the tuner layers of the model instead of matching the key
-        names against `cls.prefix`, so that a base model module whose name happens to contain the prefix is not
+        The entries are determined structurally by visiting the tuner layers of the model instead of only matching the
+        key names against `cls.prefix`, so that a base model module whose name happens to contain the prefix is not
         included. The passed state_dict is already filtered to exclude the other adapters and the returned state_dict
         still contains the adapter name in its keys, it is removed later via `_remove_adapter_name_from_key`.
 
-        Note that the returned keys must round-trip through `_remove_adapter_name_from_key`, as loading relies on that
-        correspondence to remap the checkpoint keys back to the model keys. If an override renames keys beyond what
-        `_remove_adapter_name_from_key` does (see the DoRA handling in LoRA, which additionally strips a ".weight"
-        suffix), the inverse rename must be applied in `_remap_adapter_state_dict_for_load` before calling super().
+        Note that the returned keys still contain the adapter name. They must round-trip through
+        `_remove_adapter_name_from_key`, as loading relies on that correspondence to remap the checkpoint keys back to
+        the model keys. If an override renames keys beyond what `_remove_adapter_name_from_key` does (see the DoRA
+        handling in LoRA, which additionally strips a ".weight" suffix), the inverse rename must be applied in
+        `_remap_adapter_state_dict_for_load` before calling super().
+
+        As an example, the returned keys could look like this:
+
+        `['base_model.model.lin0.<peft_method_param_name>.<adapter_name>', ...]`
         """
         prefixes = _get_tuner_state_dict_key_prefixes(model)
         return _filter_state_dict_by_key_prefixes(state_dict, prefixes)
@@ -1473,6 +1478,11 @@ class BaseTuner(nn.Module, ABC):
         directions: on saving it is applied to the selected keys, on loading it is applied to the model keys to build
         the inverse mapping (see `_remap_adapter_state_dict_for_load`). It should therefore be a pure function of the
         passed key and adapter name.
+
+        As an example, the returned keys could look like this:
+
+        - before: `'base_model.model.lin0.<peft_method_param_name>.<adapter_name>'`
+        -  after: `'base_model.model.lin0.<peft_method_param_name>'`
         """
         return _remove_adapter_name_from_state_dict_key(key, adapter_name)
 
@@ -1492,22 +1502,28 @@ class BaseTuner(nn.Module, ABC):
         corresponding checkpoint key for each of them via `_remove_adapter_name_from_key`, guaranteeing that saving and
         loading are symmetric. Checkpoint entries with no corresponding adapter parameter (e.g. saved biases or
         embedding weights) are passed through unchanged.
+
+        As an example, the returned keys could look like this:
+        - before: `['base_model.model.lin0.<peft_method_param_name>', ...]`
+        -  after: `['base_model.model.lin0.<peft_method_param_name>'.<adapter_name>, ...]`
         """
         prefixes = _get_tuner_state_dict_key_prefixes(model, adapter_name=adapter_name)
         checkpoint_key_to_model_key = {}
         peft_prefix = "base_model.model."
         for model_key in _filter_state_dict_by_key_prefixes(model.state_dict(), prefixes):
+            # create the reverse mapping
             checkpoint_key = cls._remove_adapter_name_from_key(model_key, adapter_name)
             checkpoint_key_to_model_key[checkpoint_key] = model_key
             if not model_key.startswith(peft_prefix):
-                # The checkpoint keys may contain the PEFT-specific prefix even if the model keys don't, e.g. when
-                # loading a checkpoint created from a PeftModel into a model that only has the PEFT layers injected.
-                # Since the prefix is only removed after this remapping, also map the prefixed checkpoint key.
+                # The model keys only contain the prefix if the model is wrapped in a PeftModel. When the PEFT layers
+                # were injected directly into the model via {get,set}_peft_model_state_dict (e.g. Transformers and
+                # Diffusers integration), there is no prefix in the model. Since the checkpoint still contains it, we
+                # need to add the key with the prefix present.
                 checkpoint_key_to_model_key[peft_prefix + checkpoint_key] = model_key
         return {checkpoint_key_to_model_key.get(k, k): v for k, v in state_dict.items()}
 
     @classmethod
-    def _save_mutated_as_lora(
+    def _convert_state_dict_for_initial_model(
         cls,
         peft_model,
         peft_config: PeftConfig,
@@ -1663,6 +1679,7 @@ def _get_tuner_state_dict_key_prefixes(model: nn.Module, adapter_name: Optional[
             # If FSDP is used, the state_dict is from the unwrapped model, which would result in a key mismatch if we
             # didn't remove the FSDP-specific prefix
             module_name = module_name.removeprefix("_fsdp_wrapped_module.")
+
         if isinstance(module, AuxiliaryTrainingWrapper):
             aux_module_names.add(module_name)
         elif isinstance(module, BaseTuner) or (
@@ -1678,14 +1695,31 @@ def _is_key_under_prefixes(key: str, prefixes: set[str]) -> bool:
     Matching respects "." boundaries, i.e. the prefix "a.b" matches the keys "a.b" and "a.b.c" but not "a.bc". The
     check runs in O(depth of the key) instead of O(number of prefixes), which matters because the number of keys and
     the number of prefixes can both scale with the model size.
+
+    Example:
+
+    ```py
+    >>> key = "lin0.road_theta.default"
+    >>> prefixes = {"lin0.road_alpha", "lin0.road_theta"}
+    >>> _is_key_under_prefixes(key, prefixes)
+    True
+
+    >>> key = "lin0.base_layer.weight"
+    >>> prefixes = {"lin0.road_alpha", "lin0.road_theta"}
+    >>> _is_key_under_prefixes(key, prefixes)
+    False
+    ```
     """
+    if not prefixes:
+        return False
+
     # check the key itself and each of its ancestors, e.g. for "a.b.c" check "a.b.c", then "a.b", then "a"
     subkey = key
     while True:
         if subkey in prefixes:
             return True
         subkey, dot, _ = subkey.rpartition(".")
-        if not dot:
+        if not dot:  # must be reached eventually
             return False
 
 

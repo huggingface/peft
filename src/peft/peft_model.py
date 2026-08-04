@@ -321,10 +321,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
                 if path_initial_model_for_weight_conversion is not None:
                     peft_config = copy.deepcopy(peft_config)
-                    peft_config.init_lora_weights = True
+                    if peft_config.peft_type == PeftType.LORA:
+                        peft_config.init_lora_weights = True
+                    else:
+                        peft_config.init_weights = True
                     peft_config.save_pretrained(path_initial_model_for_weight_conversion)
                     tuner_cls = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
-                    output_state_dict = tuner_cls._save_mutated_as_lora(
+                    output_state_dict = tuner_cls._convert_state_dict_for_initial_model(
                         self, peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
                     )
 
@@ -347,7 +350,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     peft_config.init_lora_weights = True
                     peft_config.save_pretrained(path_initial_model_for_weight_conversion)
                     tuner_cls = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
-                    output_state_dict = tuner_cls._save_mutated_as_lora(
+                    output_state_dict = tuner_cls._convert_state_dict_for_initial_model(
                         self, peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
                     )
                 torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))

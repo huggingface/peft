@@ -1040,7 +1040,7 @@ class LoraModel(BaseTuner):
         return peft_model_state_dict
 
     @classmethod
-    def _save_mutated_as_lora(
+    def _convert_state_dict_for_initial_model(
         cls, peft_model, peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
     ):
         if peft_config.use_rslora and (peft_config.rank_pattern or peft_config.alpha_pattern):
@@ -1058,6 +1058,7 @@ class LoraModel(BaseTuner):
                 "`path_initial_model_for_weight_conversion` only works for converting a PiSSA/CorDA/OLoRA/LoRA-GA adapter to "
                 "a LoRA adapter"
             )
+
         initial_adapter_name = os.path.basename(path_initial_model_for_weight_conversion)
         try:
             peft_model.load_adapter(
