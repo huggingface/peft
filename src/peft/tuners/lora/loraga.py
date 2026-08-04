@@ -25,6 +25,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.lora.config import LoraConfig
 from peft.tuners.lora.model import LoraModel
+from peft.utils.save_and_load import torch_load
 
 
 def get_target_modules(model: nn.Module, config: LoraConfig):
@@ -98,7 +99,7 @@ def preprocess_loraga(
 
     # If cache exists, load from cache
     if cache_file is not None and os.path.exists(cache_file) and os.path.getsize(cache_file) > 0:
-        cache = torch.load(cache_file, map_location=get_model_device(model))
+        cache = torch_load(cache_file, map_location=get_model_device(model))
         for name, module in get_target_modules(model, lora_config):
             module._peft_loraga_grad = cache[f"{name}._peft_loraga_grad"]
     else:
