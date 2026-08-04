@@ -15,7 +15,7 @@
 from setuptools import find_packages, setup
 
 
-VERSION = "0.19.2.dev0"
+VERSION = "0.20.1.dev0"
 
 extras = {}
 extras["quality"] = [
@@ -23,6 +23,7 @@ extras["quality"] = [
     "hf-doc-builder",
     # when upgrading this, also upgrade required version in pyproject.toml and pre-commit-config.yaml
     "ruff~=0.15.12",
+    "griffe",  # for ./scripts/check_doc_coverage.py
 ]
 extras["docs_specific"] = [
     "black",  # doc-builder has an implicit dependency on Black, see huggingface/doc-builder#434

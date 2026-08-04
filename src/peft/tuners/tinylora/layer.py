@@ -152,6 +152,10 @@ class TinyLoraLayer(BaseTunerLayer):
         inference_mode = config.inference_mode
         fan_in_fan_out = config.fan_in_fan_out
 
+        # The projection tensors P are only part of the checkpoint if save_projection is set, otherwise they are
+        # regenerated from the projection seed when loading.
+        self.tinylora_P.persistent = config.save_projection
+
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         if u <= 0:

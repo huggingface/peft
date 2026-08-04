@@ -66,6 +66,7 @@ if is_bnb_available():
                 # no adapter to merge
                 return
 
+            # Each adapter is requantized separately, so batch and sequential merges can produce different results.
             for active_adapter in adapter_names:
                 if active_adapter not in self.hira_A.keys():
                     continue
@@ -290,6 +291,7 @@ if is_bnb_4bit_available():
                 # no adapter to merge
                 return
 
+            # Each adapter is requantized separately, so batch and sequential merges can produce different results.
             for active_adapter in adapter_names:
                 if active_adapter not in self.hira_A.keys():
                     continue

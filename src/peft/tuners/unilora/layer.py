@@ -23,9 +23,19 @@ from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 from peft.utils.other import transpose
 
+from .config import UniLoraConfig
+
 
 class UniLoraLayer(BaseTunerLayer):
-    other_param_names = ("unilora_theta_d", "unilora_scales_A", "unilora_scales_B")
+    other_param_names = (
+        "r",
+        "unilora_theta_d",
+        "unilora_indices_A",
+        "unilora_indices_B",
+        "unilora_scales_A",
+        "unilora_scales_B",
+        "unilora_dropout",
+    )
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer
@@ -59,23 +69,30 @@ class UniLoraLayer(BaseTunerLayer):
         self,
         adapter_name: str,
         unilora_theta_d,
-        r: int,
-        theta_d_length: int,
-        unilora_dropout: float = 0.0,
+        config: UniLoraConfig,
     ):
+        r = config.r
         if r <= 0:
             raise ValueError(f"`r` {r} should be a positive integer value")
 
         self.r[adapter_name] = r
 
-        if unilora_dropout > 0.0:
-            unilora_dropout_layer = nn.Dropout(p=unilora_dropout)
+        # The indices and scales are only part of the checkpoint if save_indices is set, otherwise they are regenerated
+        # when loading. Align the persistence of the buffers accordingly, so that the state_dict only contains entries
+        # that are actually meant to be saved and restored.
+        self.unilora_indices_A.persistent = config.save_indices
+        self.unilora_indices_B.persistent = config.save_indices
+        self.unilora_scales_A.persistent = config.save_indices
+        self.unilora_scales_B.persistent = config.save_indices
+
+        if config.unilora_dropout > 0.0:
+            unilora_dropout_layer = nn.Dropout(p=config.unilora_dropout)
         else:
             unilora_dropout_layer = nn.Identity()
         self.unilora_dropout.update(nn.ModuleDict({adapter_name: unilora_dropout_layer}))
 
         self.unilora_theta_d = unilora_theta_d
-        self.reset_unilora_parameters(adapter_name, theta_d_length)
+        self.reset_unilora_parameters(adapter_name, config.theta_d_length)
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
@@ -135,9 +152,7 @@ class Linear(nn.Linear, UniLoraLayer):
         base_layer,
         unilora_theta_d,
         adapter_name: str,
-        r: int,
-        theta_d_length: int,
-        unilora_dropout: float = 0.0,
+        config: UniLoraConfig,
         fan_in_fan_out: bool = False,
         is_target_conv_1d_layer: bool = False,
         **kwargs,
@@ -146,13 +161,7 @@ class Linear(nn.Linear, UniLoraLayer):
         UniLoraLayer.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name
-        self.update_layer(
-            adapter_name,
-            unilora_theta_d,
-            r,
-            theta_d_length,
-            unilora_dropout,
-        )
+        self.update_layer(adapter_name, unilora_theta_d, config)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:

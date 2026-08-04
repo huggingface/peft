@@ -72,13 +72,26 @@ from .utils import (
 def _get_layer_kv_target_shape(base_config, layer_idx: int) -> tuple[int, int] | None:
     """Per-layer (num_kv_heads, head_dim) for prefix-tuning injection, or None for uniform models.
 
-    Models with heterogeneous attention (e.g. Gemma4) expose `global_head_dim` / `num_global_key_value_heads` alongside
-    the sliding-layer `head_dim` / `num_key_value_heads`. The provisioned prefix is sized for the global footprint;
-    this returns the shape each layer actually expects so the caller can slice down or skip layers that don't fit.
+    Models with heterogeneous attention (e.g. Gemma4) expose per-layer config via
+    `config.per_layer_config[layer_idx].head_dim` / `.num_key_value_heads`. Older versions used `global_head_dim` /
+    `num_global_key_value_heads` alongside the sliding-layer `head_dim` / `num_key_value_heads`. The provisioned prefix
+    is sized for the global footprint; this returns the shape each layer actually expects so the caller can slice down
+    or skip layers that don't fit.
     """
     layer_types = getattr(base_config, "layer_types", None)
+    if not layer_types:
+        return None
+
+    # New transformers (>= 5.15) use per_layer_config instead of global_head_dim / num_global_key_value_heads.
+    # per_layer_config can be indexed by layer_idx (what we do here) or by layer_type.
+    per_layer_config = getattr(base_config, "per_layer_config", None)
+    if per_layer_config is not None:
+        layer_cfg = per_layer_config[layer_idx]
+        return layer_cfg.num_key_value_heads, layer_cfg.head_dim
+
+    # Fallback for older transformers that still use global_head_dim / num_global_key_value_heads
     global_head_dim = getattr(base_config, "global_head_dim", None)
-    if not layer_types or global_head_dim is None:
+    if global_head_dim is None:
         return None
 
     is_sliding = layer_types[layer_idx] == "sliding_attention"
@@ -617,23 +630,18 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # 1. Remove VB-LoRA vector bank, since it's a shared parameter set via the VBLoRAModel
         # 2. Remove the prompt encoder, as it does not need to be part of the checkpoint
         # 3. Remove TinyLoRA layer-level tinylora_v references (they share with model-level tinylora_v)
-        def is_expected_missing_key(k):
+        def is_shared_parameter(k):
             # TinyLoRA: layer-level tinylora_v is a reference to model-level, exclude from warning
             if "vblora_vector_bank" in k or "prompt_encoder" in k or ".tinylora_v." in k:
-                return False
-            if (
+                return True
+
+            return (
                 config.peft_type == PeftType.UNILORA
                 and ".unilora_theta_d." in k
                 and not k.startswith("base_model.unilora_theta_d.")
-            ):
-                return False
-            return not (
-                config.peft_type == PeftType.UNILORA
-                and not getattr(config, "save_indices", False)
-                and (".unilora_indices_" in k or ".unilora_scales_" in k)
             )
 
-        missing_keys = [k for k in load_result.missing_keys if is_expected_missing_key(k)]
+        missing_keys = [k for k in load_result.missing_keys if not is_shared_parameter(k)]
         if missing_keys:
             # Let's warn here since (in contrast to load_adapter) we don't return the load result, so it could be quite
             # difficult for users to even notice that something might have gone wrong here. As we filter out non PEFT
@@ -1498,12 +1506,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     and not key.startswith("base_model.unilora_theta_d.")
                 ):
                     continue
-                if (
-                    tuner == PeftType.UNILORA
-                    and not getattr(self.peft_config[adapter_name], "save_indices", False)
-                    and (".unilora_indices_" in key or ".unilora_scales_" in key)
-                ):
-                    continue
                 adapter_missing_keys.append(key)
 
         load_result.missing_keys.clear()
@@ -2210,7 +2212,7 @@ class PeftModelForCausalLM(PeftModel):
                     outputs = self.base_model.generate(*args, **kwargs)
             else:
                 outputs = self.base_model.generate(*args, **kwargs)
-        except:
+        except Exception:
             self.base_model.prepare_inputs_for_generation = self.base_model_prepare_inputs_for_generation
             raise
         else:
@@ -2571,7 +2573,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
                     return self.base_model.generate(**kwargs)
                 else:
                     raise NotImplementedError
-        except:
+        except Exception:
             self.base_model.prepare_inputs_for_generation = self.base_model_prepare_inputs_for_generation
             self.base_model._prepare_encoder_decoder_kwargs_for_generation = (
                 self.base_model_prepare_encoder_decoder_kwargs_for_generation

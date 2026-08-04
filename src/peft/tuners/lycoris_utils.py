@@ -63,7 +63,7 @@ class LycorisLayer(BaseTunerLayer):
     """
 
     # adapter_layer_names needs to be defined on the child class
-    other_param_names = ("r", "alpha", "scaling", "rank_dropout", "module_dropout")
+    other_param_names = ("r", "alpha", "scaling", "rank_dropout", "rank_dropout_scale", "module_dropout")
 
     def __init__(self, base_layer: nn.Module) -> None:
         self.base_layer = base_layer

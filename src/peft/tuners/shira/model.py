@@ -21,9 +21,21 @@ import torch
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING,
+    get_quantization_kwargs,
+    resolve_quantization_backend,
 )
 
 from .layer import Linear, ShiraLayer
+
+
+def _get_tuner_layer_class(target_base_layer: torch.nn.Module) -> type[ShiraLayer] | None:
+    layer_cls: type[ShiraLayer] | None = None
+    if isinstance(target_base_layer, torch.nn.Linear):
+        layer_cls = Linear
+    elif (quant_backend := resolve_quantization_backend(target_base_layer)) is not None:
+        layer_cls = {"linear": Linear}.get(quant_backend.layer_type)
+
+    return layer_cls
 
 
 class ShiraModel(BaseTuner):
@@ -72,7 +84,7 @@ class ShiraModel(BaseTuner):
             raise ValueError("Current Key shouldn't be `None`")
 
         bias = hasattr(target, "bias") and target.bias is not None
-        kwargs = {}
+        kwargs = get_quantization_kwargs(self)
         kwargs["bias"] = bias
         if shira_config.mask_type == "random":
             kwargs["random_seed"] = shira_config.random_seed
@@ -91,6 +103,7 @@ class ShiraModel(BaseTuner):
                 mask,
                 shira_config.r,
                 config=shira_config,
+                **kwargs,
             )
         else:
             new_module = self._create_new_module(shira_config, adapter_name, target, **kwargs)
@@ -108,14 +121,16 @@ class ShiraModel(BaseTuner):
         else:
             target_base_layer = target
 
-        if isinstance(target_base_layer, torch.nn.Linear):
+        layer_cls = _get_tuner_layer_class(target_base_layer)
+
+        if layer_cls is Linear:
             if shira_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
                 shira_config.fan_in_fan_out = False
-        else:
+        elif layer_cls is None:
             raise TypeError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`."
@@ -127,7 +142,7 @@ class ShiraModel(BaseTuner):
             else None
         )
 
-        new_module = Linear(
+        new_module = layer_cls(
             target,
             mask,
             adapter_name,
