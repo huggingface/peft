@@ -633,15 +633,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         def is_shared_parameter(k):
             # TinyLoRA: layer-level tinylora_v is a reference to model-level, exclude from warning
             if "vblora_vector_bank" in k or "prompt_encoder" in k or ".tinylora_v." in k:
-                return False
+                return True
 
-            return not (
+            return (
                 config.peft_type == PeftType.UNILORA
                 and ".unilora_theta_d." in k
                 and not k.startswith("base_model.unilora_theta_d.")
             )
 
-        missing_keys = [k for k in load_result.missing_keys if is_shared_parameter(k)]
+        missing_keys = [k for k in load_result.missing_keys if not is_shared_parameter(k)]
         if missing_keys:
             # Let's warn here since (in contrast to load_adapter) we don't return the load result, so it could be quite
             # difficult for users to even notice that something might have gone wrong here. As we filter out non PEFT
