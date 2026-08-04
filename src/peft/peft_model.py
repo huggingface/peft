@@ -592,23 +592,18 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # 1. Remove VB-LoRA vector bank, since it's a shared parameter set via the VBLoRAModel
         # 2. Remove the prompt encoder, as it does not need to be part of the checkpoint
         # 3. Remove TinyLoRA layer-level tinylora_v references (they share with model-level tinylora_v)
-        def is_expected_missing_key(k):
+        def is_shared_parameter(k):
             # TinyLoRA: layer-level tinylora_v is a reference to model-level, exclude from warning
             if "vblora_vector_bank" in k or "prompt_encoder" in k or ".tinylora_v." in k:
-                return False
-            if (
+                return True
+
+            return (
                 config.peft_type == PeftType.UNILORA
                 and ".unilora_theta_d." in k
                 and not k.startswith("base_model.unilora_theta_d.")
-            ):
-                return False
-            return not (
-                config.peft_type == PeftType.UNILORA
-                and not getattr(config, "save_indices", False)
-                and (".unilora_indices_" in k or ".unilora_scales_" in k)
             )
 
-        missing_keys = [k for k in load_result.missing_keys if is_expected_missing_key(k)]
+        missing_keys = [k for k in load_result.missing_keys if not is_shared_parameter(k)]
         if missing_keys:
             # Let's warn here since (in contrast to load_adapter) we don't return the load result, so it could be quite
             # difficult for users to even notice that something might have gone wrong here. As we filter out non PEFT
@@ -1471,12 +1466,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     tuner == PeftType.UNILORA
                     and ".unilora_theta_d." in key
                     and not key.startswith("base_model.unilora_theta_d.")
-                ):
-                    continue
-                if (
-                    tuner == PeftType.UNILORA
-                    and not getattr(self.peft_config[adapter_name], "save_indices", False)
-                    and (".unilora_indices_" in key or ".unilora_scales_" in key)
                 ):
                     continue
                 adapter_missing_keys.append(key)

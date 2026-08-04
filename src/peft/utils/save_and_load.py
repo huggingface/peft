@@ -487,6 +487,8 @@ def set_peft_model_state_dict(
     """
     config = model.peft_config[adapter_name]
     state_dict = peft_model_state_dict
+    if config.peft_type not in PEFT_TYPE_TO_TUNER_MAPPING:
+        raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 
     is_like_transformers_model = hasattr(getattr(model, "config", None), "model_type")
     if is_transformers_ge_v5 and is_like_transformers_model:
@@ -521,9 +523,6 @@ def set_peft_model_state_dict(
 
                 # delete the old key from the previous `state_dict = peft_model_state_dict` statement.
                 del state_dict[lookup_key]
-
-    if config.peft_type not in PEFT_TYPE_TO_TUNER_MAPPING:
-        raise NotImplementedError
 
     # Remapping the keys of the loaded state_dict to fit the model is method-specific and thus delegated to the tuner
     # class, see BaseTuner._remap_adapter_state_dict_for_load for the default implementation.

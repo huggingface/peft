@@ -102,6 +102,8 @@
           title: "Variant: BD-LoRA"
         - local: package_reference/lora_variant_dora
           title: "Variant: DoRA"
+        - local: package_reference/lora_variant_kasa
+          title: "Variant: KaSA"
         - local: package_reference/lora_variant_monteclora
           title: "Variant: MonteCLoRA"
         - local: package_reference/lora_variant_velora
@@ -272,5 +274,7 @@
       title: Functions for PEFT integration
     - local: package_reference/lora_conversion
       title: Converting non-LoRA adapters to LoRA
+    - local: package_reference/warnings
+      title: Warnings emitted by PEFT
     title: Utilities
   title: API reference

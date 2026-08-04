@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.20.0"
+__version__ = "0.20.1.dev0"
 
 from .auto import (
     MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
@@ -84,6 +84,7 @@ from .tuners import (
     HRAModel,
     IA3Config,
     IA3Model,
+    KasaConfig,
     LilyConfig,
     LilyModel,
     LNTuningConfig,
@@ -224,6 +225,7 @@ __all__ = [
     "HiraModel",
     "IA3Config",
     "IA3Model",
+    "KasaConfig",
     "LNTuningConfig",
     "LNTuningModel",
     "LilyConfig",

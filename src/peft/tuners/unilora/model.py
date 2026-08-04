@@ -188,9 +188,7 @@ class UniLoraModel(BaseTuner):
             target.update_layer(
                 adapter_name=adapter_name,
                 unilora_theta_d=self.unilora_theta_d,
-                r=unilora_config.r,
-                theta_d_length=unilora_config.theta_d_length,
-                unilora_dropout=unilora_config.unilora_dropout,
+                config=unilora_config,
             )
         else:
             new_module = self._create_new_module(
@@ -235,9 +233,7 @@ class UniLoraModel(BaseTuner):
             base_layer=target,
             unilora_theta_d=unilora_theta_d,
             adapter_name=adapter_name,
-            r=unilora_config.r,
-            theta_d_length=unilora_config.theta_d_length,
-            unilora_dropout=unilora_config.unilora_dropout,
+            config=unilora_config,
             **kwargs,
         )
 
