@@ -21,9 +21,11 @@ from peft import (
     BeftConfig,
     BOFTConfig,
     C3AConfig,
+    DeftConfig,
     DeloraConfig,
     FourierFTConfig,
     FrodConfig,
+    GloraConfig,
     GraloraConfig,
     HiraConfig,
     HRAConfig,
@@ -91,6 +93,13 @@ ALL_CONFIGS = [
         },
     ),
     (
+        DeftConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+        },
+    ),
+    (
         DeloraConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
@@ -112,6 +121,13 @@ ALL_CONFIGS = [
             "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
             "sparse_rate": 0.01,
+        },
+    ),
+    (
+        GloraConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
         },
     ),
     (

@@ -14,6 +14,7 @@
 
 from .lorafa import create_lorafa_optimizer
 from .loraplus import create_loraplus_optimizer
+from .riemannian import create_riemannian_optimizer
 
 
-__all__ = ["create_lorafa_optimizer", "create_loraplus_optimizer"]
+__all__ = ["create_lorafa_optimizer", "create_loraplus_optimizer", "create_riemannian_optimizer"]

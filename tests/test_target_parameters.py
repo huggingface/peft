@@ -20,7 +20,7 @@ from torch import nn
 from transformers import AutoModelForCausalLM
 
 import peft
-from peft import LoraConfig, TaskType, get_peft_model
+from peft import LoraConfig, PeftModel, TaskType, get_peft_model
 from peft.tuners.lora.layer import ParamWrapper
 
 from .testing_common import PeftCommonTester
@@ -163,6 +163,10 @@ class MyAutoModelForCausalLM(AutoModelForCausalLM):
             with torch.no_grad():
                 for param in model.parameters():
                     param.data = torch.randn(param.shape)
+        elif args[0] == "trl-internal-testing/tiny-GptOssForCausalLM":
+            # model is bf16, which trips up some tests that require tight tolerances
+            with torch.no_grad():
+                model.float()
         return model
 
 
@@ -233,13 +237,11 @@ class TestDecoderModelsTargetParameters(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs.copy(), safe_serialization=False)
 
-    @pytest.mark.skip(reason="Multiple adapters with target_parameters are not supported yet.")
     @pytest.mark.parametrize("model_id,config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs.copy())
 
-    @pytest.mark.skip(reason="Multiple adapters with target_parameters are not supported yet.")
     @pytest.mark.parametrize("model_id,config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters_pickle(self, model_id, config_cls, config_kwargs):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
@@ -256,7 +258,6 @@ class TestDecoderModelsTargetParameters(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers(model_id, config_cls, config_kwargs.copy())
 
-    @pytest.mark.skip(reason="Multiple adapters with target_parameters are not supported yet.")
     @pytest.mark.parametrize("model_id,config_cls,config_kwargs", ALL_CONFIGS)
     def test_merge_layers_multi(self, model_id, config_cls, config_kwargs):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
@@ -267,7 +268,6 @@ class TestDecoderModelsTargetParameters(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_merge_layers_nan(model_id, config_cls, config_kwargs.copy())
 
-    @pytest.mark.skip(reason="Multiple adapters with target_parameters are not supported yet.")
     @pytest.mark.parametrize("model_id,config_cls,config_kwargs", ALL_CONFIGS)
     def test_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
@@ -275,7 +275,6 @@ class TestDecoderModelsTargetParameters(PeftCommonTester):
         with pytest.raises(ValueError, match=msg):
             self._test_mixed_adapter_batches(model_id, config_cls, config_kwargs.copy())
 
-    @pytest.mark.skip(reason="Multiple adapters with target_parameters are not supported yet.")
     @pytest.mark.parametrize("model_id,config_cls,config_kwargs", ALL_CONFIGS)
     def test_generate_with_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
@@ -315,12 +314,10 @@ class TestDecoderModelsTargetParameters(PeftCommonTester):
     def test_peft_model_device_map(self, model_id, config_cls, config_kwargs):
         self._test_peft_model_device_map(model_id, config_cls, config_kwargs.copy())
 
-    @pytest.mark.skip(reason="Multiple adapters with target_parameters are not supported yet.")
     @pytest.mark.parametrize("model_id,config_cls,config_kwargs", ALL_CONFIGS)
     def test_delete_adapter(self, model_id, config_cls, config_kwargs):
         self._test_delete_adapter(model_id, config_cls, config_kwargs.copy())
 
-    @pytest.mark.skip(reason="Multiple adapters with target_parameters are not supported yet.")
     @pytest.mark.parametrize("model_id,config_cls,config_kwargs", ALL_CONFIGS)
     def test_delete_inactive_adapter(self, model_id, config_cls, config_kwargs):
         self._test_delete_inactive_adapter(model_id, config_cls, config_kwargs.copy())
@@ -334,7 +331,6 @@ class TestDecoderModelsTargetParameters(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_unload_adapter(model_id, config_cls, config_kwargs.copy())
 
-    @pytest.mark.skip(reason="Multiple adapters with target_parameters are not supported yet.")
     @pytest.mark.parametrize("model_id,config_cls,config_kwargs", ALL_CONFIGS)
     def test_weighted_combination_of_adapters(self, model_id, config_cls, config_kwargs):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
@@ -529,14 +525,14 @@ class TestTargetParameters:
         output_lora2 = model(x)
         assert torch.allclose(output_lora, output_lora2)
 
-        # add another LoRA parametrization to other_weight, should have no effect on the output
+        # Adding another adapter that targets a *different* parameter is not allowed: all adapters that use
+        # target_parameters must target the same set of parameters.
         config = LoraConfig(r=2, lora_alpha=6, target_parameters=["lin.other_weight"], init_lora_weights=False)
-        model.add_adapter("other", config)
-
-        output_other_lora = model(x)
-        # delta_weight should be: (1+1) * lora_scale = (1+1) * (alpha / rank) = 2 * (6 / 2) = 6
-        # result should be: (1+1+6)*1 + (1+1+6)*1 == 8 + 8 == 16
-        assert torch.all(output_other_lora == output_lora)
+        msg = "all adapters must target the same set of parameters"
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config)
+        # the rejected adapter was not added
+        assert "other" not in model.peft_config
 
         # after unloading, the output should be the same as before LoRA was applied
         unloaded = model.unload()
@@ -600,6 +596,76 @@ class TestTargetParameters:
             warn_messages = (w.message.args[0] for w in recwarn.list)
             msg_start = "Unsupported layer type"
             assert not any(msg.startswith(msg_start) for msg in warn_messages)
+
+    def test_adding_second_adapter_reuses_param_wrapper(self):
+        # Adding a second adapter that targets the same parameters must reuse the existing (possibly nested)
+        # ParamWrapper(s) instead of nesting new ones. As a result, the number of ParamWrappers stays constant and each
+        # of them holds both adapters.
+        torch.manual_seed(0)
+        model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
+        target_parameters = ["feed_forward.experts.gate_up_proj", "feed_forward.experts.down_proj"]
+        with hub_online_once(model_id):
+            model = MyAutoModelForCausalLM.from_pretrained(model_id)
+            config = LoraConfig(target_modules=[], target_parameters=target_parameters, init_lora_weights=False)
+            model = get_peft_model(model, config)
+            num_wrappers_single = sum(isinstance(m, ParamWrapper) for m in model.modules())
+
+            config_other = LoraConfig(target_modules=[], target_parameters=target_parameters, init_lora_weights=False)
+            model.add_adapter("other", config_other)
+            num_wrappers_multi = sum(isinstance(m, ParamWrapper) for m in model.modules())
+
+            # the number of ParamWrappers does not change when adding a second adapter
+            assert num_wrappers_single > 0
+            assert num_wrappers_multi == num_wrappers_single
+
+            # every ParamWrapper holds both adapters
+            for module in model.modules():
+                if isinstance(module, ParamWrapper):
+                    assert set(module.lora_A.keys()) == {"default", "other"}
+                    assert set(module.lora_B.keys()) == {"default", "other"}
+
+    def test_multiple_adapters_load_order_independent(self, tmp_path):
+        # Regression test: when multiple adapters target parameters, the saved checkpoint must load correctly regardless
+        # of the order in which the adapters are loaded. This is important to test because a previous attempt at
+        # implementing multiple target_parameters adapters made use of nesting, so had something like:
+        #   wrapper-default (wrapper-other (base-layer))
+        # which meant that the state dict for 'other' would contain an extra base layer, which meant it could not be
+        # loaded unless the default adapter was loaded first.
+        torch.manual_seed(0)
+        model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
+        target_parameters = ["feed_forward.experts.gate_up_proj", "feed_forward.experts.down_proj"]
+        x = torch.arange(10).view(2, 5)
+        with hub_online_once(model_id):
+            model = MyAutoModelForCausalLM.from_pretrained(model_id)
+            config = LoraConfig(target_modules=[], target_parameters=target_parameters, init_lora_weights=False)
+            model = get_peft_model(model, config)
+            config_other = LoraConfig(target_modules=[], target_parameters=target_parameters, init_lora_weights=False)
+            model.add_adapter("other", config_other)
+
+            # collect the reference outputs of both adapters
+            outputs = {}
+            for adapter in ["default", "other"]:
+                model.set_adapter(adapter)
+                with torch.inference_mode():
+                    outputs[adapter] = model(x).logits.clone()
+
+            # 'default' is saved to the root, 'other' to a subfolder
+            model.save_pretrained(tmp_path)
+            del model
+
+            # load in *reverse* order: load 'other' first, then 'default'
+            model = MyAutoModelForCausalLM.from_pretrained(model_id)
+            model = PeftModel.from_pretrained(model, str(tmp_path / "other"), adapter_name="other")
+            load_result = model.load_adapter(str(tmp_path), adapter_name="default")
+
+            assert not load_result.missing_keys
+            assert not load_result.unexpected_keys
+
+            for adapter in ["default", "other"]:
+                model.set_adapter(adapter)
+                with torch.inference_mode():
+                    out = model(x).logits
+                assert torch.allclose(out, outputs[adapter], atol=1e-5, rtol=1e-5)
 
     def test_target_parameter_on_top_level_module_raises(self):
         # nn.Parameters that are registered directly on the top-level module (i.e. the module passed to get_peft_model)

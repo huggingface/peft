@@ -20,9 +20,11 @@ from .boft import BOFTConfig, BOFTModel
 from .c3a import C3AConfig, C3AModel
 from .cartridge import CartridgeConfig, CartridgeEncoder
 from .cpt import CPTConfig, CPTEmbedding
+from .deft import DeftConfig, DeftModel
 from .delora import DeloraConfig, DeloraModel
 from .fourierft import FourierFTConfig, FourierFTModel
 from .frod import FrodConfig, FrodModel
+from .glora import GloraConfig, GloraModel
 from .gralora import GraloraConfig, GraloraModel
 from .hira import HiraConfig, HiraModel
 from .hra import HRAConfig, HRAModel
@@ -35,6 +37,7 @@ from .lora import (
     ArrowConfig,
     BdLoraConfig,
     EvaConfig,
+    KasaConfig,
     LoftQConfig,
     LoraConfig,
     LoraGAConfig,
@@ -66,6 +69,7 @@ from .road import RoadConfig, RoadModel
 from .shira import ShiraConfig, ShiraModel
 from .tinylora import TinyLoraConfig, TinyLoraModel
 from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
+from .unilora import UniLoraConfig, UniLoraModel
 from .vblora import VBLoRAConfig, VBLoRAModel
 from .vera import VeraConfig, VeraModel
 from .waveft import WaveFTConfig, WaveFTModel
@@ -91,6 +95,8 @@ __all__ = [
     "CPTEmbedding",
     "CartridgeConfig",
     "CartridgeEncoder",
+    "DeftConfig",
+    "DeftModel",
     "DeloraConfig",
     "DeloraModel",
     "EvaConfig",
@@ -98,6 +104,8 @@ __all__ = [
     "FourierFTModel",
     "FrodConfig",
     "FrodModel",
+    "GloraConfig",
+    "GloraModel",
     "GraloraConfig",
     "GraloraModel",
     "HRAConfig",
@@ -106,6 +114,7 @@ __all__ = [
     "HiraModel",
     "IA3Config",
     "IA3Model",
+    "KasaConfig",
     "LNTuningConfig",
     "LNTuningModel",
     "LilyConfig",
@@ -156,6 +165,8 @@ __all__ = [
     "TinyLoraModel",
     "TrainableTokensConfig",
     "TrainableTokensModel",
+    "UniLoraConfig",
+    "UniLoraModel",
     "VBLoRAConfig",
     "VBLoRAModel",
     "VeloraConfig",

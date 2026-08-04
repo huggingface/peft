@@ -23,7 +23,7 @@ import torch
 from accelerate.utils.memory import clear_device_cache
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig, TorchAoConfig
 
-from peft import BOFTConfig, MissConfig, OFTConfig, VeraConfig, get_peft_model
+from peft import BOFTConfig, MissConfig, OFTConfig, ShiraConfig, VeraConfig, get_peft_model
 from peft.import_utils import (
     is_bnb_4bit_available,
     is_bnb_available,
@@ -181,6 +181,10 @@ TEST_CASES = [
         {"r": 2, "init_weights": "bat"},
     ),
     (
+        ShiraConfig,
+        {"r": 8, "random_seed": 42},
+    ),
+    (
         VeraConfig,
         {"r": 8, "target_modules": ["q_proj", "v_proj"]},
     ),
@@ -210,6 +214,11 @@ def check_outputs_similar(x, y, min_corr=MIN_CORR, max_mse=MAX_MSE):
         assert False, f"correlation ({corr[0, 1]:.4f}>={min_corr}) check failed"
     if not mse_checks:
         assert False, f"MSE ({mse:.4f}<={max_mse}) check failed"
+
+
+def _config_supports_forward(config, quant) -> bool:
+    # check if, for the given PEFT config and quantization backend, calling forward is expected to work
+    return not (isinstance(config, MissConfig) and (config.init_weights == "bat") and (not quant.supports_merge))
 
 
 class TestQuantization:
@@ -254,6 +263,9 @@ class TestQuantization:
     @pytest.mark.parametrize("config_cls,config_kwargs", TEST_CASES, ids=_peft_id)
     def test_forward_changes_output(self, config_cls, config_kwargs, quant, dummy_input):
         """Check that the forward pass works, also check if the results are affected"""
+        if (config_cls == MissConfig) and (config_kwargs.get("init_weights") == "bat"):
+            pytest.skip(reason="Test requires non-zero init but MiSS is using 'bat' init")
+
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         model = quant.load_model()
 
@@ -262,6 +274,11 @@ class TestQuantization:
 
         config = config_cls(**config_kwargs)
         model = get_peft_model(model, config)
+
+        if not _config_supports_forward(config, quant):
+            with pytest.raises(ValueError, match="is not supported for quantization with"), torch.inference_mode():
+                model(dummy_input).logits
+            return
 
         with torch.inference_mode():
             out_peft = model(dummy_input).logits
@@ -287,6 +304,11 @@ class TestQuantization:
         config = config_cls(**config_kwargs)
         torch.manual_seed(SEED)
         model = get_peft_model(model, config).eval()
+
+        if not _config_supports_forward(config, quant):
+            with pytest.raises(ValueError, match="is not supported for quantization with"), torch.inference_mode():
+                model(dummy_input).logits
+            return
 
         with torch.inference_mode():
             out_quant = model(dummy_input).logits

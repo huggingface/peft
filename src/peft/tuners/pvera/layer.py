@@ -30,7 +30,7 @@ from .config import PveraConfig
 class PveraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
     adapter_layer_names = ("pvera_lambda_b", "pvera_lambda_d")
-    other_param_names = ("pvera_A", "pvera_B")
+    other_param_names = ("pvera_A", "pvera_B", "pvera_dropout", "r")
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer

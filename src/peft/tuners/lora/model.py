@@ -175,6 +175,45 @@ class LoraModel(BaseTuner):
         if peft_config.layer_replication:
             replicate_layers(model, peft_config.layer_replication)
 
+    def _check_new_adapter_config(self, config: LoraConfig) -> None:
+        super()._check_new_adapter_config(config)
+
+        # KaSA destructively truncates the base weight when the adapter is initialized, so the base weight that any
+        # other adapter sees depends on whether a KaSA adapter was added before it. To avoid silently inconsistent
+        # results, mixing KaSA and non-KaSA adapters on the same model is not supported.
+        new_uses_kasa = getattr(config, "kasa_config", None) is not None
+        for adapter_name, other_conf in self.peft_config.items():
+            if other_conf is config:
+                continue
+            other_uses_kasa = getattr(other_conf, "kasa_config", None) is not None
+            if new_uses_kasa is not other_uses_kasa:
+                raise ValueError(
+                    "KaSA cannot be combined with adapters that don't use KaSA, since KaSA modifies the base "
+                    f"weights: the new adapter {'uses' if new_uses_kasa else 'does not use'} KaSA but adapter "
+                    f"'{adapter_name}' {'does not' if new_uses_kasa else 'does'}."
+                )
+
+        # Multiple adapters that use `target_parameters` are supported, but they must all target the same set of
+        # parameters. The reason is that the targeted parameters are wrapped with (possibly nested) lora.ParamWrapper
+        # layers, and which parameter a LoRA weight belongs to is encoded by its position in that nesting. If different
+        # adapters targeted different parameters, the nesting (and thus the state_dict keys) would differ between
+        # adapters, which is not supported.
+        target_parameters = getattr(config, "target_parameters", None)
+        if not target_parameters:
+            return
+
+        target_parameters = set(target_parameters)  # set is okay as we don't support str for this arg
+        for adapter_name, other_conf in self.peft_config.items():
+            if other_conf is config:
+                continue
+            other_target_parameters = getattr(other_conf, "target_parameters", None)
+            if other_target_parameters and (set(other_target_parameters) != target_parameters):
+                raise ValueError(
+                    "When using multiple adapters with `target_parameters`, all adapters must target the same set of "
+                    f"parameters, but got {sorted(target_parameters)} for the new adapter and "
+                    f"{sorted(other_target_parameters)} for adapter '{adapter_name}'."
+                )
+
     def _create_and_replace(
         self,
         lora_config,
@@ -188,18 +227,6 @@ class LoraModel(BaseTuner):
     ) -> None:
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
-
-        if lora_config.target_parameters:
-            # Right now, unfortunately, we don't support multiple adapters with target_parameters on the same model.
-            other_configs_use_target_params = any(
-                conf.target_parameters for key, conf in self.peft_config.items() if key != adapter_name
-            )
-            if other_configs_use_target_params:
-                raise ValueError(
-                    f"Adding a LoRA config with `target_parameters={lora_config.target_parameters}` but there are "
-                    "already other LoRA adapters on this model that use `target_parameters`. At the moment, only "
-                    "one LoRA adapter per model with `target_parameters` is allowed."
-                )
 
         # Regexp matching - Find key which matches current target_name in patterns provided
         r_key = get_pattern_key(lora_config.rank_pattern.keys(), current_key)
@@ -1007,6 +1034,58 @@ class LoraModel(BaseTuner):
         if num_monte_layers == 0:
             return 0.0
         return var_loss_sum / num_monte_layers
+
+    def _get_kasa_loss(self, adapter_names: Optional[Union[str, list[str]]] = None) -> torch.Tensor | float:
+        """
+        Compute the KaSA auxiliary regularization loss summed over all KaSA-adapted layers.
+
+        The KaSA paper (https://huggingface.co/papers/2412.06071) optimizes the task loss together with two auxiliary
+        terms (Eq. 9-12): an L2 penalty on the learnable singular values `sum(lora_diag ** 2)` (weighted by `beta`) and
+        an orthogonal regularization `||B^T B - I||_F + ||A A^T - I||_F` on the adapter factors (weighted by `gamma`),
+        which softly enforces the semi-orthogonality assumed by the SVD parametrization. The coefficients are taken
+        from the `KasaConfig` of each adapter. Returns `0.0` if no matching KaSA layers are present (e.g. KaSA is not
+        used, or none of the requested adapters use KaSA).
+
+        Typical usage during training (after computing the task loss):
+
+        ```py
+        task_loss = ...  # standard loss from the model
+        kasa_loss = model._get_kasa_loss()
+        total_loss = task_loss + kasa_loss
+        ```
+
+        Args:
+            adapter_names (`str` or `list[str]`, *optional*):
+                Name(s) of the adapter(s) to include in the loss computation. If `None` (the default), the model's
+                currently active adapters (`self.active_adapters`) are used.
+
+        Returns:
+            The summed regularization loss as a tensor (or `0.0` if no KaSA layers match).
+        """
+        from .variants import _kasa_layer_regularization_loss
+
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+        elif isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+
+        total: torch.Tensor | float = 0.0
+        for module in self.modules():
+            if not isinstance(module, LoraLayer):
+                continue
+            lora_diag = getattr(module, "lora_diag", None)
+            if lora_diag is None:
+                continue
+            for adapter_name in adapter_names:
+                if adapter_name not in lora_diag:
+                    continue
+                kasa_config = self.peft_config[adapter_name].kasa_config
+                layer_loss = _kasa_layer_regularization_loss(
+                    module, adapter_name=adapter_name, beta=kasa_config.beta, gamma=kasa_config.gamma
+                )
+                total = total + layer_loss
+
+        return total
 
     def _add_modules_to_save_to_tie(self, peft_config: LoraConfig, tied_weight_keys: list[str]):
         """
