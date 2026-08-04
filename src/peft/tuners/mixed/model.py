@@ -22,7 +22,12 @@ from torch import nn
 from tqdm import tqdm
 
 from peft.tuners import adalora, loha, lokr, lora, oft, shira
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, _delete_auxiliary_adapter
+from peft.tuners.tuners_utils import (
+    BaseTuner,
+    BaseTunerLayer,
+    _check_adapters_not_merged,
+    _delete_auxiliary_adapter,
+)
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
@@ -292,6 +297,8 @@ class MixedModel(BaseTuner):
             raise ValueError(
                 f"Adapter(s) {sorted(mismatched)} not found, available adapters: {sorted(self.peft_config.keys())}"
             )
+
+        _check_adapters_not_merged(self.model, adapter_names)
 
         for adapter_to_delete in adapter_names:
             del self.peft_config[adapter_to_delete]

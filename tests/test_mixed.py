@@ -652,6 +652,29 @@ class TestMixedAdapterTypes(unittest.TestCase):
         output_deleted_01 = peft_model(input)
         assert torch.allclose(output_deleted_01, output_base, atol=atol, rtol=rtol)
 
+    def test_delete_merged_adapter_is_atomic(self):
+        model = SimpleNet().eval().to(self.torch_device)
+        config0 = LoraConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(model, config0, "adapter0", mixed=True)
+        config1 = LoHaConfig(target_modules=["lin1"])
+        peft_model.add_adapter("adapter1", config1)
+        peft_model.base_model.merge_adapter(adapter_names=["adapter1"])
+
+        msg = "Cannot delete adapter 'adapter1' while it is merged. Please unmerge the adapter first."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            peft_model.delete_adapter(["adapter0", "adapter1"])
+
+        assert set(peft_model.peft_config) == {"adapter0", "adapter1"}
+        available_adapters = set()
+        for module in peft_model.modules():
+            if isinstance(module, BaseTunerLayer):
+                available_adapters.update(module._all_available_adapter_names())
+        assert available_adapters == {"adapter0", "adapter1"}
+
+        peft_model.base_model.unmerge_adapter()
+        peft_model.delete_adapter(["adapter0", "adapter1"])
+        assert not peft_model.peft_config
+
     def test_modules_to_save(self):
         model = SimpleNet().eval().to(self.torch_device)
         config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])

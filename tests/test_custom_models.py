@@ -3580,6 +3580,29 @@ class TestPeftCustomModel(PeftCommonTester):
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
 
+    @pytest.mark.parametrize(
+        ("model_cls", "config_cls", "target_modules"),
+        [
+            pytest.param(MLP, LoraConfig, ["lin0"], id="lora"),
+            pytest.param(MLP_LayerNorm, LNTuningConfig, ["layernorm0"], id="ln-tuning"),
+        ],
+    )
+    def test_delete_merged_adapter_raises_without_mutation(self, model_cls, config_cls, target_modules):
+        model = get_peft_model(model_cls(), config_cls(target_modules=target_modules))
+        adapter_layer = next(module for module in model.modules() if isinstance(module, BaseTunerLayer))
+        model.merge_adapter()
+
+        msg = "Cannot delete adapter 'default' while it is merged. Please unmerge the adapter first."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            model.delete_adapter("default")
+
+        assert "default" in model.peft_config
+        assert adapter_layer.merged_adapters == ["default"]
+        assert "default" in adapter_layer._all_available_adapter_names()
+
+        model.unmerge_adapter()
+        assert not adapter_layer.merged
+
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_adapter_properly_cleans_up_after_itself(self, test_name, model_id, config_cls, config_kwargs):
         # Generic guard against dangling per-adapter state: after `delete_adapter`, no adapter-specific attributes
