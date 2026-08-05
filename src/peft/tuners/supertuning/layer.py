@@ -287,10 +287,14 @@ class Linear(nn.Module, SupertuningLayer):
             if self.supertuning_rank[adapter_name] > 0:
                 r = self.supertuning_rank[adapter_name]
                 alpha = self.supertuning_lora_alpha[adapter_name]
-                x_dropped = self.lora_dropout[adapter_name](x)
+                # LoRA parameters are held in fp32 for training stability (matches PEFT LoRA convention).
+                # Activations arriving in bf16/fp16 need to be promoted for the matmul; the LoRA output is
+                # cast back to the result dtype before composition.
+                lora_dtype = self.lora_A[adapter_name].dtype
+                x_dropped = self.lora_dropout[adapter_name](x).to(lora_dtype)
                 lora_out = torch.nn.functional.linear(x_dropped, self.lora_A[adapter_name])
                 lora_out = torch.nn.functional.linear(lora_out, self.lora_B[adapter_name])
-                result = result + (alpha / r) * lora_out.to(result.dtype)
+                result = result + ((alpha / r) * lora_out).to(result.dtype)
             return result
 
         # Multiple active adapters: combine their sparse supports on top of the frozen weight. The frozen weight
@@ -307,9 +311,10 @@ class Linear(nn.Module, SupertuningLayer):
             if self.supertuning_rank[adapter_name] > 0:
                 r = self.supertuning_rank[adapter_name]
                 alpha = self.supertuning_lora_alpha[adapter_name]
-                x_dropped = self.lora_dropout[adapter_name](x)
+                lora_dtype = self.lora_A[adapter_name].dtype
+                x_dropped = self.lora_dropout[adapter_name](x).to(lora_dtype)
                 lora_out = torch.nn.functional.linear(x_dropped, self.lora_A[adapter_name])
                 lora_out = torch.nn.functional.linear(lora_out, self.lora_B[adapter_name])
-                result = result + (alpha / r) * lora_out.to(result.dtype)
+                result = result + ((alpha / r) * lora_out).to(result.dtype)
 
         return result

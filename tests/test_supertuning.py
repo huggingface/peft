@@ -425,3 +425,40 @@ class TestSupertuning:
         assert not torch.equal(layer.get_base_layer().weight.detach(), weight_before)
         layer.unmerge()
         assert torch.allclose(layer.get_base_layer().weight.detach(), weight_before, atol=1e-6)
+
+    def test_supra_hybrid_forward_bf16_base_fp32_lora(self):
+        """Supra forward works when the base model is bf16 and LoRA parameters are fp32 (PEFT convention).
+
+        Regression test for a dtype-mismatch bug where the forward path fed bf16 activations directly into an
+        fp32 LoRA weight matmul. LoRA is intentionally held in fp32 for training stability (matching PEFT LoRA
+        convention), so the wrapper must promote incoming activations to the LoRA dtype and downcast the result.
+        """
+        if not torch.cuda.is_available():
+            pytest.skip("bf16 requires CUDA")
+
+        torch.manual_seed(0)
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+        model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(self.device)
+        config = SupertuningConfig(target_modules=["q_proj", "v_proj"], sparsity=0.5, r=4)
+        model = get_peft_model(model, config)
+
+        # Confirm the wrapper's LoRA parameters are fp32 while the base is bf16
+        for _, module in model.named_modules():
+            if hasattr(module, "lora_A") and "default" in module.lora_A:
+                assert module.lora_A["default"].dtype == torch.float32
+                assert module.get_base_layer().weight.dtype == torch.bfloat16
+                break
+
+        # A forward pass that would previously have raised
+        # RuntimeError: expected mat1 and mat2 to have the same dtype
+        inputs = torch.arange(10).view(-1, 1).to(self.device)
+        out = model(inputs)
+        assert out.logits.dtype == torch.bfloat16  # returns in base dtype
+
+        # And a backward pass — grads must reach the fp32 LoRA parameters
+        out.logits.float().sum().backward()
+        for _, module in model.named_modules():
+            if hasattr(module, "lora_A") and "default" in module.lora_A:
+                assert module.lora_A["default"].grad is not None
+                assert module.lora_B["default"].grad is not None
+                break
