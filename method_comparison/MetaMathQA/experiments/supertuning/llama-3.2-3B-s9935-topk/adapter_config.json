@@ -1,0 +1,19 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "inference_mode": false,
+  "init_weights": true,
+  "lora_alpha": null,
+  "lora_dropout": 0.0,
+  "modules_to_save": null,
+  "peft_type": "SUPERTUNING",
+  "r": null,
+  "revision": null,
+  "selection_direction": "top",
+  "sparsity": 0.9935,
+  "target_modules": [
+    "q_proj",
+    "v_proj"
+  ],
+  "task_type": "CAUSAL_LM"
+}

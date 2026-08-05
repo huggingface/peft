@@ -43,6 +43,7 @@ from peft import (
     RandLoraConfig,
     RoadConfig,
     ShiraConfig,
+    SupertuningConfig,
     TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -255,6 +256,15 @@ ALL_CONFIGS = [
         ShiraConfig,
         {
             "r": 1,
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "init_weights": False,
+        },
+    ),
+    (
+        SupertuningConfig,
+        {
+            "sparsity": 0.9,
             "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
             "init_weights": False,
