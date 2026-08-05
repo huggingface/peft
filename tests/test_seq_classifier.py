@@ -325,7 +325,7 @@ ALL_CONFIGS = [
 ]
 
 
-def _skip_if_shadow_unsupported(model_id, config_cls):
+def _skip_encoder_models(model_id, config_cls):
     # ShadowPEFT rides a contiguous decoder stack; encoder-only classifiers (BERT/RoBERTa) are unsupported.
     if config_cls is ShadowConfig and ("Bert" in model_id or "Roberta" in model_id):
         pytest.skip("ShadowPEFT requires a decoder-only backbone")
@@ -347,19 +347,19 @@ class TestSequenceClassificationModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_attributes_parametrized(self, model_id, config_cls, config_kwargs):
-        _skip_if_shadow_unsupported(model_id, config_cls)
+        _skip_encoder_models(model_id, config_cls)
         self._test_model_attr(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_adapter_name(self, model_id, config_cls, config_kwargs):
-        _skip_if_shadow_unsupported(model_id, config_cls)
+        _skip_encoder_models(model_id, config_cls)
         self._test_adapter_name(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_prepare_for_training_parametrized(self, model_id, config_cls, config_kwargs):
-        _skip_if_shadow_unsupported(model_id, config_cls)
+        _skip_encoder_models(model_id, config_cls)
         self._test_prepare_for_training(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
@@ -376,28 +376,28 @@ class TestSequenceClassificationModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained(self, model_id, config_cls, config_kwargs):
-        _skip_if_shadow_unsupported(model_id, config_cls)
+        _skip_encoder_models(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_pickle(self, model_id, config_cls, config_kwargs):
-        _skip_if_shadow_unsupported(model_id, config_cls)
+        _skip_encoder_models(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs.copy(), safe_serialization=False)
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
-        _skip_if_shadow_unsupported(model_id, config_cls)
+        _skip_encoder_models(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters_pickle(self, model_id, config_cls, config_kwargs):
-        _skip_if_shadow_unsupported(model_id, config_cls)
+        _skip_encoder_models(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained_selected_adapters(
             model_id, config_cls, config_kwargs.copy(), safe_serialization=False
@@ -406,14 +406,14 @@ class TestSequenceClassificationModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_from_pretrained_config_construction(self, model_id, config_cls, config_kwargs):
-        _skip_if_shadow_unsupported(model_id, config_cls)
+        _skip_encoder_models(model_id, config_cls)
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_modules_to_save_correctly_set(self, model_id, config_cls, config_kwargs):
         # tests for a regression, introduced via #2220, where modules_to_save was not applied to prompt learning methods
-        _skip_if_shadow_unsupported(model_id, config_cls)
+        _skip_encoder_models(model_id, config_cls)
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
             config = config_cls(

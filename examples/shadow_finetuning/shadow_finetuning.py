@@ -1,4 +1,4 @@
-# Copyright 2024-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,11 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Minimal ShadowPEFT fine-tuning example.
+"""ShadowPEFT with a *pretrained* shadow backbone.
 
-This script wraps a frozen base causal LM with a ShadowPEFT adapter, runs a few training steps on a toy dataset, saves
-the adapter, reloads it and runs generation. It is intentionally small so it can serve as a starting point; swap in a
-real dataset and the `Trainer` for actual fine-tuning.
+Instead of letting ShadowPEFT build a fresh ("mirror") shadow backbone from the base config, this example initializes
+the shadow backbone from a separate, (optionally smaller) pretrained model by passing its id/path as
+``ShadowConfig(shadow_model=...)``. When the pretrained backbone's hidden size differs from the base model's,
+ShadowPEFT automatically inserts a trainable projection to bridge the two hidden spaces.
+
+After training, ``unload_shadow()`` returns the standalone shadow network (backbone + head), the lightweight component
+that can be deployed on its own.
 """
 
 import argparse
@@ -28,15 +32,17 @@ from peft import PeftModel, ShadowConfig, get_peft_model
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="ShadowPEFT fine-tuning example")
-    parser.add_argument("--base_model_name_or_path", type=str, default="Qwen/Qwen3-0.6B")
+    parser = argparse.ArgumentParser(description="ShadowPEFT pretrained-shadow-backbone example")
+    parser.add_argument("--base_model_name_or_path", type=str, default="Qwen/Qwen3-8B")
     parser.add_argument(
         "--shadow_model",
         type=str,
-        default="mirror",
-        help="'mirror' builds a small shadow backbone from the base config; or pass a model id/path to load one.",
+        default="shadow-llm/Qwen3-0.6B-H8B",
+        help=(
+            "Shadow backbone source: set to 'mirror' to build a fresh mirrored backbone from the base config, "
+            "or pass a model id/path for an explicit pretrained shadow."
+        ),
     )
-    parser.add_argument("--shadow_num_hidden_layers", type=int, default=1)
     parser.add_argument("--r", type=int, default=8)
     parser.add_argument("--update_hidden_size", type=int, default=None)
     parser.add_argument("--shadow_alpha", type=float, default=1.0)
@@ -44,7 +50,7 @@ def parse_args():
     parser.add_argument("--auxiliary_loss_weight", type=float, default=0.05)
     parser.add_argument("--num_steps", type=int, default=5)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--output_dir", type=str, default="./shadow-adapter")
+    parser.add_argument("--output_dir", type=str, default="./shadow-explicit-adapter")
     return parser.parse_args()
 
 
@@ -60,7 +66,6 @@ def main():
 
     config = ShadowConfig(
         shadow_model=args.shadow_model,
-        shadow_num_hidden_layers=args.shadow_num_hidden_layers,
         r=args.r,
         update_hidden_size=args.update_hidden_size,
         shadow_alpha=args.shadow_alpha,
@@ -71,11 +76,14 @@ def main():
     model = get_peft_model(base_model, config).to(device)
     model.print_trainable_parameters()
 
+    projection = model.base_model.shadow_projection["default"]
+    print(f"shadow_projection: {type(projection).__name__}")
+
     # Toy training data: replace with a real dataset / transformers.Trainer for actual fine-tuning.
     texts = [
-        "ShadowPEFT trains a small parallel network.",
-        "The base model stays frozen during fine-tuning.",
-        "Only the shadow adapter is updated.",
+        "A small shadow backbone can adapt a much larger base model.",
+        "A projection bridges the shadow and base hidden spaces when they differ.",
+        "Only the shadow backbone and the injection/update adapters are trained.",
     ]
     batch = tokenizer(texts, return_tensors="pt", padding=True).to(device)
     labels = batch["input_ids"].clone()
@@ -90,19 +98,31 @@ def main():
         optimizer.step()
         print(f"step {step}: loss={out.loss.item():.4f}")
 
-    # Save only the shadow adapter (base weights are not stored).
+    # Save only the adapter (shadow backbone + injection/update + projection). The base model is not stored. On reload,
+    # the shadow backbone architecture is rebuilt from `shadow_model` and the fine-tuned weights are restored.
     model.save_pretrained(args.output_dir)
     print(f"Saved adapter to {args.output_dir}")
 
-    # Reload and run generation. ShadowPEFT maintains separate base and shadow KV caches.
     reloaded_base = AutoModelForCausalLM.from_pretrained(args.base_model_name_or_path)
     model = PeftModel.from_pretrained(reloaded_base, args.output_dir).to(device)
     model.eval()
 
-    prompt = tokenizer("ShadowPEFT", return_tensors="pt").to(device)
+    prompt = tokenizer("Shadow adaptation", return_tensors="pt").to(device)
     with torch.no_grad():
         generated = model.generate(**prompt, max_new_tokens=20, use_cache=True, do_sample=False)
     print(tokenizer.decode(generated[0], skip_special_tokens=True))
+
+    # Recover the standalone shadow network (backbone + projection + head). It behaves like a normal causal LM (it
+    # supports generate()), so it can be evaluated on its own and saved/pushed like any HF model. This is how you
+    # measure the shadow path's own performance, independent of the base model. `copy=True` gives it private modules,
+    # including the input embeddings it would otherwise share with the base model, so the checkpoint below is complete.
+    shadow = model.base_model.unload_shadow(copy=True)
+    shadow.eval()
+    with torch.no_grad():
+        shadow_generated = shadow.generate(**prompt, max_new_tokens=20, use_cache=True, do_sample=False)
+    print("shadow-only generation:", tokenizer.decode(shadow_generated[0], skip_special_tokens=True))
+    shadow.save_pretrained(f"{args.output_dir}-standalone-shadow")
+    print(f"Saved standalone shadow model ({type(shadow).__name__}) to {args.output_dir}-standalone-shadow")
 
 
 if __name__ == "__main__":

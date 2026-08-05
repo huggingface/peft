@@ -14,12 +14,16 @@
 
 import contextlib
 import inspect
+import json
 from copy import deepcopy
 from typing import Any, Optional
 
 import torch
 import torch.nn.functional as F
 from torch import nn
+from transformers import  AutoConfig, AutoModel
+from transformers.utils import cached_file
+from safetensors.torch import load_file
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import TaskType
@@ -133,6 +137,8 @@ def _remove_embed_tokens(module: nn.Module) -> None:
         try:
             module.embed_tokens = None
         except Exception:
+            # Some architectures reject assigning None (read-only property / typed setter). Unregister the
+            # submodule directly so the embedding table is still dropped from the backbone.
             module._modules.pop("embed_tokens", None)
 
 
@@ -192,7 +198,11 @@ class ShadowModel(BaseTuner):
         return _get_hidden_size(self.model.config)
 
     def _ensure_shadow_containers(self) -> None:
-        """Create the model-level containers on first use (`BaseTuner` has no custom `__init__` to hook into)."""
+        """Idempotently create the model-level shadow containers and runtime bookkeeping.
+
+        Primary creation happens in [`ShadowModel._pre_injection_hook`]. This helper is also called from
+        `_create_and_replace` / `unload_shadow` so those paths remain safe if the containers are not yet present.
+        """
         if not hasattr(self, "shadow_backbone"):
             # Registered as submodules so their params are saved/loaded (names contain the "shadow_" prefix) and moved
             # with `.to(...)` alongside the rest of the model.
@@ -209,6 +219,9 @@ class ShadowModel(BaseTuner):
             self._should_pack_shadow_cache: bool = False
             self._shadow_share_embeddings: dict[str, bool] = {}
             self._shadow_head_is_lm: dict[str, bool] = {}
+
+    def _pre_injection_hook(self, model: nn.Module, config: ShadowConfig, adapter_name: str) -> None:
+        self._ensure_shadow_containers()
 
     def _create_and_replace(
         self,
@@ -317,11 +330,6 @@ class ShadowModel(BaseTuner):
         shadow_hidden -> base_hidden `nn.Linear` when loading a "projected" shadow checkpoint (`model_type ==
         'causal_lm_with_hidden_projection'`), which bundles a small backbone with a projection aligned to a larger base.
         """
-        import json
-
-        from transformers import AutoModel
-        from transformers.utils import cached_file
-
         config_file = cached_file(config.shadow_model, "config.json")
         with open(config_file) as f:
             raw_config = json.load(f)
@@ -332,10 +340,6 @@ class ShadowModel(BaseTuner):
     @staticmethod
     def _load_projected_shadow_backbone(config: ShadowConfig, raw_config: dict) -> tuple[nn.Module, nn.Module]:
         """Load the backbone + trained projection out of a `causal_lm_with_hidden_projection` checkpoint."""
-        from safetensors.torch import load_file
-        from transformers import AutoConfig, AutoModel
-        from transformers.utils import cached_file
-
         inner = dict(raw_config["shadow_model_config"])
         model_type = inner.pop("model_type")
         backbone = AutoModel.from_config(AutoConfig.for_model(model_type, **inner))
@@ -379,14 +383,17 @@ class ShadowModel(BaseTuner):
     def _post_injection_hook(self, model: nn.Module, config: ShadowConfig, adapter_name: str) -> None:
         # The shadow state rides the base decoder loop; boundary hooks seed `s^(0)`, wrap/unwrap the carrier, and pack
         # the dual KV cache (`ShadowCache`) when `use_cache=True`.
-        self._ensure_shadow_containers()
         self._register_boundary_hooks()
 
     def _register_boundary_hooks(self) -> None:
+        # Drop any previously registered hooks so a re-bind (e.g. after adding/deleting an adapter) does not stack
+        # duplicate callbacks on the same modules.
         for handle in self._boundary_hook_handles:
             handle.remove()
         self._boundary_hook_handles = []
 
+        # Find the first/last ShadowLayer wrappers: they are the entry and exit of the shadow trajectory through the
+        # base decoder. Then attach the four boundary hooks below.
         wrapped = [module for _, module in self.model.named_modules() if isinstance(module, ShadowLayer)]
         if not wrapped:
             self._boundary_layers = []
@@ -428,6 +435,8 @@ class ShadowModel(BaseTuner):
         return past, None
 
     def _seed_shadow_pre_hook(self, module: nn.Module, args: tuple, kwargs: dict):
+        # Top-of-model pre-hook: reset per-forward bookkeeping, unpack a `ShadowCache` so the base model only sees its
+        # own past, and compute the initial shadow state `s^(0)` from the raw inputs for the entry carrier.
         self._seed_shadow_state = None
         self._shadow_past_out = None
         self._should_pack_shadow_cache = False
@@ -555,21 +564,29 @@ class ShadowModel(BaseTuner):
             if isinstance(embed, nn.Module):
                 embed.requires_grad_(False)
 
-    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
-        super()._mark_only_adapters_as_trainable(model)
-        # The model-level backbones/heads live on the tuner, not on `model`; only the active adapter's pieces train.
+    def _sync_shadow_module_trainability(self, inference_mode: bool = False) -> None:
+        """Make the model-level shadow modules' `requires_grad` match the active adapter.
+
+        The backbones/projections/heads live on the tuner, not on `self.model`, so the generic `BaseTuner` machinery --
+        which walks the base model looking for `ShadowLayer`s -- never reaches them. Both injection
+        (`_mark_only_adapters_as_trainable`) and adapter switching (`set_adapter`) must call this, otherwise the
+        previously active backbone would stay trainable while the newly activated one stays frozen.
+        """
+        self._ensure_shadow_containers()
+        # Only the SEQ_CLS classifier is stored in `shadow_head`. The causal-LM head is managed by the base model and
+        # PEFT's normal modules_to_save mechanism.
+        for container in (self.shadow_backbone, self.shadow_projection, self.shadow_head):
+            for adapter_name, module in container.items():
+                module.requires_grad_(adapter_name in self.active_adapters and not inference_mode)
         for adapter_name, backbone in self.shadow_backbone.items():
-            backbone.requires_grad_(adapter_name in self.active_adapters)
             # For a pretrained shadow backbone, keep its embeddings frozen. (A "mirror" backbone either shares the
             # frozen base embeddings -- absent here -- or has randomly-initialized ones that must stay trainable.)
             if self.peft_config[adapter_name].shadow_model != "mirror":
                 self._freeze_backbone_embeddings(backbone)
-        for adapter_name, projection in self.shadow_projection.items():
-            projection.requires_grad_(adapter_name in self.active_adapters)
-        # Only the SEQ_CLS classifier is stored here. The causal-LM head is managed by the base model and PEFT's normal
-        # modules_to_save mechanism.
-        for adapter_name, head in self.shadow_head.items():
-            head.requires_grad_(adapter_name in self.active_adapters)
+
+    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
+        super()._mark_only_adapters_as_trainable(model)
+        self._sync_shadow_module_trainability()
 
     # ------------------------------------------------------------------------------------------- public forward
 
@@ -579,14 +596,22 @@ class ShadowModel(BaseTuner):
         output = self.model(*args, **kwargs)
 
         # Compute the shadow path's own task loss (Eq. 8-9) on the standalone prediction head(s^(0)) -- `s^(0)` is
-        # `_seed_shadow_state`, set by the seed pre-hook during the forward above. Expose it (unweighted, for
-        # logging/inspection) as `output.shadow_loss` *and* on the tuner as `last_shadow_loss` -- the latter survives
-        # DDP/FSDP, which reconstruct the model output from its registered fields and drop extra attributes. Then add
-        # its `auxiliary_loss_weight`-scaled contribution to the task loss.
+        # `_seed_shadow_state`, set by the seed pre-hook during the forward above.
+        #
+        # Training uses the *live* `shadow_loss` tensor: it is scaled by `auxiliary_loss_weight` and added into
+        # `output.loss`, so autograd (and DDP/FSDP gradient sync on the shadow params) still see it.
+        #
+        # Separately, an unweighted *detached* copy is exposed for logging/inspection as `output.shadow_loss` and
+        # `self.last_shadow_loss`. Detach keeps logging from retaining the graph or accidentally driving a second
+        # backward. Storing it on the tuner matters because DDP/FSDP (and some Trainer paths) rebuild/replace the
+        # model output from registered `ModelOutput` fields and drop ad-hoc attributes like `shadow_loss`; the module
+        # attribute remains readable after the forward. This has been designed for that logging case -- there is no
+        # dedicated DDP/FSDP integration test for the aux loss beyond ordinary `output.loss.backward()`.
         self.last_shadow_loss = None
         if labels is not None and getattr(output, "loss", None) is not None and self._shadow_path_active():
             shadow_loss = self.shadow_auxiliary_loss(labels, attention_mask=attention_mask)
             if shadow_loss is not None:
+                # Logging copy only (no grad). The live `shadow_loss` below is what trains.
                 self.last_shadow_loss = shadow_loss.detach()
                 output.shadow_loss = self.last_shadow_loss
                 weight = self.peft_config[self.active_adapters[0]].auxiliary_loss_weight
@@ -634,6 +659,8 @@ class ShadowModel(BaseTuner):
                 f"ShadowPEFT requires exactly one active adapter, but got {len(adapter_names)} adapters."
             )
         super().set_adapter(adapter_name, inference_mode=inference_mode)
+        # `super()` only retargets the wrapped blocks; the tuner-level shadow modules need the same switch.
+        self._sync_shadow_module_trainability(inference_mode=inference_mode)
 
     def _check_merge_allowed(self):
         raise NotImplementedError(
@@ -699,6 +726,11 @@ class ShadowModel(BaseTuner):
                 rather than cloning them. Mutating one model then affects the other.
 
         Assign the result to a variable and use it; with `copy=False` the modules remain shared with this model.
+
+        Pass `copy=True` when you intend to `save_pretrained` the standalone model. A shadow backbone that shares the
+        frozen base input embeddings (the default `"mirror"` setup) reaches them through a reference that is not a
+        submodule of the returned model, so a `copy=False` checkpoint is missing the embedding table; `copy=True`
+        re-attaches a private copy and saves a complete checkpoint.
         """
         self._ensure_shadow_containers()
         if adapter_name is None:

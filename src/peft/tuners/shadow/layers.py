@@ -359,7 +359,10 @@ class DetachedShadowModel(PreTrainedModel, GenerationMixin):
 
     Modules may be shared with the parent [`ShadowModel`] when `unload_shadow(copy=False)` (the default), or owned
     privately when `copy=True`. If the shadow backbone shared the base embeddings, an external `input_embeddings`
-    reference may be supplied so the model can run from `input_ids` without re-parenting the embedding module.
+    reference may be supplied so the model can run from `input_ids` without re-parenting the embedding module. That
+    shared table is deliberately not a submodule, so it is absent from `state_dict()`: such a model runs correctly but
+    `save_pretrained` writes a checkpoint without the input embeddings. Use `unload_shadow(copy=True)`, which
+    re-attaches a private copy of the embeddings, when the standalone model is meant to be saved.
 
     Because it is just the shadow backbone with a task head, it behaves like a normal task model. For a causal-LM head
     it returns a [`~transformers.modeling_outputs.CausalLMOutputWithPast`] and supports `generate()` and KV caching.

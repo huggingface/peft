@@ -23,6 +23,7 @@ from transformers import (
     AutoModelForSequenceClassification,
     Cache,
     LlamaConfig,
+    LlamaModel
 )
 
 from peft import (
@@ -35,10 +36,10 @@ from peft import (
 from peft.tuners.shadow import DetachedShadowModel, ShadowCache, ShadowModel
 from peft.tuners.shadow.layers import ShadowLayer
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
-from peft.utils import PeftType, get_peft_model_state_dict
+from peft.utils import PeftType
 from peft.utils.constants import SAFETENSORS_WEIGHTS_NAME
 
-from .testing_utils import hub_online_once
+from .testing_utils import hub_online_once, require_torch_gpu
 
 
 LLAMA_CAUSAL_MODEL_ID = "peft-internal-testing/tiny-random-LlamaForCausalLM"
@@ -62,16 +63,54 @@ def _seed():
     torch.manual_seed(0)
 
 
+def _wrap_with_fsdp(model):
+    """Wrap `model` in FSDP (single-process) and return `(fsdp_model, peft_model)`."""
+    import os
+    import socket
+
+    from torch.distributed import destroy_process_group, init_process_group, is_initialized
+    from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
+    from peft.utils.other import fsdp_auto_wrap_policy
+
+    if not is_initialized():
+        with socket.socket() as sock:
+            sock.bind(("", 0))
+            port = sock.getsockname()[1]
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(port)
+        init_process_group(backend="nccl", world_size=1, rank=0)
+
+    model = model.cuda()
+    fsdp_model = FSDP(
+        model,
+        auto_wrap_policy=fsdp_auto_wrap_policy(model),
+        use_orig_params=True,
+        sync_module_states=True,
+        device_id=torch.cuda.current_device(),
+    )
+    peft_model = fsdp_model._fsdp_wrapped_module
+    return fsdp_model, peft_model
+
+
+def _fsdp_state_dict(fsdp_model):
+    """Collect a CPU state dict whose keys retain FSDP wrapper path segments."""
+    state_dict = {name: param.detach().cpu().clone() for name, param in fsdp_model.named_parameters()}
+    assert any("_fsdp_wrapped_module" in key for key in state_dict), (
+        "Expected FSDP wrapper segments in the state-dict keys; got: "
+        f"{list(state_dict)[:5]}"
+    )
+    return state_dict
+
+
+def _destroy_fsdp_process_group():
+    from torch.distributed import destroy_process_group, is_initialized
+
+    if is_initialized():
+        destroy_process_group()
+
+
 class TestShadowCausalLM:
-    def test_forward_and_auxiliary_loss_backward(self):
-        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
-        ids = torch.randint(0, 128, (2, 6))
-        out = model(input_ids=ids, labels=ids.clone())
-        assert out.logits.shape == (2, 6, model.config.vocab_size)
-        assert out.loss is not None
-        out.loss.backward()
-        grads = [p for p in model.parameters() if p.requires_grad and p.grad is not None]
-        assert len(grads) > 0
 
     def test_auxiliary_loss_trains_shadow_backbone(self):
         # With auxiliary_loss_weight > 0, the shadow backbone must receive gradients.
@@ -84,13 +123,20 @@ class TestShadowCausalLM:
 
     def test_forward_exposes_shadow_loss(self):
         # The (unweighted) shadow-path loss is exposed for logging/inspection both on the output (`shadow_loss`) and on
-        # the tuner (`last_shadow_loss`). The latter survives DDP/FSDP, which drop non-field output attributes.
-        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
+        # the tuner (`last_shadow_loss`). Both are detached so logging does not retain the graph; training still flows
+        # through the live aux term inside `output.loss`. `last_shadow_loss` is the DDP/FSDP-friendly place to read the
+        # metric, because wrappers may drop non-field output attributes.
+        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM", auxiliary_loss_weight=0.5))
         ids = torch.randint(0, 128, (2, 6))
         out = model(input_ids=ids, labels=ids.clone())
         assert out.shadow_loss is not None
         assert out.shadow_loss.numel() == 1
-        assert model.base_model.last_shadow_loss is not None
+        assert not out.shadow_loss.requires_grad
+        assert model.base_model.last_shadow_loss is out.shadow_loss
+        # The live (non-detached) aux term is inside `output.loss`, so backward still trains the shadow backbone.
+        out.loss.backward()
+        backbone = model.base_model.shadow_backbone["default"]
+        assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in backbone.parameters())
         # Without labels there is no shadow loss to report.
         assert getattr(model(input_ids=ids), "shadow_loss", None) is None
         assert model.base_model.last_shadow_loss is None
@@ -123,24 +169,93 @@ class TestShadowCausalLM:
 
     def test_untrained_adapter_is_noop(self):
         # shadow_up is zero-initialized, so an untrained shadow adapter must not change the base output.
-        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
-        model.eval()
+        base = make_llama_causal()
+        base.eval()
         ids = torch.randint(0, 128, (2, 6))
+        with torch.no_grad():
+            before = base(input_ids=ids).logits
+
+        model = get_peft_model(base, ShadowConfig(task_type="CAUSAL_LM"))
+        model.eval()
         with torch.no_grad():
             on = model(input_ids=ids).logits
             with model.disable_adapter():
                 off = model(input_ids=ids).logits
         assert torch.allclose(on, off, atol=1e-6)
+        assert torch.allclose(on, before, atol=1e-6)
+        assert torch.allclose(off, before, atol=1e-6)
 
     def test_switches_adapters_but_rejects_multiple_active_adapters(self):
-        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
-        model.add_adapter("other", ShadowConfig(task_type="CAUSAL_LM"))
+        # init_weights=False so the adapters are not no-ops: switching must change the logits, and switching back must
+        # restore them. Also check that only the active adapter's model-level shadow modules are trainable.
+        cfg = dict(task_type="CAUSAL_LM", init_weights=False, shadow_num_hidden_layers=2)
+        model = get_peft_model(make_llama_causal(), ShadowConfig(**cfg))
+        model.add_adapter("other", ShadowConfig(**cfg))
+        model.eval()
+        ids = torch.randint(0, 128, (2, 6))
+        tuner = model.base_model
+
+        def shadow_trainable(adapter_name):
+            return any(
+                p.requires_grad
+                for container in (tuner.shadow_backbone, tuner.shadow_projection, tuner.shadow_head)
+                if adapter_name in container
+                for p in container[adapter_name].parameters()
+            )
+
+        assert model.active_adapters == ["default"]
+        assert shadow_trainable("default") and not shadow_trainable("other")
+
+        with torch.no_grad():
+            default_out = model(input_ids=ids).logits
+
         model.set_adapter("other")
         assert model.active_adapters == ["other"]
+        assert shadow_trainable("other") and not shadow_trainable("default")
+        with torch.no_grad():
+            other_out = model(input_ids=ids).logits
+
+        model.set_adapter("default")
+        assert model.active_adapters == ["default"]
+        assert shadow_trainable("default") and not shadow_trainable("other")
+        with torch.no_grad():
+            default_again = model(input_ids=ids).logits
+
+        assert not torch.allclose(default_out, other_out, atol=1e-5)
+        assert torch.allclose(default_out, default_again, atol=1e-6)
 
         with pytest.raises(ValueError, match="exactly one active adapter"):
             model.base_model.set_adapter(["default", "other"])
-        assert model.active_adapters == ["other"]
+        assert model.active_adapters == ["default"]
+
+    def test_switching_adapters_moves_trainability_to_the_new_shadow_modules(self):
+        # The model-level shadow backbone/projection/head hang off the tuner, not off the base model, so the generic
+        # BaseTuner.set_adapter traversal does not reach them. Without an explicit sync, switching adapters would leave
+        # the old backbone trainable and the new one frozen, i.e. silently train the wrong weights.
+        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM", shadow_num_hidden_layers=2))
+        model.add_adapter("other", ShadowConfig(task_type="CAUSAL_LM", shadow_num_hidden_layers=2))
+        tuner = model.base_model
+
+        def trainable(container, adapter_name):
+            return any(p.requires_grad for p in container[adapter_name].parameters())
+
+        assert trainable(tuner.shadow_backbone, "default")
+        assert not trainable(tuner.shadow_backbone, "other")
+
+        model.set_adapter("other")
+        assert not trainable(tuner.shadow_backbone, "default")
+        assert trainable(tuner.shadow_backbone, "other")
+
+        # Only the newly activated adapter's backbone may receive gradients.
+        ids = torch.randint(0, 128, (2, 6))
+        model(input_ids=ids, labels=ids.clone()).loss.backward()
+        assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in tuner.shadow_backbone["other"].parameters())
+        assert all(p.grad is None for p in tuner.shadow_backbone["default"].parameters())
+
+        # inference_mode freezes the activated adapter instead of training it.
+        model.set_adapter("default", inference_mode=True)
+        assert not trainable(tuner.shadow_backbone, "default")
+        assert not trainable(tuner.shadow_backbone, "other")
 
     def test_merge_raises(self):
         # ShadowPEFT cannot be merged: it must raise an explicit error rather than silently doing the wrong thing.
@@ -151,17 +266,46 @@ class TestShadowCausalLM:
             model.base_model.merge_adapter()
 
     def test_save_includes_shadow_modules_but_not_frozen_head(self, tmp_path):
-        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
+        # For causal LM the shadow path reuses the frozen base LM head (not a stored shadow_head). Saving therefore
+        # omits `.shadow_head.*`; after reload the head is rebuilt by resolving to the new base model's lm_head.
+        base = make_llama_causal()
+        base_sd = copy.deepcopy(base.state_dict())
+        model = get_peft_model(base, ShadowConfig(task_type="CAUSAL_LM", init_weights=False))
+        ids = torch.randint(0, 128, (2, 6))
+        opt = torch.optim.SGD([p for p in model.parameters() if p.requires_grad], lr=0.1)
+        for _ in range(2):
+            opt.zero_grad()
+            model(input_ids=ids, labels=ids.clone()).loss.backward()
+            opt.step()
+        model.eval()
+
+        assert "default" not in model.base_model.shadow_head
+        assert model.base_model._resolve_shadow_head("default") is model.get_output_embeddings()
+        with torch.no_grad():
+            ref = model.base_model.unload_shadow()(input_ids=ids).logits
+
         model.save_pretrained(tmp_path)
         with safe_open(tmp_path / SAFETENSORS_WEIGHTS_NAME, framework="pt") as f:
             keys = list(f.keys())
         assert any(".shadow_backbone." in key for key in keys)
         assert any("shadow_down" in key for key in keys)
         assert any("shadow_update_transform" in key for key in keys)
-        # The frozen copy of the base LM head is not stored (it is rebuilt from the base model on load).
         assert not any(".shadow_head." in key for key in keys)
 
+        base2 = make_llama_causal()
+        base2.load_state_dict(base_sd)
+        loaded = PeftModel.from_pretrained(base2, tmp_path)
+        loaded.eval()
+        # The checkpoint had no shadow_head; the LM head is taken from the reloaded base model.
+        assert "default" not in loaded.base_model.shadow_head
+        assert loaded.base_model._resolve_shadow_head("default") is loaded.get_output_embeddings()
+        with torch.no_grad():
+            got = loaded.base_model.unload_shadow()(input_ids=ids).logits
+        assert torch.allclose(ref, got, atol=1e-6)
+
     def test_save_includes_trainable_lm_head(self, tmp_path):
+        # With modules_to_save=["lm_head"], the causal-LM head is trained and stored through PEFT's normal
+        # modules_to_save path (as `lm_head` keys), not as a ShadowPEFT `shadow_head` module.
         model = get_peft_model(
             make_llama_causal(),
             ShadowConfig(task_type="CAUSAL_LM", modules_to_save=["lm_head"]),
@@ -174,16 +318,27 @@ class TestShadowCausalLM:
         assert any("lm_head" in key for key in keys)
         assert not any(".shadow_head." in key for key in keys)
 
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
     def test_save_fsdp_prefixed_state_dict(self, tmp_path):
+        # Wrap in real FSDP so the state-dict keys contain `_fsdp_wrapped_module` segments, then check that
+        # save_pretrained strips them and still writes the shadow adapter weights.
         model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
-        prefixed_state_dict = {f"_fsdp_wrapped_module.{k}": v for k, v in model.state_dict().items()}
-        model.save_pretrained(tmp_path, state_dict=prefixed_state_dict)
+        try:
+            fsdp_model, peft_model = _wrap_with_fsdp(model)
+            peft_model.save_pretrained(tmp_path, state_dict=_fsdp_state_dict(fsdp_model))
+        finally:
+            _destroy_fsdp_process_group()
         with safe_open(tmp_path / SAFETENSORS_WEIGHTS_NAME, framework="pt") as f:
             keys = list(f.keys())
         assert any(".shadow_backbone." in key for key in keys)
+        assert not any("_fsdp_wrapped_module" in key for key in keys)
         assert len(keys) > 2
 
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
     def test_load_fsdp_wrapped_shadow_keys(self, tmp_path):
+        # Same as above, but round-trip through save/load: FSDP-prefixed keys must reload to matching logits.
         base = make_llama_causal()
         base_sd = copy.deepcopy(base.state_dict())
         model = get_peft_model(base, ShadowConfig(task_type="CAUSAL_LM"))
@@ -195,13 +350,13 @@ class TestShadowCausalLM:
             opt.step()
         model.eval()
         with torch.no_grad():
-            ref = model(input_ids=ids).logits
+            ref = model(input_ids=ids).logits.cpu()
 
-        state_dict = get_peft_model_state_dict(model)
-        wrapped_state_dict = {
-            key.replace(".weight", "._fsdp_wrapped_module.weight"): value for key, value in state_dict.items()
-        }
-        model.save_pretrained(tmp_path, state_dict=wrapped_state_dict)
+        try:
+            fsdp_model, peft_model = _wrap_with_fsdp(model)
+            peft_model.save_pretrained(tmp_path, state_dict=_fsdp_state_dict(fsdp_model))
+        finally:
+            _destroy_fsdp_process_group()
 
         base2 = make_llama_causal()
         base2.load_state_dict(base_sd)
@@ -360,7 +515,6 @@ class TestShadowKVCache:
         # Unlike `test_generate_cached_matches_uncached_with_projection` (which uses the default `shadow_model="mirror"`
         # builder with a smaller hidden size), this exercises loading an explicit external shadow backbone via
         # `shadow_model=<path>` (`_load_shadow_backbone`) and checks that dual-cache generate still matches uncached.
-        from transformers import LlamaModel
 
         base = make_llama_causal()
         shadow_hidden = base.config.hidden_size // 2
@@ -540,6 +694,21 @@ class TestShadowBackboneVariants:
         with torch.no_grad():
             out = detached(input_ids=ids)
         assert out.logits.shape == (2, 5, model.config.vocab_size)
+
+    def test_unload_shadow_copy_is_required_for_a_complete_checkpoint(self):
+        # A mirrored backbone shares the frozen base input embeddings through a reference that is not a submodule, so
+        # the shared table is missing from the state dict. copy=True re-attaches a private copy and saves everything.
+        model = get_peft_model(
+            make_llama_causal(),
+            ShadowConfig(task_type="CAUSAL_LM", shadow_num_hidden_layers=2),
+        )
+        assert model.base_model._shadow_share_embeddings["default"] is True
+
+        shared = model.base_model.unload_shadow()
+        assert "backbone.embed_tokens.weight" not in shared.state_dict()
+
+        copied = model.base_model.unload_shadow(copy=True)
+        assert "backbone.embed_tokens.weight" in copied.state_dict()
 
     def test_unload_shadow_applies_projection(self):
         # With a smaller shadow hidden size the standalone model must apply the trained projection so the head receives

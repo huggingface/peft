@@ -252,16 +252,8 @@
       title: SHiRA
     - local: package_reference/tinylora
       title: TinyLoRA
-    - local: package_reference/lily
-      title: Lily
-    - local: package_reference/peanut
-      title: PEANuT
-    - local: package_reference/beft
-      title: BEFT
     - local: package_reference/shadow
       title: ShadowPEFT
-
-    title: Adapters
     - local: package_reference/unilora
       title: UniLoRA
     - local: package_reference/trainable_tokens

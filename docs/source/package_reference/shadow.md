@@ -29,7 +29,7 @@ Input
 
 Because the adaptation is an **input-dependent trajectory in layer space** (the shadow state evolves with the data) rather than a static weight-space delta, ShadowPEFT **cannot be merged** into the base weights. Calling `merge`, `merge_adapter`, or `merge_and_unload` raises an explicit error. To obtain the lightweight shadow network on its own (the analogue of `merge_and_unload`), use `model.base_model.unload_shadow()`, which returns a standalone [`~tuners.shadow.layers.DetachedShadowModel`].
 
-ShadowPEFT follows the standard PEFT API: it is a [`~tuners.tuners_utils.BaseTuner`] whose wrapped blocks are [`~tuners.tuners_utils.BaseTunerLayer`] instances, so adding multiple adapters, switching between them with `set_adapter`, deleting them, and enabling/disabling them all work as with other methods. Only **one** adapter can be active at a time, because the shadow state is a single trajectory through the network.
+Adding multiple adapters, switching between them with `set_adapter`, deleting them, and enabling/disabling them all work as with other PEFT methods. Only **one** adapter can be active at a time, because the shadow state is a single trajectory through the network.
 
 The shadow backbone can be built in two ways, controlled by `ShadowConfig.shadow_model`:
 
@@ -94,6 +94,12 @@ shadow.eval()
 out = shadow.generate(input_ids, max_new_tokens=32)
 # sequence classification:
 logits = shadow(input_ids=input_ids, attention_mask=attention_mask).logits  # (batch, num_labels)
+```
+
+By default (`copy=False`) the returned model shares its modules with the PEFT model, and a shadow backbone that shares the frozen base input embeddings reaches them through a reference that is not a submodule. That is fine for evaluation, but it means `save_pretrained` would write a checkpoint without the embedding table. Pass `copy=True` when you want to save or push the standalone model:
+
+```py
+shadow = model.base_model.unload_shadow(copy=True)
 shadow.save_pretrained("standalone-shadow")
 ```
 
