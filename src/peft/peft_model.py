@@ -109,7 +109,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     Base model encompassing various Peft methods.
 
     Args:
-        model ([`~transformers.PreTrainedModel`]): The base transformer model used for Peft.
+        model ([`torch.nn.Module`]): The base model to be adapted, typically a Transformers model.
         peft_config ([`PeftConfig`]): The configuration of the Peft model.
         adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
         autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
@@ -138,7 +138,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
     def __init__(
         self,
-        model: PreTrainedModel,
+        model: torch.nn.Module,
         peft_config: PeftConfig,
         adapter_name: str = "default",
         autocast_adapter_dtype: bool = True,
@@ -994,7 +994,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             f"trainable params: {trainable_params:,d} || all params: {all_param:,d} || trainable%: {100 * trainable_params / all_param:.4f}"
         )
 
-    def __getattr__(self, name: str):
+    def __getattr__(self, name: str) -> Any:
         """Forward missing attributes to the wrapped module."""
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
