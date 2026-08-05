@@ -516,6 +516,29 @@ class TestPeftConfig:
         with pytest.raises(TypeError, match=msg):
             config_class.from_pretrained(tmp_path)
 
+    def test_from_pretrained_warns_on_ignored_config_overrides(self, tmp_path):
+        # Regression for #3506: config-field kwargs to from_pretrained look like overrides but are
+        # ignored (loaded checkpoint wins / parent fields are dropped by _split_kwargs). Warn instead
+        # of failing silently. Hub-download kwargs must not trigger the warning.
+        LoraConfig(r=8, inference_mode=False, task_type=TaskType.FEATURE_EXTRACTION).save_pretrained(tmp_path)
+
+        with pytest.warns(UserWarning, match="ignored as config overrides"):
+            loaded = LoraConfig.from_pretrained(
+                tmp_path,
+                r=16,
+                inference_mode=True,
+                task_type=TaskType.CAUSAL_LM,
+            )
+
+        assert loaded.r == 8
+        assert loaded.inference_mode is False
+        assert loaded.task_type == "FEATURE_EXTRACTION"
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            LoraConfig.from_pretrained(tmp_path, revision=None)
+        assert not any("ignored as config overrides" in str(w.message) for w in caught)
+
     def test_lora_config_layers_to_transform_validation(self):
         """Test that specifying layers_pattern without layers_to_transform raises an error"""
         with pytest.raises(

@@ -235,8 +235,13 @@ class PeftConfigMixin(PushToHubMixin):
         Args:
             pretrained_model_name_or_path (`str`):
                 The directory or the Hub repository id where the configuration is saved.
+            subfolder (`str`, *optional*):
+                An optional subfolder under `pretrained_model_name_or_path`.
             kwargs (additional keyword arguments, *optional*):
-                Additional keyword arguments passed along to the child class initialization.
+                Keyword arguments forwarded to [`huggingface_hub.hf_hub_download`] (for example `token`,
+                `revision`, `cache_dir`). Config-field keyword arguments such as `r` or `task_type` are **not**
+                applied as overrides — the saved `adapter_config.json` is loaded as-is. To change attributes,
+                set them on the returned config after loading.
         """
         path = (
             os.path.join(pretrained_model_name_or_path, subfolder)
@@ -244,7 +249,19 @@ class PeftConfigMixin(PushToHubMixin):
             else pretrained_model_name_or_path
         )
 
-        hf_hub_download_kwargs, class_kwargs, _ = cls._split_kwargs(kwargs)
+        hf_hub_download_kwargs, class_kwargs, other_kwargs = cls._split_kwargs(kwargs)
+        # Config-field kwargs are not a supported override API (see #3506). Warn so callers notice
+        # instead of silently keeping the checkpoint values. Hub-download kwargs are forwarded below.
+        ignored_as_overrides = sorted(set(class_kwargs) | set(other_kwargs))
+        if ignored_as_overrides:
+            warnings.warn(
+                f"Keyword arguments {ignored_as_overrides} passed to `{cls.__name__}.from_pretrained` are "
+                "ignored as config overrides. `from_pretrained` loads the saved configuration as-is; set "
+                "attributes on the returned config after loading if you need to change them. Only arguments "
+                "recognized by `huggingface_hub.hf_hub_download` are forwarded.",
+                UserWarning,
+                stacklevel=2,
+            )
         if "user_agent" not in hf_hub_download_kwargs:
             hf_hub_download_kwargs["user_agent"] = http_user_agent()
 
@@ -259,6 +276,8 @@ class PeftConfigMixin(PushToHubMixin):
                 raise ValueError(f"Can't find '{CONFIG_NAME}' at '{pretrained_model_name_or_path}'") from exc
 
         loaded_attributes = cls.from_json_file(config_file)
+        # Loaded file wins on conflict; class_kwargs that are absent from the file still merge in for
+        # backward compatibility, but are not a supported override API (warning above).
         kwargs = {**class_kwargs, **loaded_attributes}
         kwargs = cls.check_kwargs(**kwargs)
         return cls.from_peft_type(**kwargs)
