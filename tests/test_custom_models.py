@@ -37,6 +37,7 @@ from peft import (
     C3AConfig,
     DeftConfig,
     DeloraConfig,
+    FineGatesConfig,
     FourierFTConfig,
     FrodConfig,
     GloraConfig,
@@ -331,6 +332,23 @@ TEST_CASES = [
         "Conv3d",
         IA3Config,
         {"target_modules": ["conv3d", "lin0"], "feedforward_modules": ["conv3d", "lin0"]},
+    ),
+    ###########
+    # FineGates #
+    ###########
+    ("Vanilla MLP 1 FineGates", "MLP", FineGatesConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 FineGates", "MLP", FineGatesConfig, {"target_modules": ["lin0", "lin1"]}),
+    (
+        "Vanilla MLP 3 FineGates",
+        "MLP",
+        FineGatesConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "target_sparsity": 0.3},
+    ),
+    (
+        "Embedding + transformers Conv1D 1 FineGates",
+        "EmbConv1D",
+        FineGatesConfig,
+        {"target_modules": ["conv1d"], "fan_in_fan_out": True},
     ),
     ########
     # BEFT #
@@ -2761,19 +2779,25 @@ class TestPeftCustomModel(PeftCommonTester):
         elif issubclass(config_cls, GloraConfig):
             # GLoRA keeps some factors at zero at init; a higher LR helps all adapter tensors move within a few steps.
             lr = 50.0
+        elif issubclass(config_cls, FineGatesConfig):
+            # FineGates gates are initialized near the identity and are typically trained together with the auxiliary
+            # sparsity loss, so a larger LR is needed in this generic task-only harness.
+            lr = 50.0
         elif is_monteclora:
             lr = 1e-3
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
-        n_train_steps = 10 if issubclass(config_cls, GloraConfig) else 3
+        n_train_steps = 10 if issubclass(config_cls, (GloraConfig, FineGatesConfig)) else 3
         for _ in range(n_train_steps):
             optimizer.zero_grad()
             y_pred = model(**X)
             loss = y_pred.sum()
             if is_monteclora:
                 loss = loss + model._get_monteclora_loss()
+            if issubclass(config_cls, FineGatesConfig):
+                loss = loss + model.base_model._get_finegates_loss()
             loss.backward()
             optimizer.step()
 
@@ -2965,15 +2989,22 @@ class TestPeftCustomModel(PeftCommonTester):
             lr = 1e-4  # needs smaller lr to not get nan
         if isinstance(config, AdaLoraConfig):
             lr = 1e-4  # AdaLoRA can blow up with multi-target SGD; use a smaller lr to avoid nan
+        if issubclass(config_cls, FineGatesConfig):
+            lr = 1.0
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+        if issubclass(config_cls, FineGatesConfig):
+            optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
-        for _ in range(3):
+        n_train_steps = 20 if issubclass(config_cls, FineGatesConfig) else 3
+        for _ in range(n_train_steps):
             optimizer.zero_grad()
             y_pred = model(**X)
             y = torch.arange(len(y_pred)).to(self.torch_device) % 2
             loss = nn.functional.nll_loss(y_pred, y)
+            if issubclass(config_cls, FineGatesConfig):
+                loss = loss + model.base_model._get_finegates_loss()
             loss.backward()
             optimizer.step()
 
@@ -3056,14 +3087,20 @@ class TestPeftCustomModel(PeftCommonTester):
             # Adam optimizer since SGD isn't great for small models with IA3 + Conv1D
             lr = 0.01
             optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        if issubclass(config_cls, FineGatesConfig):
+            lr = 1.0
+            optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
-        for _ in range(3):
+        n_train_steps = 10 if issubclass(config_cls, FineGatesConfig) else 3
+        for _ in range(n_train_steps):
             optimizer.zero_grad()
             y_pred = model(**X)
             y = torch.arange(len(y_pred)).to(self.torch_device) % 2
             loss = nn.functional.nll_loss(y_pred, y)
+            if issubclass(config_cls, FineGatesConfig):
+                loss = loss + model.base_model._get_finegates_loss()
             loss.backward()
             optimizer.step()
 
