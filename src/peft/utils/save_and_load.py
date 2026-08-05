@@ -933,6 +933,17 @@ def set_peft_model_state_dict(
                     " PRNG initialisation to restore these projections using `config.projection_prng_key`, which may"
                     " not be accurate on all system configurations."
                 )
+
+            if "base_model.vera_A" in peft_model_state_dict:
+                # The projections are shared between the layers and stored on the model itself, so their keys don't
+                # contain the parameter prefix and were thus not remapped by _insert_adapter_name_into_state_dict.
+                # Without inserting the adapter name here, they would not be restored by load_state_dict below.
+                peft_model_state_dict[f"base_model.vera_A.{adapter_name}"] = peft_model_state_dict.pop(
+                    "base_model.vera_A"
+                )
+                peft_model_state_dict[f"base_model.vera_B.{adapter_name}"] = peft_model_state_dict.pop(
+                    "base_model.vera_B"
+                )
         elif config.peft_type == PeftType.TINYLORA:
             has_projection = any(".tinylora_P." in k for k in peft_model_state_dict)
             if config.save_projection and not has_projection:
@@ -968,6 +979,17 @@ def set_peft_model_state_dict(
                     "Specified to not load pvera_A and pvera_B from state dictionary. This means we will be relying on"
                     " PRNG initialisation to restore these projections using `config.projection_prng_key`, which may"
                     " not be accurate on all system configurations."
+                )
+
+            if "base_model.pvera_A" in peft_model_state_dict:
+                # The projections are shared between the layers and stored on the model itself, so their keys don't
+                # contain the parameter prefix and were thus not remapped by _insert_adapter_name_into_state_dict.
+                # Without inserting the adapter name here, they would not be restored by load_state_dict below.
+                peft_model_state_dict[f"base_model.pvera_A.{adapter_name}"] = peft_model_state_dict.pop(
+                    "base_model.pvera_A"
+                )
+                peft_model_state_dict[f"base_model.pvera_B.{adapter_name}"] = peft_model_state_dict.pop(
+                    "base_model.pvera_B"
                 )
         elif config.peft_type == PeftType.FROD:
             has_projection = any(

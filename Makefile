@@ -9,6 +9,7 @@ quality:
 	ruff check $(check_dirs)
 	ruff format --check $(check_dirs)
 	doc-builder style src/peft tests docs/source --max_len 119 --check_only
+	./scripts/check_doc_coverage.py
 
 # Format source code automatically and check is there are any problems left that need manual fixing
 style:
@@ -33,7 +34,7 @@ tests_core_single_gpu:
 
 # exclude gemma tests, as generation fails with torch.compile, these failures
 # trigger side effects that make other tests fail with 'RuntimeError: Offset
-# increment outside graph capture encountered unexpectedly.' 
+# increment outside graph capture encountered unexpectedly.'
 # TODO re-enable gemma once/if it is fixed
 tests_common_gpu:
 	python -m pytest tests/test_decoder_models.py -k "not gemma" $(if $(IS_GITHUB_CI),--report-log "common_decoder.log",)

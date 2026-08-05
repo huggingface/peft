@@ -664,6 +664,41 @@ class TestMixedAdapterTypes(unittest.TestCase):
         with pytest.raises(ValueError, match="Only one adapter can be set at a time for ModulesToSaveWrapper"):
             peft_model.set_adapter(["adapter0", "adapter1"])
 
+    def test_unload_modules_to_save_when_active_adapter_does_not_use_it(self):
+        # Unloading used to crash when the active adapter did not use modules_to_save on a wrapped module; see
+        # TestModulesToSaveUnloadNoActiveAdapter in test_other.py. This covers MixedModel's separate unload path.
+        atol = 1e-5
+        rtol = 1e-5
+        input = torch.arange(90).reshape(9, 10).to(self.torch_device)
+
+        config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = self._get_model(SimpleNet, config0, "adapter0")
+        torch.manual_seed(1)
+        config1 = LoHaConfig(target_modules=["lin0"], init_weights=False)
+        peft_model.add_adapter("adapter1", config1)
+        peft_model.set_adapter(["adapter1"])
+
+        # modify the modules_to_save copy of adapter0 to ensure that unloading does not use it
+        lin1_weight_before = peft_model.base_model.model.lin1.original_module.weight.data.clone()
+        peft_model.base_model.model.lin1.modules_to_save["adapter0"].weight.data.fill_(42.0)
+        output_peft = peft_model(input)
+
+        model_merged = copy.deepcopy(peft_model).merge_and_unload()
+        assert isinstance(model_merged.lin1, nn.Linear)
+        assert torch.equal(model_merged.lin1.weight.data, lin1_weight_before)
+        output_merged = model_merged(input)
+        # merging must reproduce the output of the model with adapter1 active; merging requires a bit higher
+        # tolerance, like in _check_merging
+        assert torch.allclose(output_peft, output_merged, atol=1e-4, rtol=1e-4)
+
+        model_unloaded = peft_model.unload()
+        assert isinstance(model_unloaded.lin1, nn.Linear)
+        assert torch.equal(model_unloaded.lin1.weight.data, lin1_weight_before)
+        output_unloaded = model_unloaded(input)
+        # unloading without merging must restore the base model output
+        output_base = self._get_model(SimpleNet)(input)
+        assert torch.allclose(output_base, output_unloaded, atol=atol, rtol=rtol)
+
     def test_get_nb_trainable_parameters(self):
         model = SimpleNet().eval().to(self.torch_device)
         params_base = sum(p.numel() for p in model.parameters())
