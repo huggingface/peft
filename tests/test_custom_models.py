@@ -78,7 +78,11 @@ from peft.tuners.lora.monteclora import MontecloraSampler
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
-from .testing_common import PeftCommonTester, _skip_if_merging_not_supported
+from .testing_common import (
+    PeftCommonTester,
+    _skip_if_deleting_adapter_not_supported,
+    _skip_if_merging_not_supported,
+)
 from .testing_utils import get_state_dict, require_non_cpu, set_init_weights_false
 
 
@@ -3579,6 +3583,66 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_delete_adapter(self, test_name, model_id, config_cls, config_kwargs):
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_delete_merged_adapter_raises_without_mutation(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_if_deleting_adapter_not_supported(config_cls, config_kwargs)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config_cls(**config_kwargs))
+        tuner_layers = [module for module in model.modules() if isinstance(module, BaseTunerLayer)]
+        model.merge_adapter()
+
+        merged_before = [layer.merged_adapters[:] for layer in tuner_layers]
+        available_before = [set(layer._all_available_adapter_names()) for layer in tuner_layers]
+
+        msg = "Cannot delete adapter(s) ['default'] while they are merged. Please unmerge them first."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            model.delete_adapter("default")
+
+        # the rejected deletion must leave the adapter and the merged state untouched
+        assert "default" in model.peft_config
+        assert [layer.merged_adapters[:] for layer in tuner_layers] == merged_before
+        assert [set(layer._all_available_adapter_names()) for layer in tuner_layers] == available_before
+
+        # after unmerging, the same deletion goes through
+        model.unmerge_adapter()
+        assert not any(layer.merged for layer in tuner_layers)
+        model.delete_adapter("default")
+        assert "default" not in model.peft_config
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_delete_merged_adapter_only_rejects_the_merged_one(self, test_name, model_id, config_cls, config_kwargs):
+        # with two adapters and only one of them merged, the merged one cannot be deleted while the other still can
+        _skip_if_deleting_adapter_not_supported(config_cls, config_kwargs)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
+
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        config = config_cls(**config_kwargs)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config, adapter_name="adapter0")
+        model.add_adapter("adapter1", config)
+        model.set_adapter("adapter1")
+        tuner_layers = [module for module in model.modules() if isinstance(module, BaseTunerLayer)]
+        model.merge_adapter()
+        merged_after_merge = [layer.merged_adapters[:] for layer in tuner_layers]
+
+        msg = "Cannot delete adapter(s) ['adapter1'] while they are merged. Please unmerge them first."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            model.delete_adapter("adapter1")
+        assert set(model.peft_config) == {"adapter0", "adapter1"}
+
+        # deleting the unmerged adapter is allowed and keeps the merge in place
+        model.delete_adapter("adapter0")
+        assert set(model.peft_config) == {"adapter1"}
+        assert [layer.merged_adapters[:] for layer in tuner_layers] == merged_after_merge
+
+        model.unmerge_adapter()
+        model.delete_adapter("adapter1")
+        assert not model.peft_config
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_adapter_properly_cleans_up_after_itself(self, test_name, model_id, config_cls, config_kwargs):

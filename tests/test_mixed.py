@@ -652,6 +652,33 @@ class TestMixedAdapterTypes(unittest.TestCase):
         output_deleted_01 = peft_model(input)
         assert torch.allclose(output_deleted_01, output_base, atol=atol, rtol=rtol)
 
+    def test_delete_merged_adapter_is_atomic(self):
+        model = SimpleNet().eval().to(self.torch_device)
+        config0 = LoraConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(model, config0, "adapter0", mixed=True)
+        config1 = LoHaConfig(target_modules=["lin1"])
+        peft_model.add_adapter("adapter1", config1)
+        peft_model.base_model.merge_adapter(adapter_names=["adapter1"])
+
+        msg = "Cannot delete adapter(s) ['adapter1'] while they are merged. Please unmerge them first."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            peft_model.delete_adapter(["adapter0", "adapter1"])
+
+        assert set(peft_model.peft_config) == {"adapter0", "adapter1"}
+        available_adapters = set()
+        for module in peft_model.modules():
+            if isinstance(module, BaseTunerLayer):
+                available_adapters.update(module._all_available_adapter_names())
+        assert available_adapters == {"adapter0", "adapter1"}
+
+        # "adapter0" is not merged, so deleting it on its own works while "adapter1" stays merged
+        peft_model.delete_adapter(["adapter0"])
+        assert set(peft_model.peft_config) == {"adapter1"}
+
+        peft_model.base_model.unmerge_adapter()
+        peft_model.delete_adapter(["adapter1"])
+        assert not peft_model.peft_config
+
     def test_delete_active_adapter_keeps_remaining_adapter_active(self):
         # In a mixed model the adapters usually live on different layers, so the active adapter left after a deletion
         # cannot be read off a single layer: the first one visited doesn't host the survivor.
