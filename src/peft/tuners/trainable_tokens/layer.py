@@ -157,14 +157,15 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
-    def _check_overlapping_tokens(self, adapter_names):
+    def _check_overlapping_tokens(self, adapter_names: list[str]):
         """Raises an error if the token indices of the given adapter names are overlapping.
         This is currently not supported and can lead to undefined behavior of the model if no specific merging between
         the overlapping indices' values is applied.
         """
         # We take already merged adapters into account as well since they can be overridden by new adapters as well.
-        # Merged ones come first so that the adapter reported in the error is the one being added.
-        adapters_to_check = list(dict.fromkeys(self.merged_adapters + list(adapter_names)))
+        # Merged ones come first so that the adapter reported in the error is the one being added. Duplicates are
+        # dropped so that a name repeated within one call is not reported as overlapping with itself.
+        adapters_to_check = list(dict.fromkeys(self.merged_adapters + adapter_names))
         if len(adapters_to_check) <= 1:
             return
 

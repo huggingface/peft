@@ -469,9 +469,9 @@ class TestTrainableTokens:
         model = get_peft_model(model, peft_config_1, adapter_name="adapter_1")
         model.add_adapter("adapter_2", peft_config_2)
 
-        model.base_model.merge_adapter(adapter_names=["adapter_1"])
+        model.merge_adapter(adapter_names=["adapter_1"])
         with pytest.raises(ValueError) as e:
-            model.base_model.merge_adapter(adapter_names=["adapter_2"])
+            model.merge_adapter(adapter_names=["adapter_2"])
         assert "adapter_2" in str(e.value)
         assert "are already defined and would result in undefined merging behavior" in str(e.value)
 
@@ -492,8 +492,8 @@ class TestTrainableTokens:
         model = get_peft_model(model, peft_config_1, adapter_name="adapter_1")
         model.add_adapter("adapter_2", peft_config_2)
 
-        model.base_model.merge_adapter(adapter_names=["adapter_1"])
-        model.base_model.merge_adapter(adapter_names=["adapter_2"])
+        model.merge_adapter(adapter_names=["adapter_1"])
+        model.merge_adapter(adapter_names=["adapter_2"])
 
         for module in model.modules():
             if isinstance(module, TrainableTokensLayer):
