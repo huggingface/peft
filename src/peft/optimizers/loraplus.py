@@ -18,6 +18,8 @@ This module contains the implementation of the LoraPlus optimizer.
 
 from __future__ import annotations
 
+from operator import attrgetter
+
 from torch import nn
 from torch.optim import Optimizer
 from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
@@ -58,11 +60,6 @@ def create_loraplus_optimizer(
 
     decay_parameters = get_parameter_names(model, ALL_LAYERNORM_LAYERS)
     decay_parameters = [name for name in decay_parameters if "bias" not in name]
-    # The LoRA weights of an embedding layer are stored in `ParameterDict`s below the tuner layer, so the parameter
-    # name cannot be resolved to the tuner layer directly and has to be matched against the module prefix instead.
-    embedding_prefixes = tuple(
-        f"{module_name}." for module_name, module in model.named_modules() if isinstance(module, Embedding)
-    )
     param_groups = {
         "groupA": {},
         "groupB": {},
@@ -74,7 +71,12 @@ def create_loraplus_optimizer(
         if not param.requires_grad:
             continue
 
-        if name.startswith(embedding_prefixes):
+        # The parameters of a tuner layer live in a `ModuleDict`/`ParameterDict` below it, e.g.
+        # `<...>.embedding.lora_embedding_A.default`, hence strip the last two parts to get the tuner layer. If nothing
+        # is left, the parameter is not held by such a dict and there is no tuner layer to look up.
+        module_name = ".".join(name.split(".")[:-2])
+        module = attrgetter(module_name)(model) if module_name else None
+        if isinstance(module, Embedding):
             param_groups["embedding"][name] = param
         elif "lora_B" in name or param.ndim == 1:
             if name in decay_parameters:

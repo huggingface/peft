@@ -19,14 +19,9 @@ import torch
 from torch import nn
 
 from peft import LoraConfig, get_peft_model
-from peft.import_utils import is_bnb_available
 from peft.optimizers import create_loraplus_optimizer
 
-from .testing_utils import require_bitsandbytes, torch_device
-
-
-if is_bnb_available():
-    import bitsandbytes as bnb
+from .testing_utils import torch_device
 
 
 class SimpleNet(nn.Module):
@@ -45,10 +40,9 @@ class SimpleNet(nn.Module):
         return X
 
 
-@require_bitsandbytes
 def test_lora_plus_helper_sucess():
-    model = SimpleNet()
-    optimizer_cls = bnb.optim.Adam8bit
+    model = get_peft_model(SimpleNet(), LoraConfig(target_modules=["embedding", "lin0", "lin1"]))
+    optimizer_cls = torch.optim.AdamW
     lr = 5e-5
     optim_config = {
         "eps": 1e-6,
@@ -72,18 +66,17 @@ def test_lora_plus_helper_sucess():
     assert optim.param_groups[2]["lr"] == optim.param_groups[3]["lr"] == (lr * loraplus_lr_ratio)
 
 
-@require_bitsandbytes
 def test_lora_plus_optimizer_sucess():
     """
     Test if the optimizer is correctly created and step function runs without any exception
     """
-    optimizer_cls = bnb.optim.Adam8bit
+    optimizer_cls = torch.optim.AdamW
     optim_config = {
         "eps": 1e-6,
         "betas": (0.9, 0.999),
         "loraplus_weight_decay": 0.0,
     }
-    model: SimpleNet = SimpleNet().to(torch_device)
+    model = get_peft_model(SimpleNet(), LoraConfig(target_modules=["embedding", "lin0", "lin1"])).to(torch_device)
     optim = create_loraplus_optimizer(
         model=model,
         optimizer_cls=optimizer_cls,
@@ -93,7 +86,6 @@ def test_lora_plus_optimizer_sucess():
         **optim_config,
     )
     loss = torch.nn.CrossEntropyLoss()
-    bnb.optim.GlobalOptimManager.get_instance().register_parameters(model.parameters())
     x = torch.randint(100, (2, 4, 10)).to(torch_device)
     output = model(x).permute(0, 3, 1, 2)
     label = torch.randint(16, (2, 4, 10)).to(torch_device)
@@ -118,6 +110,8 @@ def test_lora_plus_embedding_lr():
     )
 
     param_to_name = {id(param): name for name, param in model.named_parameters()}
+    # Map each learning rate to the names of the parameters trained with it. The groups themselves are unnamed and the
+    # two groupB groups share a learning rate, hence the sets are merged per learning rate.
     group_names = collections.defaultdict(set)
     for group in optim.param_groups:
         group_names[group["lr"]].update(param_to_name[id(param)] for param in group["params"])
@@ -127,3 +121,10 @@ def test_lora_plus_embedding_lr():
     }
     assert group_names[lr] == {"base_model.model.lin0.lora_A.default.weight"}
     assert group_names[lr * loraplus_lr_ratio] == {"base_model.model.lin0.lora_B.default.weight"}
+
+
+def test_lora_plus_model_without_peft_wrapper():
+    # top-level parameters like "embedding.weight" have no tuner layer to resolve, this must not raise
+    model = SimpleNet()
+    optim = create_loraplus_optimizer(model=model, optimizer_cls=torch.optim.AdamW, lr=5e-5, loraplus_lr_ratio=1.2)
+    assert not optim.param_groups[1]["params"]
