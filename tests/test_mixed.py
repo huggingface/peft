@@ -660,7 +660,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         peft_model.add_adapter("adapter1", config1)
         peft_model.base_model.merge_adapter(adapter_names=["adapter1"])
 
-        msg = "Cannot delete adapter 'adapter1' while it is merged. Please unmerge the adapter first."
+        msg = "Cannot delete adapter(s) ['adapter1'] while they are merged. Please unmerge them first."
         with pytest.raises(ValueError, match=re.escape(msg)):
             peft_model.delete_adapter(["adapter0", "adapter1"])
 
@@ -671,8 +671,12 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 available_adapters.update(module._all_available_adapter_names())
         assert available_adapters == {"adapter0", "adapter1"}
 
+        # "adapter0" is not merged, so deleting it on its own works while "adapter1" stays merged
+        peft_model.delete_adapter(["adapter0"])
+        assert set(peft_model.peft_config) == {"adapter1"}
+
         peft_model.base_model.unmerge_adapter()
-        peft_model.delete_adapter(["adapter0", "adapter1"])
+        peft_model.delete_adapter(["adapter1"])
         assert not peft_model.peft_config
 
     def test_modules_to_save(self):

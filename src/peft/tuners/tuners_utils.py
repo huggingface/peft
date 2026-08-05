@@ -2212,11 +2212,9 @@ def _check_adapters_not_merged(model: nn.Module, adapter_names: str | Sequence[s
         if isinstance(module, BaseTunerLayer)
         for adapter_name in module.merged_adapters
     }
-    for adapter_name in adapter_names:
-        if adapter_name in merged_adapters:
-            raise ValueError(
-                f"Cannot delete adapter '{adapter_name}' while it is merged. Please unmerge the adapter first."
-            )
+    still_merged = sorted(set(adapter_names) & merged_adapters)
+    if still_merged:
+        raise ValueError(f"Cannot delete adapter(s) {still_merged} while they are merged. Please unmerge them first.")
 
 
 def delete_adapter(
