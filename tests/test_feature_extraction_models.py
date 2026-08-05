@@ -41,6 +41,7 @@ from peft import (
     PromptLearningConfig,
     PromptTuningConfig,
     PsoftConfig,
+    RandLoraConfig,
     RoadConfig,
     ShiraConfig,
     TinyLoraConfig,
@@ -239,6 +240,15 @@ ALL_CONFIGS = [
             "depth": 1,
             "act_fn": "relu",
             "scaling": 1.0,
+        },
+    ),
+    (
+        RandLoraConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "r": 8,
+            "randlora_alpha": 1,
         },
     ),
     (

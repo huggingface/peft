@@ -115,14 +115,15 @@ def calculate_mean_per_token_loss(model, tokenizer, rows: list[str], batch_size:
         sliced = rows[j : j + batch_size]
         batch = tokenizer(sliced, truncation=True, max_length=max_length)
         batch = tokenizer.pad(batch, return_tensors="pt", padding_side="left").to(model.device)
-        outputs = model(**batch, pad_token_id=tokenizer.eos_token_id)
+        outputs = model(**batch)
         logits = outputs.logits
         for logit, target, mask in zip(logits, batch["input_ids"], batch["attention_mask"]):
             # calculate loss per token so that the mean is not skewed by sequence length of sample, padding from left
+            # note: mask correctly calculates the tokens, it does *not* include potential virtual tokens
             num_tokens = mask.sum()
-            token_losses = torch.nn.functional.cross_entropy(
-                logit[-num_tokens:], target[-num_tokens:], reduction="none"
-            )
+            logit = logit[-num_tokens:]
+            target = target[-num_tokens:]
+            token_losses = torch.nn.functional.cross_entropy(logit[:-1], target[1:], reduction="none")
             losses.extend(loss.item() for loss in token_losses)
     return torch.tensor(losses).mean().item()
 
@@ -209,10 +210,27 @@ def train(
 
     rows_wiki = get_wiki_small()
     model.eval()
-    # use small batch_size, not batch_size_eval, to prevent this from taking too much memory and affecting the max memory metric
-    wiki_loss_before = calculate_mean_per_token_loss(
-        model=model, tokenizer=tokenizer, rows=rows_wiki, batch_size=batch_size, max_length=768
-    )
+
+    # Ensure that we calculate the the wiki loss on the base model. Otherwise, PEFT models that are not zero-initialized
+    # (e.g. prompt tuning) will have very bad initial loss, leading to artificially low or negative forgetting. Note: We
+    # could hard-code the value (1.58611) but it would be easy to forget to update the value if we change the
+    # calculation or dataset.
+    is_full_fine_tune = not hasattr(model, "peft_config")
+    base_model_context = nullcontext if is_full_fine_tune else model.disable_adapter
+    with base_model_context():
+        # use small batch_size, not batch_size_eval, to prevent this from taking too much memory and affecting the max
+        # memory metric
+        wiki_loss_before = calculate_mean_per_token_loss(
+            model=model,
+            tokenizer=tokenizer,
+            rows=rows_wiki,
+            batch_size=batch_size,
+            max_length=768,
+        )
+        assert 1 < wiki_loss_before < 2, (
+            "Sanity check failed: The wiki loss before training should be between 1.0 and 2.0"
+        )
+
     model.train()
 
     ds_train, ds_valid, ds_test = get_train_valid_test_datasets(

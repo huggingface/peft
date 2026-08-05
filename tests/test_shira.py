@@ -15,12 +15,14 @@
 # This test file is for tests specific to SHiRA.
 
 import os
+import warnings
 
 import pytest
 import torch
 from accelerate.utils.imports import is_bf16_available
 from torch import nn
 
+import peft
 from peft import PeftModel, ShiraConfig, get_peft_model
 
 
@@ -276,3 +278,38 @@ class TestShira:
         inputs = torch.randn(5, 10).to(dtype)
         output = peft_model(inputs)  # should not raise
         assert output.dtype == dtype
+
+    @pytest.mark.parametrize(
+        "expected_warnings, hook_setter",
+        [
+            (0, lambda m: None),
+            (1, lambda m: m.register_forward_hook(lambda *x: None)),
+            (1, lambda m: m.register_backward_hook(lambda *x: None)),
+            (1, lambda m: m.register_forward_pre_hook(lambda *x: None)),
+        ],
+    )
+    def test_shira_warns_about_hooks(self, expected_warnings, hook_setter):
+        # ShiRA by default uses an efficient forward pass that only uses the base layer's weights,
+        # not its forward. This means that forward/backward hooks on the base layer are not called.
+        # We test that a warning is issued to the user to highlight this fact.
+        model = MLP()
+        hook_setter(model.lin1)
+
+        # Reset the 'warn only once' mechanic to make it possible to test this when shira
+        # was instantiated already by this or other tests. This is necessary because it is a global state.
+        peft.tuners.shira.layer._warn_once_about_module_hooks.cache_clear()
+
+        config = ShiraConfig(r=2, target_modules=["lin1", "lin2"])
+        peft_model = get_peft_model(model, config)
+        inputs = torch.randn(5, 10)
+
+        # Test multiple invocations of the layers to make sure the warning is only issued once.
+        # This violates PT031, so we disable it.
+        with pytest.warns() as record:  # noqa: PT031
+            warnings.warn("Dummy warning to silence failure when expected warnings is 0")
+            _ = peft_model(inputs)
+            _ = peft_model(inputs)
+
+        warning_match = "One of the base layers adapted with ShiRA"
+        relevant_warnings = [w for w in record if warning_match in str(w.message)]
+        assert len(relevant_warnings) == expected_warnings

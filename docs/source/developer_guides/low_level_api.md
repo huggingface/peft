@@ -146,3 +146,31 @@ print(model.linear.lora_A["default"].weight.device.type == "meta")  # should be 
 set_peft_model_state_dict(model, peft_state_dict, low_cpu_mem_usage=True)
 print(model.linear.lora_A["default"].weight.device.type == "cpu")  # should be True
 ```
+
+For loading weights from the hub there's the low-level [`load_peft_weights`] function:
+
+```python
+state_dict = load_peft_weights("my-account/my-adapter-repo")
+```
+
+## Setting and loading base weights
+
+The functions above deal with the state dict of the *adapter*. There are also situations where the *base model* weights need to be read or written through the PEFT wrapper. This is not entirely trivial because PEFT renames the parameters of targeted modules (e.g. `q_proj.weight` becomes `q_proj.base_layer.weight`) and adds adapter parameters that don't exist in the base model. Use [`get_base_model_state_dict`] and [`set_base_model_state_dict`] to translate between the two namings:
+
+```python
+from peft import LoraConfig, get_peft_model, get_base_model_state_dict, set_base_model_state_dict
+from transformers import AutoModelForCausalLM
+
+model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+model = get_peft_model(model, LoraConfig(target_modules="all-linear"))
+
+# state dict with the original (pre-PEFT) key names, adapter parameters excluded
+base_state_dict = get_base_model_state_dict(model)
+
+# load a state dict with original key names into the PEFT-wrapped model
+outcome = set_base_model_state_dict(model, base_state_dict, strict=False)
+# check that there were no wrong keys
+print(outcome.missing_keys, outcome.unexpected_keys)
+```
+
+The main use case for this is loading the base weights *after* the model has already been wrapped by PEFT. For example, FSDP training setups such as TorchTitan initialize the model on the meta device, apply PEFT, and shard the result. Real memory only exists after sharding, so the checkpoint, whose keys use the original names, has to be loaded into the already-wrapped model. Note that [`get_base_model_state_dict`] returns the live tensors of the model, not copies.

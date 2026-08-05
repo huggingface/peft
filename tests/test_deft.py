@@ -109,3 +109,39 @@ class TestDeftMerge:
         assert torch.allclose(peft_model(x), unmerged_out, atol=1e-4)
         peft_model.unmerge_adapter()
         assert torch.allclose(layer.base_layer.weight, w0, atol=1e-5)
+
+    def test_merge_unmerge_roundtrip_precise_for_bf16_base(self):
+        # Test that a merge->unmerge roundtrip is as precise as possible (see discussion in #3412). In
+        # the previous implementation, an intermediate value was cast to the dtype of the base weight,
+        # which introduced extra source of imprecision. This test ensures that with the current
+        # implementation, that error is meaningfully reduced.
+        #
+        # `deft_P` is scaled well above its default init so the effect is large enough to observe over ordinary
+        # bf16 storage rounding.
+        def roundtrip_max_abs_error(downcast_cached_factor: bool) -> float:
+            torch.manual_seed(0)
+            model = MLP().to(torch.bfloat16)
+            model.eval()
+            config = DeftConfig(target_modules=["lin0"], decomposition_method="relu", r=4)
+            peft_model = get_peft_model(model, config)
+            peft_model.eval()
+            layer = peft_model.base_model.model.lin0
+            with torch.no_grad():
+                layer.deft_P["default"].normal_(std=1.0)
+                layer.deft_R["default"].normal_(std=0.1)
+
+            w0 = layer.base_layer.weight.detach().clone()
+            peft_model.merge_adapter()
+            if downcast_cached_factor:
+                # Force the cached factor through the base dtype and back, so unmerge recomputes the delta from
+                # a rounded factor instead of the exact float32 one merge() cached.
+                dtype = layer.base_layer.weight.dtype
+                rounded = layer._cached_merge_factor["default"].to(dtype).to(torch.float32)
+                layer._cached_merge_factor["default"] = rounded
+            peft_model.unmerge_adapter()
+            return (layer.base_layer.weight.float() - w0.float()).abs().max().item()
+
+        err_float32 = roundtrip_max_abs_error(downcast_cached_factor=False)
+        err_downcast = roundtrip_max_abs_error(downcast_cached_factor=True)
+        # Require the float32 path to be at least 10% more accurate.
+        assert err_float32 < 0.9 * err_downcast

@@ -41,6 +41,7 @@ from peft import (
     PromptTuningConfig,
     PromptTuningInit,
     PsoftConfig,
+    RandLoraConfig,
     RoadConfig,
     ShiraConfig,
     TinyLoraConfig,
@@ -248,6 +249,15 @@ ALL_CONFIGS = [
             "act_fn": "relu",
             "task_type": "SEQ_CLS",
             "target_modules": None,
+        },
+    ),
+    (
+        RandLoraConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "r": 8,
+            "randlora_alpha": 1,
         },
     ),
     (
