@@ -450,6 +450,58 @@ class TestTrainableTokens:
     @pytest.mark.parametrize(
         "peft_config_factory",
         [
+            lambda token_indices: LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"embed_tokens": token_indices},
+            ),
+        ],
+    )
+    def test_multiple_adapters_overlapping_token_indices_merging_sequentially(self, model, peft_config_factory):
+        # merging one adapter at a time must reject the same overlap that a single combined call rejects, since the
+        # second merge would otherwise overwrite the first adapter's values for the shared indices with no way to
+        # restore them on unmerge
+        token_indices_1 = [0, 1, 2]
+        token_indices_2 = [2, 3, 4]
+
+        peft_config_1 = peft_config_factory(token_indices_1)
+        peft_config_2 = peft_config_factory(token_indices_2)
+
+        model = get_peft_model(model, peft_config_1, adapter_name="adapter_1")
+        model.add_adapter("adapter_2", peft_config_2)
+
+        model.base_model.merge_adapter(adapter_names=["adapter_1"])
+        with pytest.raises(ValueError) as e:
+            model.base_model.merge_adapter(adapter_names=["adapter_2"])
+        assert "adapter_2" in str(e.value)
+        assert "are already defined and would result in undefined merging behavior" in str(e.value)
+
+    @pytest.mark.parametrize(
+        "peft_config_factory",
+        [
+            lambda token_indices: LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"embed_tokens": token_indices},
+            ),
+        ],
+    )
+    def test_multiple_adapters_disjunct_token_indices_merging_sequentially(self, model, peft_config_factory):
+        # control for the test above: disjunct indices must still merge one at a time
+        peft_config_1 = peft_config_factory([0, 1, 2])
+        peft_config_2 = peft_config_factory([3, 4, 5])
+
+        model = get_peft_model(model, peft_config_1, adapter_name="adapter_1")
+        model.add_adapter("adapter_2", peft_config_2)
+
+        model.base_model.merge_adapter(adapter_names=["adapter_1"])
+        model.base_model.merge_adapter(adapter_names=["adapter_2"])
+
+        for module in model.modules():
+            if isinstance(module, TrainableTokensLayer):
+                assert module.merged_adapters == ["adapter_1", "adapter_2"]
+
+    @pytest.mark.parametrize(
+        "peft_config_factory",
+        [
             lambda targets, token_indices: LoraConfig(
                 target_modules=targets,
                 trainable_token_indices={"embed_tokens": token_indices},
