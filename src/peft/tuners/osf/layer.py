@@ -27,7 +27,6 @@ from peft.tuners.tuners_utils import BaseTunerLayer
 from .config import OSFConfig
 from .utils import (
     decompose_weight_matrix,
-    reconstruct_weight_matrix,
 )
 
 
@@ -35,16 +34,28 @@ class OSFLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names: tuple[str, ...] = ("osf_svd_params",)
     # All names of other parameters that may contain adapter-related parameters
-    other_param_names: tuple[str, ...] = ("_osf_U_high", "_osf_S_high", "_osf_V_high", "effective_rank")
+    other_param_names: tuple[str, ...] = (
+        "_osf_U_low_init",
+        "_osf_V_low_init",
+        "_osf_U_high",
+        "_osf_V_high",
+        "effective_rank",
+    )
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
         self.effective_rank = {}
         # Map adapter_name -> ParameterDict{"U_low", "S_low", "V_low"}
         self.osf_svd_params = nn.ModuleDict({})
-        # Store high-rank (frozen) components as buffers that track device moves
+        # Frozen initial low-rank components (for delta computation and gradient projection)
+        self._osf_U_low_init = BufferDict({})
+        self._osf_S_low_init = BufferDict({})
+        self._osf_V_low_init = BufferDict({})
+        # Frozen high-rank subspace for gradient projection — only stored when not
+        # exactly recoverable from U_low_init / V_low_init (i.e. the non-square factor).
+        # When the factor IS square, this buffer is left empty and projection uses the
+        # low-rank init instead.
         self._osf_U_high = BufferDict({})
-        self._osf_S_high = BufferDict({})
         self._osf_V_high = BufferDict({})
         # Track hook handles for cleanup
         self.hook_handles = []
@@ -97,10 +108,24 @@ class OSFLayer(BaseTunerLayer):
         weight = base_layer.weight.data
         svd_dict = decompose_weight_matrix(weight, top_k=effective_rank)
 
-        # Store high-rank (frozen) components as buffers
-        self._osf_U_high[adapter_name] = svd_dict["U_high"]
-        self._osf_S_high[adapter_name] = svd_dict["S_high"]
-        self._osf_V_high[adapter_name] = svd_dict["V_high"]
+        # Store frozen initial low-rank components (for delta computation).
+        # Must clone() to avoid sharing storage with the trainable Parameter.
+        self._osf_U_low_init[adapter_name] = svd_dict["U_low"].detach().clone()
+        self._osf_S_low_init[adapter_name] = svd_dict["S_low"].detach().clone()
+        self._osf_V_low_init[adapter_name] = svd_dict["V_low"].detach().clone()
+
+        # Determine which high-rank factors can be exactly recovered from low-rank inits.
+        # U is square (hence exactly recoverable) when out_features <= in_features.
+        # V is square (hence exactly recoverable) when out_features >= in_features.
+        u_is_square = self.out_features <= self.in_features
+        v_is_square = self.out_features >= self.in_features
+
+        if not u_is_square:
+            # U_high is not recoverable from U_low_init; store it for gradient projection.
+            self._osf_U_high[adapter_name] = svd_dict["U_high"].detach()
+        if not v_is_square:
+            # V_high is not recoverable from V_low_init; store it for gradient projection.
+            self._osf_V_high[adapter_name] = svd_dict["V_high"].detach()
 
         # Create ParameterDict for trainable low-rank components
         svd_params = nn.ParameterDict(
@@ -126,16 +151,36 @@ class OSFLayer(BaseTunerLayer):
         svd_module = self.osf_svd_params[adapter_name]
 
         def hook(grad, name: str, adapter: str, layer: OSFLayer):
-            # Project gradient to be orthogonal to high-rank subspace for U_low/V_low
-            # Access buffers dynamically to ensure they're on the correct device
+            # Project gradient to be orthogonal to high-rank subspace.
+            #
+            # When the SVD factor is square, the orthogonal complement of U_high is
+            # exactly spanned by U_low_init:
+            #   (I - U_high @ U_high^T) = U_low_init @ U_low_init^T
+            # so we can project using U_low_init instead of U_high.
+            #
+            # When the factor is NOT square, the orthogonal complement has a null-space
+            # component that U_low_init cannot capture, so we fall back to U_high.
             if name == "U_low":
-                U_high = layer._osf_U_high[adapter]
-                proj = U_high @ (U_high.transpose(0, 1) @ grad)
-                return grad - proj
+                if adapter in layer._osf_U_high:
+                    # Non-square case: use stored U_high
+                    U_high = layer._osf_U_high[adapter]
+                    proj = U_high @ (U_high.transpose(0, 1) @ grad)
+                    return grad - proj
+                else:
+                    # Square case: (I - U_high @ U_high^T) = U_low_init @ U_low_init^T,
+                    # so the projection is simply U_low_init @ (U_low_init^T @ grad).
+                    U_low_init = layer._osf_U_low_init[adapter]
+                    return U_low_init @ (U_low_init.transpose(0, 1) @ grad)
             elif name == "V_low":
-                V_high = layer._osf_V_high[adapter]
-                proj = (grad @ V_high.transpose(0, 1)) @ V_high
-                return grad - proj
+                if adapter in layer._osf_V_high:
+                    # Non-square case: use stored V_high
+                    V_high = layer._osf_V_high[adapter]
+                    proj = (grad @ V_high.transpose(0, 1)) @ V_high
+                    return grad - proj
+                else:
+                    # Square case: grad @ (I - V_high^T @ V_high) = grad @ V_low_init^T @ V_low_init
+                    V_low_init = layer._osf_V_low_init[adapter]
+                    return (grad @ V_low_init.transpose(0, 1)) @ V_low_init
             return grad
 
         # Store hook handles for later cleanup
@@ -150,21 +195,32 @@ class OSFLayer(BaseTunerLayer):
             handle.remove()
         self.hook_handles.clear()
 
-    def _reconstruct_weight(self, adapter_name: str) -> torch.Tensor:
-        """Reconstruct weight matrix from SVD components for given adapter."""
+    def _compute_delta(self, adapter_name: str) -> torch.Tensor:
+        """Compute the weight delta: (U_low*S_low*V_low - U_low_init*S_low_init*V_low_init).
+
+        This is a low-rank update of size [out_features, in_features], computed as:
+            delta = (U_low * S_low) @ V_low - (U_low_init * S_low_init) @ V_low_init
+
+        The intermediate products are [out_features, r] and [r, in_features], so the
+        peak memory is O(r * (out + in)) instead of O(out * in) for the full weight.
+        """
         if adapter_name not in self.osf_svd_params:
-            return self.get_base_layer().weight
+            return None
 
         svd_module = self.osf_svd_params[adapter_name]
-        svd_dict = {
-            "U_high": self._osf_U_high[adapter_name],
-            "S_high": self._osf_S_high[adapter_name],
-            "V_high": self._osf_V_high[adapter_name],
-            "U_low": svd_module["U_low"],
-            "S_low": svd_module["S_low"],
-            "V_low": svd_module["V_low"],
-        }
-        return reconstruct_weight_matrix(svd_dict)
+        U_low = svd_module["U_low"]
+        S_low = svd_module["S_low"]
+        V_low = svd_module["V_low"]
+
+        U_low_init = self._osf_U_low_init[adapter_name]
+        S_low_init = self._osf_S_low_init[adapter_name]
+        V_low_init = self._osf_V_low_init[adapter_name]
+
+        # Current low-rank component
+        current = torch.mm(U_low * S_low.unsqueeze(0), V_low)
+        # Initial low-rank component (frozen)
+        initial = torch.mm(U_low_init * S_low_init.unsqueeze(0), V_low_init)
+        return current - initial
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -173,8 +229,7 @@ class OSFLayer(BaseTunerLayer):
         Args:
             safe_merge (`bool`, *optional*):
                 If True, the merge operation will be performed in a copy of the original weights and check for NaNs
-                before merging the weights. This is useful if you want to check if the merge operation will produce
-                NaNs. Defaults to `False`.
+                before merging the weights. Defaults to `False`.
             adapter_names (`list[str]`, *optional*):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
@@ -185,11 +240,13 @@ class OSFLayer(BaseTunerLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.osf_svd_params.keys():
                 base_layer = self.get_base_layer()
+                delta = self._compute_delta(active_adapter)
+
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weight = base_layer.weight.data.clone()
-                    new_weight = self._reconstruct_weight(active_adapter)
+                    new_weight = orig_weight + delta
 
                     if not torch.isfinite(new_weight).all():
                         raise ValueError(
@@ -198,8 +255,7 @@ class OSFLayer(BaseTunerLayer):
 
                     base_layer.weight.data = new_weight.to(orig_weight.dtype)
                 else:
-                    new_weight = self._reconstruct_weight(active_adapter)
-                    base_layer.weight.data = new_weight
+                    base_layer.weight.data = base_layer.weight.data + delta
 
                 self.merged_adapters.append(active_adapter)
 
@@ -246,20 +302,24 @@ class Linear(nn.Module, OSFLayer):
         if self.disable_adapters or self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            # Use reconstructed weight for forward pass
-            base_layer = self.get_base_layer()
-            bias = base_layer.bias
-
-            # Use the active adapter's reconstructed weight
+            # Delta-based forward: output = base_layer(x) + x @ delta^T
+            # This avoids materializing the full reconstructed weight.
             active_adapter = self.active_adapters[0] if self.active_adapters else None
             if active_adapter and active_adapter in self.osf_svd_params:
-                weight = self._reconstruct_weight(active_adapter)
-                orig_dtype = x.dtype  # assume that the intended dtype is that of the input
-                x = self._cast_input_dtype(x, weight.dtype)
-                if bias is not None:
-                    bias = bias.to(weight.dtype)
-                result = F.linear(x, weight, bias)
-                result = result.to(orig_dtype)
+                orig_dtype = x.dtype
+                # Base output (may run in different precision)
+                result = self.base_layer(x, *args, **kwargs)
+
+                # Compute delta as a low-rank product
+                delta = self._compute_delta(active_adapter)
+                if delta is not None:
+                    # Apply delta as a low-rank update to the output
+                    # delta is [out_features, in_features], x is [batch, ..., in_features]
+                    # We compute x @ delta^T, which is [batch, ..., out_features]
+                    x_cast = self._cast_input_dtype(x, delta.dtype)
+                    delta_out = F.linear(x_cast, delta)
+                    result = result.to(delta_out.dtype) + delta_out
+                    result = result.to(orig_dtype)
             else:
                 result = self.base_layer(x, *args, **kwargs)
 
