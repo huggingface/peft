@@ -31,8 +31,7 @@ class SupertuningConfig(PeftConfig):
 
     The default (magnitude scoring, ``r=None``) reproduces the paper's best-reported single-mechanism configuration:
     on Meta-Llama-3-8B, ``magnitude-topk`` at 79.02% average beats ``Wanda`` at 78.66% AND requires no calibration
-    pass. Users who want a different scoring rule (e.g. Wanda, activation-aware, task-conditioned) compute the
-    indices externally and pass them via [`SupertuningModel.set_precomputed_indices`].
+    pass.
 
     Args:
         target_modules (`Optional[Union[List[str], str]]`):

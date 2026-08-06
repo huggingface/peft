@@ -18,7 +18,7 @@ rendered properly in your Markdown viewer.
 
 [Super-Tuning](https://huggingface.co/papers/2607.09287) is a sparse fine-tuning method that freezes the base weight and trains only a sparse support of scalar entries selected by weight magnitude — a distinct point in the trainable-parameter Pareto vs LoRA / IA³. Setting `r` additionally allocates a LoRA-style low-rank adapter composed additively on top of the sparse support (the paper's "Supra" hybrid).
 
-Default scoring is magnitude-only and data-free. The paper's 8B ablation reports `magnitude-topk` at 79.02% average outperforming Wanda-weighted saliency at 78.66% while requiring no calibration pass. Users wanting a different scoring rule (Wanda, activation-aware, task-conditioned, hand-crafted) can compute indices externally and pass them via [`SupertuningModel.set_precomputed_indices`], which accepts a `{module_name: LongTensor}` mapping.
+Default scoring is magnitude-only and data-free. The paper's 8B ablation reports `magnitude-topk` at 79.02% average outperforming Wanda-weighted saliency at 78.66% while requiring no calibration pass.
 
 Super-Tuning currently has the following constraint:
 
@@ -47,21 +47,6 @@ config = SupertuningConfig(
     r=8, lora_alpha=16,   # lora_alpha defaults to 2 * r when omitted
 )
 model = get_peft_model(base_model, config)
-```
-
-**Custom scoring** (e.g. Wanda computed externally):
-
-```python
-config = SupertuningConfig(target_modules=["q_proj", "v_proj"], sparsity=0.9)
-model = get_peft_model(base_model, config)
-
-# Compute indices in any framework, pass a {module_name: LongTensor} dict keyed by
-# module names relative to the inner base model (model.base_model.model):
-model.base_model.set_precomputed_indices({
-    "model.layers.0.self_attn.q_proj": custom_indices_0,
-    "model.layers.0.self_attn.v_proj": custom_indices_1,
-    # ...
-})
 ```
 
 ## SupertuningConfig

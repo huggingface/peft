@@ -327,47 +327,6 @@ class TestSupertuning:
         assert bot_layer.supertuning_values["default"].grad is not None
         assert bot_layer.get_base_layer().weight.grad is None
 
-
-    def test_supertuning_set_precomputed_indices(self):
-        """User-supplied indices override the magnitude-computed ones and reset ``values`` to zero."""
-        torch.manual_seed(0)
-        model = self._prepare_trainable_model(sparsity=0.9, init_weights=False)  # values non-zero at first
-        # Names must be relative to the inner base model (what SupertuningModel iterates), NOT the outer PeftModel.
-        # This matches how users typically compute indices — on the raw base model, before get_peft_model wraps it.
-        inner = model.base_model.model
-        layers_by_name = {
-            name: mod for name, mod in inner.named_modules() if hasattr(mod, "supertuning_indices")
-        }
-        # Non-magnitude choice — first N flat positions, deterministic and disjoint from magnitude top-k on this init.
-        overrides = {}
-        for name, mod in layers_by_name.items():
-            n = mod.supertuning_values["default"].numel()
-            device = mod.get_base_layer().weight.device
-            overrides[name] = torch.arange(n, dtype=torch.int32, device=device)
-
-        model.base_model.set_precomputed_indices(overrides)
-
-        for name, mod in layers_by_name.items():
-            assert torch.equal(mod.supertuning_indices["default"], overrides[name])
-            # ``set_precomputed_indices`` re-zeros values so the new support starts as an identity update
-            assert torch.all(mod.supertuning_values["default"] == 0)
-
-    def test_supertuning_set_precomputed_indices_wrong_length_raises(self):
-        """Indices whose count doesn't match the sparse budget raise a clear ValueError."""
-        torch.manual_seed(0)
-        model = self._prepare_trainable_model(sparsity=0.5)
-        # Names must be relative to the inner base model (what SupertuningModel iterates), NOT the outer PeftModel.
-        # This matches how users typically compute indices — on the raw base model, before get_peft_model wraps it.
-        inner = model.base_model.model
-        layers_by_name = {
-            name: mod for name, mod in inner.named_modules() if hasattr(mod, "supertuning_indices")
-        }
-        name = next(iter(layers_by_name))
-        mod = layers_by_name[name]
-        wrong = torch.zeros(mod.supertuning_values["default"].numel() + 1, dtype=torch.int32, device=self.device)
-        with pytest.raises(ValueError, match="to match the sparse budget"):
-            model.base_model.set_precomputed_indices({name: wrong})
-
     def test_supra_hybrid_allocates_lora_parameters(self):
         """When ``r`` is set, the layer allocates LoRA A and B parameters."""
         torch.manual_seed(0)

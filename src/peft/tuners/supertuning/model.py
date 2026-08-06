@@ -28,10 +28,6 @@ class SupertuningModel(BaseTuner):
     best single-mechanism configuration; data-free). When ``config.r`` is set, additionally allocates LoRA A/B
     parameters composed additively with the sparse support — the paper's Supra hybrid.
 
-    Users who want a scoring rule other than magnitude (Wanda, activation-aware, task-conditioned, hand-crafted)
-    compute the indices externally and pass them via [`set_precomputed_indices`]; PEFT does not ship a calibration
-    utility.
-
     Args:
         model ([`~transformers.PreTrainedModel`]): The base model to adapt.
         config ([`SupertuningConfig`]): The Supertuning configuration.
@@ -59,18 +55,6 @@ class SupertuningModel(BaseTuner):
         ...     target_modules=["q_proj", "v_proj"], sparsity=0.99, r=8, lora_alpha=16,
         ... )
         >>> model = get_peft_model(base, config)
-        ```
-
-    Example (user-supplied indices, e.g. Wanda scoring computed externally):
-
-        ```py
-        >>> config = SupertuningConfig(target_modules=["q_proj", "v_proj"], sparsity=0.99)
-        >>> model = get_peft_model(base, config)  # indices default to magnitude at this point
-        >>> model.base_model.set_precomputed_indices({
-        ...     "model.layers.0.self_attn.q_proj": wanda_indices_0,
-        ...     "model.layers.0.self_attn.v_proj": wanda_indices_1,
-        ...     # ...
-        ... })
         ```
 
     Paper: https://arxiv.org/abs/2607.09287
@@ -117,43 +101,6 @@ class SupertuningModel(BaseTuner):
                 # Adding an additional adapter: it is not automatically trainable.
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
-
-    def set_precomputed_indices(
-        self,
-        indices_by_module: dict[str, torch.Tensor],
-        adapter_name: str = "default",
-    ) -> None:
-        """Override the magnitude-computed sparse support with user-supplied indices.
-
-        Use this to plug in any external scoring rule (Wanda, activation-aware, task-conditioned) without extending
-        PEFT itself. The user is responsible for producing the right number of indices per module (matching the
-        layer's sparsity budget). After this call, each affected layer's ``values`` are reset to zero so the new
-        support starts as an identity update.
-
-        Args:
-            indices_by_module: Mapping from ``model.named_modules()`` names to 1-D integer tensors of flat positions
-                into the corresponding module's weight. Missing modules keep their magnitude-computed indices.
-            adapter_name: Which adapter to update. Defaults to ``"default"``.
-
-        Raises:
-            KeyError: If a module name in ``indices_by_module`` does not resolve to a Supertuning layer, or if the
-                adapter does not exist on that layer.
-            ValueError: If an indices tensor's length does not match the sparse budget for its module.
-        """
-        seen = set()
-        for name, module in self.model.named_modules():
-            if not isinstance(module, SupertuningLayer):
-                continue
-            if name not in indices_by_module:
-                continue
-            module.set_precomputed_indices(adapter_name, indices_by_module[name])
-            seen.add(name)
-
-        missing = set(indices_by_module) - seen
-        if missing:
-            raise KeyError(
-                f"The following module names were not found as Supertuning layers on this model: {sorted(missing)}"
-            )
 
     def get_trainable_parameters_count(self, adapter_name: str = "default") -> dict:
         """Report per-adapter trainable-parameter accounting for reporting / test assertions."""

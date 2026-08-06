@@ -74,9 +74,8 @@ class SupertuningLayer(BaseTunerLayer):
     Supertuning layer implementing weight-decomposed sparse fine-tuning.
 
     The base weight is frozen; a compact ``(indices, values)`` pair encodes the trainable sparse support:
-    ``indices`` are flat positions into the weight (selected by magnitude at ``update_layer`` time, or supplied
-    externally via [`SupertuningModel.set_precomputed_indices`]), and ``values`` are the trainable scalars
-    scatter-added onto the base weight in the forward pass.
+    ``indices`` are flat positions into the weight (selected by magnitude at ``update_layer`` time), and
+    ``values`` are the trainable scalars scatter-added onto the base weight in the forward pass.
 
     When ``config.r`` is set, additionally allocates LoRA ``A`` and ``B`` low-rank parameters (the paper's Supra
     hybrid); their contribution is added to the sparse-composed output in ``forward`` and folded into the base
@@ -117,8 +116,7 @@ class SupertuningLayer(BaseTunerLayer):
     def update_layer(self, adapter_name: str, config: SupertuningConfig, **kwargs):
         """Allocate the sparse support and (optionally) LoRA parameters for a new adapter.
 
-        Indices are selected by weight magnitude (paper's best single-mechanism config; data-free). External callers
-        can override the magnitude-computed indices via ``set_precomputed_indices`` on the outer ``SupertuningModel``.
+        Indices are selected by weight magnitude (paper's best single-mechanism config; data-free).
         """
         base_layer = self.get_base_layer()
         weight = base_layer.weight.data  # [out_features, in_features]
@@ -160,30 +158,6 @@ class SupertuningLayer(BaseTunerLayer):
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=config.inference_mode)
-
-    def set_precomputed_indices(self, adapter_name: str, indices: torch.Tensor) -> None:
-        """Override the magnitude-computed indices with a user-supplied tensor.
-
-        The user takes responsibility for the number of indices matching the layer's sparsity budget. The trainable
-        ``values`` are re-initialized to zero (identity update) to preserve the invariant that a freshly-swapped
-        support starts with no effect on the forward pass.
-        """
-        if adapter_name not in self.supertuning_values:
-            raise KeyError(f"Adapter {adapter_name!r} not found on this layer.")
-
-        expected = self.supertuning_values[adapter_name].numel()
-        if indices.numel() != expected:
-            raise ValueError(
-                f"Adapter {adapter_name!r}: expected {expected} indices to match the sparse budget, "
-                f"got {indices.numel()}."
-            )
-
-        weight = self.get_base_layer().weight
-        self.supertuning_indices[adapter_name] = indices.to(dtype=torch.int32, device=weight.device)
-        # Reset values to zero — the new support may point to different weight entries, so any previously
-        # trained ``values`` no longer correspond to the intended parameters.
-        with torch.no_grad():
-            self.supertuning_values[adapter_name].zero_()
 
 
 class Linear(nn.Module, SupertuningLayer):
