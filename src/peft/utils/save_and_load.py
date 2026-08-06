@@ -91,6 +91,80 @@ def _filter_state_dict_for_adapter_name(
     }
 
 
+def _normalize_fsdp_state_dict_key(key: str) -> str:
+    """Remove FSDP wrapper segments from a state-dict key."""
+    if key.startswith("module."):
+        key = key.removeprefix("module.")
+    if key.startswith("_fsdp_wrapped_module."):
+        key = key.removeprefix("_fsdp_wrapped_module.")
+    return key.replace("._fsdp_wrapped_module", "")
+
+
+_SHADOW_ADAPTER_CONTAINERS = (
+    "shadow_backbone",
+    "shadow_projection",
+    "shadow_head",
+    "shadow_down",
+    "shadow_up",
+    "shadow_update_transform",
+    "shadow_update_gate",
+)
+
+
+def _remap_shadow_adapter_name(key: str, source: str, target: str) -> str:
+    for container in _SHADOW_ADAPTER_CONTAINERS:
+        key = key.replace(f"{container}.{source}.", f"{container}.{target}.")
+    return key
+
+
+def _get_shadow_adapter_state_dict(
+    model, state_dict: dict[str, torch.Tensor], adapter_name: str
+) -> dict[str, torch.Tensor]:
+    """Collect one ShadowPEFT adapter's tensors, canonicalizing its saved name to `default`."""
+    adapter_names = {
+        _normalize_fsdp_state_dict_key(name)
+        for name, _ in model.named_parameters()
+        if any(f"{container}.{adapter_name}." in name for container in _SHADOW_ADAPTER_CONTAINERS)
+        and ".modules_to_save." not in name
+        and ".original_module." not in name
+    }
+
+    lookups: dict[str, torch.Tensor] = {}
+    for key, tensor in state_dict.items():
+        lookups[key] = tensor
+        lookups[_normalize_fsdp_state_dict_key(key)] = tensor
+
+    to_return = {}
+    for name in adapter_names:
+        saved_name = _remap_shadow_adapter_name(name, adapter_name, "default")
+        if name in lookups:
+            to_return[saved_name] = lookups[name]
+            continue
+        normalized = _normalize_fsdp_state_dict_key(name)
+        if normalized in lookups:
+            to_return[saved_name] = lookups[normalized]
+
+    saved_names = {_remap_shadow_adapter_name(name, adapter_name, "default") for name in adapter_names}
+    missing = saved_names.difference(to_return.keys())
+    if missing:
+        live_params = {_normalize_fsdp_state_dict_key(name): param for name, param in model.named_parameters()}
+        for saved_name in missing:
+            live_name = _remap_shadow_adapter_name(saved_name, "default", adapter_name)
+            param = live_params.get(live_name)
+            if param is not None:
+                to_return[saved_name] = param.detach().clone()
+
+    if len(to_return) < len(adapter_names):
+        warnings.warn(
+            "ShadowPEFT save collected "
+            f"{len(to_return)}/{len(adapter_names)} adapter tensors. "
+            "When using FSDP, call `save_pretrained(..., state_dict=accelerator.get_state_dict(model))` "
+            "after switching to `FULL_STATE_DICT`."
+        )
+
+    return to_return
+
+
 def get_peft_model_state_dict(
     model,
     state_dict=None,
@@ -223,6 +297,9 @@ def get_peft_model_state_dict(
 
     elif config.peft_type == PeftType.ADAPTION_PROMPT:
         to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
+
+    elif config.peft_type == PeftType.SHADOW:
+        to_return = _get_shadow_adapter_state_dict(model, state_dict, adapter_name)
 
     elif config.is_prompt_learning:
         to_return = {}
@@ -501,7 +578,10 @@ def get_peft_model_state_dict(
         key = pattern.sub("", key)  # remove adapter name, e.g. v_proj.lora_A
         return f"{key}.{suffix}"  # stitch the suffix back, e.g, v_proj.lora_A.weight
 
-    to_return = {remove_adapter_name(k): v for k, v in to_return.items()}
+    if config.peft_type != PeftType.SHADOW:
+        # ShadowPEFT uses nested adapter-name segments that don't fit this generic pattern. Its save helper has already
+        # canonicalized those segments to `default`, and its load helper remaps them to the requested adapter name.
+        to_return = {remove_adapter_name(k): v for k, v in to_return.items()}
     return to_return
 
 
@@ -744,8 +824,18 @@ def set_peft_model_state_dict(
                 # delete the old key from the previous `state_dict = peft_model_state_dict` statement.
                 del state_dict[lookup_key]
 
-    if config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT or config.peft_type == PeftType.XLORA:
+    if (
+        config.is_prompt_learning
+        or config.peft_type == PeftType.ADAPTION_PROMPT
+        or config.peft_type == PeftType.XLORA
+        or config.peft_type == PeftType.SHADOW
+    ):
         peft_model_state_dict = state_dict
+        if config.peft_type == PeftType.SHADOW:
+            peft_model_state_dict = {
+                _remap_shadow_adapter_name(_normalize_fsdp_state_dict_key(k), "default", adapter_name): v
+                for k, v in peft_model_state_dict.items()
+            }
     elif config.peft_type in PEFT_TYPE_TO_PREFIX_MAPPING:
         peft_model_state_dict = {}
         parameter_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]

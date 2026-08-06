@@ -102,6 +102,10 @@ def _reset_unilora_theta_d(model, config, adapter_name="default"):
 # EmbConv1D has an embedding and a Conv1D layer
 # Conv2D has a Conv2D layer
 TEST_CASES = [
+    # ShadowPEFT is not tested here: it needs a real decoder stack (not MLP/Conv custom
+    # models), and wiring a dedicated TinyDecoder into this suite clashes with the shared
+    # custom-model assumptions. Coverage lives in test_shadow.py, test_decoder_models.py,
+    # and test_seq_classifier.py instead.
     ########
     # GLoRA #
     ########
@@ -1951,6 +1955,7 @@ class Block(nn.Module):
         X = self.drop(X)
         X = self.lin1(X)
         return X
+
 
 
 class DeepMLP(nn.Module):
