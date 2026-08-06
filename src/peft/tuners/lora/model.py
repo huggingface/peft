@@ -569,10 +569,33 @@ class LoraModel(BaseTuner):
                         handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                         hook_handles.append(handle)
 
-        yield
-
-        for handle in hook_handles:
-            handle.remove()
+        try:
+            yield
+        except BaseException:
+            # On the exception path no .backward() will run, so _peft_gradient_checkpointing_forward_hooks
+            # would never be drained by backward_hook. Drain them here so the model stays usable.
+            #
+            # These hooks are intentionally NOT in the finally block: on the normal path they must
+            # outlive the context manager because they fire during the recomputed forward inside
+            # .backward(), long after this CM has exited. Only on the exception path — where there
+            # is no backward pass coming — do we need to drain them early.
+            #
+            # BaseException rather than Exception so that KeyboardInterrupt and async cancellation
+            # are covered too; both can interrupt a generate() call mid-way and leave the same
+            # stale hooks behind. The bare `raise` re-raises unchanged, so nothing is swallowed.
+            #
+            # Walking named_modules() costs O(model depth) getattr calls, but this path is already
+            # unwinding an exception so the overhead is inconsequential. There is no cheaper handle
+            # to the affected layers: the ValueError guard above rules out a nested CM that might
+            # own some of them, and the attribute is only ever set on the layers touched by the
+            # aLoRA branch above.
+            for _, layer in self.named_modules():
+                while getattr(layer, "_peft_gradient_checkpointing_forward_hooks", None):
+                    layer._peft_gradient_checkpointing_forward_hooks.pop().remove()
+            raise
+        finally:
+            for handle in hook_handles:
+                handle.remove()
 
     def _check_merge_allowed(self):
         """Verify that the configuration supports merging.
