@@ -344,6 +344,18 @@ TEST_CASES = [
         IA3Config,
         {"target_modules": ["conv3d", "lin0"], "feedforward_modules": ["conv3d", "lin0"]},
     ),
+    (
+        "Conv2d Groups IA3",
+        "Conv2dGroups",
+        IA3Config,
+        {"target_modules": ["conv2d"], "feedforward_modules": ["conv2d"]},
+    ),
+    (
+        "Conv2d Groups2 IA3",
+        "Conv2dGroups2",
+        IA3Config,
+        {"target_modules": ["conv2d"], "feedforward_modules": ["conv2d"]},
+    ),
     ########
     # BEFT #
     ########

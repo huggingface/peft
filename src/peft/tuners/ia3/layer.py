@@ -219,6 +219,21 @@ class _ConvNd(nn.Module, IA3Layer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
+    def _weight_scaling(self, active_adapter: str, base_layer: nn.Module) -> torch.Tensor:
+        ia3_scaling = self.ia3_l[active_adapter].data
+        if not self.is_feedforward:
+            return ia3_scaling.transpose(0, 1)
+
+        groups = getattr(base_layer, "groups", 1)
+        if groups == 1:
+            return ia3_scaling
+
+        # weight holds in_channels // groups, so split the per-channel scaling into groups and expand to match
+        out_channels, in_channels_per_group, *kernel_dims = base_layer.weight.shape
+        scaling = ia3_scaling.view(groups, 1, in_channels_per_group, *([1] * len(kernel_dims)))
+        scaling = scaling.expand(groups, out_channels // groups, in_channels_per_group, *kernel_dims)
+        return scaling.reshape(out_channels, in_channels_per_group, *kernel_dims)
+
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
@@ -241,9 +256,7 @@ class _ConvNd(nn.Module, IA3Layer):
             if active_adapter in self.ia3_l.keys():
                 base_layer = self.get_base_layer()
                 orig_dtype = base_layer.weight.data.dtype
-                ia3_scaling = self.ia3_l[active_adapter].data
-                if not self.is_feedforward:
-                    ia3_scaling = ia3_scaling.transpose(0, 1)
+                ia3_scaling = self._weight_scaling(active_adapter, base_layer)
 
                 if safe_merge:
                     output_weight = torch.mul(base_layer.weight.data, ia3_scaling).clone()
@@ -278,9 +291,7 @@ class _ConvNd(nn.Module, IA3Layer):
                 base_layer = self.get_base_layer()
                 orig_dtype = base_layer.weight.data.dtype
                 # divide by (IA)^3 vector. Add tolerace to avoid division by zero
-                ia3_scaling = self.ia3_l[active_adapter].data
-                if not self.is_feedforward:
-                    ia3_scaling = ia3_scaling.transpose(0, 1)
+                ia3_scaling = self._weight_scaling(active_adapter, base_layer)
                 base_layer.weight.data = torch.div(base_layer.weight.data, ia3_scaling + 1e-8).to(orig_dtype)
 
                 if not self.is_feedforward and (base_layer.bias is not None):
