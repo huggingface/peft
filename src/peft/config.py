@@ -235,8 +235,12 @@ class PeftConfigMixin(PushToHubMixin):
         Args:
             pretrained_model_name_or_path (`str`):
                 The directory or the Hub repository id where the configuration is saved.
+            subfolder (`str`, *optional*):
+                An optional subfolder under `pretrained_model_name_or_path`.
             kwargs (additional keyword arguments, *optional*):
-                Additional keyword arguments passed along to the child class initialization.
+                Keyword arguments forwarded to [`huggingface_hub.hf_hub_download`] (for example `token`,
+                `revision`, `cache_dir`). PEFT config-specific arguments, such as `task_type` or `r`, cannot be
+                passed as overrides. To change attributes, set them on the returned config after loading.
         """
         path = (
             os.path.join(pretrained_model_name_or_path, subfolder)
