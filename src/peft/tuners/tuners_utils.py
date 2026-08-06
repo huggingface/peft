@@ -784,6 +784,18 @@ class BaseTuner(nn.Module, ABC):
         ###################################
         # PREPARATION OF MODEL AND CONFIG #
         ###################################
+        # Adding an adapter must not change the trainability of parameters that were already present. Some tuners
+        # create their new adapter parameters before calling this method, so exclude those from the snapshot.
+        existing_adapter_parameters = (
+            [
+                (param, param.requires_grad)
+                for name, param in model.named_parameters()
+                if f".{adapter_name}." not in name and not name.endswith(f".{adapter_name}")
+            ]
+            if any(isinstance(module, BaseTunerLayer) for module in model.modules())
+            else []
+        )
+
         is_transformers_like_model = hasattr(getattr(model, "config", None), "model_type")
         if is_transformers_ge_v5 and is_transformers_like_model:
             # TODO remove once transformers < v5.0 is no longer supported
@@ -1056,6 +1068,9 @@ class BaseTuner(nn.Module, ABC):
         # layers will be activated, which we don't want.
         self.set_adapter(self.active_adapters, inference_mode=peft_config.inference_mode)
         self._mark_only_adapters_as_trainable(model)
+
+        for param, requires_grad in existing_adapter_parameters:
+            param.requires_grad = requires_grad
 
         if self.peft_config[adapter_name].inference_mode:
             for n, p in model.named_parameters():
