@@ -37,7 +37,7 @@ from peft import (
     get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
-from peft.utils import infer_device
+from peft.utils import ModulesToSaveWrapper, infer_device
 
 
 class SimpleNet(nn.Module):
@@ -678,6 +678,42 @@ class TestMixedAdapterTypes(unittest.TestCase):
         peft_model.base_model.unmerge_adapter()
         peft_model.delete_adapter(["adapter1"])
         assert not peft_model.peft_config
+
+    def test_delete_active_adapter_keeps_remaining_adapter_active(self):
+        # In a mixed model the adapters usually live on different layers, so the active adapter left after a deletion
+        # cannot be read off a single layer: the first one visited doesn't host the survivor.
+        model = SimpleNet().eval().to(self.torch_device)
+        peft_model = get_peft_model(model, LoraConfig(target_modules=["lin0"]), "adapter0", mixed=True)
+        peft_model.add_adapter("adapter1", LoHaConfig(target_modules=["lin1"]))
+        peft_model.base_model.set_adapter("adapter0")
+
+        peft_model.delete_adapter("adapter0")
+
+        assert set(peft_model.peft_config) == {"adapter1"}
+        assert peft_model.active_adapters == ["adapter1"]
+        for module in peft_model.modules():
+            if isinstance(module, BaseTunerLayer) and "adapter1" in module._all_available_adapter_names():
+                assert module.active_adapters == ["adapter1"]
+
+    def test_delete_multiple_adapters_removes_every_auxiliary_adapter(self):
+        # `_delete_auxiliary_adapter` used to run once after the loop with the leftover loop variable, so only the
+        # last name's `modules_to_save` entry was removed.
+        for names in (["adapter0", "adapter1"], ["adapter1", "adapter0"]):
+            model = SimpleNet().eval().to(self.torch_device)
+            peft_model = get_peft_model(
+                model, LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"]), "adapter0", mixed=True
+            )
+            peft_model.add_adapter("adapter1", LoHaConfig(target_modules=["lin0"], modules_to_save=["lin1"]))
+
+            wrappers = [m for m in peft_model.modules() if isinstance(m, ModulesToSaveWrapper)]
+            assert wrappers
+            assert all(set(w.modules_to_save) == {"adapter0", "adapter1"} for w in wrappers)
+
+            peft_model.delete_adapter(names)
+
+            assert not peft_model.peft_config
+            for wrapper in wrappers:
+                assert not set(wrapper.modules_to_save), f"leftover after deleting {names}"
 
     def test_modules_to_save(self):
         model = SimpleNet().eval().to(self.torch_device)
