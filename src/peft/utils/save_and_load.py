@@ -91,6 +91,13 @@ def _filter_state_dict_for_adapter_name(
     }
 
 
+def _find_bias_key(state_dict: dict[str, torch.Tensor], prefix: str) -> Optional[str]:
+    for bias_name in (prefix + "base_layer.bias", prefix + "bias"):
+        if bias_name in state_dict:
+            return bias_name
+    return None
+
+
 def get_peft_model_state_dict(
     model,
     state_dict=None,
@@ -178,8 +185,8 @@ def get_peft_model_state_dict(
             for k in state_dict:
                 if "lora_" in k:
                     to_return[k] = state_dict[k]
-                    bias_name = k.split("lora_")[0] + "bias"
-                    if bias_name in state_dict:
+                    bias_name = _find_bias_key(state_dict, k.split("lora_")[0])
+                    if bias_name is not None:
                         to_return[bias_name] = state_dict[bias_name]
         else:
             raise NotImplementedError
@@ -215,8 +222,8 @@ def get_peft_model_state_dict(
             for k in state_dict:
                 if "boft_" in k:
                     to_return[k] = state_dict[k]
-                    bias_name = k.split("boft_")[0] + "bias"
-                    if bias_name in state_dict:
+                    bias_name = _find_bias_key(state_dict, k.split("boft_")[0])
+                    if bias_name is not None:
                         to_return[bias_name] = state_dict[bias_name]
         else:
             raise NotImplementedError

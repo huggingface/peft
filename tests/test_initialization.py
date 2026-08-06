@@ -1509,6 +1509,34 @@ class TestLoraInitialization:
                 # only layers targeted with target_modules
                 assert param.requires_grad is ("linear" in name) or ("conv2d" in name)
 
+    def test_lora_with_bias_lora_only_save_load_roundtrip(self, tmp_path, data):
+        # bias="lora_only" trains base_layer.bias, but get_peft_model_state_dict/save_pretrained
+        # used to drop it, so a reloaded adapter did not reproduce the trained output. See #3306.
+        torch.manual_seed(0)
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear", "conv2d"], bias="lora_only")
+        model = get_peft_model(model, config)
+
+        with torch.no_grad():
+            for param in model.parameters():
+                if param.requires_grad:
+                    param.add_(torch.randn_like(param) * 0.1)
+
+        with torch.no_grad():
+            expected = model(data)
+
+        model.save_pretrained(tmp_path)
+        state_dict = load_file(tmp_path / "adapter_model.safetensors")
+        assert any(key.endswith("base_layer.bias") for key in state_dict)
+
+        torch.manual_seed(0)
+        reloaded = PeftModel.from_pretrained(self.get_model(), tmp_path)
+        with torch.no_grad():
+            actual = reloaded(data)
+
+        for exp, act in zip(expected, actual):
+            assert torch.allclose(exp, act)
+
     def test_lora_with_bias_extra_params(self):
         # lora with lora_bias=True
         model = self.get_model()
