@@ -33,6 +33,9 @@ from peft import (
     HRAConfig,
     IA3Config,
     LilyConfig,
+    LNTuningConfig,
+    LoHaConfig,
+    LoKrConfig,
     LoraConfig,
     MissConfig,
     OFTConfig,
@@ -65,7 +68,6 @@ PEFT_ENCODER_DECODER_MODELS_TO_TEST = [
     "peft-internal-testing/tiny-random-BartForConditionalGeneration",
 ]
 
-# TODO Missing from this list are LoKr, LoHa, LN Tuning, add them
 ALL_CONFIGS = [
     (
         AdaLoraConfig,
@@ -171,6 +173,27 @@ ALL_CONFIGS = [
             "r": 8,
             "stride_A": 1,
             "num_B": 2,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        LNTuningConfig,
+        {
+            "target_modules": None,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        LoHaConfig,
+        {
+            "target_modules": None,
+            "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        LoKrConfig,
+        {
+            "target_modules": None,
             "task_type": "SEQ_2_SEQ_LM",
         },
     ),
