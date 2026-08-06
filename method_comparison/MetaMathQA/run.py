@@ -275,6 +275,9 @@ def train(
             with autocast_ctx():
                 outputs = model(**batch, num_items_in_batch=num_items_in_batch)
                 loss = outputs.loss
+                base_model = getattr(model, "base_model", None)
+                if (base_model is not None) and hasattr(base_model, "_get_finegates_loss"):
+                    loss = loss + base_model._get_finegates_loss()
             grad_scaler.scale(loss).backward()
             if grad_norm_clip:
                 grad_scaler.unscale_(optimizer)
