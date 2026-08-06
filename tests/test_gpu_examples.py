@@ -95,6 +95,7 @@ from peft.import_utils import (
     is_diffusers_available,
     is_te_available,
     is_transformers_ge_v5,
+    is_transformers_ge_v5_13_0,
     is_xpu_available,
 )
 from peft.tuners import boft
@@ -6627,6 +6628,19 @@ TP_PLAN = {
 }
 
 
+def _get_tp_kwargs(tp_plan=None, tp_size=WORLD_SIZE):
+    """Build kwargs for from_pretrained to enable tensor parallelism.
+
+    transformers >= 5.13.0 uses the `distributed_config` kwarg (a `DistributedConfig` instance). Older versions use the
+    `tp_plan` and `tp_size` kwargs directly. The `tp_plan`/`tp_size` kwargs were removed in transformers 5.15.0.
+    """
+    if is_transformers_ge_v5_13_0:
+        from transformers.distributed import DistributedConfig
+
+        return {"distributed_config": DistributedConfig(tp_plan=tp_plan, tp_size=tp_size)}
+    return {"tp_plan": tp_plan, "tp_size": tp_size}
+
+
 def _find_free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
@@ -6661,7 +6675,7 @@ def _test_lora_weight_synchronization(rank, world_size, port):
     """
     Test that non-sharded LoRA weights are identical across ranks after training step.
     """
-    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
+    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, **_get_tp_kwargs(tp_plan=TP_PLAN))
     lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
     model = get_peft_model(model, lora_config)
 
@@ -6726,7 +6740,7 @@ def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
 
-    tp_base = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
+    tp_base = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, **_get_tp_kwargs(tp_plan=TP_PLAN))
     tp_base.to(device)
     tp_model = PeftModel.from_pretrained(tp_base, tmp_dir)
 
@@ -6786,7 +6800,7 @@ def _test_save_unsharded_weights(rank, world_size, port, tmp_dir_reference, tmp_
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
 
-    tp_base = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
+    tp_base = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, **_get_tp_kwargs(tp_plan=TP_PLAN))
     tp_base.to(device)
     tp_model = PeftModel.from_pretrained(tp_base, tmp_dir_reference)
     tp_model.save_pretrained(tmp_dir_tp)
@@ -6810,7 +6824,7 @@ def _test_multiple_adapters(rank, world_size, port):
     """Two LoRA adapters coexist on a TP model and can be switched between."""
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
-    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
+    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, **_get_tp_kwargs(tp_plan=TP_PLAN))
     model.to(device)
 
     for adapter_name in ["adapter_a", "adapter_b"]:
@@ -6847,7 +6861,7 @@ def _test_load_adapter_forward(rank, world_size, port, tmp_dir_reference):
 
     dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
 
-    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
+    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, **_get_tp_kwargs(tp_plan=TP_PLAN))
     model.load_adapter(tmp_dir_reference)
     model.to(device)
 
@@ -6894,7 +6908,7 @@ def _test_load_adapter_save(rank, world_size, port, tmp_dir_reference, tmp_dir_t
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
 
-    tp_base = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, tp_plan=TP_PLAN)
+    tp_base = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, **_get_tp_kwargs(tp_plan=TP_PLAN))
     tp_base.load_adapter(tmp_dir_reference)
     tp_base.to(device)
 
