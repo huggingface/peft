@@ -115,9 +115,9 @@ class SupertuningModel(BaseTuner):
 
                 if adapter_name in module.supertuning_values.keys():
                     sparse_params += int(module.supertuning_values[adapter_name].numel())
-                if adapter_name in module.lora_A.keys():
+                if adapter_name in module.supertuning_lora_A.keys():
                     lora_params += int(
-                        module.lora_A[adapter_name].numel() + module.lora_B[adapter_name].numel()
+                        module.supertuning_lora_A[adapter_name].numel() + module.supertuning_lora_B[adapter_name].numel()
                     )
 
         trainable = sparse_params + lora_params

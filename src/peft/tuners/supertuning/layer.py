@@ -82,7 +82,7 @@ class SupertuningLayer(BaseTunerLayer):
     weight during ``merge``. Standard LoRA init is used (Kaiming-uniform for ``A``, zeros for ``B``).
     """
 
-    adapter_layer_names = ("supertuning_values", "lora_A", "lora_B")
+    adapter_layer_names = ("supertuning_values", "supertuning_lora_A", "supertuning_lora_B")
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
@@ -95,9 +95,9 @@ class SupertuningLayer(BaseTunerLayer):
         self.supertuning_rank: dict[str, int] = {}
         self.supertuning_lora_alpha: dict[str, float] = {}
         # LoRA parameters only populated for adapters with r > 0.
-        self.lora_A = nn.ParameterDict({})
-        self.lora_B = nn.ParameterDict({})
-        self.lora_dropout = nn.ModuleDict({})
+        self.supertuning_lora_A = nn.ParameterDict({})
+        self.supertuning_lora_B = nn.ParameterDict({})
+        self.supertuning_lora_dropout = nn.ModuleDict({})
 
         self._disable_adapters = False
         self.merged_adapters = []
@@ -141,15 +141,15 @@ class SupertuningLayer(BaseTunerLayer):
             in_features, out_features = base_layer.in_features, base_layer.out_features
             self.supertuning_rank[adapter_name] = config.r
             self.supertuning_lora_alpha[adapter_name] = float(config.lora_alpha)
-            self.lora_A[adapter_name] = nn.Parameter(
+            self.supertuning_lora_A[adapter_name] = nn.Parameter(
                 torch.empty(config.r, in_features, dtype=torch.float32, device=weight.device)
             )
-            self.lora_B[adapter_name] = nn.Parameter(
+            self.supertuning_lora_B[adapter_name] = nn.Parameter(
                 torch.zeros(out_features, config.r, dtype=torch.float32, device=weight.device)
             )
             # Standard LoRA init: Kaiming-uniform for A, zeros for B (zero contribution at step 0).
-            nn.init.kaiming_uniform_(self.lora_A[adapter_name], a=math.sqrt(5))
-            self.lora_dropout[adapter_name] = (
+            nn.init.kaiming_uniform_(self.supertuning_lora_A[adapter_name], a=math.sqrt(5))
+            self.supertuning_lora_dropout[adapter_name] = (
                 nn.Dropout(p=config.lora_dropout) if config.lora_dropout > 0.0 else nn.Identity()
             )
         else:
@@ -179,8 +179,8 @@ class Linear(nn.Module, SupertuningLayer):
         """Fold LoRA A/B into a dense ``[out_features, in_features]`` weight delta scaled by ``alpha/r``."""
         r = self.supertuning_rank[adapter_name]
         alpha = self.supertuning_lora_alpha[adapter_name]
-        A = self.lora_A[adapter_name]
-        B = self.lora_B[adapter_name]
+        A = self.supertuning_lora_A[adapter_name]
+        B = self.supertuning_lora_B[adapter_name]
         return ((alpha / r) * (B @ A)).to(dtype)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -264,10 +264,10 @@ class Linear(nn.Module, SupertuningLayer):
                 # LoRA parameters are held in fp32 for training stability (matches PEFT LoRA convention).
                 # Activations arriving in bf16/fp16 need to be promoted for the matmul; the LoRA output is
                 # cast back to the result dtype before composition.
-                lora_dtype = self.lora_A[adapter_name].dtype
-                x_dropped = self.lora_dropout[adapter_name](x).to(lora_dtype)
-                lora_out = torch.nn.functional.linear(x_dropped, self.lora_A[adapter_name])
-                lora_out = torch.nn.functional.linear(lora_out, self.lora_B[adapter_name])
+                lora_dtype = self.supertuning_lora_A[adapter_name].dtype
+                x_dropped = self.supertuning_lora_dropout[adapter_name](x).to(lora_dtype)
+                lora_out = torch.nn.functional.linear(x_dropped, self.supertuning_lora_A[adapter_name])
+                lora_out = torch.nn.functional.linear(lora_out, self.supertuning_lora_B[adapter_name])
                 result = result + ((alpha / r) * lora_out).to(result.dtype)
             return result
 
@@ -285,10 +285,10 @@ class Linear(nn.Module, SupertuningLayer):
             if self.supertuning_rank[adapter_name] > 0:
                 r = self.supertuning_rank[adapter_name]
                 alpha = self.supertuning_lora_alpha[adapter_name]
-                lora_dtype = self.lora_A[adapter_name].dtype
-                x_dropped = self.lora_dropout[adapter_name](x).to(lora_dtype)
-                lora_out = torch.nn.functional.linear(x_dropped, self.lora_A[adapter_name])
-                lora_out = torch.nn.functional.linear(lora_out, self.lora_B[adapter_name])
+                lora_dtype = self.supertuning_lora_A[adapter_name].dtype
+                x_dropped = self.supertuning_lora_dropout[adapter_name](x).to(lora_dtype)
+                lora_out = torch.nn.functional.linear(x_dropped, self.supertuning_lora_A[adapter_name])
+                lora_out = torch.nn.functional.linear(lora_out, self.supertuning_lora_B[adapter_name])
                 result = result + ((alpha / r) * lora_out).to(result.dtype)
 
         return result

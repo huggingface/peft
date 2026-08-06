@@ -356,12 +356,12 @@ class TestSupertuning:
 
         # Seed lora_B to a non-zero value so the LoRA contribution is observable
         with torch.no_grad():
-            layer.lora_B["default"].normal_(std=0.02)
+            layer.supertuning_lora_B["default"].normal_(std=0.02)
 
         sparse_delta = torch.zeros_like(weight).reshape(-1).scatter_add(0, indices, values).reshape_as(weight)
         r = layer.supertuning_rank["default"]
         alpha = layer.supertuning_lora_alpha["default"]
-        lora_delta = ((alpha / r) * (layer.lora_B["default"] @ layer.lora_A["default"])).to(weight.dtype)
+        lora_delta = ((alpha / r) * (layer.supertuning_lora_B["default"] @ layer.supertuning_lora_A["default"])).to(weight.dtype)
         effective = weight.detach() + sparse_delta.detach() + lora_delta.detach()
 
         x = torch.randn(3, layer.in_features).to(self.device).to(weight.dtype)
@@ -376,7 +376,7 @@ class TestSupertuning:
 
         # Seed lora_B so the LoRA contribution is non-zero
         with torch.no_grad():
-            layer.lora_B["default"].normal_(std=0.02)
+            layer.supertuning_lora_B["default"].normal_(std=0.02)
 
         weight_before = layer.get_base_layer().weight.detach().clone()
         layer.merge()
@@ -403,8 +403,8 @@ class TestSupertuning:
 
         # Confirm the wrapper's LoRA parameters are fp32 while the base is bf16
         for _, module in model.named_modules():
-            if hasattr(module, "lora_A") and "default" in module.lora_A:
-                assert module.lora_A["default"].dtype == torch.float32
+            if hasattr(module, "lora_A") and "default" in module.supertuning_lora_A:
+                assert module.supertuning_lora_A["default"].dtype == torch.float32
                 assert module.get_base_layer().weight.dtype == torch.bfloat16
                 break
 
@@ -417,7 +417,48 @@ class TestSupertuning:
         # And a backward pass — grads must reach the fp32 LoRA parameters
         out.logits.float().sum().backward()
         for _, module in model.named_modules():
-            if hasattr(module, "lora_A") and "default" in module.lora_A:
-                assert module.lora_A["default"].grad is not None
-                assert module.lora_B["default"].grad is not None
+            if hasattr(module, "lora_A") and "default" in module.supertuning_lora_A:
+                assert module.supertuning_lora_A["default"].grad is not None
+                assert module.supertuning_lora_B["default"].grad is not None
+                break
+
+    def test_supra_lora_parameters_require_grad(self):
+        """LoRA A / B parameters are trainable in Supra mode.
+
+        Regression test for a bug where PEFT's BaseTuner._mark_only_adapters_as_trainable
+        keys off `self.prefix` — the tuner's `prefix = "supertuning_"` combined with the
+        original `lora_A` / `lora_B` naming meant those parameter names did NOT contain the
+        prefix, so the outer freeze pass set their `requires_grad = False`. LoRA B is zero-
+        initialised, so the frozen LoRA silently contributed nothing to the forward pass
+        while training reported "trainable_params: N + LoRA_count" — the Supra hybrid
+        collapsed to pure Super at the given sparsity.
+
+        Renaming the attributes to `supertuning_lora_A` / `supertuning_lora_B` puts them
+        under the tuner's prefix; this test asserts both are counted trainable by
+        the same accounting the PEFT harness uses (sum of p.numel() for p.requires_grad).
+        """
+        torch.manual_seed(0)
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
+        config = SupertuningConfig(target_modules=["q_proj", "v_proj"], sparsity=0.5, r=4)
+        model = get_peft_model(model, config)
+
+        # Harness accounting — this is what tests/method_comparison reports
+        harness_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+        # Our accounting — via get_trainable_parameters_count on the outer tuner model
+        own = model.base_model.get_trainable_parameters_count()
+
+        assert own["lora_parameters"] > 0, "LoRA parameters were allocated but count is zero"
+        assert harness_count == own["trainable_parameters"], (
+            f"Harness ({harness_count}) and internal accounting ({own['trainable_parameters']}) "
+            f"disagree — this typically means LoRA A/B are frozen by the outer freeze pass, i.e. "
+            f"the tuner prefix does not match the LoRA parameter names."
+        )
+
+        # Directly check requires_grad on the LoRA tensors
+        for _, mod in model.named_modules():
+            if hasattr(mod, "supertuning_lora_A") and "default" in mod.supertuning_lora_A:
+                assert mod.supertuning_lora_A["default"].requires_grad, "supertuning_lora_A is frozen"
+                assert mod.supertuning_lora_B["default"].requires_grad, "supertuning_lora_B is frozen"
                 break
