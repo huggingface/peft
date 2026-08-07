@@ -56,6 +56,7 @@ from peft import (
     PromptTuningInit,
     PsoftConfig,
     PveraConfig,
+    RandLoraConfig,
     RoadConfig,
     ShiraConfig,
     TaskType,
@@ -311,6 +312,15 @@ ALL_CONFIGS = [
         {
             "task_type": "CAUSAL_LM",
             "num_virtual_tokens": 10,
+        },
+    ),
+    (
+        RandLoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "r": 8,
+            "randlora_alpha": 1,
         },
     ),
     (

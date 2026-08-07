@@ -554,6 +554,7 @@ class BaseTuner(nn.Module, ABC):
         """
         if adapter_name not in list(self.peft_config.keys()):
             raise ValueError(f"Adapter {adapter_name} does not exist")
+        _check_adapters_not_merged(self.model, adapter_name)
         del self.peft_config[adapter_name]
 
         new_adapter = delete_adapter(
@@ -1540,7 +1541,7 @@ class BaseTuner(nn.Module, ABC):
             f"{cls.__name__}."
         )
 
-    def __getattr__(self, name: str):
+    def __getattr__(self, name: str) -> Any:
         """Forward missing attributes to the wrapped module."""
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
@@ -2522,6 +2523,21 @@ def _delete_auxiliary_adapter(model, adapter_name: str, new_active_adapters: Opt
     for module in model.modules():
         if isinstance(module, AuxiliaryTrainingWrapper):
             module.delete_adapter(adapter_name, new_active_adapters=new_active_adapters)
+
+
+def _check_adapters_not_merged(model: nn.Module, adapter_names: str | Sequence[str]) -> None:
+    if isinstance(adapter_names, str):
+        adapter_names = [adapter_names]
+
+    merged_adapters = {
+        adapter_name
+        for module in model.modules()
+        if isinstance(module, BaseTunerLayer)
+        for adapter_name in module.merged_adapters
+    }
+    still_merged = sorted(set(adapter_names) & merged_adapters)
+    if still_merged:
+        raise ValueError(f"Cannot delete adapter(s) {still_merged} while they are merged. Please unmerge them first.")
 
 
 def delete_adapter(
