@@ -41,10 +41,11 @@ class SupertuningLayer(BaseTunerLayer):
 
     # Layers that may contain (trainable) adapter parameters.
     adapter_layer_names = ("supertuning_values", "supertuning_lora_A", "supertuning_lora_B")
-    # Other per-adapter attributes that are not themselves parameters but are needed to configure
-    # the forward / merge paths (rank, scaling, dropout module, sparse-support buffer).
+    # Other per-adapter attributes needed to configure the forward / merge paths. Deliberately
+    # excludes `supertuning_indices` (BufferDict of int32 tensors) — including it would trigger
+    # PEFT's `_move_adapter_to_device_of_base_layer` to cast the buffer to the base layer's
+    # float dtype, and `scatter_add`'s subsequent `.to(int64)` would then read garbage.
     other_param_names = (
-        "supertuning_indices",
         "supertuning_rank",
         "supertuning_lora_alpha",
         "supertuning_lora_dropout",

@@ -72,6 +72,12 @@ class TestSupertuning:
             indices = state_dict[key.replace("supertuning_values", "supertuning_indices")]
             assert values.ndim == 1
             assert indices.shape == values.shape
+            # Indices MUST stay integer-typed. Regression guard: if PEFT's `other_param_names`
+            # machinery ever casts the BufferDict to a float dtype, `scatter_add` would read
+            # garbage from `.to(int64)` on those floats and produce out-of-bounds asserts on GPU.
+            assert not indices.is_floating_point(), (
+                f"supertuning_indices must not be cast to a floating-point dtype (got {indices.dtype})"
+            )
 
     def test_supertuning_magnitude_scoring_populates_indices(self):
         """Magnitude scoring runs at construction time (data-free) and populates a non-empty support."""
