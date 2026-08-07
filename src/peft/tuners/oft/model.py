@@ -183,3 +183,12 @@ class OFTModel(BaseTuner):
             raise ValueError("Cannot merge OFT layers when the model is gptq quantized")
         if self.peft_config.get("layer_replication"):
             raise ValueError("Cannot merge OFT layers when base model layers are replicated")
+
+    @classmethod
+    def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
+        peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
+        if any(".oft_r." in key for key in peft_model_state_dict):
+            raise ValueError(
+                "Trying to load old OFT checkpoint, which is no longer supported. Please install PEFT <= v0.15.2 to load it or train a new OFT adapter."
+            )
+        return peft_model_state_dict
