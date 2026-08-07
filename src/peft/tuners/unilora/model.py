@@ -251,4 +251,6 @@ class UniLoraModel(BaseTuner):
                     if (("unilora_indices" in k or "unilora_scales" in k) and f".{adapter_name}" in k)
                 }
             )
+
+        to_return.update(cls._get_learnable_bias_state_dict(model, state_dict, config))
         return to_return

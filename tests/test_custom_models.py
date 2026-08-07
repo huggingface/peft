@@ -24,8 +24,10 @@ from unittest.mock import MagicMock
 
 import pytest
 import torch
+import torch.distributed as dist
 from safetensors.torch import load_file as safe_load_file
 from torch import nn
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
 from transformers.pytorch_utils import Conv1D
 
@@ -71,6 +73,8 @@ from peft import (
     VeraConfig,
     WaveFTConfig,
     get_peft_model,
+    get_peft_model_state_dict,
+    set_peft_model_state_dict,
 )
 from peft.tuners import lora
 from peft.tuners.lora.config import BdLoraConfig
@@ -7624,3 +7628,118 @@ class TestDefaultTargetModules:
         model = get_peft_model(model, config)
         assert model.targeted_module_names == ["lin0", "lin1"]
         assert model.peft_config["default"].target_modules == {"lin0", "lin1"}
+
+
+@pytest.mark.skipif(platform.system() != "Linux", reason="Run FSDP tests only on Linux")
+@pytest.mark.skipif(not dist.is_available(), reason="These tests require torch.distributed")
+class TestPeftFsdpStateDict:
+    """
+    Tests with FSDP-wrapped models.
+
+    FSDP is a special case because it wraps the whole module, thus modifying the module structure and state dict.
+
+    This test would be better suited to `test_low_level_api.py` but it's put here because we already have all the
+    machinery ready to check each PEFT method.
+    """
+
+    transformers_class = MockTransformerWrapper
+    torch_device = infer_device()
+
+    def prepare_inputs_for_testing(self):
+        X = torch.arange(90).view(9, 10).to(self.torch_device)
+        return {"X": X}
+
+    @pytest.fixture(autouse=True, scope="class")
+    def fsdp_process_group(self):
+        # robust and minimal FSDP setup
+        dist.init_process_group(
+            backend="gloo",
+            store=dist.HashStore(),
+            rank=0,
+            world_size=1,
+        )
+        try:
+            yield
+        finally:
+            dist.destroy_process_group()
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_save_load_roundtrip_fsdp_wrapped(self, test_name, model_id, config_cls, config_kwargs):
+        # using get_peft_model_state_dict & set_peft_model_state_dict because instead of save_pretrained &
+        # from_pretrained because:
+        #   1. avoid disk, do everything in memory
+        #   2. ensures that this works with PEFT integrations like Transformers, Diffusers
+        if config_kwargs.get("target_parameters"):
+            pytest.skip("Skipping FSDP + target_paramters because of clash with nn.utils.parametrize on sharded model")
+        if (config_cls == DeftConfig) and config_kwargs.get("para"):
+            pytest.skip(reason="DEFT with PaRa does not change the base output")
+
+        config_kwargs_init_false = set_init_weights_false(config_cls, config_kwargs)
+        config = config_cls(**config_kwargs_init_false)
+        torch.manual_seed(0)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config).eval()
+        model = FSDP(model, use_orig_params=True, device_id=self.torch_device)
+
+        X = self.prepare_inputs_for_testing()
+        with torch.no_grad():
+            output_before = model(**X)
+
+        state_dict = get_peft_model_state_dict(model)
+        del model
+
+        torch.manual_seed(0)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config_cls(**config_kwargs)).eval()
+        # note: we don't make a sanity check that without setting the state dict, the results differ; this is on
+        # purpose, because otherwise we can't check PEFT methods that don't have non-identity inits
+        set_peft_model_state_dict(model, state_dict)
+
+        with torch.no_grad():
+            output_after = model(**X)
+        assert torch.allclose(output_after, output_before)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_save_load_roundtrip_fsdp_wrapped_learnable_bias(self, test_name, model_id, config_cls, config_kwargs):
+        # same test as test_save_load_roundtrip_fsdp_wrapped, but for the specific case that the bias is learnable
+        if config_kwargs.get("target_parameters"):
+            pytest.skip("Skipping FSDP + target_paramters")
+        if (config_cls == DeftConfig) and config_kwargs.get("para"):
+            pytest.skip(reason="DEFT with PaRa does not change the base output")
+
+        config_kwargs_init_false = set_init_weights_false(config_cls, config_kwargs)
+        config = config_cls(**config_kwargs_init_false)
+        if not hasattr(config, "bias"):
+            pytest.skip(reason="This test requires the PEFT method to support training the bias directly")
+
+        # Manually enable bias learning, don't rely on the test matrix to include an example with bias learning
+        # enabled. The bias="all" option should always exist, otherwise we would need to pass something like "lora_only"
+        config.bias = "all"
+        torch.manual_seed(0)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config).eval()
+
+        # modify the bias
+        for name, module in model.named_modules():
+            if getattr(module, "bias", None) is not None:
+                with torch.no_grad():
+                    module.bias.data.fill_(1.23)
+
+        model = FSDP(model, use_orig_params=True, device_id=self.torch_device)
+        X = self.prepare_inputs_for_testing()
+        with torch.no_grad():
+            output_before = model(**X)
+
+        state_dict = get_peft_model_state_dict(model)
+        del model
+
+        torch.manual_seed(0)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config_cls(**config_kwargs)).eval()
+        # note: we don't make a sanity check that without setting the state dict, the results differ; this is on
+        # purpose, because otherwise we can't check PEFT methods that don't have non-identity inits
+        set_peft_model_state_dict(model, state_dict)
+
+        with torch.no_grad():
+            output_after = model(**X)
+        assert torch.allclose(output_after, output_before)

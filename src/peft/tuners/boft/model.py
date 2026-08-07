@@ -139,26 +139,3 @@ class BOFTModel(BaseTuner):
             boft_config.fan_in_fan_out = False
         new_module = layer_cls(target, adapter_name, config=boft_config, **kwargs)
         return new_module
-
-    @classmethod
-    def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
-        to_return = super()._get_adapter_state_dict(model, config, adapter_name, state_dict, unwanted_adapter_names)
-
-        bias = config.bias
-        if bias == "none":
-            pass
-        elif bias == "all":
-            to_return.update({k: v for k, v in state_dict.items() if (k == "bias") or k.endswith(".bias")})
-        elif bias == "boft_only":
-            for module_name, module in model.named_modules():
-                if module_name.startswith("_fsdp_wrapped_module."):
-                    module_name = module_name.removeprefix("_fsdp_wrapped_module.")
-                if not isinstance(module, BOFTLayer):
-                    continue
-                # the bias of the targeted module is located on the base layer of the tuner layer
-                bias_name = f"{module_name}.base_layer.bias" if module_name else "base_layer.bias"
-                if bias_name in state_dict:
-                    to_return[bias_name] = state_dict[bias_name]
-        else:
-            raise NotImplementedError
-        return to_return

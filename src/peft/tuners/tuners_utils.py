@@ -1424,8 +1424,8 @@ class BaseTuner(nn.Module, ABC):
     # adapter name). The conversion is split into two concerns that can be overridden independently:
     #
     # - selection: which entries belong to the given adapter and with which values they are saved
-    #   (`_get_adapter_state_dict`; overridden e.g. by LoRA to handle the `bias` argument and by VeRA for the shared
-    #   projections)
+    #   (`_get_adapter_state_dict`; `_get_learnable_bias_state_dict` deals with cases like bias="all" if the PEFT
+    #   method supports that)
     # - key translation: how a single model state_dict key maps to the adapter-name-independent checkpoint key
     #   (`_remove_adapter_name_from_key`; overridden e.g. by VB-LoRA and PEANuT due to their special key formats)
     #
@@ -1468,7 +1468,33 @@ class BaseTuner(nn.Module, ABC):
         `['base_model.model.lin0.<peft_method_param_name>.<adapter_name>', ...]`
         """
         prefixes = _get_tuner_state_dict_key_prefixes(model)
-        return _filter_state_dict_by_key_prefixes(state_dict, prefixes)
+        to_return = _filter_state_dict_by_key_prefixes(state_dict, prefixes)
+        to_return.update(cls._get_learnable_bias_state_dict(model, state_dict, config))
+        return to_return
+
+    @classmethod
+    def _get_learnable_bias_state_dict(
+        cls, model: nn.Module, state_dict: dict[str, torch.Tensor], config: PeftConfig
+    ) -> dict[str, torch.Tensor]:
+        bias = getattr(config, "bias", "none")
+        if bias == "none":
+            return {}
+
+        if bias == "all":
+            return {k: v for k, v in state_dict.items() if (k == "bias") or k.endswith(".bias")}
+
+        bias_state_dict = {}
+        if bias.endswith("_only"):  # e.g. 'lora_only'
+            for module_name, module in model.named_modules():
+                if module_name.startswith("_fsdp_wrapped_module."):
+                    module_name = module_name.removeprefix("_fsdp_wrapped_module.")
+                if not isinstance(module, BaseTunerLayer):
+                    continue
+                # the bias of the targeted module is located on the base layer of the tuner layer
+                bias_name = f"{module_name}.base_layer.bias" if module_name else "base_layer.bias"
+                if bias_name in state_dict:
+                    bias_state_dict[bias_name] = state_dict[bias_name]
+        return bias_state_dict
 
     @classmethod
     def _remove_adapter_name_from_key(cls, key: str, adapter_name: str) -> str:
@@ -1506,7 +1532,7 @@ class BaseTuner(nn.Module, ABC):
 
         As an example, the returned keys could look like this:
         - before: `['base_model.model.lin0.<peft_method_param_name>', ...]`
-        -  after: `['base_model.model.lin0.<peft_method_param_name>'.<adapter_name>, ...]`
+        -  after: `['base_model.model.lin0.<peft_method_param_name>.<adapter_name>', ...]`
         """
         prefixes = _get_tuner_state_dict_key_prefixes(model, adapter_name=adapter_name)
         checkpoint_key_to_model_key = {}
@@ -1725,7 +1751,25 @@ def _is_key_under_prefixes(key: str, prefixes: set[str]) -> bool:
 
 
 def _filter_state_dict_by_key_prefixes(state_dict: dict[str, Any], prefixes: set[str]) -> dict[str, Any]:
-    """Return the entries of the state_dict whose key equals, or lies under, one of the given key prefixes."""
+    """
+    Return the entries of the general model state_dict whose entries belongs to the PEFT method, as identified by the
+    prefixes.
+
+    Example:
+
+    ```py
+    >>> prefixes
+    {'lin0.road_alpha', 'lin0.road_theta'}
+
+    >>> list(state_dict.keys())
+    ['lin0.base_layer.weight', 'lin0.base_layer.bias',
+     'lin0.road_theta.default', 'lin0.road_alpha.default',
+     'lin1.weight', 'lin1.bias']
+
+    >>> list(_filter_state_dict_by_key_prefixes(state_dict, prefixes))
+    ['lin0.road_theta.default', 'lin0.road_alpha.default']
+    ```
+    """
     return {key: value for key, value in state_dict.items() if _is_key_under_prefixes(key, prefixes)}
 
 

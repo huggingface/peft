@@ -988,24 +988,6 @@ class LoraModel(BaseTuner):
     def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
         to_return = super()._get_adapter_state_dict(model, config, adapter_name, state_dict, unwanted_adapter_names)
 
-        bias = config.bias
-        if bias == "none":
-            pass
-        elif bias == "all":
-            to_return.update({k: v for k, v in state_dict.items() if (k == "bias") or k.endswith(".bias")})
-        elif bias == "lora_only":
-            for module_name, module in model.named_modules():
-                if module_name.startswith("_fsdp_wrapped_module."):
-                    module_name = module_name.removeprefix("_fsdp_wrapped_module.")
-                if not isinstance(module, LoraLayer):
-                    continue
-                # the bias of the targeted module is located on the base layer of the tuner layer
-                bias_name = f"{module_name}.base_layer.bias" if module_name else "base_layer.bias"
-                if bias_name in state_dict:
-                    to_return[bias_name] = state_dict[bias_name]
-        else:
-            raise NotImplementedError
-
         if config.use_dora:
             # Here we take care of a refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a
             # ModuleDict with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. Since

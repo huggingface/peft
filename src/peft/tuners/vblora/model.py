@@ -224,6 +224,7 @@ class VBLoRAModel(BaseTuner):
         to_return["base_model.vblora_vector_bank." + adapter_name] = state_dict[
             "base_model.vblora_vector_bank." + adapter_name
         ]
+        to_return.update(cls._get_learnable_bias_state_dict(model, state_dict, config))
         return to_return
 
     @classmethod

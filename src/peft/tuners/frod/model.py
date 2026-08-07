@@ -333,6 +333,8 @@ class FrodModel(BaseTuner):
                     if k.startswith(projection_prefixes) and k.endswith(f".{adapter_name}")
                 }
             )
+
+        to_return.update(cls._get_learnable_bias_state_dict(model, state_dict, config))
         return to_return
 
     @classmethod

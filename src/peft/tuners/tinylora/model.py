@@ -343,6 +343,8 @@ class TinyLoraModel(BaseTuner):
             for k in state_dict:
                 if ".tinylora_P." in k and adapter_name in k:
                     to_return[k] = state_dict[k]
+
+        to_return.update(cls._get_learnable_bias_state_dict(model, state_dict, config))
         return to_return
 
     @classmethod
