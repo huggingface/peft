@@ -25,13 +25,13 @@ class SupertuningModel(BaseTuner):
     """Super-Tuning tuner (arXiv:2607.09287).
 
     Freezes the base weights and trains only a sparse support of scalar entries selected by weight magnitude (paper's
-    best single-mechanism configuration; data-free). When ``config.r`` is set, additionally allocates LoRA A/B
-    parameters composed additively with the sparse support — the paper's Supra hybrid.
+    best single-mechanism configuration; data-free). When `config.r` is set, additionally allocates LoRA A/B parameters
+    composed additively with the sparse support — the paper's Supra hybrid.
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The base model to adapt.
         config ([`SupertuningConfig`]): The Supertuning configuration.
-        adapter_name (`str`): The adapter name. Defaults to ``"default"``.
+        adapter_name (`str`): The adapter name. Defaults to `"default"`.
         low_cpu_mem_usage (`bool`, *optional*): Create empty adapter weights on the meta device to speed up loading.
 
     Returns:
@@ -52,7 +52,10 @@ class SupertuningModel(BaseTuner):
 
         ```py
         >>> config = SupertuningConfig(
-        ...     target_modules=["q_proj", "v_proj"], sparsity=0.99, r=8, lora_alpha=16,
+        ...     target_modules=["q_proj", "v_proj"],
+        ...     sparsity=0.99,
+        ...     r=8,
+        ...     lora_alpha=16,
         ... )
         >>> model = get_peft_model(base, config)
         ```
@@ -101,30 +104,3 @@ class SupertuningModel(BaseTuner):
                 # Adding an additional adapter: it is not automatically trainable.
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
-
-    def get_trainable_parameters_count(self, adapter_name: str = "default") -> dict:
-        """Report per-adapter trainable-parameter accounting for reporting / test assertions."""
-        total_params = 0
-        sparse_params = 0
-        lora_params = 0
-
-        for _, module in self.model.named_modules():
-            if isinstance(module, Linear):
-                base_layer = module.get_base_layer()
-                total_params += base_layer.weight.numel()
-
-                if adapter_name in module.supertuning_values.keys():
-                    sparse_params += int(module.supertuning_values[adapter_name].numel())
-                if adapter_name in module.supertuning_lora_A.keys():
-                    lora_params += int(
-                        module.supertuning_lora_A[adapter_name].numel() + module.supertuning_lora_B[adapter_name].numel()
-                    )
-
-        trainable = sparse_params + lora_params
-        return {
-            "total_parameters": total_params,
-            "sparse_parameters": sparse_params,
-            "lora_parameters": lora_params,
-            "trainable_parameters": trainable,
-            "sparsity": 1.0 - (trainable / total_params if total_params > 0 else 0),
-        }

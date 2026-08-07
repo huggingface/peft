@@ -762,7 +762,7 @@ TEST_CASES = [
         "Vanilla MLP 4 Supertuning bottom-k",
         "MLP",
         SupertuningConfig,
-        {"sparsity": 0.5, "target_modules": ["lin0", "lin1"], "selection_direction": "bottom"},
+        {"sparsity": 0.5, "target_modules": ["lin0", "lin1"], "select_top": False},
     ),
     (
         "Vanilla MLP 5 Supertuning Supra (r=2)",

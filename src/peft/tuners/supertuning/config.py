@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Optional, Union
 
@@ -26,38 +27,44 @@ class SupertuningConfig(PeftConfig):
     """Configuration class for [`SupertuningModel`].
 
     Super-Tuning (arXiv:2607.09287) freezes the base weight and trains only a sparse support of scalar entries,
-    selected by weight magnitude. Setting ``r`` additionally allocates a LoRA-style low-rank adapter on top of the
-    sparse support (the paper's "Supra" hybrid).
+    selected by weight magnitude. Setting `r` additionally allocates a LoRA-style low-rank adapter on top of the sparse
+    support (the paper's "Supra" hybrid).
 
-    The default (magnitude scoring, ``r=None``) reproduces the paper's best-reported single-mechanism configuration:
-    on Meta-Llama-3-8B, ``magnitude-topk`` at 79.02% average beats ``Wanda`` at 78.66% AND requires no calibration
-    pass.
+    The default (magnitude scoring, `r=None`) reproduces the paper's best-reported single-mechanism configuration: on
+    Meta-Llama-3-8B, `magnitude-topk` at 79.02% average beats `Wanda` at 78.66% AND requires no calibration pass.
+    Wanda-style activation-weighted scoring is not offered by this implementation.
 
     Args:
         target_modules (`Optional[Union[List[str], str]]`):
-            The names of the modules to apply the adapter to. String → regex match; list → suffix / exact match; None
-            → model-architecture default.
+            The names of the modules to apply the adapter to. String → regex match; list → suffix / exact match; None →
+            model-architecture default.
         modules_to_save (`Optional[List[str]]`):
             Modules outside the Supertuning layers that should also be trainable and saved in the final checkpoint
             (e.g. randomly-initialized classifier heads).
         sparsity (`float`):
-            Target sparsity ratio in ``[0.0, 1.0)``. ``0.9`` = 10% of weight entries are trainable. Defaults to ``0.5``.
-        selection_direction (`str`):
-            Which end of the magnitude score to keep as the trainable support. ``"top"`` keeps the largest-magnitude
-            entries (paper's Super / Supra); ``"bottom"`` keeps the smallest (paper's ``-bottom`` variants). Paper
-            reports the best direction is model- and task-dependent. Defaults to ``"top"``.
+            Target sparsity ratio in `[0.0, 1.0)`. `0.99` = 1% of weight entries are trainable. Defaults to `0.99`.
+        select_top (`bool`):
+            Which end of the magnitude score to keep as the trainable support. `True` keeps the largest-magnitude
+            entries (paper's Super / Supra); `False` keeps the smallest (paper's `-bottom` variants). The paper reports
+            that the best direction is model- and task-dependent. Defaults to `True`.
         r (`Optional[int]`):
-            LoRA rank for the "Supra" hybrid. When ``None`` (default), pure Super — sparse support only. When set to
-            a positive integer, additionally allocates LoRA ``A`` (``[r, in_features]``) and ``B``
-            (``[out_features, r]``) parameters whose contribution is added to the sparse support in the forward pass.
+            LoRA rank for the "Supra" hybrid. When `None` (default), only the sparse support is trainable (Super mode).
+            When set to a positive integer, additionally allocates LoRA `A` (`[r, in_features]`) and `B`
+            (`[out_features, r]`) parameters whose contribution is added to the sparse support in the forward pass.
         lora_alpha (`Optional[float]`):
-            LoRA scaling factor for Supra mode. If ``None`` and ``r`` is set, defaults to ``2 * r``. Ignored when
-            ``r is None``.
+            LoRA scaling factor for Supra mode. If `None` and `r` is set, defaults to `2 * r`. Ignored when `r is
+            None`.
         lora_dropout (`float`):
-            LoRA dropout probability for Supra mode. Defaults to ``0.0``. Ignored when ``r is None``.
+            LoRA dropout probability for Supra mode. Defaults to `0.0`. Ignored when `r is None`.
         init_weights (`bool`):
-            Whether to initialize the trainable sparse values to zero (an identity update) at construction. Defaults
-            to ``True``. LoRA ``A`` uses Kaiming-uniform, ``B`` uses zero (standard LoRA init) regardless.
+            When `True` (default), the sparse `values` are zero-initialised and LoRA `B` is zero-initialised — the
+            adapter is an identity update at construction. When `False`, both are Kaiming-uniform (used by tests to
+            exercise a non-trivial adapter). LoRA `A` uses Kaiming-uniform in both cases.
+        save_precomputed_indices (`bool`):
+            Whether to save the sparse-support indices in the state dict. Defaults to `True`. Set to `False` to trim
+            checkpoint size — indices will be reconstructed deterministically from the base weight magnitudes at load
+            time. Reconstruction assumes the base model weights are byte-identical to those used at training time;
+            small numerical drift can cause topk tie-breaks to differ.
 
     Paper: https://arxiv.org/abs/2607.09287
     """
@@ -81,19 +88,17 @@ class SupertuningConfig(PeftConfig):
         },
     )
     sparsity: float = field(
-        default=0.5,
+        default=0.99,
         metadata={
-            "help": (
-                "Target sparsity ratio in [0.0, 1.0). E.g. 0.9 = 10% of weight entries are trainable."
-            ),
+            "help": ("Target sparsity ratio in [0.0, 1.0). E.g. 0.99 = 1% of weight entries are trainable."),
         },
     )
-    selection_direction: str = field(
-        default="top",
+    select_top: bool = field(
+        default=True,
         metadata={
             "help": (
-                "Which end of the magnitude score to keep as the trainable support. 'top' keeps the "
-                "largest-magnitude entries (paper's Super/Supra); 'bottom' keeps the smallest ('-bottom' variants)."
+                "Which end of the magnitude score to keep as the trainable support. True keeps the "
+                "largest-magnitude entries (paper's Super/Supra); False keeps the smallest ('-bottom' variants)."
             )
         },
     )
@@ -101,8 +106,8 @@ class SupertuningConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "LoRA rank for the 'Supra' hybrid. When None (default), pure Super — sparse support only. When set, "
-                "additionally allocates LoRA A/B parameters composed additively with the sparse support."
+                "LoRA rank for the 'Supra' hybrid. When None (default), only the sparse support is trainable "
+                "(Super mode). When set, additionally allocates LoRA A/B parameters composed additively."
             )
         },
     )
@@ -118,8 +123,17 @@ class SupertuningConfig(PeftConfig):
         default=True,
         metadata={
             "help": (
-                "Whether to initialize the trainable sparse values to zero (identity update). LoRA A/B init is "
-                "unaffected — Kaiming-uniform for A, zeros for B, matching the LoRA convention."
+                "When True (default), sparse `values` and LoRA `B` are zero-initialised (identity update). "
+                "When False, both are Kaiming-uniform (non-identity — used by tests)."
+            )
+        },
+    )
+    save_precomputed_indices: bool = field(
+        default=True,
+        metadata={
+            "help": (
+                "Whether to save the sparse-support indices in the state dict. Set False to trim checkpoint "
+                "size; indices reconstruct deterministically from base weight magnitudes at load time."
             )
         },
     )
@@ -134,9 +148,6 @@ class SupertuningConfig(PeftConfig):
         if not 0.0 <= self.sparsity < 1.0:
             raise ValueError(f"sparsity must be in [0.0, 1.0), got {self.sparsity}")
 
-        if self.selection_direction not in ("top", "bottom"):
-            raise ValueError(f"selection_direction must be 'top' or 'bottom', got {self.selection_direction!r}")
-
         if self.r is not None:
             if not isinstance(self.r, int) or self.r <= 0:
                 raise ValueError(f"r must be a positive integer or None, got {self.r!r}")
@@ -148,3 +159,10 @@ class SupertuningConfig(PeftConfig):
 
         if not 0.0 <= self.lora_dropout < 1.0:
             raise ValueError(f"lora_dropout must be in [0.0, 1.0), got {self.lora_dropout}")
+
+        if not self.save_precomputed_indices:
+            warnings.warn(
+                "save_precomputed_indices=False: sparse-support indices will be recomputed from base weight "
+                "magnitudes at load time. This assumes the base model is byte-identical to training time; "
+                "numerical drift can cause topk tie-breaks to differ."
+            )

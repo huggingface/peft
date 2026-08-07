@@ -18,7 +18,7 @@ rendered properly in your Markdown viewer.
 
 [Super-Tuning](https://huggingface.co/papers/2607.09287) is a sparse fine-tuning method that freezes the base weight and trains only a sparse support of scalar entries selected by weight magnitude — a distinct point in the trainable-parameter Pareto vs LoRA / IA³. Setting `r` additionally allocates a LoRA-style low-rank adapter composed additively on top of the sparse support (the paper's "Supra" hybrid).
 
-Default scoring is magnitude-only and data-free. The paper's 8B ablation reports `magnitude-topk` at 79.02% average outperforming Wanda-weighted saliency at 78.66% while requiring no calibration pass.
+Default scoring is magnitude-only and data-free. The paper's 8B ablation reports `magnitude-topk` at 79.02% average outperforming Wanda-weighted saliency at 78.66% while requiring no calibration pass. Wanda-style activation-weighted scoring is not offered by this implementation.
 
 Super-Tuning currently has the following constraint:
 

@@ -9,7 +9,7 @@
   "peft_type": "SUPERTUNING",
   "r": 8,
   "revision": null,
-  "selection_direction": "top",
+  "select_top": true,
   "sparsity": 0.99,
   "target_modules": [
     "q_proj",

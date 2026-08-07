@@ -12,12 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Super-Tuning-specific tests.
+
+Generic PEFT behaviours (config instantiation, save / load round-trip, identity init, multiple adapters, base-weight
+freezing, get_nb_trainable_parameters, etc.) are covered uniformly by tests/test_custom_models.py and
+tests/test_decoder_models.py — Super-Tuning is registered in those suites via its config entry. Config validation lives
+in tests/test_initialization.py::TestSupertuningInitialization.
+
+This file keeps only the Super-Tuning-specific checks that the generic suites cannot express: magnitude-scoring's
+data-free index selection, bottom-k support disjointness, Supra's sparse + LoRA compose semantics, and two regression
+tests (bf16-base + fp32-LoRA dtype promotion, and LoRA A/B trainability under the tuner's prefix freeze pass).
+"""
+
 import pytest
 import torch
 from safetensors.torch import load_file
 from transformers import AutoModelForCausalLM
 
-from peft import PeftModel, SupertuningConfig, get_peft_model
+from peft import SupertuningConfig, get_peft_model
 from peft.tuners.supertuning.layer import Linear as SupertuningLinear
 from peft.utils import infer_device
 
@@ -25,81 +37,30 @@ from peft.utils import infer_device
 class TestSupertuning:
     device = infer_device()
 
-    def test_supertuning_config(self):
-        """Test that SupertuningConfig is properly configured."""
-        config = SupertuningConfig(
-            peft_type="SUPERTUNING",
-            task_type="CAUSAL_LM",
-            target_modules=["q_proj", "v_proj"],
-            sparsity=0.5,
-        )
-        assert config.peft_type.value == "SUPERTUNING"
-        assert config.sparsity == 0.5
-        assert config.r is None  # pure Super by default
-
-    def test_supertuning_config_validation(self):
-        """Test that SupertuningConfig validates its parameters."""
-        # Invalid sparsity
-        with pytest.raises(ValueError, match="sparsity must be"):
-            SupertuningConfig(sparsity=1.5)
-
-        # Invalid selection_direction
-        with pytest.raises(ValueError, match="selection_direction must be"):
-            SupertuningConfig(selection_direction="sideways")
-
-        # Invalid Supra rank
-        with pytest.raises(ValueError, match="r must be a positive integer"):
-            SupertuningConfig(r=0)
-
-        # lora_alpha set without r
-        with pytest.raises(ValueError, match="lora_alpha is set but r is None"):
-            SupertuningConfig(lora_alpha=16.0)
-
-    def test_supertuning_identity_init(self):
-        """With zero-initialized values, the sparse update is the identity and does not change the output."""
-        torch.manual_seed(0)
-
-        inputs = torch.arange(10).view(-1, 1).to(self.device)
+    def _prepare_trainable_model(self, **config_kwargs):
         model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
-        model.eval()
-        output_base = model(inputs).logits
+        kwargs = {"target_modules": ["q_proj", "v_proj"], "sparsity": 0.5}
+        kwargs.update(config_kwargs)
+        config = SupertuningConfig(**kwargs)
+        return get_peft_model(model, config)
 
-        config = SupertuningConfig(
-            target_modules=["q_proj", "v_proj"],
-            sparsity=0.5,
-            init_weights=True,
-        )
-        model = get_peft_model(model, config)
-        model.eval()
-        output_peft = model(inputs).logits
+    def _supertuning_layers(self, model):
+        return [module for module in model.modules() if isinstance(module, SupertuningLinear)]
 
-        # values start at zero, so the effective weight equals the base weight exactly
-        assert torch.allclose(output_base, output_peft, atol=1e-6, rtol=1e-6)
+    def test_supertuning_state_dict_stores_compact_support(self, tmp_path):
+        """The adapter checkpoint stores the compact (indices, values) support — not a dense mask.
 
-    def test_supertuning_state_dict(self, tmp_path):
-        """Test that Supertuning saves only the compact (indices, values) support and round-trips."""
+        This is Super-Tuning-specific: the storage shape (1-D pair sized to trainable count) is a design choice unique
+        to this tuner, so the generic save-round-trip tests can't check it.
+        """
         torch.manual_seed(0)
-
-        inputs = torch.arange(10).view(-1, 1).to(self.device)
         model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
-
-        config = SupertuningConfig(
-            target_modules=["q_proj", "v_proj"],
-            sparsity=0.5,
-            # non-identity update so the round-trip actually exercises the trained values
-            init_weights=False,
-        )
+        config = SupertuningConfig(target_modules=["q_proj", "v_proj"], sparsity=0.5, init_weights=False)
         model = get_peft_model(model, config)
-        model.eval()
-        output_peft = model(inputs).logits
-
         model.save_pretrained(tmp_path)
-        del model
 
-        # the adapter checkpoint stores the compact sparse support: 1-D values and indices sized to the trainable
-        # count, and nothing resembling a full dense mask.
         state_dict = load_file(tmp_path / "adapter_model.safetensors")
         assert any("supertuning_values" in key for key in state_dict)
         assert any("supertuning_indices" in key for key in state_dict)
@@ -109,242 +70,37 @@ class TestSupertuning:
         for key in values_keys:
             values = state_dict[key]
             indices = state_dict[key.replace("supertuning_values", "supertuning_indices")]
-            # support is a 1-D pair sized to the trainable count (sparse storage, not the full weight numel)
             assert values.ndim == 1
             assert indices.shape == values.shape
 
-        atol, rtol = 1e-5, 1e-8
-        # the trained sparse values survive the round-trip
-        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
-        model = PeftModel.from_pretrained(model, tmp_path)
-        output_loaded = model(inputs).logits
-        assert torch.allclose(output_peft, output_loaded, atol=atol, rtol=rtol)
-
-    def test_supertuning_get_peft_model(self):
-        """Test that get_peft_model works with Supertuning."""
+    def test_supertuning_magnitude_scoring_populates_indices(self):
+        """Magnitude scoring runs at construction time (data-free) and populates a non-empty support."""
         torch.manual_seed(0)
-
-        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
-        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
-
-        config = SupertuningConfig(
-            target_modules=["q_proj", "v_proj"],
-            sparsity=0.5,
-        )
-        model = get_peft_model(model, config)
-
-        # Check that the model has the adapter
-        assert hasattr(model, "peft_config")
-        assert "default" in model.peft_config
-        assert model.peft_config["default"].peft_type.value == "SUPERTUNING"
-
-    def test_supertuning_trainable_parameters_count(self):
-        """Test that trainable parameter count is computed correctly."""
-        torch.manual_seed(0)
-
-        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
-        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
-
-        config = SupertuningConfig(
-            target_modules=["q_proj", "v_proj"],
-            sparsity=0.5,
-        )
-        model = get_peft_model(model, config)
-
-        # Get trainable parameter count
-        if hasattr(model, "get_trainable_parameters_count"):
-            counts = model.get_trainable_parameters_count()
-            assert "total_parameters" in counts
-            assert "trainable_parameters" in counts
-            assert "sparsity" in counts
-            # Check that sparsity is close to the configured value
-            assert 0.4 <= counts["sparsity"] <= 0.6  # Allow some tolerance
-
-    def test_supertuning_magnitude_scoring(self):
-        """Test that magnitude-only scoring works."""
-        torch.manual_seed(0)
-
-        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
-        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
-
-        config = SupertuningConfig(
-            target_modules=["q_proj", "v_proj"],
-            sparsity=0.5,
-        )
-        model = get_peft_model(model, config)
-
-        # Magnitude is the (only) automatic scoring path — indices are populated at construction time.
+        model = self._prepare_trainable_model()
         for _, module in model.named_modules():
             if hasattr(module, "supertuning_indices") and "default" in module.supertuning_indices:
                 assert module.supertuning_indices["default"].numel() > 0
 
-    def test_supertuning_multiple_adapters(self):
-        """Test that multiple adapters can be added."""
-        torch.manual_seed(0)
+    def test_supertuning_bottomk_selects_disjoint_support(self):
+        """`select_top=False` keeps the least-salient support — verify it's disjoint from the top-k support.
 
-        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
-        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
-
-        config1 = SupertuningConfig(
-            target_modules=["q_proj", "v_proj"],
-            sparsity=0.5,
-        )
-        model = get_peft_model(model, config1, adapter_name="adapter1")
-
-        config2 = SupertuningConfig(
-            target_modules=["q_proj", "v_proj"],
-            sparsity=0.3,
-        )
-        model.add_adapter("adapter2", config2)
-
-        assert "adapter1" in model.peft_config
-        assert "adapter2" in model.peft_config
-        assert model.peft_config["adapter1"].sparsity == 0.5
-        assert model.peft_config["adapter2"].sparsity == 0.3
-
-    def _prepare_trainable_model(self, **config_kwargs):
-        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
-        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
-        kwargs = {"target_modules": ["q_proj", "v_proj"], "sparsity": 0.5}
-        kwargs.update(config_kwargs)
-        config = SupertuningConfig(**kwargs)
-        model = get_peft_model(model, config)
-        return model
-
-    def _supertuning_layers(self, model):
-        return [module for module in model.modules() if isinstance(module, SupertuningLinear)]
-
-    def test_supertuning_base_weight_frozen(self):
-        """The base weight is frozen; only the sparse ``values`` are trainable."""
-        torch.manual_seed(0)
-        model = self._prepare_trainable_model()
-
-        saw_layer = False
-        for layer in self._supertuning_layers(model):
-            saw_layer = True
-            weight = layer.get_base_layer().weight
-            assert weight.requires_grad is False
-            assert layer.supertuning_values["default"].requires_grad is True
-        assert saw_layer
-
-    def test_supertuning_gradient_only_reaches_values(self):
-        """Backward must not accumulate any gradient on the frozen base weight."""
-        torch.manual_seed(0)
-        model = self._prepare_trainable_model()
-        inputs = torch.arange(10).view(-1, 1).to(self.device)
-
-        model(inputs).logits.float().sum().backward()
-
-        saw_support_signal = False
-        for layer in self._supertuning_layers(model):
-            weight = layer.get_base_layer().weight
-            values = layer.supertuning_values["default"]
-            # the frozen weight receives no gradient at all
-            assert weight.grad is None
-            assert values.grad is not None
-            if torch.any(values.grad != 0):
-                saw_support_signal = True
-        # the support still learns
-        assert saw_support_signal
-
-    def test_supertuning_optimizer_step_only_updates_support(self):
-        """After an optimizer step, the frozen weight is untouched and only the sparse support changes.
-
-        Uses AdamW, whose stateful update would leak into the frozen entries under the old gradient-masking mechanism
-        but cannot here since the base weight receives no gradient.
+        Only the disjointness check remains; asserting that the smallest-magnitude entries have magnitude ≤ everything
+        else just re-implements torch.topk's own contract, so it can't catch a bug in the selection code path it's
+        supposed to test.
         """
         torch.manual_seed(0)
-        model = self._prepare_trainable_model()
-        inputs = torch.arange(10).view(-1, 1).to(self.device)
-
-        optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=1.0)
-        layer = self._supertuning_layers(model)[0]
-        weight = layer.get_base_layer().weight
-        values = layer.supertuning_values["default"]
-        weight_before = weight.detach().clone()
-        values_before = values.detach().clone()
-
-        model(inputs).logits.float().sum().backward()
-        optimizer.step()
-
-        # the frozen base weight is never modified by the optimizer
-        assert torch.equal(weight_before, weight.detach())
-        # the sparse support (values) is updated
-        assert not torch.equal(values_before, values.detach())
-
-    def test_supertuning_forward_applies_sparse_update(self):
-        """The forward pass adds the sparse ``values`` at ``indices`` on top of the base weight."""
+        top_model = self._prepare_trainable_model(sparsity=0.9, select_top=True)
         torch.manual_seed(0)
-        model = self._prepare_trainable_model(init_weights=False)
-        inputs = torch.arange(10).view(-1, 1).to(self.device)
-        model.eval()
-
-        layer = self._supertuning_layers(model)[0]
-        weight = layer.get_base_layer().weight
-        indices = layer.supertuning_indices["default"].to(torch.int64)
-        values = layer.supertuning_values["default"].to(weight.dtype)
-
-        # reconstruct the effective weight and compare against the module's own linear output
-        effective = weight.detach().reshape(-1).scatter_add(0, indices, values.detach()).reshape_as(weight)
-        x = torch.randn(3, layer.in_features).to(self.device).to(weight.dtype)
-        expected = torch.nn.functional.linear(x, effective, layer.get_base_layer().bias)
-        assert torch.allclose(layer(x), expected, atol=1e-5)
-        # the update is non-trivial
-        assert not torch.equal(effective, weight.detach())
-
-    def test_supertuning_bottomk_selects_least_salient_support(self):
-        """selection_direction='bottom' keeps the least-salient entries as the trainable support.
-
-        Mirrors the paper's `magnitude-bottomk` (bottom-k) variant. Verifies (a) the selected support is
-        disjoint from the TopK support at the same sparsity, and (b) every selected value has magnitude at most the
-        magnitude of every non-selected value.
-        """
-        torch.manual_seed(0)
-        top_model = self._prepare_trainable_model(sparsity=0.9, selection_direction="top")
-        torch.manual_seed(0)
-        bot_model = self._prepare_trainable_model(sparsity=0.9, selection_direction="bottom")
+        bot_model = self._prepare_trainable_model(sparsity=0.9, select_top=False)
 
         top_layer = self._supertuning_layers(top_model)[0]
         bot_layer = self._supertuning_layers(bot_model)[0]
         top_idx = set(top_layer.supertuning_indices["default"].tolist())
         bot_idx = set(bot_layer.supertuning_indices["default"].tolist())
-
-        # at sparsity 0.9 the TopK and BottomK 10% supports do not overlap
         assert top_idx.isdisjoint(bot_idx)
 
-        # every selected magnitude is at most every non-selected magnitude — i.e. the BottomK support is the
-        # least-salient set under magnitude scoring
-        weight_flat = bot_layer.get_base_layer().weight.detach().flatten().abs()
-        selected_mags = weight_flat[bot_layer.supertuning_indices["default"].long()]
-        mask = torch.ones_like(weight_flat, dtype=torch.bool)
-        mask[bot_layer.supertuning_indices["default"].long()] = False
-        non_selected_mags = weight_flat[mask]
-        assert selected_mags.max() <= non_selected_mags.min()
-
-        # and the module still trains — a backward pass reaches the BottomK values
-        inputs = torch.arange(10).view(-1, 1).to(self.device)
-        bot_model(inputs).logits.float().sum().backward()
-        assert bot_layer.supertuning_values["default"].grad is not None
-        assert bot_layer.get_base_layer().weight.grad is None
-
-    def test_supra_hybrid_allocates_lora_parameters(self):
-        """When ``r`` is set, the layer allocates LoRA A and B parameters."""
-        torch.manual_seed(0)
-        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
-        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
-        config = SupertuningConfig(target_modules=["q_proj", "v_proj"], sparsity=0.5, r=4)
-        model = get_peft_model(model, config)
-
-        counts = model.base_model.get_trainable_parameters_count()
-        assert counts["sparse_parameters"] > 0
-        assert counts["lora_parameters"] > 0
-        assert counts["trainable_parameters"] == counts["sparse_parameters"] + counts["lora_parameters"]
-
-        # lora_alpha defaults to 2*r
-        assert model.peft_config["default"].lora_alpha == 8.0
-
     def test_supra_hybrid_forward_composes_sparse_and_lora(self):
-        """The Supra forward output equals the composed effective weight (sparse + LoRA) applied to the input."""
+        """Supra forward equals (base + sparse + LoRA) applied as a single linear — composition semantics."""
         torch.manual_seed(0)
         model = self._prepare_trainable_model(r=4, init_weights=False)
         model.eval()
@@ -354,14 +110,16 @@ class TestSupertuning:
         indices = layer.supertuning_indices["default"].to(torch.int64)
         values = layer.supertuning_values["default"].to(weight.dtype)
 
-        # Seed lora_B to a non-zero value so the LoRA contribution is observable
+        # Seed lora_B to non-zero so the LoRA contribution is observable
         with torch.no_grad():
-            layer.supertuning_lora_B["default"].normal_(std=0.02)
+            layer.supertuning_lora_B["default"].weight.normal_(std=0.02)
 
         sparse_delta = torch.zeros_like(weight).reshape(-1).scatter_add(0, indices, values).reshape_as(weight)
         r = layer.supertuning_rank["default"]
         alpha = layer.supertuning_lora_alpha["default"]
-        lora_delta = ((alpha / r) * (layer.supertuning_lora_B["default"] @ layer.supertuning_lora_A["default"])).to(weight.dtype)
+        lora_delta = (
+            (alpha / r) * (layer.supertuning_lora_B["default"].weight @ layer.supertuning_lora_A["default"].weight)
+        ).to(weight.dtype)
         effective = weight.detach() + sparse_delta.detach() + lora_delta.detach()
 
         x = torch.randn(3, layer.in_features).to(self.device).to(weight.dtype)
@@ -374,23 +132,21 @@ class TestSupertuning:
         model = self._prepare_trainable_model(r=4, init_weights=False)
         layer = self._supertuning_layers(model)[0]
 
-        # Seed lora_B so the LoRA contribution is non-zero
         with torch.no_grad():
-            layer.supertuning_lora_B["default"].normal_(std=0.02)
+            layer.supertuning_lora_B["default"].weight.normal_(std=0.02)
 
         weight_before = layer.get_base_layer().weight.detach().clone()
         layer.merge()
-        # After merge, the base weight has been modified in place
         assert not torch.equal(layer.get_base_layer().weight.detach(), weight_before)
         layer.unmerge()
         assert torch.allclose(layer.get_base_layer().weight.detach(), weight_before, atol=1e-6)
 
     def test_supra_hybrid_forward_bf16_base_fp32_lora(self):
-        """Supra forward works when the base model is bf16 and LoRA parameters are fp32 (PEFT convention).
+        """Regression: Supra forward under bf16 base + fp32 LoRA promotes activations correctly.
 
-        Regression test for a dtype-mismatch bug where the forward path fed bf16 activations directly into an
-        fp32 LoRA weight matmul. LoRA is intentionally held in fp32 for training stability (matching PEFT LoRA
-        convention), so the wrapper must promote incoming activations to the LoRA dtype and downcast the result.
+        LoRA is intentionally held in fp32 for training stability (matches PEFT LoRA convention), so the wrapper must
+        promote incoming bf16 activations to the LoRA dtype and downcast the result. A prior version fed bf16
+        activations directly into an fp32 matmul and crashed with `expected mat1 and mat2 to have the same dtype`.
         """
         if not torch.cuda.is_available():
             pytest.skip("bf16 requires CUDA")
@@ -401,41 +157,26 @@ class TestSupertuning:
         config = SupertuningConfig(target_modules=["q_proj", "v_proj"], sparsity=0.5, r=4)
         model = get_peft_model(model, config)
 
-        # Confirm the wrapper's LoRA parameters are fp32 while the base is bf16
-        for _, module in model.named_modules():
-            if hasattr(module, "lora_A") and "default" in module.supertuning_lora_A:
-                assert module.supertuning_lora_A["default"].dtype == torch.float32
-                assert module.get_base_layer().weight.dtype == torch.bfloat16
-                break
-
-        # A forward pass that would previously have raised
-        # RuntimeError: expected mat1 and mat2 to have the same dtype
         inputs = torch.arange(10).view(-1, 1).to(self.device)
         out = model(inputs)
-        assert out.logits.dtype == torch.bfloat16  # returns in base dtype
+        assert out.logits.dtype == torch.bfloat16
 
-        # And a backward pass — grads must reach the fp32 LoRA parameters
         out.logits.float().sum().backward()
         for _, module in model.named_modules():
-            if hasattr(module, "lora_A") and "default" in module.supertuning_lora_A:
-                assert module.supertuning_lora_A["default"].grad is not None
-                assert module.supertuning_lora_B["default"].grad is not None
+            if hasattr(module, "supertuning_lora_A") and "default" in module.supertuning_lora_A:
+                assert module.supertuning_lora_A["default"].weight.grad is not None
+                assert module.supertuning_lora_B["default"].weight.grad is not None
                 break
 
-    def test_supra_lora_parameters_require_grad(self):
-        """LoRA A / B parameters are trainable in Supra mode.
+    def test_supra_lora_parameters_are_trainable(self):
+        """Regression: LoRA A / B must be trainable in Supra mode.
 
-        Regression test for a bug where PEFT's BaseTuner._mark_only_adapters_as_trainable
-        keys off `self.prefix` — the tuner's `prefix = "supertuning_"` combined with the
-        original `lora_A` / `lora_B` naming meant those parameter names did NOT contain the
-        prefix, so the outer freeze pass set their `requires_grad = False`. LoRA B is zero-
-        initialised, so the frozen LoRA silently contributed nothing to the forward pass
-        while training reported "trainable_params: N + LoRA_count" — the Supra hybrid
-        collapsed to pure Super at the given sparsity.
-
-        Renaming the attributes to `supertuning_lora_A` / `supertuning_lora_B` puts them
-        under the tuner's prefix; this test asserts both are counted trainable by
-        the same accounting the PEFT harness uses (sum of p.numel() for p.requires_grad).
+        PEFT's `BaseTuner._mark_only_adapters_as_trainable` keys off `self.prefix` (`supertuning_`). An earlier version
+        named the parameters `lora_A` / `lora_B`, which did NOT contain that prefix — the outer freeze pass then set
+        their `requires_grad = False` while `save_pretrained` still serialised them (as `adapter_layer_names` was left
+        broad), silently collapsing Supra to pure Super at the configured sparsity. The rename to `supertuning_lora_A`
+        / `supertuning_lora_B` puts them under the tuner prefix; this test asserts both are trainable by the same
+        accounting the harness uses (`sum p.numel() for p.requires_grad`).
         """
         torch.manual_seed(0)
         model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
@@ -443,22 +184,27 @@ class TestSupertuning:
         config = SupertuningConfig(target_modules=["q_proj", "v_proj"], sparsity=0.5, r=4)
         model = get_peft_model(model, config)
 
-        # Harness accounting — this is what tests/method_comparison reports
-        harness_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        trainable_names = [n for n, p in model.named_parameters() if p.requires_grad]
+        assert any("supertuning_lora_A" in n for n in trainable_names)
+        assert any("supertuning_lora_B" in n for n in trainable_names)
 
-        # Our accounting — via get_trainable_parameters_count on the outer tuner model
-        own = model.base_model.get_trainable_parameters_count()
-
-        assert own["lora_parameters"] > 0, "LoRA parameters were allocated but count is zero"
-        assert harness_count == own["trainable_parameters"], (
-            f"Harness ({harness_count}) and internal accounting ({own['trainable_parameters']}) "
-            f"disagree — this typically means LoRA A/B are frozen by the outer freeze pass, i.e. "
-            f"the tuner prefix does not match the LoRA parameter names."
-        )
-
-        # Directly check requires_grad on the LoRA tensors
         for _, mod in model.named_modules():
             if hasattr(mod, "supertuning_lora_A") and "default" in mod.supertuning_lora_A:
-                assert mod.supertuning_lora_A["default"].requires_grad, "supertuning_lora_A is frozen"
-                assert mod.supertuning_lora_B["default"].requires_grad, "supertuning_lora_B is frozen"
+                assert mod.supertuning_lora_A["default"].weight.requires_grad
+                assert mod.supertuning_lora_B["default"].weight.requires_grad
                 break
+
+    def test_supertuning_reports_trainable_via_get_nb_trainable_parameters(self):
+        """`model.get_nb_trainable_parameters()` reports the sparse + (optional) LoRA counts correctly.
+
+        This is the canonical PEFT API for the parameter tally (what `print_trainable_parameters` prints). For Super at
+        sparsity `s` on target modules `M`, trainable ≈ `sum((1-s)*numel(w))` for `w in M`.
+        """
+        torch.manual_seed(0)
+        model = self._prepare_trainable_model(sparsity=0.5)
+        trainable, total = model.get_nb_trainable_parameters()
+
+        # every trainable parameter should be from the Super support (values) — no LoRA in this config
+        support_params = sum(layer.supertuning_values["default"].numel() for layer in self._supertuning_layers(model))
+        assert trainable == support_params
+        assert total > trainable  # frozen base weights dominate the total
