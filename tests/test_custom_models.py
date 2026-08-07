@@ -62,6 +62,7 @@ from peft import (
     RandLoraConfig,
     RoadConfig,
     ShiraConfig,
+    SupertuningConfig,
     TaskType,
     TinyLoraConfig,
     TrainableTokensConfig,
@@ -750,6 +751,24 @@ TEST_CASES = [
         "MLP",
         ShiraConfig,
         {"r": 1, "target_modules": ["lin0"]},
+    ),
+    ###############
+    # Supertuning #
+    ###############
+    ("Vanilla MLP 1 Supertuning", "MLP", SupertuningConfig, {"sparsity": 0.5, "target_modules": "lin0"}),
+    ("Vanilla MLP 2 Supertuning", "MLP", SupertuningConfig, {"sparsity": 0.5, "target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 Supertuning", "MLP", SupertuningConfig, {"sparsity": 0.5, "target_modules": ["lin1"]}),
+    (
+        "Vanilla MLP 4 Supertuning bottom-k",
+        "MLP",
+        SupertuningConfig,
+        {"sparsity": 0.5, "target_modules": ["lin0", "lin1"], "select_top": False},
+    ),
+    (
+        "Vanilla MLP 5 Supertuning Supra (r=2)",
+        "MLP",
+        SupertuningConfig,
+        {"sparsity": 0.5, "target_modules": ["lin0"], "r": 2},
     ),
     ########
     # VeRA #
@@ -1517,6 +1536,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         ShiraConfig,
         {"r": 1, "target_modules": ["lin0"], "init_weights": False},
         {"r": 1, "target_modules": ["lin1"], "init_weights": False},
+    ),
+    (
+        "Supertuning Same",
+        "supertuning",
+        SupertuningConfig,
+        {"sparsity": 0.5, "target_modules": ["lin0"], "init_weights": False},
+        {"sparsity": 0.5, "target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "Supertuning Different",
+        "supertuning",
+        SupertuningConfig,
+        {"sparsity": 0.5, "target_modules": ["lin0"], "init_weights": False},
+        {"sparsity": 0.5, "target_modules": ["lin1"], "init_weights": False},
     ),
     # Note: Currently, we cannot target lin0 and lin1 with different adapters when using VeRA. The reason is that the
     # first adapter being created will result in a vera_A or vera_B shape that is too small for the next adapter
@@ -3939,7 +3972,18 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize(
         "config_cls",
-        [IA3Config, BeftConfig, FrodConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig, MissConfig],
+        [
+            IA3Config,
+            BeftConfig,
+            FrodConfig,
+            LoHaConfig,
+            LoKrConfig,
+            LoraConfig,
+            HRAConfig,
+            ShiraConfig,
+            SupertuningConfig,
+            MissConfig,
+        ],
     )
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
@@ -3952,6 +3996,8 @@ class TestPeftCustomModel(PeftCommonTester):
             config_cls = partial(config_cls, r=2)
         if config_cls == ShiraConfig:
             config_cls = partial(config_cls, r=1)
+        if config_cls == SupertuningConfig:
+            config_cls = partial(config_cls, sparsity=0.5)
 
         config0 = config_cls(target_modules=["lin0"], modules_to_save=["lin1"])
         config1 = config_cls(target_modules=["lin0"])
@@ -3972,7 +4018,17 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize(
         "config_cls",
-        [IA3Config, BeftConfig, FrodConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig],
+        [
+            IA3Config,
+            BeftConfig,
+            FrodConfig,
+            LoHaConfig,
+            LoKrConfig,
+            LoraConfig,
+            HRAConfig,
+            ShiraConfig,
+            SupertuningConfig,
+        ],
     )
     def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
         # See issue 1574
@@ -3984,6 +4040,8 @@ class TestPeftCustomModel(PeftCommonTester):
             config_cls = partial(config_cls, r=2)
         if config_cls == ShiraConfig:
             config_cls = partial(config_cls, r=1)
+        if config_cls == SupertuningConfig:
+            config_cls = partial(config_cls, sparsity=0.5)
 
         config0 = config_cls(target_modules=["lin0"])
         config1 = config_cls(target_modules=["lin0"], modules_to_save=["lin1"])

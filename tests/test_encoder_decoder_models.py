@@ -46,6 +46,7 @@ from peft import (
     RandLoraConfig,
     RoadConfig,
     ShiraConfig,
+    SupertuningConfig,
     TaskType,
     TinyLoraConfig,
     UniLoraConfig,
@@ -255,6 +256,15 @@ ALL_CONFIGS = [
         ShiraConfig,
         {
             "r": 1,
+            "task_type": "SEQ_2_SEQ_LM",
+            "target_modules": None,
+            "init_weights": False,
+        },
+    ),
+    (
+        SupertuningConfig,
+        {
+            "sparsity": 0.9,
             "task_type": "SEQ_2_SEQ_LM",
             "target_modules": None,
             "init_weights": False,

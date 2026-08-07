@@ -1,0 +1,276 @@
+# Copyright 2026-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import math
+import warnings
+from typing import Any, Optional
+
+import torch
+from torch import nn
+
+from peft.tuners._buffer_dict import BufferDict
+from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+
+from .config import SupertuningConfig
+
+
+class SupertuningLayer(BaseTunerLayer):
+    """
+    Supertuning layer implementing weight-decomposed sparse fine-tuning.
+
+    The base weight is frozen; a compact `(indices, values)` pair encodes the trainable sparse support: `indices` are
+    flat positions into the weight (selected by magnitude at `update_layer` time), and `values` are the trainable
+    scalars scatter-added onto the base weight in the forward pass.
+
+    When `config.r` is set, additionally allocates LoRA `A` and `B` low-rank layers (the paper's Supra hybrid); their
+    contribution is added to the sparse-composed output in `forward` and folded into the base weight during `merge`.
+    Standard LoRA init: Kaiming-uniform for `A`, zeros for `B` — an identity update at init that matches PEFT's LoRA
+    layer.
+    """
+
+    # Layers that may contain (trainable) adapter parameters.
+    adapter_layer_names = ("supertuning_values", "supertuning_lora_A", "supertuning_lora_B")
+    # Other per-adapter attributes needed to configure the forward / merge paths. Deliberately
+    # excludes `supertuning_indices` (BufferDict of int32 tensors) — including it would trigger
+    # PEFT's `_move_adapter_to_device_of_base_layer` to cast the buffer to the base layer's
+    # float dtype, and `scatter_add`'s subsequent `.to(int64)` would then read garbage.
+    other_param_names = (
+        "supertuning_rank",
+        "supertuning_lora_alpha",
+        "supertuning_lora_dropout",
+    )
+
+    def __init__(self, base_layer: nn.Module, save_precomputed_indices: bool = True, **kwargs) -> None:
+        self.base_layer = base_layer
+        # Trainable sparse quantities, one 1-D parameter per adapter.
+        self.supertuning_values = nn.ParameterDict({})
+        # Flat positions of the sparse support inside the weight. Persistent iff the first-configured adapter
+        # requested save_precomputed_indices=True; when False, the indices are recomputed from base weight
+        # magnitudes at load time (deterministic given identical base weights).
+        self.supertuning_indices = BufferDict(persistent=save_precomputed_indices)
+        # Per-adapter Supra rank / scaling. Rank 0 (falsy) → pure Super for that adapter.
+        self.supertuning_rank: dict[str, int] = {}
+        self.supertuning_lora_alpha: dict[str, float] = {}
+        # LoRA layers only populated for adapters with r > 0. Held as nn.Linear (bias-less) inside a
+        # ModuleDict, mirroring the PEFT LoRA layer convention so tooling that walks module trees
+        # (state-dict save, activation hooks, etc.) sees the same shape as LoRA.
+        self.supertuning_lora_A = nn.ModuleDict({})
+        self.supertuning_lora_B = nn.ModuleDict({})
+        self.supertuning_lora_dropout = nn.ModuleDict({})
+
+        self._disable_adapters = False
+        self.merged_adapters = []
+
+        base_layer = self.get_base_layer()
+        # Expose base-layer shape attributes so downstream code and tests can query the wrapper directly.
+        if hasattr(base_layer, "in_features"):
+            self.in_features = base_layer.in_features
+        if hasattr(base_layer, "out_features"):
+            self.out_features = base_layer.out_features
+
+    def _num_trainable(self, num_params: int, sparsity: float) -> int:
+        """Number of trainable sparse entries at the given sparsity ratio."""
+        return int(num_params * (1 - sparsity))
+
+    def update_layer(self, adapter_name: str, config: SupertuningConfig, **kwargs):
+        """Allocate the sparse support and (optionally) LoRA parameters for a new adapter.
+
+        Indices are selected by weight magnitude (paper's best single-mechanism config; data-free).
+        """
+        base_layer = self.get_base_layer()
+        weight = base_layer.weight.data  # [out_features, in_features]
+
+        # Magnitude scoring — data-free, matches the paper's best-reported single-mechanism configuration.
+        # We flatten the weight and store 1-D positions so `values` can be a compact 1-D parameter that
+        # `scatter_add` maps back into the 2-D weight in the forward pass. Storing 2-D (row, col) index pairs
+        # would double the buffer size and require `scatter_add_` on a 2-D destination, which needs an extra
+        # broadcast axis. The flat form is simpler and touches the same memory pattern.
+        scores = weight.abs().flatten()
+        num_trainable = self._num_trainable(scores.numel(), config.sparsity)
+        _, indices = torch.topk(scores, k=num_trainable, largest=config.select_top)
+        # Store indices as int32 to halve the checkpoint size vs int64 (indices are non-negative and at most
+        # `numel(weight)` — well within int32 range even for the largest realistic base weights). They're cast
+        # back to int64 at forward/merge time because `scatter_add`'s index kernel requires int64.
+        indices = indices.to(dtype=torch.int32, device=weight.device)
+
+        self.supertuning_indices[adapter_name] = indices
+        if config.init_weights:
+            values = torch.zeros(num_trainable, dtype=torch.float32, device=weight.device)
+        else:
+            # Non-identity init — used by tests to exercise a non-trivial adapter.
+            values = torch.randn(num_trainable, dtype=torch.float32, device=weight.device)
+        self.supertuning_values[adapter_name] = nn.Parameter(values)
+
+        # Supra: optionally allocate LoRA A/B layers.
+        if config.r is not None:
+            in_features, out_features = base_layer.in_features, base_layer.out_features
+            self.supertuning_rank[adapter_name] = config.r
+            self.supertuning_lora_alpha[adapter_name] = float(config.lora_alpha)
+            # bias=False matches PEFT LoRA convention; fp32 for training stability.
+            self.supertuning_lora_A[adapter_name] = nn.Linear(
+                in_features, config.r, bias=False, dtype=torch.float32, device=weight.device
+            )
+            self.supertuning_lora_B[adapter_name] = nn.Linear(
+                config.r, out_features, bias=False, dtype=torch.float32, device=weight.device
+            )
+            nn.init.kaiming_uniform_(self.supertuning_lora_A[adapter_name].weight, a=math.sqrt(5))
+            if config.init_weights:
+                # Identity update at construction: B = 0 → LoRA contributes nothing initially.
+                nn.init.zeros_(self.supertuning_lora_B[adapter_name].weight)
+            else:
+                # Non-identity init — matches LoRA's `init_lora_weights=False` behaviour: keep B's
+                # default Kaiming init so the LoRA path is non-trivial from the first forward.
+                nn.init.kaiming_uniform_(self.supertuning_lora_B[adapter_name].weight, a=math.sqrt(5))
+            self.supertuning_lora_dropout[adapter_name] = (
+                nn.Dropout(p=config.lora_dropout) if config.lora_dropout > 0.0 else nn.Identity()
+            )
+        else:
+            self.supertuning_rank[adapter_name] = 0
+            self.supertuning_lora_alpha[adapter_name] = 0.0
+
+        self._move_adapter_to_device_of_base_layer(adapter_name)
+        self.set_adapter(self.active_adapters, inference_mode=config.inference_mode)
+
+
+class Linear(nn.Module, SupertuningLayer):
+    """Supertuning applied to a `torch.nn.Linear` base layer."""
+
+    def __init__(
+        self,
+        base_layer: nn.Module,
+        adapter_name: str,
+        config: SupertuningConfig,
+        **kwargs,
+    ) -> None:
+        super().__init__()
+        SupertuningLayer.__init__(self, base_layer, save_precomputed_indices=config.save_precomputed_indices)
+        self._active_adapter = adapter_name
+        self.update_layer(adapter_name, config=config)
+
+    def _lora_delta(self, adapter_name: str, dtype: torch.dtype) -> torch.Tensor:
+        """Fold LoRA A/B into a dense `[out_features, in_features]` weight delta scaled by `alpha/r`."""
+        r = self.supertuning_rank[adapter_name]
+        alpha = self.supertuning_lora_alpha[adapter_name]
+        A = self.supertuning_lora_A[adapter_name].weight
+        B = self.supertuning_lora_B[adapter_name].weight
+        return ((alpha / r) * (B @ A)).to(dtype)
+
+    def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
+        """Return the dense `[out_features, in_features]` delta for a given adapter (sparse + optional LoRA).
+
+        Sums (a) the sparse `values` scatter-added onto a zero matrix at `indices`, and (b) the LoRA delta `(alpha / r)
+        * (B @ A)` when the adapter is in Supra mode. Matches the semantics of PEFT's LoRA `get_delta_weight` — callers
+        can subtract from / add to the base weight to reason about the update.
+        """
+        base_weight = self.get_base_layer().weight
+        indices = self.supertuning_indices[adapter_name].to(torch.int64)
+        values = self.supertuning_values[adapter_name].to(base_weight.dtype)
+        sparse_delta = (
+            torch.zeros_like(base_weight).reshape(-1).scatter_add(0, indices, values).reshape_as(base_weight)
+        )
+        if self.supertuning_rank[adapter_name] > 0:
+            return sparse_delta + self._lora_delta(adapter_name, base_weight.dtype)
+        return sparse_delta
+
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+        """Fold each active adapter's (sparse + LoRA) contribution into the base weight in place."""
+        adapter_names = check_adapters_to_merge(self, adapter_names)
+        if not adapter_names:
+            return
+
+        base_layer = self.get_base_layer()
+        for active_adapter in adapter_names:
+            if active_adapter not in self.supertuning_values.keys():
+                continue
+            weight = base_layer.weight
+            indices = self.supertuning_indices[active_adapter].to(torch.int64)
+            values = self.supertuning_values[active_adapter].to(weight.dtype)
+
+            if safe_merge:
+                merged = weight.data.reshape(-1).scatter_add(0, indices, values).reshape_as(weight)
+                if self.supertuning_rank[active_adapter] > 0:
+                    merged = merged + self._lora_delta(active_adapter, weight.dtype)
+                if not torch.isfinite(merged).all():
+                    raise ValueError(
+                        f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                    )
+                weight.data = merged
+            else:
+                weight.data.reshape(-1).scatter_add_(0, indices, values)
+                if self.supertuning_rank[active_adapter] > 0:
+                    weight.data.add_(self._lora_delta(active_adapter, weight.dtype))
+            self.merged_adapters.append(active_adapter)
+
+    def unmerge(self) -> None:
+        """Reverse [`merge`] for all currently-merged adapters."""
+        if not self.merged:
+            warnings.warn("Already unmerged. Nothing to do.")
+            return
+
+        base_layer = self.get_base_layer()
+        while len(self.merged_adapters) > 0:
+            active_adapter = self.merged_adapters.pop()
+            if active_adapter not in self.supertuning_values.keys():
+                continue
+            weight = base_layer.weight
+            indices = self.supertuning_indices[active_adapter].to(torch.int64)
+            values = self.supertuning_values[active_adapter].to(weight.dtype)
+            if self.supertuning_rank[active_adapter] > 0:
+                weight.data.sub_(self._lora_delta(active_adapter, weight.dtype))
+            weight.data.reshape(-1).scatter_add_(0, indices, -values)
+
+    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        """Frozen base weight + (per-adapter) sparse support + (optional) LoRA delta, applied as one linear op.
+
+        The base weight is frozen (`requires_grad=False`), so native autograd does not accumulate any gradient on it —
+        the sparse composition uses plain `scatter_add`. In Supra mode the LoRA output is added on top of the
+        sparse-composed linear output (equivalent by linearity to composing all three deltas into the effective weight
+        before the matmul).
+        """
+        if self.disable_adapters:
+            if self.merged:
+                self.unmerge()
+            result = self.base_layer(x, *args, **kwargs)
+        elif self.merged or not (
+            active_adapters := [a for a in self.active_adapters if a in self.supertuning_values.keys()]
+        ):
+            result = self.base_layer(x, *args, **kwargs)
+        else:
+            base_layer = self.get_base_layer()
+            weight = base_layer.weight
+            bias = base_layer.bias
+
+            # Compose base + each adapter's sparse support into the effective weight for this forward.
+            dense_plus_sparse = weight.reshape(-1)
+            for adapter_name in active_adapters:
+                indices = self.supertuning_indices[adapter_name].to(torch.int64)
+                values = self.supertuning_values[adapter_name].to(weight.dtype)
+                dense_plus_sparse = dense_plus_sparse.scatter_add(0, indices, values)
+            result = torch.nn.functional.linear(x, dense_plus_sparse.reshape_as(weight), bias)
+
+            # Add each Supra-mode adapter's LoRA delta on top of the sparse-composed output.
+            for adapter_name in active_adapters:
+                if self.supertuning_rank[adapter_name] > 0:
+                    r = self.supertuning_rank[adapter_name]
+                    alpha = self.supertuning_lora_alpha[adapter_name]
+                    lora_A = self.supertuning_lora_A[adapter_name]
+                    lora_B = self.supertuning_lora_B[adapter_name]
+                    # LoRA layers are held in fp32 for training stability (matches PEFT LoRA convention).
+                    # Activations arriving in bf16/fp16 need to be promoted for the matmul; the LoRA output is
+                    # cast back to the result dtype before composition.
+                    x_dropped = self.supertuning_lora_dropout[adapter_name](x).to(lora_A.weight.dtype)
+                    lora_out = lora_B(lora_A(x_dropped))
+                    result = result + ((alpha / r) * lora_out).to(result.dtype)
+
+        return result
