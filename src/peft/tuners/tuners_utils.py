@@ -868,10 +868,14 @@ class BaseTuner(nn.Module, ABC):
         # MATCHING & CREATING MODULES #
         ###############################
 
-        existing_adapter_prefixes = []
-        for key, module in named_modules:
-            if isinstance(module, BaseTunerLayer):
-                existing_adapter_prefixes.append(key + ".")
+        # Skip existing tuner internals, but keep the tuner layer itself eligible for adding the new adapter
+        existing_adapter_children = {
+            id(child)
+            for _, module in named_modules
+            if isinstance(module, BaseTunerLayer)
+            for child in module.modules()
+            if child is not module
+        }
 
         # TODO: check if this the most robust way
         module_names: set[str] = set()
@@ -887,12 +891,8 @@ class BaseTuner(nn.Module, ABC):
 
             # It is possible that we're adding an additional adapter, so if we encounter a key that clearly belongs to a
             # previous adapter we can skip here since we don't want to interfere with adapter internals.
-            for adapter_key in existing_adapter_prefixes:
-                if key.startswith(adapter_key):
-                    excluded_modules.append(key)
-                    break
-
-            if excluded_modules and excluded_modules[-1] == key:
+            if id(module) in existing_adapter_children:
+                excluded_modules.append(key)
                 continue
 
             if state_dict is None:
