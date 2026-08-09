@@ -67,7 +67,8 @@ def random_pruning(tensor: torch.Tensor, density: float, rescale: bool) -> torch
     """
     mask = torch.bernoulli(torch.full_like(input=tensor, fill_value=density))
     pruned_tensor = tensor * mask
-    if rescale:
+    if rescale and density > 0:
+        # at density == 0 the tensor is already all zeros and dividing by it would produce NaNs
         pruned_tensor = pruned_tensor / density
     return pruned_tensor
 

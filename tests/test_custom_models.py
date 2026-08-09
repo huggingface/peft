@@ -4164,6 +4164,60 @@ class TestPeftCustomModel(PeftCommonTester):
         output = model(dummy_input)
         assert output is not None
 
+    @pytest.mark.parametrize("combination_type", ["ties", "dare_ties", "dare_linear", "magnitude_prune"])
+    def test_add_weighted_adapter_zero_density_prunes_everything(self, combination_type):
+        # density=0 means that all values are pruned, so the merged adapter should be all zeros. The dare
+        # combination types returned NaNs instead, as they rescale the pruned tensor by 1 / density.
+        torch.manual_seed(42)
+        model = MLP()
+        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+
+        model = get_peft_model(model, config, adapter_name="adapter1")
+        model.add_adapter("adapter2", config)
+
+        model.add_weighted_adapter(
+            adapters=["adapter1", "adapter2"],
+            weights=[1.0, 1.0],
+            adapter_name="merged",
+            combination_type=combination_type,
+            density=0.0,
+        )
+
+        delta_weight = model.base_model.model.lin0.get_delta_weight("merged")
+        assert torch.isfinite(delta_weight).all()
+        assert torch.allclose(delta_weight, torch.zeros_like(delta_weight))
+
+    def test_add_weighted_adapter_dare_linear_rescales_by_density(self):
+        # dare_linear prunes at random and rescales the values that survive by 1 / density to preserve the
+        # expected value. The second adapter is zeroed out so that every surviving value stems from the first
+        # adapter, which makes the rescaling factor observable.
+        torch.manual_seed(42)
+        model = MLP()
+        # lora_alpha == r, so that the scaling of the source adapters is 1.0
+        config = LoraConfig(r=8, lora_alpha=8, target_modules=["lin0"], init_lora_weights=False)
+        density = 0.5
+
+        model = get_peft_model(model, config, adapter_name="adapter1")
+        model.add_adapter("adapter2", config)
+
+        lora_layer = model.base_model.model.lin0
+        lora_layer.lora_A["adapter2"].weight.data.zero_()
+        lora_layer.lora_B["adapter2"].weight.data.zero_()
+        lora_A_before = lora_layer.lora_A["adapter1"].weight.data.clone()
+
+        model.add_weighted_adapter(
+            adapters=["adapter1", "adapter2"],
+            weights=[1.0, 1.0],
+            adapter_name="merged",
+            combination_type="dare_linear",
+            density=density,
+        )
+
+        merged_lora_A = lora_layer.lora_A["merged"].weight.data
+        survived = merged_lora_A != 0
+        assert survived.any()
+        assert torch.allclose(merged_lora_A[survived], lora_A_before[survived] / density)
+
     def test_multiple_adapters_no_needless_copy_modules_to_save(self):
         # See 2206
         # The problem was that we keep a "global" modules_to_save on the model which contains all possible
