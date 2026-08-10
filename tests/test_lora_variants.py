@@ -400,3 +400,37 @@ class TestActivatedLora:
                 lora_model.forward(**inputs)
 
             lora_model.forward(**inputs)
+
+    def test_gradient_checkpointing_hooks_removed_on_error(self):
+        # _peft_gradient_checkpointing_forward_hooks is normally drained by backward_hook during .backward().
+        # If the wrapped block raises instead (e.g. an OOM mid-batch), no backward pass happens, so
+        # _enable_peft_forward_hooks must drain it on the exception path itself, or the next call raises
+        # "Multiple invocations of PEFT forward hooks".
+        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+
+        with hub_online_once(model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(model_id)
+            cfg = LoraConfig(task_type=TaskType.CAUSAL_LM, target_modules="all-linear", alora_invocation_tokens=[0])
+            lora_model = get_peft_model(base_model, cfg)
+            lora_model.train()
+
+            lora_model.prepare_model_for_gradient_checkpointing(lora_model)
+            lora_model.gradient_checkpointing_enable()
+
+            inputs = {"input_ids": torch.tensor([[0, 1, 2, 3]])}
+
+            def count_grad_ckpt_hooks():
+                return sum(
+                    len(getattr(m, "_peft_gradient_checkpointing_forward_hooks", [])) for m in lora_model.modules()
+                )
+
+            with pytest.raises(RuntimeError, match="simulated failure"):
+                with lora_model.base_model._enable_peft_forward_hooks(alora_offsets=[0]):
+                    assert count_grad_ckpt_hooks() > 0
+                    raise RuntimeError("simulated failure")
+
+            assert count_grad_ckpt_hooks() == 0
+
+            # The model must still be usable: this would raise "Multiple invocations of PEFT forward
+            # hooks" if the grad-checkpointing hooks from the failed call above had not been drained.
+            lora_model.forward(**inputs)

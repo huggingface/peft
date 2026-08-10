@@ -6840,21 +6840,14 @@ class TestMixedAdapterBatches:
         ):
             self.run_checks(peft_model, inputs)
 
-    @pytest.mark.parametrize(
-        "test_name, config",
-        [
-            ("LoRA", LoraConfig(target_modules=["lin0"], init_lora_weights=False)),
-            ("RoAd", RoadConfig(target_modules=["lin0"], group_size=2, init_weights=False)),
-            ("GLoRA", GloraConfig(target_modules=["lin0"], init_weights=False)),
-        ],
-    )
-    def test_mixed_adapter_batches_hooks_removed_on_error(self, test_name, config):
+    @pytest.mark.parametrize("test_name, config0, config1", MIXED_ADAPTER_TEST_CASES)
+    def test_mixed_adapter_batches_hooks_removed_on_error(self, test_name, config0, config1):
         # The forward pre-hooks that inject `adapter_names` must be removed even when the wrapped call raises.
         # Otherwise they stay registered and every later forward pass keeps receiving the stale `adapter_names`,
         # which makes the model unusable until it is recreated.
         base_model = MLP().to(self.torch_device).eval()
-        peft_model = get_peft_model(base_model, config, "adapter0").eval()
-        peft_model.add_adapter("adapter1", config)
+        peft_model = get_peft_model(base_model, config0, "adapter0").eval()
+        peft_model.add_adapter("adapter1", config1)
 
         def count_pre_hooks():
             return sum(len(module._forward_pre_hooks) for module in peft_model.modules())
@@ -6871,70 +6864,6 @@ class TestMixedAdapterBatches:
 
         # The model must still be usable afterwards.
         inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
-        peft_model(**inputs)
-
-    def test_alora_gradient_checkpointing_hooks_removed_on_error(self):
-        # Hooks registered on GradientCheckpointingLayer via _peft_gradient_checkpointing_forward_hooks
-        # are only drained by backward_hook during .backward().  When the wrapped block raises (e.g. OOM)
-        # there is no backward pass, so without an explicit except path the hooks survive and the next
-        # call into _enable_peft_forward_hooks raises ValueError ("Multiple invocations...").
-        import packaging.version
-        import transformers
-
-        if packaging.version.parse(transformers.__version__) < packaging.version.parse("4.52.1"):
-            pytest.skip("aLoRA requires transformers >= 4.52.1")
-
-        from transformers.modeling_layers import GradientCheckpointingLayer
-
-        # Subclass to provide a real forward; bare GradientCheckpointingLayer raises
-        # NotImplementedError, which would make the "model still usable" check below fail
-        # for a reason unrelated to hooks.
-        class GradCkptLinear(GradientCheckpointingLayer):
-            def forward(self, X):
-                return self.linear(X)
-
-        # Build a tiny model where lin0 is wrapped in a GradientCheckpointingLayer.
-        class MLPWithGradCkpt(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.lin0 = GradCkptLinear()
-                self.lin0.gradient_checkpointing = True
-                # Attach the linear as a sub-module so LoRA can target it.
-                self.lin0.linear = nn.Linear(10, 10)
-                self.lin1 = nn.Linear(10, 10)
-
-            def forward(self, X):
-                x = self.lin0(X)
-                return self.lin1(x)
-
-        lora_config = LoraConfig(target_modules=["linear"], init_lora_weights=False)
-        base_model = MLPWithGradCkpt().to(self.torch_device).eval()
-        peft_model = get_peft_model(base_model, lora_config, "adapter0").eval()
-
-        def count_grad_ckpt_hooks():
-            return sum(
-                len(getattr(m, "_peft_gradient_checkpointing_forward_hooks", []))
-                for m in peft_model.modules()
-            )
-
-        assert count_grad_ckpt_hooks() == 0
-
-        alora_offsets = [0] * 10  # dummy offsets
-
-        with pytest.raises(RuntimeError, match="simulated failure"):
-            with peft_model.base_model._enable_peft_forward_hooks(alora_offsets=alora_offsets):
-                assert count_grad_ckpt_hooks() > 0
-                raise RuntimeError("simulated failure")
-
-        # All gradient-checkpointing hooks must be gone after the exception.
-        assert count_grad_ckpt_hooks() == 0
-
-        # A second call must not raise "Multiple invocations of PEFT forward hooks".
-        with peft_model.base_model._enable_peft_forward_hooks(alora_offsets=alora_offsets):
-            pass
-
-        # The model must still be usable afterwards.
-        inputs = {"X": torch.arange(90).view(-1, 10).float().to(self.torch_device)}
         peft_model(**inputs)
 
     @pytest.mark.parametrize(
