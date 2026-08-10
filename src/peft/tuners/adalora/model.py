@@ -233,8 +233,8 @@ class AdaLoraModel(LoraModel):
             # Calculate the orthogonal regularization
             orth_reg_weight = self.peft_config[self.trainable_adapter_name].orth_reg_weight
 
-            if orth_reg_weight <= 0:
-                raise ValueError("orth_reg_weight should be greater than 0. ")
+            if orth_reg_weight < 0:
+                raise ValueError("orth_reg_weight should be greater than or equal to 0. ")
 
             regu_loss = 0
             num_param = 0
