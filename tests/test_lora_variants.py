@@ -19,6 +19,7 @@ import pytest
 import torch
 from torch import nn
 from transformers import AutoModelForCausalLM
+from transformers.pytorch_utils import Conv1D
 
 from peft import KasaConfig, LoraConfig, TaskType, get_peft_model
 from peft.tuners.lora.layer import Conv1d as LoraConv1d
@@ -72,6 +73,16 @@ class CustomModel(nn.Module):
         output = self.relu(self.linear1(torch.concat([x1_flat, x2_flat], dim=1)))
         output = self.linear2(output)
         return output
+
+
+# A single transformers Conv1D layer, i.e. a fan_in_fan_out linear layer as used by GPT-2.
+class ModelWithConv1D(nn.Module):
+    def __init__(self, out_features, in_features):
+        super().__init__()
+        self.c = Conv1D(out_features, in_features)
+
+    def forward(self, x):
+        return self.c(x)
 
 
 # Used for testing alora_offsets for aLoRA
@@ -186,6 +197,29 @@ class TestLoraVariants:
 
         for layer in layer_names:
             assert getattr(peft_model.base_model.model, layer).lora_magnitude_vector["default"].weight.grad is not None
+
+    @pytest.mark.parametrize("out_features, in_features", [(6, 6), (8, 4)])
+    def test_dora_unmerge_inverts_merge_for_fan_in_fan_out_layer(self, out_features, in_features):
+        # Regression test for DoraLinearVariant.unmerge on a fan_in_fan_out layer such as a transformers
+        # Conv1D. merge applies the fan_in_fan_out transpose to the DoRA magnitude factor, so unmerge has
+        # to apply it too; otherwise it divides along the wrong axis, which crashes on a non-square weight
+        # and silently corrupts a square one. The discrepancy only surfaces once the magnitude has moved
+        # away from its initial value, so it is perturbed here to emulate a trained adapter.
+        torch.manual_seed(0)
+        model = ModelWithConv1D(out_features, in_features)
+        peft_model = get_peft_model(model, LoraConfig(target_modules=["c"], use_dora=True, fan_in_fan_out=True))
+
+        magnitude = peft_model.base_model.model.c.lora_magnitude_vector["default"].weight
+        with torch.no_grad():
+            magnitude.add_(0.5)
+
+        base_layer = peft_model.base_model.model.c.base_layer
+        original_weight = base_layer.weight.detach().clone()
+
+        peft_model.merge_adapter()
+        peft_model.unmerge_adapter()
+
+        assert torch.allclose(base_layer.weight, original_weight, atol=1e-4, rtol=1e-4)
 
     def test_kasa_params_have_gradients(self):
         """Ensure that the lora_diag parameter added by the KaSA variant participates in the output computation."""
