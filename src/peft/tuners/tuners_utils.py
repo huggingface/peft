@@ -869,13 +869,12 @@ class BaseTuner(nn.Module, ABC):
         ###############################
 
         # Skip existing tuner internals, but keep the tuner layer itself eligible for adding the new adapter
-        existing_adapter_children = {
-            id(child)
-            for _, module in named_modules
-            if isinstance(module, BaseTunerLayer)
-            for child in module.modules()
-            if child is not module
-        }
+        existing_adapter_children = set()
+        for _, module in named_modules:
+            if isinstance(module, BaseTunerLayer):
+                for child in module.modules():
+                    if child is not module:
+                        existing_adapter_children.add(id(child))
 
         # TODO: check if this the most robust way
         module_names: set[str] = set()
