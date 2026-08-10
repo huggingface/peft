@@ -620,6 +620,25 @@ class TestExcludedModuleNames:
         with pytest.raises(ValueError, match="Target modules .* not found in the base model"):
             get_peft_model(model, LoraConfig(target_modules=["non_existent_module"]))
 
+    def test_no_modules_matched_second_adapter(self):
+        # A second adapter whose target_modules match nothing must raise just like the first adapter does
+        # (test_no_modules_matched). The no-match check used to read targeted_module_names, which accumulates
+        # across adapters, so once the first adapter matched a module the second was silently accepted.
+        # See https://github.com/huggingface/peft/issues/3533.
+        model = MLP()
+        model = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
+        with pytest.raises(ValueError, match="Target modules .* not found in the base model"):
+            model.add_adapter("other", LoraConfig(target_modules=["non_existent_module"]))
+
+    def test_second_adapter_only_modules_to_save_is_accepted(self):
+        # A second adapter whose target_modules match nothing is still valid if it contributes through
+        # modules_to_save (a module that is not itself a target), and must not raise.
+        # See https://github.com/huggingface/peft/issues/3533.
+        model = MLP()
+        model = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
+        model.add_adapter("other", LoraConfig(target_modules=["non_existent_module"], modules_to_save=["lin1"]))
+        assert "other" in model.base_model.model.lin1.modules_to_save
+
     def test_some_modules_excluded_some_unmatched(self):
         model = MLP()
         with pytest.raises(ValueError, match="No modules were targeted for adaptation"):

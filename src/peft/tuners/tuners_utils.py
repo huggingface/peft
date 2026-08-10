@@ -46,6 +46,7 @@ from peft.utils.constants import (
 from peft.utils.integrations import init_empty_weights
 from peft.utils.other import (
     AuxiliaryTrainingWrapper,
+    _get_input_embeddings_name,
     _get_module_names_tied_with_embedding,
     _set_adapter,
     _set_layer_requires_grad,
@@ -808,6 +809,10 @@ class BaseTuner(nn.Module, ABC):
         unmatched_modules = []
         targeted_modules_from_peft_config: list[str] = []  # only relevant if state_dict is passed
         targets_to_tie: list[str] = []
+        # targeted_module_names and targeted_parameter_names accumulate across all adapters injected into this
+        # tuner, so record their current lengths to detect whether *this* adapter matched anything below.
+        num_targeted_modules_before = len(self.targeted_module_names)
+        num_targeted_parameters_before = len(self.targeted_parameter_names)
         # Note: If possible, all checks should be performed *at the start of this method*.
         # This way, we can raise early if something goes wrong, without leaving the model
         # in a bad (half-initialized) state.
@@ -886,13 +891,9 @@ class BaseTuner(nn.Module, ABC):
                 continue
 
             # It is possible that we're adding an additional adapter, so if we encounter a key that clearly belongs to a
-            # previous adapter we can skip here since we don't want to interfere with adapter internals.
-            for adapter_key in existing_adapter_prefixes:
-                if key.startswith(adapter_key):
-                    excluded_modules.append(key)
-                    break
-
-            if excluded_modules and excluded_modules[-1] == key:
+            # previous adapter we can skip here since we don't want to interfere with adapter internals. These are
+            # adapter internals rather than user-excluded modules, so they are not added to excluded_modules.
+            if any(key.startswith(adapter_key) for adapter_key in existing_adapter_prefixes):
                 continue
 
             if state_dict is None:
@@ -988,7 +989,38 @@ class BaseTuner(nn.Module, ABC):
             if warning_msg:
                 warnings.warn(warning_msg, RuntimeWarning)
 
-        if not self.targeted_module_names and not self.targeted_parameter_names and not uses_dummy_target_modules:
+        matched_modules = len(self.targeted_module_names) > num_targeted_modules_before
+        matched_parameters = len(self.targeted_parameter_names) > num_targeted_parameters_before
+        # An adapter can also be valid through modules_to_save / trainable_token_indices, which are wrapped
+        # later in _set_trainable. Treat this adapter as non-empty if one of those auxiliary targets matches a
+        # module -- with the same suffix rule _set_trainable uses -- that is not itself a target module. A module
+        # targeted by both a tuner and an auxiliary wrapper is a misconfiguration that must still raise (see
+        # TestTargetingAuxiliaryTrainingWrapper in test_other).
+        auxiliary_names = list(getattr(peft_config, "modules_to_save", None) or [])
+        trainable_token_indices = getattr(peft_config, "trainable_token_indices", None)
+        if isinstance(trainable_token_indices, dict):
+            auxiliary_names += list(trainable_token_indices)
+        elif trainable_token_indices:
+            input_embeddings_name = _get_input_embeddings_name(model, "embed_tokens")
+            if input_embeddings_name is not None:
+                auxiliary_names.append(input_embeddings_name)
+        target_modules = peft_config.target_modules
+
+        def _is_target_module(key: str) -> bool:
+            if isinstance(target_modules, str):
+                return match_target_against_key(target_modules, key) is not None
+            if not target_modules:
+                return False
+            return key in target_modules or any(key.endswith(f".{name}") for name in target_modules)
+
+        # Only relevant for a non-first adapter (an earlier adapter already targeted something): a *first* adapter
+        # whose target_modules match nothing is a misconfiguration that must still raise even if modules_to_save
+        # matches, which keeps first-adapter behavior unchanged from before this fix.
+        has_earlier_target = num_targeted_modules_before > 0 or num_targeted_parameters_before > 0
+        matched_auxiliary = has_earlier_target and any(
+            any(key.endswith(name) for name in auxiliary_names) and not _is_target_module(key) for key in key_list
+        )
+        if not matched_modules and not matched_parameters and not uses_dummy_target_modules and not matched_auxiliary:
             if excluded_modules and not unmatched_modules:
                 # All targeted modules were excluded
                 raise ValueError(
