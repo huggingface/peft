@@ -2745,8 +2745,7 @@ class TestOffloadSave:
 
             # offload around half of all transformer modules to the disk
             device_map = infer_auto_device_map(model, max_memory=memory_limits)
-            assert "cpu" in device_map.values()
-            assert "disk" in device_map.values()
+            assert set(device_map.values()) == {"cpu", "disk"}
 
             config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["q_proj", "v_proj"])
 
@@ -2767,6 +2766,8 @@ class TestOffloadSave:
             offloaded_lora_model = PeftModel.from_pretrained(
                 offloaded_model, tmp_path, max_memory=memory_limits, offload_folder=tmp_path
             ).eval()
+            assert set(offloaded_lora_model.hf_device_map.values()) == {"cpu", "disk"}
+
             offloaded_output = offloaded_lora_model(input_tokens)[0]
             assert torch.allclose(output, offloaded_output, atol=1e-5)
 
