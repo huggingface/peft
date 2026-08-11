@@ -728,3 +728,108 @@ class TestShadowBackboneVariants:
             out = detached(input_ids=ids)
         assert out.logits.shape == (2, 5, model.config.vocab_size)
 
+
+class _TinyDiTConfig:
+    model_type = "tiny_dit"
+    num_attention_heads = 2
+    attention_head_dim = 4
+
+    @property
+    def hidden_dim(self):
+        return self.num_attention_heads * self.attention_head_dim
+
+    def to_dict(self):
+        return {
+            "model_type": self.model_type,
+            "num_attention_heads": self.num_attention_heads,
+            "attention_head_dim": self.attention_head_dim,
+        }
+
+
+class _TinyDiTBlock(torch.nn.Module):
+    def __init__(self, hidden_dim):
+        super().__init__()
+        self.norm = torch.nn.LayerNorm(hidden_dim)
+        self.linear = torch.nn.Linear(hidden_dim, hidden_dim)
+
+    def forward(self, hidden_states):
+        return hidden_states + self.linear(self.norm(hidden_states))
+
+
+class _TinyDiT(torch.nn.Module):
+    """A diffusers-style transformer: `single_transformer_blocks`, no token ids, no `inputs_embeds`.
+
+    Stands in for Flux: the top-level input is a latent that is embedded inside `forward`, so the shadow state cannot
+    be seeded from the model's inputs and has to be built from the first wrapped block's hidden states instead.
+    """
+
+    def __init__(self, num_layers=3):
+        super().__init__()
+        self.config = _TinyDiTConfig()
+        hidden_dim = self.config.hidden_dim
+        self.x_embedder = torch.nn.Linear(hidden_dim, hidden_dim)
+        self.single_transformer_blocks = torch.nn.ModuleList(
+            [_TinyDiTBlock(hidden_dim) for _ in range(num_layers)]
+        )
+        self.proj_out = torch.nn.Linear(hidden_dim, hidden_dim)
+        self.gradient_checkpointing = False
+
+    def forward(self, hidden_states):
+        hidden_states = self.x_embedder(hidden_states)
+        for block in self.single_transformer_blocks:
+            if self.gradient_checkpointing and self.training:
+                hidden_states = torch.utils.checkpoint.checkpoint(block.__call__, hidden_states, use_reentrant=False)
+            else:
+                hidden_states = block(hidden_states)
+        return self.proj_out(hidden_states)
+
+
+class TestShadowDiffusionTransformer:
+    """ShadowPEFT on a diffusers-style transformer, where `s^(0)` is seeded from the first wrapped block."""
+
+    @staticmethod
+    def _make_peft_model():
+        torch.manual_seed(0)
+        return get_peft_model(
+            _TinyDiT(),
+            ShadowConfig(
+                target_modules=r"single_transformer_blocks\.\d+$",
+                share_embeddings=False,
+                init_weights=False,
+            ),
+        )
+
+    def test_seeds_the_shadow_state_from_the_first_wrapped_block(self):
+        model = self._make_peft_model()
+        assert len([m for m in model.modules() if isinstance(m, ShadowLayer)]) == 3
+        latents = torch.randn(2, 5, model.base_model.model.config.hidden_dim)
+        out = model(hidden_states=latents)
+        out.pow(2).mean().backward()
+        backbone = model.base_model.shadow_backbone["default"]
+        assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in backbone.parameters())
+
+    def test_gradient_checkpointing_matches_the_uncheckpointed_run(self):
+        # Gradient checkpointing runs the wrapped blocks a second time during recomputation, so the deferred seeding
+        # must re-run the shadow backbone as well -- otherwise the recomputed graph saves fewer tensors than the
+        # original one and torch raises. Results must be identical either way.
+        latents = torch.randn(2, 5, _TinyDiTConfig().hidden_dim)
+
+        def run(use_gradient_checkpointing):
+            model = self._make_peft_model()
+            model.train()
+            model.base_model.model.gradient_checkpointing = use_gradient_checkpointing
+            out = model(hidden_states=latents)
+            out.pow(2).mean().backward()
+            grads = {n: p.grad for n, p in model.named_parameters() if "shadow_" in n and p.grad is not None}
+            return out, grads
+
+        expected, expected_grads = run(use_gradient_checkpointing=False)
+        actual, actual_grads = run(use_gradient_checkpointing=True)
+
+        assert torch.allclose(actual, expected, atol=1e-6)
+        assert actual_grads.keys() == expected_grads.keys()
+        assert any("shadow_backbone" in name for name in actual_grads)
+        for name, grad in actual_grads.items():
+            assert torch.allclose(grad, expected_grads[name], atol=1e-6), name
+
+

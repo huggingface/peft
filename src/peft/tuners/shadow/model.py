@@ -35,13 +35,28 @@ from .layers import DetachedShadowModel, ShadowCache, ShadowCarrier, ShadowLayer
 # --------------------------------------------------------------------------------------------------- backbone helpers
 
 
+def _is_flux_like(model: nn.Module) -> bool:
+    """Diffusers Flux / Flux2 transformers expose `transformer_blocks` instead of HF `layers`/`h`."""
+    return isinstance(getattr(model, "single_transformer_blocks", None), nn.ModuleList) or (
+        isinstance(getattr(model, "transformer_blocks", None), nn.ModuleList)
+        and not isinstance(getattr(model, "layers", None), nn.ModuleList)
+    )
+
+
 def _get_backbone(model: nn.Module) -> nn.Module:
     """Return the module that holds the transformer decoder stack (e.g. `LlamaModel` inside `LlamaForCausalLM`)."""
 
     def _has_layer_stack(module: nn.Module) -> bool:
-        return isinstance(getattr(module, "layers", None), nn.ModuleList) or isinstance(
-            getattr(module, "h", None), nn.ModuleList
+        return (
+            isinstance(getattr(module, "layers", None), nn.ModuleList)
+            or isinstance(getattr(module, "h", None), nn.ModuleList)
+            or isinstance(getattr(module, "single_transformer_blocks", None), nn.ModuleList)
+            or isinstance(getattr(module, "transformer_blocks", None), nn.ModuleList)
         )
+
+    # Diffusers DiT / Flux models *are* the backbone (no nested `.model`).
+    if _is_flux_like(model):
+        return model
 
     for attr in ("model", "transformer", "base_model", "decoder"):
         backbone = getattr(model, attr, None)
@@ -67,7 +82,8 @@ def _get_backbone(model: nn.Module) -> nn.Module:
 
 def _get_decoder_layers(backbone: nn.Module) -> tuple[nn.ModuleList, str]:
     """Return `(layers, attr_name)` for the decoder-layer `nn.ModuleList` of a backbone."""
-    for attr in ("layers", "h"):
+    # Prefer the longer contiguous Flux single-stream stack when both are present.
+    for attr in ("layers", "h", "single_transformer_blocks", "transformer_blocks"):
         candidate = getattr(backbone, attr, None)
         if isinstance(candidate, nn.ModuleList):
             return candidate, attr
@@ -82,7 +98,43 @@ def _get_hidden_size(config: Any) -> int:
     for attr in ("hidden_size", "n_embd", "d_model"):
         if hasattr(config, attr):
             return int(getattr(config, attr))
+    # Diffusers Flux / DiT configs store width as heads * head_dim.
+    if hasattr(config, "num_attention_heads") and hasattr(config, "attention_head_dim"):
+        return int(config.num_attention_heads) * int(config.attention_head_dim)
     raise AttributeError("Unable to infer the hidden size from the model config.")
+
+
+class _TokenShadowBackbone(nn.Module):
+    """A tiny token-wise MLP used as the ShadowPEFT mirror backbone on non-causal (e.g. Flux) models.
+
+    Causal-LM ShadowPEFT mirrors the HF decoder class; Diffusers transformers do not share that constructor/config
+    contract, so for those architectures we seed `s^(0)` with a small residual MLP over the entry hidden states.
+    """
+
+    def __init__(self, in_features: int, hidden_size: int, num_layers: int = 1) -> None:
+        super().__init__()
+        self.config = type("TokenShadowConfig", (), {"hidden_size": int(hidden_size)})()
+        self.proj_in = nn.Linear(in_features, hidden_size)
+        n_layers = max(1, int(num_layers))
+        self.blocks = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.LayerNorm(hidden_size),
+                    nn.Linear(hidden_size, hidden_size),
+                    nn.GELU(),
+                    nn.Linear(hidden_size, hidden_size),
+                )
+                for _ in range(n_layers)
+            ]
+        )
+
+    def forward(self, input_ids=None, inputs_embeds=None, **kwargs):
+        if inputs_embeds is None:
+            raise ValueError("`_TokenShadowBackbone` requires `inputs_embeds`.")
+        hidden = self.proj_in(inputs_embeds)
+        for block in self.blocks:
+            hidden = hidden + block(hidden)
+        return type("TokenShadowOutput", (), {"last_hidden_state": hidden, "past_key_values": None})()
 
 
 def _set_config_attr(config: Any, names: tuple[str, ...], value: int) -> None:
@@ -219,6 +271,7 @@ class ShadowModel(BaseTuner):
             self._should_pack_shadow_cache: bool = False
             self._shadow_share_embeddings: dict[str, bool] = {}
             self._shadow_head_is_lm: dict[str, bool] = {}
+            self._deferred_shadow_seed: bool = False
 
     def _pre_injection_hook(self, model: nn.Module, config: ShadowConfig, adapter_name: str) -> None:
         self._ensure_shadow_containers()
@@ -311,6 +364,17 @@ class ShadowModel(BaseTuner):
 
     def _build_shadow_backbone(self, config: ShadowConfig) -> nn.Module:
         """Build a fresh, randomly-initialized backbone mirroring the base architecture (Section 3.1)."""
+        # Diffusers Flux / DiT transformers do not share the HF decoder constructor contract used below, so seed
+        # `s^(0)` from a small token-wise MLP over the entry hidden states instead.
+        if _is_flux_like(self.model):
+            base_hidden = self._base_hidden_size()
+            shadow_hidden = config.shadow_hidden_size or base_hidden
+            return _TokenShadowBackbone(
+                in_features=base_hidden,
+                hidden_size=shadow_hidden,
+                num_layers=config.shadow_num_hidden_layers or 1,
+            )
+
         base_backbone = _get_backbone(self.model)
         cfg = deepcopy(base_backbone.config)
         _set_config_attr(cfg, ("num_hidden_layers", "n_layer", "num_layers"), config.shadow_num_hidden_layers or 1)
@@ -440,6 +504,7 @@ class ShadowModel(BaseTuner):
         self._seed_shadow_state = None
         self._shadow_past_out = None
         self._should_pack_shadow_cache = False
+        self._deferred_shadow_seed = False
 
         past = kwargs.get("past_key_values")
         base_past, shadow_past = self._unpack_past_key_values(past)
@@ -467,6 +532,13 @@ class ShadowModel(BaseTuner):
                     input_ids = main_input
                 else:
                     inputs_embeds = main_input
+        # Diffusers DiT / Flux forwards pass pre-patch latents as `hidden_states`, not token ids / embeds. Seed
+        # `s^(0)` later from the first wrapped block's hidden states (post-embed, matching width).
+        if input_ids is None and inputs_embeds is None:
+            self._deferred_shadow_seed = True
+            self._should_pack_shadow_cache = False
+            return args, kwargs
+
         self._seed_shadow_state, self._shadow_past_out = self._compute_initial_shadow_state(
             self.active_adapters[0],
             input_ids=input_ids,
@@ -494,9 +566,27 @@ class ShadowModel(BaseTuner):
 
     def _wrap_entry_pre_hook(self, module: ShadowLayer, args: tuple, kwargs: dict):
         """Wrap the first block's input (the embeddings) into a [`ShadowCarrier`] seeded with `s^(0)` (Eq. 1)."""
+        hidden = args[0] if args else kwargs.get("hidden_states")
+        if hidden is None:
+            return
+
+        # Flux / DiT: the top-of-model hook could not seed from tokens, so build `s^(0)` from this block's input.
+        # Recompute on every call instead of caching for the rest of the forward: under gradient checkpointing this
+        # hook runs a second time during recomputation, and reusing the cached state would leave the shadow backbone
+        # out of the recomputed graph (torch then rejects the mismatch in saved-tensor counts).
+        if self._deferred_shadow_seed:
+            self._seed_shadow_state, self._shadow_past_out = self._compute_initial_shadow_state(
+                self.active_adapters[0],
+                input_ids=None,
+                attention_mask=None,
+                position_ids=None,
+                inputs_embeds=hidden,
+                past_key_values=None,
+                use_cache=False,
+            )
+
         if self._seed_shadow_state is None:
             return
-        hidden = args[0] if args else kwargs["hidden_states"]
         if hidden.shape[:-1] != self._seed_shadow_state.shape[:-1]:
             raise ValueError(
                 f"Shadow state sequence shape {tuple(self._seed_shadow_state.shape[:-1])} does not match base hidden "
@@ -765,3 +855,4 @@ class ShadowModel(BaseTuner):
             is_classification=is_classification,
             input_embeddings=shared_input_embeddings,
         )
+
