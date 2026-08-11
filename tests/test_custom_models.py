@@ -7700,8 +7700,15 @@ class TestPeftFsdpStateDict:
         assert torch.allclose(output_after, output_before)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
-    def test_save_load_roundtrip_fsdp_wrapped_learnable_bias(self, test_name, model_id, config_cls, config_kwargs):
-        # same test as test_save_load_roundtrip_fsdp_wrapped, but for the specific case that the bias is learnable
+    @pytest.mark.parametrize("bias_arg", ["bias_all", "bias_peft_method_only"])
+    def test_save_load_roundtrip_fsdp_wrapped_learnable_bias(
+        self, test_name, model_id, config_cls, config_kwargs, bias_arg
+    ):
+        # Same test as test_save_load_roundtrip_fsdp_wrapped, but for the specific case that the bias is
+        # learnable. Regarding the `bias` argument, there are normally 3 possibilities:
+        # 1. It's not supported: test is skipped
+        # 2. `bias="all"`: all bias parameters on the model are made learnable
+        # 3. `bias="<peft-method-name>_only", e.g. "lora_only": only the biases on targeted modules are learnable
         if config_kwargs.get("target_parameters"):
             pytest.skip("Skipping FSDP + target_paramters")
         if (config_cls == DeftConfig) and config_kwargs.get("para"):
@@ -7713,14 +7720,21 @@ class TestPeftFsdpStateDict:
             pytest.skip(reason="This test requires the PEFT method to support training the bias directly")
 
         # Manually enable bias learning, don't rely on the test matrix to include an example with bias learning
-        # enabled. The bias="all" option should always exist, otherwise we would need to pass something like "lora_only"
-        config.bias = "all"
+        # enabled.
+        if bias_arg == "bias_peft_method_only":
+            # e.g. "lora_only" or "boft_only"
+            config.bias = f"{config.peft_type.value.lower()}_only"
+        else:
+            config.bias = "all"
+
         torch.manual_seed(0)
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         model = get_peft_model(model, config).eval()
 
         # modify the bias
         for name, module in model.named_modules():
+            if (bias_arg == "bias_peft_method_only") and not isinstance(module, BaseTunerLayer):
+                continue
             if getattr(module, "bias", None) is not None:
                 with torch.no_grad():
                     module.bias.data.fill_(1.23)

@@ -1481,6 +1481,8 @@ class BaseTuner(nn.Module, ABC):
             return {}
 
         if bias == "all":
+            # note: the state_dict of an FSDP model already removes the _fsdp_wrapped_module prefix, so no extra
+            # handling is needed
             return {k: v for k, v in state_dict.items() if (k == "bias") or k.endswith(".bias")}
 
         bias_state_dict = {}
