@@ -12,14 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ShadowPEFT with a *pretrained* shadow backbone.
+"""ShadowPEFT with a mirror or pretrained shadow backbone.
 
-Instead of letting ShadowPEFT build a fresh ("mirror") shadow backbone from the base config, this example initializes
-the shadow backbone from a separate, (optionally smaller) pretrained model by passing its id/path as
-``ShadowConfig(shadow_model=...)``. When the pretrained backbone's hidden size differs from the base model's,
-ShadowPEFT automatically inserts a trainable projection to bridge the two hidden spaces.
+Pass `shadow_model="mirror"` to build a fresh shadow backbone from the base config, or initialize the shadow backbone
+from a separate, optionally smaller pretrained model by passing its id/path to `ShadowConfig(shadow_model=...)`. When
+the shadow backbone's hidden size differs from the base model's, ShadowPEFT automatically inserts a trainable
+projection to bridge the two hidden spaces.
 
-After training, ``unload_shadow()`` returns the standalone shadow network (backbone + head), the lightweight component
+After training, `unload_shadow()` returns the standalone shadow network (backbone + head), the lightweight component
 that can be deployed on its own.
 """
 
@@ -32,7 +32,7 @@ from peft import PeftModel, ShadowConfig, get_peft_model
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="ShadowPEFT pretrained-shadow-backbone example")
+    parser = argparse.ArgumentParser(description="ShadowPEFT mirror-or-pretrained-shadow-backbone example")
     parser.add_argument("--base_model_name_or_path", type=str, default="Qwen/Qwen3-8B")
     parser.add_argument(
         "--shadow_model",

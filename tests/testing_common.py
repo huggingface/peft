@@ -364,9 +364,7 @@ class PeftCommonTester:
             # AdaLora does not support adding more than 1 adapter
             pytest.skip(f"Test not applicable for {config_cls}")
         if issubclass(config_cls, ShadowConfig) and config_kwargs.get("task_type") == "SEQ_CLS":
-            # SEQ_CLS auto-enables modules_to_save on the classifier; combining that with a per-adapter shadow_head
-            # copy is not supported for multi-adapter save/load yet.
-            pytest.skip("ShadowPEFT SEQ_CLS multi-adapter save with modules_to_save is not supported yet")
+            pytest.skip("ShadowPEFT explicitly rejects multiple sequence classification adapters")
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)

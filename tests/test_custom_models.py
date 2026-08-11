@@ -1957,7 +1957,6 @@ class Block(nn.Module):
         return X
 
 
-
 class DeepMLP(nn.Module):
     def __init__(self, bias=True, num_hidden_layers=12, size=10):
         super().__init__()

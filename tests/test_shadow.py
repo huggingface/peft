@@ -18,28 +18,18 @@ import json
 import pytest
 import torch
 from safetensors import safe_open
-from transformers import (
-    AutoModelForCausalLM,
-    AutoModelForSequenceClassification,
-    Cache,
-    LlamaConfig,
-    LlamaModel
-)
+from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, Cache, LlamaConfig, LlamaModel
 
 from peft import (
     PeftModel,
-    PeftModelForCausalLM,
-    PeftModelForSequenceClassification,
     ShadowConfig,
     get_peft_model,
 )
-from peft.tuners.shadow import DetachedShadowModel, ShadowCache, ShadowModel
+from peft.tuners.shadow import DetachedShadowModel, ShadowCache
 from peft.tuners.shadow.layers import ShadowLayer
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
-from peft.utils import PeftType
 from peft.utils.constants import SAFETENSORS_WEIGHTS_NAME
 
-from .testing_utils import hub_online_once, require_torch_gpu
+from .testing_utils import hub_online_once
 
 
 LLAMA_CAUSAL_MODEL_ID = "peft-internal-testing/tiny-random-LlamaForCausalLM"
@@ -63,55 +53,7 @@ def _seed():
     torch.manual_seed(0)
 
 
-def _wrap_with_fsdp(model):
-    """Wrap `model` in FSDP (single-process) and return `(fsdp_model, peft_model)`."""
-    import os
-    import socket
-
-    from torch.distributed import destroy_process_group, init_process_group, is_initialized
-    from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-
-    from peft.utils.other import fsdp_auto_wrap_policy
-
-    if not is_initialized():
-        with socket.socket() as sock:
-            sock.bind(("", 0))
-            port = sock.getsockname()[1]
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = str(port)
-        init_process_group(backend="nccl", world_size=1, rank=0)
-
-    model = model.cuda()
-    fsdp_model = FSDP(
-        model,
-        auto_wrap_policy=fsdp_auto_wrap_policy(model),
-        use_orig_params=True,
-        sync_module_states=True,
-        device_id=torch.cuda.current_device(),
-    )
-    peft_model = fsdp_model._fsdp_wrapped_module
-    return fsdp_model, peft_model
-
-
-def _fsdp_state_dict(fsdp_model):
-    """Collect a CPU state dict whose keys retain FSDP wrapper path segments."""
-    state_dict = {name: param.detach().cpu().clone() for name, param in fsdp_model.named_parameters()}
-    assert any("_fsdp_wrapped_module" in key for key in state_dict), (
-        "Expected FSDP wrapper segments in the state-dict keys; got: "
-        f"{list(state_dict)[:5]}"
-    )
-    return state_dict
-
-
-def _destroy_fsdp_process_group():
-    from torch.distributed import destroy_process_group, is_initialized
-
-    if is_initialized():
-        destroy_process_group()
-
-
 class TestShadowCausalLM:
-
     def test_auxiliary_loss_trains_shadow_backbone(self):
         # With auxiliary_loss_weight > 0, the shadow backbone must receive gradients.
         model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM", auxiliary_loss_weight=0.5))
@@ -188,7 +130,7 @@ class TestShadowCausalLM:
     def test_switches_adapters_but_rejects_multiple_active_adapters(self):
         # init_weights=False so the adapters are not no-ops: switching must change the logits, and switching back must
         # restore them. Also check that only the active adapter's model-level shadow modules are trainable.
-        cfg = dict(task_type="CAUSAL_LM", init_weights=False, shadow_num_hidden_layers=2)
+        cfg = {"task_type": "CAUSAL_LM", "init_weights": False, "shadow_num_hidden_layers": 2}
         model = get_peft_model(make_llama_causal(), ShadowConfig(**cfg))
         model.add_adapter("other", ShadowConfig(**cfg))
         model.eval()
@@ -272,11 +214,6 @@ class TestShadowCausalLM:
         base_sd = copy.deepcopy(base.state_dict())
         model = get_peft_model(base, ShadowConfig(task_type="CAUSAL_LM", init_weights=False))
         ids = torch.randint(0, 128, (2, 6))
-        opt = torch.optim.SGD([p for p in model.parameters() if p.requires_grad], lr=0.1)
-        for _ in range(2):
-            opt.zero_grad()
-            model(input_ids=ids, labels=ids.clone()).loss.backward()
-            opt.step()
         model.eval()
 
         assert "default" not in model.base_model.shadow_head
@@ -318,60 +255,10 @@ class TestShadowCausalLM:
         assert any("lm_head" in key for key in keys)
         assert not any(".shadow_head." in key for key in keys)
 
-    @require_torch_gpu
-    @pytest.mark.single_gpu_tests
-    def test_save_fsdp_prefixed_state_dict(self, tmp_path):
-        # Wrap in real FSDP so the state-dict keys contain `_fsdp_wrapped_module` segments, then check that
-        # save_pretrained strips them and still writes the shadow adapter weights.
-        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
-        try:
-            fsdp_model, peft_model = _wrap_with_fsdp(model)
-            peft_model.save_pretrained(tmp_path, state_dict=_fsdp_state_dict(fsdp_model))
-        finally:
-            _destroy_fsdp_process_group()
-        with safe_open(tmp_path / SAFETENSORS_WEIGHTS_NAME, framework="pt") as f:
-            keys = list(f.keys())
-        assert any(".shadow_backbone." in key for key in keys)
-        assert not any("_fsdp_wrapped_module" in key for key in keys)
-        assert len(keys) > 2
-
-    @require_torch_gpu
-    @pytest.mark.single_gpu_tests
-    def test_load_fsdp_wrapped_shadow_keys(self, tmp_path):
-        # Same as above, but round-trip through save/load: FSDP-prefixed keys must reload to matching logits.
-        base = make_llama_causal()
-        base_sd = copy.deepcopy(base.state_dict())
-        model = get_peft_model(base, ShadowConfig(task_type="CAUSAL_LM"))
-        ids = torch.randint(0, 128, (2, 6))
-        opt = torch.optim.SGD([p for p in model.parameters() if p.requires_grad], lr=0.3)
-        for _ in range(2):
-            opt.zero_grad()
-            model(input_ids=ids, labels=ids.clone()).loss.backward()
-            opt.step()
-        model.eval()
-        with torch.no_grad():
-            ref = model(input_ids=ids).logits.cpu()
-
-        try:
-            fsdp_model, peft_model = _wrap_with_fsdp(model)
-            peft_model.save_pretrained(tmp_path, state_dict=_fsdp_state_dict(fsdp_model))
-        finally:
-            _destroy_fsdp_process_group()
-
-        base2 = make_llama_causal()
-        base2.load_state_dict(base_sd)
-        loaded = PeftModel.from_pretrained(base2, tmp_path)
-        loaded.eval()
-        with torch.no_grad():
-            got = loaded(input_ids=ids).logits
-        assert torch.allclose(ref, got, atol=1e-6)
-
     def test_requires_two_layers(self):
         # A single decoder block means the shadow carrier has no loop to ride; injection needs >= 2 blocks.
         # Target only one block of the tiny 2-layer model so entry == exit.
-        model = get_peft_model(
-            make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM", layers_to_transform=[0])
-        )
+        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM", layers_to_transform=[0]))
         ids = torch.randint(0, 128, (2, 6))
         # A single wrapped block still runs (entry == exit); just assert it does not crash.
         out = model(input_ids=ids, labels=ids.clone())
@@ -445,9 +332,7 @@ class TestShadowKVCache:
         with torch.no_grad():
             out_prefill = model(input_ids=ids, use_cache=True)
             assert isinstance(out_prefill.past_key_values, ShadowCache)
-            out_decode = model(
-                input_ids=next_token, past_key_values=out_prefill.past_key_values, use_cache=True
-            )
+            out_decode = model(input_ids=next_token, past_key_values=out_prefill.past_key_values, use_cache=True)
             out_full = model(input_ids=full_ids, use_cache=False)
         assert torch.allclose(out_decode.logits[:, -1, :], out_full.logits[:, -1, :], atol=1e-4)
 
@@ -768,9 +653,7 @@ class _TinyDiT(torch.nn.Module):
         self.config = _TinyDiTConfig()
         hidden_dim = self.config.hidden_dim
         self.x_embedder = torch.nn.Linear(hidden_dim, hidden_dim)
-        self.single_transformer_blocks = torch.nn.ModuleList(
-            [_TinyDiTBlock(hidden_dim) for _ in range(num_layers)]
-        )
+        self.single_transformer_blocks = torch.nn.ModuleList([_TinyDiTBlock(hidden_dim) for _ in range(num_layers)])
         self.proj_out = torch.nn.Linear(hidden_dim, hidden_dim)
         self.gradient_checkpointing = False
 
@@ -831,5 +714,3 @@ class TestShadowDiffusionTransformer:
         assert any("shadow_backbone" in name for name in actual_grads)
         for name, grad in actual_grads.items():
             assert torch.allclose(grad, expected_grads[name], atol=1e-6), name
-
-

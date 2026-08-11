@@ -20,10 +20,10 @@ from typing import Any, Optional
 
 import torch
 import torch.nn.functional as F
-from torch import nn
-from transformers import  AutoConfig, AutoModel
-from transformers.utils import cached_file
 from safetensors.torch import load_file
+from torch import nn
+from transformers import AutoConfig, AutoModel
+from transformers.utils import cached_file
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import TaskType
@@ -144,7 +144,7 @@ def _set_config_attr(config: Any, names: tuple[str, ...], value: int) -> None:
             return
     raise AttributeError(
         f"Unable to update the model config: none of the expected attributes {names} are defined. "
-        "This is required when building a mirrored shadow backbone (`shadow_model=\"mirror\"`). "
+        'This is required when building a mirrored shadow backbone (`shadow_model="mirror"`). '
         "Please use a supported decoder architecture, or set `shadow_model` to a pretrained model "
         "id/path instead."
     )
@@ -186,12 +186,7 @@ def _normalize_layer_config(config: Any) -> Any:
 def _remove_embed_tokens(module: nn.Module) -> None:
     """Drop `embed_tokens` so a backbone can be driven purely via shared base `inputs_embeds`."""
     if hasattr(module, "embed_tokens") and isinstance(module.embed_tokens, nn.Module):
-        try:
-            module.embed_tokens = None
-        except Exception:
-            # Some architectures reject assigning None (read-only property / typed setter). Unregister the
-            # submodule directly so the embedding table is still dropped from the backbone.
-            module._modules.pop("embed_tokens", None)
+        del module.embed_tokens
 
 
 def _shifted_ce_loss(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
@@ -275,6 +270,16 @@ class ShadowModel(BaseTuner):
 
     def _pre_injection_hook(self, model: nn.Module, config: ShadowConfig, adapter_name: str) -> None:
         self._ensure_shadow_containers()
+
+    def _check_new_adapter_config(self, config: ShadowConfig) -> None:
+        super()._check_new_adapter_config(config)
+        if len(self.peft_config) > 1 and any(
+            peft_config.task_type == TaskType.SEQ_CLS for peft_config in self.peft_config.values()
+        ):
+            raise ValueError(
+                "ShadowPEFT does not support multiple sequence classification adapters because each adapter requires "
+                "both a classifier in `modules_to_save` and a separate `shadow_head`."
+            )
 
     def _create_and_replace(
         self,
@@ -745,9 +750,7 @@ class ShadowModel(BaseTuner):
     def set_adapter(self, adapter_name: str | list[str], inference_mode: bool = False) -> None:
         adapter_names = [adapter_name] if isinstance(adapter_name, str) else adapter_name
         if len(adapter_names) != 1:
-            raise ValueError(
-                f"ShadowPEFT requires exactly one active adapter, but got {len(adapter_names)} adapters."
-            )
+            raise ValueError(f"ShadowPEFT requires exactly one active adapter, but got {len(adapter_names)} adapters.")
         super().set_adapter(adapter_name, inference_mode=inference_mode)
         # `super()` only retargets the wrapped blocks; the tuner-level shadow modules need the same switch.
         self._sync_shadow_module_trainability(inference_mode=inference_mode)
@@ -839,13 +842,12 @@ class ShadowModel(BaseTuner):
         # detached model can run from `input_ids`. With `copy=True`, re-attach a private copy on the backbone. With
         # `copy=False`, pass a shared reference into `DetachedShadowModel` without re-parenting the module.
         shared_input_embeddings = None
-        if self._shadow_share_embeddings.get(adapter_name, False) and hasattr(backbone, "embed_tokens"):
-            if getattr(backbone, "embed_tokens", None) is None:
-                embeds = self.model.get_input_embeddings()
-                if copy:
-                    backbone.embed_tokens = deepcopy(embeds)
-                else:
-                    shared_input_embeddings = embeds
+        if self._shadow_share_embeddings.get(adapter_name, False):
+            embeds = self.model.get_input_embeddings()
+            if copy:
+                backbone.embed_tokens = deepcopy(embeds)
+            else:
+                shared_input_embeddings = embeds
 
         is_classification = self.peft_config[adapter_name].task_type == TaskType.SEQ_CLS
         return DetachedShadowModel(
@@ -855,4 +857,3 @@ class ShadowModel(BaseTuner):
             is_classification=is_classification,
             input_embeddings=shared_input_embeddings,
         )
-
