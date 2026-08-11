@@ -43,6 +43,7 @@ from peft import (
     PromptTuningConfig,
     PsoftConfig,
     PveraConfig,
+    RandLoraConfig,
     RoadConfig,
     ShiraConfig,
     TaskType,
@@ -232,6 +233,15 @@ ALL_CONFIGS = [
         {
             "num_virtual_tokens": 10,
             "task_type": "SEQ_2_SEQ_LM",
+        },
+    ),
+    (
+        RandLoraConfig,
+        {
+            "task_type": "SEQ_2_SEQ_LM",
+            "target_modules": None,
+            "r": 8,
+            "randlora_alpha": 1,
         },
     ),
     (
