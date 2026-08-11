@@ -1537,19 +1537,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"r": 1, "target_modules": ["lin0"], "init_weights": False},
         {"r": 1, "target_modules": ["lin1"], "init_weights": False},
     ),
+    # Check Supra (r set) here: if the hybrid works with multiple adapters, pure Super does too.
     (
         "Supertuning Same",
         "supertuning",
         SupertuningConfig,
-        {"sparsity": 0.5, "target_modules": ["lin0"], "init_weights": False},
-        {"sparsity": 0.5, "target_modules": ["lin0"], "init_weights": False},
+        {"sparsity": 0.5, "target_modules": ["lin0"], "r": 2, "init_weights": False},
+        {"sparsity": 0.5, "target_modules": ["lin0"], "r": 2, "init_weights": False},
     ),
     (
         "Supertuning Different",
         "supertuning",
         SupertuningConfig,
-        {"sparsity": 0.5, "target_modules": ["lin0"], "init_weights": False},
-        {"sparsity": 0.5, "target_modules": ["lin1"], "init_weights": False},
+        {"sparsity": 0.5, "target_modules": ["lin0"], "r": 2, "init_weights": False},
+        {"sparsity": 0.5, "target_modules": ["lin1"], "r": 2, "init_weights": False},
     ),
     # Note: Currently, we cannot target lin0 and lin1 with different adapters when using VeRA. The reason is that the
     # first adapter being created will result in a vera_A or vera_B shape that is too small for the next adapter

@@ -1764,10 +1764,17 @@ class BaseTunerLayer(ABC):
             if any(p.device == meta for p in adapter_layer.parameters()):
                 continue
 
-            if target_dtype is not None:
-                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(target_device, dtype=target_dtype)
+            # Don't cast the dtype of integer parameters/buffers (e.g. index buffers) to the base layer's
+            # float dtype, even when the base layer is float — that would corrupt the integer data. Modules
+            # (nn.ModuleDict entries) have no single dtype; their own `.to(dtype=...)` already skips integer
+            # sub-buffers, so they take the regular cast path.
+            item = adapter_layer[adapter_name]
+            item_dtype = getattr(item, "dtype", None)
+            cast_dtype = item_dtype is None or item_dtype.is_floating_point or item_dtype.is_complex
+            if target_dtype is not None and cast_dtype:
+                adapter_layer[adapter_name] = item.to(target_device, dtype=target_dtype)
             else:
-                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(target_device)
+                adapter_layer[adapter_name] = item.to(target_device)
 
     @overload
     def _cast_input_dtype(self, x: None, dtype: torch.dtype) -> None: ...

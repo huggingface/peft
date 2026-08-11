@@ -355,6 +355,7 @@ ALL_CONFIGS = [
         {
             "sparsity": 0.9,
             "r": 2,
+            "select_top": False,
             "task_type": "CAUSAL_LM",
             "target_modules": None,
             "init_weights": False,

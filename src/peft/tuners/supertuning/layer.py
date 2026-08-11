@@ -14,6 +14,7 @@
 
 import math
 import warnings
+from functools import lru_cache
 from typing import Any, Optional
 
 import torch
@@ -23,6 +24,28 @@ from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 from .config import SupertuningConfig
+
+
+# use an LRU cache so the warning is only ever emitted once, not repeated for every layer/step/epoch
+@lru_cache(None)
+def _warn_once_about_module_hooks(supertuning_layer):
+    # Super-Tuning composes the effective weight and calls F.linear directly instead of the base layer's own
+    # forward, so any hooks set on the base layer are bypassed. Inform the user so they can register the hooks
+    # on the PEFT module instead.
+    base_layer = supertuning_layer.get_base_layer()
+    if any(
+        [
+            base_layer._forward_hooks,
+            base_layer._forward_pre_hooks,
+            base_layer._backward_hooks,
+            base_layer._backward_pre_hooks,
+        ]
+    ):
+        warnings.warn(
+            "One of the base layers adapted with Super-Tuning has backward/forward (pre) hooks set which will be "
+            "ignored by the adapter's forward implementation. Please set the hooks on the adapted layer instead "
+            "(i.e., apply the hooks on the same path but after applying the PEFT config)."
+        )
 
 
 class SupertuningLayer(BaseTunerLayer):
@@ -41,11 +64,9 @@ class SupertuningLayer(BaseTunerLayer):
 
     # Layers that may contain (trainable) adapter parameters.
     adapter_layer_names = ("supertuning_values", "supertuning_lora_A", "supertuning_lora_B")
-    # Other per-adapter attributes needed to configure the forward / merge paths. Deliberately
-    # excludes `supertuning_indices` (BufferDict of int32 tensors) — including it would trigger
-    # PEFT's `_move_adapter_to_device_of_base_layer` to cast the buffer to the base layer's
-    # float dtype, and `scatter_add`'s subsequent `.to(int64)` would then read garbage.
+    # Other per-adapter attributes needed to configure the forward / merge paths.
     other_param_names = (
+        "supertuning_indices",
         "supertuning_rank",
         "supertuning_lora_alpha",
         "supertuning_lora_dropout",
@@ -98,6 +119,11 @@ class SupertuningLayer(BaseTunerLayer):
         # broadcast axis. The flat form is simpler and touches the same memory pattern.
         scores = weight.abs().flatten()
         num_trainable = self._num_trainable(scores.numel(), config.sparsity)
+        if num_trainable < 1:
+            raise ValueError(
+                f"sparsity={config.sparsity} leaves no trainable entries for a weight with {scores.numel()} "
+                "elements — no parameter would be adapted. Lower the sparsity so at least one entry is trainable."
+            )
         _, indices = torch.topk(scores, k=num_trainable, largest=config.select_top)
         # Store indices as int32 to halve the checkpoint size vs int64 (indices are non-negative and at most
         # `numel(weight)` — well within int32 range even for the largest realistic base weights). They're cast
@@ -247,6 +273,9 @@ class Linear(nn.Module, SupertuningLayer):
         ):
             result = self.base_layer(x, *args, **kwargs)
         else:
+            # This path composes the effective weight and calls F.linear directly, bypassing the base layer's
+            # forward (and thus its hooks); warn the user once if any hooks are registered there.
+            _warn_once_about_module_hooks(self)
             base_layer = self.get_base_layer()
             weight = base_layer.weight
             bias = base_layer.bias

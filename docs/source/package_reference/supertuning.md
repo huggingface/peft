@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # Super-Tuning
 
-[Super-Tuning](https://huggingface.co/papers/2607.09287) is a sparse fine-tuning method that freezes the base weight and trains only a sparse support of scalar entries selected by weight magnitude — a distinct point in the trainable-parameter Pareto vs LoRA / IA³. Setting `r` additionally allocates a LoRA-style low-rank adapter composed additively on top of the sparse support (the paper's "Supra" hybrid).
+[Super-Tuning](https://huggingface.co/papers/2607.09287) is a sparse fine-tuning method that freezes the base weight and trains only a sparse support of scalar entries selected by weight magnitude. Setting `r` additionally allocates a LoRA-style low-rank adapter composed additively on top of the sparse support (the paper's "Supra" hybrid).
 
 Default scoring is magnitude-only and data-free. The paper's 8B ablation reports `magnitude-topk` at 79.02% average outperforming Wanda-weighted saliency at 78.66% while requiring no calibration pass. Wanda-style activation-weighted scoring is not offered by this implementation.
 
@@ -28,6 +28,15 @@ The abstract from the paper is:
 
 > Fine-tuning large language models with parameter-efficient methods has become standard practice, but existing approaches like LoRA restrict the trainable subspace to a low-rank decomposition. We introduce Super-Tuning, a sparse fine-tuning approach that instead selects a small support of individual scalar weight entries — an unrestricted-rank trainable set at a fixed parameter budget. Selection is guided by pruning-inspired saliency signals: magnitude-only scoring (PaFi-style) or activation-weighted scoring (Wanda-style). We show that on Llama-3.2-1B and Meta-Llama-3-8B fine-tunes evaluated on Math17K, magnitude-based Super-Tuning matches or exceeds LoRA at comparable parameter budgets, and that a hybrid variant "Supra" — combining sparse support with a low-rank component — further improves downstream accuracy.
 
+## Benchmark overview
+
+<iframe
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=SUPERTUNING"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
+
 ## Usage
 
 **Pure Super (magnitude scoring, data-free):**
@@ -35,7 +44,7 @@ The abstract from the paper is:
 ```python
 from peft import SupertuningConfig, get_peft_model
 
-config = SupertuningConfig(target_modules=["q_proj", "v_proj"], sparsity=0.9)
+config = SupertuningConfig(target_modules=["q_proj", "v_proj"], sparsity=0.99)
 model = get_peft_model(base_model, config)
 ```
 
@@ -43,7 +52,7 @@ model = get_peft_model(base_model, config)
 
 ```python
 config = SupertuningConfig(
-    target_modules=["q_proj", "v_proj"], sparsity=0.9,
+    target_modules=["q_proj", "v_proj"], sparsity=0.99,
     r=8, lora_alpha=16,   # lora_alpha defaults to 2 * r when omitted
 )
 model = get_peft_model(base_model, config)
