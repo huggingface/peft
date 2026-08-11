@@ -33,7 +33,7 @@ from .save_and_load import _insert_adapter_name_into_state_dict, load_peft_weigh
 CONFIG_KEYS_TO_CHECK = {PeftType.LORA: ["use_rslora", "lora_dropout", "alpha_pattern", "use_dora"]}
 
 
-def _update_scaling(lora_module: LoraLayer, adapter_name: str, scaling: Optional[float] = None) -> None:
+def _update_scaling(lora_module: LoraLayer, adapter_name: str, scaling: float) -> None:
     """
     Update the value of the scalings of the LoRA module.
 

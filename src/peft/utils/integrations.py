@@ -45,7 +45,7 @@ def check_deepspeed_zero3_enabled() -> bool:
 def gather_params_ctx(
     param: Union[nn.Parameter, Iterable[nn.Parameter]],
     modifier_rank: Optional[int] = 0,
-    fwd_module: torch.nn.Module = None,
+    fwd_module: Optional[torch.nn.Module] = None,
 ) -> Iterator[None]:
     """Call DeepSpeed GatheredParameters context manager if DeepSpeed is enabled, otherwise do nothing."""
 
@@ -139,7 +139,7 @@ def get_bnb_param_type(param: torch.nn.Parameter) -> Literal[False, "4bit", "8bi
 
 # adapted from:
 # https://github.com/huggingface/transformers/blob/eab6c491d439e83d5e31c660df6f7e36592eb0a2/src/transformers/generation/utils.py#L1617-L1643
-def get_layer_device_map(model: Any) -> Optional[dict[int, Union[int, str]]]:
+def get_layer_device_map(model: Any) -> dict[int, Union[int, str]] | None:
     """
     Derive the device map for the layers of the model.
     """
@@ -206,8 +206,8 @@ def map_cache_to_layer_device_map(model: Any, cache: transformers.Cache) -> None
 @contextmanager
 def init_empty_weights(include_buffers: bool | None = None) -> Iterator[None]:
     # adapted from accelerate.big_modeling.py
-    with _init_on_device(torch.device("meta"), include_buffers=include_buffers) as f:
-        yield f
+    with _init_on_device(torch.device("meta"), include_buffers=include_buffers):
+        yield
 
 
 @contextmanager
