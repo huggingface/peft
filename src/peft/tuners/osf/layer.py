@@ -53,8 +53,11 @@ class OSFLayer(BaseTunerLayer):
         self._osf_V_low_init = BufferDict({})
         # Frozen high-rank subspace for gradient projection — only stored when not
         # exactly recoverable from U_low_init / V_low_init (i.e. the non-square factor).
-        # When the factor IS square, this buffer is left empty and projection uses the
-        # low-rank init instead.
+        # When the factor IS square, the high-rank subspace can be recovered from the
+        # low-rank init via the orthogonal complement identity:
+        #   (I - U_high @ U_high^T) = U_low_init @ U_low_init^T
+        # so the projection can use the smaller low-rank init instead, and U_high/V_high
+        # do not need to be stored.
         self._osf_U_high = BufferDict({})
         self._osf_V_high = BufferDict({})
         # Track hook handles for cleanup
@@ -117,6 +120,9 @@ class OSFLayer(BaseTunerLayer):
         # Determine which high-rank factors can be exactly recovered from low-rank inits.
         # U is square (hence exactly recoverable) when out_features <= in_features.
         # V is square (hence exactly recoverable) when out_features >= in_features.
+        #
+        # I.e.: (20, 10) -> U: (20, 10) and V: (10, 10)
+        #        (10, 20) -> U: (10, 10) and V: (10, 20)
         u_is_square = self.out_features <= self.in_features
         v_is_square = self.out_features >= self.in_features
 
@@ -195,7 +201,7 @@ class OSFLayer(BaseTunerLayer):
             handle.remove()
         self.hook_handles.clear()
 
-    def _compute_delta(self, adapter_name: str) -> torch.Tensor:
+    def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         """Compute the weight delta: (U_low*S_low*V_low - U_low_init*S_low_init*V_low_init).
 
         This is a low-rank update of size [out_features, in_features], computed as:
@@ -240,7 +246,7 @@ class OSFLayer(BaseTunerLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.osf_svd_params.keys():
                 base_layer = self.get_base_layer()
-                delta = self._compute_delta(active_adapter)
+                delta = self.get_delta_weight(active_adapter)
 
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
@@ -311,7 +317,7 @@ class Linear(nn.Module, OSFLayer):
                 result = self.base_layer(x, *args, **kwargs)
 
                 # Compute delta as a low-rank product
-                delta = self._compute_delta(active_adapter)
+                delta = self.get_delta_weight(active_adapter)
                 if delta is not None:
                     # Apply delta as a low-rank update to the output
                     # delta is [out_features, in_features], x is [batch, ..., in_features]
