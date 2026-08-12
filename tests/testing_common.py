@@ -1473,8 +1473,6 @@ class PeftCommonTester:
                 model.delete_adapter("unknown-adapter")
 
     def _test_unload_adapter(self, model_id, config_cls, config_kwargs):
-        if issubclass(config_cls, OSFConfig):
-            pytest.skip("OSF is an exact identity at init, so unload produces identical logits.")
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         num_params_base = len(model.state_dict())

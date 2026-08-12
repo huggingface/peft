@@ -133,12 +133,25 @@ class OSFLayer(BaseTunerLayer):
             # V_high is not recoverable from V_low_init; store it for gradient projection.
             self._osf_V_high[adapter_name] = svd_dict["V_high"].detach()
 
-        # Create ParameterDict for trainable low-rank components
+        # Create ParameterDict for trainable low-rank components.
+        # When init_weights is False, randomly initialize the trainable parameters so the
+        # adapter is not an identity at init (used by tests). The frozen init components
+        # remain from the SVD decomposition, so delta computation and gradient projection
+        # are unaffected.
+        if config.init_weights is False:
+            U_low = torch.randn_like(svd_dict["U_low"])
+            S_low = torch.randn_like(svd_dict["S_low"])
+            V_low = torch.randn_like(svd_dict["V_low"])
+        else:
+            U_low = svd_dict["U_low"]
+            S_low = svd_dict["S_low"]
+            V_low = svd_dict["V_low"]
+
         svd_params = nn.ParameterDict(
             {
-                "U_low": svd_dict["U_low"],
-                "S_low": svd_dict["S_low"],
-                "V_low": svd_dict["V_low"],
+                "U_low": U_low,
+                "S_low": S_low,
+                "V_low": V_low,
             }
         )
         self.osf_svd_params[adapter_name] = svd_params
@@ -204,11 +217,9 @@ class OSFLayer(BaseTunerLayer):
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         """Compute the weight delta: (U_low*S_low*V_low - U_low_init*S_low_init*V_low_init).
 
-        This is a low-rank update of size [out_features, in_features], computed as:
-            delta = (U_low * S_low) @ V_low - (U_low_init * S_low_init) @ V_low_init
-
-        The intermediate products are [out_features, r] and [r, in_features], so the peak memory is O(r * (out + in))
-        instead of O(out * in) for the full weight.
+        Based on: W = U_high_init*S_high_init*V_high_init + U_low_init*S_low_init*V_low_init
+        Applying delta: W_new = W + (U_low*S_low*V_low - U_low_init*S_low_init*V_low_init)
+        Resulting update: W_new = U_high_init*S_high_init*V_high_init + U_low*S_low*V_low
         """
         if adapter_name not in self.osf_svd_params:
             return None
