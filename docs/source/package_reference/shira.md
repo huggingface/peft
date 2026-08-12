@@ -18,9 +18,55 @@ rendered properly in your Markdown viewer.
 
 Sparse High Rank Adapters or [SHiRA](https://huggingface.co/papers/2406.13175) is an alternate type of adapter and has been found to have significant advantages over the low rank adapters. Specifically, SHiRA achieves better accuracy than LoRA for a variety of vision and language tasks. It also offers simpler and higher quality multi-adapter fusion by significantly reducing concept loss, a common problem faced by low rank adapters. SHiRA directly finetunes a small number of the base model's parameters to finetune the model on any adaptation task.
 
+## When to use SHiRA
+
+SHiRA is a good choice when:
+
+- You want a sparse, potentially high-rank update while keeping the same trainable parameter budget as a LoRA adapter.
+- You need to switch or combine adapters often. SHiRA stores sparse updates to the base weights, which can be merged
+  without retaining a low-rank branch for inference.
+- You want to control which individual weights are trainable through a custom mask.
+
+SHiRA's `r` controls the parameter budget, not the rank of the update. For a target weight with shape `m x n`, SHiRA
+trains `r * (m + n)` selected entries. Increasing `r` therefore trains more entries but does not constrain the update
+to rank `r`.
+
+## Usage
+
+```python
+from peft import ShiraConfig, get_peft_model
+from transformers import AutoModelForCausalLM
+
+model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+config = ShiraConfig(
+    r=8,
+    target_modules=["q_proj", "v_proj"],
+    random_seed=42,
+)
+model = get_peft_model(model, config)
+model.print_trainable_parameters()
+```
+
+The default mask selects weights randomly. Set `random_seed` when independently constructed adapters should select
+the same entries. Saved SHiRA checkpoints include the selected indices, so loading an existing adapter restores the
+mask that was used during training.
+
+To use another selection strategy, create the config with a custom `mask_type` and assign `config.mask_fn` before
+calling `get_peft_model`. The function must return a binary mask with the same shape, device, and dtype as the target
+weight and exactly `r * (m + n)` selected entries. Custom mask functions are Python callables and are not serialized,
+although the indices they produce are saved in the adapter checkpoint.
+
+## Practical considerations
+
+- SHiRA checkpoints store both the trainable values and their sparse indices. Consequently, a SHiRA checkpoint can be
+  larger than a LoRA checkpoint with the same number of trainable parameters.
+- The only built-in selection strategy is the random mask. Other strategies require a custom mask function.
+- Hooks registered on a targeted base layer before applying SHiRA are ignored by its forward implementation. Register
+  hooks on the adapted layer after calling `get_peft_model` instead.
+
 SHiRA currently has the following constraint:
 
-- Only `nn.Linear` layers are supported.
+- Only linear layers are supported, including `nn.Linear` and supported quantized linear backends.
 
 The abstract from the paper is:
 
