@@ -247,8 +247,6 @@ optimizer = torch.optim.AdamW([
 
 [[autodoc]] tuners.osf.utils.decompose_weight_matrix
 
-[[autodoc]] tuners.osf.utils.reconstruct_weight_matrix
-
 ### Gradient Projection
 
 [[autodoc]] tuners.osf.utils.project_gradient_to_orthogonal_space

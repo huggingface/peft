@@ -6,14 +6,16 @@ from peft import OSFConfig, get_peft_model
 from peft.tuners.osf.layer import OSFLayer
 from peft.tuners.osf.utils import (
     decompose_weight_matrix,
-    reconstruct_weight_matrix,
 )
 
 
 def test_osf_roundtrip():
     w = torch.randn(10, 8)
     svd = decompose_weight_matrix(w, top_k=4)
-    w_rec = reconstruct_weight_matrix(svd)
+    # Inline reconstruction: high_part + low_part
+    high_part = torch.mm(svd["U_high"] * svd["S_high"].unsqueeze(0), svd["V_high"])
+    low_part = torch.mm(svd["U_low"] * svd["S_low"].unsqueeze(0), svd["V_low"])
+    w_rec = high_part + low_part
     assert_close(w_rec, w, atol=1e-5, rtol=1e-5)
 
 
