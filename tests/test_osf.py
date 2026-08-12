@@ -12,7 +12,6 @@ from peft.tuners.osf.utils import (
 def test_osf_roundtrip():
     w = torch.randn(10, 8)
     svd = decompose_weight_matrix(w, top_k=4)
-    # Inline reconstruction: high_part + low_part
     high_part = torch.mm(svd["U_high"] * svd["S_high"].unsqueeze(0), svd["V_high"])
     low_part = torch.mm(svd["U_low"] * svd["S_low"].unsqueeze(0), svd["V_low"])
     w_rec = high_part + low_part
