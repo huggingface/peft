@@ -207,8 +207,8 @@ class OSFLayer(BaseTunerLayer):
         This is a low-rank update of size [out_features, in_features], computed as:
             delta = (U_low * S_low) @ V_low - (U_low_init * S_low_init) @ V_low_init
 
-        The intermediate products are [out_features, r] and [r, in_features], so the
-        peak memory is O(r * (out + in)) instead of O(out * in) for the full weight.
+        The intermediate products are [out_features, r] and [r, in_features], so the peak memory is O(r * (out + in))
+        instead of O(out * in) for the full weight.
         """
         if adapter_name not in self.osf_svd_params:
             return None
