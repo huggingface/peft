@@ -204,8 +204,14 @@ def init_accelerator() -> int:
 def get_tokenizer(*, model_id: str, max_seq_length: int):
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.model_max_length = max_seq_length
-    if not tokenizer.pad_token:
-        tokenizer.pad_token = tokenizer.eos_token
+
+    # Override tokenizer settings to match our code.
+    # We assume that inputs are padded on the right side and we also assume
+    # the padding token to be the EOS token. We'll use this in the label
+    # creation so that we always have an EOS token at the end. See train().
+    tokenizer.padding_side = "right"
+    tokenizer.pad_token = tokenizer.eos_token
+
     return tokenizer
 
 
