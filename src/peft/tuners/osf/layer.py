@@ -217,9 +217,9 @@ class OSFLayer(BaseTunerLayer):
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         """Compute the weight delta: (U_low*S_low*V_low - U_low_init*S_low_init*V_low_init).
 
-        Based on: W = U_high_init*S_high_init*V_high_init + U_low_init*S_low_init*V_low_init
-        Applying delta: W_new = W + (U_low*S_low*V_low - U_low_init*S_low_init*V_low_init)
-        Resulting update: W_new = U_high_init*S_high_init*V_high_init + U_low*S_low*V_low
+        - Based on: W = U_high_init*S_high_init*V_high_init + U_low_init*S_low_init*V_low_init
+        - Applying delta: W_new = W + (U_low*S_low*V_low - U_low_init*S_low_init*V_low_init)
+        - Resulting update: W_new = U_high_init*S_high_init*V_high_init + U_low*S_low*V_low
         """
         if adapter_name not in self.osf_svd_params:
             return None
