@@ -18,7 +18,14 @@ import json
 import pytest
 import torch
 from safetensors import safe_open
-from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, Cache, LlamaConfig, LlamaModel
+from transformers import (
+    AutoModelForCausalLM,
+    AutoModelForSequenceClassification,
+    Cache,
+    LlamaConfig,
+    LlamaModel,
+    PretrainedConfig,
+)
 
 from peft import (
     PeftModel,
@@ -690,6 +697,18 @@ class TestShadowDiffusionTransformer:
         out.pow(2).mean().backward()
         backbone = model.base_model.shadow_backbone["default"]
         assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in backbone.parameters())
+
+    def test_unload_shadow(self):
+        model = self._make_peft_model()
+        shadow = model.base_model.unload_shadow(copy=True)
+
+        assert isinstance(shadow, DetachedShadowModel)
+        assert isinstance(shadow.config, PretrainedConfig)
+        assert shadow.backbone is not model.base_model.shadow_backbone["default"]
+
+        hidden_states = torch.randn(2, 5, model.base_model.model.config.hidden_dim)
+        output = shadow(inputs_embeds=hidden_states)
+        assert output.shape == hidden_states.shape
 
     def test_gradient_checkpointing_matches_the_uncheckpointed_run(self):
         # Gradient checkpointing runs the wrapped blocks a second time during recomputation, so the deferred seeding
