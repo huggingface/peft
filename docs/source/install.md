@@ -41,7 +41,7 @@ nvidia-smi
 Install PyTorch from the NVIDIA PyPI index, then install PEFT.
 
 ```bash
-pip install torch --index-url https://pypi.nvidia.com
+pip install torch --index-url https://pypi.nvidia.com/nvtorch_oot_nightly
 pip install peft
 ```
 
