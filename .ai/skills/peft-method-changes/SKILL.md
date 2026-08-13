@@ -52,8 +52,8 @@ Run `pytest tests/regression/test_state_dict.py --regression -k <peft-method-nam
 
 In general, it is possible to make changes to the `state_dict` structure, e.g. moving a PEFT module into a sub-module. This invalidates old `state_dict`s but if this can be reliably detected and fixed, this is fine. Here is an example of such a fix for a change in DoRA:
 
-- https://github.com/huggingface/peft/blob/a429b594910844a21634114c5776c3ef5d0217a4/src/peft/utils/save_and_load.py#L194-L205
-- https://github.com/huggingface/peft/blob/a429b594910844a21634114c5776c3ef5d0217a4/src/peft/utils/save_and_load.py#L922-L932
+- https://github.com/huggingface/peft/blob/ad4e565c8a94081458db42cb771afed54e722d36/src/peft/tuners/lora/model.py#L991-L1002
+- https://github.com/huggingface/peft/blob/ad4e565c8a94081458db42cb771afed54e722d36/src/peft/tuners/lora/model.py#L1011-L1016
 
 ### Config backward compatibility
 
