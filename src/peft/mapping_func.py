@@ -15,20 +15,95 @@
 from __future__ import annotations
 
 import warnings
-from typing import Optional
+from typing import TYPE_CHECKING, Literal, Optional, overload
 
-from transformers import PreTrainedModel
+from torch import nn
 
 from .auto import MODEL_TYPE_TO_PEFT_MODEL_MAPPING
-from .config import PeftConfig
+from .config import PeftConfig, PromptLearningConfig
 from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_PREFIX_MAPPING
 from .mixed_model import PeftMixedModel
 from .peft_model import PeftModel
 from .tuners.tuners_utils import BaseTuner, BaseTunerLayer
 
 
+if TYPE_CHECKING:
+    from .tuners import LoraConfig, LoraModel
+
+    # A PeftModel forwards missing attributes to the wrapped tuner model via __getattr__, so its interface is
+    # effectively the intersection of both classes. Python's type system cannot express intersections, so we emulate
+    # them for static type checkers with classes that inherit from both, with PeftModel first in the MRO to mirror the
+    # runtime attribute lookup order. These classes only exist for type checkers; at runtime, get_peft_model returns a
+    # plain PeftModel (subclass).
+    class _LoraPeftModel(PeftModel, LoraModel):  # type: ignore[misc]
+        ...
+
+    class _TunerPeftModel(PeftModel, BaseTuner):  # type: ignore[misc]
+        ...
+
+    # The overloads only affect static type checking, the returned types are chosen based on what attributes are
+    # reachable through __getattr__ forwarding: LoRA has extra methods like add_weighted_adapter, other tuners provide
+    # the BaseTuner API (e.g. merge_and_unload), and prompt learning wraps the base model directly, i.e. there is no
+    # tuner model whose attributes could be forwarded. Overloads need to be defined before the actual function.
+    @overload
+    def get_peft_model(
+        model: nn.Module,
+        peft_config: PeftConfig,
+        adapter_name: str = ...,
+        *,
+        mixed: Literal[True],
+        autocast_adapter_dtype: bool = ...,
+        revision: Optional[str] = ...,
+        low_cpu_mem_usage: bool = ...,
+    ) -> PeftMixedModel: ...
+
+    @overload
+    def get_peft_model(
+        model: nn.Module,
+        peft_config: LoraConfig,
+        adapter_name: str = ...,
+        mixed: Literal[False] = ...,
+        autocast_adapter_dtype: bool = ...,
+        revision: Optional[str] = ...,
+        low_cpu_mem_usage: bool = ...,
+    ) -> _LoraPeftModel: ...
+
+    @overload
+    def get_peft_model(
+        model: nn.Module,
+        peft_config: PromptLearningConfig,
+        adapter_name: str = ...,
+        mixed: Literal[False] = ...,
+        autocast_adapter_dtype: bool = ...,
+        revision: Optional[str] = ...,
+        low_cpu_mem_usage: bool = ...,
+    ) -> PeftModel: ...
+
+    @overload
+    def get_peft_model(
+        model: nn.Module,
+        peft_config: PeftConfig,
+        adapter_name: str = ...,
+        mixed: Literal[False] = ...,
+        autocast_adapter_dtype: bool = ...,
+        revision: Optional[str] = ...,
+        low_cpu_mem_usage: bool = ...,
+    ) -> _TunerPeftModel: ...
+
+    @overload
+    def get_peft_model(
+        model: nn.Module,
+        peft_config: PeftConfig,
+        adapter_name: str = ...,
+        mixed: bool = ...,
+        autocast_adapter_dtype: bool = ...,
+        revision: Optional[str] = ...,
+        low_cpu_mem_usage: bool = ...,
+    ) -> PeftModel | PeftMixedModel: ...
+
+
 def get_peft_model(
-    model: PreTrainedModel,
+    model: nn.Module,
     peft_config: PeftConfig,
     adapter_name: str = "default",
     mixed: bool = False,
@@ -40,8 +115,9 @@ def get_peft_model(
     Returns a Peft model object from a model and a config, where the model will be modified in-place.
 
     Args:
-        model ([`transformers.PreTrainedModel`]):
-            Model to be wrapped.
+        model ([`torch.nn.Module`]):
+            Model to be wrapped. Typically this is a Transformers model but any `nn.Module` can work, with the caveat
+            that task-specific features (`peft_config.task_type`) require the model to follow Transformers conventions.
         peft_config ([`PeftConfig`]):
             Configuration object containing the parameters of the Peft model.
         adapter_name (`str`, `optional`, defaults to `"default"`):
