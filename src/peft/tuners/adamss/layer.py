@@ -48,6 +48,7 @@ class AdamssLayer(BaseTunerLayer):
         "exp_avg_ipt_B",
         "exp_avg_unc_A",
         "exp_avg_unc_B",
+        "adamss_newB",
     )
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:

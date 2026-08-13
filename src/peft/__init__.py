@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.19.2.dev0"
+__version__ = "0.20.1.dev0"
 
 from .auto import (
     MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
@@ -84,6 +84,7 @@ from .tuners import (
     HRAModel,
     IA3Config,
     IA3Model,
+    KasaConfig,
     LilyConfig,
     LilyModel,
     LNTuningConfig,
@@ -163,10 +164,12 @@ from .utils import (
     TaskType,
     bloom_model_postprocess_past_key_value,
     cast_mixed_precision_params,
+    get_base_model_state_dict,
     get_peft_model_state_dict,
     load_peft_weights,
     prepare_model_for_kbit_training,
     replace_lora_weights_loftq,
+    set_base_model_state_dict,
     set_peft_model_state_dict,
     shift_tokens_right,
 )
@@ -222,6 +225,7 @@ __all__ = [
     "HiraModel",
     "IA3Config",
     "IA3Model",
+    "KasaConfig",
     "LNTuningConfig",
     "LNTuningModel",
     "LilyConfig",
@@ -300,6 +304,7 @@ __all__ = [
     "convert_to_lora",
     "create_arrow_model",
     "find_kappa_target_modules",
+    "get_base_model_state_dict",
     "get_eva_state_dict",
     "get_layer_status",
     "get_model_status",
@@ -316,6 +321,7 @@ __all__ = [
     "prompt_embeddings_from_past_key_values",
     "replace_lora_weights_loftq",
     "save_as_lora",
+    "set_base_model_state_dict",
     "set_peft_model_state_dict",
     "shift_tokens_right",
 ]

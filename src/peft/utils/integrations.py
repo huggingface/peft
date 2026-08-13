@@ -15,9 +15,10 @@
 from __future__ import annotations
 
 import functools
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Any, Literal, Optional, Union
 
 import packaging.version
 import torch
@@ -41,7 +42,11 @@ def check_deepspeed_zero3_enabled() -> bool:
 
 
 @contextmanager
-def gather_params_ctx(param, modifier_rank: Optional[int] = 0, fwd_module: torch.nn.Module = None):
+def gather_params_ctx(
+    param: Union[nn.Parameter, Iterable[nn.Parameter]],
+    modifier_rank: Optional[int] = 0,
+    fwd_module: Optional[torch.nn.Module] = None,
+) -> Iterator[None]:
     """Call DeepSpeed GatheredParameters context manager if DeepSpeed is enabled, otherwise do nothing."""
 
     if not check_deepspeed_zero3_enabled():
@@ -92,7 +97,7 @@ def dequantize_module_weight(module: torch.nn.Module) -> torch.nn.Parameter:
     return weight
 
 
-def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
+def dequantize_bnb_weight(weight: torch.nn.Parameter, state: Optional[Any] = None) -> torch.Tensor:
     """Helper function to dequantize 4bit or 8bit bnb weights."""
     import bitsandbytes as bnb
 
@@ -115,10 +120,10 @@ def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
 
     if hasattr(bnb.functional, "int8_vectorwise_dequant"):
         # Use bitsandbytes API if available (requires v0.45.0+)
-        dequantized = bnb.functional.int8_vectorwise_dequant(weight.data, state.SCB)
+        dequantized = bnb.functional.int8_vectorwise_dequant(weight.data, state.SCB.to(weight.data.device))
     else:
         # Multiply by (scale/127) to dequantize.
-        dequantized = weight.data * state.SCB.view(-1, 1) * 7.874015718698502e-3
+        dequantized = weight.data * state.SCB.to(weight.data.device).view(-1, 1) * 7.874015718698502e-3
 
     return dequantized
 
@@ -134,7 +139,7 @@ def get_bnb_param_type(param: torch.nn.Parameter) -> Literal[False, "4bit", "8bi
 
 # adapted from:
 # https://github.com/huggingface/transformers/blob/eab6c491d439e83d5e31c660df6f7e36592eb0a2/src/transformers/generation/utils.py#L1617-L1643
-def get_layer_device_map(model):
+def get_layer_device_map(model: Any) -> dict[int, Union[int, str]] | None:
     """
     Derive the device map for the layers of the model.
     """
@@ -164,7 +169,7 @@ def get_layer_device_map(model):
 
 # adapted from:
 # https://github.com/huggingface/transformers/blob/eab6c491d439e83d5e31c660df6f7e36592eb0a2/src/transformers/cache_utils.py#L1159-L1179
-def map_cache_to_layer_device_map(model, cache) -> None:
+def map_cache_to_layer_device_map(model: Any, cache: transformers.Cache) -> None:
     """
     Ensure that the key and value cache of the model are on the same device as their corresponding layers.
     """
@@ -199,14 +204,14 @@ def map_cache_to_layer_device_map(model, cache) -> None:
 
 
 @contextmanager
-def init_empty_weights(include_buffers: bool | None = None):
+def init_empty_weights(include_buffers: bool | None = None) -> Iterator[None]:
     # adapted from accelerate.big_modeling.py
-    with _init_on_device(torch.device("meta"), include_buffers=include_buffers) as f:
-        yield f
+    with _init_on_device(torch.device("meta"), include_buffers=include_buffers):
+        yield
 
 
 @contextmanager
-def _init_on_device(device: torch.device, include_buffers: bool | None = None):
+def _init_on_device(device: torch.device, include_buffers: bool | None = None) -> Iterator[None]:
     # adapted from accelerate.big_modeling.py
     old_register_parameter = nn.Module.register_parameter
     old_register_buffer = nn.Module.register_buffer
@@ -259,7 +264,7 @@ def _init_on_device(device: torch.device, include_buffers: bool | None = None):
 
 
 @contextmanager
-def _skip_init_on_device():
+def _skip_init_on_device() -> Iterator[None]:
     # context manager to skip the _init_on_device context manager
     old_val = getattr(_init_on_device, "_skip", False)
     try:
@@ -269,7 +274,7 @@ def _skip_init_on_device():
         _init_on_device._skip = old_val
 
 
-def skip_init_on_device(func):
+def skip_init_on_device(func: Callable) -> Callable:
     """
     Ignore the init_on_device context manager when calling the decorated function.
 

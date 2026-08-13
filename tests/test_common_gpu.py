@@ -67,6 +67,7 @@ from .testing_utils import (
     require_deterministic_for_xpu,
     require_gptqmodel,
     require_non_cpu,
+    require_torch_gpu,
     require_torch_multi_accelerator,
 )
 
@@ -1769,7 +1770,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_non_cpu
     @pytest.mark.single_gpu_tests
     def test_r_odd_hra_inference(self):
-        # check that an untrained HRA adapter can't be initialized as an identity tranformation
+        # check that an untrained HRA adapter can't be initialized as an identity transformation
         # when r is an odd number
         model = AutoModelForCausalLM.from_pretrained(
             "peft-internal-testing/opt-125m",
@@ -2197,3 +2198,43 @@ class TestSameAdapterDifferentDevices:
         # the rest should be on GPU
         assert model.lin0.base_layer.weight.device.type == self.device
         assert model.lin0.road_theta.other.device.type == self.device
+
+
+class TestPrepareModelForKbitTraining:
+    """Tests for prepare_model_for_kbit_training that require a GPU (issue #3265 memory fix).
+
+    CPU-only tests for this function live in test_other.py.
+    """
+
+    def _make_fp16_model(self):
+        model = nn.Sequential(
+            nn.Linear(64, 64),
+            nn.Linear(64, 64),
+            nn.Linear(64, 32),
+        ).to(torch.float16)
+        model.is_loaded_in_8bit = True
+        return model
+
+    @require_torch_gpu
+    def test_prepare_model_for_kbit_training_no_memory_leak(self):
+        """CUDA: empty_cache() after bulk fp16→fp32 casts keeps reserved memory under 200 MB (issue #3265)."""
+        model = self._make_fp16_model().cuda()
+
+        torch.cuda.synchronize()
+        torch.cuda.reset_peak_memory_stats()
+        mem_before = torch.cuda.memory_reserved()
+
+        prepare_model_for_kbit_training(model, use_gradient_checkpointing=False)
+
+        torch.cuda.synchronize()
+        mem_after = torch.cuda.memory_reserved()
+
+        delta_mb = (mem_after - mem_before) / (1024**2)
+        assert delta_mb < 200, f"CUDA reserved memory grew by {delta_mb:.1f} MB after prepare_model_for_kbit_training"
+
+        # Confirm empty_cache() was actually called: a second call should not further reduce reserved memory.
+        torch.cuda.empty_cache()
+        mem_after_extra_empty = torch.cuda.memory_reserved()
+        assert mem_after == mem_after_extra_empty, (
+            "Reserved memory changed after a second empty_cache(), meaning the first call was not made"
+        )

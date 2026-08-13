@@ -36,6 +36,9 @@ A `PeftModel` for causal language modeling.
 
 A `PeftModel` for sequence-to-sequence language modeling.
 
+Note: this will automatically generate decoder input tokens by shifting the input tokens one step right using
+[`shift_tokens_right`] if you supply input tokens but don't supply decoder input tokens explicitly.
+
 [[autodoc]] PeftModelForSeq2SeqLM
     - all
 

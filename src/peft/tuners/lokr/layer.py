@@ -204,7 +204,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
             use_w2 = not (r < max(shape[0][1], shape[1][1]) / 2)
             use_effective_conv2d = False
         elif isinstance(base_layer, nn.Conv2d):
-            in_dim, out_dim = base_layer.in_channels, base_layer.out_channels
+            in_dim, out_dim = base_layer.in_channels // base_layer.groups, base_layer.out_channels
             k_size = base_layer.kernel_size
 
             in_m, in_n = factorization(in_dim, decompose_factor)
@@ -220,7 +220,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
             # without affecting the mathematical equivalence of the operation.
             use_effective_conv2d = use_effective_conv2d and base_layer.kernel_size != (1, 1)
         elif isinstance(base_layer, nn.Conv1d):
-            in_dim, out_dim = base_layer.in_channels, base_layer.out_channels
+            in_dim, out_dim = base_layer.in_channels // base_layer.groups, base_layer.out_channels
             k_size = (base_layer.kernel_size[0],)  # Convert to a tuple with single element
 
             in_m, in_n = factorization(in_dim, decompose_factor)

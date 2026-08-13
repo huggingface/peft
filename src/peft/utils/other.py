@@ -148,7 +148,9 @@ def infer_device() -> str:
     return "cpu"
 
 
-def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs=None):
+def prepare_model_for_kbit_training(
+    model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs=None, auto_clear_cache=True
+):
     r"""
     Note this method only works for `transformers` models.
 
@@ -166,6 +168,10 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
             Keyword arguments to pass to the gradient checkpointing function, please refer to the documentation of
             `torch.utils.checkpoint.checkpoint` for more details about the arguments that you can pass to that method.
             Note this is only available in the latest transformers versions (> 4.34.1).
+        auto_clear_cache (`bool`, *optional*, defaults to `True`):
+            Whether to empty the accelerator cache after upcasting parameters to fp32. This releases memory held by the
+            caching allocator, which is especially helpful on devices that share host and accelerator memory. Set to
+            `False` to skip this step.
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
     is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
@@ -194,6 +200,16 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
                 (param.dtype == torch.float16) or (param.dtype == torch.bfloat16)
             ) and param.__class__.__name__ != "Params4bit":
                 param.data = param.data.to(torch.float32)
+
+        # Release CUDA allocator cache after bulk fp16→fp32 casts to reduce
+        # reserved-but-unused memory to free up system memory in devices
+        # that share host and accelerator memory (issue #3265)
+        if auto_clear_cache:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            if is_xpu_available():
+                torch.xpu.empty_cache()
 
     if (
         loaded_in_kbit
@@ -781,6 +797,11 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
         However, if the wrapped module is itself a tuner, we'll call merge on it before.
         """
+        if not self.active_adapters:
+            # none of the modules_to_save adapters of this module are active, e.g. because the model's active adapter
+            # does not use modules_to_save on this module; like in forward, the original module is used in this case
+            return self.original_module
+
         new_module = self.modules_to_save[self.active_adapter]
 
         # TODO: not sure if this is still a sensible thing to do. We would basically have to
@@ -1168,13 +1189,32 @@ def _prepare_prompt_learning_config(peft_config, model_config):
 
     # For grouped-query attention, see #1901.
     if (peft_config.peft_type in {"PREFIX_TUNING", "CARTRIDGE"}) and ("num_key_value_heads" in model_config):
-        # Models with heterogeneous attention (e.g. Gemma4) expose distinct shapes for global vs. sliding layers via
-        # `global_head_dim` / `num_global_key_value_heads`. Provision the prefix for the global-layer footprint; sliding
-        # layers whose KV shape doesn't match are skipped per-layer at injection time. Matches the default in
-        # google-deepmind/gemma#631.
+        # Models with heterogeneous attention (e.g. Gemma4) expose distinct shapes for global vs. sliding layers.
+        # New transformers (>= 5.15) use `per_layer_config` instead of `global_head_dim` / `num_global_key_value_heads`.
+        # Provision the prefix for the largest KV footprint; sliding layers whose KV shape doesn't match are skipped
+        # per-layer at injection time. Matches the default in google-deepmind/gemma#631.
         if model_config.get("global_head_dim") is not None:
             head_dim = model_config["global_head_dim"]
             num_key_value_heads = model_config.get("num_global_key_value_heads") or model_config["num_key_value_heads"]
+        elif model_config.get("per_layer_config") is not None:
+            # New transformers (>= 5.15): global_head_dim / num_global_key_value_heads were replaced by
+            # per_layer_config. Here model_config is a plain dict (from config.to_dict()), so
+            # per_layer_config contains only the *overrides*; the base head_dim and num_key_value_heads
+            # come from the top-level config. (The per_layer_config property on the config object
+            # returns the full config with overrides applied, but that's not available here.)
+            # Resolve the effective per-layer values and provision the prefix for the largest KV
+            # footprint (typically the full-attention layers).
+            per_layer = model_config["per_layer_config"]
+            base_head_dim = model_config.get("head_dim", peft_config.token_dim // peft_config.num_attention_heads)
+            base_num_kv_heads = model_config["num_key_value_heads"]
+            head_dim = base_head_dim
+            num_key_value_heads = base_num_kv_heads
+            for layer_cfg in per_layer.values():
+                layer_head_dim = layer_cfg.get("head_dim", base_head_dim)
+                layer_num_kv = layer_cfg.get("num_key_value_heads", base_num_kv_heads)
+                if layer_head_dim > head_dim:
+                    head_dim = layer_head_dim
+                    num_key_value_heads = layer_num_kv
         elif model_config.get("head_dim", None) is not None:
             head_dim = model_config["head_dim"]
             num_key_value_heads = model_config["num_key_value_heads"]

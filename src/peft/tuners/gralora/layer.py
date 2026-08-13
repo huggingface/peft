@@ -29,7 +29,7 @@ from .config import GraloraConfig
 class GraloraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weight
     adapter_layer_names = ("gralora_A", "gralora_B", "gralora_A_general", "gralora_B_general")
-    other_param_names = ("r", "hybrid_r", "alpha", "scaling", "gralora_dropout")
+    other_param_names = ("r", "hybrid_r", "alpha", "scaling", "gralora_dropout", "gralora_k")
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer

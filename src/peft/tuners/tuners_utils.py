@@ -148,7 +148,7 @@ def _check_lora_target_modules_mamba(peft_config: PeftConfig, model: nn.Module, 
 
     lora_like_types = {"LORA", "ADALORA", "XLORA", "RANDLORA"}
     incompatible_modules = {"out_proj", "conv1d"}
-    mamba_model_types = {"falcon_h1", "mamba", "mamba2", "falcon_mamba"}
+    mamba_model_types = {"falcon_h1", "mamba", "mamba2", "falcon_mamba", "nemotron_h"}
 
     if (
         peft_config.peft_type in lora_like_types
@@ -543,6 +543,7 @@ class BaseTuner(nn.Module, ABC):
         """
         if adapter_name not in list(self.peft_config.keys()):
             raise ValueError(f"Adapter {adapter_name} does not exist")
+        _check_adapters_not_merged(self.model, adapter_name)
         del self.peft_config[adapter_name]
 
         new_adapter = delete_adapter(
@@ -1395,7 +1396,7 @@ class BaseTuner(nn.Module, ABC):
             module.supports_lora_conversion() for module in self.modules() if isinstance(module, BaseTunerLayer)
         )
 
-    def __getattr__(self, name: str):
+    def __getattr__(self, name: str) -> Any:
         """Forward missing attributes to the wrapped module."""
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
@@ -1660,9 +1661,11 @@ class BaseTunerLayer(ABC):
                 del getattr(self, attr)[adapter_name]
 
         if adapter_name in self.frozen_peft_weight_names:
-            frozen_peft_weight_names = self.frozen_peft_weight_names.copy()
-            del frozen_peft_weight_names[adapter_name]
-            self.frozen_peft_weight_names = frozen_peft_weight_names
+            # Delete in place (like the containers above) rather than copy-and-rebind: once an adapter
+            # has been registered the instance already owns its own dict (see
+            # `_register_frozen_peft_weight`), so this can't mutate the class-level default, and it keeps
+            # the deletion visible to any already-held reference to the dict.
+            del self.frozen_peft_weight_names[adapter_name]
 
         if adapter_name in self.active_adapters:
             # choose a new active adapter
@@ -2220,6 +2223,21 @@ def _delete_auxiliary_adapter(model, adapter_name: str, new_active_adapters: Opt
             module.delete_adapter(adapter_name, new_active_adapters=new_active_adapters)
 
 
+def _check_adapters_not_merged(model: nn.Module, adapter_names: str | Sequence[str]) -> None:
+    if isinstance(adapter_names, str):
+        adapter_names = [adapter_names]
+
+    merged_adapters = {
+        adapter_name
+        for module in model.modules()
+        if isinstance(module, BaseTunerLayer)
+        for adapter_name in module.merged_adapters
+    }
+    still_merged = sorted(set(adapter_names) & merged_adapters)
+    if still_merged:
+        raise ValueError(f"Cannot delete adapter(s) {still_merged} while they are merged. Please unmerge them first.")
+
+
 def delete_adapter(
     model: nn.Module, adapter_name: str, prefix: str, layer_cls: type[BaseTunerLayer] = BaseTunerLayer
 ) -> list[str] | None:
@@ -2245,11 +2263,11 @@ def delete_adapter(
             The name of remaining adapter(s) after deletion, or `None` if there are no active adapters left. Use this
             to set the new active adapter of the model if necessary.
     """
-    key_list = [key for key, _ in model.named_modules() if prefix not in key]
     new_adapter = None
 
-    for key in key_list:
-        _, target, _ = _get_submodules(model, key)
+    for key, target in model.named_modules():
+        if prefix in key:
+            continue
         if isinstance(target, layer_cls):
             target.delete_adapter(adapter_name)
             if new_adapter is None:
