@@ -226,6 +226,7 @@ def get_pipeline(
     peft_config: Optional[PeftConfig],
     autocast_adapter_dtype: bool,
     use_gc: bool,
+    device_type: str,
 ):
     torch_dtype = get_torch_dtype(dtype)
     pipeline = Flux2KleinPipeline.from_pretrained(model_id, torch_dtype=torch_dtype)
@@ -236,7 +237,9 @@ def get_pipeline(
     pipeline.vae.requires_grad_(False)
     pipeline.text_encoder.requires_grad_(False)
 
-    transformer = pipeline.transformer
+    # temporarily move the transformer to the accelerator early, since there could be expensive operations during
+    # get_peft_model (e.g. SVD calls)
+    transformer = pipeline.transformer.to(device_type)
     if peft_config is None:
         transformer.requires_grad_(True)
     else:
@@ -245,6 +248,11 @@ def get_pipeline(
 
     if compile:
         pipeline.transformer = torch.compile(pipeline.transformer, dynamic=True)
+
+    # move back to CPU for now to prevent memory peaks
+    pipeline.transformer.to("cpu")
+    torch_accelerator_module = getattr(torch, device_type, torch.cuda)
+    torch_accelerator_module.empty_cache()
 
     pipeline.transformer.train()
     pipeline.vae.eval()
