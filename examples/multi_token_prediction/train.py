@@ -5,17 +5,17 @@ from dataclasses import asdict, dataclass
 from functools import partial
 from itertools import cycle
 
+import safetensors.torch
 import torch
 import torch.nn.functional as F
 import trackio
-import safetensors.torch
-
-from torch import nn
-from torch.utils.data import Dataset, DataLoader
-from transformers import AutoTokenizer, AutoModelForCausalLM, get_cosine_schedule_with_warmup
-from tqdm import tqdm
 from datasets import load_dataset
-from peft import LoraConfig, get_peft_model, TaskType
+from torch import nn
+from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
+from transformers import AutoModelForCausalLM, AutoTokenizer, get_cosine_schedule_with_warmup
+
+from peft import LoraConfig, TaskType, get_peft_model
 
 
 @dataclass
@@ -89,7 +89,7 @@ def augment_mtp(sample: list[int], bs: int, num_mtp: int, use_lc_loss: bool):
     offsets = []
     labels = []
 
-    indices = range(0, bs - int(use_lc_loss))
+    indices = range(bs - int(use_lc_loss))
     for i in indices:
         # each sequence in the batch is longer by num_mtp tokens instead of just 1
         # to be more sample efficient.
@@ -114,6 +114,7 @@ def augment_mtp(sample: list[int], bs: int, num_mtp: int, use_lc_loss: bool):
 
 class Sampler(nn.Module):
     """Section 2.3"""
+
     def __init__(self, embedding, unembedding, num_mtp: int, hidden_size: int, skip_last: bool):
         super().__init__()
         self.k = num_mtp
@@ -139,8 +140,8 @@ class Sampler(nn.Module):
         for batch_idx, offset in enumerate(offsets):
             # logits: [B, T, V]
             # hidden: [B, T, H]
-            ntp_logits.append(logits[batch_idx, offset - 1:offset])  # [K, V]
-            mtp_hidden.append(hidden[batch_idx, offset:offset + self.k])  # [K, H]
+            ntp_logits.append(logits[batch_idx, offset - 1 : offset])  # [K, V]
+            mtp_hidden.append(hidden[batch_idx, offset : offset + self.k])  # [K, H]
         ntp_logits = torch.stack(ntp_logits, dim=0)  # [B, 1, V]
         mtp_hidden = torch.stack(mtp_hidden, dim=0)  # [B, K, H]
         prev_token = ntp_logits.argmax(dim=-1)  # [B, 1]
@@ -149,7 +150,7 @@ class Sampler(nn.Module):
         for i_k in range(self.k):
             prev_token_emb = self.embedding(prev_token)  # [B, 1, H]
             sampler_logits = self.sampler(
-                mtp_hidden[:, i_k:i_k+1],  # [B, 1, H]
+                mtp_hidden[:, i_k : i_k + 1],  # [B, 1, H]
                 prev_token_emb,
             )  # [B, 1, V]
             prev_token = sampler_logits.argmax(dim=-1)  # [B, 1]
@@ -171,6 +172,7 @@ class SamplerModule(torch.nn.Module):
     This ensures the sampler starts from z_n (which already encodes the future
     via base-CE training) and the MLP only refines it using prev_token info.
     """
+
     def __init__(self, unembedding, hidden_size):
         super().__init__()
         self.mlp = nn.Sequential(
@@ -221,22 +223,19 @@ def calculate_lc_loss(hidden_states, offsets, *, num_mtp: int, lc_loss_weight: f
     # iterate over all but the last items in the last layer's hidden state to compute the
     # LC loss.
     for hidden_state, offset in zip(hidden_states[:-1], offsets):
-        hs = hidden_state[offset: offset + num_mtp]  # [T, H]
-        target = hidden_states[-1, offset: offset + num_mtp].detach()
+        hs = hidden_state[offset : offset + num_mtp]  # [T, H]
+        target = hidden_states[-1, offset : offset + num_mtp].detach()
         loss += lc_loss_weight * F.mse_loss(hs, target)
     return loss / (len(hidden_states) - 1)
 
 
 def calculate_mtp_loss(logits, labels, offsets, use_lc_loss: bool, num_mtp: int):
-    """Calculates the cross-entropy loss exactly on the MTP tokens
-    """
+    """Calculates the cross-entropy loss exactly on the MTP tokens"""
     loss = 0
     logits = logits if not use_lc_loss else logits[:-1]
     for logit, label, offset in zip(logits, labels, offsets):
         # since the number of MTP tokens is equal for each sample, we can just sum them
-        loss += F.cross_entropy(
-            logit[offset:offset + num_mtp], label[offset : offset + num_mtp], ignore_index=-100
-        )
+        loss += F.cross_entropy(logit[offset : offset + num_mtp], label[offset : offset + num_mtp], ignore_index=-100)
 
     return loss / len(logits)
 
@@ -255,9 +254,7 @@ def calculate_sampler_loss(logits, labels, offsets, use_lc_loss: bool, num_mtp: 
     loss = 0
     for logit, label, offset in zip(logits, labels, offsets):
         # since the number of MTP tokens is equal for each sample, we can just sum them
-        loss += F.cross_entropy(
-            logit[0:num_mtp], label[offset : offset + num_mtp], ignore_index=-100
-        )
+        loss += F.cross_entropy(logit[0:num_mtp], label[offset : offset + num_mtp], ignore_index=-100)
 
     return loss / len(logits)
 
@@ -274,8 +271,8 @@ def calculate_mtp_accuracy(logits, labels, logit_offsets, label_offsets, num_mtp
     y_true = []
     logit_offsets = logit_offsets[:-1] if use_lc_loss else logit_offsets
     for idx_batch, (logit_offset, label_offset) in enumerate(zip(logit_offsets, label_offsets)):
-        y_pred.append(logits[idx_batch, logit_offset:logit_offset + num_mtp].argmax(dim=-1))
-        y_true.append(labels[idx_batch, label_offset:label_offset + num_mtp])
+        y_pred.append(logits[idx_batch, logit_offset : logit_offset + num_mtp].argmax(dim=-1))
+        y_true.append(labels[idx_batch, label_offset : label_offset + num_mtp])
     y_pred = torch.stack(y_pred, dim=0)  # [B, K]
     y_true = torch.stack(y_true, dim=0)  # [B, K]
     token_accuracies = (y_pred == y_true).float().mean(dim=0)
@@ -290,7 +287,7 @@ def calculate_model_match(model, batch, labels, offsets, model_logits, num_mtp, 
     match_rates = []
     offsets = offsets[:-1] if use_lc_loss else offsets
 
-    for idx_batch, (input_ids, offset) in enumerate(zip(batch['input_ids'], offsets)):
+    for idx_batch, (input_ids, offset) in enumerate(zip(batch["input_ids"], offsets)):
         # auto-regressively create the reference tokens from the base model.
         #
         # for input index i the corresponding prediction will be for i+1. so the model logits for
@@ -311,12 +308,12 @@ def calculate_model_match(model, batch, labels, offsets, model_logits, num_mtp, 
         y_ref = model.generate(
             input_ids=in_ref,
             attention_mask=torch.ones(*in_ref.shape).to(model.device),
-            max_new_tokens=num_mtp+1,
+            max_new_tokens=num_mtp + 1,
             do_sample=False,
             num_beams=1,
         )[0, -num_mtp:]
 
-        y_mtp = model_logits[idx_batch, offset:offset+num_mtp].argmax(dim=-1)
+        y_mtp = model_logits[idx_batch, offset : offset + num_mtp].argmax(dim=-1)
 
         # the first mismatched index is also the number of matched tokens that are usable in a speculative decoding
         # setup (since after the first mismatch, the following tokens cannot be used). example:
@@ -329,7 +326,7 @@ def calculate_model_match(model, batch, labels, offsets, model_logits, num_mtp, 
 
         if not len(match_indices):
             # no mismatch found
-            match_rate = 1.
+            match_rate = 1.0
         else:
             match_rate = match_indices[0].item() / num_mtp
         match_rates.append(match_rate)
@@ -371,7 +368,7 @@ def save_artifacts(model, sampler, tokenizer, train_config, is_checkpoint: bool 
     model.save_pretrained(directory)
     sampler_state_dict = sampler.state_dict()
     for key in list(sampler_state_dict.keys()):
-        if key.startswith("embedding.") or key.startswith("sampler.unembedding."):
+        if key.startswith(("embedding.", "sampler.unembedding.")):
             del sampler_state_dict[key]
     safetensors.torch.save_file(
         tensors=sampler_state_dict,
@@ -381,14 +378,16 @@ def save_artifacts(model, sampler, tokenizer, train_config, is_checkpoint: bool 
     print(f"Saved the PEFT model and sampler at {directory}")
 
 
-def train_loop(model, tokenizer, sampler, optimizer, iterator_train, iterator_eval, lr_scheduler, train_config: TrainConfig):
+def train_loop(
+    model, tokenizer, sampler, optimizer, iterator_train, iterator_eval, lr_scheduler, train_config: TrainConfig
+):
     # assume batch size 1
     for step, sample in tqdm(enumerate(cycle(iterator_train)), desc="train"):
         if step == train_config.num_steps:
             break
 
         if isinstance(sample, dict):
-            sample = [n.item() for n in sample['input_ids']]  # finewiki dataloader must emit dicts, unpack that
+            sample = [n.item() for n in sample["input_ids"]]  # finewiki dataloader must emit dicts, unpack that
         else:
             sample = sample[0].tolist()  # unpack batch of size 1, batching happens in augment_mtp
 
@@ -428,10 +427,14 @@ def train_loop(model, tokenizer, sampler, optimizer, iterator_train, iterator_ev
                     "eval/loss/lcm": eval_output["loss_lc"],
                     "eval/step": step,
                     "eval/mtp_match_rate": eval_output["mtp_match_rate"],
-                    **{f"eval/accuracy/mtp_model_{i}": eval_output[f"mtp_model_accuracy_{i}"] for i in
-                       range(train_config.num_mtp)},
-                    **{f"eval/accuracy/mtp_sampler_{i}": eval_output[f"mtp_sampler_accuracy_{i}"] for i in
-                       range(train_config.num_mtp)},
+                    **{
+                        f"eval/accuracy/mtp_model_{i}": eval_output[f"mtp_model_accuracy_{i}"]
+                        for i in range(train_config.num_mtp)
+                    },
+                    **{
+                        f"eval/accuracy/mtp_sampler_{i}": eval_output[f"mtp_sampler_accuracy_{i}"]
+                        for i in range(train_config.num_mtp)
+                    },
                 }
             )
 
@@ -441,10 +444,14 @@ def train_loop(model, tokenizer, sampler, optimizer, iterator_train, iterator_ev
     save_artifacts(model, sampler, tokenizer, train_config, is_checkpoint=False)
 
 
-def train_step(model, tokenizer, sampler, optimizer, iterator_train, lr_scheduler, train_config: TrainConfig, sample, step):
+def train_step(
+    model, tokenizer, sampler, optimizer, iterator_train, lr_scheduler, train_config: TrainConfig, sample, step
+):
     tic = time.perf_counter()
     # assume batch size 1
-    input_ids, labels, offsets = augment_mtp(sample, bs=train_config.batch_size, num_mtp=train_config.num_mtp, use_lc_loss=train_config.use_lc_loss)
+    input_ids, labels, offsets = augment_mtp(
+        sample, bs=train_config.batch_size, num_mtp=train_config.num_mtp, use_lc_loss=train_config.use_lc_loss
+    )
 
     # create the batch
     tokens_per_sample = [len(i) for i in input_ids]
@@ -453,7 +460,7 @@ def train_step(model, tokenizer, sampler, optimizer, iterator_train, lr_schedule
     actual_batch_size = len(batch["input_ids"])
 
     # pad targets to padded input ids
-    for i, (input_ids, label) in enumerate(zip(batch['input_ids'], labels)):
+    for i, (input_ids, label) in enumerate(zip(batch["input_ids"], labels)):
         labels[i] = labels[i] + [-100] * (input_ids.shape[0] - len(label))  # assume right padding
     labels = torch.tensor(labels).to(model.device)
 
@@ -462,7 +469,12 @@ def train_step(model, tokenizer, sampler, optimizer, iterator_train, lr_schedule
     outputs = model(**batch, num_items_in_batch=total_tokens, output_hidden_states=True)
     loss_mtp = calculate_mtp_loss(outputs.logits, labels, offsets, train_config.use_lc_loss, train_config.num_mtp)
     if train_config.use_lc_loss:
-        loss_lc = calculate_lc_loss(outputs.hidden_states[-1], offsets, num_mtp=train_config.num_mtp, lc_loss_weight=train_config.lc_loss_weight)
+        loss_lc = calculate_lc_loss(
+            outputs.hidden_states[-1],
+            offsets,
+            num_mtp=train_config.num_mtp,
+            lc_loss_weight=train_config.lc_loss_weight,
+        )
     else:
         loss_lc = torch.tensor(0.0)
     if train_config.use_sampler:
@@ -472,13 +484,16 @@ def train_step(model, tokenizer, sampler, optimizer, iterator_train, lr_schedule
         if train_config.sampler_detach_hidden_state:
             hidden_state = hidden_state.detach()
         logits_sampler = sampler(outputs.logits, hidden_state, offsets)
-        loss_sampler = calculate_sampler_loss(
-            logits=logits_sampler,
-            labels=labels,
-            offsets=offsets,
-            use_lc_loss=train_config.use_lc_loss,
-            num_mtp=train_config.num_mtp,
-        ) * train_config.sampler_loss_weight
+        loss_sampler = (
+            calculate_sampler_loss(
+                logits=logits_sampler,
+                labels=labels,
+                offsets=offsets,
+                use_lc_loss=train_config.use_lc_loss,
+                num_mtp=train_config.num_mtp,
+            )
+            * train_config.sampler_loss_weight
+        )
     else:
         loss_sampler = torch.tensor(0.0)
 
@@ -492,7 +507,7 @@ def train_step(model, tokenizer, sampler, optimizer, iterator_train, lr_schedule
 
     if train_config.max_gradient_norm > 0:
         for group in optimizer.param_groups:
-            torch.nn.utils.clip_grad_norm_(group['params'], train_config.max_gradient_norm)
+            torch.nn.utils.clip_grad_norm_(group["params"], train_config.max_gradient_norm)
 
     optimizer.step()
     lr_scheduler.step()
@@ -519,7 +534,7 @@ def evaluate(model, tokenizer, sampler, iterator_eval, train_config):
     outputs = []
     for step, sample in tqdm(enumerate(iterator_eval), desc="eval"):
         if isinstance(sample, dict):
-            sample = [n.item() for n in sample['input_ids']]  # finewiki dataloader must emit dicts, unpack that
+            sample = [n.item() for n in sample["input_ids"]]  # finewiki dataloader must emit dicts, unpack that
         else:
             sample = sample[0].tolist()  # unpack batch of size 1, batching happens in augment_mtp
 
@@ -534,7 +549,7 @@ def evaluate(model, tokenizer, sampler, iterator_eval, train_config):
             # None values are used to signify skipped values that are not reported in every step
             if value is None:
                 continue
-            outputs_aggregated[metric_key] = outputs_aggregated.get(metric_key, 0) + metrics[metric_key]
+            outputs_aggregated[metric_key] = outputs_aggregated.get(metric_key, 0) + value
             counts_aggregated[metric_key] = counts_aggregated.get(metric_key, 0) + 1
     for metric_key in outputs_aggregated:
         outputs_aggregated[metric_key] /= counts_aggregated[metric_key]
@@ -547,7 +562,9 @@ def evaluate(model, tokenizer, sampler, iterator_eval, train_config):
 def eval_step(model, tokenizer, sampler, train_config: TrainConfig, sample, step):
     tic = time.perf_counter()
     # assume batch size 1
-    input_ids, labels, offsets = augment_mtp(sample, bs=train_config.batch_size, num_mtp=train_config.num_mtp, use_lc_loss=train_config.use_lc_loss)
+    input_ids, labels, offsets = augment_mtp(
+        sample, bs=train_config.batch_size, num_mtp=train_config.num_mtp, use_lc_loss=train_config.use_lc_loss
+    )
 
     # create the batch
     tokens_per_sample = [len(i) for i in input_ids]
@@ -555,7 +572,7 @@ def eval_step(model, tokenizer, sampler, train_config: TrainConfig, sample, step
     batch = tokenizer.pad({"input_ids": input_ids}, return_tensors="pt").to(model.device)
 
     # pad targets to padded input ids
-    for i, (input_ids, label) in enumerate(zip(batch['input_ids'], labels)):
+    for i, (input_ids, label) in enumerate(zip(batch["input_ids"], labels)):
         labels[i] = labels[i] + [-100] * (input_ids.shape[0] - len(label))  # assume right padding
     labels = torch.tensor(labels).to(model.device)
 
@@ -563,20 +580,28 @@ def eval_step(model, tokenizer, sampler, train_config: TrainConfig, sample, step
     outputs = model(**batch, num_items_in_batch=total_tokens, output_hidden_states=True)
     loss_mtp = calculate_mtp_loss(outputs.logits, labels, offsets, train_config.use_lc_loss, train_config.num_mtp)
     if train_config.use_lc_loss:
-        loss_lc = calculate_lc_loss(outputs.hidden_states[-1], offsets, num_mtp=train_config.num_mtp, lc_loss_weight=train_config.lc_loss_weight)
+        loss_lc = calculate_lc_loss(
+            outputs.hidden_states[-1],
+            offsets,
+            num_mtp=train_config.num_mtp,
+            lc_loss_weight=train_config.lc_loss_weight,
+        )
     else:
         loss_lc = torch.tensor(0.0)
     if train_config.use_sampler:
         # Generate a num_mtp long sequence using the sampler and compute the MTP loss
         # for that (paper says: should be better than via the model itself).
         logits_sampler = sampler(outputs.logits, outputs.hidden_states[-1], offsets)
-        loss_sampler = calculate_sampler_loss(
-            logits=logits_sampler,
-            labels=labels,
-            offsets=offsets,
-            use_lc_loss=train_config.use_lc_loss,
-            num_mtp=train_config.num_mtp,
-        ) * train_config.sampler_loss_weight
+        loss_sampler = (
+            calculate_sampler_loss(
+                logits=logits_sampler,
+                labels=labels,
+                offsets=offsets,
+                use_lc_loss=train_config.use_lc_loss,
+                num_mtp=train_config.num_mtp,
+            )
+            * train_config.sampler_loss_weight
+        )
     else:
         loss_sampler = torch.tensor(0.0)
 
@@ -586,7 +611,9 @@ def eval_step(model, tokenizer, sampler, train_config: TrainConfig, sample, step
     # we also report NTP accuracy as a baseline for MTP, if we are significantly better than that, we're
     # probably overfitting the fine-tuning dataset. if we're way worse than that, we are not learning enough.
     if step % 50 == 0:
-        mtp_match_rate = calculate_model_match(model, batch, labels, offsets, outputs.logits, train_config.num_mtp, train_config.use_lc_loss)
+        mtp_match_rate = calculate_model_match(
+            model, batch, labels, offsets, outputs.logits, train_config.num_mtp, train_config.use_lc_loss
+        )
     else:
         mtp_match_rate = None
 
@@ -628,23 +655,21 @@ def eval_step(model, tokenizer, sampler, train_config: TrainConfig, sample, step
     }
 
 
-
 def gradient_norm_step(optimizer, loss_mtp, loss_lc, loss_sampler):
     """Compute the average gradient norm for each loss term so that we can see the impact of each
     loss term and the potential need for individual scaling.
     """
+
     def get_grad_norm(optimizer):
         grad_norms = []
         for group in optimizer.param_groups:
-            norms = torch.tensor([p.grad.norm() for p in group['params'] if p.grad is not None])
+            norms = torch.tensor([p.grad.norm() for p in group["params"] if p.grad is not None])
             if len(norms) > 0:
                 grad_norms.append(norms.mean())
         return sum(grad_norms) / len(grad_norms)
 
     loss_mtp.backward(retain_graph=True)
     grad_norm_mtp = get_grad_norm(optimizer)
-    if grad_norm_mtp != grad_norm_mtp:
-        breakpoint()
     optimizer.zero_grad()
 
     if loss_lc > 0:
@@ -652,20 +677,19 @@ def gradient_norm_step(optimizer, loss_mtp, loss_lc, loss_sampler):
         grad_norm_lc = get_grad_norm(optimizer)
         optimizer.zero_grad()
     else:
-        grad_norm_lc = torch.tensor(0.)
+        grad_norm_lc = torch.tensor(0.0)
 
     loss_sampler.backward(retain_graph=True)
     grad_norm_sampler = get_grad_norm(optimizer)
     optimizer.zero_grad()
 
     gradnorms = {
-        'gradnorm/mtp': grad_norm_mtp.cpu().item(),
-        'gradnorm/lc': grad_norm_lc.cpu().item(),
-        'gradnorm/sampler': grad_norm_sampler.cpu().item(),
+        "gradnorm/mtp": grad_norm_mtp.cpu().item(),
+        "gradnorm/lc": grad_norm_lc.cpu().item(),
+        "gradnorm/sampler": grad_norm_sampler.cpu().item(),
     }
 
     return gradnorms
-
 
 
 class TextDataset(Dataset):
@@ -679,48 +703,47 @@ class TextDataset(Dataset):
 
     def __getitem__(self, idx):
         return torch.tensor(
-            [self.tokenizer.bos_token_id] +
-            self.full_tokens[idx*self.seq_len:(idx+1)*self.seq_len],
+            [self.tokenizer.bos_token_id] + self.full_tokens[idx * self.seq_len : (idx + 1) * self.seq_len],
         )
 
 
 def tokenize_wiki(examples, tokenizer, chunk_size):
     chunks = []
-    for tokens in tokenizer.encode(examples['text'], add_special_tokens=False):
+    for tokens in tokenizer.encode(examples["text"], add_special_tokens=False):
         for i_split in range(0, len(tokens), chunk_size):
-            chunk = tokens[i_split:i_split+chunk_size]
+            chunk = tokens[i_split : i_split + chunk_size]
             if len(chunk) == chunk_size:
                 chunks.append([tokenizer.bos_token_id] + chunk)
 
-    return {'input_ids': chunks}
+    return {"input_ids": chunks}
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-r', type=int, default=16)
-    parser.add_argument('--alpha', type=int, default=32)
-    parser.add_argument('-k', type=int, default=2)
-    parser.add_argument('--text_file', type=str, default='train.txt')
-    parser.add_argument('--use_wiki', action='store_true', default=False, help="Use finewiki instead of --text_file")
-    parser.add_argument('--seq_len', type=int, default=128)
-    parser.add_argument('--model_id', type=str, default='meta-llama/Llama-3.2-3B')
-    parser.add_argument('--lr', type=float)
-    parser.add_argument('--num_steps', type=int, default=5_000, help="Training steps.")
-    parser.add_argument('--warmup_ratio', type=float, default=0.1, help="warmup_ratio * training_steps = warmup_steps")
-    parser.add_argument('--output_dir', type=str, default="mtp_model")
-    parser.add_argument('--checkpoint_dir', type=str, default="mtp_model_checkpoint")
-    parser.add_argument('--batch_size', type=int, default=4)
-    parser.add_argument('--use_sampler', action='store_true', default=False)
-    parser.add_argument('--sampler_loss_weight', type=float, default=1.)
-    parser.add_argument('--sampler_detach_hidden_state', action='store_true', default=False)
-    parser.add_argument('--sampler_lr', type=float)
-    parser.add_argument('--lc_loss_weight', type=float, default=1.)
-    parser.add_argument('--use_lc_loss', action='store_true', default=False)
-    parser.add_argument('--log_step', type=int, default=10)
-    parser.add_argument('--eval_step', type=int, default=200)
-    parser.add_argument('--checkpoint_step', type=int, default=1000)
-    parser.add_argument('--num_valid', type=int, default=1000)
-    parser.add_argument('--max_grad_norm', type=float, default=10)
+    parser.add_argument("-r", type=int, default=16)
+    parser.add_argument("--alpha", type=int, default=32)
+    parser.add_argument("-k", type=int, default=2)
+    parser.add_argument("--text_file", type=str, default="train.txt")
+    parser.add_argument("--use_wiki", action="store_true", default=False, help="Use finewiki instead of --text_file")
+    parser.add_argument("--seq_len", type=int, default=128)
+    parser.add_argument("--model_id", type=str, default="meta-llama/Llama-3.2-3B")
+    parser.add_argument("--lr", type=float)
+    parser.add_argument("--num_steps", type=int, default=5_000, help="Training steps.")
+    parser.add_argument("--warmup_ratio", type=float, default=0.1, help="warmup_ratio * training_steps = warmup_steps")
+    parser.add_argument("--output_dir", type=str, default="mtp_model")
+    parser.add_argument("--checkpoint_dir", type=str, default="mtp_model_checkpoint")
+    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--use_sampler", action="store_true", default=False)
+    parser.add_argument("--sampler_loss_weight", type=float, default=1.0)
+    parser.add_argument("--sampler_detach_hidden_state", action="store_true", default=False)
+    parser.add_argument("--sampler_lr", type=float)
+    parser.add_argument("--lc_loss_weight", type=float, default=1.0)
+    parser.add_argument("--use_lc_loss", action="store_true", default=False)
+    parser.add_argument("--log_step", type=int, default=10)
+    parser.add_argument("--eval_step", type=int, default=200)
+    parser.add_argument("--checkpoint_step", type=int, default=1000)
+    parser.add_argument("--num_valid", type=int, default=1000)
+    parser.add_argument("--max_grad_norm", type=float, default=10)
 
     default_lr = 2e-4
     parser.set_defaults(sampler_lr=default_lr, lr=default_lr)
@@ -767,16 +790,19 @@ def main():
         num_valid_samples = args.num_valid
         dataset_train = ds.skip(num_valid_samples).map(
             partial(tokenize_wiki, tokenizer=tokenizer, chunk_size=args.seq_len),
-            batched=True, remove_columns=ds.column_names, drop_last_batch=True,
+            batched=True,
+            remove_columns=ds.column_names,
+            drop_last_batch=True,
         )
         dataset_valid = ds.take(num_valid_samples).map(
             partial(tokenize_wiki, tokenizer=tokenizer, chunk_size=args.seq_len),
-            batched=True, remove_columns=ds.column_names,
+            batched=True,
+            remove_columns=ds.column_names,
         )
         dataset_valid = dataset_valid.take(num_valid_samples)
     else:
         print(f"Loading text from: {args.text_file}")
-        with open(args.text_file, "r") as f:
+        with open(args.text_file) as f:
             text = f.read()
         split_idx = args.num_valid
         dataset_train = TextDataset(text[split_idx:], tokenizer, args.seq_len)
@@ -788,17 +814,21 @@ def main():
 
     # Optimizer: separate LR for sampler MLP (trains from scratch, may need higher LR)
     # Exclude unembedding from sampler params (it's shared with the model)
-    sampler_params = [p for n, p in sampler.named_parameters() if not
-                      n.startswith("sampler.unembedding") and not
-                      n.startswith("embedding")]
-    optimizer = torch.optim.AdamW([
-        {"params": model.parameters(), "lr": args.lr},
-        {"params": sampler_params, "lr": args.sampler_lr},
-    ])
+    sampler_params = [
+        p for n, p in sampler.named_parameters() if not n.startswith(("sampler.unembedding", "embedding"))
+    ]
+    optimizer = torch.optim.AdamW(
+        [
+            {"params": model.parameters(), "lr": args.lr},
+            {"params": sampler_params, "lr": args.sampler_lr},
+        ]
+    )
 
     # LR scheduler: linear warmup then cosine decay to 0
     warmup_steps = int(args.num_steps * args.warmup_ratio)
-    scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=args.num_steps)
+    scheduler = get_cosine_schedule_with_warmup(
+        optimizer, num_warmup_steps=warmup_steps, num_training_steps=args.num_steps
+    )
     print(f"LR schedule: warmup={warmup_steps} steps, cosine decay over {args.num_steps} steps")
     print(f"  model lr={args.lr}, sampler lr={args.lr} (x{args.warmup_ratio})")
 
@@ -856,4 +886,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -14,21 +14,25 @@ Design:
 
 Memory: 1 model + 1 cache + tiny sampler. No `detached_copy` / second assistant needed.
 """
-import sys, os
-# Prefer local transformers (5.15.0.dev0, has use_mtp) and peft source over installed versions
-_LOCAL_TRANSFORMERS = os.path.join(os.path.dirname(__file__), "transformers", "src")
-_LOCAL_PEFT = os.path.join(os.path.dirname(__file__), "..", "..", "src")
-for p in (_LOCAL_TRANSFORMERS, _LOCAL_PEFT):
-    ap2 = os.path.abspath(p)
-    if os.path.isdir(ap2) and ap2 not in sys.path:
-        sys.path.insert(0, ap2)
 
 import argparse
+import json
+import os
+import time
+
+import packaging.version
+import safetensors
 import torch
-from transformers import LlamaConfig, LlamaForCausalLM, DynamicCache
-from peft import LoraConfig, get_peft_model, TaskType, PeftModelForCausalLM
+import transformers
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from peft import PeftModel, PeftModelForCausalLM
 from peft.tuners.lora import LoraLayer
 from peft.tuners.lora.variants import calculate_alora_offsets
+
+
+if packaging.version.parse(transformers.__version__) <= packaging.version.parse("5.15.0"):
+    raise RuntimeError("needs transformers > 5.15")
 
 torch.manual_seed(0)
 
@@ -40,8 +44,12 @@ class SamplerModule(torch.nn.Module):
     def __init__(self, unembedding, hidden_size):
         super().__init__()
         self.mlp = torch.nn.Sequential(
-            torch.nn.Linear(hidden_size * 2, hidden_size), torch.nn.SiLU(), torch.nn.LayerNorm(hidden_size),
-            torch.nn.Linear(hidden_size, hidden_size), torch.nn.SiLU(), torch.nn.LayerNorm(hidden_size),
+            torch.nn.Linear(hidden_size * 2, hidden_size),
+            torch.nn.SiLU(),
+            torch.nn.LayerNorm(hidden_size),
+            torch.nn.Linear(hidden_size, hidden_size),
+            torch.nn.SiLU(),
+            torch.nn.LayerNorm(hidden_size),
         )
         self.unembedding = unembedding
         torch.nn.init.zeros_(self.mlp[-3].weight)
@@ -68,15 +76,17 @@ def make_draft(model_outputs, embedding, sampler_module, K, use_sampler, prev_to
     last_hidden = model_outputs.hidden_states[-1]  # [B, T, H]
     logits = model_outputs.logits  # [B, T', V] (T' = logits_to_keep window)
     if os.environ.get("MTP_DEBUG"):
-        print(f"  [MTP] make_draft: logits.shape={logits.shape} hidden.shape={last_hidden.shape} "
-              f"logits_to_keep_arg={getattr(model_outputs, 'logits_to_keep', '?')}")
+        print(
+            f"  [MTP] make_draft: logits.shape={logits.shape} hidden.shape={last_hidden.shape} "
+            f"logits_to_keep_arg={getattr(model_outputs, 'logits_to_keep', '?')}"
+        )
         print(f"  [MTP] make_draft: logits[:,-K:].argmax={logits[:, -K:, :].argmax(dim=-1)[0].tolist()}")
     mask_hidden = last_hidden[:, -K:, :]  # [B, K, H]
     if use_sampler:
         draft = []
         for i in range(K):
             emb = embedding(prev_token)  # [B, 1, H]
-            sl = sampler_module(mask_hidden[:, i:i + 1, :], emb)  # [B, 1, V]
+            sl = sampler_module(mask_hidden[:, i : i + 1, :], emb)  # [B, 1, V]
             prev_token = sl.argmax(dim=-1)  # [B, 1]
             draft.append(prev_token)
         return torch.cat(draft, dim=-1)  # [B, K]
@@ -90,8 +100,16 @@ class AloraMTPCandidateGenerator:
     requires_model_outputs = True
     model_kwargs_overrides = {"output_hidden_states": True}
 
-    def __init__(self, main_model, generation_config, model_kwargs, logits_processor=None,
-                 sampler_module=None, use_sampler=True, mask_token_ids=None):
+    def __init__(
+        self,
+        main_model,
+        generation_config,
+        model_kwargs,
+        logits_processor=None,
+        sampler_module=None,
+        use_sampler=True,
+        mask_token_ids=None,
+    ):
         self.main_model = main_model
         self.device = main_model.device
         self.K = len(mask_token_ids)
@@ -100,8 +118,9 @@ class AloraMTPCandidateGenerator:
         self.mask_ids = torch.tensor(mask_token_ids, dtype=torch.long, device=self.device)
         self.n_matches_history = []  # n_matches per spec cycle (acceptance stats)
 
-    def get_candidates(self, input_ids, model_kwargs=None, model_outputs=None,
-                       is_first_iteration=False, n_last_matches=0, **kw):
+    def get_candidates(
+        self, input_ids, model_kwargs=None, model_outputs=None, is_first_iteration=False, n_last_matches=0, **kw
+    ):
         masks = self.mask_ids.unsqueeze(0).expand(input_ids.shape[0], -1)
         if is_first_iteration:
             # No draft yet: just append masks so the first (prefill) forward produces
@@ -121,9 +140,14 @@ class AloraMTPCandidateGenerator:
         # Draft from the previous forward's mask hidden states, then re-append masks.
         # The previous candidate either was masks-only (fresh hiddens) or fully accepted
         # (hiddens attended to correct drafts only), so its mask hiddens are valid.
-        draft = make_draft(model_outputs, self.main_model.get_input_embeddings(),
-                           self.sampler_module, self.K, self.use_sampler,
-                           prev_token=input_ids[:, -1:])  # [B, K]
+        draft = make_draft(
+            model_outputs,
+            self.main_model.get_input_embeddings(),
+            self.sampler_module,
+            self.K,
+            self.use_sampler,
+            prev_token=input_ids[:, -1:],
+        )  # [B, K]
         self._last_draft = draft[0]
         self._last_had_drafts = True
         cand = torch.cat([draft, masks], dim=-1)  # [B, 2K]
@@ -133,10 +157,15 @@ class AloraMTPCandidateGenerator:
         self.n_matches_history.append(int(num_matches))
         if os.environ.get("MTP_DEBUG"):
             draft = self._last_draft.tolist() if getattr(self, "_last_draft", None) is not None else "?"
-            sel = scores[0, :num_matches+2].argmax(dim=-1).tolist() if scores is not None and num_matches >= 0 else "?"
-            print(f"  [MTP DEBUG] n_matches={num_matches} draft={draft} sel_prefix={sel} "
-                  f"input_ids_len={input_ids.shape[1] if input_ids is not None else '?'}")
-        return None
+            sel = (
+                scores[0, : num_matches + 2].argmax(dim=-1).tolist()
+                if scores is not None and num_matches >= 0
+                else "?"
+            )
+            print(
+                f"  [MTP DEBUG] n_matches={num_matches} draft={draft} sel_prefix={sel} "
+                f"input_ids_len={input_ids.shape[1] if input_ids is not None else '?'}"
+            )
 
 
 # --------------------------------------------------------------------------------------
@@ -173,16 +202,17 @@ class AloraMTPModel(PeftModelForCausalLM):
                     pos_end = pos_ids[0, -5:].tolist() if pos_ids is not None else None
                     cache = kwargs_.get("past_key_values")
                     cache_len = cache.get_seq_length() if cache is not None else "no cache"
-                    print(f"  [MTP] top_pre_hook: input_ids={inp.shape if inp is not None else None} "
-                          f"pos_start={pos_vals} cache_len={cache_len}")
+                    print(
+                        f"  [MTP] top_pre_hook: input_ids={inp.shape if inp is not None else None} "
+                        f"pos_start={pos_vals} cache_len={cache_len}"
+                    )
 
         # ... and inject freshly-recomputed alora_offsets into every LoRA layer, recording them.
         self._alora_offsets_seen = []
 
         def layer_pre_hook(module, args_, kwargs_):
             inp = rec["input_ids"]
-            off = (calculate_alora_offsets(self.peft_config, self.active_adapter, inp)
-                   if inp is not None else None)
+            off = calculate_alora_offsets(self.peft_config, self.active_adapter, inp) if inp is not None else None
             kwargs_["alora_offsets"] = off
             self._alora_offsets_seen.append(off)
             if os.environ.get("MTP_DEBUG") and rec.get("_is_mtp") and getattr(module, "_lp_dbg", 0) < 5:
@@ -208,40 +238,6 @@ class AloraMTPModel(PeftModelForCausalLM):
             self.base_model.prepare_inputs_for_generation = self.base_model_prepare_inputs_for_generation
 
 
-# --------------------------------------------------------------------------------------
-# Build a tiny end-to-end setup (CPU, random init, no download)
-# --------------------------------------------------------------------------------------
-def build(K=2, use_sampler=True, vocab=80, hidden=64, layers=2, heads=2):
-    torch.manual_seed(0)
-    cfg = LlamaConfig(vocab_size=vocab, hidden_size=hidden, num_hidden_layers=layers,
-                     num_attention_heads=heads, intermediate_size=128,
-                     max_position_embeddings=512, rms_norm_eps=1e-5)
-    base = LlamaForCausalLM(cfg)
-    mask_token_ids = list(range(vocab, vocab + K))
-    base.resize_token_embeddings(vocab + K)
-    lora_cfg = LoraConfig(task_type=TaskType.CAUSAL_LM, r=4, lora_alpha=8,
-                          target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-                          alora_invocation_tokens=mask_token_ids, use_rslora=True)
-    model = get_peft_model(base, lora_cfg)
-    model = model  # PeftModelForCausalLM
-    # Non-zero LoRA so the adapter is observable
-    with torch.no_grad():
-        for n, p in model.named_parameters():
-            if "lora_B" in n:
-                p.copy_(torch.randn_like(p) * 0.1)
-    model.eval()
-    # Wrap to get per-forward aLoRA recompute
-    model.__class__ = AloraMTPModel  # NOTE: reclass the PeftModelForCausalLM instance
-    sampler = SamplerModule(model.get_output_embeddings(), hidden)
-    # make sampler weights non-zero so it drafts something
-    with torch.no_grad():
-        for n, p in sampler.named_parameters():
-            if "weight" in n and "LayerNorm" not in n:
-                p.copy_(torch.randn_like(p) * 0.05)
-    sampler = sampler.to(model.device)
-    return model, sampler, mask_token_ids, vocab
-
-
 def wire_candidate_generator(model, sampler, mask_token_ids, use_sampler):
     """Monkeypatch `_get_candidate_generator` to return ours when use_mtp is set.
 
@@ -250,164 +246,179 @@ def wire_candidate_generator(model, sampler, mask_token_ids, use_sampler):
     """
     gen = model
     base = model.base_model.model  # the LlamaForCausalLM that generate() actually runs on
-    orig = base._get_candidate_generator
 
-    def patched(self, generation_config, input_ids, inputs_tensor, logits_processor,
-                model_kwargs, assistant_model=None, target_tokenizer=None, assistant_tokenizer=None):
-        if getattr(generation_config, "use_alora_mtp", False):
-            cg = AloraMTPCandidateGenerator(
-                main_model=gen, generation_config=generation_config, model_kwargs=model_kwargs,
-                logits_processor=logits_processor, sampler_module=sampler,
-                use_sampler=use_sampler, mask_token_ids=mask_token_ids,
-            )
-            gen._last_mtp_generator = cg
-            return cg
-        return orig(generation_config=generation_config, input_ids=input_ids,
-                    inputs_tensor=inputs_tensor, logits_processor=logits_processor,
-                    model_kwargs=model_kwargs, assistant_model=assistant_model,
-                    target_tokenizer=target_tokenizer, assistant_tokenizer=assistant_tokenizer)
+    def patched(
+        self,
+        generation_config,
+        input_ids,
+        inputs_tensor,
+        logits_processor,
+        model_kwargs,
+        assistant_model=None,
+        target_tokenizer=None,
+        assistant_tokenizer=None,
+    ):
+        cg = AloraMTPCandidateGenerator(
+            main_model=gen,
+            generation_config=generation_config,
+            model_kwargs=model_kwargs,
+            logits_processor=logits_processor,
+            sampler_module=sampler,
+            use_sampler=use_sampler,
+            mask_token_ids=mask_token_ids,
+        )
+        gen._last_mtp_generator = cg
+        return cg
+
     base._get_candidate_generator = patched.__get__(base, type(base))
 
 
-def base_greedy(model, input_ids, max_new_tokens):
-    """Reference: plain greedy with aLoRA OFF (no masks in prompt) -> base greedy."""
-    model.generation_config.use_alora_mtp = False
-    out = model.generate(input_ids=input_ids, do_sample=False, use_cache=True,
-                         max_new_tokens=max_new_tokens, pad_token_id=0)
-    return out
+def load_model(model_path: str, dtype=torch.bfloat16):
+    """Load base model and apply trained LoRA adapter with mask tokens."""
+    # Load tokenizer (has the mask tokens we added during training)
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
 
+    # Read adapter config to get base model name
+    with open(f"{model_path}/adapter_config.json") as f:
+        adapter_config = json.load(f)
+    base_model_name = adapter_config["base_model_name_or_path"]
 
-def train_drafter(model, sampler, mask_ids, K, use_sampler, ctx, rollout_len=64, steps=120, seq_len=8):
-    """Self-distill on the generation trajectory: train LoRA + sampler so drafts predict
-    the (aLoRA-off) greedy verifier's own continuation -> high acceptance, which exercises
-    the multi-token / full-acceptance path of the cache logic (the riskiest part)."""
+    # Load base model (original Llama without LoRA)
+    print(f"Loading base model: {base_model_name}")
+    base_model = AutoModelForCausalLM.from_pretrained(base_model_name, dtype=dtype, device_map="auto")
+
+    # Resize embeddings to match tokenizer (added mask tokens during training)
+    base_model.resize_token_embeddings(len(tokenizer))
+
+    # Apply LoRA adapter from training
+    print(f"Loading LoRA adapter from: {model_path}")
+    model = PeftModel.from_pretrained(base_model, model_path)
     model.eval()
-    # 1. base greedy rollout (aLoRA OFF) from ctx
-    with model.disable_adapter():
-        roll = model.generate(input_ids=ctx, do_sample=False, use_cache=True,
-                               max_new_tokens=rollout_len, pad_token_id=0)[0].tolist()
-    model.train()
-    opt = torch.optim.AdamW(
-        [p for n, p in model.named_parameters() if "lora_" in n] + list(sampler.parameters()), lr=1e-2)
-    masks = torch.tensor(mask_ids)
-    vocab = mask_ids[0]
-    for step in range(steps):
-        s = torch.randint(0, len(roll) - seq_len - K - 1, (1,)).item()
-        window = torch.tensor([roll[s:s + seq_len]])
-        inp = torch.cat([window, masks.unsqueeze(0)], dim=1)
-        with model.disable_adapter():
-            tgt = model(inp).logits[0, seq_len:seq_len + K].argmax(-1)  # y2..yK+1 (after the NTP y1)
-        out = model(inp, output_hidden_states=True)
-        hs = out.hidden_states[-1][:, -K:, :]
-        prev = out.logits[:, -K - 1, :].argmax(-1, keepdim=True)
-        loss = 0.0
-        for i in range(K):
-            emb = model.get_input_embeddings()(prev)
-            sl = sampler(hs[:, i:i + 1, :], emb)
-            loss = loss + torch.nn.functional.cross_entropy(sl[0], tgt[i:i + 1])
-            prev = sl.argmax(-1)
-        opt.zero_grad(); loss.backward(); opt.step()
-        if step % 30 == 0:
-            print(f"  [train] step {step:3d} loss {loss.item():.4f}")
-    model.eval()
+    model.__class__ = AloraMTPModel
+    model.generation_config.pad_token_id = tokenizer.eos_token_id
+
+    # Get mask token IDs
+    mask_token_ids = model.peft_config["default"].alora_invocation_tokens
+
+    print("Model loaded successfully")
+    print(f"Mask token IDs: {mask_token_ids}")
+    print(f"Trainable params: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
+
+    return model, tokenizer, mask_token_ids, len(mask_token_ids)
 
 
-def mtp_generate(model, input_ids, max_new_tokens, use_sampler=True):
-    model.generation_config.use_alora_mtp = True
-    model.generation_config.use_mtp = True  # triggers ASSISTED mode
-    out = model.generate(input_ids=input_ids, do_sample=False, use_cache=True,
-                         max_new_tokens=max_new_tokens, pad_token_id=0)
+def load_sampler(model_path, model, hidden_size, device):
+    """Load the trained sampler head from sampler_model.safetensors."""
+    sampler = SamplerModule(model.get_output_embeddings(), hidden_size)
+    sd = safetensors.torch.load_file(f"{model_path}/sampler_model.safetensors")
+    # Strip 'sampler.' prefix (keys are 'sampler.mlp.0.weight' etc.)
+    sd = {k.removeprefix("sampler."): v for k, v in sd.items()}
+    sampler.load_state_dict(sd, strict=False)
+    sampler = sampler.to(device).to(model.dtype)
+    sampler.eval()
+    return sampler
+
+
+def greedy_ref(model, input_ids, max_new_tokens, device):
+    t0 = time.perf_counter()
+    out = model.generate(
+        input_ids=input_ids.to(device),
+        do_sample=False,
+        use_cache=True,
+        max_new_tokens=max_new_tokens,
+        pad_token_id=model.generation_config.pad_token_id,
+    )
+    return out, time.perf_counter() - t0
+
+
+def mtp_gen(model, input_ids, max_new_tokens, device):
+    model.generation_config.use_mtp = True
+    t0 = time.perf_counter()
+    out = model.generate(
+        input_ids=input_ids.to(device),
+        do_sample=False,
+        use_cache=True,
+        max_new_tokens=max_new_tokens,
+        pad_token_id=model.generation_config.pad_token_id,
+    )
     model.generation_config.use_mtp = False
-    model.generation_config.use_alora_mtp = False
-    return out
-
-
-def param_bytes(m):
-    return sum(p.storage().nbytes() for p in m.parameters())
+    return out, time.perf_counter() - t0
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--K", type=int, default=2)
-    ap.add_argument("--max_new_tokens", type=int, default=30)
-    ap.add_argument("--no_sampler", action="store_true")
-    ap.add_argument("--train_steps", type=int, default=0, help="self-distill the drafter so drafts get accepted")
+    ap.add_argument("--model_path", default="mtp_a3_seq384")
+    ap.add_argument("--max_new_tokens", type=int, default=20)
+    ap.add_argument("--prompt_len", type=int, default=64)
+    ap.add_argument("--samples", type=str, default="infer.txt")
+    ap.add_argument("--num_samples", type=int, default=3)
+    ap.add_argument("--device", default="cpu")
+    ap.add_argument("--use_sampler", action="store_true", help="use trained sampler head instead of base unembedding")
+    ap.add_argument("--dtype", default="bfloat16", choices=["bfloat16", "float32"])
     args = ap.parse_args()
-    use_sampler = not args.no_sampler
 
-    model, sampler, mask_ids, vocab = build(K=args.K, use_sampler=use_sampler)
-    wire_candidate_generator(model, sampler, mask_ids, use_sampler)
+    dtype = torch.float32 if args.dtype == "float32" else torch.bfloat16
+    model, tokenizer, mask_ids, K = load_model(args.model_path, dtype)
+    model = model.to(args.device)
 
-    ctx = torch.tensor([[1, 2, 3, 4, 5, 6, 7, 8]])
-    if args.train_steps > 0:
-        train_drafter(model, sampler, mask_ids, args.K, use_sampler, ctx.clone(), steps=args.train_steps)
+    sampler = None
+    if args.use_sampler:
+        hidden_size = model.config.hidden_size
+        sampler = load_sampler(args.model_path, model, hidden_size, args.device)
+        print(f"Loaded sampler head (hidden_size={hidden_size})")
+    wire_candidate_generator(model, sampler=sampler, mask_token_ids=mask_ids, use_sampler=args.use_sampler)
 
-    ref = base_greedy(model, ctx.clone(), args.max_new_tokens)
-    out = mtp_generate(model, ctx.clone(), args.max_new_tokens, use_sampler=use_sampler)
+    with open(args.samples) as f:
+        samples = f.read().split("\n\n")
 
-    ref_new = ref[0, ctx.shape[1]:].tolist()
-    out_new = out[0, ctx.shape[1]:].tolist()
-    print(f"K={args.K} use_sampler={use_sampler} max_new={args.max_new_tokens}")
-    print("ref :", ref_new)
-    print("mtp :", out_new)
-    print("LOSSLESS (mtp == greedy):", ref_new == out_new)
-    assert ref_new == out_new, "MTP output diverged from greedy -> not lossless!"
+    total_accepted = 0
+    total_tokens = 0
+    total_fwd = 0
+    all_match = True
 
-    # ---- Instrumentation: prove per-forward aLoRA recompute + real draft acceptance ----
-    cg = getattr(model, "_last_mtp_generator", None)
-    nm = cg.n_matches_history if cg else []
-    offs = getattr(model, "_alora_offsets_seen", [])
-    n_lora = sum(1 for m in model.base_model.modules() if isinstance(m, LoraLayer))
-    per_fwd = [offs[i] for i in range(0, len(offs), max(n_lora, 1))] if offs else []
-    nonzero_fwd = sum(1 for o in per_fwd if o is not None and o[0] is not None)
-    print(f"\nInstrumentation:")
-    print(f"  LoRA layers instrumented: {n_lora}")
-    print(f"  forward passes recorded: {len(per_fwd)}")
-    print(f"  forwards with aLoRA ON (masks triggered adapter): {nonzero_fwd}")
-    print(f"  spec cycles: {len(nm)} | n_matches history: {nm}")
-    print(f"  total draft tokens accepted: {sum(nm)} (proves verify+draft loop is real)")
+    for i, text in enumerate(samples[: args.num_samples]):
+        ids = tokenizer(text, return_tensors="pt", add_special_tokens=False)["input_ids"]
+        ids = ids[:, : args.prompt_len]
+        print(f"\n--- sample {i} (prompt {ids.shape[1]} tok) ---")
 
-    # ---- Memory accounting (real numbers) ----
-    base_p = param_bytes(model)
-    samp_p = param_bytes(sampler)
-    shared = sampler.unembedding.weight.data_ptr() == model.get_output_embeddings().weight.data_ptr()
+        ref, t_ref = greedy_ref(model, ids.clone(), args.max_new_tokens, args.device)
+        out, t_mtp = mtp_gen(model, ids.clone(), args.max_new_tokens, args.device)
 
-    # Measure a real KV cache for a sequence of length L (cache cost dominates long gen)
-    L = ctx.shape[1] + args.max_new_tokens
-    with torch.no_grad():
-        cache = DynamicCache()
-        model.generation_config.use_alora_mtp = False
-        model(torch.arange(L, device=model.device).unsqueeze(0) % 64, use_cache=True, past_key_values=cache)
-        cache_bytes = sum((lyr.keys.storage().nbytes() + lyr.values.storage().nbytes())
-                          for lyr in cache.layers if lyr.keys is not None)
-    cache_mb = cache_bytes / 1e6
+        ref_new = ref[0, ids.shape[1] :].tolist()
+        out_new = out[0, ids.shape[1] :].tolist()
+        match = ref_new == out_new
+        all_match &= match
+        if not match:
+            for j, (r, o) in enumerate(zip(ref_new, out_new)):
+                if r != o:
+                    print(f"  DIVERGE at pos {j}: ref={tokenizer.decode([r])!r} mtp={tokenizer.decode([o])!r}")
+                    break
 
-    print("\nMemory (MB):")
-    print(f"  model (base+LoRA) : {base_p/1e6:.3f}")
-    print(f"  sampler head      : {samp_p/1e6:.4f}  (unembedding tied/shared: {shared})")
-    print(f"  1x KV cache (L={L}) : {cache_mb:.3f}")
-    print("  ---- our single-pass approach ----")
-    print(f"  TOTAL peak ~ model + sampler + 1x cache + 2K scratch = {base_p/1e6 + samp_p/1e6 + cache_mb:.3f} (+ {2*args.K} transient positions)")
-    print("  second model? NO   second KV cache? NO   detached_copy? NOT NEEDED")
-    print("  ---- contrast: two-model spec decoding ----")
-    import copy
-    asst = copy.deepcopy(model)
-    cow_shared = all(a.data_ptr() == b.data_ptr() for a, b in
-                     zip(asst.parameters(), model.parameters()))  # deepcopy -> all distinct
-    print(f"  naive deepcopy assistant : +{param_bytes(asst)/1e6:.3f} params AND +1x cache  -> doubles BOTH")
-    del asst
-    # Simulate PEFT PR #3470 `detached_copy` (COW via _lazy_clone): params shared, but a
-    # separate model needs its OWN KV cache to run as an independent assistant.
-    shadow = copy.copy(model)  # shallow -> same module tree
-    shadow._orig_owners = []
-    for (n, p), (_, q) in zip(model.named_parameters(), shadow.named_parameters()):
-        q._lazy_clone()            # COW: storage shared until written
-        shadow._orig_owners.append((n, q))
-    cow_share = all(p.data_ptr() == q.data_ptr() for (_, p), (_, q) in
-                    zip(model.named_parameters(), shadow.named_parameters()))
-    print(f"  detached_copy (COW) shadow: +0 params (shared={cow_share}) BUT still +1x cache -> cache DOUBLES")
-    print("  => detached_copy saves WEIGHTS, not the KV cache; only the single-pass approach avoids doubling.")
-    print("\nPROTOTYPE OK")
+        cg = getattr(model, "_last_mtp_generator", None)
+        nm = cg.n_matches_history if cg else []
+        n_acc = sum(nm)
+        n_tok = len(out_new)
+        total_accepted += n_acc
+        total_tokens += n_tok
+        total_fwd += len(nm)
+
+        print(f"  ref : {tokenizer.decode(ref_new, skip_special_tokens=True)[:120]}")
+        print(f"  mtp : {tokenizer.decode(out_new, skip_special_tokens=True)[:120]}")
+        print(
+            f"  lossless: {match} | accepted {n_acc}/{n_tok} ({n_acc / max(n_tok, 1) * 100:.0f}%) | "
+            f"fwd: {len(nm)} | n_matches: {nm} | t_ref {t_ref:.1f}s t_mtp {t_mtp:.1f}s"
+        )
+
+    mode = "sampler" if args.use_sampler else "no-sampler"
+    print(f"\n=== Summary ({args.num_samples} samples, K={K}, {mode}, {args.dtype}) ===")
+    print(
+        f"  Overall acceptance: {total_accepted}/{total_tokens} ({total_accepted / max(total_tokens, 1) * 100:.0f}%)"
+    )
+    print(f"  All lossless: {all_match}")
+    if not all_match and dtype == torch.bfloat16:
+        print("  NOTE: lossless=False is expected with bf16 (batched vs single-token numerical diff)")
+        print("        float32 is lossless — confirmed by test_precision.py")
+    print("  Target: ~30% acceptance on wikipedia")
 
 
 if __name__ == "__main__":
