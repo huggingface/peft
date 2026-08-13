@@ -34,9 +34,10 @@ class ShadowConfig(PeftConfig):
     Args:
         target_modules (`Optional[Union[list[str], str]]`):
             The transformer blocks to wrap with the shadow mechanism (whole decoder blocks, not linear layers). Can be
-            a list of module names, or a regex, e.g. `r'.*\\.layers\\.\\d+$'` to target every decoder block. Defaults to
-            `None`, in which case every decoder block of the base model is wrapped. Note that the wrapped blocks must be
-            contiguous, because the shadow state rides the decoder loop from the first wrapped block to the last.
+            a list of module names, or a regex, e.g. `r'.*\\.layers\\.\\d+$'` to target every decoder block. Defaults
+            to `None`, in which case every decoder block of the base model is wrapped. Note that the wrapped blocks
+            must be contiguous, because the shadow state rides the decoder loop from the first wrapped block to the
+            last.
         exclude_modules (`Optional[Union[list[str], str]]`):
             The names of the modules to not wrap with the shadow mechanism, given as a list or a regex. Defaults to
             `None`.
@@ -54,8 +55,8 @@ class ShadowConfig(PeftConfig):
             the base model but with fewer/smaller layers (see the `shadow_*` overrides below). Any other string is
             treated as a model id or local path: a plain model is loaded with Transformers `AutoModel`, and a
             "projected" shadow checkpoint (`model_type == "causal_lm_with_hidden_projection"`, e.g.
-            `shadow-llm/Qwen3-0.6B-H8B`) loads its pretrained backbone together with its trained
-            shadow-hidden -> base-hidden projection.
+            `shadow-llm/Qwen3-0.6B-H8B`) loads its pretrained backbone together with its trained shadow-hidden ->
+            base-hidden projection.
         shadow_num_hidden_layers (`Optional[int]`):
             The number of layers of the auto-built (`"mirror"`) shadow backbone. Defaults to `None` (`1` layer).
         shadow_hidden_size (`Optional[int]`):
@@ -79,8 +80,8 @@ class ShadowConfig(PeftConfig):
             indices. If a single integer is passed, it is applied at that index only. Defaults to `None` (every matched
             block is transformed).
         layers_pattern (`Optional[Union[list[str], str]]`):
-            The layer pattern name, used only if `layers_to_transform` is different from `None`. This is the name of the
-            `nn.ModuleList` that holds the decoder blocks (often `"layers"` or `"h"`). Defaults to `None`.
+            The layer pattern name, used only if `layers_to_transform` is different from `None`. This is the name of
+            the `nn.ModuleList` that holds the decoder blocks (often `"layers"` or `"h"`). Defaults to `None`.
         modules_to_save (`Optional[list[str]]`):
             The extra modules to set as trainable and save in the final checkpoint (e.g. `"lm_head"` or a classifier
             head). Defaults to `None`.

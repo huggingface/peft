@@ -36,14 +36,14 @@ class ShadowCache(Cache):
     """Paired KV caches for incremental ShadowPEFT decoding.
 
     Autoregressive generation needs a base-model cache (keys/values computed under shadow injection) *and* a separate
-    shadow model cache (to advance `s^(0)` token-by-token). This is a Transformers [`Cache`] subclass: operations
-    that affect the batch or sequence layout (reset, reorder, crop, repeat, and select) are applied to both caches,
-    while attention metadata and updates delegate to the base cache. Unknown cache attributes also delegate to the
-    base cache for compatibility with architecture-specific cache implementations.
+    shadow model cache (to advance `s^(0)` token-by-token). This is a Transformers [`Cache`] subclass: operations that
+    affect the batch or sequence layout (reset, reorder, crop, repeat, and select) are applied to both caches, while
+    attention metadata and updates delegate to the base cache. Unknown cache attributes also delegate to the base cache
+    for compatibility with architecture-specific cache implementations.
 
     The wrapper is intentionally not compileable because the two caches can have different layer layouts and hidden
-    sizes. Legacy tuple conversion is not supported, since a single legacy tuple cannot represent both paths.
-    The shadow half is unpacked before the base forward and re-packed on the way out -- see [`ShadowModel`] hooks.
+    sizes. Legacy tuple conversion is not supported, since a single legacy tuple cannot represent both paths. The
+    shadow half is unpacked before the base forward and re-packed on the way out -- see [`ShadowModel`] hooks.
     """
 
     __slots__ = ("base", "shadow")

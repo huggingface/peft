@@ -22,7 +22,7 @@ import torch
 import torch.nn.functional as F
 from safetensors.torch import load_file
 from torch import nn
-from transformers import AutoConfig, AutoModel
+from transformers import AutoConfig, AutoModel, PretrainedConfig
 from transformers.utils import cached_file
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
@@ -104,6 +104,16 @@ def _get_hidden_size(config: Any) -> int:
     raise AttributeError("Unable to infer the hidden size from the model config.")
 
 
+class _TokenShadowConfig(PretrainedConfig):
+    """Configuration for the token-wise shadow backbone used by Flux-like models."""
+
+    model_type = "shadow_token_backbone"
+
+    def __init__(self, hidden_size: int = 0, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.hidden_size = int(hidden_size)
+
+
 class _TokenShadowBackbone(nn.Module):
     """A tiny token-wise MLP used as the ShadowPEFT mirror backbone on non-causal (e.g. Flux) models.
 
@@ -113,7 +123,7 @@ class _TokenShadowBackbone(nn.Module):
 
     def __init__(self, in_features: int, hidden_size: int, num_layers: int = 1) -> None:
         super().__init__()
-        self.config = type("TokenShadowConfig", (), {"hidden_size": int(hidden_size)})()
+        self.config = _TokenShadowConfig(hidden_size=hidden_size)
         self.proj_in = nn.Linear(in_features, hidden_size)
         n_layers = max(1, int(num_layers))
         self.blocks = nn.ModuleList(
@@ -153,11 +163,10 @@ def _set_config_attr(config: Any, names: tuple[str, ...], value: int) -> None:
 def _normalize_layer_config(config: Any) -> Any:
     """Keep per-layer config fields consistent after reducing `num_hidden_layers`.
 
-    When building a mirrored shadow backbone we deepcopy the base config and shrink
-    `num_hidden_layers` (often to 1). Some architectures also store per-layer lists
-    or layer-count-dependent fields (e.g. Qwen3 `layer_types`, `max_window_layers`)
-    sized for the full base model. Leaving those unchanged would leave them longer
-    than the new layer count and break construction, so truncate/pad them here.
+    When building a mirrored shadow backbone we deepcopy the base config and shrink `num_hidden_layers` (often to 1).
+    Some architectures also store per-layer lists or layer-count-dependent fields (e.g. Qwen3 `layer_types`,
+    `max_window_layers`) sized for the full base model. Leaving those unchanged would leave them longer than the new
+    layer count and break construction, so truncate/pad them here.
     """
     try:
         num_layers = int(config.num_hidden_layers)
@@ -212,10 +221,9 @@ class ShadowModel(BaseTuner):
     Creates a ShadowPEFT model from a pretrained transformers model.
 
     ShadowPEFT augments a frozen base decoder-only model with a small, trainable parallel *shadow* network. A shadow
-    backbone produces an initial shadow state that rides the base decoder loop; at every targeted block the
-    discrepancy between the base hidden states and the shadow state is injected into the block, and the shadow state is
-    advanced by a gated residual update. Only the shadow components are trained. See [`ShadowConfig`] for the
-    configuration.
+    backbone produces an initial shadow state that rides the base decoder loop; at every targeted block the discrepancy
+    between the base hidden states and the shadow state is injected into the block, and the shadow state is advanced by
+    a gated residual update. Only the shadow components are trained. See [`ShadowConfig`] for the configuration.
 
     The method cannot be merged into the base weights (the adaptation is an input-dependent trajectory, not a static
     weight delta); use [`ShadowModel.unload_shadow`] to obtain the standalone shadow network instead.
@@ -395,9 +403,10 @@ class ShadowModel(BaseTuner):
     def _load_shadow_backbone(self, config: ShadowConfig) -> tuple[nn.Module, Optional[nn.Module]]:
         """Load a pretrained shadow backbone from the id/path in `config.shadow_model`.
 
-        Returns `(backbone, projection)`. `projection` is `None` for a plain `AutoModel`, or a trained
-        shadow_hidden -> base_hidden `nn.Linear` when loading a "projected" shadow checkpoint (`model_type ==
-        'causal_lm_with_hidden_projection'`), which bundles a small backbone with a projection aligned to a larger base.
+        Returns `(backbone, projection)`. `projection` is `None` for a plain `AutoModel`, or a trained shadow_hidden ->
+        base_hidden `nn.Linear` when loading a "projected" shadow checkpoint (`model_type ==
+        'causal_lm_with_hidden_projection'`), which bundles a small backbone with a projection aligned to a larger
+        base.
         """
         config_file = cached_file(config.shadow_model, "config.json")
         with open(config_file) as f:
