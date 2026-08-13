@@ -1424,8 +1424,8 @@ class BaseTuner(nn.Module, ABC):
     # adapter name). The conversion is split into two concerns that can be overridden independently:
     #
     # - selection: which entries belong to the given adapter and with which values they are saved
-    #   (`_get_adapter_state_dict`; `_get_learnable_bias_state_dict` deals with cases like bias="all" if the PEFT
-    #   method supports that)
+    #   (`_get_adapter_state_dict`; `_get_learnable_bias_state_dict` deals with cases like bias="all" or
+    #   bias="<peft-method>_only" if the PEFT method supports that)
     # - key translation: how a single model state_dict key maps to the adapter-name-independent checkpoint key
     #   (`_remove_adapter_name_from_key`; overridden e.g. by VB-LoRA and PEANuT due to their special key formats)
     #
