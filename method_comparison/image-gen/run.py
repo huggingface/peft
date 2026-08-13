@@ -71,12 +71,11 @@ from peft.utils import CONFIG_NAME, infer_device
 os.environ["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
 
 
-def get_sigmas(timesteps, noise_scheduler, n_dim, dtype):
+def get_sigmas(timesteps, noise_scheduler, *, step_indices, n_dim, dtype):
     device = "cpu"
     sigmas = noise_scheduler.sigmas.to(device=device, dtype=dtype)
     schedule_timesteps = noise_scheduler.timesteps.to(device)
     timesteps = timesteps.to(device)
-    step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
 
     sigma = sigmas[step_indices].flatten()
     while len(sigma.shape) < n_dim:
@@ -346,9 +345,9 @@ def train(
             indices = (u * noise_scheduler_copy.config.num_train_timesteps).long()
             timesteps = noise_scheduler_copy.timesteps[indices].to(device=latents.device)
             # Add noise according to flow matching. zt = (1 - texp) * x + texp * z1
-            sigmas = get_sigmas(timesteps, noise_scheduler_copy, n_dim=latents.ndim, dtype=latents.dtype).to(
-                device_type
-            )
+            sigmas = get_sigmas(
+                timesteps, noise_scheduler_copy, step_indices=indices, n_dim=latents.ndim, dtype=latents.dtype
+            ).to(device_type)
             noisy_latents = (1.0 - sigmas) * latents + sigmas * noise
             # [B, C, H, W] -> [B, H*W, C]
             packed_noisy_latents = pipeline._pack_latents(noisy_latents)
@@ -392,6 +391,7 @@ def train(
             if is_adalora:
                 transformer.base_model.update_and_allocate(step)
 
+            loss = loss.detach()
             losses.append(loss)
             pbar.set_postfix({"loss": loss.item()})
 
