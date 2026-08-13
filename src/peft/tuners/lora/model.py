@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import operator
+import os
 import re
 import warnings
 from contextlib import contextmanager
@@ -47,6 +48,7 @@ from peft.utils import (
 from peft.utils.integrations import TpInfo
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 from peft.utils.other import get_pattern_key
+from peft.utils.save_and_load import _maybe_shard_state_dict_for_tp
 
 from .aqlm import dispatch_aqlm
 from .awq import dispatch_awq
@@ -981,6 +983,87 @@ class LoraModel(BaseTuner):
                 )
 
         return tensors_lora
+
+    @classmethod
+    def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
+        to_return = super()._get_adapter_state_dict(model, config, adapter_name, state_dict, unwanted_adapter_names)
+
+        if config.use_dora:
+            # Here we take care of a refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a
+            # ModuleDict with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. Since
+            # we want the state_dict format not to change, we remove the "weight" part.
+            new_dora_suffix = f"lora_magnitude_vector.{adapter_name}.weight"
+
+            def renamed_dora_weights(k):
+                if k.endswith(new_dora_suffix):
+                    k = k[:-7]  # remove ".weight"
+                return k
+
+            to_return = {renamed_dora_weights(k): v for k, v in to_return.items()}
+        return to_return
+
+    @classmethod
+    def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
+        # Here we take care of a refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a
+        # ModuleDict with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. As the
+        # checkpoint format did not change (the keys still end with lora_magnitude_vector, without ".weight"), the
+        # suffix needs to be appended before the keys are remapped to the model format.
+        def renamed_dora_weights(k):
+            if k.endswith("lora_magnitude_vector"):
+                k = k + ".weight"
+            return k
+
+        state_dict = {renamed_dora_weights(k): v for k, v in state_dict.items()}
+        peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
+
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            _maybe_shard_state_dict_for_tp(model, peft_model_state_dict, adapter_name)
+
+        return peft_model_state_dict
+
+    @classmethod
+    def _convert_state_dict_for_initial_model(
+        cls, peft_model, peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
+    ):
+        if peft_config.use_rslora and (peft_config.rank_pattern or peft_config.alpha_pattern):
+            msg = (
+                "Passing `path_initial_model_for_weight_conversion` to `save_pretrained` is not supported when "
+                "using `rank_pattern` or `alpha_pattern` at the same time as `use_rslora=True`."
+            )
+            raise ValueError(msg)
+
+        if not any(
+            str(peft_config.init_lora_weights).lower().startswith(prefix)
+            for prefix in ["pissa", "corda", "olora", "lora_ga", "true"]
+        ):
+            warnings.warn(
+                "`path_initial_model_for_weight_conversion` only works for converting a PiSSA/CorDA/OLoRA/LoRA-GA adapter to "
+                "a LoRA adapter"
+            )
+
+        initial_adapter_name = os.path.basename(path_initial_model_for_weight_conversion)
+        try:
+            peft_model.load_adapter(
+                os.path.dirname(path_initial_model_for_weight_conversion),
+                subfolder=initial_adapter_name,
+                adapter_name=initial_adapter_name,
+            )
+            is_pissa = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower().startswith("pissa")
+            is_corda = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "corda"
+            is_olora = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "olora"
+            is_lora_ga = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "lora_ga"
+            if is_pissa or is_corda or is_olora or is_lora_ga:
+                raise ValueError(
+                    "The `init_lora_weights` parameter of the initial adapter should be set to `True`. "
+                    "Otherwise, `self.load_adapter` will subtract the decomposed values again based on the "
+                    "residual model."
+                )
+            output_state_dict = peft_model.base_model.subtract_mutated_init(
+                output_state_dict, initial_adapter_name, kwargs
+            )
+        finally:
+            peft_model.delete_adapter(initial_adapter_name)
+        return output_state_dict
 
     def _get_monteclora_loss(self, adapter_names: Optional[Union[str, list[str]]] = None) -> torch.Tensor | float:
         """

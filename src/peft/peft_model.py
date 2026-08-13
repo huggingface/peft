@@ -281,46 +281,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     f" {list(self.peft_config.keys())} - got {selected_adapters}."
                 )
 
-        def save_mutated_as_lora(peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs):
-            if peft_config.use_rslora and (peft_config.rank_pattern or peft_config.alpha_pattern):
-                msg = (
-                    "Passing `path_initial_model_for_weight_conversion` to `save_pretrained` is not supported when "
-                    "using `rank_pattern` or `alpha_pattern` at the same time as `use_rslora=True`."
-                )
-                raise ValueError(msg)
-
-            if not any(
-                str(peft_config.init_lora_weights).lower().startswith(prefix)
-                for prefix in ["pissa", "corda", "olora", "lora_ga", "true"]
-            ):
-                warnings.warn(
-                    "`path_initial_model_for_weight_conversion` only works for converting a PiSSA/CorDA/OLoRA/LoRA-GA adapter to "
-                    "a LoRA adapter"
-                )
-            initial_adapter_name = os.path.basename(path_initial_model_for_weight_conversion)
-            try:
-                self.load_adapter(
-                    os.path.dirname(path_initial_model_for_weight_conversion),
-                    subfolder=initial_adapter_name,
-                    adapter_name=initial_adapter_name,
-                )
-                is_pissa = str(self.peft_config[initial_adapter_name].init_lora_weights).lower().startswith("pissa")
-                is_corda = str(self.peft_config[initial_adapter_name].init_lora_weights).lower() == "corda"
-                is_olora = str(self.peft_config[initial_adapter_name].init_lora_weights).lower() == "olora"
-                is_lora_ga = str(self.peft_config[initial_adapter_name].init_lora_weights).lower() == "lora_ga"
-                if is_pissa or is_corda or is_olora or is_lora_ga:
-                    raise ValueError(
-                        "The `init_lora_weights` parameter of the initial adapter should be set to `True`. "
-                        "Otherwise, `self.load_adapter` will subtract the decomposed values again based on the "
-                        "residual model."
-                    )
-                output_state_dict = self.base_model.subtract_mutated_init(
-                    output_state_dict, initial_adapter_name, kwargs
-                )
-            finally:
-                self.delete_adapter(initial_adapter_name)
-            return output_state_dict
-
         if is_main_process:
             os.makedirs(save_directory, exist_ok=True)
             self.create_or_update_model_card(save_directory)
@@ -361,10 +321,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
                 if path_initial_model_for_weight_conversion is not None:
                     peft_config = copy.deepcopy(peft_config)
-                    peft_config.init_lora_weights = True
+                    if peft_config.peft_type == PeftType.LORA:
+                        peft_config.init_lora_weights = True
+                    else:
+                        peft_config.init_weights = True
                     peft_config.save_pretrained(path_initial_model_for_weight_conversion)
-                    output_state_dict = save_mutated_as_lora(
-                        peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
+                    tuner_cls = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
+                    output_state_dict = tuner_cls._convert_state_dict_for_initial_model(
+                        self, peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
                     )
 
                 # Before exporting the parameters we need to make sure all the tensors are contiguous as saving
@@ -383,10 +347,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             elif is_main_process:
                 if path_initial_model_for_weight_conversion is not None:
                     peft_config = copy.deepcopy(peft_config)
-                    peft_config.init_lora_weights = True
+                    if peft_config.peft_type == PeftType.LORA:
+                        peft_config.init_lora_weights = True
+                    else:
+                        peft_config.init_weights = True
                     peft_config.save_pretrained(path_initial_model_for_weight_conversion)
-                    output_state_dict = save_mutated_as_lora(
-                        peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
+                    tuner_cls = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
+                    output_state_dict = tuner_cls._convert_state_dict_for_initial_model(
+                        self, peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
                     )
                 torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
 
