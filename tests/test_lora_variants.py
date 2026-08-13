@@ -75,14 +75,13 @@ class CustomModel(nn.Module):
         return output
 
 
-# A single transformers Conv1D layer, i.e. a fan_in_fan_out linear layer as used by GPT-2.
+# A single transformers Conv1D layer, i.e. a fan_in_fan_out linear layer as used by GPT-2. Tests must use
+# out_features > 1: with a single output feature the DoRA magnitude factor is a scalar, the fan_in_fan_out
+# transpose is a no-op, and the unmerge test would pass trivially even without the fix.
 class ModelWithConv1D(nn.Module):
     def __init__(self, out_features, in_features):
         super().__init__()
         self.c = Conv1D(out_features, in_features)
-
-    def forward(self, x):
-        return self.c(x)
 
 
 # Used for testing alora_offsets for aLoRA
