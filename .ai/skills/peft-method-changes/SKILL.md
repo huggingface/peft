@@ -11,7 +11,7 @@ tags: [peft, huggingface, refactor, contributions, backward-compatibility]
 When making changes to a PEFT method that:
 
 - affects the `forward` method
-- adds/subtracts parameters or buffers
+- adds/removes parameters or buffers
 - changes the logic of creating or loading the `state_dict`
 - adds config options or changes the default behavior of existing ones
 
@@ -52,7 +52,8 @@ Run `pytest tests/regression/test_state_dict.py --regression -k <peft-method-nam
 
 In general, it is possible to make changes to the `state_dict` structure, e.g. moving a PEFT module into a sub-module. This invalidates old `state_dict`s but if this can be reliably detected and fixed, this is fine. Here is an example of such a fix for a change in DoRA:
 
-https://github.com/huggingface/peft/blob/a429b594910844a21634114c5776c3ef5d0217a4/src/peft/utils/save_and_load.py#L194-L205
+- https://github.com/huggingface/peft/blob/a429b594910844a21634114c5776c3ef5d0217a4/src/peft/utils/save_and_load.py#L194-L205
+- https://github.com/huggingface/peft/blob/a429b594910844a21634114c5776c3ef5d0217a4/src/peft/utils/save_and_load.py#L922-L932
 
 ### Config backward compatibility
 
@@ -77,6 +78,7 @@ Even with all the precautions described above, backward incompatible changes may
 - if the change concerns one specific layer type, e.g. `nn.Conv2d`, ensure that the tested model uses that layer type and that the layer type is targeted
 - if quantization is involved, use this quantization method
 - if a specific option is changed, e.g. `LoraConfig(use_foobar=True)`, ensure to use that option
+- if the change only affects training mode (e.g. when it involves dropout), test this specifically
 
 The testing script should work as follows: On the first run, using the existing `main` branch, it loads the model, applies the PEFT method with different parametrizations, generates an output and a checkpoint, and saves those to a temporary directory. For the second run, first switch to your branch, then run the script again. The script should find the existing checkpoint and expected output, load the checkpoint, create a new output, and ensure that the new output and the old output are reasonably close.
 
@@ -113,6 +115,7 @@ def check_case(test_case_name, config, dtype, device):
         output = compute_output(model, device, dtype)
         model.merge_adapter()
         output_merged = compute_output(model, device, dtype)
+        model.unmerge_adapter()
         # store both outputs and save the checkpoint
         ...
         return
