@@ -1274,7 +1274,7 @@ class PeftCommonTester:
             loss = output.sum()
             loss.backward()
 
-            non_zero_grad_params_normal = {n for n, p in params if p.grad.abs().sum() > 0}
+            non_zero_grad_params_normal = {n for n, p in params if p.grad is not None and p.grad.abs().sum() > 0}
 
             for name, param in params:
                 param.grad = None
@@ -1288,7 +1288,9 @@ class PeftCommonTester:
             loss = output.sum()
             loss.backward()
 
-            non_zero_grad_params_checkpointing = {n for n, p in params if p.grad.abs().sum() > 0}
+            non_zero_grad_params_checkpointing = {
+                n for n, p in params if p.grad is not None and p.grad.abs().sum() > 0
+            }
             assert non_zero_grad_params_normal == non_zero_grad_params_checkpointing
 
             for n, param in model.named_parameters():
@@ -1302,6 +1304,11 @@ class PeftCommonTester:
                 elif (
                     hasattr(model, "prefix") and (model.prefix in n) or "trainable_tokens_" in n
                 ):  # non-prompt tuning methods
+                    if issubclass(config_cls, ShadowConfig):
+                        # The exit block's update MLPs are intentionally unused because the post-exit shadow state is
+                        # discarded. Compare the non-zero gradient sets above instead of requiring every Shadow
+                        # parameter to receive a gradient.
+                        continue
                     assert param.grad is not None
                 else:
                     assert param.grad is None

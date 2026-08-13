@@ -277,7 +277,13 @@ class ShadowLayer(nn.Module, BaseTunerLayer):
         out = self.base_layer(injected, *args, **kwargs)
         new_hidden = self._block_output_hidden_states(out)  # h_out^(l)
         new_shadow = self.shadow_update(new_hidden, shadow, adapter_name)  # Eq. 5-7 -> s^(l)
-        return ShadowCarrier(new_hidden, new_shadow)
+        carrier = ShadowCarrier(new_hidden, new_shadow)
+        # Some decoder loops (notably GPT-J) expect each block to return a tuple and immediately read `output[0]`.
+        # Preserve the block's remaining outputs (KV cache, attentions, etc.) and replace only its hidden-state slot.
+        # Tensor-returning backbones retain the existing carrier behavior.
+        if isinstance(out, tuple):
+            return (carrier, *out[1:])
+        return carrier
 
     @staticmethod
     def _block_output_hidden_states(out: Any) -> torch.Tensor:

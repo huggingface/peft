@@ -614,6 +614,8 @@ class ShadowModel(BaseTuner):
 
     def _unwrap_exit_hook(self, module: ShadowLayer, args: tuple, kwargs: dict, output: Any):
         """Unwrap the last block's carrier back to a plain hidden-states tensor for the base model's final norm."""
+        if isinstance(output, tuple) and output and isinstance(output[0], ShadowCarrier):
+            return (output[0].hidden, *output[1:])
         if not isinstance(output, ShadowCarrier):
             return output
         return output.hidden
