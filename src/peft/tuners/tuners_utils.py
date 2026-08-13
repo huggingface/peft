@@ -43,10 +43,10 @@ from peft.utils.constants import (
     MIN_TARGET_MODULES_FOR_OPTIMIZATION,
     SEQ_CLS_HEAD_NAMES,
 )
+from peft.utils.error import NoMatchingPeftModule
 from peft.utils.integrations import init_empty_weights
 from peft.utils.other import (
     AuxiliaryTrainingWrapper,
-    _get_input_embeddings_name,
     _get_module_names_tied_with_embedding,
     _set_adapter,
     _set_layer_requires_grad,
@@ -232,6 +232,18 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
             in_features, out_features = None, None
         warnings.warn(f"Unsupported layer type '{type(module)}' encountered, proceed at your own risk.", UserWarning)
     return in_features, out_features
+
+
+def _extend_unique(existing: list[str], new_names: list[str]) -> None:
+    """Append the entries of new_names that are missing from existing, preserving order.
+
+    The membership check uses a set, as repeated `in` checks on a list could become expensive for large models.
+    """
+    seen = set(existing)
+    for name in new_names:
+        if name not in seen:
+            existing.append(name)
+            seen.add(name)
 
 
 class BaseTuner(nn.Module, ABC):
@@ -809,10 +821,10 @@ class BaseTuner(nn.Module, ABC):
         unmatched_modules = []
         targeted_modules_from_peft_config: list[str] = []  # only relevant if state_dict is passed
         targets_to_tie: list[str] = []
-        # targeted_module_names and targeted_parameter_names accumulate across all adapters injected into this
-        # tuner, so record their current lengths to detect whether *this* adapter matched anything below.
-        num_targeted_modules_before = len(self.targeted_module_names)
-        num_targeted_parameters_before = len(self.targeted_parameter_names)
+        # Modules/parameters targeted by *this* adapter are collected locally and only merged into
+        # self.targeted_module_names / self.targeted_parameter_names (deduplicated) after the checks below passed.
+        targeted_module_names: list[str] = []
+        targeted_parameter_names: list[str] = []
         # Note: If possible, all checks should be performed *at the start of this method*.
         # This way, we can raise early if something goes wrong, without leaving the model
         # in a bad (half-initialized) state.
@@ -911,7 +923,7 @@ class BaseTuner(nn.Module, ABC):
                 elif not result:
                     unmatched_modules.append(key)
                 else:
-                    self.targeted_module_names.append(key)
+                    targeted_module_names.append(key)
                     parent, target, target_name = _get_submodules(model, key)
                     self._check_target_module_compatiblity(peft_config, model, target_name)
                     ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
@@ -933,7 +945,7 @@ class BaseTuner(nn.Module, ABC):
                     if self._check_tied_module_exists(peft_config, key):
                         targets_to_tie.append(key)
                         continue
-                    self.targeted_module_names.append(key)
+                    targeted_module_names.append(key)
                     parent, target, target_name = _get_submodules(model, key)
                     self._check_target_module_compatiblity(peft_config, model, target_name)
                     ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
@@ -949,13 +961,17 @@ class BaseTuner(nn.Module, ABC):
         if getattr(peft_config, "target_parameters", []):
             # Note: We don't need to check for no state_dict being passed, since we already checked this earlier.
             self._inject_parameters(
-                peft_config=peft_config, model=model, adapter_name=adapter_name, low_cpu_mem_usage=low_cpu_mem_usage
+                peft_config=peft_config,
+                model=model,
+                adapter_name=adapter_name,
+                low_cpu_mem_usage=low_cpu_mem_usage,
+                targeted_parameter_names=targeted_parameter_names,
             )
 
         # Here we inject tied adapters for all the layers which were tied
         # Only applicable if `ensure_weight_tying = True` for LoraConfig
         for key in targets_to_tie:
-            self.targeted_module_names.append(key)
+            targeted_module_names.append(key)
             parent, target, target_name = _get_submodules(model, key)
             self._check_target_module_compatiblity(peft_config, model, target_name)
             ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
@@ -970,7 +986,7 @@ class BaseTuner(nn.Module, ABC):
             # in case that the state_dict was used as source of truth and it resulted in different outcomes than what
             # would have been matched with the PEFT config, warn the user about that.
             targeted_set_from_peft_config = set(targeted_modules_from_peft_config)
-            targeted_set_from_state_dict = set(self.targeted_module_names)
+            targeted_set_from_state_dict = set(targeted_module_names)
             diff_peft_config = targeted_set_from_peft_config - targeted_set_from_state_dict
             diff_state_dict = targeted_set_from_state_dict - targeted_set_from_peft_config
             warning_msg = ""
@@ -989,46 +1005,15 @@ class BaseTuner(nn.Module, ABC):
             if warning_msg:
                 warnings.warn(warning_msg, RuntimeWarning)
 
-        matched_modules = len(self.targeted_module_names) > num_targeted_modules_before
-        matched_parameters = len(self.targeted_parameter_names) > num_targeted_parameters_before
-        # An adapter can also be valid through modules_to_save / trainable_token_indices, which are wrapped
-        # later in _set_trainable. Treat this adapter as non-empty if one of those auxiliary targets matches a
-        # module -- with the same suffix rule _set_trainable uses -- that is not itself a target module. A module
-        # targeted by both a tuner and an auxiliary wrapper is a misconfiguration that must still raise (see
-        # TestTargetingAuxiliaryTrainingWrapper in test_other).
-        auxiliary_names = list(getattr(peft_config, "modules_to_save", None) or [])
-        trainable_token_indices = getattr(peft_config, "trainable_token_indices", None)
-        if isinstance(trainable_token_indices, dict):
-            auxiliary_names += list(trainable_token_indices)
-        elif trainable_token_indices:
-            input_embeddings_name = _get_input_embeddings_name(model, "embed_tokens")
-            if input_embeddings_name is not None:
-                auxiliary_names.append(input_embeddings_name)
-        target_modules = peft_config.target_modules
-
-        def _is_target_module(key: str) -> bool:
-            if isinstance(target_modules, str):
-                return match_target_against_key(target_modules, key) is not None
-            if not target_modules:
-                return False
-            return key in target_modules or any(key.endswith(f".{name}") for name in target_modules)
-
-        # Only relevant for a non-first adapter (an earlier adapter already targeted something): a *first* adapter
-        # whose target_modules match nothing is a misconfiguration that must still raise even if modules_to_save
-        # matches, which keeps first-adapter behavior unchanged from before this fix.
-        has_earlier_target = num_targeted_modules_before > 0 or num_targeted_parameters_before > 0
-        matched_auxiliary = has_earlier_target and any(
-            any(key.endswith(name) for name in auxiliary_names) and not _is_target_module(key) for key in key_list
-        )
-        if not matched_modules and not matched_parameters and not uses_dummy_target_modules and not matched_auxiliary:
+        if not targeted_module_names and not targeted_parameter_names and not uses_dummy_target_modules:
             if excluded_modules and not unmatched_modules:
                 # All targeted modules were excluded
-                raise ValueError(
+                raise NoMatchingPeftModule(
                     "All modules were excluded. This is likely unintended. "
                     "Check your `target_modules`, `exclude_modules` and `modules_to_save` configuration."
                 )
             elif not excluded_modules and unmatched_modules and not peft_config.target_modules:
-                raise ValueError(
+                raise NoMatchingPeftModule(
                     "No `target_modules` passed but also no `target_parameters` found. Please check the values for "
                     "these arguments."
                 )
@@ -1042,7 +1027,7 @@ class BaseTuner(nn.Module, ABC):
                     error_msg += f" Note: You specified 'layers_to_transform': {peft_config.layers_to_transform}."
                 if getattr(peft_config, "layers_pattern", None) is not None:
                     error_msg += f" You also specified 'layers_pattern': {peft_config.layers_pattern}."
-                raise ValueError(error_msg)
+                raise NoMatchingPeftModule(error_msg)
             else:
                 # Some modules did not match and some matched but were excluded
                 error_msg = (
@@ -1055,7 +1040,7 @@ class BaseTuner(nn.Module, ABC):
                     error_msg += f" Note: You specified 'layers_to_transform': {peft_config.layers_to_transform}."
                 if getattr(peft_config, "layers_pattern", None) is not None:
                     error_msg += f" You also specified 'layers_pattern': {peft_config.layers_pattern}."
-                raise ValueError(error_msg)
+                raise NoMatchingPeftModule(error_msg)
 
         elif hasattr(peft_config, "exclude_modules") and peft_config.exclude_modules and not excluded_modules:
             # exclude_modules was passed but was not used
@@ -1069,15 +1054,20 @@ class BaseTuner(nn.Module, ABC):
             # error. However, let's warn the user if it seems like
             # - they wanted to match a module but there was no match
             # - they wanted to match a parameter but there was no match
-            if peft_config.target_modules and not self.targeted_module_names:
+            if peft_config.target_modules and not targeted_module_names:
                 warnings.warn(
                     f"target_modules={peft_config.target_modules} were set but no module was matched.", RuntimeWarning
                 )
-            elif getattr(peft_config, "target_parameters", []) and not self.targeted_parameter_names:
+            elif getattr(peft_config, "target_parameters", []) and not targeted_parameter_names:
                 warnings.warn(
                     f"target_parameters={peft_config.target_parameters} were set but no parameter was matched.",
                     RuntimeWarning,
                 )
+
+        # Now that the checks passed, merge this adapter's matches into the tuner-level bookkeeping. Duplicates
+        # are skipped so that names stay unique when several adapters target the same modules.
+        _extend_unique(self.targeted_module_names, targeted_module_names)
+        _extend_unique(self.targeted_parameter_names, targeted_parameter_names)
 
         ################
         # HOUSEKEEPING #
@@ -1103,7 +1093,12 @@ class BaseTuner(nn.Module, ABC):
         )
 
     def _inject_parameters(
-        self, peft_config: PeftConfig, model: nn.Module, adapter_name: str, low_cpu_mem_usage: bool
+        self,
+        peft_config: PeftConfig,
+        model: nn.Module,
+        adapter_name: str,
+        low_cpu_mem_usage: bool,
+        targeted_parameter_names: list[str],
     ) -> None:
         """Inject layers based on peft_config.target_modules"""
 
@@ -1187,7 +1182,7 @@ class BaseTuner(nn.Module, ABC):
                     if getattr(module, param_name, None) is None:
                         continue
                     create_and_replace_param(module_name, key, param_name)
-                    self.targeted_parameter_names.append(key)
+                    targeted_parameter_names.append(key)
             else:
                 # Standard case: the parameter is not already parametrized. Note, however, that the model could already
                 # be nested with lora.ParamWrapper, as this is how we allow targeting multiple Parameters on the same
@@ -1200,7 +1195,7 @@ class BaseTuner(nn.Module, ABC):
                         # Note: We use the unwrapped_module_name to check if the key matches, but we use the module_name for
                         # replacement, since we want to replace the wrapped module.
                         create_and_replace_param(module_name, key, param_name)
-                        self.targeted_parameter_names.append(key)
+                        targeted_parameter_names.append(key)
 
     def _replace_module(self, parent, child_name, new_module, child) -> None:
         """
