@@ -1941,8 +1941,10 @@ class TestAdamssInitialization:
             ),
             (
                 {"init_warmup": 10, "final_warmup": 10},
-                "`init_warmup` must be smaller than `final_warmup` when `use_asa=True` so that ASA has a "
-                "non-empty pruning ramp, got init_warmup=10 and final_warmup=10.",
+                (
+                    "`init_warmup` must be smaller than `final_warmup` when `use_asa=True` so that ASA has a "
+                    "non-empty pruning ramp, got init_warmup=10 and final_warmup=10."
+                ),
             ),
             (
                 {"asa_target_subspaces": 0},
