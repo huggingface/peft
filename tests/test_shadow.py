@@ -441,7 +441,7 @@ class TestShadowKVCache:
         assert isinstance(cache, ShadowCache)
         cache.reorder_cache(torch.tensor([1, 0]))
         assert cache.get_seq_length() == 4
-        cache.crop(3)
+        cache.crop(-1)
         assert cache.get_seq_length() == 3
         assert cache.shadow.get_seq_length() == 3
 
