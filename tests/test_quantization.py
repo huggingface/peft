@@ -172,6 +172,14 @@ TEST_CASES = [
         OFTConfig,
         {"oft_block_size": 4, "target_modules": ["q_proj", "v_proj"]},
     ),
+    # Test OFT with an Embedding target in addition to Linear targets. Embeddings are not
+    # quantized by bnb, so the Embedding OFT layer will have quantization_backend=None. This
+    # case ensures that merge/unmerge and forward work correctly when both quantized Linear
+    # and non-quantized Embedding OFT layers coexist.
+    (
+        OFTConfig,
+        {"oft_block_size": 4, "target_modules": ["q_proj", "v_proj", "embed_tokens"]},
+    ),
     (
         MissConfig,
         {"r": 2},

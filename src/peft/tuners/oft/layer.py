@@ -556,32 +556,22 @@ class Linear(nn.Module, OFTLayer):
             return
         for active_adapter in adapter_names:
             if active_adapter in self.oft_R.keys():
+                orig_weight = self.get_base_weight()
+                orig_dtype = orig_weight.dtype
+                oft_mat = self.get_delta_weight(active_adapter)
+                orig_weight = torch.transpose(orig_weight, 0, 1)
+                orig_weight = torch.mm(oft_mat, orig_weight.to(oft_mat.dtype))
+                orig_weight = torch.transpose(orig_weight, 0, 1)
+
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
-                    # because of the copy operation.
-                    orig_weight = self.get_base_weight().clone()
-                    orig_dtype = orig_weight.dtype
-                    oft_mat = self.get_delta_weight(active_adapter)
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(oft_mat, orig_weight.to(oft_mat.dtype))
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
-
+                    # because of the NaN check.
                     if not torch.isfinite(orig_weight).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
-                else:
-                    orig_weight = self.get_base_weight()
-                    orig_dtype = orig_weight.dtype
-                    oft_mat = self.get_delta_weight(active_adapter)
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(oft_mat, orig_weight.to(oft_mat.dtype))
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
-
-                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
-
+                self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -795,37 +785,27 @@ class Conv2d(nn.Module, OFTLayer):
                 base_layer = self.get_base_layer()
                 orig_weight = self.get_base_weight()
                 orig_dtype = orig_weight.dtype
+                oft_mat = self.get_delta_weight(active_adapter)
+
+                orig_weight = orig_weight.view(
+                    self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
+                )
+                orig_weight = torch.transpose(orig_weight, 0, 1)
+                orig_weight = torch.mm(oft_mat, orig_weight.to(oft_mat.dtype))
+                orig_weight = torch.transpose(orig_weight, 0, 1)
+                orig_weight = orig_weight.view(
+                    self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
+                )
+
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
-                    # because of the copy operation.
-                    oft_mat = self.get_delta_weight(active_adapter)
+                    # because of the NaN check.
+                    if not torch.isfinite(orig_weight).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
 
-                    orig_weight = orig_weight.view(
-                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
-                    )
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(oft_mat, orig_weight.to(oft_mat.dtype))
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = orig_weight.view(
-                        self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
-                    )
-
-                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
-                else:
-                    oft_mat = self.get_delta_weight(active_adapter)
-
-                    orig_weight = orig_weight.view(
-                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
-                    )
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(oft_mat, orig_weight.to(oft_mat.dtype))
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = orig_weight.view(
-                        self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
-                    )
-
-                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
-
+                self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -1027,22 +1007,18 @@ class Embedding(nn.Module, OFTLayer):
             if active_adapter in self.oft_embedding_R.keys():
                 orig_weight = self.get_base_weight()
                 orig_dtype = orig_weight.dtype
+                oft_mat = self.get_delta_weight(active_adapter)
+                orig_weight = torch.mm(orig_weight.to(oft_mat.dtype), oft_mat)
+
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
-                    oft_mat = self.get_delta_weight(active_adapter)
-                    orig_weight = torch.mm(orig_weight.to(oft_mat.dtype), oft_mat)
-
+                    # because of the NaN check.
                     if not torch.isfinite(orig_weight).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
-                else:
-                    oft_mat = self.get_delta_weight(active_adapter)
-                    orig_weight = torch.mm(orig_weight.to(oft_mat.dtype), oft_mat)
-
-                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
+                self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
