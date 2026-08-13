@@ -101,9 +101,9 @@ class DummyGradScaler:
 def precompute_prompt_caches(
     pipeline, train_prompts: list[str], eval_prompts: list[str], device_type: str, train_config: TrainConfig
 ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
-    """Precompue all prompt embeds needed during the run in a single pass over the text encoder.
+    """Precompute all prompt embeds needed during the run in a single pass over the text encoder.
 
-    This is mainly to save memory so that we don't need to either onload the text encoder during evaluation, which
+    This is mainly to save memory so that we don't need to either unload the text encoder during evaluation, which
     requires extra VRAM, or compute the embeddings on CPU, which is slow. Once this is done, we can completely remove
     the text encoder.
 
