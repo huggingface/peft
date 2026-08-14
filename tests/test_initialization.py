@@ -39,6 +39,7 @@ from peft import (
     FrodConfig,
     GraloraConfig,
     HiraConfig,
+    HRAConfig,
     IA3Config,
     KasaConfig,
     LilyConfig,
@@ -2992,6 +2993,48 @@ class TestHiraInitialization:
         config = HiraConfig(target_modules=["conv"], r=4)
         with pytest.raises(NotImplementedError, match="HiRA does not support .* layers with groups > 1"):
             get_peft_model(base_model, config)
+
+
+class TestHraInitialization:
+    """Test class to check the initialization of HRA adapters."""
+
+    torch_device = infer_device()
+
+    def get_model_conv2d(self, **conv_kwargs):
+        class ModelConv2D(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(4, 8, **conv_kwargs)
+
+            def forward(self, X):
+                return self.conv(X)
+
+        return ModelConv2D().eval().to(self.torch_device)
+
+    def test_error_raised_for_groups_greater_than_one(self):
+        # HRA composes the adapted weight as W @ H, with H acting on the flattened in_channels * kernel_size
+        # dimension, which has no well-defined generalization to grouped convolutions.
+        base_model = self.get_model_conv2d(kernel_size=3, groups=2)
+        config = HRAConfig(target_modules=["conv"], r=4)
+        with pytest.raises(NotImplementedError, match="HRA does not support Conv2d layers with groups > 1"):
+            get_peft_model(base_model, config)
+
+    def test_conv2d_non_square_kernel(self):
+        # HRA supports non-square conv kernels; check that the unmerged forward matches the merged result.
+        torch.manual_seed(0)
+        base_model = self.get_model_conv2d(kernel_size=(3, 5), padding=(1, 2))
+        # init_weights=False, otherwise the adapter is a no-op and the comparison trivial
+        config = HRAConfig(target_modules=["conv"], r=4, init_weights=False)
+        model = get_peft_model(base_model, config).eval()
+
+        x = torch.randn(2, 4, 10, 10, device=self.torch_device)
+        with torch.inference_mode():
+            output = model(x)
+        model.merge_adapter()
+        with torch.inference_mode():
+            output_merged = model(x)
+
+        assert torch.allclose(output, output_merged, atol=1e-5, rtol=1e-5)
 
 
 class TestNoInfiniteRecursionDeepspeed:
