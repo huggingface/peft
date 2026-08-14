@@ -1,7 +1,0 @@
-_check_*.py
-check_env.py
-check_jobs.py
-reproduce_*.py
-run_ci_repro.py
-run_multi_test.py
-uv.lock
