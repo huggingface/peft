@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import copy
+import inspect
 import json
 import os
 import pickle
@@ -24,12 +25,18 @@ from peft import (
     AdaLoraConfig,
     AdamssConfig,
     AdaptionPromptConfig,
+    BeftConfig,
     BOFTConfig,
     C3AConfig,
     CartridgeConfig,
     CPTConfig,
+    DeftConfig,
+    DeloraConfig,
     FourierFTConfig,
+    FrodConfig,
+    GloraConfig,
     GraloraConfig,
+    HiraConfig,
     HRAConfig,
     IA3Config,
     LilyConfig,
@@ -50,6 +57,8 @@ from peft import (
     PromptEncoderConfig,
     PromptTuningConfig,
     PsoftConfig,
+    PveraConfig,
+    RandLoraConfig,
     RoadConfig,
     ShiraConfig,
     TaskType,
@@ -57,8 +66,13 @@ from peft import (
     TrainableTokensConfig,
     VBLoRAConfig,
     VeraConfig,
+    WaveFTConfig,
     XLoraConfig,
 )
+
+
+class TestingCommitHashError(Exception):
+    pass
 
 
 PEFT_MODELS_TO_TEST = [("peft-internal-testing/tiny-opt-lora-revision", "test")]
@@ -68,10 +82,15 @@ ALL_CONFIG_CLASSES = (
     (AdaLoraConfig, {"total_step": 1}),
     (AdamssConfig, {}),
     (AdaptionPromptConfig, {}),
+    (BeftConfig, {}),
     (BOFTConfig, {}),
     (C3AConfig, {}),
+    (DeftConfig, {}),
     (FourierFTConfig, {}),
+    (FrodConfig, {}),
+    (GloraConfig, {}),
     (GraloraConfig, {}),
+    (HiraConfig, {}),
     (HRAConfig, {}),
     (IA3Config, {}),
     (LilyConfig, {}),
@@ -96,7 +115,21 @@ ALL_CONFIG_CLASSES = (
     (VeraConfig, {}),
     (VBLoRAConfig, {}),
     (XLoraConfig, {"hidden_size": 32, "adapters": {}}),
+    (CPTConfig, {"task_type": "CAUSAL_LM"}),
+    (RandLoraConfig, {}),
+    (DeloraConfig, {}),
+    (OFTConfig, {}),
+    (PveraConfig, {}),
+    (WaveFTConfig, {}),
 )
+
+# Config classes that support selecting layers by index (`layers_to_transform`) together
+# with a custom `layers_pattern`.
+LAYER_INDEXING_CONFIG_CLASSES = [
+    (config_class, mandatory_kwargs)
+    for config_class, mandatory_kwargs in ALL_CONFIG_CLASSES
+    if {"layers_to_transform", "layers_pattern"} <= set(inspect.signature(config_class).parameters)
+]
 
 
 class TestPeftConfig:
@@ -122,6 +155,8 @@ class TestPeftConfig:
         r"""
         Test if all configs work correctly for all valid task types
         """
+        if config_class is CPTConfig:
+            pytest.skip("CPTConfig only supports the CAUSAL_LM task type (validated in its __post_init__)")
         config_class(task_type=valid_task_type, **mandatory_kwargs)
 
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
@@ -129,6 +164,8 @@ class TestPeftConfig:
         r"""
         Test if all configs correctly raise the defined error message for invalid task types.
         """
+        if config_class is CPTConfig:
+            pytest.skip("CPTConfig validates task_type with a config-specific message in its __post_init__")
         invalid_task_type = "invalid-task-type"
         with pytest.raises(
             ValueError,
@@ -161,6 +198,8 @@ class TestPeftConfig:
         Test if the config is correctly loaded using:
         - from_pretrained
         """
+        if config_class is OFTConfig:
+            pytest.skip("OFT's from_pretrained back-compat guard fires before the generic load path tested here")
         for model_name, revision in PEFT_MODELS_TO_TEST:
             # Test we can load config from delta
             config_class.from_pretrained(model_name, revision=revision)
@@ -191,7 +230,8 @@ class TestPeftConfig:
             # Also test with a runtime_config entry -- they should be ignored, even if they
             # were accidentally saved to disk
             config_from_json["runtime_config"] = {"ephemeral_gpu_offload": True}
-            json.dump(config_from_json, open(config_path, "w"))
+            with open(config_path, "w") as f:
+                json.dump(config_from_json, f)
 
             config_from_json = config_class.from_json_file(config_path)
             assert config.to_dict() == config_from_json
@@ -210,6 +250,8 @@ class TestPeftConfig:
         r"""
         Test if the config is correctly loaded with extra kwargs
         """
+        if config_class is OFTConfig:
+            pytest.skip("OFT's from_pretrained back-compat guard fires before the generic load path tested here")
         with tempfile.TemporaryDirectory() as tmp_dirname:
             for model_name, revision in PEFT_MODELS_TO_TEST:
                 # Test we can load config from delta
@@ -228,6 +270,8 @@ class TestPeftConfig:
         r"""
         Test if the config correctly removes runtime config when saving
         """
+        if config_class is OFTConfig:
+            pytest.skip("OFT's from_pretrained back-compat guard fires before the generic load path tested here")
         with tempfile.TemporaryDirectory() as tmp_dirname:
             for model_name, revision in PEFT_MODELS_TO_TEST:
                 cfg = config_class.from_pretrained(model_name, revision=revision)
@@ -294,7 +338,7 @@ class TestPeftConfig:
         assert str(record.list[0].message) == expected_msg
 
     @pytest.mark.parametrize(
-        "config_class", [LoHaConfig, LoraConfig, IA3Config, OFTConfig, BOFTConfig, HRAConfig, VBLoRAConfig]
+        "config_class", [LoHaConfig, LoraConfig, IA3Config, BeftConfig, OFTConfig, BOFTConfig, HRAConfig, VBLoRAConfig]
     )
     def test_save_pretrained_with_target_modules(self, config_class):
         # See #1041, #1045
@@ -395,7 +439,6 @@ class TestPeftConfig:
             {"total_step": 10, "tinit": 20, "tfinal": 0},
             {"total_step": 10, "tinit": 0, "tfinal": 10},
             {"total_step": 10, "tinit": 10, "tfinal": 0},
-            {"total_step": 10, "tinit": 20, "tfinal": 0},
             {"total_step": 10, "tinit": 20, "tfinal": 20},
             {"total_step": 10, "tinit": 0, "tfinal": 20},
         ],
@@ -472,6 +515,8 @@ class TestPeftConfig:
         """Following up on the previous test about forward compatibility, we *don't* want any random json to be accepted as
         a PEFT config. There should be a minimum set of required keys.
         """
+        if config_class is OFTConfig:
+            pytest.skip("OFT's from_pretrained back-compat guard fires before the generic load path tested here")
         non_peft_json = {"foo": "bar", "baz": 123}
         with open(tmp_path / "adapter_config.json", "w") as f:
             json.dump(non_peft_json, f)
@@ -506,6 +551,19 @@ class TestPeftConfig:
         )
         assert config.layers_to_transform is None
         assert config.layers_pattern is None
+
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", LAYER_INDEXING_CONFIG_CLASSES)
+    def test_config_layers_to_transform_index_zero(self, config_class, mandatory_kwargs):
+        # `layers_to_transform=0` selects the first layer and is a valid index. Because 0
+        # is falsy, a truthiness check on `layers_to_transform` wrongly rejected it when
+        # combined with `layers_pattern`; the guard must compare against None instead.
+        config = config_class(
+            layers_to_transform=0,
+            layers_pattern="model.layers",
+            **mandatory_kwargs,
+        )
+        assert config.layers_to_transform == 0
+        assert config.layers_pattern == "model.layers"
 
     @pytest.mark.parametrize("version", ["0.10", "0.17.0", "1"])
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
@@ -591,7 +649,7 @@ class TestPeftConfig:
         monkeypatch.setattr(config, "__version__", version)
 
         def fake_commit_hash_raises(pkg_name):
-            raise Exception("Error for testing purpose")
+            raise TestingCommitHashError("Error for testing purpose")
 
         monkeypatch.setattr(config, "_get_commit_hash", fake_commit_hash_raises)
 

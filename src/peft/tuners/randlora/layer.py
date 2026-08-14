@@ -16,8 +16,8 @@ import warnings
 from typing import Optional
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
@@ -28,7 +28,7 @@ from .config import RandLoraConfig
 
 
 class UniqueBaseGrad(torch.autograd.Function):
-    # Memory efficent for a unique base
+    # Memory efficient for a unique base
     @staticmethod
     def forward(ctx, randlora_A, randlora_lambda, randlora_gamma):
         out = randlora_lambda[:, :, None] * randlora_A * randlora_gamma[None,]
@@ -51,7 +51,7 @@ class UniqueBaseGrad(torch.autograd.Function):
 class RandLoraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
     adapter_layer_names = ("randlora_lambda", "randlora_gamma")
-    other_param_names = ("randlora_A", "randlora_B")
+    other_param_names = ("randlora_A", "randlora_B", "randlora_dropout", "r", "scaling")
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer
@@ -137,8 +137,8 @@ class RandLoraLayer(BaseTunerLayer):
                     "The `randlora_A` and `randlora_B` buffers are empty. This should not happen. Please report this issue."
                 )
             # we can take any of the existing adapter's parameters, as they should all be identical
-            randlora_A_param = list(self.randlora_A.values())[0]
-            randlora_B_param = list(self.randlora_B.values())[0]
+            randlora_A_param = next(iter(self.randlora_A.values()))
+            randlora_B_param = next(iter(self.randlora_B.values()))
 
             error_tmpl = (
                 "{} has a size of {} but {} or greater is required; this probably happened because an additional RandLora "

@@ -15,11 +15,10 @@ from __future__ import annotations
 
 import copy
 import os
-import platform
 import re
 import warnings
 from collections import namedtuple
-from typing import Optional
+from typing import Literal, Optional
 
 import huggingface_hub
 import torch
@@ -29,7 +28,7 @@ from safetensors.torch import load_file as safe_load_file
 from transformers.utils import http_user_agent
 
 from peft.import_utils import is_transformers_ge_v5
-from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
+from peft.mapping import PEFT_TYPE_TO_TUNER_MAPPING
 
 from .constants import INCLUDE_LINEAR_LAYERS_SHORTHAND
 from .integrations import TpInfo
@@ -50,7 +49,7 @@ def has_valid_embedding_base_layer(layer):
     return hasattr(layer, "base_layer") and isinstance(layer.base_layer, (torch.nn.Linear, torch.nn.Embedding))
 
 
-def get_embedding_layer_name(model, layer, is_embedding_in_target_modules):
+def get_embedding_layer_name(model, layer, is_embedding_in_target_modules) -> str | None:
     """Get the name of the embedding module for a given layer."""
     for name, module in model.named_modules():
         if (not is_embedding_in_target_modules and module == layer) or module == getattr(layer, "base_layer", None):
@@ -74,8 +73,29 @@ def _get_tp_info(model) -> TpInfo | None:
     return None
 
 
+def _filter_state_dict_for_adapter_name(
+    state_dict: dict[str, torch.Tensor], unwanted_adapter_names: list[str]
+) -> dict[str, torch.Tensor]:
+    """Filter the state dict to remove keys that correspond to the unwanted adapter
+
+    Use a negative filter to avoid removing keys that correspond to keys that contain no adapter name at all, e.g. when
+    using modules_to_save.
+    """
+    return {
+        k: v
+        for k, v in state_dict.items()
+        if not any(
+            f".{adapter_name}." in k or k.endswith(f".{adapter_name}") for adapter_name in unwanted_adapter_names
+        )
+    }
+
+
 def get_peft_model_state_dict(
-    model, state_dict=None, adapter_name="default", unwrap_compiled=False, save_embedding_layers="auto"
+    model,
+    state_dict=None,
+    adapter_name: str = "default",
+    unwrap_compiled: bool = False,
+    save_embedding_layers: bool | Literal["auto"] = "auto",
 ):
     """
     Get the state dict of the given adapter of the PEFT model.
@@ -110,6 +130,18 @@ def get_peft_model_state_dict(
     if state_dict is None:
         state_dict = model.state_dict()
 
+    # FILTER FOR ADAPTER NAME
+    unwanted_adapter_names = [name for name in model.peft_config if name != adapter_name]
+    if not config.is_prompt_learning:
+        # Prompt learning methods don't support multiple adapters and hence don't have the adapter name in the Parameter
+        # name.
+        state_dict_filtered_for_adapter_name = _filter_state_dict_for_adapter_name(state_dict, unwanted_adapter_names)
+        if len(state_dict_filtered_for_adapter_name) > 0:
+            # If, after filtering the state dict for the adapter name, we end up with an empty state dict, it means that
+            # the adapter weights are not stored with the adapter name as suffix. This can happen e.g. for adaption
+            # prompt (which is not a prompt learning method).
+            state_dict = state_dict_filtered_for_adapter_name
+
     # If model was sharded with TP, gather full tensors for saving
     tp_info = _get_tp_info(model)
     if tp_info is not None:
@@ -131,178 +163,20 @@ def get_peft_model_state_dict(
         state_dict = gather_state_dict_for_save(state_dict, tp_plan, tp_info.device_mesh, tp_info.tp_size)
 
     # TUNER SPECIFIC CODE
-    if config.peft_type in (PeftType.LORA, PeftType.ADALORA):
-        # to_return = lora_state_dict(model, bias=model.peft_config.bias)
-        # adapted from `https://github.com/microsoft/LoRA/blob/main/loralib/utils.py`
-        # to be used directly with the state dict which is necessary when using DeepSpeed or FSDP
-        bias = config.bias
-        if bias == "none":
-            to_return = {k: state_dict[k] for k in state_dict if "lora_" in k}
-        elif bias == "all":
-            to_return = {k: state_dict[k] for k in state_dict if "lora_" in k or "bias" in k}
-        elif bias == "lora_only":
-            to_return = {}
-            for k in state_dict:
-                if "lora_" in k:
-                    to_return[k] = state_dict[k]
-                    bias_name = k.split("lora_")[0] + "bias"
-                    if bias_name in state_dict:
-                        to_return[bias_name] = state_dict[bias_name]
-        else:
-            raise NotImplementedError
-        to_return = {k: v for k, v in to_return.items() if (("lora_" in k and adapter_name in k) or ("bias" in k))}
-        if config.peft_type == PeftType.ADALORA:
-            rank_pattern = config.rank_pattern
-            if rank_pattern is not None:
-                rank_pattern = {k.replace(f".{adapter_name}", ""): v for k, v in rank_pattern.items()}
-                config.rank_pattern = rank_pattern
-                to_return = model.resize_state_dict_by_rank_pattern(rank_pattern, to_return, adapter_name)
-
-        if config.use_dora:
-            # Here we take care of a refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a
-            # ModuleDict with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. Since
-            # we want the state_dict format not to change, we remove the "weight" part.
-            new_dora_suffix = f"lora_magnitude_vector.{adapter_name}.weight"
-
-            def renamed_dora_weights(k):
-                if k.endswith(new_dora_suffix):
-                    k = k[:-7]  # remove ".weight"
-                return k
-
-            to_return = {renamed_dora_weights(k): v for k, v in to_return.items()}
-
-    elif config.peft_type == PeftType.BOFT:
-        bias = config.bias
-        if bias == "none":
-            to_return = {k: state_dict[k] for k in state_dict if "boft_" in k}
-        elif bias == "all":
-            to_return = {k: state_dict[k] for k in state_dict if "boft_" in k or "bias" in k}
-        elif bias == "boft_only":
-            to_return = {}
-            for k in state_dict:
-                if "boft_" in k:
-                    to_return[k] = state_dict[k]
-                    bias_name = k.split("boft_")[0] + "bias"
-                    if bias_name in state_dict:
-                        to_return[bias_name] = state_dict[bias_name]
-        else:
-            raise NotImplementedError
-
-    elif config.peft_type == PeftType.ADAPTION_PROMPT:
-        to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
-
-    elif config.is_prompt_learning:
-        to_return = {}
-        if config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
-            to_return["prefix_task_cols"] = model.prompt_encoder[adapter_name].prefix_task_cols
-            to_return["prefix_task_rows"] = model.prompt_encoder[adapter_name].prefix_task_rows
-            prompt_embeddings = model.prompt_encoder[adapter_name].embedding.weight
-        else:
-            if config.inference_mode:
-                prompt_embeddings = model.prompt_encoder[adapter_name].embedding.weight
-            else:
-                prompt_embeddings = model.get_prompt_embedding_to_save(adapter_name)
-        to_return["prompt_embeddings"] = prompt_embeddings
-
-    elif config.peft_type == PeftType.SHIRA:
-        shira_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
-        to_return = {k: state_dict[k] for k in state_dict if shira_prefix in k}
-        if platform.system() == "Windows":
-            warnings.warn(
-                "Windows has issues saving integers into safetensors. Hence, we convert shira_indices to float32 "
-                "before saving on Windows OS. The shira_indices will always be converted to integers when loading."
-            )
-        for name, module in model.named_modules():
-            if hasattr(module, "shira_indices"):
-                for k, v in module.shira_indices.items():
-                    # Windows has some issues with saving integers into safetensors. Tests fail with some kind of
-                    # PermissionError. This results in failed tests, so we are converting indices to float32 before
-                    # saving and then converting them back to int when loading. This is happening only for Windows,
-                    # not for Linux and Mac-OS.
-                    to_return[f"{name}.shira_indices.{k}"] = (
-                        v.to(torch.float32) if platform.system() == "Windows" else v
-                    )
-
-    elif config.peft_type == PeftType.VERA:
-        vera_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
-        to_return = {k: state_dict[k] for k in state_dict if vera_prefix in k}
-        if config.save_projection:
-            # TODO: adding vera_A and vera_B to `self.get_base_layer` would
-            # make name to match here difficult to predict.
-            if f"base_model.vera_A.{adapter_name}" not in state_dict:
-                raise ValueError(
-                    "Model was initialised to not save vera_A and vera_B but config now specifies to save projection!"
-                    " Set `config.save_projection` to `False`."
-                )
-            to_return["base_model.vera_A." + adapter_name] = state_dict["base_model.vera_A." + adapter_name]
-            to_return["base_model.vera_B." + adapter_name] = state_dict["base_model.vera_B." + adapter_name]
-    elif config.peft_type == PeftType.TINYLORA:
-        tinylora_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
-        # Collect tinylora keys (A, B buffers) excluding:
-        # - tinylora_v: shared model-level params (handled separately below)
-        # - tinylora_P: projection buffers (conditionally saved based on save_projection)
-        to_return = {
-            k: state_dict[k]
-            for k in state_dict
-            if tinylora_prefix in k and ".tinylora_v." not in k and ".tinylora_P." not in k
-        }
-        # Handle model-level shared v vectors
-        # The keys have format "base_model.tinylora_v.{adapter_name}.{idx}"
-        # We strip the adapter name for saving: "base_model.tinylora_v.{idx}"
-        adapter_v_prefix = f"base_model.tinylora_v.{adapter_name}."
-        for k in state_dict:
-            if k.startswith(adapter_v_prefix):
-                new_key = k.replace(adapter_v_prefix, "base_model.tinylora_v.")
-                to_return[new_key] = state_dict[k]
-        # Save projection tensors P if save_projection is True; otherwise they'll be
-        # regenerated from projection_seed when loading
-        if config.save_projection:
-            for k in state_dict:
-                if ".tinylora_P." in k and adapter_name in k:
-                    to_return[k] = state_dict[k]
-    elif config.peft_type == PeftType.PVERA:
-        vera_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
-        to_return = {k: state_dict[k] for k in state_dict if vera_prefix in k}
-        if config.save_projection:
-            # TODO: adding pvera_A and pvera_B to `self.get_base_layer` would
-            # make name to match here difficult to predict.
-            if f"base_model.pvera_A.{adapter_name}" not in state_dict:
-                raise ValueError(
-                    "Model was initialised to not save pvera_A and pvera_B but config now specifies to save projection!"
-                    + " Set `config.save_projection` to `False`."
-                )
-            to_return["base_model.pvera_A." + adapter_name] = state_dict["base_model.pvera_A." + adapter_name]
-            to_return["base_model.pvera_B." + adapter_name] = state_dict["base_model.pvera_B." + adapter_name]
-    elif config.peft_type == PeftType.XLORA:
-        to_return = {k: state_dict[k] for k in state_dict if "internal_xlora_classifier" in k}
-    elif config.peft_type == PeftType.VBLORA:
-        to_return = {}
-        # choose the most efficient dtype for indices
-        if config.num_vectors < 2**8:
-            indices_dtype = torch.uint8
-        elif config.num_vectors < 2**15:
-            indices_dtype = torch.int16
-        elif config.num_vectors < 2**31:
-            indices_dtype = torch.int32
-        else:
-            indices_dtype = torch.int64
-        if config.save_only_topk_weights:
-            # in save_only_topk_weights mode, we save topk_indices and topk_weights for parameter efficiency
-            for k in state_dict:
-                if "vblora_logits" in k:
-                    logits, indices = state_dict[k].topk(config.topk)
-                    to_return.update({k + "_topk_indices": indices.to(dtype=indices_dtype)})
-                    to_return.update({k + "_topk_weights": torch.softmax(logits, dim=-1)[:, :, :-1].contiguous()})
-        else:
-            to_return = {k: state_dict[k] for k in state_dict if "vblora_logits" in k}
-        to_return["base_model.vblora_vector_bank." + adapter_name] = state_dict[
-            "base_model.vblora_vector_bank." + adapter_name
-        ]
-    elif config.peft_type in list(PeftType):
-        prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
-        to_return = {k: state_dict[k] for k in state_dict if prefix in k}
-    else:
+    if config.peft_type not in PEFT_TYPE_TO_TUNER_MAPPING:
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
+
+    # The logic of which entries of the state_dict belong to the given adapter is method-specific and thus delegated
+    # to the tuner class, see BaseTuner._get_adapter_state_dict and BasePromptEncoder._get_adapter_state_dict for the
+    # default implementations.
+    tuner_cls = PEFT_TYPE_TO_TUNER_MAPPING[config.peft_type]
+    to_return = tuner_cls._get_adapter_state_dict(
+        model=model,
+        config=config,
+        adapter_name=adapter_name,
+        state_dict=state_dict,
+        unwanted_adapter_names=unwanted_adapter_names,
+    )
 
     # ADDITIONAL TRAINING MODULES / MODULES_TO_SAVE
     for name, module in model.named_modules():
@@ -397,45 +271,15 @@ def get_peft_model_state_dict(
             if not embedding_is_targeted or has_valid_embedding_base_layer(layer):
                 embedding_module_name = get_embedding_layer_name(model, layer, embedding_is_targeted)
                 if embedding_module_name:
-                    to_return.update({k: v for k, v in state_dict.items() if embedding_module_name in k})
+                    embedding_prefix = f"{embedding_module_name}."
+                    to_return.update({k: v for k, v in state_dict.items() if k.startswith(embedding_prefix)})
     elif save_embedding_layers:
         warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
 
     # REMOVE ADAPTER NAME
-    # Ensure not to replace in the middle of the key because a module happens to have the same name as the adapter.
-    pattern = re.compile(re.escape(f".{adapter_name}") + r"$")
-
-    def remove_adapter_name(key):
-        if "." not in key:
-            # nothing to do
-            return key
-
-        if config.peft_type == PeftType.PEANUT:
-            # PEANuT stores residual blocks as ModuleDict[adapter] -> ModuleList.
-            # Their keys look like `...peanut_encoders.<adapter>.0.weight` (and similarly for decoders),
-            # where adapter_name is not in the second-to-last position.
-            for container in ("peanut_encoders", "peanut_decoders"):
-                marker = f".{container}.{adapter_name}."
-                if marker in key:
-                    return key.replace(marker, f".{container}.")
-
-        if key.endswith(f".{adapter_name}"):
-            # comes from an nn.Parameter, so no .weight suffix, the adapter name is directly at the end
-            return key.removesuffix(f".{adapter_name}")
-
-        # comes from an nn.Module, i.e. the adapter name is the 2nd to last element, e.g. v_proj.lora_A.default.weight
-        key, _, suffix = key.rpartition(".")  # split, e.g. v_proj.lora_A.default + weight
-
-        if (config.peft_type == PeftType.VBLORA) and suffix.startswith(f"{adapter_name}_"):
-            # special case: VBLoRA creates keys that require this replacement:
-            # base_model.model.lin0.vblora_logits_A.default_topk_indices =>
-            # base_model.model.lin0.vblora_logits_A_topk_indices
-            return key + "_" + suffix.removeprefix(f"{adapter_name}_")
-
-        key = pattern.sub("", key)  # remove adapter name, e.g. v_proj.lora_A
-        return f"{key}.{suffix}"  # stitch the suffix back, e.g, v_proj.lora_A.weight
-
-    to_return = {remove_adapter_name(k): v for k, v in to_return.items()}
+    # Key formats can be method-specific, so the removal is delegated to the tuner class, see
+    # BaseTuner._remove_adapter_name_from_key for the default implementation.
+    to_return = {tuner_cls._remove_adapter_name_from_key(k, adapter_name): v for k, v in to_return.items()}
     return to_return
 
 
@@ -497,14 +341,30 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
         state_dict (`dict`): The adapter state dict to shard in-place (as loaded from a checkpoint).
         adapter_name (`str`): The name of the adapter whose weights are being sharded.
     """
+    from ..tuners.lora.layer import LoraLayer  # lazy import to avoid circular import
+
+    tp_lora_modules = []
+    for name, module in model.named_modules():
+        if not isinstance(module, LoraLayer):
+            continue
+
+        base_layer = module.get_base_layer()
+        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+        device_mesh = getattr(base_layer, "_hf_device_mesh", None)
+        if tp_plan is None or device_mesh is None:
+            continue
+
+        tp_lora_modules.append((name, module, base_layer, tp_plan, device_mesh))
+
+    if not tp_lora_modules:
+        return
+
     from transformers.integrations.tensor_parallel import (
         ALL_PARALLEL_STYLES,
         ColwiseParallel,
         EmbeddingParallel,
         RowwiseParallel,
     )
-
-    from ..tuners.lora.layer import LoraLayer  # lazy import to avoid circular import
 
     should_check = True
     prefix_to_remove = None
@@ -513,16 +373,8 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
 
     possible_prefixes = ["base_model.model.", "base_model."]
 
-    for name, module in model.named_modules():
-        if not isinstance(module, LoraLayer):
-            continue
-        base_layer = module.get_base_layer()
+    for name, module, base_layer, tp_plan, device_mesh in tp_lora_modules:
         device = base_layer.weight.device
-        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
-        device_mesh = getattr(base_layer, "_hf_device_mesh", None)
-
-        if tp_plan is None or device_mesh is None:
-            continue
 
         # One time check to make sure we are adding / removing a potential prefix to get the proper key in the state
         # dict. Same thing for the adapter name.
@@ -587,7 +439,7 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
             # We transpose back because LoraEmbedding expects the weights to be of shape (rank, num_embeddings)
             sharded = sharded.T
         else:
-            raise ValueError(f"Unknown tensor parallel plan {tp_plan} for {module.__class__.__name__}.")
+            raise TypeError(f"Unknown tensor parallel plan {tp_plan} for {module.__class__.__name__}.")
 
         if weight is None:
             weight = state_dict[key]
@@ -635,6 +487,8 @@ def set_peft_model_state_dict(
     """
     config = model.peft_config[adapter_name]
     state_dict = peft_model_state_dict
+    if config.peft_type not in PEFT_TYPE_TO_TUNER_MAPPING:
+        raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 
     is_like_transformers_model = hasattr(getattr(model, "config", None), "model_type")
     if is_transformers_ge_v5 and is_like_transformers_model:
@@ -670,156 +524,20 @@ def set_peft_model_state_dict(
                 # delete the old key from the previous `state_dict = peft_model_state_dict` statement.
                 del state_dict[lookup_key]
 
-    if config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT:
-        peft_model_state_dict = state_dict
-    elif config.peft_type == PeftType.XLORA:
-        peft_model_state_dict = state_dict
-    elif config.peft_type in PEFT_TYPE_TO_PREFIX_MAPPING:
-        peft_model_state_dict = {}
-        parameter_prefix = PEFT_TYPE_TO_PREFIX_MAPPING[config.peft_type]
-        if config.peft_type == PeftType.VBLORA and config.save_only_topk_weights:
-            num_vectors, _ = model.vblora_vector_bank[adapter_name].shape
-            state_dict_keys = list(state_dict.keys())
-            for k in state_dict_keys:
-                # in save_only_topk_weights mode, only topk_indices and topk_weights are saved
-                # note that topk_indices and topk_weights serve as an efficient representation of the logits
-                # so we need to recover the logits from the topk_indices and topk_weights
-                if "_topk_indices" in k:
-                    v = state_dict[k].to(torch.long)
-                    original_key = k.replace("_topk_indices", "")
-                    # find the corresponding topk_weights from the state_dict
-                    topk_weights = state_dict[k.replace("_topk_indices", "_topk_weights")]
-                    # as we only save the first k-1 topk_weights, here we recover the last one
-                    topk_weights = torch.cat([topk_weights, 1 - topk_weights.sum(-1, keepdim=True)], dim=-1)
-                    # convert the weights to logits
-                    topk_logits = torch.log(topk_weights)
-                    matrix = (
-                        torch.zeros([*(topk_logits.shape[:-1]), num_vectors])
-                        .fill_(float("-inf"))
-                        .to(topk_logits.device)
-                        .scatter(-1, v, topk_logits)
-                    )
-                    # add logits to the state_dict
-                    state_dict[original_key] = matrix
-                    # delete the topk_indices and topk_weights from the state_dict
-                    del state_dict[k]
-                    del state_dict[k.replace("_topk_indices", "_topk_weights")]
+    # Remapping the keys of the loaded state_dict to fit the model is method-specific and thus delegated to the tuner
+    # class, see BaseTuner._remap_adapter_state_dict_for_load for the default implementation.
+    tuner_cls = PEFT_TYPE_TO_TUNER_MAPPING[config.peft_type]
+    peft_model_state_dict = tuner_cls._remap_adapter_state_dict_for_load(
+        model=model, config=config, adapter_name=adapter_name, state_dict=state_dict
+    )
 
-        # For TinyLora, handle tinylora_v keys separately since they use a nested structure
-        # that doesn't follow the standard "{prefix}.{adapter_name}" pattern
-        tinylora_v_state_dict = {}
-        if config.peft_type == PeftType.TINYLORA:
-            # Extract tinylora_v keys before _insert_adapter_name_into_state_dict
-            # The saved keys are like "base_model.tinylora_v.{idx}"
-            # We need to transform them to "base_model.tinylora_v.{adapter_name}.{idx}"
-            tinylora_v_keys = [k for k in state_dict if ".tinylora_v." in k]
-            for k in tinylora_v_keys:
-                new_key = k.replace(".tinylora_v.", f".tinylora_v.{adapter_name}.")
-                tinylora_v_state_dict[new_key] = state_dict.pop(k)
-
-        peft_model_state_dict = _insert_adapter_name_into_state_dict(
-            state_dict, adapter_name=adapter_name, parameter_prefix=parameter_prefix
-        )
-
-        # Add back the tinylora_v keys (now in the correct format)
-        if config.peft_type == PeftType.TINYLORA:
-            peft_model_state_dict.update(tinylora_v_state_dict)
-
-        if config.peft_type == PeftType.ADALORA:
-            rank_pattern = config.rank_pattern
-            if rank_pattern is not None:
-                model.resize_modules_by_rank_pattern(rank_pattern, adapter_name)
-        elif config.peft_type == PeftType.SHIRA:
-            if platform.system() == "Windows":
-                warnings.warn(
-                    "Windows has issues saving integers into safetensors. Hence, we had converted shira_indices "
-                    "to float32 before saving on Windows OS. The shira_indices will always be converted to integers "
-                    "when loading."
-                )
-            for name, module in model.named_modules():
-                if hasattr(module, "shira_indices"):
-                    # for k, v in module.shira_indices.items():
-                    if f"{name}.shira_indices.{adapter_name}" in peft_model_state_dict:
-                        shira_indices_values = peft_model_state_dict.pop(f"{name}.shira_indices.{adapter_name}")
-                        # Convert shira_indices to int in case they were saved on a Windows OS and are being loaded
-                        # on a Linux or a Mac-OS system. If they were saved in Linux or Mac-OS, they are already
-                        # integers and the following will not affect anything.
-                        module.shira_indices[adapter_name] = shira_indices_values.to(torch.int)
-        elif config.peft_type == PeftType.VERA:
-            if config.save_projection and "base_model.vera_A" not in peft_model_state_dict:
-                raise ValueError(
-                    "Specified to load vera_A and vera_B from state dictionary however they were not present!"
-                )
-            elif not config.save_projection and "base_model.vera_A" in peft_model_state_dict:
-                warnings.warn(
-                    "Specified to not load vera_A and vera_B from state dictionary however they are present in state"
-                    " dictionary! Consider using them to ensure checkpoint loading is correct on all platforms using"
-                    " `peft_config.save_projection = True`"
-                )
-            elif not config.save_projection:  # and no vera_A in state dictionary
-                warnings.warn(
-                    "Specified to not load vera_A and vera_B from state dictionary. This means we will be relying on"
-                    " PRNG initialisation to restore these projections using `config.projection_prng_key`, which may"
-                    " not be accurate on all system configurations."
-                )
-        elif config.peft_type == PeftType.TINYLORA:
-            has_projection = any(".tinylora_P." in k for k in peft_model_state_dict)
-            if config.save_projection and not has_projection:
-                warnings.warn(
-                    "Specified to load tinylora_P from state dictionary however it was not present! "
-                    "Projection tensors will be regenerated from the projection_seed."
-                )
-            elif not config.save_projection and has_projection:
-                warnings.warn(
-                    "Specified to not load tinylora_P from state dictionary however they are present in state"
-                    " dictionary! Consider using them to ensure checkpoint loading is correct on all platforms using"
-                    " `peft_config.save_projection = True`"
-                )
-            elif not config.save_projection:  # and no tinylora_P in state dictionary
-                warnings.warn(
-                    "Specified to not load tinylora_P from state dictionary. This means we will be relying on"
-                    " PRNG initialisation to restore these projections using `config.projection_seed`, which may"
-                    " not be accurate on all system configurations."
-                )
-        elif config.peft_type == PeftType.PVERA:
-            if config.save_projection and "base_model.pvera_A" not in peft_model_state_dict:
-                raise ValueError(
-                    "Specified to load pvera_A and pvera_B from state dictionary however they were not present!"
-                )
-            elif not config.save_projection and "base_model.pvera_A" in peft_model_state_dict:
-                warnings.warn(
-                    "Specified to not load pvera_A and pvera_B from state dictionary however they are present in state"
-                    " dictionary! Consider using them to ensure checkpoint loading is correct on all platforms using"
-                    " `peft_config.save_projection = True`"
-                )
-            elif not config.save_projection:  # and no vera_A in state dictionary
-                warnings.warn(
-                    "Specified to not load pvera_A and pvera_B from state dictionary. This means we will be relying on"
-                    " PRNG initialisation to restore these projections using `config.projection_prng_key`, which may"
-                    " not be accurate on all system configurations."
-                )
-        elif config.peft_type == PeftType.LORA:
-            # Here we take care of a refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a
-            # ModuleDict with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer.
-            old_dora_suffix = f"lora_magnitude_vector.{adapter_name}"
-
-            def renamed_dora_weights(k):
-                if k.endswith(old_dora_suffix):
-                    k = k + ".weight"
-                return k
-
-            peft_model_state_dict = {renamed_dora_weights(k): v for k, v in peft_model_state_dict.items()}
-
-            if torch.distributed.is_available() and torch.distributed.is_initialized():
-                _maybe_shard_state_dict_for_tp(model, peft_model_state_dict, adapter_name)
-
-        elif config.peft_type == PeftType.OFT:
-            if any(".oft_r." in key for key in peft_model_state_dict):
-                raise ValueError(
-                    "Trying to load old OFT checkpoint, which is no longer supported. Please install PEFT <= v0.15.2 to load it or train a new OFT adapter."
-                )
-    else:
-        raise NotImplementedError
+    # Updating the state dict for Transformers weight conversion with convert_peft_adapter_state_dict_for_transformers
+    # can introduce the base model prefix, but when loading the state_dict directly into the model (i.e. no PeftModel,
+    # e.g. when using set_peft_model_state_dict), there is no prefix.
+    prefix = "base_model.model."
+    requires_prefix = any(n.startswith(prefix) for n, _ in model.named_parameters())
+    if not requires_prefix:
+        peft_model_state_dict = {k.removeprefix(prefix): v for k, v in peft_model_state_dict.items()}
 
     peft_model_state_dict, mismatched_keys = _find_mismatched_keys(
         model, peft_model_state_dict, ignore_mismatched_sizes=ignore_mismatched_sizes
@@ -834,15 +552,9 @@ def set_peft_model_state_dict(
         load_result = model.load_state_dict(peft_model_state_dict, strict=False)
 
     if config.is_prompt_learning:
-        if config.peft_type == PeftType.CARTRIDGE:
-            model.prompt_encoder[adapter_name].load_prompt_embeddings(peft_model_state_dict["prompt_embeddings"])
-        else:
-            model.prompt_encoder[adapter_name].embedding.load_state_dict(
-                {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
-            )
-
-    if config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
-        model.prompt_encoder[adapter_name].load_state_dict(peft_model_state_dict, strict=False)
+        # The state of prompt learning methods lives on the prompt encoder, so it is not covered by
+        # model.load_state_dict above and needs to be loaded explicitly.
+        model.prompt_encoder[adapter_name]._load_adapter_state_dict(peft_model_state_dict)
 
     if mismatched_keys:
         # see https://github.com/huggingface/transformers/blob/09f9f566de83eef1f13ee83b5a1bbeebde5c80c1/src/transformers/modeling_utils.py#L4039
@@ -994,3 +706,191 @@ def load_peft_weights(
             remapped_adapters_weights[key_with_prefix] = val
 
     return remapped_adapters_weights
+
+
+def _get_adapter_state_dict_key_prefixes(model) -> set[str]:
+    """Collect state dict key prefixes for adapter parameters by inspecting the module tree.
+
+    For ``BaseTunerLayer`` modules every parameter/buffer is adapter-specific except those under ``base_layer`` (the
+    wrapped original module), so we collect every immediate child/parameter/buffer other than ``base_layer``. For
+    ``AuxiliaryTrainingWrapper`` modules it queries ``adapter_state_dict_load_map`` (the canonical source of adapter
+    keys) for each registered adapter, and falls back to ``other_param_names`` for non-saveable adapter attributes.
+    """
+    from peft.tuners.tuners_utils import BaseTunerLayer
+
+    adapter_key_prefixes: set[str] = set()
+    for module_name, module in model.base_model.model.named_modules():
+        if isinstance(module, AuxiliaryTrainingWrapper):
+            # Use adapter_state_dict_load_map to get the actual state dict keys owned by
+            # each adapter
+            for adapter_name in module._adapters:
+                load_map = module.adapter_state_dict_load_map(adapter_name)
+                for state_dict_key in load_map.values():
+                    prefix = f"{module_name}.{state_dict_key}" if module_name else state_dict_key
+                    adapter_key_prefixes.add(prefix)
+            for attr_name in module.other_param_names:
+                prefix = f"{module_name}.{attr_name}" if module_name else attr_name
+                adapter_key_prefixes.add(prefix)
+        elif isinstance(module, BaseTunerLayer):
+            # Everything on a tuner layer belongs to the adapter except the wrapped ``base_layer``. We enumerate the
+            # immediate children/parameters/buffers instead of relying on ``adapter_layer_names`` because some adapter
+            # parameters are registered dynamically and are not part of that static list (e.g. DoRA's
+            # ``lora_magnitude_vector``).
+            adapter_attr_names = (
+                [name for name, _ in module.named_children()]
+                + [name for name, _ in module.named_parameters(recurse=False)]
+                + [name for name, _ in module.named_buffers(recurse=False)]
+            )
+            for attr_name in adapter_attr_names:
+                if attr_name == "base_layer":
+                    continue
+                prefix = f"{module_name}.{attr_name}" if module_name else attr_name
+                adapter_key_prefixes.add(prefix)
+    return adapter_key_prefixes
+
+
+def _is_adapter_key(key: str, adapter_key_prefixes: set[str]) -> bool:
+    """Check if a state dict key belongs to an adapter parameter."""
+    return any(key == pfx or key.startswith(pfx + ".") for pfx in adapter_key_prefixes)
+
+
+def _peft_key_to_original_key(model, peft_key: str) -> str:
+    """Transform a PEFT state dict key to its original base model key.
+
+    Walks the module tree to strip wrapper infixes (``base_layer``, ``original_module``, and internal tuner modules
+    like ``token_adapter`` inside ``AuxiliaryTrainingWrapper``).
+
+    We walk the module tree rather than relying on a purely string-based transform (e.g. removing every
+    ``.base_layer.``/``.original_module.`` substring): the same token can legitimately be part of an original module
+    name and the infixes that need stripping depend on the *type* of the enclosing module (``BaseTunerLayer`` vs.
+    ``AuxiliaryTrainingWrapper`` vs. a regular module). By resolving each path component against the live module via
+    ``getattr`` we can check ``isinstance`` at every level and only strip a segment when it is genuinely a
+    PEFT-injected infix, which keeps this correct across the different (and weight-sharing) tuner structures.
+    """
+    from peft.tuners.tuners_utils import BaseTunerLayer
+
+    parts = peft_key.split(".")
+    original_parts: list[str] = []
+    current = model.base_model.model
+
+    for part in parts:
+        if current is None:
+            # Already past the module tree (e.g. nested parameter names)
+            original_parts.append(part)
+            continue
+
+        child = getattr(current, part, None)
+        if child is None or not isinstance(child, torch.nn.Module):
+            # Parameter/buffer name - keep it
+            original_parts.append(part)
+            current = None
+        elif part == "base_layer" and isinstance(current, BaseTunerLayer):
+            # Skip the base_layer infix inside a tuner
+            current = child
+        elif part == "original_module" and isinstance(current, AuxiliaryTrainingWrapper):
+            # Skip the original_module infix inside a wrapper
+            current = child
+        elif isinstance(child, BaseTunerLayer) and isinstance(current, AuxiliaryTrainingWrapper):
+            # Internal tuner inside a wrapper (e.g. token_adapter in TrainableTokensWrapper) - skip
+            current = child
+        elif isinstance(child, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
+            # Tuner/wrapper that replaces an original module (e.g. LoRA at q_proj) - keep name
+            original_parts.append(part)
+            current = child
+        else:
+            # Regular module - keep name
+            original_parts.append(part)
+            current = child
+
+    return ".".join(original_parts)
+
+
+def get_base_model_state_dict(model) -> dict[str, torch.Tensor]:
+    """Return the state dict of the base model with the original model keys.
+
+    Extracts the base model's parameters from a PEFT-wrapped model, removing PEFT-specific key modifications and
+    filtering out adapter-specific parameters.
+
+    Args:
+        model: A ``PeftModel`` instance.
+
+    Returns:
+        The base model's state dict with original keys (without PEFT modifications).
+    """
+    # For prompt learning methods the base model structure is not modified, so the state
+    # dict already uses the original keys and contains no adapter-injected parameters.
+    if model._is_prompt_learning:
+        return dict(model.base_model.state_dict())
+
+    state_dict = model.base_model.model.state_dict()
+    adapter_key_prefixes = _get_adapter_state_dict_key_prefixes(model)
+
+    result: dict[str, torch.Tensor] = {}
+    for key, value in state_dict.items():
+        if _is_adapter_key(key, adapter_key_prefixes):
+            continue
+        result[_peft_key_to_original_key(model, key)] = value
+
+    return result
+
+
+def set_base_model_state_dict(
+    model,
+    state_dict: dict[str, torch.Tensor],
+    strict: bool = True,
+):
+    """Load a state dict with original model keys into a PEFT-wrapped model.
+
+    Takes a state dict keyed by the original (pre-PEFT) model key names and loads it into the base model, automatically
+    translating keys to account for PEFT wrapper infixes (``base_layer``, ``original_module``, etc.).
+
+    This is the counterpart to :func:`get_base_model_state_dict` and is useful for scenarios like loading base model
+    weights after FSDP wrapping.
+
+    Args:
+        model: A ``PeftModel`` instance.
+        state_dict: The state dict with original model keys to load.
+        strict: Whether to strictly enforce that the keys match.  If ``True``,
+            raises ``RuntimeError`` on missing or unexpected keys.
+
+    Returns:
+        A ``namedtuple`` with ``missing_keys`` and ``unexpected_keys`` fields.
+    """
+    _IncompatibleKeys = namedtuple("IncompatibleKeys", ["missing_keys", "unexpected_keys"])
+
+    # For prompt learning methods the base model structure is not modified, so the state
+    # dict already uses the original keys and contains no adapter-injected parameters.
+    if model._is_prompt_learning:
+        return model.base_model.load_state_dict(state_dict, strict=strict)
+
+    current_state_dict = model.base_model.model.state_dict()
+    adapter_key_prefixes = _get_adapter_state_dict_key_prefixes(model)
+
+    # Build mapping: original_key → peft_key
+    original_to_peft_key: dict[str, str] = {}
+    for peft_key in current_state_dict.keys():
+        if _is_adapter_key(peft_key, adapter_key_prefixes):
+            continue
+        original_to_peft_key[_peft_key_to_original_key(model, peft_key)] = peft_key
+
+    peft_state_dict: dict[str, torch.Tensor] = {}
+    unexpected_keys: list[str] = []
+
+    for original_key, value in state_dict.items():
+        if original_key in original_to_peft_key:
+            peft_state_dict[original_to_peft_key[original_key]] = value
+        else:
+            unexpected_keys.append(original_key)
+
+    missing_keys = [k for k in original_to_peft_key if k not in state_dict]
+
+    if strict and (missing_keys or unexpected_keys):
+        error_msgs: list[str] = []
+        if missing_keys:
+            error_msgs.append(f"Missing key(s) in state_dict: {missing_keys}")
+        if unexpected_keys:
+            error_msgs.append(f"Unexpected key(s) in state_dict: {unexpected_keys}")
+        raise RuntimeError("Error(s) in loading state_dict:\n\t" + "\n\t".join(error_msgs))
+
+    model.base_model.model.load_state_dict(peft_state_dict, strict=False)
+    return _IncompatibleKeys(missing_keys=missing_keys, unexpected_keys=unexpected_keys)

@@ -33,7 +33,7 @@ from .save_and_load import _insert_adapter_name_into_state_dict, load_peft_weigh
 CONFIG_KEYS_TO_CHECK = {PeftType.LORA: ["use_rslora", "lora_dropout", "alpha_pattern", "use_dora"]}
 
 
-def _update_scaling(lora_module, adapter_name, scaling=None):
+def _update_scaling(lora_module: LoraLayer, adapter_name: str, scaling: float) -> None:
     """
     Update the value of the scalings of the LoRA module.
 
@@ -47,7 +47,7 @@ def _update_scaling(lora_module, adapter_name, scaling=None):
     elif isinstance(lora_module.scaling[adapter_name], (float, int)):
         lora_module.scaling[adapter_name] = scaling
     else:
-        raise ValueError(
+        raise TypeError(
             "Something went wrong when trying to set the new scale value, expected to find the old value to be of type "
             f"float or torch.Tensor, got {type(lora_module.scaling[adapter_name])} instead."
         )
@@ -73,14 +73,14 @@ def _convert_scalings_to_tensor(model) -> bool:
                 # no need to deal with dtype as scalars are coerced
                 scaling[key] = torch.tensor(val, device=module.weight.device)
             elif not isinstance(val, torch.Tensor):
-                raise ValueError(
+                raise TypeError(
                     "Something went wrong while trying to convert the scalings, expected to find values of type float "
                     f"but found {type(val)} instead."
                 )
     return found_adapter
 
 
-def _get_padded_linear(lora_module: torch.nn.Module, target_rank: int, is_lora_A: bool) -> torch.nn.Linear:
+def _get_padded_linear(lora_module: torch.nn.Module, target_rank: int, is_lora_A: bool, **kwargs) -> torch.nn.Linear:
     """
     Get a new Linear layer for LoRA with padded weights according to the target rank.
 
@@ -124,6 +124,7 @@ def _get_padded_linear(lora_module: torch.nn.Module, target_rank: int, is_lora_A
         padded = torch.zeros(out_features, target_rank, device=weight.device, dtype=weight.dtype)
         padded[:, :original_rank] = weight
         new_layer = torch.nn.Linear(target_rank, out_features, bias=lora_module.bias is not None)
+    new_layer.weight.requires_grad_(lora_module.weight.requires_grad)
 
     # Sanity check
     if new_layer.weight.shape != padded.shape:
@@ -147,7 +148,29 @@ def _get_padded_linear(lora_module: torch.nn.Module, target_rank: int, is_lora_A
     return new_layer
 
 
-def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A: bool) -> torch.nn.Conv2d:
+def _copy_grouped_conv2d_lora_a_weights(destination: torch.Tensor, source: torch.Tensor, groups: int) -> None:
+    """
+    Copy grouped Conv2d LoRA A weights while preserving the rank block for each group.
+
+    Args:
+        destination (`torch.Tensor`):
+            The destination tensor with the padded rank dimension.
+        source (`torch.Tensor`):
+            The source tensor with the original rank dimension.
+        groups (`int`):
+            The number of groups in the base Conv2d layer.
+    """
+    destination_rank_per_group = destination.shape[0] // groups
+    source_rank_per_group = source.shape[0] // groups
+    for group_idx in range(groups):
+        destination_start = group_idx * destination_rank_per_group
+        source_start = group_idx * source_rank_per_group
+        destination[destination_start : destination_start + source_rank_per_group].copy_(
+            source[source_start : source_start + source_rank_per_group]
+        )
+
+
+def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A: bool, **kwargs) -> torch.nn.Conv2d:
     """
     Get a new Conv2d layer for LoRA with padded weights according to the target rank.
 
@@ -166,7 +189,11 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
     weight = lora_module.weight
     # For Conv2d: [out_channels, in_channels, kernel_height, kernel_width]
     out_channels, in_channels, kh, kw = weight.shape
-    original_rank = out_channels if is_lora_A else in_channels
+    groups = lora_module.groups
+    base_layer_groups = kwargs.get("base_layer_groups", 1)
+    # For lora_B with groups > 1, the effective rank is in_channels * groups because weight.shape[1] contains the
+    # rank per group. lora_A is created with groups=1, so its rank is out_channels.
+    original_rank = out_channels if is_lora_A else in_channels * groups
 
     if original_rank == target_rank:
         return lora_module
@@ -181,7 +208,10 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
     if is_lora_A:
         # LoRA A affects out_channels
         padded = torch.zeros(target_rank, in_channels, kh, kw, device=weight.device, dtype=weight.dtype)
-        padded[:out_channels, :, :, :] = weight
+        if base_layer_groups == 1:
+            padded[:out_channels, :, :, :] = weight
+        else:
+            _copy_grouped_conv2d_lora_a_weights(padded, weight, base_layer_groups)
         new_layer = torch.nn.Conv2d(
             in_channels,
             target_rank,
@@ -189,11 +219,18 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
             stride=lora_module.stride,
             padding=lora_module.padding,
             bias=lora_module.bias is not None,
-            groups=lora_module.groups,
+            groups=groups,
         )
     else:
-        # LoRA B affects in_channels
-        padded = torch.zeros(out_channels, target_rank, kh, kw, device=weight.device, dtype=weight.dtype)
+        # LoRA B affects in_channels. When groups > 1, the target rank must be divisible by groups and the weight
+        # tensor's second dimension is target_rank // groups.
+        if target_rank % groups != 0:
+            raise ValueError(
+                f"Trying to pad a Conv2d LoRA B with groups={groups} to target rank {target_rank}, but the target "
+                f"rank is not divisible by {groups}. Please choose a target rank that is divisible by groups."
+            )
+        target_in_channels = target_rank // groups
+        padded = torch.zeros(out_channels, target_in_channels, kh, kw, device=weight.device, dtype=weight.dtype)
         padded[:, :in_channels, :, :] = weight
         new_layer = torch.nn.Conv2d(
             target_rank,
@@ -202,8 +239,9 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
             stride=lora_module.stride,
             padding=lora_module.padding,
             bias=lora_module.bias is not None,
-            groups=lora_module.groups,
+            groups=groups,
         )
+    new_layer.weight.requires_grad_(lora_module.weight.requires_grad)
 
     # Sanity check
     if new_layer.weight.shape != padded.shape:
@@ -245,20 +283,32 @@ def _pad_lora_weights(model: torch.nn.Module, target_rank: int) -> bool:
         # Decide which pad function to call based on module type
         if isinstance(module, Linear):
             pad_fn = _get_padded_linear
+            base_layer_groups = 1  # Linear layers do not have grouped-convolution layout
         elif isinstance(module, Conv2d):
             pad_fn = _get_padded_conv2d
+            base_layer_groups = module.get_base_layer().groups
+            if target_rank % base_layer_groups != 0:
+                raise ValueError(
+                    f"Trying to pad a Conv2d LoRA adapter with groups={base_layer_groups} to target rank "
+                    f"{target_rank}, but the target rank is not divisible by {base_layer_groups}. Please choose a "
+                    f"target rank that is divisible by {base_layer_groups}."
+                )
         else:
             # Skip any other module types
             continue
 
         # Pad LoRA A
         for adapter_name, lora_A_module in module.lora_A.items():
-            new_layer = pad_fn(lora_A_module, target_rank=target_rank, is_lora_A=True)
+            new_layer = pad_fn(
+                lora_A_module, target_rank=target_rank, is_lora_A=True, base_layer_groups=base_layer_groups
+            )
             module.lora_A[adapter_name] = new_layer
 
         # Pad LoRA B
         for adapter_name, lora_B_module in module.lora_B.items():
-            new_layer = pad_fn(lora_B_module, target_rank=target_rank, is_lora_A=False)
+            new_layer = pad_fn(
+                lora_B_module, target_rank=target_rank, is_lora_A=False, base_layer_groups=base_layer_groups
+            )
             module.lora_B[adapter_name] = new_layer
 
         found_adapter = True
@@ -306,7 +356,7 @@ def prepare_model_for_compiled_hotswap(
 
     Raises:
         ValueError
-            If the model is already compiled or if no adpater layer was found, raise an error.
+            If the model is already compiled or if no adapter layer was found, raise an error.
 
     Example:
 
@@ -372,7 +422,7 @@ def hotswap_adapter_from_state_dict(
     adapter_name: str,
     config: LoraConfig,
     parameter_prefix: str = "lora_",
-):
+) -> None:
     """
     Swap out the adapter weights from the model with the weights from state_dict.
 
@@ -404,9 +454,8 @@ def hotswap_adapter_from_state_dict(
     # Ensure that all the keys of the new adapter correspond exactly to the keys of the old adapter, otherwise
     # hot-swapping is not possible
 
-    # _orig_mod is for torch.compile(model) and _compiled_call_impl is for model.compile() (not wrapped)
-    is_compiled = hasattr(model, "_orig_mod")
-    is_compiled_inplace = bool(getattr(model, "_compiled_call_impl", None))
+    # _orig_mod is for torch.compile(model)
+    is_compiled_wrapper = hasattr(model, "_orig_mod")
     # TODO: there is probably a more precise way to identify the adapter keys
     missing_keys = {k for k in model.state_dict() if (parameter_prefix in k) and (adapter_name in k)}
     unexpected_keys = []
@@ -419,7 +468,7 @@ def hotswap_adapter_from_state_dict(
             unexpected_keys.append(key)
             continue
 
-        if is_compiled:
+        if is_compiled_wrapper:
             missing_keys.remove("_orig_mod." + key)
         else:
             missing_keys.remove(key)
@@ -464,25 +513,22 @@ def hotswap_adapter_from_state_dict(
         old_val = attrgetter(key)(model)
         new_val = new_val.to(old_val.data.device)
 
-        # We try to detect if the model is compiled but it does not always work, e.g. if hotswapping is called from
-        # within the model itself. In this case, swap_tensors raises RuntimeError and should continue without
-        # swap_tensors.
-        if not is_compiled and not is_compiled_inplace:
-            try:
-                torch.utils.swap_tensors(old_val, new_val)
-                continue
-            except RuntimeError:
-                is_compiled = True
+        # 3 options:
+        # - shapes_match: the new adapter has the same rank as the current tensor (possibly because
+        #   prepare_model_for_compiled_hotswap padded the current tensor to match).
+        # - new_is_smaller: the new adapter has a smaller rank than the current tensor. This happens either
+        #   when the old adapter had a larger rank, or when the current tensor was padded to a larger
+        #   target_rank.
+        # - new_is_larger: the new adapter has a larger rank than the current tensor. The parameter shape
+        #   must change, which is only safe when no padded-shape invariant applies (i.e. the model was
+        #   not padded via prepare_model_for_compiled_hotswap). swap_tensors is the only option here.
+        shapes_match = old_val.shape == new_val.shape
+        new_is_smaller = (not shapes_match) and all(o >= n for o, n in zip(old_val.shape, new_val.shape))
+        new_is_larger = (not shapes_match) and not new_is_smaller
 
-        # Compiled models don't work with swap_tensors because there are weakrefs for the tensor. It is unclear if
-        # this workaround could not cause trouble but the tests indicate that it works.
-        if old_val.shape == new_val.shape:
-            # either
-            # - adapters had the same rank
-            # - adapters were padded with prepare_model_for_compiled_hotswap and 2nd adapter was larger
+        if shapes_match:
             old_val.data.copy_(new_val.data)
-        else:
-            # if 2nd adapter was smaller, ensure to fill up to adapter dimension and set the rest to zeros
+        elif new_is_smaller:
             if old_val.dim() not in (2, 4):
                 raise NotImplementedError(
                     f"Trying to hotswap an adapter whose weight has {old_val.dim()} dimensions, but only Conv2d and "
@@ -492,7 +538,14 @@ def hotswap_adapter_from_state_dict(
             # Linear or Conv2d: the check for dim 0 or 1 works for both of these layer types
             if old_val.shape[0] > new_val.shape[0]:
                 old_val.data.fill_(0)
-                old_val.data[: new_val.shape[0]].copy_(new_val.data)
+                requires_grouped_conv2d_lora_a_copy = (
+                    isinstance(module, Conv2d) and ".lora_A." in key and module.get_base_layer().groups > 1
+                )
+                if not requires_grouped_conv2d_lora_a_copy:
+                    old_val.data[: new_val.shape[0]].copy_(new_val.data)
+                else:
+                    groups = module.get_base_layer().groups
+                    _copy_grouped_conv2d_lora_a_weights(old_val.data, new_val.data, groups)
             elif old_val.shape[1] > new_val.shape[1]:
                 old_val.data.fill_(0)
                 old_val.data[:, : new_val.shape[1]].copy_(new_val.data)
@@ -502,6 +555,21 @@ def hotswap_adapter_from_state_dict(
                     "ensure that all ranks are padded to the largest rank among all LoRA adapters by using "
                     "peft.utils.hotswap.prepare_model_for_compiled_hotswap."
                 )
+        elif new_is_larger:
+            try:
+                torch.utils.swap_tensors(old_val, new_val)
+            except RuntimeError:
+                # Fallback if swap_tensors is not permitted (e.g. tensor has weakrefs). This still
+                # rebinds storage and will break inductor if the model is compiled, but growing the
+                # rank of a compiled-and-padded model is already unsupported; the caller should have
+                # used prepare_model_for_compiled_hotswap with a sufficient target_rank.
+                old_val.data = new_val.data
+        else:
+            # should be unreachable
+            raise ValueError(
+                "Something went wrong during hotswapping, please open an issue on PEFT: "
+                "https://github.com/huggingface/peft/issues"
+            )
 
 
 def check_hotswap_configs_compatible(config0: PeftConfig, config1: PeftConfig) -> None:
@@ -542,7 +610,13 @@ def check_hotswap_configs_compatible(config0: PeftConfig, config1: PeftConfig) -
             raise ValueError(f"Configs are incompatible: for {key}, {val0} != {val1}")
 
 
-def hotswap_adapter(model, model_name_or_path, adapter_name, torch_device=None, **kwargs):
+def hotswap_adapter(
+    model: torch.nn.Module,
+    model_name_or_path: str,
+    adapter_name: str,
+    torch_device: Optional[str] = None,
+    **kwargs,
+) -> None:
     """Substitute old adapter data with new adapter data, keeping the rest the same.
 
     As of now, only LoRA is supported.

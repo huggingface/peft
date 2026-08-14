@@ -77,7 +77,7 @@ def config_random():
 @pytest.fixture(scope="module")
 def sst_data():
     """Load the SST2 dataset and prepare it for testing."""
-    data = load_dataset("glue", "sst2")
+    data = load_dataset("nyu-mll/glue", "sst2")
 
     def add_string_labels(example):
         if example["label"] == 0:

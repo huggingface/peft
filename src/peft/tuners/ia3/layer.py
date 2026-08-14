@@ -16,7 +16,7 @@ import warnings
 from typing import Any, Optional
 
 import torch
-import torch.nn as nn
+from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
@@ -49,7 +49,7 @@ class IA3Layer(BaseTunerLayer):
                 base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
             )
         else:
-            raise ValueError(f"Unsupported layer type {type(base_layer)}")
+            raise TypeError(f"Unsupported layer type {type(base_layer)}")
         self.in_features = in_features
         self.out_features = out_features
 
@@ -286,7 +286,7 @@ class _ConvNd(nn.Module, IA3Layer):
                 if not self.is_feedforward and (base_layer.bias is not None):
                     scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
                     orig_dtype = base_layer.bias.data.dtype
-                    base_layer.bias.data = torch.mul(base_layer.bias.data, scaling.data).to(orig_dtype)
+                    base_layer.bias.data = torch.div(base_layer.bias.data, scaling.data + 1e-8).to(orig_dtype)
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         dtype = previous_dtype = x.dtype

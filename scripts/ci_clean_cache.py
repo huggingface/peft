@@ -11,6 +11,7 @@ Deletion can be enabled by passing `-d` parameter, otherwise it will only list t
 
 import sys
 from datetime import datetime as dt
+from datetime import timezone
 
 from huggingface_hub import scan_cache_dir
 
@@ -20,9 +21,9 @@ def find_old_revisions(scan_results, max_age_days=30):
     is above the passed `max_age_days` parameter. Returns an empty list if no objects are found.
     Time measurement is based of the current time and the recorded last access tiem in the cache.
     """
-    now = dt.now()
+    now = dt.now(timezone.utc)
     revisions = [(i.revisions, i.last_accessed) for i in scan_results.repos]
-    revisions_ages = [(rev, (now - dt.fromtimestamp(ts_access)).days) for rev, ts_access in revisions]
+    revisions_ages = [(rev, (now - dt.fromtimestamp(ts_access, timezone.utc)).days) for rev, ts_access in revisions]
     delete_candidates = [rev for rev, age in revisions_ages if age > max_age_days]
     hashes = [n.commit_hash for rev in delete_candidates for n in rev]
 

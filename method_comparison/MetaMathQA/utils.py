@@ -45,7 +45,7 @@ from transformers import (
 
 import peft
 from peft import PeftConfig, get_peft_model
-from peft.optimizers import create_lorafa_optimizer, create_loraplus_optimizer
+from peft.optimizers import create_lorafa_optimizer, create_loraplus_optimizer, create_riemannian_optimizer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 
 
@@ -116,7 +116,7 @@ class TrainConfig:
 
     def __post_init__(self) -> None:
         if not isinstance(self.model_id, str):
-            raise ValueError(f"Invalid model_id: {self.model_id}")
+            raise TypeError(f"Invalid model_id: {self.model_id}")
         if self.dtype not in ["float32", "float16", "bfloat16", "int8", "int4"]:
             raise ValueError(f"Invalid dtype: {self.dtype}")
         if self.max_seq_length < 0:
@@ -133,7 +133,9 @@ class TrainConfig:
             raise ValueError(f"Invalid eval_steps: {self.eval_steps} > max_steps: {self.max_steps}")
         if self.grad_norm_clip < 0:
             raise ValueError(f"Invalid grad_norm_clip: {self.grad_norm_clip}")
-        if self.optimizer_type not in ["lora+", "lora-fa"] and not hasattr(torch.optim, self.optimizer_type):
+        if self.optimizer_type not in ["lora+", "lora-fa", "riemannian"] and not hasattr(
+            torch.optim, self.optimizer_type
+        ):
             raise ValueError(f"Invalid optimizer_type: {self.optimizer_type}")
         if self.lr_scheduler not in [None, "cosine"]:
             raise ValueError(f"Invalid lr_scheduler: {self.lr_scheduler}, must be None or 'cosine'")
@@ -202,8 +204,14 @@ def init_accelerator() -> int:
 def get_tokenizer(*, model_id: str, max_seq_length: int):
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.model_max_length = max_seq_length
-    if not tokenizer.pad_token:
-        tokenizer.pad_token = tokenizer.eos_token
+
+    # Override tokenizer settings to match our code.
+    # We assume that inputs are padded on the right side and we also assume
+    # the padding token to be the EOS token. We'll use this in the label
+    # creation so that we always have an EOS token at the end. See train().
+    tokenizer.padding_side = "right"
+    tokenizer.pad_token = tokenizer.eos_token
+
     return tokenizer
 
 
@@ -281,6 +289,8 @@ def get_optimizer_and_scheduler(
         optimizer = create_loraplus_optimizer(model, optimizer_cls=torch.optim.AdamW, **optimizer_kwargs)
     elif optimizer_type == "lora-fa":
         optimizer = create_lorafa_optimizer(model, **optimizer_kwargs)
+    elif optimizer_type == "riemannian":
+        optimizer = create_riemannian_optimizer(model, optimizer_cls=torch.optim.AdamW, **optimizer_kwargs)
     else:
         cls = getattr(torch.optim, optimizer_type)
         optimizer = cls(model.parameters(), **optimizer_kwargs)
@@ -519,10 +529,12 @@ def get_dataset_info(dataset_id: str) -> Optional[huggingface_hub.DatasetInfo]:
 
 
 def get_git_hash(module) -> Optional[str]:
-    if "site-packages" in module.__path__[0]:
+    module_path = module.__path__[0]
+    if "site-packages" in module_path or "dist-packages" in module_path:
+        # dist-packages is required for Kaggle installs.
         return None
 
-    return subprocess.check_output("git rev-parse HEAD".split(), cwd=os.path.dirname(module.__file__)).decode().strip()
+    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=os.path.dirname(module.__file__)).decode().strip()
 
 
 def get_package_info() -> dict[str, Optional[str]]:
@@ -574,10 +586,19 @@ def get_meta_info() -> MetaInfo:
 
 def get_peft_branch() -> str:
     return (
-        subprocess.check_output("git rev-parse --abbrev-ref HEAD".split(), cwd=os.path.dirname(peft.__file__))
+        subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=os.path.dirname(peft.__file__))
         .decode()
         .strip()
     )
+
+
+def get_peft_worktree_is_dirty() -> bool:
+    """Check if the PEFT git worktree has uncommitted changes."""
+    peft_dir = os.path.dirname(peft.__file__)
+    # Exit code 0 means clean, non-zero means dirty (or error, which we treat as dirty)
+    result = subprocess.run(["git", "diff", "--quiet"], cwd=peft_dir)
+    result_cached = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=peft_dir)
+    return result.returncode != 0 or result_cached.returncode != 0
 
 
 class TrainStatus(enum.Enum):
@@ -699,6 +720,7 @@ def log_results(
             "total_time": time_total,
             "experiment_name": experiment_name,
             "peft_branch": peft_branch,
+            "peft_worktree_is_dirty": get_peft_worktree_is_dirty(),
             "train_config": asdict(train_config),
             "peft_config": peft_config_dict,
             "error_msg": train_result.error_msg,

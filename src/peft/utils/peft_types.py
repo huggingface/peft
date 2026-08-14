@@ -30,6 +30,7 @@ class PeftType(str, enum.Enum):
     - BOFT
     - ADAPTION_PROMPT
     - IA3
+    - BEFT
     - LOHA
     - LOKR
     - OFT
@@ -37,6 +38,7 @@ class PeftType(str, enum.Enum):
     - POLY
     - LN_TUNING
     - VERA
+    - FROD
     - FOURIERFT
     - HRA
     - BONE
@@ -50,6 +52,7 @@ class PeftType(str, enum.Enum):
     - DELORA
     - GRALORA
     - ADAMSS
+    - DEFT
     """
 
     PROMPT_TUNING = "PROMPT_TUNING"
@@ -62,6 +65,7 @@ class PeftType(str, enum.Enum):
     BOFT = "BOFT"
     ADAPTION_PROMPT = "ADAPTION_PROMPT"
     IA3 = "IA3"
+    BEFT = "BEFT"
     LILY = "LILY"
     LOHA = "LOHA"
     LOKR = "LOKR"
@@ -69,16 +73,20 @@ class PeftType(str, enum.Enum):
     POLY = "POLY"
     LN_TUNING = "LN_TUNING"
     VERA = "VERA"
+    FROD = "FROD"
     PVERA = "PVERA"
     FOURIERFT = "FOURIERFT"
+    GLORA = "GLORA"
     XLORA = "XLORA"
     HRA = "HRA"
     VBLORA = "VBLORA"
+    UNILORA = "UNILORA"
     CPT = "CPT"
     MISS = "MISS"
     RANDLORA = "RANDLORA"
     ROAD = "ROAD"
     TRAINABLE_TOKENS = "TRAINABLE_TOKENS"
+    HIRA = "HIRA"
     SHIRA = "SHIRA"
     C3A = "C3A"
     WAVEFT = "WAVEFT"
@@ -89,6 +97,7 @@ class PeftType(str, enum.Enum):
     TINYLORA = "TINYLORA"
     PSOFT = "PSOFT"
     PEANUT = "PEANUT"
+    DEFT = "DEFT"
 
 
 class TaskType(str, enum.Enum):

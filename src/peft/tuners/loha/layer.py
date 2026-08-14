@@ -16,8 +16,8 @@ import math
 from typing import Any
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from peft.tuners.lycoris_utils import LycorisLayer
 
@@ -142,12 +142,13 @@ class LoHaLayer(nn.Module, LycorisLayer):
             # similar to how Linear layers work. This optimization reduces computational cost
             # without affecting the mathematical equivalence of the operation.
             use_effective_conv2d = use_effective_conv2d and base_layer.kernel_size != (1, 1)
+            in_channels = base_layer.in_channels // base_layer.groups
             if use_effective_conv2d:
-                shape = (base_layer.out_channels, base_layer.in_channels, *base_layer.kernel_size)
+                shape = (base_layer.out_channels, in_channels, *base_layer.kernel_size)
             else:
                 shape = (
                     base_layer.out_channels,
-                    base_layer.in_channels * base_layer.kernel_size[0] * base_layer.kernel_size[1],
+                    in_channels * base_layer.kernel_size[0] * base_layer.kernel_size[1],
                 )
         elif isinstance(base_layer, nn.Conv1d):
             # For Conv1d with kernel_size=1, disable effective_conv2d for the same optimization reasons
@@ -155,12 +156,13 @@ class LoHaLayer(nn.Module, LycorisLayer):
             # to a Linear layer applied across the channel dimension. Using flattened representation
             # avoids unnecessary reshaping and improves computational efficiency.
             use_effective_conv2d = use_effective_conv2d and base_layer.kernel_size[0] != 1
+            in_channels = base_layer.in_channels // base_layer.groups
             if use_effective_conv2d:
-                shape = (base_layer.out_channels, base_layer.in_channels, base_layer.kernel_size[0])
+                shape = (base_layer.out_channels, in_channels, base_layer.kernel_size[0])
             else:
                 shape = (
                     base_layer.out_channels,
-                    base_layer.in_channels * base_layer.kernel_size[0],
+                    in_channels * base_layer.kernel_size[0],
                 )
         else:
             raise TypeError(f"LoHa is not implemented for base layers of type {type(base_layer).__name__}")
@@ -361,7 +363,7 @@ class Conv1d(LoHaLayer):
 
 class HadaWeight(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, w1a, w1b, w2a, w2b, scale=torch.tensor(1)):
+    def forward(ctx, w1a, w1b, w2a, w2b, scale=torch.tensor(1)):  # noqa: B008
         ctx.save_for_backward(w1a, w1b, w2a, w2b, scale)
         diff_weight = ((w1a @ w1b) * (w2a @ w2b)) * scale
         return diff_weight
@@ -384,7 +386,7 @@ class HadaWeight(torch.autograd.Function):
 
 class HadaWeightCP(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, t1, w1a, w1b, t2, w2a, w2b, scale=torch.tensor(1)):
+    def forward(ctx, t1, w1a, w1b, t2, w2a, w2b, scale=torch.tensor(1)):  # noqa: B008
         ctx.save_for_backward(t1, w1a, w1b, t2, w2a, w2b, scale)
 
         rebuild1 = torch.einsum("i j k l, j r, i p -> p r k l", t1, w1b, w1a)

@@ -1,0 +1,31 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "bias": "none",
+  "exclude_modules": null,
+  "inference_mode": false,
+  "init_weights": true,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "mini_r": 1,
+  "miss_dropout": 0.0,
+  "modules_to_save": null,
+  "peft_type": "MISS",
+  "peft_version": "0.18.2.dev0@UNKNOWN",
+  "r": 32,
+  "revision": null,
+  "target_modules": [
+    "to_q",
+    "add_q_proj",
+    "add_k_proj",
+    "add_v_proj",
+    "to_k",
+    "to_v",
+    "to_add_out",
+    "linear_in",
+    "linear_out",
+    "to_qkv_mlp_proj",
+    "to_out.0"
+  ],
+  "task_type": null
+}

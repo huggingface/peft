@@ -16,14 +16,40 @@ rendered properly in your Markdown viewer.
 
 # Prefix tuning
 
+<div class="flex justify-center">
+    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/prefix-tuning.png"/>
+</div>
+<small>Optimize the prefix parameters for each task <a href="https://hf.co/papers/2101.00190">(image source)</a>.</small>
+
 [Prefix tuning](https://hf.co/papers/2101.00190) prefixes a series of task-specific vectors to the input sequence that can be learned while keeping the pretrained model frozen. The prefix parameters are inserted in all of the model layers.
+
+The abstract from the paper is:
+
+*Fine-tuning is the de facto way to leverage large pretrained language models to perform downstream tasks. However, it modifies all the language model parameters and therefore necessitates storing a full copy for each task. In this paper, we propose prefix-tuning, a lightweight alternative to fine-tuning for natural language generation tasks, which keeps language model parameters frozen, but optimizes a small continuous task-specific vector (called the prefix). Prefix-tuning draws inspiration from prompting, allowing subsequent tokens to attend to this prefix as if it were "virtual tokens". We apply prefix-tuning to GPT-2 for table-to-text generation and to BART for summarization. We find that by learning only 0.1\% of the parameters, prefix-tuning obtains comparable performance in the full data setting, outperforms fine-tuning in low-data settings, and extrapolates better to examples with topics unseen during training*.
 
 **Note** For encoder-decoder models (seq2seq), the prefix is only applied to the decoder, which does not correspond to the paper specification (see e.g. Figure 2). Prefix tuning can still be fine-tuned on these model architectures but the performance could be sub-par; consider using other PEFT methods for encoder-decoder models.
 
-## Possible Initialization
+Prefix tuning is very similar to [prompt tuning](../package_reference/prompt_tuning). The main difference is that the prefix parameters are inserted in **all** of the model layers, whereas prompt tuning only adds the prompt parameters to the model input embeddings. The prefix parameters are also optimized by a separate feed-forward network (FFN) instead of training directly on the soft prompts because it causes instability and hurts performance. The FFN is discarded after updating the soft prompts.
 
-By default, prefix tuning is randomly initialized. There's also the option to initialize the embeddings (or the
-projection thereof) to be close to a no-op (initialized to zero, it will still shift the probability mass a bit).
+As a result, the authors found that prefix tuning demonstrates comparable performance to fully finetuning a model, despite having 1000x fewer parameters, and it performs even better in low-data settings.
+
+## Basic Usage
+
+Create a [`PrefixTuningConfig`] with the task type and number of virtual tokens to add and learn.
+
+```py
+from peft import PrefixTuningConfig, get_peft_model
+
+peft_config = PrefixTuningConfig(task_type="CAUSAL_LM", num_virtual_tokens=20)
+model = get_peft_model(model, peft_config)
+model.print_trainable_parameters()
+"trainable params: 983,040 || all params: 560,197,632 || trainable%: 0.1754809274167014"
+```
+
+## Possible Initializations
+
+By default, prefix tuning uses randomly initialized virtual tokens. There's also the option to initialize the vectors
+to be close to a no-op (initialized to zero, it will still shift the probability mass a bit).
 This means that the KV-cache injected prefixes have less impact from the beginning and reduces the variance in training
 performance.
 
@@ -47,7 +73,21 @@ initialize_kv_prefix_from_text(
     tok,
     text="...a long context with at least num_virtual_tokens tokens...",
     use_chat_template=False,
+)m peft import PrefixTuningConfig, get_peft_model, initialize_kv_prefix_from_text
+
+base = AutoModelForCausalLM.from_pretrained("gpt2")
+tok = AutoTokenizer.from_pretrained("gpt2")
+
+peft_cfg = PrefixTuningConfig(task_type="CAUSAL_LM", num_virtual_tokens=20, prefix_projection=False)
+model = get_peft_model(base, peft_cfg)
+
+initialize_kv_prefix_from_text(
+    model,
+    tok,
+    text="...a long context with at least num_virtual_tokens tokens...",
+    use_chat_template=False,
 )
+
 ```
 
 Make sure the text is long enough to produce at least `num_virtual_tokens` tokens, otherwise initialization will fail.
@@ -61,9 +101,18 @@ As a guideline:
 * if it is not possible to use an initialization text or you want to quickly check if prefix tuning is viable at all,
   use a zero init without projection
 
-The abstract from the paper is:
 
-*Fine-tuning is the de facto way to leverage large pretrained language models to perform downstream tasks. However, it modifies all the language model parameters and therefore necessitates storing a full copy for each task. In this paper, we propose prefix-tuning, a lightweight alternative to fine-tuning for natural language generation tasks, which keeps language model parameters frozen, but optimizes a small continuous task-specific vector (called the prefix). Prefix-tuning draws inspiration from prompting, allowing subsequent tokens to attend to this prefix as if it were "virtual tokens". We apply prefix-tuning to GPT-2 for table-to-text generation and to BART for summarization. We find that by learning only 0.1\% of the parameters, prefix-tuning obtains comparable performance in the full data setting, outperforms fine-tuning in low-data settings, and extrapolates better to examples with topics unseen during training*.
+## Benchmark overview
+
+<iframe
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=PREFIX_TUNING"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
+
+
+# API
 
 ## PrefixTuningConfig
 

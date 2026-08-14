@@ -51,8 +51,8 @@ class IA3Model(BaseTuner):
     Example:
 
         ```py
-        >>> from transformers import AutoModelForSeq2SeqLM, ia3Config
-        >>> from peft import IA3Model, IA3Config
+        >>> from transformers import AutoModelForSeq2SeqLM
+        >>> from peft import IA3Config, get_peft_model
 
         >>> config = IA3Config(
         ...     peft_type="IA3",
@@ -62,12 +62,12 @@ class IA3Model(BaseTuner):
         ... )
 
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> ia3_model = IA3Model(config, model)
+        >>> ia3_model = get_peft_model(model, config)
         ```
 
     **Attributes**:
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
-        - **peft_config** ([`ia3Config`]): The configuration of the (IA)^3 model.
+        - **peft_config** ([`IA3Config`]): The configuration of the (IA)^3 model.
     """
 
     prefix: str = "ia3_"

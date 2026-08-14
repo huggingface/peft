@@ -1,7 +1,7 @@
 import argparse
 import json
 import os
-from datetime import date
+from datetime import UTC, datetime
 from pathlib import Path
 
 from tabulate import tabulate
@@ -127,7 +127,7 @@ def main(slack_channel_name=None):
             "elements": [
                 {
                     "type": "plain_text",
-                    "text": f"Nightly {os.environ.get('TEST_TYPE')} test results for {date.today()}",
+                    "text": f"Nightly {os.environ.get('TEST_TYPE')} test results for {datetime.now(UTC).date()}",
                 },
             ],
         }

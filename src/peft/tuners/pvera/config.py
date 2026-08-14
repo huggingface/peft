@@ -75,6 +75,8 @@ class PveraConfig(PeftConfig):
             default for non-specified adapters). For example
             `sample_at_inference={'encoder.layer.0.attention.attention.query': True}` will only sample at inference for
             one specific adapter.
+        generator_seed (`int`, defaults to None):
+            Random seed for the generator for sampling from the learned distribution.
     """
 
     r: int = field(
@@ -187,6 +189,9 @@ class PveraConfig(PeftConfig):
             ),
         },
     )
+    generator_seed: int = field(
+        default=None, metadata={"help": "Random seed for the generator for sampling from the learned distribution."}
+    )
 
     def __post_init__(self):
         super().__post_init__()
@@ -195,7 +200,7 @@ class PveraConfig(PeftConfig):
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
         # check for layers_to_transform and layers_pattern
-        if self.layers_pattern and not self.layers_to_transform:
+        if self.layers_pattern and self.layers_to_transform is None:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
         if not self.save_projection:
             warnings.warn(

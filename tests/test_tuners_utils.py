@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,6 +15,8 @@ import dataclasses
 import re
 from copy import deepcopy
 
+import diffusers
+import packaging.version
 import pytest
 import torch
 from diffusers import StableDiffusionPipeline
@@ -48,6 +47,8 @@ from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
+    _filter_state_dict_by_key_prefixes,
+    _get_tuner_state_dict_key_prefixes,
     _maybe_include_all_linear_layers,
     check_target_module_exists,
     inspect_matched_modules,
@@ -57,9 +58,13 @@ from peft.tuners.tuners_utils import (
 )
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, ModulesToSaveWrapper, infer_device
 from peft.utils.constants import DUMMY_MODEL_CONFIG, MIN_TARGET_MODULES_FOR_OPTIMIZATION
+from peft.utils.quantization_utils import Bnb8bitBackend
 
 from .testing_utils import hub_online_once, require_bitsandbytes, require_non_cpu
 
+
+# TODO: remove once Diffusers 0.40 is released
+is_diffusers_ge_v040 = packaging.version.parse(diffusers.__version__) >= packaging.version.parse("0.40.0.dev0")
 
 # Implements tests for regex matching logic common for all BaseTuner subclasses, and
 # tests for correct behaviour with different config kwargs for BaseTuners (Ex: feedforward for IA3, etc) and
@@ -342,6 +347,10 @@ class TestPeftCustomKwargs:
             assert new_config.target_modules == expected_target_modules
 
     def test_maybe_include_all_linear_layers_diffusion(self):
+        # TODO: remove once Diffusers 0.40 is released
+        if not is_diffusers_ge_v040:
+            pytest.skip("This test fails with Diffusers < 0.40 due to a change in huggingface_hub")
+
         model_id = "hf-internal-testing/tiny-sd-pipe"
         with hub_online_once(model_id):
             model = StableDiffusionPipeline.from_pretrained(model_id)
@@ -424,7 +433,7 @@ class TestPeftCustomKwargs:
                 layer.mlp.down_proj,
             )
             for proj in projs:
-                # the targted layer itself, which in the base model was the nn.Linear layer, is now a LoraLayer
+                # the targeted layer itself, which in the base model was the nn.Linear layer, is now a LoraLayer
                 assert isinstance(proj, LoraLayer)
                 # all children of that layer are still normal nn.Linear layers
                 assert isinstance(proj.base_layer, nn.Linear)
@@ -490,6 +499,48 @@ class TestTargetedModuleNames:
             f"transformer.h.{i}.self_attention.query_key_value" for i in range(len(model.base_model.transformer.h))
         ]
         assert model.targeted_module_names == expected
+
+    @pytest.mark.parametrize("layers_pattern", [None, "layers", ["h", "layers"]])
+    def test_layers_to_transform_filters_by_layer_not_expert_index(self, layers_pattern):
+        # Test fix to issue #3016
+        # The layer-index regex used a greedy ".*" prefix, so for MoE paths like
+        # "model.layers.1.mlp.experts.0.up_proj" it captured the expert index instead of the layer
+        # index, making layers_to_transform target the wrong modules.
+        class ToyMoEBlock(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.self_attn = nn.Module()
+                self.self_attn.q_proj = nn.Linear(4, 4, bias=False)
+
+                self.mlp = nn.Module()
+                self.mlp.experts = nn.ModuleList([nn.Module() for _ in range(2)])
+                for e in range(2):
+                    self.mlp.experts[e].up_proj = nn.Linear(4, 4, bias=False)
+
+        class ToyMoEModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.model = nn.Module()
+                self.model.layers = nn.ModuleList([ToyMoEBlock() for _ in range(4)])
+
+        config = LoraConfig(
+            target_modules=["q_proj", "up_proj"],
+            layers_pattern=layers_pattern,
+            layers_to_transform=[1],
+            r=2,
+            lora_alpha=4,
+        )
+        model = get_peft_model(ToyMoEModel(), config)
+
+        # only layer 1's modules should be targeted, both experts included.
+        # Under the bug, layers.1.experts.0 was misread as layer 0 and dropped, and a
+        # layers.2.experts.1 module could be misread as layer 1 and wrongly included.
+        expected = {
+            "model.layers.1.self_attn.q_proj",
+            "model.layers.1.mlp.experts.0.up_proj",
+            "model.layers.1.mlp.experts.1.up_proj",
+        }
+        assert set(model.targeted_module_names) == expected
 
 
 class TestTargetedParameterNames:
@@ -907,6 +958,49 @@ class TestModelAndLayerStatus:
         layer_status = large_model.get_layer_status()
         assert [status.name for status in layer_status] == ["model.lin0", "model.lin1"]
         assert [status.module_type for status in layer_status] == ["lora.ParamWrapper", "lora.Linear"]
+
+    def test_quantization_backend_small(self, small_model):
+        # non-quantized model should have quantization_backend=None
+        layer_status = small_model.get_layer_status()
+        assert [status.quantization_backend for status in layer_status] == [None]
+
+    def test_quantization_backend_large(self, large_model):
+        layer_status = large_model.get_layer_status()
+        result = [status.quantization_backend for status in layer_status]
+        expected = [None, None, None, None]
+        assert result == expected
+
+    def test_quantization_backend_bnb(self, small_base_model_cls):
+        # Manually inject an inconsistent quantization_backend instead of loading a model with bnb so that the test can run
+        # without bnb
+        model = small_base_model_cls()
+        config = LoraConfig(target_modules=["lin0", "lin1"])
+        model = get_peft_model(model, config)
+
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayer):
+                module.quantization_backend = Bnb8bitBackend()
+
+        layer_status = model.get_layer_status()
+        result = [status.quantization_backend for status in layer_status]
+        assert result == ["bnb 8bit", "bnb 8bit"]
+
+    def test_quantization_backend_irregular(self, small_base_model_cls):
+        # Manually inject an inconsistent quantization_backend to simulate irregular state. This is an invalid state, but we
+        # should still test it.
+        model = small_base_model_cls()
+        config = LoraConfig(target_modules=["lin0", "lin1"])
+        model = get_peft_model(model, config)
+
+        # set quantization_backend on only one layer
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayer):
+                module.quantization_backend = Bnb8bitBackend()
+                break
+
+        layer_status = model.get_layer_status()
+        result = [status.quantization_backend for status in layer_status]
+        assert result == ["bnb 8bit", None]
 
     ################
     # model status #
@@ -1346,6 +1440,44 @@ class TestModelAndLayerStatus:
         assert layer_status0.requires_grad == {"default": True}
         assert layer_status0.available_adapters == ["default"]
         assert layer_status0.devices == {"default": ["cpu", self.torch_device]}
+
+    def test_model_quantization_backend_small(self, small_model):
+        model_status = small_model.get_model_status()
+        assert model_status.quantization_backend is None
+
+    def test_model_quantization_backend_large(self, large_model):
+        model_status = large_model.get_model_status()
+        assert model_status.quantization_backend is None
+
+    def test_model_quantization_backend_bnb(self, small_base_model_cls):
+        # Manually inject an inconsistent quantization_backend instead of loading a model with bnb so that the test can run
+        # without bnb
+        model = small_base_model_cls()
+        config = LoraConfig(target_modules=["lin0", "lin1"])
+        model = get_peft_model(model, config)
+
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayer):
+                module.quantization_backend = Bnb8bitBackend()
+
+        model_status = model.get_model_status()
+        assert model_status.quantization_backend == "bnb 8bit"
+
+    def test_model_quantization_backend_irregular(self, small_base_model_cls):
+        # Manually inject an inconsistent quantization_backend to simulate irregular state. This is an invalid state, but we
+        # should still test it.
+        model = small_base_model_cls()
+        config = LoraConfig(target_modules=["lin0", "lin1"])
+        model = get_peft_model(model, config)
+
+        # set quantization_backend on only one layer
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayer):
+                module.quantization_backend = Bnb8bitBackend()
+                break
+
+        model_status = model.get_model_status()
+        assert model_status.quantization_backend == "irregular"
 
     ###################
     # non-PEFT models #
@@ -2167,3 +2299,113 @@ class TestRankAndAlphaPattern:
         assert model.module.foobar.scaling["default"] == 1.0
         assert model.module.module.foo.scaling["default"] == 0.125
         assert model.module.module.barfoo.scaling["default"] == 1.0
+
+
+class TestTunerStateDictKeyPrefixes:
+    # Unit tests for the helper functions that structurally determine which state dict keys belong to the PEFT method,
+    # see BaseTuner._get_adapter_state_dict and friends for how they are used.
+
+    def test_filter_state_dict_by_key_prefixes(self):
+        state_dict = {"a": 0, "a.b": 1, "a.b.c": 2, "a.bc": 3, "ab": 4, "x.a.b": 5, "b.c": 6}
+        # matching respects "." boundaries: "a.b" matches "a.b" and "a.b.c", but not "a.bc", "ab" or "x.a.b"
+        assert _filter_state_dict_by_key_prefixes(state_dict, {"a.b"}) == {"a.b": 1, "a.b.c": 2}
+        assert _filter_state_dict_by_key_prefixes(state_dict, {"a"}) == {"a": 0, "a.b": 1, "a.b.c": 2, "a.bc": 3}
+        assert _filter_state_dict_by_key_prefixes(state_dict, {"a.b", "b.c"}) == {"a.b": 1, "a.b.c": 2, "b.c": 6}
+        assert _filter_state_dict_by_key_prefixes(state_dict, set()) == {}
+        assert _filter_state_dict_by_key_prefixes({}, {"a.b"}) == {}
+
+    def test_prefixes_lora(self):
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0"]))
+        prefixes = _get_tuner_state_dict_key_prefixes(model)
+        assert "base_model.model.lin0.lora_A" in prefixes
+        assert "base_model.model.lin0.lora_B" in prefixes
+        # the wrapped base layer and modules that are not targeted don't belong to the PEFT method
+        assert not any("base_layer" in prefix for prefix in prefixes)
+        assert not any(prefix.startswith("base_model.model.lin1") for prefix in prefixes)
+
+    def test_prefixes_select_correct_state_dict_keys(self):
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0"]))
+        prefixes = _get_tuner_state_dict_key_prefixes(model)
+        state_dict = _filter_state_dict_by_key_prefixes(model.state_dict(), prefixes)
+        expected = ["base_model.model.lin0.lora_A.default.weight", "base_model.model.lin0.lora_B.default.weight"]
+        assert sorted(state_dict) == expected
+
+    def test_prefixes_model_with_injected_layers_only(self):
+        # the helper also works when the passed model is not a PeftModel but only has the PEFT layers injected
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0"]))
+        prefixes = _get_tuner_state_dict_key_prefixes(model.base_model.model)
+        assert "lin0.lora_A" in prefixes
+        assert not any(prefix.startswith("base_model") for prefix in prefixes)
+
+    def test_prefixes_module_named_like_peft_prefix_not_included(self):
+        # a base model module whose name contains the PEFT prefix does not belong to the PEFT method
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 10)
+                self.lora_foobar = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.lora_foobar(self.lin0(x))
+
+        model = get_peft_model(MyModel(), LoraConfig(target_modules=["lin0"]))
+        prefixes = _get_tuner_state_dict_key_prefixes(model)
+        assert len(prefixes) > 0  # sanity check
+        assert not any("lora_foobar" in prefix for prefix in prefixes)
+
+    def test_prefixes_multiple_adapters_and_adapter_name_narrowing(self):
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0"]))
+        model.add_adapter("other", LoraConfig(target_modules=["lin0", "lin1"]))
+
+        # without adapter_name, the adapter containers are included as a whole, i.e. covering all adapters
+        prefixes = _get_tuner_state_dict_key_prefixes(model)
+        assert "base_model.model.lin0.lora_A" in prefixes
+        assert "base_model.model.lin1.lora_A" in prefixes
+
+        # with adapter_name, the containers are narrowed down to the entries of the given adapter
+        prefixes = _get_tuner_state_dict_key_prefixes(model, adapter_name="other")
+        assert "base_model.model.lin0.lora_A.other" in prefixes
+        assert "base_model.model.lin1.lora_A.other" in prefixes
+        assert not any(prefix.endswith(".default") for prefix in prefixes)
+
+        # lin1 is only targeted by the "other" adapter
+        prefixes = _get_tuner_state_dict_key_prefixes(model, adapter_name="default")
+        assert "base_model.model.lin0.lora_A.default" in prefixes
+        assert not any(prefix.startswith("base_model.model.lin1") for prefix in prefixes)
+
+    def test_prefixes_model_level_containers_vera(self):
+        # VeRA stores the shared projections on the BaseTuner instance itself, which is covered as well
+        model = get_peft_model(MLP(), VeraConfig(target_modules=["lin0"], r=2))
+        prefixes = _get_tuner_state_dict_key_prefixes(model)
+        assert "base_model.vera_A" in prefixes
+        assert "base_model.vera_B" in prefixes
+        prefixes = _get_tuner_state_dict_key_prefixes(model, adapter_name="default")
+        assert "base_model.vera_A.default" in prefixes
+
+    def test_prefixes_auxiliary_modules_not_included(self):
+        # auxiliary modules like ModulesToSaveWrapper are handled separately and thus not included
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"]))
+        assert isinstance(model.base_model.model.lin1, ModulesToSaveWrapper)  # sanity check
+        prefixes = _get_tuner_state_dict_key_prefixes(model)
+        assert len(prefixes) > 0  # sanity check
+        assert not any(prefix.startswith("base_model.model.lin1") for prefix in prefixes)
+
+    def test_prefixes_tuner_layer_inside_auxiliary_module_not_included(self):
+        # tuner layers nested inside an auxiliary module (here: the token_adapter of the TrainableTokensWrapper) are
+        # handled by the auxiliary module and thus not included
+        class ModelWithEmbedding(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = nn.Embedding(10, 10)
+                self.lin0 = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.lin0(self.emb(x))
+
+        config = LoraConfig(target_modules=["lin0"], trainable_token_indices={"emb": [0, 1]})
+        model = get_peft_model(ModelWithEmbedding(), config)
+        # sanity check: the wrapped embedding contains a nested tuner layer
+        assert any(isinstance(module, BaseTunerLayer) for module in model.base_model.model.emb.modules())
+        prefixes = _get_tuner_state_dict_key_prefixes(model)
+        assert len(prefixes) > 0  # sanity check
+        assert not any(prefix.startswith("base_model.model.emb") for prefix in prefixes)

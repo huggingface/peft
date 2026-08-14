@@ -33,7 +33,6 @@ import sys
 import time
 
 import torch
-from data import prepare_benchmark_prompts
 from run import measure_inference_time
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
 from utils import (
@@ -41,6 +40,8 @@ from utils import (
     get_memory_usage,
     init_accelerator,
 )
+
+from data import prepare_benchmark_prompts
 
 
 def run_base_model_benchmark(benchmark_config: BenchmarkConfig, print_fn=print) -> dict:

@@ -25,6 +25,14 @@ from .config import LoraConfig
 if is_eetq_available():
     from eetq import EetqLinear
 
+    try:
+        from transformers.integrations.eetq import EetqLinear as TransformersEetqLinear
+
+        # in newer transformers versions, EETQ quantization uses a transformers-specific class
+        eetq_classes = (EetqLinear, TransformersEetqLinear)
+    except ImportError:
+        eetq_classes = (EetqLinear,)
+
     class EetqLoraLinear(torch.nn.Module, LoraLayer):
         def __init__(
             self,
@@ -37,6 +45,8 @@ if is_eetq_available():
         ):
             if config.use_dora:
                 raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
+            if config.velora_config is not None:
+                raise ValueError(f"{self.__class__.__name__} does not support VeLoRA yet, please set it to False")
 
             super().__init__()
             LoraLayer.__init__(self, base_layer)
@@ -103,7 +113,7 @@ def dispatch_eetq(
     else:
         target_base_layer = target
 
-    if is_eetq_available() and isinstance(target_base_layer, EetqLinear):
+    if is_eetq_available() and isinstance(target_base_layer, eetq_classes):
         new_module = EetqLoraLinear(target, adapter_name, config=config, **kwargs)
         target.weight = target_base_layer.weight
 

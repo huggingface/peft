@@ -18,7 +18,7 @@ rendered properly in your Markdown viewer.
 
 Some fine-tuning techniques, such as prompt tuning, are specific to language models. That means in 🤗 PEFT, it is
 assumed a 🤗 Transformers model is being used. However, other fine-tuning techniques - like
-[LoRA](../conceptual_guides/lora) - are not restricted to specific model types.
+[LoRA](../package_reference/lora) - are not restricted to specific model types.
 
 In this guide, we will see how LoRA can be applied to a multilayer perceptron, a computer vision model from the [timm](https://huggingface.co/docs/timm/index) library, or a new 🤗 Transformers architecture.
 

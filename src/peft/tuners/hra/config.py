@@ -53,6 +53,8 @@ class HRAConfig(PeftConfig):
         layers_pattern (`Optional[Union[List[str], str]]`):
             The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
             `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
+        bias (`str`):
+            Bias type for HRA. Can be `'none'`, `'all'` or `'hra_only'`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
     """
@@ -129,5 +131,5 @@ class HRAConfig(PeftConfig):
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
 
         # check for layers_to_transform and layers_pattern
-        if self.layers_pattern and not self.layers_to_transform:
+        if self.layers_pattern and self.layers_to_transform is None:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")

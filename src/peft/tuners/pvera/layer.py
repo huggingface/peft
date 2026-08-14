@@ -16,8 +16,8 @@ import warnings
 from typing import Optional
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
@@ -30,7 +30,7 @@ from .config import PveraConfig
 class PveraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
     adapter_layer_names = ("pvera_lambda_b", "pvera_lambda_d")
-    other_param_names = ("pvera_A", "pvera_B")
+    other_param_names = ("pvera_A", "pvera_B", "pvera_dropout", "r")
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer
@@ -89,6 +89,12 @@ class PveraLayer(BaseTunerLayer):
         else:
             pvera_dropout_layer = nn.Identity()
 
+        if config.generator_seed is not None:
+            self.generator = torch.Generator()
+            self.generator.manual_seed(config.generator_seed)
+        else:
+            self.generator = None
+
         self.pvera_dropout.update(nn.ModuleDict({adapter_name: pvera_dropout_layer}))
         # Actual trainable parameters
         self.pvera_lambda_b[adapter_name] = nn.Parameter(torch.ones(self.out_features), requires_grad=True)
@@ -104,8 +110,8 @@ class PveraLayer(BaseTunerLayer):
                     "The `pvera_A` and `pvera_B` buffers are empty. This should not happen. Please report this issue."
                 )
             # we can take any of the existing adapter's parameters, as they should all be identical
-            pvera_A_param = list(self.pvera_A.values())[0]
-            pvera_B_param = list(self.pvera_B.values())[0]
+            pvera_A_param = next(iter(self.pvera_A.values()))
+            pvera_B_param = next(iter(self.pvera_B.values()))
 
             error_tmpl = (
                 "{} has a size of {} but {} or greater is required; this probably happened because an additional PVeRA "
@@ -142,6 +148,15 @@ class PveraLayer(BaseTunerLayer):
             with torch.no_grad():
                 nn.init.zeros_(self.pvera_lambda_d[adapter_name]).fill_(d_initial)
                 nn.init.zeros_(self.pvera_lambda_b[adapter_name])
+
+    def _reparametrize(self, mu, logvar, sample_at_inference):
+        if self.training or (not self.training and sample_at_inference):
+            std = torch.exp(0.5 * logvar)
+            eps = torch.randn_like(std, generator=self.generator)
+            z = mu + eps * std
+        else:
+            z = mu
+        return z
 
 
 class Linear(nn.Linear, PveraLayer):
@@ -258,15 +273,6 @@ class Linear(nn.Linear, PveraLayer):
             output_tensor = output_tensor.to(dtype=dtype)
 
         return output_tensor
-
-    def _reparametrize(self, mu, logvar, sample_at_inference):
-        if self.training or (not self.training and sample_at_inference):
-            std = torch.exp(0.5 * logvar)
-            eps = torch.randn_like(std)
-            z = mu + eps * std
-        else:
-            z = mu
-        return z
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype

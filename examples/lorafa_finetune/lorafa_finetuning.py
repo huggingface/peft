@@ -135,8 +135,8 @@ def train_model(
         save_steps=save_step,
         save_total_limit=2,
         gradient_accumulation_steps=1,
-        bf16=True if compute_dtype == torch.bfloat16 else False,
-        fp16=True if compute_dtype == torch.float16 else False,
+        bf16=compute_dtype == torch.bfloat16,
+        fp16=compute_dtype == torch.float16,
         learning_rate=lr,
     )
 

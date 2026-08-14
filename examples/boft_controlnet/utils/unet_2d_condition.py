@@ -38,7 +38,7 @@ class UNet2DConditionNewModel(UNet2DConditionModel):
     def forward(
         self,
         sample: torch.FloatTensor,
-        timestep: Union[torch.Tensor, float, int],
+        timestep: Union[torch.Tensor, float],
         encoder_hidden_states: torch.Tensor,
         guided_hint: Optional[torch.Tensor] = None,
         class_labels: Optional[torch.Tensor] = None,

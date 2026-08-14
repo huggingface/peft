@@ -17,7 +17,7 @@ from __future__ import annotations
 import warnings
 
 import torch
-import torch.nn as nn
+from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
@@ -68,6 +68,11 @@ class TinyLoraModel(BaseTuner):
     target_module_mapping = TRANSFORMERS_MODELS_TO_TINYLORA_TARGET_MODULES_MAPPING
 
     def __init__(self, model, config, adapter_name, low_cpu_mem_usage=False, **kwargs):
+        # Model-level cache from adapter name to a mapping of target-module key -> deterministic layer index (see
+        # `_build_target_key_mapping`), used to derive `weight_tying` groups. Must be assigned before calling
+        # `super().__init__`, since that call triggers the first injection cycle (`_create_and_replace`), which
+        # reads this attribute.
+        self._target_key_to_idx: dict[str, dict[str, int]] = {}
         super().__init__(model, config, adapter_name, low_cpu_mem_usage, **kwargs)
 
     def _init_tinylora_v(self, config: TinyLoraConfig, adapter_name: str) -> None:
@@ -112,7 +117,7 @@ class TinyLoraModel(BaseTuner):
 
         save_projection_unique_values = sorted({c.save_projection for c in self.peft_config.values()})
         if len(save_projection_unique_values) > 1:
-            raise ValueError(
+            raise TypeError(
                 "TinyLoRA projection tensors must be saved for all adapters or none, but got multiple different values: "
                 f"{save_projection_unique_values}"
             )
@@ -130,14 +135,17 @@ class TinyLoraModel(BaseTuner):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
-        # Build the target key mapping lazily on first call per injection cycle.
-        # This is needed because add_adapter calls inject_adapter directly without _pre_injection_hook.
-        if not hasattr(self, "_target_key_to_idx") or current_key not in self._target_key_to_idx:
-            self._target_key_to_idx = self._build_target_key_mapping(tinylora_config)
+        # Build the target key mapping lazily on first call per adapter's injection cycle. This is needed because
+        # add_adapter calls inject_adapter directly without _pre_injection_hook. The mapping must not be shared
+        # across adapters: each adapter can target a different (and possibly overlapping) subset of modules, so
+        # reusing a mapping built for a different adapter would silently corrupt the layer index and group count
+        # used for `weight_tying` whenever `current_key` happens to also appear in that stale mapping.
+        if adapter_name not in self._target_key_to_idx or current_key not in self._target_key_to_idx[adapter_name]:
+            self._target_key_to_idx[adapter_name] = self._build_target_key_mapping(tinylora_config)
 
         # Look up the deterministic index for this module
-        layer_idx = self._target_key_to_idx[current_key]
-        num_target_layers = len(self._target_key_to_idx)
+        layer_idx = self._target_key_to_idx[adapter_name][current_key]
+        num_target_layers = len(self._target_key_to_idx[adapter_name])
 
         # Determine the group for this layer based on weight_tying
         # weight_tying=0.0 → num_groups = num_target_layers (no sharing)
@@ -247,7 +255,7 @@ class TinyLoraModel(BaseTuner):
                 **kwargs,
             )
         else:
-            raise ValueError(
+            raise TypeError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`, `torch.nn.Embedding`, `transformers.pytorch_utils.Conv1D`."
             )
@@ -281,6 +289,12 @@ class TinyLoraModel(BaseTuner):
         if adapter_name in self.tinylora_v:
             del self.tinylora_v[adapter_name]
 
+        # Remove the adapter's cached target-key mapping so that re-adding an adapter with the same name (but
+        # potentially different target_modules) rebuilds the mapping instead of reusing a stale one.
+        # `_target_key_to_idx` is always assigned in `__init__` before injection, so no `hasattr` guard is needed.
+        if adapter_name in self._target_key_to_idx:
+            del self._target_key_to_idx[adapter_name]
+
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         """
         Mark only the adapter layers as trainable.
@@ -304,3 +318,67 @@ class TinyLoraModel(BaseTuner):
             if active_adapter in self.tinylora_v:
                 for param in self.tinylora_v[active_adapter].values():
                     param.requires_grad = True
+
+    @classmethod
+    def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
+        # Collect tinylora keys (A, B buffers) excluding:
+        # - tinylora_v: shared model-level params (handled separately below)
+        # - tinylora_P: projection buffers (conditionally saved based on save_projection)
+        to_return = {
+            k: state_dict[k]
+            for k in state_dict
+            if cls.prefix in k and ".tinylora_v." not in k and ".tinylora_P." not in k
+        }
+        # Handle model-level shared v vectors
+        # The keys have format "base_model.tinylora_v.{adapter_name}.{idx}"
+        # We strip the adapter name for saving: "base_model.tinylora_v.{idx}"
+        adapter_v_prefix = f"base_model.tinylora_v.{adapter_name}."
+        for k in state_dict:
+            if k.startswith(adapter_v_prefix):
+                new_key = k.replace(adapter_v_prefix, "base_model.tinylora_v.")
+                to_return[new_key] = state_dict[k]
+        # Save projection tensors P if save_projection is True; otherwise they'll be
+        # regenerated from projection_seed when loading
+        if config.save_projection:
+            for k in state_dict:
+                if ".tinylora_P." in k and adapter_name in k:
+                    to_return[k] = state_dict[k]
+
+        to_return.update(cls._get_learnable_bias_state_dict(model, state_dict, config))
+        return to_return
+
+    @classmethod
+    def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
+        # Handle tinylora_v keys separately since they use a nested structure that doesn't follow the standard
+        # "{prefix}.{adapter_name}" pattern: the saved keys are like "base_model.tinylora_v.{idx}" and we need to
+        # transform them to "base_model.tinylora_v.{adapter_name}.{idx}", so extract them before the adapter name is
+        # inserted into the remaining keys.
+        tinylora_v_state_dict = {}
+        tinylora_v_keys = [k for k in state_dict if ".tinylora_v." in k]
+        for k in tinylora_v_keys:
+            new_key = k.replace(".tinylora_v.", f".tinylora_v.{adapter_name}.")
+            tinylora_v_state_dict[new_key] = state_dict.pop(k)
+
+        peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
+        # Add back the tinylora_v keys (now in the correct format)
+        peft_model_state_dict.update(tinylora_v_state_dict)
+
+        has_projection = any(".tinylora_P." in k for k in peft_model_state_dict)
+        if config.save_projection and not has_projection:
+            warnings.warn(
+                "Specified to load tinylora_P from state dictionary however it was not present! "
+                "Projection tensors will be regenerated from the projection_seed."
+            )
+        elif not config.save_projection and has_projection:
+            warnings.warn(
+                "Specified to not load tinylora_P from state dictionary however they are present in state"
+                " dictionary! Consider using them to ensure checkpoint loading is correct on all platforms using"
+                " `peft_config.save_projection = True`"
+            )
+        elif not config.save_projection:  # and no tinylora_P in state dictionary
+            warnings.warn(
+                "Specified to not load tinylora_P from state dictionary. This means we will be relying on"
+                " PRNG initialisation to restore these projections using `config.projection_seed`, which may"
+                " not be accurate on all system configurations."
+            )
+        return peft_model_state_dict

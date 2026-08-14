@@ -19,21 +19,23 @@ from ..import_utils import is_transformers_le_4_53
 
 
 # needed for prefix-tuning of bloom model
-def bloom_model_postprocess_past_key_value(past_key_values):
-    past_key_values = torch.cat(past_key_values)
-    total_layers, batch_size, num_attention_heads, num_virtual_tokens, head_dim = past_key_values.shape
-    keys = past_key_values[: total_layers // 2]
+def bloom_model_postprocess_past_key_value(
+    past_key_values: tuple[torch.Tensor, ...],
+) -> tuple[tuple[torch.Tensor, torch.Tensor], ...]:
+    concatenated_past_key_values = torch.cat(past_key_values)
+    total_layers, batch_size, num_attention_heads, num_virtual_tokens, head_dim = concatenated_past_key_values.shape
+    keys = concatenated_past_key_values[: total_layers // 2]
     keys = keys.transpose(2, 3).reshape(
         total_layers // 2, batch_size * num_attention_heads, head_dim, num_virtual_tokens
     )
-    values = past_key_values[total_layers // 2 :]
+    values = concatenated_past_key_values[total_layers // 2 :]
     values = values.reshape(total_layers // 2, batch_size * num_attention_heads, num_virtual_tokens, head_dim)
 
     return tuple(zip(keys, values))
 
 
 # needed for prefix-tuning of StarCoder models
-def starcoder_model_postprocess_past_key_value(past_key_values):
+def starcoder_model_postprocess_past_key_value(past_key_values: tuple[torch.Tensor, ...]) -> tuple[torch.Tensor, ...]:
     result = []
     for k in past_key_values:
         k = k[:, :, 0]
@@ -100,6 +102,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "gemma4": r".*language_model\..*\.(q_proj|v_proj)",
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
+    "nemotron_h": ["q_proj", "k_proj", "v_proj", "o_proj"],
     "rwkv": ["key", "value", "receptance", "output"],
     "rwkv7": ["r_proj", "k_proj", "v_proj", "o_proj", "key", "value"],
 }
@@ -108,6 +111,8 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
 TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
+TRANSFORMERS_MODELS_TO_DEFT_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
+TRANSFORMERS_MODELS_TO_GLORA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_LOHA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_LOKR_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
@@ -134,6 +139,9 @@ TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING["phi"] = ["q_proj", "v_proj"
 
 TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING["phi"] = ["q_proj", "v_proj"]
+
+TRANSFORMERS_MODELS_TO_FROD_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING.copy()
+TRANSFORMERS_MODELS_TO_FROD_TARGET_MODULES_MAPPING["vit"] = ["query", "value"]
 
 TRANSFORMERS_MODELS_TO_PVERA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING.copy()
 TRANSFORMERS_MODELS_TO_PVERA_TARGET_MODULES_MAPPING["dinov2"] = ["query", "value"]
@@ -182,6 +190,9 @@ TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING = {
     "qwen3": ["post_attention_layernorm"],
 }
 
+TRANSFORMERS_MODELS_TO_HIRA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
+
+
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "t5": ["k", "v", "wo"],
     "mt5": ["k", "v", "wi_1"],
@@ -210,6 +221,28 @@ TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "gemma3_text": ["q_proj", "v_proj", "down_proj"],
     "qwen2": ["q_proj", "v_proj", "down_proj"],
     "qwen3": ["q_proj", "v_proj", "down_proj"],
+}
+
+TRANSFORMERS_MODELS_TO_BEFT_TARGET_MODULES_MAPPING = {
+    "t5": ["v"],
+    "mt5": ["v"],
+    "roberta": ["value"],
+    "opt": ["v_proj"],
+    "gptj": ["v_proj"],
+    "gpt_neo": ["v_proj"],
+    "bart": ["v_proj"],
+    "llama": ["v_proj"],
+    "llama4": ["v_proj"],
+    "mistral": ["v_proj"],
+    "mixtral": ["v_proj"],
+    "bert": ["value"],
+    "deberta-v2": ["value_proj"],
+    "phi": ["v_proj"],
+    "gemma": ["v_proj"],
+    "gemma2": ["v_proj"],
+    "gemma3_text": ["v_proj"],
+    "qwen2": ["v_proj"],
+    "qwen3": ["v_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
@@ -268,6 +301,7 @@ TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
     "gemma4": r".*language_model\..*\.(q_proj|v_proj)",
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
+    "nemotron_h": ["q_proj", "k_proj", "v_proj", "o_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING = {
@@ -293,7 +327,10 @@ TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING = {
     "gemma4": r".*language_model\..*\.(q_proj|v_proj)",
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
+    "nemotron_h": ["q_proj", "k_proj", "v_proj", "o_proj"],
 }
+
+TRANSFORMERS_MODELS_TO_UNILORA_TARGET_MODULES_MAPPING = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING.copy()
 
 TRANSFORMERS_MODELS_TO_OSF_TARGET_MODULES_MAPPING = {
     "llama": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
@@ -352,6 +389,7 @@ TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING = {
     "gemma4": r".*language_model\..*\.(q_proj|v_proj)",
     "qwen2": ["q_proj", "v_proj"],
     "qwen3": ["q_proj", "v_proj"],
+    "nemotron_h": ["q_proj", "k_proj", "v_proj", "o_proj"],
 }
 
 ##################

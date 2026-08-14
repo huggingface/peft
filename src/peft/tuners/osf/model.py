@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 from peft.tuners.tuners_utils import BaseTuner
 from peft.utils.constants import TRANSFORMERS_MODELS_TO_OSF_TARGET_MODULES_MAPPING
@@ -73,7 +73,7 @@ class OSFModel(BaseTuner):
     ) -> None:
         # OSF only works on 2D weight matrices
         if not hasattr(target, "weight") or len(target.weight.shape) != 2:
-            return None
+            return
 
         # Determine effective rank for this target (supports int or fractional in (0,1])
         def _resolve_rank(value, min_dim: int) -> int:
@@ -106,7 +106,7 @@ class OSFModel(BaseTuner):
         else:
             new_module = dispatch_default(target, adapter_name, osf_config, **kwargs)
             if new_module is None:
-                return None
+                return
             # If adding an additional adapter, keep it frozen initially
             if adapter_name not in self.active_adapters:
                 new_module.requires_grad_(False)

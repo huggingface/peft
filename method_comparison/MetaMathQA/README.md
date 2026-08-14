@@ -47,9 +47,7 @@ without modifying it. For example:
 
 to run the VBLoRA default experiment again.
 
-If you set `UPLOAD_BUCKET="your_user/bucket_name"` as an environment variable prior to starting experiments
-via `make`, all experiments will be called with the `--bucket_name $UPLOAD_BUCKET` parameter and therefore
-store the checkpoints in that bucket.
+If you set `UPLOAD_BUCKET="your_user/bucket_name"` as an environment variable prior to starting experiments via `make`, all experiments will be called with the `--bucket_name $UPLOAD_BUCKET` parameter and therefore store the checkpoints in that bucket. _For maintainers_: The default bucket name should be `"peft-internal-testing/metamathqa-checkpoints"`.
 
 ### `adapter_config.json`
 
