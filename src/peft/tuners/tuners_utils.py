@@ -235,7 +235,8 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
 
 
 def _extend_unique(existing: list[str], new_names: list[str]) -> None:
-    """Append the entries of new_names that are missing from existing, preserving order.
+    """
+    Append the entries of new_names that are missing from existing, preserving order.
 
     The membership check uses a set, as repeated `in` checks on a list could become expensive for large models.
     """
