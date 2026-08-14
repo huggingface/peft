@@ -43,7 +43,7 @@ from peft.utils.constants import (
     MIN_TARGET_MODULES_FOR_OPTIMIZATION,
     SEQ_CLS_HEAD_NAMES,
 )
-from peft.utils.error import NoMatchingPeftModule
+from peft.utils.error import NoMatchingPeftModuleError
 from peft.utils.integrations import init_empty_weights
 from peft.utils.other import (
     AuxiliaryTrainingWrapper,
@@ -960,12 +960,8 @@ class BaseTuner(nn.Module, ABC):
 
         if getattr(peft_config, "target_parameters", []):
             # Note: We don't need to check for no state_dict being passed, since we already checked this earlier.
-            self._inject_parameters(
-                peft_config=peft_config,
-                model=model,
-                adapter_name=adapter_name,
-                low_cpu_mem_usage=low_cpu_mem_usage,
-                targeted_parameter_names=targeted_parameter_names,
+            targeted_parameter_names = self._inject_parameters(
+                peft_config=peft_config, model=model, adapter_name=adapter_name, low_cpu_mem_usage=low_cpu_mem_usage
             )
 
         # Here we inject tied adapters for all the layers which were tied
@@ -1008,12 +1004,12 @@ class BaseTuner(nn.Module, ABC):
         if not targeted_module_names and not targeted_parameter_names and not uses_dummy_target_modules:
             if excluded_modules and not unmatched_modules:
                 # All targeted modules were excluded
-                raise NoMatchingPeftModule(
+                raise NoMatchingPeftModuleError(
                     "All modules were excluded. This is likely unintended. "
                     "Check your `target_modules`, `exclude_modules` and `modules_to_save` configuration."
                 )
             elif not excluded_modules and unmatched_modules and not peft_config.target_modules:
-                raise NoMatchingPeftModule(
+                raise NoMatchingPeftModuleError(
                     "No `target_modules` passed but also no `target_parameters` found. Please check the values for "
                     "these arguments."
                 )
@@ -1027,7 +1023,7 @@ class BaseTuner(nn.Module, ABC):
                     error_msg += f" Note: You specified 'layers_to_transform': {peft_config.layers_to_transform}."
                 if getattr(peft_config, "layers_pattern", None) is not None:
                     error_msg += f" You also specified 'layers_pattern': {peft_config.layers_pattern}."
-                raise NoMatchingPeftModule(error_msg)
+                raise NoMatchingPeftModuleError(error_msg)
             else:
                 # Some modules did not match and some matched but were excluded
                 error_msg = (
@@ -1040,7 +1036,7 @@ class BaseTuner(nn.Module, ABC):
                     error_msg += f" Note: You specified 'layers_to_transform': {peft_config.layers_to_transform}."
                 if getattr(peft_config, "layers_pattern", None) is not None:
                     error_msg += f" You also specified 'layers_pattern': {peft_config.layers_pattern}."
-                raise NoMatchingPeftModule(error_msg)
+                raise NoMatchingPeftModuleError(error_msg)
 
         elif hasattr(peft_config, "exclude_modules") and peft_config.exclude_modules and not excluded_modules:
             # exclude_modules was passed but was not used
@@ -1093,14 +1089,10 @@ class BaseTuner(nn.Module, ABC):
         )
 
     def _inject_parameters(
-        self,
-        peft_config: PeftConfig,
-        model: nn.Module,
-        adapter_name: str,
-        low_cpu_mem_usage: bool,
-        targeted_parameter_names: list[str],
-    ) -> None:
+        self, peft_config: PeftConfig, model: nn.Module, adapter_name: str, low_cpu_mem_usage: bool
+    ) -> list[str]:
         """Inject layers based on peft_config.target_modules"""
+        targeted_parameter_names: list[str] = []
 
         def strip_base_layer_from_name(module_name):
             # It is possible that the layer is already a PEFT layer and needs updating with a new adapter. In this case,
@@ -1196,6 +1188,8 @@ class BaseTuner(nn.Module, ABC):
                         # replacement, since we want to replace the wrapped module.
                         create_and_replace_param(module_name, key, param_name)
                         targeted_parameter_names.append(key)
+
+        return targeted_parameter_names
 
     def _replace_module(self, parent, child_name, new_module, child) -> None:
         """

@@ -17,7 +17,7 @@ class PeftError(Exception):
     """Base PEFT error"""
 
 
-class NoMatchingPeftModule(PeftError, ValueError):
+class NoMatchingPeftModuleError(PeftError, ValueError):
     """The adapter being injected matched no module or parameter of the base model.
 
     Raised e.g. when the `target_modules` of the PEFT config matched nothing, which most often points at a

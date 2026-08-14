@@ -159,7 +159,7 @@ from .tuners.cartridge.utils import (
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
-    NoMatchingPeftModule,
+    NoMatchingPeftModuleError,
     PeftError,
     PeftType,
     PeftWarning,
@@ -246,7 +246,7 @@ __all__ = [
     "MontecloraConfig",
     "MultitaskPromptTuningConfig",
     "MultitaskPromptTuningInit",
-    "NoMatchingPeftModule",
+    "NoMatchingPeftModuleError",
     "OFTConfig",
     "OFTModel",
     "OSFConfig",

@@ -36,7 +36,7 @@ from peft import (
     IA3Config,
     LoHaConfig,
     LoraConfig,
-    NoMatchingPeftModule,
+    NoMatchingPeftModuleError,
     PeftError,
     PeftModel,
     PromptTuningConfig,
@@ -629,30 +629,29 @@ class TestExcludedModuleNames:
         # See https://github.com/huggingface/peft/issues/3533.
         model = MLP()
         model = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
-        with pytest.raises(NoMatchingPeftModule, match="Target modules .* not found in the base model"):
+        with pytest.raises(NoMatchingPeftModuleError, match="Target modules .* not found in the base model"):
             model.add_adapter("other", LoraConfig(target_modules=["non_existent_module"]))
 
     def test_second_adapter_only_modules_to_save_raises(self):
         # A second adapter is held to the same standard as a first one: if its target_modules match nothing, it
-        # raises even when modules_to_save matches. The error subclasses PeftError (and ValueError), so callers
-        # who add such an adapter intentionally can catch it and proceed.
+        # raises even when modules_to_save matches.
         # See https://github.com/huggingface/peft/issues/3533.
         model = MLP()
         model = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
-        with pytest.raises(NoMatchingPeftModule, match="No modules were targeted for adaptation"):
+        with pytest.raises(NoMatchingPeftModuleError, match="No modules were targeted for adaptation"):
             model.add_adapter("other", LoraConfig(target_modules=["non_existent_module"], modules_to_save=["lin1"]))
 
     def test_no_matching_peft_module_error_hierarchy(self):
-        # NoMatchingPeftModule stays a ValueError for backwards compatibility and a PeftError for interception
-        assert issubclass(NoMatchingPeftModule, ValueError)
-        assert issubclass(NoMatchingPeftModule, PeftError)
+        # NoMatchingPeftModuleError stays a ValueError for backwards compatibility and a PeftError for interception
+        assert issubclass(NoMatchingPeftModuleError, ValueError)
+        assert issubclass(NoMatchingPeftModuleError, PeftError)
 
     def test_targeted_module_names_unique_across_adapters(self):
         # targeted_module_names records each module once, even when several adapters target the same module
         model = MLP()
-        model = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
+        model = get_peft_model(model, LoraConfig(target_modules=["lin1"]))
         model.add_adapter("other", LoraConfig(target_modules=["lin0", "lin1"]))
-        assert model.base_model.targeted_module_names == ["lin0", "lin1"]
+        assert model.base_model.targeted_module_names == ["lin1", "lin0"]
 
     def test_some_modules_excluded_some_unmatched(self):
         model = MLP()
