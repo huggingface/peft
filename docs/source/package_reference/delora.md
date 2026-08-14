@@ -17,12 +17,57 @@ rendered properly in your Markdown viewer.
 # DeLoRA: Decoupled Low-rank Adaptation
 [DeLoRA](https://huggingface.co/papers/2503.18225) is a parameter-efficient fine-tuning technique that implicitly maintains a Frobenius boundary with respect to the pretrained weights by normalizing and scaling learnable low-rank matrices. This effectively decouples the learning of directions (BA term) and magnitude (boundary term) of the weight updates, avoiding catastrophic shifts in the adapted weights and enhancing robustness to hyperparameter choices.
 
-Note:
-- use a learning rate 10-100x larger than for standard LoRA variants (typical values from 1e-3/1e-2/..)
-- ensure the initial boundary parameter lambda is not too small (typical values around 10/15/..). Setting different lambdas to different layers is possible
+## How DeLoRA works
+
+Like LoRA, DeLoRA represents the weight update with two trainable low-rank matrices, `A` and `B`. DeLoRA normalizes
+the rows of `A` and columns of `B`, then scales the resulting update using the frozen base-weight norms and a
+trainable `delora_lambda`. This separates the direction learned by `A` and `B` from the strength of the update.
+
+The configured `delora_lambda` is the initial value of a trainable scalar for each adapted layer, not a fixed bound
+throughout training. The update is also divided by `r`, so changing the rank affects both adapter capacity and its
+initial scaling.
+
+## When to use DeLoRA
+
+DeLoRA is a good choice when:
+
+- You want a LoRA-like workflow but need the update magnitude to be explicitly normalized and learned separately from
+  its direction.
+- Your fine-tuning setup is sensitive to the learning rate or training duration and would benefit from a bounded
+  parameterization.
+- You need an adapter that can be merged into the base weights for inference.
+
+Standard LoRA may be a better choice when you need quantized base layers, want to adapt module types other than
+`nn.Linear`, or depend on the broader set of LoRA-specific features and variants.
+
+## Usage
+
+```python
+from peft import DeloraConfig, TaskType, get_peft_model
+from transformers import AutoModelForCausalLM
+
+model = AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM-135M")
+config = DeloraConfig(
+    task_type=TaskType.CAUSAL_LM,
+    r=8,
+    delora_lambda=15,
+    target_modules=["q_proj", "v_proj"],
+)
+model = get_peft_model(model, config)
+model.print_trainable_parameters()
+```
+
+With the default `init_weights=True`, `B` is initialized to zero, so applying DeLoRA does not change the model output
+before training. The PEFT DeLoRA benchmarks use a learning rate of `1e-3`; in general, DeLoRA is intended to use a
+learning rate roughly 10 to 100 times larger than typical LoRA settings. Avoid initializing `delora_lambda` too close
+to zero; values around 10 to 15 are a useful starting range.
+
+Use `rank_pattern` and `lambda_pattern` to override `r` or the initial `delora_lambda` for selected modules.
+`module_dropout` applies dropout to the input of the adapter update during training and defaults to `0.0`.
 
 DeLoRA currently has the following constraints:
-- Only nn.Linear layers are supported.
+
+- Only `nn.Linear` layers are supported.
 - Quantized layers are not supported.
 
 If these constraints don't work for your use case, consider other methods instead.
