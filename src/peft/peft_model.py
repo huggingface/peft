@@ -3208,7 +3208,7 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
     - `available_adapters` (`list[str]`):
        The names of the available adapters, e.g. `["default"]`.
     - `devices` (`dict[str, list[str]]`):
-       The devices where the parameters of the given adapter are stored, e.g. `["cuda"]`.
+       The devices where the parameters of the given adapter are stored, e.g. `["cuda","xpu"]`.
     - `quantization_backend` (`str` or `None`):
        The name of the quantization backend, e.g. `"bnb 4bit"`, or `None` if not quantized.
 
@@ -3352,7 +3352,7 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
     - `available_adapters` (`list[str]`):
        The names of the available adapters, e.g. `["default"]`.
     - `devices` (`dict[str, list[str]]`):
-       The devices where the parameters of the given adapter are stored, e.g. `["cuda"]`.
+       The devices where the parameters of the given adapter are stored, e.g. `["cuda","xpu"]`.
     - `quantization_backend` (`str`, `None`, `Literal["irregular"]`):
        The name of the quantization backend, e.g. `"bnb 4bit"`, or `None` if not quantized. If the backend is not
        consistent across all layers, this will be `"irregular"`.
