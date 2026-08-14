@@ -1,6 +1,5 @@
 {
   "optimizer_kwargs": {
-    "lr": 0.002,
-    "weight_decay": 0.1
+    "lr": 0.002
   }
 }
