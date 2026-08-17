@@ -28,6 +28,7 @@ class TrainConfig:
     sampler_loss_weight: float
     sampler_detach_hidden_state: bool
     sampler_use_rnn: bool
+    sampler_teacher_forcing: bool
     lc_loss_weight: float
     tv_loss_weight: float
     use_lc_loss: bool
@@ -119,12 +120,14 @@ def augment_mtp(sample: list[int], bs: int, num_mtp: int, use_lc_loss: bool, use
 class Sampler(nn.Module):
     """Section 2.3"""
 
-    def __init__(self, embedding, unembedding, num_mtp: int, hidden_size: int, skip_last: bool, recurrent: bool = False):
+    def __init__(self, embedding, unembedding, num_mtp: int, hidden_size: int, skip_last: bool, recurrent: bool = False,
+                 teacher_forcing: bool = False):
         super().__init__()
         self.k = num_mtp
         self.hidden_size = hidden_size
         self.skip_last = skip_last
         self.recurrent = recurrent
+        self.teacher_forcing = teacher_forcing
 
         self.embedding = embedding
 
@@ -146,13 +149,18 @@ class Sampler(nn.Module):
         # Multi Token Prediction hidden states are used in every sampler step.
         ntp_logits = []
         mtp_hidden = []
+        mtp_logits = []
         for batch_idx, offset in enumerate(offsets):
             # logits: [B, T, V]
             # hidden: [B, T, H]
             ntp_logits.append(logits[batch_idx, offset - 1 : offset])  # [K, V]
             mtp_hidden.append(hidden[batch_idx, offset : offset + self.k])  # [K, H]
+            if self.teacher_forcing:
+                mtp_logits.append(logits[batch_idx, offset : offset + self.k])  # [K, V]
         ntp_logits = torch.stack(ntp_logits, dim=0)  # [B, 1, V]
         mtp_hidden = torch.stack(mtp_hidden, dim=0)  # [B, K, H]
+        if self.teacher_forcing:
+            mtp_logits = torch.stack(mtp_logits, dim=0)  # [B, K, V]
         prev_token = ntp_logits.argmax(dim=-1)  # [B, 1]
         all_logits = []
 
@@ -173,7 +181,10 @@ class Sampler(nn.Module):
                     prev_token_emb,
                 )  # [b, 1, v]
 
-            prev_token = sampler_logits.argmax(dim=-1)  # [B, 1]
+            if self.training and self.teacher_forcing:
+                prev_token = mtp_logits[:, i_k].argmax(dim=-1)  # [B, 1]
+            else:
+                prev_token = sampler_logits.argmax(dim=-1)  # [B, 1]
             all_logits.append(sampler_logits)
 
         return torch.concat(all_logits, dim=1)  # [B, K, V]
@@ -1037,6 +1048,7 @@ def main():
         sampler_loss_weight=args.sampler_loss_weight,
         sampler_detach_hidden_state=args.sampler_detach_hidden_state,
         sampler_use_rnn=args.sampler_use_rnn,
+        sampler_teacher_forcing=args.sampler_teacher_forcing,
         lc_loss_weight=args.lc_loss_weight,
         tv_loss_weight=args.tv_loss_weight,
         use_lc_loss=args.use_lc_loss,
