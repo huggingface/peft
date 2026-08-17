@@ -29,7 +29,9 @@ class TrainConfig:
     sampler_detach_hidden_state: bool
     sampler_use_rnn: bool
     lc_loss_weight: float
+    tv_loss_weight: float
     use_lc_loss: bool
+    use_tv_loss: bool
     log_step: int
     eval_step: int
     output_dir: str
@@ -41,7 +43,7 @@ class TrainConfig:
 MTP_MASK_TOKENS = None
 
 
-def augment_mtp(sample: list[int], bs: int, num_mtp: int, use_lc_loss: bool):
+def augment_mtp(sample: list[int], bs: int, num_mtp: int, use_lc_loss: bool, use_tv_loss: bool):
     """Augment samples with MTP tokens.
 
     Create `bs` samples based on a single sample, with each generated sample having a different
@@ -91,7 +93,7 @@ def augment_mtp(sample: list[int], bs: int, num_mtp: int, use_lc_loss: bool):
     offsets = []
     labels = []
 
-    indices = range(bs - int(use_lc_loss))
+    indices = range(bs - int(use_lc_loss or use_tv_loss))
     for i in indices:
         # each sequence in the batch is longer by num_mtp tokens instead of just 1
         # to be more sample efficient.
@@ -105,7 +107,7 @@ def augment_mtp(sample: list[int], bs: int, num_mtp: int, use_lc_loss: bool):
         # mask the values not relating to the MTP input tokens.
         labels.append([-100] * (end_idx) + sample[end_idx + 1 : end_idx + 1 + num_mtp])
 
-    if use_lc_loss:
+    if use_lc_loss or use_tv_loss:
         end_idx = rand_idx_seq + (bs - 1) * num_mtp
         input_ids.append(sample[:end_idx])
         offsets.append(end_idx)
@@ -298,10 +300,34 @@ def calculate_lc_loss(hidden_states, offsets, *, num_mtp: int, lc_loss_weight: f
     return loss / (len(hidden_states) - 1)
 
 
-def calculate_mtp_loss(logits, labels, offsets, use_lc_loss: bool, num_mtp: int):
+def calculate_tv_loss(logits, offsets, num_mtp: int, tv_loss_weight: float):
+    # The TV loss (from DSpark) is similar to LCM loss but operates on the target distribution
+    # instead of the latent space. The goal is to match the mask token's distribution to that
+    # of the base model's output distribution.
+    #
+    # We achieve this similarly to the LCM loss implementation: the last item in the batch
+    # contains all logits of the input sequence (i.e. the target distribution for all tokens).
+    # This way we can now calculate each MTP token logit distribution and the distance to
+    # the reference logits.
+    loss = 0
+    for sublogits, offset in zip(logits[:-1], offsets[:-1]):
+        logits_pred = sublogits[offset : offset + num_mtp]  # [B, K, V]
+        logits_true = logits[-1, offset : offset + num_mtp].detach()  # [B, K, V]
+        # we use float32 values since the vocabulary can be huge and therefore
+        # rounding errors might become more of a problem (e.g., non-discernable entries
+        # in the distribution).
+        probas_pred = F.softmax(logits_pred.float(), dim=-1)  # [B, K, V]
+        probas_true = F.softmax(logits_true.float(), dim=-1)  # [B, K, V]
+        # instead of using l1_loss() we're summing the differences so that we're not
+        # dividing by K*V but only by K, otherwise the values would vanish since V is huge.
+        loss += tv_loss_weight * (probas_pred - probas_true).abs().sum(dim=-1).mean()
+    return loss / len(offsets[:-1])
+
+
+def calculate_mtp_loss(logits, labels, offsets, use_lc_loss: bool, use_tv_loss: bool, num_mtp: int):
     """Calculates the cross-entropy loss exactly on the MTP tokens"""
     loss = 0
-    logits = logits if not use_lc_loss else logits[:-1]
+    logits = logits if not (use_lc_loss or use_tv_loss) else logits[:-1]
     for logit, label, offset in zip(logits, labels, offsets):
         # since the number of MTP tokens is equal for each sample, we can just sum them
         loss += F.cross_entropy(logit[offset : offset + num_mtp], label[offset : offset + num_mtp], ignore_index=-100)
@@ -309,15 +335,15 @@ def calculate_mtp_loss(logits, labels, offsets, use_lc_loss: bool, num_mtp: int)
     return loss / len(logits)
 
 
-def calculate_sampler_loss(logits, labels, offsets, use_lc_loss: bool, num_mtp: int):
+def calculate_sampler_loss(logits, labels, offsets, num_mtp: int):
     """Calculates the cross-entropy loss exactly on the MTP tokens for the sampler.
 
     This differs to calculate_mtp_loss in that we expect the logits sequence to be
     only as long as num_mtp but the labels sequence is the original labels sequence,
     so we need to get the correct labels from the MTP offsets.
 
-    Note that we DO NOT drop the last batch of logits in case of `use_lc_loss` since
-    this is supposed to be handled in the sampler. The returned logits are already
+    Note that we DO NOT drop the last batch of logits in case of `use_lc_loss`/`use_tv_loss`
+    since this is supposed to be handled in the sampler. The returned logits are already
     skipping the last batch item in that case.
     """
     loss = 0
@@ -328,7 +354,7 @@ def calculate_sampler_loss(logits, labels, offsets, use_lc_loss: bool, num_mtp: 
     return loss / len(logits)
 
 
-def calculate_mtp_accuracy(logits, labels, logit_offsets, label_offsets, num_mtp, use_lc_loss):
+def calculate_mtp_accuracy(logits, labels, logit_offsets, label_offsets, num_mtp, use_lc_loss: bool, use_tv_loss: bool):
     """Calculate the accuracy for each MTP token position individually.
 
     To support both the base model and the sampler case this function takes two offset vectors.
@@ -338,7 +364,7 @@ def calculate_mtp_accuracy(logits, labels, logit_offsets, label_offsets, num_mtp
     """
     y_pred = []
     y_true = []
-    logit_offsets = logit_offsets[:-1] if use_lc_loss else logit_offsets
+    logit_offsets = logit_offsets[:-1] if (use_lc_loss or use_tv_loss) else logit_offsets
     for idx_batch, (logit_offset, label_offset) in enumerate(zip(logit_offsets, label_offsets)):
         y_pred.append(logits[idx_batch, logit_offset : logit_offset + num_mtp].argmax(dim=-1))
         y_true.append(labels[idx_batch, label_offset : label_offset + num_mtp])
@@ -349,12 +375,12 @@ def calculate_mtp_accuracy(logits, labels, logit_offsets, label_offsets, num_mtp
     return token_accuracies
 
 
-def calculate_model_match(model, batch, labels, offsets, model_logits, num_mtp, use_lc_loss):
+def calculate_model_match(model, batch, labels, offsets, model_logits, num_mtp, use_lc_loss: bool, use_tv_loss: bool):
     """Calculate the rate of how many MTP tokens match the base model predictions, i.e. how many tokens would
     be accepted in a speculative decoding scenario.
     """
     match_rates = []
-    offsets = offsets[:-1] if use_lc_loss else offsets
+    offsets = offsets[:-1] if (use_lc_loss or use_tv_loss) else offsets
 
     for idx_batch, (input_ids, offset) in enumerate(zip(batch["input_ids"], offsets)):
         # auto-regressively create the reference tokens from the base model.
@@ -479,6 +505,7 @@ def train_loop(
                     "train/loss/mtp": output["loss_mtp"],
                     "train/loss/sampler": output["loss_sampler"],
                     "train/loss/lcm": output["loss_lc"],
+                    "train/loss/tv": output["loss_tv"],
                     "train/lr/model": lr_scheduler.get_last_lr()[0],
                     "train/lr/sampler": lr_scheduler.get_last_lr()[1],
                     "train/step": step,
@@ -494,6 +521,7 @@ def train_loop(
                     "eval/loss/mtp": eval_output["loss_mtp"],
                     "eval/loss/sampler": eval_output["loss_sampler"],
                     "eval/loss/lcm": eval_output["loss_lc"],
+                    "eval/loss/tv": eval_output["loss_tv"],
                     "eval/step": step,
                     "eval/mtp_match_rate": eval_output["mtp_match_rate"],
                     **{
@@ -519,7 +547,11 @@ def train_step(
     tic = time.perf_counter()
     # assume batch size 1
     input_ids, labels, offsets = augment_mtp(
-        sample, bs=train_config.batch_size, num_mtp=train_config.num_mtp, use_lc_loss=train_config.use_lc_loss
+        sample,
+        bs=train_config.batch_size,
+        num_mtp=train_config.num_mtp,
+        use_tv_loss=train_config.use_tv_loss,
+        use_lc_loss=train_config.use_lc_loss,
     )
 
     # create the batch
@@ -536,7 +568,7 @@ def train_step(
     # train step
     optimizer.zero_grad()
     outputs = model(**batch, num_items_in_batch=total_tokens, output_hidden_states=True)
-    loss_mtp = calculate_mtp_loss(outputs.logits, labels, offsets, train_config.use_lc_loss, train_config.num_mtp)
+    loss_mtp = calculate_mtp_loss(outputs.logits, labels, offsets, train_config.use_lc_loss, train_config.use_tv_loss, train_config.num_mtp)
     if train_config.use_lc_loss:
         loss_lc = calculate_lc_loss(
             outputs.hidden_states[-1],
@@ -546,6 +578,15 @@ def train_step(
         )
     else:
         loss_lc = torch.tensor(0.0)
+    if train_config.use_tv_loss:
+        loss_tv = calculate_tv_loss(
+            outputs.logits,
+            offsets,
+            num_mtp=train_config.num_mtp,
+            tv_loss_weight=train_config.tv_loss_weight,
+        )
+    else:
+        loss_tv = torch.tensor(0.0)
     if train_config.use_sampler:
         # Generate a num_mtp long sequence using the sampler and compute the MTP loss
         # for that (paper says: should be better than via the model itself).
@@ -558,7 +599,6 @@ def train_step(
                 logits=logits_sampler,
                 labels=labels,
                 offsets=offsets,
-                use_lc_loss=train_config.use_lc_loss,
                 num_mtp=train_config.num_mtp,
             )
             * train_config.sampler_loss_weight
@@ -567,11 +607,11 @@ def train_step(
         loss_sampler = torch.tensor(0.0)
 
     if step % 100 == 0:
-        grad_norm_stats = gradient_norm_step(optimizer, loss_mtp, loss_lc, loss_sampler)
+        grad_norm_stats = gradient_norm_step(optimizer, loss_mtp, loss_lc, loss_tv, loss_sampler)
     else:
         grad_norm_stats = {}
 
-    loss = loss_mtp + loss_lc + loss_sampler
+    loss = loss_mtp + loss_lc + loss_tv + loss_sampler
     loss.backward()
 
     if train_config.max_gradient_norm > 0:
@@ -586,6 +626,7 @@ def train_step(
         "loss": loss.detach().cpu().item(),
         "loss_mtp": loss_mtp.detach().cpu().item(),
         "loss_lc": loss_lc.detach().cpu().item(),
+        "loss_tv": loss_tv.detach().cpu().item(),
         "loss_sampler": loss_sampler.detach().cpu().item(),
         "duration": toc - tic,
         "num_samples": actual_batch_size,
@@ -632,7 +673,11 @@ def eval_step(model, tokenizer, sampler, train_config: TrainConfig, sample, step
     tic = time.perf_counter()
     # assume batch size 1
     input_ids, labels, offsets = augment_mtp(
-        sample, bs=train_config.batch_size, num_mtp=train_config.num_mtp, use_lc_loss=train_config.use_lc_loss
+        sample,
+        bs=train_config.batch_size,
+        num_mtp=train_config.num_mtp,
+        use_lc_loss=train_config.use_lc_loss,
+        use_tv_loss=train_config.use_tv_loss,
     )
 
     # create the batch
@@ -647,7 +692,7 @@ def eval_step(model, tokenizer, sampler, train_config: TrainConfig, sample, step
 
     # train step
     outputs = model(**batch, num_items_in_batch=total_tokens, output_hidden_states=True)
-    loss_mtp = calculate_mtp_loss(outputs.logits, labels, offsets, train_config.use_lc_loss, train_config.num_mtp)
+    loss_mtp = calculate_mtp_loss(outputs.logits, labels, offsets, train_config.use_lc_loss, train_config.use_tv_loss, train_config.num_mtp)
     if train_config.use_lc_loss:
         loss_lc = calculate_lc_loss(
             outputs.hidden_states[-1],
@@ -657,6 +702,15 @@ def eval_step(model, tokenizer, sampler, train_config: TrainConfig, sample, step
         )
     else:
         loss_lc = torch.tensor(0.0)
+    if train_config.use_tv_loss:
+        loss_tv = calculate_tv_loss(
+            outputs.logits,
+            offsets,
+            num_mtp=train_config.num_mtp,
+            tv_loss_weight=train_config.tv_loss_weight,
+        )
+    else:
+        loss_tv = torch.tensor(0.0)
     if train_config.use_sampler:
         # Generate a num_mtp long sequence using the sampler and compute the MTP loss
         # for that (paper says: should be better than via the model itself).
@@ -666,7 +720,6 @@ def eval_step(model, tokenizer, sampler, train_config: TrainConfig, sample, step
                 logits=logits_sampler,
                 labels=labels,
                 offsets=offsets,
-                use_lc_loss=train_config.use_lc_loss,
                 num_mtp=train_config.num_mtp,
             )
             * train_config.sampler_loss_weight
@@ -681,7 +734,14 @@ def eval_step(model, tokenizer, sampler, train_config: TrainConfig, sample, step
     # probably overfitting the fine-tuning dataset. if we're way worse than that, we are not learning enough.
     if step % 50 == 0:
         mtp_match_rate = calculate_model_match(
-            model, batch, labels, offsets, outputs.logits, train_config.num_mtp, train_config.use_lc_loss
+            model,
+            batch,
+            labels,
+            offsets,
+            outputs.logits,
+            train_config.num_mtp,
+            train_config.use_lc_loss,
+            train_config.use_tv_loss,
         )
     else:
         mtp_match_rate = None
@@ -694,6 +754,7 @@ def eval_step(model, tokenizer, sampler, train_config: TrainConfig, sample, step
         label_offsets=offsets,
         num_mtp=train_config.num_mtp,
         use_lc_loss=train_config.use_lc_loss,
+        use_tv_loss=train_config.use_tv_loss,
     )
 
     if train_config.use_sampler:
@@ -704,17 +765,19 @@ def eval_step(model, tokenizer, sampler, train_config: TrainConfig, sample, step
             label_offsets=offsets,
             num_mtp=train_config.num_mtp,
             use_lc_loss=train_config.use_lc_loss,
+            use_tv_loss=train_config.use_tv_loss,
         )
     else:
         token_accuracies_sampler = [torch.nan] * train_config.num_mtp
 
-    loss = loss_mtp + loss_lc + loss_sampler
+    loss = loss_mtp + loss_lc + loss_tv + loss_sampler
 
     toc = time.perf_counter()
     return {
         "loss": loss.detach().cpu().item(),
         "loss_mtp": loss_mtp.detach().cpu().item(),
         "loss_lc": loss_lc.detach().cpu().item(),
+        "loss_tv": loss_tv.detach().cpu().item(),
         "loss_sampler": loss_sampler.detach().cpu().item(),
         "duration": toc - tic,
         "num_tokens": total_tokens,
@@ -724,7 +787,7 @@ def eval_step(model, tokenizer, sampler, train_config: TrainConfig, sample, step
     }
 
 
-def gradient_norm_step(optimizer, loss_mtp, loss_lc, loss_sampler):
+def gradient_norm_step(optimizer, loss_mtp, loss_lc, loss_tv, loss_sampler):
     """Compute the average gradient norm for each loss term so that we can see the impact of each
     loss term and the potential need for individual scaling.
     """
@@ -748,6 +811,13 @@ def gradient_norm_step(optimizer, loss_mtp, loss_lc, loss_sampler):
     else:
         grad_norm_lc = torch.tensor(0.0)
 
+    if loss_tv > 0:
+        loss_tv.backward(retain_graph=True)
+        grad_norm_tv = get_grad_norm(optimizer)
+        optimizer.zero_grad()
+    else:
+        grad_norm_tv = torch.tensor(0.0)
+
     loss_sampler.backward(retain_graph=True)
     grad_norm_sampler = get_grad_norm(optimizer)
     optimizer.zero_grad()
@@ -755,6 +825,7 @@ def gradient_norm_step(optimizer, loss_mtp, loss_lc, loss_sampler):
     gradnorms = {
         "gradnorm/mtp": grad_norm_mtp.cpu().item(),
         "gradnorm/lc": grad_norm_lc.cpu().item(),
+        "gradnorm/tv": grad_norm_tv.cpu().item(),
         "gradnorm/sampler": grad_norm_sampler.cpu().item(),
     }
 
@@ -811,7 +882,9 @@ def main():
     parser.add_argument("--sampler_use_rnn", action="store_true", default=False)
     parser.add_argument("--sampler_lr", type=float)
     parser.add_argument("--lc_loss_weight", type=float, default=1.0)
+    parser.add_argument("--tv_loss_weight", type=float, default=0.9)
     parser.add_argument("--use_lc_loss", action="store_true", default=False)
+    parser.add_argument("--use_tv_loss", action="store_true", default=False)
     parser.add_argument("--log_step", type=int, default=10)
     parser.add_argument("--eval_step", type=int, default=200)
     parser.add_argument("--checkpoint_step", type=int, default=1000)
@@ -861,7 +934,7 @@ def main():
     sampler = Sampler(
         hidden_size=hidden_size,
         num_mtp=args.k,
-        skip_last=args.use_lc_loss,
+        skip_last=args.use_lc_loss or args.use_tv_loss,
         embedding=model.get_input_embeddings(),
         unembedding=model.get_output_embeddings(),
         recurrent=args.sampler_use_rnn,
@@ -963,7 +1036,9 @@ def main():
         sampler_detach_hidden_state=args.sampler_detach_hidden_state,
         sampler_use_rnn=args.sampler_use_rnn,
         lc_loss_weight=args.lc_loss_weight,
+        tv_loss_weight=args.tv_loss_weight,
         use_lc_loss=args.use_lc_loss,
+        use_tv_loss=args.use_tv_loss,
         log_step=args.log_step,
         eval_step=args.eval_step,
         output_dir=args.output_dir,
