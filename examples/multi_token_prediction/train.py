@@ -829,9 +829,12 @@ def gradient_norm_step(optimizer, loss_mtp, loss_lc, loss_tv, loss_sampler):
     else:
         grad_norm_tv = torch.tensor(0.0)
 
-    loss_sampler.backward(retain_graph=True)
-    grad_norm_sampler = get_grad_norm(optimizer)
-    optimizer.zero_grad()
+    if loss_sampler > 0:
+        loss_sampler.backward(retain_graph=True)
+        grad_norm_sampler = get_grad_norm(optimizer)
+        optimizer.zero_grad()
+    else:
+        grad_norm_sampler = torch.tensor(0.0)
 
     gradnorms = {
         "gradnorm/mtp": grad_norm_mtp.cpu().item(),
