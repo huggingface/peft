@@ -463,3 +463,27 @@ class TestSequenceClassificationModels(PeftCommonTester):
                 assert output.loss > expected_loss
             else:
                 assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)
+
+    @pytest.mark.parametrize(
+        "config_cls,config_kwargs",
+        [
+            (PrefixTuningConfig, {"task_type": "SEQ_CLS", "num_virtual_tokens": 4}),
+            (PromptEncoderConfig, {"task_type": "SEQ_CLS", "num_virtual_tokens": 4, "encoder_hidden_size": 32}),
+            (PromptTuningConfig, {"task_type": "SEQ_CLS", "num_virtual_tokens": 4}),
+        ],
+    )
+    def test_prompt_learning_forward_with_inputs_embeds(self, config_cls, config_kwargs):
+        # Passing inputs_embeds instead of input_ids should be equivalent.
+        model_id = PEFT_SEQ_CLS_MODELS_TO_TEST[0]
+        with hub_online_once(model_id):
+            base_model = AutoModelForSequenceClassification.from_pretrained(model_id).to(self.torch_device)
+            model = get_peft_model(base_model, config_cls(base_model_name_or_path=model_id, **config_kwargs))
+            model.eval()
+
+            input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
+            attention_mask = torch.ones_like(input_ids)
+            with torch.no_grad():
+                output_ids = model(input_ids=input_ids, attention_mask=attention_mask)
+                inputs_embeds = model.get_input_embeddings()(input_ids)
+                output_embeds = model(inputs_embeds=inputs_embeds, attention_mask=attention_mask)
+            assert torch.allclose(output_ids.logits, output_embeds.logits, atol=1e-5, rtol=1e-5)

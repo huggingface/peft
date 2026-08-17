@@ -327,7 +327,7 @@ ALL_CONFIGS = [
 
 
 def skip_non_prompt_learning(config_cls):
-    if not issubclass(config_cls, PromptLearningConfig) or (config_cls == PrefixTuningConfig):
+    if not issubclass(config_cls, PromptLearningConfig):
         pytest.skip("Skip tests that are not prompt learning or that are prefix tuning")
 
 

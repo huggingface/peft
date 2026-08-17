@@ -1901,7 +1901,7 @@ class PeftModelForSequenceClassification(PeftModel):
         )
 
         if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
-            return self._prefix_tuning_forward(input_ids=input_ids, **kwargs)
+            return self._prefix_tuning_forward(input_ids=input_ids, inputs_embeds=inputs_embeds, **kwargs)
         else:
             if kwargs.get("token_type_ids", None) is not None:
                 kwargs["token_type_ids"] = torch.cat(
@@ -2446,6 +2446,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
             kwargs["past_key_values"] = self.get_prompt(batch_size)
             return self.base_model(
                 input_ids=input_ids,
+                inputs_embeds=inputs_embeds,
                 decoder_input_ids=decoder_input_ids,
                 decoder_inputs_embeds=decoder_inputs_embeds,
                 **kwargs,
@@ -2756,7 +2757,7 @@ class PeftModelForTokenClassification(PeftModel):
         )
 
         if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
-            return self._prefix_tuning_forward(input_ids=input_ids, **kwargs)
+            return self._prefix_tuning_forward(input_ids=input_ids, inputs_embeds=inputs_embeds, **kwargs)
         else:
             if kwargs.get("token_type_ids", None) is not None:
                 kwargs["token_type_ids"] = torch.cat(
@@ -2992,7 +2993,7 @@ class PeftModelForQuestionAnswering(PeftModel):
         )
 
         if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
-            return self._prefix_tuning_forward(input_ids=input_ids, **kwargs)
+            return self._prefix_tuning_forward(input_ids=input_ids, inputs_embeds=inputs_embeds, **kwargs)
         else:
             if kwargs.get("token_type_ids", None) is not None:
                 kwargs["token_type_ids"] = torch.cat(
@@ -3173,7 +3174,7 @@ class PeftModelForFeatureExtraction(PeftModel):
         if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
             # overwrite past_kv in kwargs
             kwargs["past_key_values"] = self.get_prompt(batch_size)
-            return self.base_model(input_ids=input_ids, **kwargs)
+            return self.base_model(input_ids=input_ids, inputs_embeds=inputs_embeds, **kwargs)
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
