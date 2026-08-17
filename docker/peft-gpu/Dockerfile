@@ -67,7 +67,6 @@ RUN conda run -n peft pip install -U --no-cache-dir \
         "soundfile>=0.12.1" \
         scipy \
         torchao \
-        mslk-cuda \
         "fbgemm-gpu-genai>=1.2.0" \
         git+https://github.com/huggingface/transformers \
         git+https://github.com/huggingface/accelerate \
@@ -77,7 +76,8 @@ RUN conda run -n peft pip install -U --no-cache-dir \
         # Add HQQ for quantization testing
         hqq \
         deepspeed \
-        "kernels<0.16"
+        "kernels<0.16" \
+        && conda run -n peft pip install -U --no-cache-dir mslk --index-url https://download.pytorch.org/whl/cu132
 
 RUN conda run -n peft pip freeze | grep transformers
 
