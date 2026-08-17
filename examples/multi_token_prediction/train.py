@@ -14,7 +14,7 @@ from datasets import load_dataset
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, get_cosine_schedule_with_warmup
 
 from peft import LoraConfig, TaskType, get_peft_model
 
@@ -27,6 +27,7 @@ class TrainConfig:
     use_sampler: bool
     sampler_loss_weight: float
     sampler_detach_hidden_state: bool
+    sampler_use_rnn: bool
     lc_loss_weight: float
     use_lc_loss: bool
     log_step: int
@@ -154,7 +155,7 @@ class Sampler(nn.Module):
         all_logits = []
 
         if self.recurrent:
-            sampler_hidden = torch.zeros(1, mtp_hidden.shape[0], mtp_hidden.shape[-1]).to(logits.device)  # [L, B, H]
+            sampler_hidden = torch.zeros(1, mtp_hidden.shape[0], mtp_hidden.shape[-1]).to(logits)  # [L, B, H]
 
         for i_k in range(self.k):
             prev_token_emb = self.embedding(prev_token)  # [B, 1, H]
@@ -796,6 +797,7 @@ def main():
     parser.add_argument("--seq_len", type=int, default=128)
     parser.add_argument("--model_id", type=str, default="meta-llama/Llama-3.2-3B")
     parser.add_argument("--lr", type=float)
+    parser.add_argument("--lr_schedule", choices=["wsd", "cosine"], default="cosine")
     parser.add_argument("--num_steps", type=int, default=10_000, help="Training steps.")
     parser.add_argument("--warmup_steps", type=int, default=200, help="Training steps for lr ramp-up")
     parser.add_argument("--decay_steps", type=int, default=None,
@@ -925,16 +927,23 @@ def main():
          decay = 1 - math.sqrt(progress)
          return floor_ratio + (1 - floor_ratio) * decay
 
-    scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer,
-        lr_lambda=partial(
-            wsd_lambda,
-            total_steps=args.num_steps,
-            warmup_steps=args.warmup_steps,
-            decay_steps=args.decay_steps,
-            floor_ratio=0.1,
-        ),
-    )
+    if args.lr_schedule == "wsd":
+        scheduler = torch.optim.lr_scheduler.LambdaLR(
+            optimizer,
+            lr_lambda=partial(
+                wsd_lambda,
+                total_steps=args.num_steps,
+                warmup_steps=args.warmup_steps,
+                decay_steps=args.decay_steps,
+                floor_ratio=0.1,
+            ),
+        )
+    elif args.lr_schedule == "cosine":
+        scheduler = get_cosine_schedule_with_warmup(
+            optimizer, num_warmup_steps=args.warmup_steps, num_training_steps=args.num_steps
+        )
+    else:
+        raise NotImplementedError
 
     print(f"LR schedule: warmup={args.warmup_steps} steps, sqrt decay over {args.decay_steps} steps")
     print(f"  model lr={args.lr}, sampler lr={args.sampler_lr} (x{args.warmup_steps}, x{args.decay_steps})")
