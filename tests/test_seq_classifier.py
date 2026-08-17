@@ -228,8 +228,8 @@ ALL_CONFIGS = [
         PsoftConfig,
         {
             "task_type": "SEQ_CLS",
-            "r": 32,
-            "psoft_alpha": 32,
+            "r": 16,  # tiny llama has hidden size 16, so don't choose a greater value
+            "psoft_alpha": 16,
             "target_modules": None,
         },
     ),
@@ -413,3 +413,53 @@ class TestSequenceClassificationModels(PeftCommonTester):
             if classifier is None:
                 raise ValueError(f"Could not determine classifier layer name for {model_id}, please fix the test")
             assert isinstance(classifier, ModulesToSaveWrapper)
+
+    @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_forward_with_labels(self, model_id, config_cls, config_kwargs):
+        # Check the full forward pass including the loss computation. This is especially relevant for prompt learning
+        # methods, whose sequence classification forward (including the _prefix_tuning_forward fallback for models whose
+        # forward does not accept past_key_values) is implemented in PeftModelForSequenceClassification itself.
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+
+            if getattr(model.config, "pad_token_id", None) is None:
+                # needed for a batched forward pass with sequence classification models like Llama
+                model.config.pad_token_id = 0
+
+            config = config_cls(
+                base_model_name_or_path=model_id,
+                **config_kwargs,
+            )
+            model = get_peft_model(model, config).to(self.torch_device)
+            model.eval()
+
+            inputs = self.prepare_inputs_for_testing()
+            num_labels = model.config.num_labels
+            if num_labels == 1:
+                # a single label means that transformers infers regression as the problem type and uses an MSE loss on
+                # float labels; this is the case for the tiny Llama model, whose head has a single output
+                labels = torch.tensor([0.5, -0.5]).to(self.torch_device)
+            else:
+                labels = torch.tensor([0, num_labels - 1]).to(self.torch_device)
+
+            with torch.no_grad():
+                output = model(**inputs, labels=labels)
+
+            assert output.loss is not None
+            assert torch.isfinite(output.loss)
+            assert output.logits.shape == (2, num_labels)
+
+            if num_labels == 1:
+                expected_loss = torch.nn.functional.mse_loss(output.logits.squeeze().float(), labels)
+            else:
+                # int labels and num_labels > 1 result in single label classification, i.e. plain cross entropy
+                expected_loss = torch.nn.functional.cross_entropy(output.logits.float(), labels)
+            # ensure same dtype for allclose call
+            expected_loss = expected_loss.to(dtype=output.loss.dtype)
+
+            if config_cls == AdaLoraConfig:
+                # AdaLora adds an orthogonal regularization term to the loss, so it does not equal the plain task loss
+                assert output.loss > expected_loss
+            else:
+                assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)

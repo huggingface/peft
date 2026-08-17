@@ -104,6 +104,17 @@ def _get_layer_kv_target_shape(base_config, layer_idx: int) -> tuple[int, int] |
     return num_kv_heads, head_dim
 
 
+def _get_return_dict(config) -> bool:
+    """Default value of `return_dict` from the model config.
+
+    Transformers v5 deprecated the `config.use_return_dict` property in favor of `config.return_dict`, so read the
+    attribute directly. The `torchscript` check replicates the old property's behavior on transformers v4 of never
+    returning dicts in torchscript mode (v5 removed the attribute), see:
+    https://github.com/huggingface/transformers/blob/753d61104116eefc8ffc977327b441ee0c8d599f/src/transformers/configuration_utils.py#L384-L390
+    """
+    return getattr(config, "return_dict", True) and not getattr(config, "torchscript", False)
+
+
 class PeftModel(PushToHubMixin, torch.nn.Module):
     """
     Base model encompassing various Peft methods.
@@ -1855,7 +1866,7 @@ class PeftModelForSequenceClassification(PeftModel):
         task_ids=None,
         **kwargs,
     ):
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = return_dict if return_dict is not None else _get_return_dict(self.config)
         peft_config = self.active_peft_config
         if not peft_config.is_prompt_learning:
             with self._enable_peft_forward_hooks(**kwargs):
@@ -2710,7 +2721,7 @@ class PeftModelForTokenClassification(PeftModel):
         **kwargs,
     ):
         peft_config = self.active_peft_config
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = return_dict if return_dict is not None else _get_return_dict(self.config)
 
         if not peft_config.is_prompt_learning:
             with self._enable_peft_forward_hooks(**kwargs):
@@ -2943,7 +2954,7 @@ class PeftModelForQuestionAnswering(PeftModel):
         **kwargs,
     ):
         peft_config = self.active_peft_config
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = return_dict if return_dict is not None else _get_return_dict(self.config)
 
         if not peft_config.is_prompt_learning:
             if peft_config.peft_type == PeftType.POLY:
