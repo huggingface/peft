@@ -116,14 +116,19 @@ def augment_mtp(sample: list[int], bs: int, num_mtp: int, use_lc_loss: bool):
 class Sampler(nn.Module):
     """Section 2.3"""
 
-    def __init__(self, embedding, unembedding, num_mtp: int, hidden_size: int, skip_last: bool):
+    def __init__(self, embedding, unembedding, num_mtp: int, hidden_size: int, skip_last: bool, recurrent: bool = False):
         super().__init__()
         self.k = num_mtp
         self.hidden_size = hidden_size
         self.skip_last = skip_last
+        self.recurrent = recurrent
 
         self.embedding = embedding
-        self.sampler = SamplerModule(unembedding, hidden_size)
+
+        if recurrent:
+            self.sampler = SamplerModuleRecurrent(unembedding, hidden_size)
+        else:
+            self.sampler = SamplerModule(unembedding, hidden_size)
 
     def forward(self, logits, hidden, offsets):
         # when using LC loss, last sequence in batch has no mask tokens to make
@@ -148,12 +153,23 @@ class Sampler(nn.Module):
         prev_token = ntp_logits.argmax(dim=-1)  # [B, 1]
         all_logits = []
 
+        if self.recurrent:
+            sampler_hidden = torch.zeros(1, mtp_hidden.shape[0], mtp_hidden.shape[-1]).to(logits.device)  # [L, B, H]
+
         for i_k in range(self.k):
             prev_token_emb = self.embedding(prev_token)  # [B, 1, H]
-            sampler_logits = self.sampler(
-                mtp_hidden[:, i_k : i_k + 1],  # [B, 1, H]
-                prev_token_emb,
-            )  # [B, 1, V]
+            if self.recurrent:
+                sampler_logits, sampler_hidden = self.sampler(
+                    mtp_hidden[:, i_k : i_k + 1],  # [b, 1, h]
+                    prev_token_emb,
+                    sampler_hidden,
+                )  # [b, 1, v]
+            else:
+                sampler_logits = self.sampler(
+                    mtp_hidden[:, i_k : i_k + 1],  # [b, 1, h]
+                    prev_token_emb,
+                )  # [b, 1, v]
+
             prev_token = sampler_logits.argmax(dim=-1)  # [B, 1]
             all_logits.append(sampler_logits)
 
@@ -214,6 +230,57 @@ class SamplerModule(torch.nn.Module):
         # Project to vocab using unembedding layer
         logits = F.linear(transformed, self.unembedding.weight)  # [B, T, V]
         return logits
+
+
+class SamplerModuleRecurrent(torch.nn.Module):
+    """Recurrent sampler, similar to SamplerModule but also uses a hidden state
+    to model transitions.
+    """
+
+    def __init__(self, unembedding, hidden_size):
+        super().__init__()
+        self.mlp_pre = nn.Sequential(
+            nn.Linear(hidden_size * 2, hidden_size),
+            nn.SiLU(),
+        )
+        self.rnn = nn.GRU(hidden_size, hidden_size, batch_first=True)
+        self.mlp_post = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size),
+            nn.LayerNorm(hidden_size),
+        )
+
+        # W is the unembedding layer (shared with base model)
+        self.unembedding = unembedding
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        # Make the last layer zero so that we still allow gradients to flow but make
+        # sure that the contribution is zero at the beginning to not add unnecessary noise.
+        torch.nn.init.zeros_(self.mlp_post[-1].weight)
+        if self.mlp_post[-1].bias is not None:
+            torch.nn.init.zeros_(self.mlp_post[-1].bias)
+
+    def forward(self, hidden_states: torch.Tensor, prev_token_embs: torch.Tensor, rnn_hidden) -> torch.Tensor:
+        """
+        Args:
+            hidden_states: [batch, seq_len, hidden_dim] - hidden reps from decoder
+            prev_token_embs: [batch, seq_len, hidden_dim] - embeddings of previously sampled tokens
+        Returns:
+            logits: [batch, seq_len, vocab_size]
+        """
+        # Concatenate [prev_token_emb; hidden_state]
+        combined = torch.cat([prev_token_embs, hidden_states], dim=-1)  # [B, T, 2H]
+        transformed = self.mlp_pre(combined)  # [B, T, H]
+        transformed, rnn_hidden = self.rnn(transformed, rnn_hidden)
+        transformed = self.mlp_post(transformed)
+
+        # Residual: add z_n so the MLP only learns corrections, not the full mapping
+        transformed = transformed + hidden_states  # [B, T, H]
+
+        # Project to vocab using unembedding layer
+        logits = F.linear(transformed, self.unembedding.weight)  # [B, T, V]
+        return logits, rnn_hidden
 
 
 def calculate_lc_loss(hidden_states, offsets, *, num_mtp: int, lc_loss_weight: float):
@@ -731,13 +798,15 @@ def main():
     parser.add_argument("--lr", type=float)
     parser.add_argument("--num_steps", type=int, default=10_000, help="Training steps.")
     parser.add_argument("--warmup_steps", type=int, default=200, help="Training steps for lr ramp-up")
-    parser.add_argument("--decay_steps", type=int, default=None, help="Training steps for lr ramp-down (sqrt). Default: 20% of total steps")
+    parser.add_argument("--decay_steps", type=int, default=None,
+        help="Training steps for lr ramp-down (sqrt). Default: 20%% of total steps")
     parser.add_argument("--output_dir", type=str, default="mtp_model")
     parser.add_argument("--checkpoint_dir", type=str, default="mtp_model_checkpoint")
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--use_sampler", action="store_true", default=False)
     parser.add_argument("--sampler_loss_weight", type=float, default=1.0)
     parser.add_argument("--sampler_detach_hidden_state", action="store_true", default=False)
+    parser.add_argument("--sampler_use_rnn", action="store_true", default=False)
     parser.add_argument("--sampler_lr", type=float)
     parser.add_argument("--lc_loss_weight", type=float, default=1.0)
     parser.add_argument("--use_lc_loss", action="store_true", default=False)
@@ -793,6 +862,7 @@ def main():
         skip_last=args.use_lc_loss,
         embedding=model.get_input_embeddings(),
         unembedding=model.get_output_embeddings(),
+        recurrent=args.sampler_use_rnn,
     ).to(model.device, dtype=torch.bfloat16)
 
     # Create dataset
@@ -882,6 +952,7 @@ def main():
         use_sampler=args.use_sampler,
         sampler_loss_weight=args.sampler_loss_weight,
         sampler_detach_hidden_state=args.sampler_detach_hidden_state,
+        sampler_use_rnn=args.sampler_use_rnn,
         lc_loss_weight=args.lc_loss_weight,
         use_lc_loss=args.use_lc_loss,
         log_step=args.log_step,
