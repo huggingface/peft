@@ -276,5 +276,7 @@
       title: Converting non-LoRA adapters to LoRA
     - local: package_reference/warnings
       title: Warnings emitted by PEFT
+    - local: package_reference/errors
+      title: Errors raised by PEFT
     title: Utilities
   title: API reference
