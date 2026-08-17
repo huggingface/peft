@@ -443,6 +443,8 @@ def calculate_model_match(model, batch, labels, offsets, model_logits, num_mtp, 
 def setup_model_with_masks(model_id: str, num_mtp: int):
     """Load model and extend vocab with k mask tokens."""
     tokenizer = AutoTokenizer.from_pretrained(model_id)
+    tokenizer.padding_side = "right"
+    tokenizer.pad_token = tokenizer.eos_token
 
     # Add mask tokens to tokenizer
     mask_tokens = [f"<mask_{i}>" for i in range(1, num_mtp + 1)]
