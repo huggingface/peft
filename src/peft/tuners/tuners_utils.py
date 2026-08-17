@@ -1066,6 +1066,49 @@ class BaseTuner(nn.Module, ABC):
                     RuntimeWarning,
                 )
 
+        # Warn if target_modules match an unusually low percentage of linear layers. This is especially
+        # relevant for hybrid architectures (e.g. NemotronH, Jamba) where the default target modules may only
+        # cover attention projections, leaving the majority of the model's linear layers frozen. See #3554.
+        if (
+            not uses_dummy_target_modules
+            and getattr(peft_config, "target_modules", None)
+            and self.targeted_module_names
+        ):
+            # After injection, targeted modules are replaced by PEFT wrapper layers (BaseTunerLayer). These
+            # wrappers introduce adapter layers (e.g. lora_A, lora_B) that are themselves nn.Linear, so we
+            # must exclude them when counting the model's original linear layers. We count:
+            # - standalone nn.Linear/Conv1D modules (not inside any wrapper)
+            # - base_layer modules of wrappers (the original modules)
+            wrapper_prefixes = tuple(n + "." for n, m in model.named_modules() if isinstance(m, BaseTunerLayer))
+            total_linear = 0
+            for name, module in model.named_modules():
+                if not isinstance(module, (nn.Linear, Conv1D)):
+                    continue
+                # Skip adapter-introduced layers inside wrappers, but keep base_layer (the original module)
+                if wrapper_prefixes and any(name.startswith(w) for w in wrapper_prefixes):
+                    if not any(name == w + "base_layer" for w in wrapper_prefixes):
+                        continue
+                total_linear += 1
+
+            if total_linear > 0:
+                targeted_names_set = set(self.targeted_module_names)
+                matched_linear = 0
+                for name, module in model.named_modules():
+                    if name not in targeted_names_set:
+                        continue
+                    base = getattr(module, "base_layer", module)
+                    if isinstance(base, (nn.Linear, Conv1D)):
+                        matched_linear += 1
+                if matched_linear / total_linear < 0.3:
+                    warnings.warn(
+                        f"PEFT target modules matched {matched_linear}/{total_linear} linear layers "
+                        f"({100 * matched_linear / total_linear:.1f}%). For hybrid architectures "
+                        "(e.g. NemotronH, Jamba), consider including Mamba/MLP modules (e.g. in_proj, "
+                        "out_proj, gate_proj, up_proj, down_proj) in target_modules. "
+                        "Use model.named_modules() to discover available module names.",
+                        UserWarning,
+                    )
+
         ################
         # HOUSEKEEPING #
         ################

@@ -13,6 +13,7 @@
 # limitations under the License.
 import dataclasses
 import re
+import warnings
 from copy import deepcopy
 
 import diffusers
@@ -644,6 +645,53 @@ class TestExcludedModuleNames:
             if i != 2
         ]
         assert model.targeted_module_names == expected
+
+    def test_low_target_coverage_warning(self):
+        # Model with 10 linear layers, only 1 targeted -> 10% coverage, should warn
+        class ModelWithManyLinears(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 10)
+                self.lin1 = nn.Linear(10, 10)
+                self.lin2 = nn.Linear(10, 10)
+                self.lin3 = nn.Linear(10, 10)
+                self.lin4 = nn.Linear(10, 10)
+                self.lin5 = nn.Linear(10, 10)
+                self.lin6 = nn.Linear(10, 10)
+                self.lin7 = nn.Linear(10, 10)
+                self.lin8 = nn.Linear(10, 10)
+                self.lin9 = nn.Linear(10, 10)
+
+        model = ModelWithManyLinears()
+        with pytest.warns(UserWarning, match="matched 1/10 linear layers"):
+            get_peft_model(model, LoraConfig(target_modules=["lin0"]))
+
+    def test_high_target_coverage_no_warning(self):
+        # Model with 10 linear layers, all targeted -> 100% coverage, should not warn
+        class ModelWithManyLinears(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 10)
+                self.lin1 = nn.Linear(10, 10)
+                self.lin2 = nn.Linear(10, 10)
+                self.lin3 = nn.Linear(10, 10)
+                self.lin4 = nn.Linear(10, 10)
+                self.lin5 = nn.Linear(10, 10)
+                self.lin6 = nn.Linear(10, 10)
+                self.lin7 = nn.Linear(10, 10)
+                self.lin8 = nn.Linear(10, 10)
+                self.lin9 = nn.Linear(10, 10)
+
+        model = ModelWithManyLinears()
+        # Use recwarn to ensure no low-coverage warning is emitted
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            get_peft_model(
+                model,
+                LoraConfig(
+                    target_modules=["lin0", "lin1", "lin2", "lin3", "lin4", "lin5", "lin6", "lin7", "lin8", "lin9"]
+                ),
+            )
 
 
 class TestModelAndLayerStatus:
