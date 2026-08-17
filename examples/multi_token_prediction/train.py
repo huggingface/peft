@@ -870,7 +870,7 @@ def main():
     parser.add_argument("--lr", type=float)
     parser.add_argument("--lr_schedule", choices=["wsd", "cosine"], default="cosine")
     parser.add_argument("--num_steps", type=int, default=10_000, help="Training steps.")
-    parser.add_argument("--warmup_steps", type=int, default=200, help="Training steps for lr ramp-up")
+    parser.add_argument("--warmup_steps", type=int, default=1000, help="Training steps for lr ramp-up")
     parser.add_argument("--decay_steps", type=int, default=None,
         help="Training steps for lr ramp-down (sqrt). Default: 20%% of total steps")
     parser.add_argument("--output_dir", type=str, default="mtp_model")
@@ -880,18 +880,19 @@ def main():
     parser.add_argument("--sampler_loss_weight", type=float, default=1.0)
     parser.add_argument("--sampler_detach_hidden_state", action="store_true", default=False)
     parser.add_argument("--sampler_use_rnn", action="store_true", default=False)
+    parser.add_argument("--sampler_teacher_forcing", action="store_true", default=False)
     parser.add_argument("--sampler_lr", type=float)
-    parser.add_argument("--lc_loss_weight", type=float, default=1.0)
+    parser.add_argument("--lc_loss_weight", type=float, default=3.0)
     parser.add_argument("--tv_loss_weight", type=float, default=0.9)
     parser.add_argument("--use_lc_loss", action="store_true", default=False)
     parser.add_argument("--use_tv_loss", action="store_true", default=False)
     parser.add_argument("--log_step", type=int, default=10)
-    parser.add_argument("--eval_step", type=int, default=200)
+    parser.add_argument("--eval_step", type=int, default=1000)  # eval is expensive, not too often
     parser.add_argument("--checkpoint_step", type=int, default=1000)
-    parser.add_argument("--num_valid", type=int, default=1000)
+    parser.add_argument("--num_valid", type=int, default=200)
     parser.add_argument("--max_grad_norm", type=float, default=2)
 
-    default_lr = 2e-4
+    default_lr = 1e-4
 
     parser.set_defaults(
         sampler_lr=default_lr,
@@ -1024,6 +1025,7 @@ def main():
     # Training loop
     print(f"Starting training for {args.num_steps} steps...")
     model.train()
+    sampler.train()
 
     model.generation_config.pad_token_id = tokenizer.eos_token_id
 
