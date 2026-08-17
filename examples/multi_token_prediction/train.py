@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import time
 from dataclasses import asdict, dataclass
@@ -13,7 +14,7 @@ from datasets import load_dataset
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer, get_cosine_schedule_with_warmup
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import LoraConfig, TaskType, get_peft_model
 
@@ -728,8 +729,9 @@ def main():
     parser.add_argument("--seq_len", type=int, default=128)
     parser.add_argument("--model_id", type=str, default="meta-llama/Llama-3.2-3B")
     parser.add_argument("--lr", type=float)
-    parser.add_argument("--num_steps", type=int, default=5_000, help="Training steps.")
-    parser.add_argument("--warmup_ratio", type=float, default=0.1, help="warmup_ratio * training_steps = warmup_steps")
+    parser.add_argument("--num_steps", type=int, default=10_000, help="Training steps.")
+    parser.add_argument("--warmup_steps", type=int, default=200, help="Training steps for lr ramp-up")
+    parser.add_argument("--decay_steps", type=int, default=None, help="Training steps for lr ramp-down (sqrt). Default: 20% of total steps")
     parser.add_argument("--output_dir", type=str, default="mtp_model")
     parser.add_argument("--checkpoint_dir", type=str, default="mtp_model_checkpoint")
     parser.add_argument("--batch_size", type=int, default=4)
@@ -743,12 +745,22 @@ def main():
     parser.add_argument("--eval_step", type=int, default=200)
     parser.add_argument("--checkpoint_step", type=int, default=1000)
     parser.add_argument("--num_valid", type=int, default=1000)
-    parser.add_argument("--max_grad_norm", type=float, default=10)
+    parser.add_argument("--max_grad_norm", type=float, default=2)
 
     default_lr = 2e-4
-    parser.set_defaults(sampler_lr=default_lr, lr=default_lr)
+
+    parser.set_defaults(
+        sampler_lr=default_lr,
+        lr=default_lr,
+    )
 
     args = parser.parse_args()
+
+    if args.decay_steps is None:
+        args.decay_steps = int(args.num_steps * 0.2)
+
+    if args.warmup_steps + args.decay_steps > args.num_steps:
+        raise ValueError("There is no stable phase. Increase num_steps to be > warum_steps + decay_steps.")
 
     trackio.init(project="mtp-training")
 
@@ -824,13 +836,38 @@ def main():
         ]
     )
 
-    # LR scheduler: linear warmup then cosine decay to 0
-    warmup_steps = int(args.num_steps * args.warmup_ratio)
-    scheduler = get_cosine_schedule_with_warmup(
-        optimizer, num_warmup_steps=warmup_steps, num_training_steps=args.num_steps
+    # Trapezoid learning rate schedule where we have a linear ramp-up, a stable phase and a
+    # square-root decay to 10% of the original LR. Hopefully this let's us observe the model
+    # training behavior in a stable setting while also benefiting from a decay at the end.
+    def wsd_lambda(step, *, total_steps, warmup_steps, decay_steps, floor_ratio=0.1):
+         # 1) warmup: 0 -> 1
+         if step < warmup_steps:
+             return step / max(1, warmup_steps)
+
+         stable_end = total_steps - decay_steps
+
+         # 2) stable: hold peak
+         if step < stable_end:
+             return 1.0
+
+         # 3) decay: 1 -> floor_ratio over the last decay_frac of steps
+         progress = (step - stable_end) / max(1, decay_steps)   # 0 -> 1
+         decay = 1 - math.sqrt(progress)
+         return floor_ratio + (1 - floor_ratio) * decay
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer,
+        lr_lambda=partial(
+            wsd_lambda,
+            total_steps=args.num_steps,
+            warmup_steps=args.warmup_steps,
+            decay_steps=args.decay_steps,
+            floor_ratio=0.1,
+        ),
     )
-    print(f"LR schedule: warmup={warmup_steps} steps, cosine decay over {args.num_steps} steps")
-    print(f"  model lr={args.lr}, sampler lr={args.lr} (x{args.warmup_ratio})")
+
+    print(f"LR schedule: warmup={args.warmup_steps} steps, sqrt decay over {args.decay_steps} steps")
+    print(f"  model lr={args.lr}, sampler lr={args.sampler_lr} (x{args.warmup_steps}, x{args.decay_steps})")
 
     # Training loop
     print(f"Starting training for {args.num_steps} steps...")
@@ -855,7 +892,16 @@ def main():
         max_gradient_norm=args.max_grad_norm,
     )
 
-    trackio.config.update(asdict(train_config))
+    trackio.config.update({
+        'r': args.r,
+        'alpha': args.alpha,
+        'lr': args.lr,
+        'sampler_lr': args.sampler_lr,
+        'seq_len': args.seq_len,
+        'warmup_steps': args.warmup_steps,
+        'decay_steps': args.decay_steps,
+        **asdict(train_config),
+    })
 
     os.makedirs(args.output_dir, exist_ok=True)
 
