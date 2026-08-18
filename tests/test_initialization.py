@@ -43,6 +43,7 @@ from peft import (
     KasaConfig,
     LilyConfig,
     LoftQConfig,
+    LoHaConfig,
     LoKrConfig,
     LoraConfig,
     PeanutConfig,
@@ -6335,3 +6336,107 @@ class TestTinyLoraInitialization:
         model_control = get_peft_model(mlp_control, config_b2, adapter_name="b")
 
         assert len(model.tinylora_v["b"]) == len(model_control.tinylora_v["b"]) == 1
+
+
+class TestLohaInitialization:
+    torch_device = infer_device()
+
+    def get_mlp(self):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+                self.relu = nn.ReLU()
+                self.lin1 = nn.Linear(20, 2, bias=bias)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = X.float()
+                X = self.lin0(X)
+                X = self.relu(X)
+                X = self.lin1(X)
+                X = self.sm(X)
+                return X
+
+        return MLP()
+
+    def get_conv2d(self):
+        class ModelConv2D(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv2d = nn.Conv2d(5, 10, 3, padding=1)
+                self.relu = nn.ReLU()
+                self.flat = nn.Flatten()
+                self.lin0 = nn.Linear(90, 2)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+        return ModelConv2D()
+
+    def test_get_effective_AB_matches_delta_weight(self):
+        torch.manual_seed(0)
+        config = LoHaConfig(target_modules=["lin0", "lin1"], init_weights=False, use_khatri_rao=True)
+        model = get_peft_model(self.get_mlp().to(self.torch_device), config).eval()
+        for layer in [model.base_model.model.lin0, model.base_model.model.lin1]:
+            A, B = layer.get_effective_AB("default")
+            delta_weight = layer.get_delta_weight("default")
+            assert torch.allclose(layer.scaling["default"] * (B @ A), delta_weight, atol=1e-6, rtol=1e-6)
+
+    def test_lora_anchored_init_is_identity_transform(self):
+        torch.manual_seed(0)
+        base_model = self.get_mlp().to(self.torch_device).eval()
+
+        x = torch.randn(5, 10).to(self.torch_device)
+        with torch.inference_mode():
+            output_base = base_model(x)
+
+        config = LoHaConfig(target_modules=["lin0", "lin1"], use_khatri_rao=True)
+        model = get_peft_model(base_model, config).eval()
+        with torch.inference_mode():
+            output_peft = model(x)
+        assert torch.allclose(output_base, output_peft, atol=1e-6, rtol=1e-6)
+
+        # the second factor pair is anchored to the all-ones matrix, so that training starts out as a plain LoRA
+        layer = model.base_model.model.lin0
+        w2 = layer.hada_w2_a["default"] @ layer.hada_w2_b["default"]
+        assert torch.allclose(w2, torch.ones_like(w2))
+
+    def test_rank_dropout_active_on_factored_path(self):
+        torch.manual_seed(0)
+        config = LoHaConfig(target_modules=["lin0"], init_weights=False, rank_dropout=0.5, use_khatri_rao=True)
+        model = get_peft_model(self.get_mlp().to(self.torch_device), config)
+        layer = model.base_model.model.lin0
+
+        layer.train()
+        _, B_1 = layer.get_effective_AB("default")
+        _, B_2 = layer.get_effective_AB("default")
+        # rank dropout fully masks random rows of B, so two draws should differ
+        assert (B_1 == 0).all(dim=1).any()
+        assert not torch.allclose(B_1, B_2)
+
+        layer.eval()
+        _, B_1 = layer.get_effective_AB("default")
+        _, B_2 = layer.get_effective_AB("default")
+        assert torch.allclose(B_1, B_2)
+
+    def test_get_effective_AB_raises_for_tucker(self):
+        # also target lin0, since use_khatri_rao requires at least one layer that supports the factored path
+        config = LoHaConfig(target_modules=["conv2d", "lin0"], use_effective_conv2d=True, use_khatri_rao=True)
+        model = get_peft_model(self.get_conv2d().to(self.torch_device), config)
+        layer = model.base_model.model.conv2d
+        msg = "get_effective_AB does not support the Tucker decomposition"
+        with pytest.raises(ValueError, match=msg):
+            layer.get_effective_AB("default")
+
+    def test_use_khatri_rao_resolved_per_layer(self):
+        # the conv2d layer uses the Tucker decomposition, so only lin0 uses the factored path
+        config = LoHaConfig(target_modules=["conv2d", "lin0"], use_effective_conv2d=True, use_khatri_rao=True)
+        model = get_peft_model(self.get_conv2d().to(self.torch_device), config)
+        assert model.base_model.model.conv2d.use_khatri_rao["default"] is False
+        assert model.base_model.model.lin0.use_khatri_rao["default"] is True
+
+    def test_use_khatri_rao_without_supporting_layer_raises(self):
+        # if no targeted layer supports the factored path, the option would silently be without effect, so it raises
+        config = LoHaConfig(target_modules=["conv2d"], use_effective_conv2d=True, use_khatri_rao=True)
+        msg = "none of the targeted layers support the Khatri-Rao factored path"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(self.get_conv2d().to(self.torch_device), config)

@@ -106,14 +106,34 @@ def _convert_miss_module_to_lora(
 
 
 @torch.no_grad()
+def _convert_loha_module_to_lora(module, adapter_name: str = "default") -> tuple[torch.Tensor, torch.Tensor, int]:
+    """Convert a single LoHa layer to LoRA A and B matrices.
+
+    Via the Khatri-Rao identity, the LoHa delta weight is exactly a rank r² LoRA, so the exact factors are returned
+    directly without SVD and without materializing the delta weight. The effective rank is r².
+    """
+    A, B = module.get_effective_AB(adapter_name)
+    lora_A = A.contiguous()
+    lora_B = (module.scaling[adapter_name] * B).contiguous()
+    return lora_A, lora_B, lora_A.shape[0]
+
+
+@torch.no_grad()
 def _convert_module_to_lora(
     module: BaseTunerLayer, rank: float, adapter_name: str = "default"
 ) -> tuple[torch.Tensor, torch.Tensor, int]:
     """Convert a single BaseTunerLayer's adapter weight to a LoRA weight, return A, B, and the effective rank."""
+    from peft.tuners.loha.layer import Linear as LoHaLinear
     from peft.tuners.miss.layer import MissLinear
 
     if isinstance(module, MissLinear):
         return _convert_miss_module_to_lora(module, rank, adapter_name)
+
+    if isinstance(module, LoHaLinear) and isinstance(rank, int) and (rank >= module.r[adapter_name] ** 2):
+        # For LoHa, an exact conversion with rank r² exists (LoHa linear layers never use the Tucker decomposition).
+        # Use it if it doesn't require more than the requested rank; otherwise, fall through to the SVD-based
+        # approximation to honor the requested rank or threshold.
+        return _convert_loha_module_to_lora(module, adapter_name)
 
     delta_weight = module.get_delta_weight(adapter_name)
     # Note: Explore different algorithms (truncated, randomized, ...) to see if they are more efficient
