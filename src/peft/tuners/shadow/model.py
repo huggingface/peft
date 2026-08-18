@@ -41,6 +41,17 @@ from .layers import DetachedShadowModel, ShadowCache, ShadowCarrier, ShadowLayer
 # --------------------------------------------------------------------------------------------------- backbone helpers
 
 
+_SHADOW_ADAPTER_CONTAINERS = (
+    "shadow_backbone",
+    "shadow_projection",
+    "shadow_head",
+    "shadow_down",
+    "shadow_up",
+    "shadow_update_transform",
+    "shadow_update_gate",
+)
+
+
 def _is_flux_like(model: nn.Module) -> bool:
     """Diffusers Flux / Flux2 transformers expose `transformer_blocks` instead of HF `layers`/`h`."""
     return isinstance(getattr(model, "single_transformer_blocks", None), nn.ModuleList) or (
@@ -238,6 +249,23 @@ class ShadowModel(BaseTuner):
     prefix: str = "shadow_"
     tuner_layer_cls = ShadowLayer
     target_module_mapping: dict = {}
+
+    # ----------------------------------------------------------------------------------------------- serialization
+
+    @classmethod
+    def _remove_adapter_name_from_key(cls, key: str, adapter_name: str) -> str:
+        """Map nested Shadow adapter keys to the canonical checkpoint name.
+
+        Unlike most tuners, Shadow stores complete modules in adapter-keyed containers, so the adapter name can occur
+        in the middle of a key (for example, `shadow_backbone.my_adapter.layers.0...`). The generic implementation only
+        handles names at the end or immediately before `.weight`. Canonicalizing these keys to `default` preserves the
+        existing Shadow checkpoint format; the base loading hook derives the inverse mapping from this method.
+        """
+        for container in _SHADOW_ADAPTER_CONTAINERS:
+            marker = f"{container}.{adapter_name}."
+            if marker in key:
+                return key.replace(marker, f"{container}.default.")
+        return super()._remove_adapter_name_from_key(key, adapter_name)
 
     # ---------------------------------------------------------------------------------------------- config / setup
 
