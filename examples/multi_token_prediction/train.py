@@ -161,7 +161,7 @@ class Sampler(nn.Module):
         mtp_hidden = torch.stack(mtp_hidden, dim=0)  # [B, K, H]
         if self.teacher_forcing:
             mtp_logits = torch.stack(mtp_logits, dim=0)  # [B, K, V]
-        prev_token = ntp_logits.argmax(dim=-1)  # [B, 1]
+        prev_token = ntp_logits.argmax(dim=-1).detach()  # [B, 1]
         all_logits = []
 
         if self.recurrent:
@@ -171,18 +171,18 @@ class Sampler(nn.Module):
             prev_token_emb = self.embedding(prev_token)  # [B, 1, H]
             if self.recurrent:
                 sampler_logits, sampler_hidden = self.sampler(
-                    mtp_hidden[:, i_k : i_k + 1],  # [b, 1, h]
+                    mtp_hidden[:, i_k : i_k + 1],  # [B, 1, H]
                     prev_token_emb,
                     sampler_hidden,
-                )  # [b, 1, v]
+                )  # [B, 1, V]
             else:
                 sampler_logits = self.sampler(
-                    mtp_hidden[:, i_k : i_k + 1],  # [b, 1, h]
+                    mtp_hidden[:, i_k : i_k + 1],  # [B, 1, H]
                     prev_token_emb,
-                )  # [b, 1, v]
+                )  # [B, 1, V]
 
             if self.training and self.teacher_forcing:
-                prev_token = mtp_logits[:, i_k].argmax(dim=-1, keepdims=True)  # [B, V] -> [B, 1]
+                prev_token = mtp_logits[:, i_k].argmax(dim=-1, keepdims=True).detach()  # [B, V] -> [B, 1]
             else:
                 prev_token = sampler_logits.argmax(dim=-1)  # [B, 1]
             all_logits.append(sampler_logits)
