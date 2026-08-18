@@ -24,7 +24,6 @@ from transformers import (
     Cache,
     LlamaConfig,
     LlamaModel,
-    PretrainedConfig,
 )
 
 from peft import (
@@ -33,6 +32,7 @@ from peft import (
     get_peft_model,
 )
 from peft.tuners.shadow import DetachedShadowModel, ShadowCache
+from peft.tuners.shadow.diffusers import DetachedFluxShadowBlock, DetachedFluxShadowModel
 from peft.tuners.shadow.layers import ShadowLayer
 from peft.utils.constants import SAFETENSORS_WEIGHTS_NAME
 
@@ -623,6 +623,7 @@ class TestShadowBackboneVariants:
 
 class _TinyDiTConfig:
     model_type = "tiny_dit"
+    in_channels = 8
     num_attention_heads = 2
     attention_head_dim = 4
 
@@ -702,13 +703,318 @@ class TestShadowDiffusionTransformer:
         model = self._make_peft_model()
         shadow = model.base_model.unload_shadow(copy=True)
 
-        assert isinstance(shadow, DetachedShadowModel)
-        assert isinstance(shadow.config, PretrainedConfig)
-        assert shadow.backbone is not model.base_model.shadow_backbone["default"]
+        assert isinstance(shadow, _TinyDiT)
+        assert shadow.config is not model.base_model.model.config
+        assert len(shadow.single_transformer_blocks) == 1
+        shadow_block = shadow.single_transformer_blocks[0]
+        assert isinstance(shadow_block, DetachedFluxShadowBlock)
+        assert shadow_block.backbone is not model.base_model.shadow_backbone["default"]
+        # Building the detached model must not replace the original model's adapted block stack.
+        assert len(model.base_model.model.single_transformer_blocks) == 3
+        assert all(isinstance(block, ShadowLayer) for block in model.base_model.model.single_transformer_blocks)
 
         hidden_states = torch.randn(2, 5, model.base_model.model.config.hidden_dim)
-        output = shadow(inputs_embeds=hidden_states)
+        output = shadow(hidden_states=hidden_states)
         assert output.shape == hidden_states.shape
+
+    def test_unload_shadow_matches_flux2_pipeline_contract(self):
+        diffusers = pytest.importorskip("diffusers")
+        transformer_cls = getattr(diffusers, "Flux2Transformer2DModel", None)
+        if transformer_cls is None:
+            pytest.skip("The installed Diffusers version does not provide Flux2Transformer2DModel.")
+
+        base = transformer_cls(
+            in_channels=4,
+            out_channels=4,
+            num_layers=1,
+            num_single_layers=2,
+            attention_head_dim=8,
+            num_attention_heads=1,
+            joint_attention_dim=8,
+            timestep_guidance_channels=8,
+            mlp_ratio=2.0,
+            axes_dims_rope=(2, 2, 2, 2),
+            guidance_embeds=False,
+        )
+        base.enable_gradient_checkpointing()
+        model = get_peft_model(
+            base,
+            ShadowConfig(
+                target_modules=r"single_transformer_blocks\.\d+$",
+                share_embeddings=True,
+                shadow_num_hidden_layers=1,
+            ),
+        )
+        inputs = {
+            "hidden_states": torch.randn(1, 4, 4),
+            "encoder_hidden_states": torch.randn(1, 3, 8),
+            "timestep": torch.tensor([0.5]),
+            "img_ids": torch.zeros(1, 4, 4),
+            "txt_ids": torch.zeros(1, 3, 4),
+            "guidance": None,
+            "return_dict": False,
+        }
+        with torch.no_grad():
+            attached_output = model(**inputs)[0]
+        assert attached_output.shape == inputs["hidden_states"].shape
+
+        shadow_backbone = model.base_model.shadow_backbone["default"]
+        assert isinstance(shadow_backbone, DetachedFluxShadowModel)
+        assert shadow_backbone.model.x_embedder.shared_module is model.base_model.model.x_embedder
+        assert not any("x_embedder.weight" in key for key in shadow_backbone.state_dict())
+        detached = model.base_model.unload_shadow()
+        assert isinstance(detached, transformer_cls)
+        assert detached.config.in_channels == base.config.in_channels
+        assert detached.config.num_layers == 1
+        assert detached.config.num_single_layers == 2
+        assert len(detached.single_transformer_blocks) == 2
+        assert len(model.base_model.model.single_transformer_blocks) == 2
+        source_last_block = model.base_model.model.single_transformer_blocks[-1].base_layer
+        assert torch.allclose(
+            next(detached.single_transformer_blocks[-1].parameters()),
+            next(source_last_block.parameters()),
+        )
+
+        with torch.no_grad(), detached.cache_context("cond"):
+            output = detached(**inputs)[0]
+        assert output.shape == inputs["hidden_states"].shape
+
+        # A standalone diffusion loss must train components used only by the detached model, not just the shared
+        # single-stream blocks that seed the attached Shadow path.
+        model.zero_grad()
+        attached_output = model(**inputs)[0]
+        detached_output = detached(**inputs)[0]
+        (attached_output.square().mean() + 0.05 * detached_output.square().mean()).backward()
+        assert next(shadow_backbone.model.transformer_blocks[0].parameters()).grad is not None
+        assert shadow_backbone.model.x_embedder.weight.grad is None
+
+        copied = model.base_model.unload_shadow(copy=True)
+        assert not hasattr(copied.x_embedder, "shared_module")
+        assert "x_embedder.weight" in copied.state_dict()
+
+    def test_explicit_flux2_shadow_checkpoint_attached_detached_and_roundtrip(self, tmp_path):
+        diffusers = pytest.importorskip("diffusers")
+        transformer_cls = getattr(diffusers, "Flux2Transformer2DModel", None)
+        if transformer_cls is None:
+            pytest.skip("The installed Diffusers version does not provide Flux2Transformer2DModel.")
+
+        common = {
+            "in_channels": 4,
+            "out_channels": 4,
+            "attention_head_dim": 8,
+            "joint_attention_dim": 8,
+            "timestep_guidance_channels": 8,
+            "axes_dims_rope": (2, 2, 2, 2),
+            "guidance_embeds": False,
+        }
+        base = transformer_cls(num_layers=2, num_single_layers=2, num_attention_heads=2, mlp_ratio=2.0, **common)
+        shadow = transformer_cls(num_layers=1, num_single_layers=1, num_attention_heads=1, mlp_ratio=2.0, **common)
+        shadow_path = tmp_path / "shadow"
+        shadow.save_pretrained(shadow_path)
+        model = get_peft_model(
+            base,
+            ShadowConfig(
+                target_modules=r"single_transformer_blocks\.\d+$",
+                shadow_model=str(shadow_path),
+                share_embeddings=False,
+            ),
+        )
+        backbone = model.base_model.shadow_backbone["default"]
+        projection = model.base_model.shadow_projection["default"]
+        assert isinstance(backbone, DetachedFluxShadowModel)
+        assert (projection.in_features, projection.out_features) == (8, 16)
+        assert torch.equal(projection.weight[:8], torch.eye(8))
+        assert not backbone.model.x_embedder.weight.requires_grad
+        assert next(backbone.model.single_transformer_blocks.parameters()).requires_grad
+        assert next(backbone.model.norm_out.parameters()).requires_grad
+
+        inputs = {
+            "hidden_states": torch.randn(1, 4, 4),
+            "encoder_hidden_states": torch.randn(1, 3, 8),
+            "timestep": torch.tensor([0.5]),
+            "img_ids": torch.zeros(1, 4, 4),
+            "txt_ids": torch.zeros(1, 3, 4),
+            "guidance": None,
+            "return_dict": False,
+        }
+        output = model(**inputs)[0]
+        output.square().mean().backward()
+        assert next(backbone.model.single_transformer_blocks.parameters()).grad is not None
+        detached = model.base_model.unload_shadow()
+        assert detached is backbone.model
+        assert detached(**inputs)[0].shape == inputs["hidden_states"].shape
+        copied = model.base_model.unload_shadow(copy=True)
+        assert copied is not detached
+        assert torch.equal(copied.x_embedder.weight, detached.x_embedder.weight)
+
+        adapter_path = tmp_path / "adapter"
+        model.save_pretrained(adapter_path)
+        reloaded = PeftModel.from_pretrained(
+            transformer_cls(num_layers=2, num_single_layers=2, num_attention_heads=2, mlp_ratio=2.0, **common),
+            adapter_path,
+            is_trainable=True,
+        )
+        assert isinstance(reloaded.base_model.shadow_backbone["default"], DetachedFluxShadowModel)
+        assert reloaded.base_model.unload_shadow()(**inputs)[0].shape == inputs["hidden_states"].shape
+
+    def test_explicit_flux2_shadow_rejects_incompatible_contract(self, tmp_path):
+        diffusers = pytest.importorskip("diffusers")
+        transformer_cls = getattr(diffusers, "Flux2Transformer2DModel", None)
+        if transformer_cls is None:
+            pytest.skip("The installed Diffusers version does not provide Flux2Transformer2DModel.")
+        base = transformer_cls(
+            in_channels=4,
+            out_channels=4,
+            num_layers=1,
+            num_single_layers=1,
+            attention_head_dim=8,
+            num_attention_heads=1,
+            joint_attention_dim=8,
+            timestep_guidance_channels=8,
+            mlp_ratio=2.0,
+            axes_dims_rope=(2, 2, 2, 2),
+            guidance_embeds=False,
+        )
+        incompatible = transformer_cls.from_config({**dict(base.config), "out_channels": 8})
+        incompatible.save_pretrained(tmp_path)
+        with pytest.raises(ValueError, match="incompatible `out_channels`"):
+            get_peft_model(
+                base,
+                ShadowConfig(
+                    target_modules=r"single_transformer_blocks\.\d+$",
+                    shadow_model=str(tmp_path),
+                ),
+            )
+        with pytest.raises(ValueError, match="mirror-only overrides"):
+            ShadowConfig(shadow_model=str(tmp_path), shadow_hidden_size=8)
+
+    def test_compact_flux2_shadow_uses_width_overrides_and_structured_pretrained_weights(self):
+        diffusers = pytest.importorskip("diffusers")
+        transformer_cls = getattr(diffusers, "Flux2Transformer2DModel", None)
+        if transformer_cls is None:
+            pytest.skip("The installed Diffusers version does not provide Flux2Transformer2DModel.")
+
+        base = transformer_cls(
+            in_channels=4,
+            out_channels=4,
+            num_layers=2,
+            num_single_layers=2,
+            attention_head_dim=8,
+            num_attention_heads=2,
+            joint_attention_dim=8,
+            timestep_guidance_channels=8,
+            mlp_ratio=2.0,
+            axes_dims_rope=(2, 2, 2, 2),
+            guidance_embeds=False,
+        )
+        source_single = base.single_transformer_blocks[-1]
+        with torch.no_grad():
+            source_single.attn.to_qkv_mlp_proj.weight.copy_(
+                torch.arange(source_single.attn.to_qkv_mlp_proj.weight.numel()).reshape_as(
+                    source_single.attn.to_qkv_mlp_proj.weight
+                )
+            )
+            source_single.attn.to_out.weight.copy_(
+                torch.arange(source_single.attn.to_out.weight.numel()).reshape_as(source_single.attn.to_out.weight)
+            )
+
+        base_param_count = sum(parameter.numel() for parameter in base.parameters())
+        model = get_peft_model(
+            base,
+            ShadowConfig(
+                target_modules=r"single_transformer_blocks\.\d+$",
+                share_embeddings=True,
+                shadow_num_hidden_layers=1,
+                shadow_hidden_size=8,
+                shadow_num_attention_heads=1,
+                shadow_intermediate_size=8,
+            ),
+        )
+        backbone = model.base_model.shadow_backbone["default"]
+        projection = model.base_model.shadow_projection["default"]
+        detached = model.base_model.unload_shadow()
+
+        assert detached.config.num_attention_heads == 1
+        assert detached.config.attention_head_dim == 8
+        assert detached.config.mlp_ratio == 1.0
+        assert not hasattr(detached.x_embedder, "shared_module")
+        assert (projection.in_features, projection.out_features) == (8, 16)
+        assert torch.equal(projection.weight[:8], torch.eye(8))
+        assert torch.count_nonzero(projection.weight[8:]) == 0
+        assert sum(parameter.numel() for parameter in detached.parameters()) < base_param_count / 4
+
+        source_qkv_mlp = source_single.attn.to_qkv_mlp_proj.weight
+        expected_qkv_mlp = torch.cat(
+            (
+                source_qkv_mlp[0:8, :8],
+                source_qkv_mlp[16:24, :8],
+                source_qkv_mlp[32:40, :8],
+                source_qkv_mlp[48:56, :8],
+                source_qkv_mlp[80:88, :8],
+            )
+        )
+        assert torch.equal(detached.single_transformer_blocks[-1].attn.to_qkv_mlp_proj.weight, expected_qkv_mlp)
+        expected_out = torch.cat(
+            (source_single.attn.to_out.weight[:8, :8], source_single.attn.to_out.weight[:8, 16:24]), dim=1
+        )
+        assert torch.equal(detached.single_transformer_blocks[-1].attn.to_out.weight, expected_out)
+
+        inputs = {
+            "hidden_states": torch.randn(1, 4, 4),
+            "encoder_hidden_states": torch.randn(1, 3, 8),
+            "timestep": torch.tensor([0.5]),
+            "img_ids": torch.zeros(1, 4, 4),
+            "txt_ids": torch.zeros(1, 3, 4),
+            "guidance": None,
+            "return_dict": False,
+        }
+        attached_output = model(**inputs)[0]
+        detached_output = detached(**inputs)[0]
+        assert attached_output.shape == detached_output.shape == inputs["hidden_states"].shape
+        (attached_output.square().mean() + detached_output.square().mean()).backward()
+        assert next(backbone.model.transformer_blocks[0].parameters()).grad is not None
+        assert backbone.model.x_embedder.weight.grad is not None
+        assert model.base_model.model.x_embedder.weight.grad is None
+
+        copied = model.base_model.unload_shadow(copy=True)
+        assert copied is not detached
+        assert copied.x_embedder is not detached.x_embedder
+
+    @pytest.mark.parametrize(
+        ("hidden_size", "num_heads", "match"),
+        [
+            (10, 1, "preserve the base attention head dimension"),
+            (None, 3, "must be between 1"),
+        ],
+    )
+    def test_compact_flux2_shadow_rejects_invalid_width(self, hidden_size, num_heads, match):
+        diffusers = pytest.importorskip("diffusers")
+        transformer_cls = getattr(diffusers, "Flux2Transformer2DModel", None)
+        if transformer_cls is None:
+            pytest.skip("The installed Diffusers version does not provide Flux2Transformer2DModel.")
+
+        base = transformer_cls(
+            in_channels=4,
+            out_channels=4,
+            num_layers=1,
+            num_single_layers=2,
+            attention_head_dim=8,
+            num_attention_heads=2,
+            joint_attention_dim=8,
+            timestep_guidance_channels=8,
+            mlp_ratio=2.0,
+            axes_dims_rope=(2, 2, 2, 2),
+            guidance_embeds=False,
+        )
+        with pytest.raises(ValueError, match=match):
+            get_peft_model(
+                base,
+                ShadowConfig(
+                    target_modules=r"single_transformer_blocks\.\d+$",
+                    shadow_hidden_size=hidden_size,
+                    shadow_num_attention_heads=num_heads,
+                ),
+            )
 
     def test_gradient_checkpointing_matches_the_uncheckpointed_run(self):
         # Gradient checkpointing runs the wrapped blocks a second time during recomputation, so the deferred seeding
