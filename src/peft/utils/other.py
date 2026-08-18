@@ -36,7 +36,12 @@ from packaging import version
 from safetensors.torch import storage_ptr, storage_size
 from transformers import PreTrainedModel
 
-from ..import_utils import is_gptqmodel_available, is_torch_tpu_available, is_transformers_ge_v5_1_0
+from ..import_utils import (
+    is_gptqmodel_available,
+    is_torch_tpu_available,
+    is_transformers_ge_v5,
+    is_transformers_ge_v5_1_0,
+)
 from .constants import (
     CONFIG_NAME,
     EMBEDDING_LAYER_NAMES,
@@ -1701,16 +1706,28 @@ def create_attention_mask(
         token_type_ids = getattr(model_input, "token_type_ids", None)
         # Some models may overwrite the general one
         causal_mask_creation_function = getattr(model, "create_masks_for_generate", create_masks_for_generate)
-        attention_mask = causal_mask_creation_function(
-            config=model.config,
-            # we only need batch size, seq_length and dtype here - we don't care about the values of the embeddings
-            input_embeds=torch.empty((batch_size, sequence_length), dtype=model.dtype),
-            attention_mask=attention_mask,
-            cache_position=cache_position,
-            past_key_values=past_key_values,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-        )
+        # we only need batch size, seq_length and dtype here - we don't care about the values of the embeddings
+        dummy_embeds = torch.empty((batch_size, sequence_length), dtype=model.dtype)
+        if is_transformers_ge_v5:
+            # transformers v5 renamed the input_embeds argument to inputs_embeds and removed cache_position
+            attention_mask = causal_mask_creation_function(
+                config=model.config,
+                inputs_embeds=dummy_embeds,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values,
+                token_type_ids=token_type_ids,
+                position_ids=position_ids,
+            )
+        else:
+            attention_mask = causal_mask_creation_function(
+                config=model.config,
+                input_embeds=dummy_embeds,
+                attention_mask=attention_mask,
+                cache_position=cache_position,
+                past_key_values=past_key_values,
+                token_type_ids=token_type_ids,
+                position_ids=position_ids,
+            )
     else:
         attention_mask = causal_mask_creation_function(
             attention_mask,
