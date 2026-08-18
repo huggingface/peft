@@ -217,7 +217,7 @@ class ShadowConfig(PeftConfig):
             raise ValueError("`layers_to_transform` cannot be used when `target_modules` is a str.")
         if isinstance(self.target_modules, str) and self.layers_pattern is not None:
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
-        if self.layers_pattern and not self.layers_to_transform:
+        if self.layers_pattern and self.layers_to_transform is None:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified.")
         if self.shadow_model != "mirror":
             mirror_overrides = {
