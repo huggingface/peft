@@ -182,7 +182,7 @@ class Sampler(nn.Module):
                 )  # [b, 1, v]
 
             if self.training and self.teacher_forcing:
-                prev_token = mtp_logits[:, i_k].argmax(dim=-1)  # [B, 1]
+                prev_token = mtp_logits[:, i_k].argmax(dim=-1, keepdims=True)  # [B, V] -> [B, 1]
             else:
                 prev_token = sampler_logits.argmax(dim=-1)  # [B, 1]
             all_logits.append(sampler_logits)
