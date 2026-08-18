@@ -1,6 +1,6 @@
 {
   "auto_mapping": null,
-  "auxiliary_loss_weight": 0.05,
+  "auxiliary_loss_weight": 0.01,
   "base_model_name_or_path": null,
   "exclude_modules": null,
   "inference_mode": false,
