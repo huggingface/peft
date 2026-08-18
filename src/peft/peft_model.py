@@ -1096,6 +1096,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 only affect select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the
                 corresponding layer.
         """
+        if adapter_name in self.peft_config:
+            raise ValueError(f"Adapter with name '{adapter_name}' already exists.")
+
         prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(peft_config.peft_type)
         if prefix and adapter_name in prefix:
             warnings.warn(

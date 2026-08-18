@@ -234,6 +234,9 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
                 only affect select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the
                 corresponding layer.
         """
+        if adapter_name in self.peft_config:
+            raise ValueError(f"Adapter with name '{adapter_name}' already exists.")
+
         _check_config_compatible(peft_config)
 
         try:
