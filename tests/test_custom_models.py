@@ -24,8 +24,10 @@ from unittest.mock import MagicMock
 
 import pytest
 import torch
+import torch.distributed as dist
 from safetensors.torch import load_file as safe_load_file
 from torch import nn
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
 from transformers.pytorch_utils import Conv1D
 
@@ -71,6 +73,8 @@ from peft import (
     VeraConfig,
     WaveFTConfig,
     get_peft_model,
+    get_peft_model_state_dict,
+    set_peft_model_state_dict,
 )
 from peft.tuners import lora
 from peft.tuners.lora.config import BdLoraConfig
@@ -2012,6 +2016,26 @@ class ModelEmbWithEmbeddingUtils(nn.Module):
         X = self.lin0(X)
         X = self.sm(X)
         return X
+
+    def get_input_embeddings(self):
+        return self.embed_tokens
+
+    def get_output_embeddings(self):
+        return None
+
+
+class ModelEmbWithSibling(nn.Module):
+    # Like ModelEmbWithEmbeddingUtils, but with a frozen module whose name has the embedding module name as a prefix,
+    # i.e. "embed_tokens_extra" next to "embed_tokens".
+    def __init__(self):
+        super().__init__()
+        self.embed_tokens = nn.Embedding(100, 5)
+        # same shape, same prefix
+        self.embed_tokens_extra = nn.Embedding(100, 5)
+        self.lin0 = nn.Linear(5, 2)
+
+    def forward(self, X):
+        return self.lin0(self.embed_tokens(X) + self.embed_tokens_extra(X))
 
     def get_input_embeddings(self):
         return self.embed_tokens
@@ -4309,6 +4333,32 @@ class TestPeftCustomModel(PeftCommonTester):
             except PermissionError:
                 # windows error
                 pass
+
+    def test_save_embedding_layers_excludes_similarly_named_sibling(self, tmp_path):
+        # A module whose name merely starts with the embedding module name is not an embedding layer and must not be
+        # swept into the checkpoint by the key selection.
+        model = ModelEmbWithSibling()
+        model = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
+        model.save_pretrained(tmp_path, save_embedding_layers=True)
+
+        state_dict = safe_load_file(tmp_path / "adapter_model.safetensors")
+        assert "base_model.model.embed_tokens.weight" in state_dict  # sanity check
+        assert not any("embed_tokens_extra" in key for key in state_dict)
+
+    def test_load_does_not_overwrite_similarly_named_sibling(self, tmp_path):
+        # The leaked key is not reported in unexpected_keys, so loading such a checkpoint would silently overwrite a
+        # frozen base model weight of the target model.
+        model = ModelEmbWithSibling()
+        model = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
+        model.save_pretrained(tmp_path, save_embedding_layers=True)
+        del model
+
+        model = ModelEmbWithSibling()
+        with torch.no_grad():
+            model.embed_tokens_extra.weight.fill_(123.0)
+        target = PeftModel.from_pretrained(model, tmp_path)
+        extra_weight = target.base_model.model.embed_tokens_extra.weight
+        assert torch.allclose(extra_weight, torch.full_like(extra_weight, 123.0))
 
     @pytest.mark.parametrize(
         "config0",
@@ -7582,3 +7632,132 @@ class TestDefaultTargetModules:
         model = get_peft_model(model, config)
         assert model.targeted_module_names == ["lin0", "lin1"]
         assert model.peft_config["default"].target_modules == {"lin0", "lin1"}
+
+
+@pytest.mark.skipif(platform.system() != "Linux", reason="Run FSDP tests only on Linux")
+@pytest.mark.skipif(not dist.is_available(), reason="These tests require torch.distributed")
+class TestPeftFsdpStateDict:
+    """
+    Tests with FSDP-wrapped models.
+
+    FSDP is a special case because it wraps the whole module, thus modifying the module structure and state dict.
+
+    This test would be better suited to `test_low_level_api.py` but it's put here because we already have all the
+    machinery ready to check each PEFT method.
+    """
+
+    transformers_class = MockTransformerWrapper
+    torch_device = infer_device()
+
+    def prepare_inputs_for_testing(self):
+        X = torch.arange(90).view(9, 10).to(self.torch_device)
+        return {"X": X}
+
+    @pytest.fixture(autouse=True, scope="class")
+    def fsdp_process_group(self):
+        # robust and minimal FSDP setup
+        dist.init_process_group(
+            backend="gloo",
+            store=dist.HashStore(),
+            rank=0,
+            world_size=1,
+        )
+        try:
+            yield
+        finally:
+            dist.destroy_process_group()
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_save_load_roundtrip_fsdp_wrapped(self, test_name, model_id, config_cls, config_kwargs):
+        # using get_peft_model_state_dict & set_peft_model_state_dict because instead of save_pretrained &
+        # from_pretrained because:
+        #   1. avoid disk, do everything in memory
+        #   2. ensures that this works with PEFT integrations like Transformers, Diffusers
+        if config_kwargs.get("target_parameters"):
+            pytest.skip("Skipping FSDP + target_paramters because of clash with nn.utils.parametrize on sharded model")
+        if (config_cls == DeftConfig) and config_kwargs.get("para"):
+            pytest.skip(reason="DEFT with PaRa does not change the base output")
+
+        config_kwargs_init_false = set_init_weights_false(config_cls, config_kwargs)
+        config = config_cls(**config_kwargs_init_false)
+        torch.manual_seed(0)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config).eval()
+        model = FSDP(model, use_orig_params=True, device_id=self.torch_device)
+
+        X = self.prepare_inputs_for_testing()
+        with torch.no_grad():
+            output_before = model(**X)
+
+        state_dict = get_peft_model_state_dict(model)
+        del model
+
+        torch.manual_seed(0)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config_cls(**config_kwargs)).eval()
+        # note: we don't make a sanity check that without setting the state dict, the results differ; this is on
+        # purpose, because otherwise we can't check PEFT methods that don't have non-identity inits
+        set_peft_model_state_dict(model, state_dict)
+
+        with torch.no_grad():
+            output_after = model(**X)
+        assert torch.allclose(output_after, output_before)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    @pytest.mark.parametrize("bias_arg", ["bias_all", "bias_peft_method_only"])
+    def test_save_load_roundtrip_fsdp_wrapped_learnable_bias(
+        self, test_name, model_id, config_cls, config_kwargs, bias_arg
+    ):
+        # Same test as test_save_load_roundtrip_fsdp_wrapped, but for the specific case that the bias is
+        # learnable. Regarding the `bias` argument, there are normally 3 possibilities:
+        # 1. It's not supported: test is skipped
+        # 2. `bias="all"`: all bias parameters on the model are made learnable
+        # 3. `bias="<peft-method-name>_only", e.g. "lora_only": only the biases on targeted modules are learnable
+        if config_kwargs.get("target_parameters"):
+            pytest.skip("Skipping FSDP + target_paramters")
+        if (config_cls == DeftConfig) and config_kwargs.get("para"):
+            pytest.skip(reason="DEFT with PaRa does not change the base output")
+
+        config_kwargs_init_false = set_init_weights_false(config_cls, config_kwargs)
+        config = config_cls(**config_kwargs_init_false)
+        if not hasattr(config, "bias"):
+            pytest.skip(reason="This test requires the PEFT method to support training the bias directly")
+
+        # Manually enable bias learning, don't rely on the test matrix to include an example with bias learning
+        # enabled.
+        if bias_arg == "bias_peft_method_only":
+            # e.g. "lora_only" or "boft_only"
+            config.bias = f"{config.peft_type.value.lower()}_only"
+        else:
+            config.bias = "all"
+
+        torch.manual_seed(0)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config).eval()
+
+        # modify the bias
+        for name, module in model.named_modules():
+            if (bias_arg == "bias_peft_method_only") and not isinstance(module, BaseTunerLayer):
+                continue
+            if getattr(module, "bias", None) is not None:
+                with torch.no_grad():
+                    module.bias.data.fill_(1.23)
+
+        model = FSDP(model, use_orig_params=True, device_id=self.torch_device)
+        X = self.prepare_inputs_for_testing()
+        with torch.no_grad():
+            output_before = model(**X)
+
+        state_dict = get_peft_model_state_dict(model)
+        del model
+
+        torch.manual_seed(0)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config_cls(**config_kwargs)).eval()
+        # note: we don't make a sanity check that without setting the state dict, the results differ; this is on
+        # purpose, because otherwise we can't check PEFT methods that don't have non-identity inits
+        set_peft_model_state_dict(model, state_dict)
+
+        with torch.no_grad():
+            output_after = model(**X)
+        assert torch.allclose(output_after, output_before)

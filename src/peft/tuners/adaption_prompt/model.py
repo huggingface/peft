@@ -169,3 +169,21 @@ class AdaptionPromptModel(nn.Module):
             if name == "model":  # see #1892: prevent infinite recursion if class is not initialized
                 raise
             return getattr(self.model, name)
+
+    # The following classmethods mirror the state dict serialization hooks of BaseTuner, which AdaptionPromptModel
+    # does not inherit from, see BaseTuner for the documentation.
+
+    @classmethod
+    def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
+        return {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
+
+    @classmethod
+    def _remove_adapter_name_from_key(cls, key, adapter_name):
+        from peft.tuners.tuners_utils import _remove_adapter_name_from_state_dict_key
+
+        return _remove_adapter_name_from_state_dict_key(key, adapter_name)
+
+    @classmethod
+    def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
+        # adaption prompt state dict keys are stored without the adapter name, so there is nothing to remap
+        return state_dict

@@ -24,7 +24,7 @@ from unittest.mock import patch
 import pytest
 import torch
 from huggingface_hub import snapshot_download
-from safetensors.torch import load_file
+from safetensors.torch import load_file, save_file
 from scipy import stats
 from torch import nn
 from transformers import AutoModelForCausalLM, LlamaConfig, LlamaForSequenceClassification
@@ -1964,8 +1964,10 @@ class TestAdamssInitialization:
             ),
             (
                 {"init_warmup": 10, "final_warmup": 10},
-                "`init_warmup` must be smaller than `final_warmup` when `use_asa=True` so that ASA has a "
-                "non-empty pruning ramp, got init_warmup=10 and final_warmup=10.",
+                (
+                    "`init_warmup` must be smaller than `final_warmup` when `use_asa=True` so that ASA has a "
+                    "non-empty pruning ramp, got init_warmup=10 and final_warmup=10."
+                ),
             ),
             (
                 {"asa_target_subspaces": 0},
@@ -4571,19 +4573,20 @@ class TestHotSwapping:
 
         model = self.get_model()
         model = get_peft_model(model, config)
-
-        # add an unexpected key
-        state_dict = model.state_dict()
-        new_key = "base_model.model.lin1.lora_A.default.weight"
-        state_dict[new_key] = torch.zeros(8, 20)
-        model.state_dict = lambda: state_dict
         model.save_pretrained(tmp_path / "adapter1")
         del model
+
+        # add an unexpected key to the checkpoint of adapter 1
+        file_name = tmp_path / "adapter1" / "adapter_model.safetensors"
+        state_dict = load_file(file_name)
+        state_dict["base_model.model.lin1.lora_A.weight"] = torch.zeros(8, 20)
+        save_file(state_dict, file_name, metadata={"format": "pt"})
 
         # load adapter 0
         model = self.get_model()
         model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
 
+        new_key = "base_model.model.lin1.lora_A.default.weight"  # the adapter name is inserted when loading
         msg = f"Hot swapping the adapter did not succeed, unexpected keys found: {new_key}"
         with pytest.raises(RuntimeError, match=msg):
             hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")

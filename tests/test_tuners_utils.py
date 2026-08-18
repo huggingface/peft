@@ -47,6 +47,8 @@ from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
+    _filter_state_dict_by_key_prefixes,
+    _get_tuner_state_dict_key_prefixes,
     _maybe_include_all_linear_layers,
     check_target_module_exists,
     inspect_matched_modules,
@@ -2297,3 +2299,113 @@ class TestRankAndAlphaPattern:
         assert model.module.foobar.scaling["default"] == 1.0
         assert model.module.module.foo.scaling["default"] == 0.125
         assert model.module.module.barfoo.scaling["default"] == 1.0
+
+
+class TestTunerStateDictKeyPrefixes:
+    # Unit tests for the helper functions that structurally determine which state dict keys belong to the PEFT method,
+    # see BaseTuner._get_adapter_state_dict and friends for how they are used.
+
+    def test_filter_state_dict_by_key_prefixes(self):
+        state_dict = {"a": 0, "a.b": 1, "a.b.c": 2, "a.bc": 3, "ab": 4, "x.a.b": 5, "b.c": 6}
+        # matching respects "." boundaries: "a.b" matches "a.b" and "a.b.c", but not "a.bc", "ab" or "x.a.b"
+        assert _filter_state_dict_by_key_prefixes(state_dict, {"a.b"}) == {"a.b": 1, "a.b.c": 2}
+        assert _filter_state_dict_by_key_prefixes(state_dict, {"a"}) == {"a": 0, "a.b": 1, "a.b.c": 2, "a.bc": 3}
+        assert _filter_state_dict_by_key_prefixes(state_dict, {"a.b", "b.c"}) == {"a.b": 1, "a.b.c": 2, "b.c": 6}
+        assert _filter_state_dict_by_key_prefixes(state_dict, set()) == {}
+        assert _filter_state_dict_by_key_prefixes({}, {"a.b"}) == {}
+
+    def test_prefixes_lora(self):
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0"]))
+        prefixes = _get_tuner_state_dict_key_prefixes(model)
+        assert "base_model.model.lin0.lora_A" in prefixes
+        assert "base_model.model.lin0.lora_B" in prefixes
+        # the wrapped base layer and modules that are not targeted don't belong to the PEFT method
+        assert not any("base_layer" in prefix for prefix in prefixes)
+        assert not any(prefix.startswith("base_model.model.lin1") for prefix in prefixes)
+
+    def test_prefixes_select_correct_state_dict_keys(self):
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0"]))
+        prefixes = _get_tuner_state_dict_key_prefixes(model)
+        state_dict = _filter_state_dict_by_key_prefixes(model.state_dict(), prefixes)
+        expected = ["base_model.model.lin0.lora_A.default.weight", "base_model.model.lin0.lora_B.default.weight"]
+        assert sorted(state_dict) == expected
+
+    def test_prefixes_model_with_injected_layers_only(self):
+        # the helper also works when the passed model is not a PeftModel but only has the PEFT layers injected
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0"]))
+        prefixes = _get_tuner_state_dict_key_prefixes(model.base_model.model)
+        assert "lin0.lora_A" in prefixes
+        assert not any(prefix.startswith("base_model") for prefix in prefixes)
+
+    def test_prefixes_module_named_like_peft_prefix_not_included(self):
+        # a base model module whose name contains the PEFT prefix does not belong to the PEFT method
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 10)
+                self.lora_foobar = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.lora_foobar(self.lin0(x))
+
+        model = get_peft_model(MyModel(), LoraConfig(target_modules=["lin0"]))
+        prefixes = _get_tuner_state_dict_key_prefixes(model)
+        assert len(prefixes) > 0  # sanity check
+        assert not any("lora_foobar" in prefix for prefix in prefixes)
+
+    def test_prefixes_multiple_adapters_and_adapter_name_narrowing(self):
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0"]))
+        model.add_adapter("other", LoraConfig(target_modules=["lin0", "lin1"]))
+
+        # without adapter_name, the adapter containers are included as a whole, i.e. covering all adapters
+        prefixes = _get_tuner_state_dict_key_prefixes(model)
+        assert "base_model.model.lin0.lora_A" in prefixes
+        assert "base_model.model.lin1.lora_A" in prefixes
+
+        # with adapter_name, the containers are narrowed down to the entries of the given adapter
+        prefixes = _get_tuner_state_dict_key_prefixes(model, adapter_name="other")
+        assert "base_model.model.lin0.lora_A.other" in prefixes
+        assert "base_model.model.lin1.lora_A.other" in prefixes
+        assert not any(prefix.endswith(".default") for prefix in prefixes)
+
+        # lin1 is only targeted by the "other" adapter
+        prefixes = _get_tuner_state_dict_key_prefixes(model, adapter_name="default")
+        assert "base_model.model.lin0.lora_A.default" in prefixes
+        assert not any(prefix.startswith("base_model.model.lin1") for prefix in prefixes)
+
+    def test_prefixes_model_level_containers_vera(self):
+        # VeRA stores the shared projections on the BaseTuner instance itself, which is covered as well
+        model = get_peft_model(MLP(), VeraConfig(target_modules=["lin0"], r=2))
+        prefixes = _get_tuner_state_dict_key_prefixes(model)
+        assert "base_model.vera_A" in prefixes
+        assert "base_model.vera_B" in prefixes
+        prefixes = _get_tuner_state_dict_key_prefixes(model, adapter_name="default")
+        assert "base_model.vera_A.default" in prefixes
+
+    def test_prefixes_auxiliary_modules_not_included(self):
+        # auxiliary modules like ModulesToSaveWrapper are handled separately and thus not included
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"]))
+        assert isinstance(model.base_model.model.lin1, ModulesToSaveWrapper)  # sanity check
+        prefixes = _get_tuner_state_dict_key_prefixes(model)
+        assert len(prefixes) > 0  # sanity check
+        assert not any(prefix.startswith("base_model.model.lin1") for prefix in prefixes)
+
+    def test_prefixes_tuner_layer_inside_auxiliary_module_not_included(self):
+        # tuner layers nested inside an auxiliary module (here: the token_adapter of the TrainableTokensWrapper) are
+        # handled by the auxiliary module and thus not included
+        class ModelWithEmbedding(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = nn.Embedding(10, 10)
+                self.lin0 = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.lin0(self.emb(x))
+
+        config = LoraConfig(target_modules=["lin0"], trainable_token_indices={"emb": [0, 1]})
+        model = get_peft_model(ModelWithEmbedding(), config)
+        # sanity check: the wrapped embedding contains a nested tuner layer
+        assert any(isinstance(module, BaseTunerLayer) for module in model.base_model.model.emb.modules())
+        prefixes = _get_tuner_state_dict_key_prefixes(model)
+        assert len(prefixes) > 0  # sanity check
+        assert not any(prefix.startswith("base_model.model.emb") for prefix in prefixes)

@@ -4,7 +4,7 @@
   "auto_mapping": null,
   "base_model_name_or_path": null,
   "decompose_both": false,
-  "decompose_factor": -1,
+  "decompose_factor": 4,
   "exclude_modules": null,
   "inference_mode": false,
   "init_weights": true,

@@ -67,6 +67,7 @@ RUN conda run -n peft pip install -U --no-cache-dir \
         "soundfile>=0.12.1" \
         scipy \
         torchao \
+        mslk-cuda \
         "fbgemm-gpu-genai>=1.2.0" \
         git+https://github.com/huggingface/transformers \
         git+https://github.com/huggingface/accelerate \
