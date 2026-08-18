@@ -328,7 +328,7 @@ ALL_CONFIGS = [
 
 def skip_non_prompt_learning(config_cls):
     if not issubclass(config_cls, PromptLearningConfig):
-        pytest.skip("Skip tests that are not prompt learning or that are prefix tuning")
+        pytest.skip("Skip tests that are not prompt learning")
 
 
 def skip_deberta_lora_tests(config_cls, model_id):
