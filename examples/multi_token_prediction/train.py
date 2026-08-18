@@ -1074,6 +1074,7 @@ def main():
         'seq_len': args.seq_len,
         'warmup_steps': args.warmup_steps,
         'decay_steps': args.decay_steps,
+        'lr_schedule': args.lr_schedule,
         **asdict(train_config),
     })
 
