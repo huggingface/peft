@@ -556,22 +556,33 @@ class Linear(nn.Module, OFTLayer):
             return
         for active_adapter in adapter_names:
             if active_adapter in self.oft_R.keys():
-                orig_weight = self.get_base_weight()
-                orig_dtype = orig_weight.dtype
                 oft_mat = self.get_delta_weight(active_adapter)
-                orig_weight = torch.transpose(orig_weight, 0, 1)
-                orig_weight = torch.mm(oft_mat, orig_weight.to(oft_mat.dtype))
-                orig_weight = torch.transpose(orig_weight, 0, 1)
+                if safe_merge or self.quantization_backend is not None:
+                    # safe_merge needs a copy to check for NaNs before writing;
+                    # quantized layers need dequantize -> modify -> re-quantize.
+                    orig_weight = self.get_base_weight()
+                    orig_dtype = orig_weight.dtype
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = torch.mm(oft_mat, orig_weight.to(oft_mat.dtype))
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
 
-                if safe_merge:
-                    # Note that safe_merge will be slower than the normal merge
-                    # because of the NaN check.
-                    if not torch.isfinite(orig_weight).all():
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
+                    if safe_merge:
+                        # Note that safe_merge will be slower than the normal merge
+                        # because of the NaN check.
+                        if not torch.isfinite(orig_weight).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                            )
 
-                self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
+                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
+                else:
+                    # Non-quantized unsafe merge: write the result directly into the
+                    # existing weight storage to avoid the extra copy that
+                    # set_base_weight would create via .contiguous().
+                    weight = self.get_base_layer().weight.data
+                    result = torch.mm(oft_mat, weight.t().to(oft_mat.dtype))
+                    weight.copy_(result.t())
+
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -783,29 +794,42 @@ class Conv2d(nn.Module, OFTLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.oft_R.keys():
                 base_layer = self.get_base_layer()
-                orig_weight = self.get_base_weight()
-                orig_dtype = orig_weight.dtype
                 oft_mat = self.get_delta_weight(active_adapter)
+                if safe_merge or self.quantization_backend is not None:
+                    # safe_merge needs a copy to check for NaNs before writing;
+                    # quantized layers need dequantize -> modify -> re-quantize.
+                    orig_weight = self.get_base_weight()
+                    orig_dtype = orig_weight.dtype
 
-                orig_weight = orig_weight.view(
-                    self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
-                )
-                orig_weight = torch.transpose(orig_weight, 0, 1)
-                orig_weight = torch.mm(oft_mat, orig_weight.to(oft_mat.dtype))
-                orig_weight = torch.transpose(orig_weight, 0, 1)
-                orig_weight = orig_weight.view(
-                    self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
-                )
+                    orig_weight = orig_weight.view(
+                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
+                    )
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = torch.mm(oft_mat, orig_weight.to(oft_mat.dtype))
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = orig_weight.view(
+                        self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
+                    )
 
-                if safe_merge:
-                    # Note that safe_merge will be slower than the normal merge
-                    # because of the NaN check.
-                    if not torch.isfinite(orig_weight).all():
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
+                    if safe_merge:
+                        # Note that safe_merge will be slower than the normal merge
+                        # because of the NaN check.
+                        if not torch.isfinite(orig_weight).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                            )
 
-                self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
+                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
+                else:
+                    # Non-quantized unsafe merge: write the result directly into the
+                    # existing weight storage to avoid the extra copy that
+                    # set_base_weight would create via .contiguous().
+                    weight = base_layer.weight.data.view(
+                        self.out_features, self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
+                    )
+                    result = torch.mm(oft_mat, weight.t().to(oft_mat.dtype))
+                    weight.copy_(result.t())
+
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -1005,20 +1029,31 @@ class Embedding(nn.Module, OFTLayer):
 
         for active_adapter in adapter_names:
             if active_adapter in self.oft_embedding_R.keys():
-                orig_weight = self.get_base_weight()
-                orig_dtype = orig_weight.dtype
                 oft_mat = self.get_delta_weight(active_adapter)
-                orig_weight = torch.mm(orig_weight.to(oft_mat.dtype), oft_mat)
+                if safe_merge or self.quantization_backend is not None:
+                    # safe_merge needs a copy to check for NaNs before writing;
+                    # quantized layers need dequantize -> modify -> re-quantize.
+                    orig_weight = self.get_base_weight()
+                    orig_dtype = orig_weight.dtype
+                    orig_weight = torch.mm(orig_weight.to(oft_mat.dtype), oft_mat)
 
-                if safe_merge:
-                    # Note that safe_merge will be slower than the normal merge
-                    # because of the NaN check.
-                    if not torch.isfinite(orig_weight).all():
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
+                    if safe_merge:
+                        # Note that safe_merge will be slower than the normal merge
+                        # because of the NaN check.
+                        if not torch.isfinite(orig_weight).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                            )
 
-                self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
+                    self.set_base_weight(orig_weight.contiguous().to(orig_dtype))
+                else:
+                    # Non-quantized unsafe merge: write the result directly into the
+                    # existing weight storage to avoid the extra copy that
+                    # set_base_weight would create via .contiguous().
+                    weight = self.get_base_layer().weight.data
+                    result = torch.mm(weight.to(oft_mat.dtype), oft_mat)
+                    weight.copy_(result)
+
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
