@@ -137,6 +137,12 @@ class Sampler(nn.Module):
             self.sampler = SamplerModule(unembedding, hidden_size)
 
     def forward(self, logits, hidden, offsets):
+        if self.training and self.teacher_forcing and not self.skip_last:
+            raise ValueError("cannot do teacher forcing if we don't supply the last batch")
+
+        if self.training and self.teacher_forcing:
+            logits_teacher = logits[-1]  # [T, V]
+
         # when using LC loss, last sequence in batch has no mask tokens to make
         # the reference computation easier, therefore we need to skip that here.
         if self.skip_last:
@@ -155,11 +161,11 @@ class Sampler(nn.Module):
             # hidden: [B, T, H]
             ntp_logits.append(logits[batch_idx, offset - 1 : offset])  # [K, V]
             mtp_hidden.append(hidden[batch_idx, offset : offset + self.k])  # [K, H]
-            if self.teacher_forcing:
-                mtp_logits.append(logits[batch_idx, offset : offset + self.k])  # [K, V]
+            if self.training and self.teacher_forcing:
+                mtp_logits.append(logits_teacher[offset : offset + self.k])  # [K, V]
         ntp_logits = torch.stack(ntp_logits, dim=0)  # [B, 1, V]
         mtp_hidden = torch.stack(mtp_hidden, dim=0)  # [B, K, H]
-        if self.teacher_forcing:
+        if self.training and self.teacher_forcing:
             mtp_logits = torch.stack(mtp_logits, dim=0)  # [B, K, V]
         prev_token = ntp_logits.argmax(dim=-1).detach()  # [B, 1]
         all_logits = []
@@ -922,6 +928,10 @@ def main():
 
     if args.warmup_steps + args.decay_steps > args.num_steps:
         raise ValueError("There is no stable phase. Increase num_steps to be > warum_steps + decay_steps.")
+
+    if args.sampler_teacher_forcing and not (args.use_lc_loss or args.use_tv_loss):
+        raise ValueError("Sampler teacher forcing needs the full base model logit sequence. As of yet this "
+                         "is only the case when tv or lcm loss are enabled. Sorry.")
 
     trackio.init(project="mtp-training")
 
