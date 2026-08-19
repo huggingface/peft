@@ -4596,6 +4596,62 @@ class TestPeftCustomModel(PeftCommonTester):
 
         assert (output1 == output2).all()
 
+    def test_pvera_sample_at_inference_dict_is_resolved_per_module(self):
+        # A dict `sample_at_inference` must only enable sampling for the modules it names.
+        config = PveraConfig(
+            r=8, init_weights=False, target_modules=["lin0", "lin1"], sample_at_inference={"lin0": True}
+        )
+        model = get_peft_model(MLP(), config).to(self.torch_device)
+
+        assert model.base_model.model.lin0.sample_at_inference["default"] is True
+        assert model.base_model.model.lin1.sample_at_inference["default"] is False
+
+    def test_pvera_sample_at_inference_dict_does_not_enable_unlisted_modules(self):
+        # Regression test: the dict used to be stored on the layer verbatim and then evaluated as a truth value, so any
+        # non-empty dict enabled sampling for every module. With no module named by the dict, inference must stay
+        # deterministic.
+        config = PveraConfig(
+            r=8, init_weights=False, target_modules=["lin0", "lin1"], sample_at_inference={"does-not-match": True}
+        )
+        torch.manual_seed(0)
+        model = get_peft_model(MLP(), config).to(self.torch_device)
+        model.eval()
+
+        torch.manual_seed(0)
+        X = torch.randn(9, 10).to(self.torch_device)
+        with torch.no_grad():
+            output0 = model(X)
+            output1 = model(X)
+
+        assert torch.allclose(output0, output1)
+
+    def test_pvera_generator_is_created_on_the_device_of_the_sampled_tensor(self):
+        # A torch.Generator is bound to one device and is not moved by nn.Module.to(), so it has to be created on the
+        # device the sampling actually happens on. On a CPU-only runner this only checks the caching, but on an
+        # accelerator it covers the device mismatch itself.
+        config = PveraConfig(
+            r=8, init_weights=False, target_modules=["lin0"], sample_at_inference=True, generator_seed=0
+        )
+        torch.manual_seed(0)
+        model = get_peft_model(MLP(), config).to(self.torch_device)
+        model.eval()
+
+        torch.manual_seed(0)
+        X = torch.randn(9, 10).to(self.torch_device)
+        with torch.no_grad():
+            model(X)
+
+        generators = model.base_model.model.lin0._generators
+        expected_device = torch.device(self.torch_device).type
+        assert len(generators) == 1
+        assert next(iter(generators.values())).device.type == expected_device
+
+    def test_pvera_no_generator_seed_means_no_generator(self):
+        config = PveraConfig(r=8, init_weights=False, target_modules=["lin0"], sample_at_inference=True)
+        model = get_peft_model(MLP(), config).to(self.torch_device)
+
+        assert model.base_model.model.lin0._get_generator(torch.device(self.torch_device)) is None
+
 
 class TestMultiRankAdapter:
     """Tests related to multirank LoRA adapters"""

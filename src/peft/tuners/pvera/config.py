@@ -70,11 +70,11 @@ class PveraConfig(PeftConfig):
             `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
         sample_at_inference (`bool` | `dict`, defaults to `False`):
             Whether to sample from the learned PVeRA distribution at inference. If false, the learned mean is used. The
-            default is False (indicating false for all adapters). If True is provided, then the value will be true for
-            all adapters. If a dict is provided, then a specific value can be specified per adapter (with False by
-            default for non-specified adapters). For example
+            default is False (indicating false for all modules). If True is provided, then the value will be true for
+            all modules. If a dict is provided, then a specific value can be specified per targeted module (with False
+            by default for non-specified modules). For example
             `sample_at_inference={'encoder.layer.0.attention.attention.query': True}` will only sample at inference for
-            one specific adapter.
+            that one module.
         generator_seed (`int`, defaults to None):
             Random seed for the generator for sampling from the learned distribution.
     """
@@ -176,20 +176,20 @@ class PveraConfig(PeftConfig):
             )
         },
     )
-    sample_at_inference: bool = field(
+    sample_at_inference: Union[bool, dict[str, bool]] = field(
         default=False,
         metadata={
             "help": (
                 "Whether to sample from the learned PVeRA distribution at inference. If false, the learned mean is used. The "
-                "default is False (indicating false for all adapters). If True is provided, then the value will be true for "
-                "all adapters. If a dict is provided, then a specific value can be specified per adapter (with False by "
-                "default for non-specified adapters). For example "
-                "`sample_at_inference={'encoder.layer.0.attention.attention.query': True}` will only sample at inference for "
-                "one specific adapter."
+                "default is False (indicating false for all modules). If True is provided, then the value will be "
+                "true for all modules. If a dict is provided, then a specific value can be specified per targeted "
+                "module (with False by default for non-specified modules). For example "
+                "`sample_at_inference={'encoder.layer.0.attention.attention.query': True}` will only sample at "
+                "inference for that one module."
             ),
         },
     )
-    generator_seed: int = field(
+    generator_seed: Optional[int] = field(
         default=None, metadata={"help": "Random seed for the generator for sampling from the learned distribution."}
     )
 

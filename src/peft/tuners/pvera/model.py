@@ -163,10 +163,12 @@ class PveraModel(BaseTuner):
 
         r = pvera_config.r
         bias = hasattr(target, "bias") and target.bias is not None
+        sample_at_inference = self._resolve_sample_at_inference(pvera_config, current_key)
         kwargs = {
             "r": r,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
+            "sample_at_inference": sample_at_inference,
         }
         kwargs["bias"] = bias
 
@@ -177,10 +179,11 @@ class PveraModel(BaseTuner):
                 pvera_B=self.pvera_B,
                 r=r,
                 config=pvera_config,
+                sample_at_inference=sample_at_inference,
             )
         else:
             new_module = self._create_new_module(
-                pvera_config, self.pvera_A, self.pvera_B, adapter_name, target, current_key, **kwargs
+                pvera_config, self.pvera_A, self.pvera_B, adapter_name, target, **kwargs
             )
             if adapter_name not in self.active_adapter:
                 # adding an additional adapter: it is not automatically trainable
@@ -188,7 +191,18 @@ class PveraModel(BaseTuner):
             self._replace_module(parent, target_name, new_module, target)
 
     @staticmethod
-    def _create_new_module(pvera_config, pvera_A, pvera_B, adapter_name, target, current_key, **kwargs):
+    def _resolve_sample_at_inference(pvera_config, current_key: str) -> bool:
+        """Resolve `sample_at_inference` for the module at `current_key`.
+
+        The config value is either a bool that applies to every module, or a dict mapping module names to bools, in
+        which case modules that are not listed default to `False`.
+        """
+        if isinstance(pvera_config.sample_at_inference, bool):
+            return pvera_config.sample_at_inference
+        return pvera_config.sample_at_inference.get(current_key, False)
+
+    @staticmethod
+    def _create_new_module(pvera_config, pvera_A, pvera_B, adapter_name, target, **kwargs):
         # avoid eager bnb import
         if is_bnb_available():
             import bitsandbytes as bnb
@@ -245,11 +259,6 @@ class PveraModel(BaseTuner):
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`, `transformers.pytorch_utils.Conv1D`."
             )
-
-        if isinstance(pvera_config.sample_at_inference, bool):
-            module_sample_at_inference = pvera_config.sample_at_inference
-        else:
-            module_sample_at_inference = pvera_config.sample_at_inference.get(current_key, False)
 
         new_module = Linear(
             target,
