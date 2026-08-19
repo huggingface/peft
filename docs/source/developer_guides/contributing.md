@@ -163,6 +163,11 @@ New parameter-efficient fine-tuning methods are developed all the time. If you w
 - [ ] Check the benchmarks in `method_comparison/` and add experiment settings for your new method. This is a good place to sanity check that the PEFT method trains as expected. Include one or two reasonable benchmark configurations (one default, one optimized for the benchmark).
 - [ ] Recommended: Add generic quantization support. Instead of having to explicitly add quantization layer types for each quantization method, support generic quantization. As an example, check how it's implemented in [BOFT](https://github.com/huggingface/peft/tree/main/src/peft/tuners/boft). Extend https://github.com/huggingface/peft/blob/main/tests/test_quantization.py by adding your PEFT method there. Ask maintainers for help if needed.
 
+
+## Making changes to existing PEFT methods
+
+If you make a change to a PEFT method that could potentially change its outputs, thus invalidating already trained checkpoints, we need to take extra precautions. Please check the description at https://github.com/huggingface/peft/blob/main/.ai/skills/peft-method-changes/SKILL.md for details. The instructions there are meant for both humans and AI.
+
 ## Add other features
 
 It is best if you first open an issue on GitHub with a proposal to add the new feature. This way, you can discuss with the maintainers if it makes sense to add the feature before spending too much time on implementing it.
