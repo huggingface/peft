@@ -648,6 +648,7 @@ def _apply_activation_aware_svd(
     weight: torch.Tensor,
     rank: Union[int, float],
     scaling: Optional[torch.Tensor] = None,
+    fast_svd: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, int]:
     """Perform (optionally activation-aware) truncated SVD on a weight matrix.
 
@@ -658,6 +659,10 @@ def _apply_activation_aware_svd(
             fraction of total squared singular values).
         scaling: Optional scaling matrix `S` of shape `[in_features, in_features]`. When provided, SVD
             is performed on `weight @ S` and the `V` factor is mapped back with `S^{-1}`.
+        fast_svd: When `True` and `rank` is an `int`, use `torch.svd_lowrank` (a randomized SVD) instead
+            of the full `torch.linalg.svd`. This is much faster for large matrices with small target
+            ranks, at the cost of a slightly less accurate approximation. Ignored when `rank` is a
+            `float` (the full singular value spectrum is needed to determine the cutoff).
 
     Returns:
         A tuple `(lora_A, lora_B, effective_rank)` where `lora_A` has shape `[rank, in_features]`
@@ -672,28 +677,47 @@ def _apply_activation_aware_svd(
     else:
         scaled_weight = weight
 
-    u, s, vh = torch.linalg.svd(scaled_weight, full_matrices=False)
+    use_fast_svd = fast_svd and isinstance(rank, int)
 
-    if isinstance(rank, float):
-        if not (0 < rank <= 1):
-            raise ValueError(f"Float rank must be in (0, 1], got {rank}.")
-        effective_rank = _find_cutoff_index(s, threshold=rank)
-    else:
+    if use_fast_svd:
+        # torch.svd_lowrank expects [n, m] and returns U [n, q], S [q], V [m, q]
         effective_rank = int(rank)
+        max_rank = min(scaled_weight.shape)
+        if effective_rank > max_rank:
+            raise ValueError(
+                f"The chosen rank {effective_rank} is larger than the weight shape ({max_rank}), "
+                "please choose a lower rank."
+            )
+        if effective_rank == 0:
+            effective_rank = 1
 
-    max_rank = u.shape[1]
-    if effective_rank > max_rank:
-        raise ValueError(
-            f"The chosen rank {effective_rank} is larger than the weight shape ({max_rank}), "
-            "please choose a lower rank."
-        )
-    if effective_rank == 0:
-        effective_rank = 1  # at least one component
+        u_truncated, s_truncated, v_truncated = torch.svd_lowrank(scaled_weight, q=effective_rank)
+        # v_truncated is [in_features, rank], need Vh = v_truncated.t() [rank, in_features]
+        vh_truncated = v_truncated.t()
+    else:
+        u, s, vh = torch.linalg.svd(scaled_weight, full_matrices=False)
 
-    s_truncated = s[:effective_rank]
+        if isinstance(rank, float):
+            if not (0 < rank <= 1):
+                raise ValueError(f"Float rank must be in (0, 1], got {rank}.")
+            effective_rank = _find_cutoff_index(s, threshold=rank)
+        else:
+            effective_rank = int(rank)
+
+        max_rank = u.shape[1]
+        if effective_rank > max_rank:
+            raise ValueError(
+                f"The chosen rank {effective_rank} is larger than the weight shape ({max_rank}), "
+                "please choose a lower rank."
+            )
+        if effective_rank == 0:
+            effective_rank = 1  # at least one component
+
+        s_truncated = s[:effective_rank]
+        u_truncated = u[:, :effective_rank]
+        vh_truncated = vh[:effective_rank, :]
+
     sqrt_sigma = torch.sqrt(torch.diag(s_truncated))
-    u_truncated = u[:, :effective_rank]
-    vh_truncated = vh[:effective_rank, :]
 
     if scaling is not None:
         scaling_inv = torch.linalg.inv(scaling)
@@ -753,6 +777,7 @@ def get_emulator_model(
     num_samples: int = 64,
     inplace: bool = True,
     progressbar: bool = False,
+    fast_svd: bool = False,
 ) -> nn.Module:
     """Construct a lightweight *emulator* of `model` by replacing `nn.Linear` layers with low-rank SVD factorizations.
 
@@ -806,6 +831,12 @@ def get_emulator_model(
             If `True`, modify the model in-place. If `False`, work on a deep copy. Defaults to `True`.
         progressbar (`bool`):
             Whether to show a progress bar during compression. Defaults to `False`.
+        fast_svd (`bool`):
+            When `True` and `rank` is an `int`, use `torch.svd_lowrank` (a randomized SVD) instead of
+            the full `torch.linalg.svd`. This is significantly faster for large matrices with small
+            target ranks, at the cost of a slightly less accurate approximation. Ignored when `rank`
+            is a `float`, since the full singular value spectrum is needed to determine the cutoff.
+            Defaults to `False`.
 
     Returns:
         `nn.Module`: The emulator model with `nn.Linear` layers replaced by low-rank factorizations.
@@ -875,7 +906,9 @@ def get_emulator_model(
 
         scaling = activation_stats.get(name, None)
 
-        lora_a, lora_b, effective_rank = _apply_activation_aware_svd(weight, rank=rank, scaling=scaling)
+        lora_a, lora_b, effective_rank = _apply_activation_aware_svd(
+            weight, rank=rank, scaling=scaling, fast_svd=fast_svd
+        )
 
         # Construct on meta device, then materialize on the target device
         svd_layer = _SVDLinear(

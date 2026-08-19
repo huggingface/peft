@@ -1004,3 +1004,53 @@ class TestGetEmulatorModel:
         assert emulator.lm_head.weight is emulator.model.decoder.embed_tokens.weight, (
             "Weight tying should be preserved after emulator construction"
         )
+
+    def test_fast_svd_approximates_original(self, model_and_inputs):
+        """fast_svd with int rank should produce a valid approximation of the original model."""
+        model, input_ids = model_and_inputs
+        with torch.no_grad():
+            original_logits = model(input_ids).logits
+
+        emulator = get_emulator_model(deepcopy(model), rank=8, fast_svd=True)
+
+        with torch.no_grad():
+            emulator_logits = emulator(input_ids).logits
+
+        error = (original_logits - emulator_logits).abs().mean().item()
+        original_scale = original_logits.abs().mean().item()
+        assert error < original_scale, f"Fast SVD approximation error {error} should be reasonable"
+
+    def test_fast_svd_close_to_full_svd(self, model_and_inputs):
+        """fast_svd should produce a close approximation to full SVD for the same rank."""
+        model, input_ids = model_and_inputs
+        with torch.no_grad():
+            original_logits = model(input_ids).logits
+
+        emulator_full = get_emulator_model(deepcopy(model), rank=4, fast_svd=False)
+        emulator_fast = get_emulator_model(deepcopy(model), rank=4, fast_svd=True)
+
+        with torch.no_grad():
+            full_logits = emulator_full(input_ids).logits
+            fast_logits = emulator_fast(input_ids).logits
+
+        full_error = (original_logits - full_logits).abs().mean().item()
+        fast_error = (original_logits - fast_logits).abs().mean().item()
+
+        # The randomized SVD error should be in the same order of magnitude as the full SVD error.
+        # On tiny matrices the randomized algorithm has relatively more noise, so we allow a factor
+        # of 2x tolerance.
+        assert fast_error <= full_error * 2, (
+            f"Fast SVD error {fast_error} should be within 2x of full SVD error {full_error}"
+        )
+
+    def test_fast_svd_ignored_for_float_rank(self, model_and_inputs):
+        """fast_svd should be silently ignored when rank is a float (needs full spectrum)."""
+        model, input_ids = model_and_inputs
+        # Should not raise — just falls back to full SVD
+        emulator = get_emulator_model(deepcopy(model), rank=0.99, fast_svd=True)
+
+        with torch.no_grad():
+            emulator_logits = emulator(input_ids).logits
+
+        # Should still produce a valid approximation
+        assert emulator_logits is not None
