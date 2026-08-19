@@ -74,6 +74,7 @@ from peft import (
     LoftQConfig,
     LoraConfig,
     PeftModel,
+    PeftWarning,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PveraConfig,
@@ -5085,24 +5086,15 @@ class TestUnshardedLoRASaveUnderZeRO3:
     Under DeepSpeed ZeRO-3, the parameters are partitioned across ranks, so a ``save_pretrained()`` that forgets to
     gather them writes ``lora_A`` / ``lora_B`` tensors that are 1-D (FSDP flat shard) or zero-sized (ZeRO-3 on the
     non-owning rank). The artifact looks valid on disk but later crashes downstream loaders (e.g. vLLM hot-swap) with
-    an opaque ``IndexError``. ``get_peft_model_state_dict`` now refuses to emit such a state dict and raises at write
-    time instead. This reproduces the real path on a single GPU (world_size=1 is enough: ``deepspeed.zero.Init``
-    partitions the parameter, leaving the ungathered shard) and asserts the guard fires, and that the documented
+    an opaque ``IndexError``. ``get_peft_model_state_dict`` now warns at write time when such tensors are detected.
+    This reproduces the real path on a single GPU (world_size=1 is enough: ``deepspeed.zero.Init`` partitions the
+    parameter, leaving the ungathered shard) and asserts the warning fires, and that the documented
     ``GatheredParameters`` workaround still saves a correct 2-D adapter.
     """
 
-    class _Tiny(torch.nn.Module):
-        def __init__(self, d=128, v=256):
-            super().__init__()
-            self.embed = torch.nn.Embedding(v, d)
-            self.proj = torch.nn.Linear(d, d, bias=False)
-
-        def forward(self, input_ids):
-            return self.proj(self.embed(input_ids))
-
     @pytest.mark.single_gpu_tests
     @require_torch_gpu
-    def test_zero3_ungathered_save_raises_and_gather_succeeds(self, tmp_path):
+    def test_zero3_ungathered_save_warns_and_gather_succeeds(self, tmp_path):
         deepspeed = pytest.importorskip("deepspeed")
 
         os.environ.setdefault("MASTER_ADDR", "localhost")
@@ -5117,13 +5109,11 @@ class TestUnshardedLoRASaveUnderZeRO3:
         try:
             ds_config = {"train_batch_size": dist.get_world_size(), "zero_optimization": {"stage": 3}}
             with deepspeed.zero.Init(config_dict_or_path=ds_config):
-                model = get_peft_model(self._Tiny(), LoraConfig(target_modules=["proj"], r=8))
-            engine, *_ = deepspeed.initialize(
-                model=model, config=ds_config, model_parameters=model.parameters()
-            )
+                model = get_peft_model(SimpleModel(), LoraConfig(target_modules=["linear_transform"], r=8))
+            engine, *_ = deepspeed.initialize(model=model, config=ds_config, model_parameters=model.parameters())
 
-            # Saving without gathering the ZeRO-3 shards must now raise instead of writing a corrupt adapter.
-            with pytest.raises(ValueError, match=r"DeepSpeed ZeRO-3 / FSDP shards"):
+            # Saving without gathering the ZeRO-3 shards must warn instead of silently writing a corrupt adapter.
+            with pytest.warns(PeftWarning, match=r"DeepSpeed ZeRO-3 / FSDP shards"):
                 engine.module.save_pretrained(tmp_path / "ungathered")
 
             # The documented workaround (gather first) still produces a correct, loadable 2-D adapter.

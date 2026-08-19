@@ -42,6 +42,7 @@ from .other import (
     match_target_against_key,
 )
 from .peft_types import PeftType
+from .warning import PeftWarning
 
 
 def _validate_lora_adapter_state_dict(
@@ -51,25 +52,21 @@ def _validate_lora_adapter_state_dict(
     """Refuse to save a LoRA adapter state dict whose ``lora_A`` / ``lora_B`` tensors look unsharded.
 
     A correctly-saved LoRA adapter has ``lora_A`` of shape ``(rank, in_dim)`` and ``lora_B`` of shape ``(out_dim,
-    rank)`` — both 2-D and non-empty. If any such tensor is 1-D or has a zero-sized dimension, it typically indicates
-    a partitioned-parameter export under DeepSpeed ZeRO-3 / FSDP that did not gather model shards before
-    ``save_pretrained``. The artifact looks structurally valid (filenames + ``adapter_config.json`` present),
-    but downstream loaders fail with confusing index errors at the first attempted use, e.g.::
+    rank)`` - both 2-D and non-empty. If any such tensor is 1-D or has a zero-sized dimension, it typically indicates a
+    partitioned-parameter export under DeepSpeed ZeRO-3 / FSDP that did not gather model shards before
+    ``save_pretrained``. The artifact looks structurally valid (filenames + ``adapter_config.json`` present), but
+    downstream loaders fail due to the tensor being incomplete.
 
-        IndexError: too many indices for tensor of dimension 1
-
-    in vLLM's ``slice_lora_b`` during hot-swap (vllm-project/vllm#28640).
-
-    Raise here so the failure surfaces at write time, with an actionable hint, instead of corrupting the artifact and
-    deferring the crash to whatever later loads it. Only the ``lora_A`` / ``lora_B`` keys are inspected; legitimately
-    1-D parameters such as DoRA's ``lora_magnitude_vector`` and AdaLoRA's ``lora_E`` are not affected.
+    Raise a warning so the failure surfaces at write time, with an actionable hint, instead of corrupting the artifact
+    and deferring the crash to whatever later loads it. Only the ``lora_A`` / ``lora_B`` keys are inspected;
+    legitimately 1-D parameters such as DoRA's ``lora_magnitude_vector`` and AdaLoRA's ``lora_E`` are not affected.
 
     Args:
         state_dict: LoRA-only state dict that will be written to disk.
         adapter_name: Adapter name being saved, used in the error message only.
 
-    Raises:
-        ValueError: When at least one ``lora_A`` / ``lora_B`` tensor is empty or has fewer than 2 dimensions.
+    Warns:
+        PeftWarning: When at least one ``lora_A`` / ``lora_B`` tensor is empty or has fewer than 2 dimensions.
     """
     bad: list[tuple[str, tuple[int, ...]]] = []
     for name, tensor in state_dict.items():
@@ -86,13 +83,14 @@ def _validate_lora_adapter_state_dict(
 
     preview = ", ".join(f"{n}:{s}" for n, s in bad[:3])
     suffix = f" (+{len(bad) - 3} more)" if len(bad) > 3 else ""
-    raise ValueError(
+    warnings.warn(
         f"Adapter {adapter_name!r}: {len(bad)} LoRA tensor(s) have invalid shape: "
         f"{preview}{suffix}. A 1-D or zero-sized lora_A / lora_B tensor indicates that DeepSpeed ZeRO-3 / FSDP shards "
-        "were not gathered before save_pretrained() — downstream loaders such as vLLM hot-swap will then fail with "
-        "IndexError at first use. Wrap the save in deepspeed.zero.GatheredParameters([...], modifier_rank=None) for "
+        "were not gathered before save_pretrained() and are therefore incomplete. "
+        "Wrap the save in deepspeed.zero.GatheredParameters([...], modifier_rank=None) for "
         "ZeRO-3, or torch.distributed.fsdp.FullyShardedDataParallel.summon_full_params(model) for FSDP, before "
-        "calling save_pretrained()."
+        "calling save_pretrained().",
+        PeftWarning,
     )
 
 
