@@ -1085,6 +1085,7 @@ def main():
         'warmup_steps': args.warmup_steps,
         'decay_steps': args.decay_steps,
         'lr_schedule': args.lr_schedule,
+        'output_dir': args.output_dir,
         **asdict(train_config),
     })
 
