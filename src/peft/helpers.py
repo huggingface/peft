@@ -583,12 +583,12 @@ def find_kappa_target_modules(
 
 
 class _SVDLinear(nn.Module):
-    """Low-rank approximation of an ``nn.Linear`` layer using (optionally activation-aware) SVD.
+    """Low-rank approximation of an `nn.Linear` layer using (optionally activation-aware) SVD.
 
-    Replaces ``W`` (shape ``[out_features, in_features]``) with two sequential linear layers ``v`` and ``u``
-    such that ``u(v(x)) ≈ W x``. When a *scaling* matrix ``S`` (derived from input activations) is provided,
-    the SVD is performed on ``W @ S``; the resulting ``V`` factor is then mapped back to the original input
-    space by ``S^{-1}``, following the *activation-aware SVD* approach of EMLoC (Lin et al., NeurIPS 2025).
+    Replaces `W` (shape `[out_features, in_features]`) with two sequential linear layers `v` and `u`
+    such that `u(v(x)) ≈ W x`. When a *scaling* matrix `S` (derived from input activations) is provided,
+    the SVD is performed on `W @ S`; the resulting `V` factor is then mapped back to the original input
+    space by `S^{-1}`, following the *activation-aware SVD* approach of EMLoC (Lin et al., NeurIPS 2025).
     """
 
     def __init__(
@@ -613,7 +613,7 @@ class _SVDLinear(nn.Module):
 
 
 def _get_input_stats(inputs: list[torch.Tensor]) -> torch.Tensor:
-    """Compute the input covariance/scaling matrix ``X^T X`` from collected input activations."""
+    """Compute the input covariance/scaling matrix `X^T X` from collected input activations."""
     xtx = torch.zeros(inputs[0].shape[-1], inputs[0].shape[-1], dtype=torch.float32)
     for x in inputs:
         x = x.reshape(-1, x.shape[-1]).to(dtype=torch.float32)
@@ -622,7 +622,7 @@ def _get_input_stats(inputs: list[torch.Tensor]) -> torch.Tensor:
 
 
 def _get_scaling(xtx: torch.Tensor) -> torch.Tensor:
-    """Compute the activation-aware scaling matrix ``S = Q * sqrt(L)`` via eigendecomposition of ``X^T X``."""
+    """Compute the activation-aware scaling matrix `S = Q * sqrt(L)` via eigendecomposition of `X^T X`."""
     factor = torch.trace(xtx) / xtx.shape[0]
     eps = 1e-7
     eigvals = torch.zeros(xtx.shape[0])
@@ -649,16 +649,16 @@ def _apply_activation_aware_svd(
     """Perform (optionally activation-aware) truncated SVD on a weight matrix.
 
     Args:
-        weight: The weight matrix of shape ``[out_features, in_features]``.
-        rank: Either an ``int`` for a fixed rank, or a ``float`` in ``(0, 1]`` interpreted as an energy
-            threshold (the smallest ``k`` such that the top-``k`` singular values account for at least that
+        weight: The weight matrix of shape `[out_features, in_features]`.
+        rank: Either an `int` for a fixed rank, or a `float` in `(0, 1]` interpreted as an energy
+            threshold (the smallest `k` such that the top-`k` singular values account for at least that
             fraction of total squared singular values).
-        scaling: Optional scaling matrix ``S`` of shape ``[in_features, in_features]``. When provided, SVD
-            is performed on ``weight @ S`` and the ``V`` factor is mapped back with ``S^{-1}``.
+        scaling: Optional scaling matrix `S` of shape `[in_features, in_features]`. When provided, SVD
+            is performed on `weight @ S` and the `V` factor is mapped back with `S^{-1}`.
 
     Returns:
-        A tuple ``(lora_A, lora_B, effective_rank)`` where ``lora_A`` has shape ``[rank, in_features]``
-        and ``lora_B`` has shape ``[out_features, rank]``, so that ``lora_B @ lora_A`` approximates the
+        A tuple `(lora_A, lora_B, effective_rank)` where `lora_A` has shape `[rank, in_features]`
+        and `lora_B` has shape `[out_features, rank]`, so that `lora_B @ lora_A` approximates the
         (scaled) weight.
     """
     weight = weight.to(dtype=torch.float32)
@@ -726,61 +726,61 @@ def get_emulator_model(
     inplace: bool = True,
     progressbar: bool = False,
 ) -> nn.Module:
-    """Construct a lightweight *emulator* of ``model`` by replacing ``nn.Linear`` layers with low-rank SVD factorizations.
+    """Construct a lightweight *emulator* of `model` by replacing `nn.Linear` layers with low-rank SVD factorizations.
 
     This implements the emulator construction approach from the EMLoC paper (Lin et al., NeurIPS 2025). Each
-    ``nn.Linear`` layer is replaced by two sequential linear layers ``v`` (in→rank) and ``u`` (rank→out) whose
-    weights are derived from a truncated SVD of the original weight. When a calibration ``data_loader`` is
+    `nn.Linear` layer is replaced by two sequential linear layers `v` (in→rank) and `u` (rank→out) whose
+    weights are derived from a truncated SVD of the original weight. When a calibration `data_loader` is
     provided, the SVD is made *activation-aware*: a scaling matrix is computed from input activations and the
     SVD is performed on the rescaled weight, which preserves the directions most relevant to the task data.
 
-    The ``rank`` argument controls the compression:
+    The `rank` argument controls the compression:
 
-    - ``int``: use a fixed rank ``k`` for every layer; the top-``k`` singular values are retained.
-    - ``float``: interpreted as an *energy threshold* in ``(0, 1]``; for each layer, the smallest ``k`` is chosen
-      such that the top-``k`` singular values account for at least that fraction of the total squared singular
-      values. This can result in different ranks per layer, similar to the logic in ``peft.tuners.lora.conversion``.
+    - `int`: use a fixed rank `k` for every layer; the top-`k` singular values are retained.
+    - `float`: interpreted as an *energy threshold* in `(0, 1]`; for each layer, the smallest `k` is chosen
+      such that the top-`k` singular values account for at least that fraction of the total squared singular
+      values. This can result in different ranks per layer, similar to the logic in `peft.tuners.lora.conversion`.
 
     The emulator approximates the original model's outputs — higher ranks yield closer approximations, at the
     cost of more parameters.
 
     Note:
         This function is inspired by EMLoC but is a generalized, standalone implementation that works with
-        arbitrary ``nn.Module`` instances. It does not require PEFT layers.
+        arbitrary `nn.Module` instances. It does not require PEFT layers.
 
     Args:
         model (`nn.Module`):
-            The model to compress. Should contain ``nn.Linear`` layers.
+            The model to compress. Should contain `nn.Linear` layers.
         rank (`int` or `float`):
-            The desired rank for the SVD factorization. An ``int`` uses a fixed rank for all layers. A
-            ``float`` in ``(0, 1]`` is interpreted as an energy threshold: for each layer, the smallest rank
-            ``k`` is chosen such that the top ``k`` singular values account for at least that fraction of the
+            The desired rank for the SVD factorization. An `int` uses a fixed rank for all layers. A
+            `float` in `(0, 1]` is interpreted as an energy threshold: for each layer, the smallest rank
+            `k` is chosen such that the top `k` singular values account for at least that fraction of the
             total squared singular values. Higher values (closer to 1.0) result in a better approximation
             but more parameters.
         data_loader (`Iterable`, *optional*):
             An iterator over calibration batches. Each batch should be a dict (or tuple) that can be passed
-            to ``model(**batch)`` or ``model(*batch)``. When provided, the SVD is activation-aware. When
-            ``None``, a plain SVD on the weight matrix is used (no activation information).
+            to `model(**batch)` or `model(*batch)`. When provided, the SVD is activation-aware. When
+            `None`, a plain SVD on the weight matrix is used (no activation information).
         target_modules (`list[str]`, *optional*):
-            List of module name patterns (regex) to compress. If ``None``, all ``nn.Linear`` layers are
+            List of module name patterns (regex) to compress. If `None`, all `nn.Linear` layers are
             compressed. Module names matching these patterns are included.
         ignore_modules (`list[str]`, *optional*):
             List of module name patterns (regex) to exclude from compression. Takes precedence over
-            ``target_modules``.
+            `target_modules`.
         num_samples (`int`):
             Maximum number of calibration samples to use for activation collection. Only relevant when
-            ``data_loader`` is provided. Defaults to 64.
+            `data_loader` is provided. Defaults to 64.
         inplace (`bool`):
-            If ``True``, modify the model in-place. If ``False``, work on a deep copy. Defaults to ``True``.
+            If `True`, modify the model in-place. If `False`, work on a deep copy. Defaults to `True`.
         progressbar (`bool`):
-            Whether to show a progress bar during compression. Defaults to ``False``.
+            Whether to show a progress bar during compression. Defaults to `False`.
 
     Returns:
-        `nn.Module`: The emulator model with ``nn.Linear`` layers replaced by low-rank factorizations.
+        `nn.Module`: The emulator model with `nn.Linear` layers replaced by low-rank factorizations.
 
     Raises:
-        `ValueError`: If the rank is invalid (0, or a float outside ``(0, 1]``).
-        `TypeError`: If no ``nn.Linear`` layers are found in the model.
+        `ValueError`: If the rank is invalid (0, or a float outside `(0, 1]`).
+        `TypeError`: If no `nn.Linear` layers are found in the model.
 
     Example:
 
@@ -861,7 +861,7 @@ def _collect_activations(
     num_samples: int,
     progressbar: bool,
 ) -> dict[str, torch.Tensor]:
-    """Collect input activations for each target ``nn.Linear`` module via forward hooks."""
+    """Collect input activations for each target `nn.Linear` module via forward hooks."""
     inputs_collected: dict[str, list[torch.Tensor]] = {name: [] for name in linear_modules}
     sample_count = 0
 
