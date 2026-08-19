@@ -14,7 +14,6 @@
 import copy
 import platform
 import re
-import tempfile
 
 import pytest
 import torch
@@ -336,10 +335,49 @@ class TestInjectAdapterFromStateDict:
             # all PEFT parameters should be on meta device
             assert {p.device.type for p in get_peft_model_state_dict(model).values()} == {"meta"}
 
-    def _tiny_causal_lm(self, dtype):
-        # Built in process rather than pulled from the hub because the modules_to_save case
-        # needs an untied lm_head: with tie_word_embeddings=True, PEFT writes no
-        # modules_to_save entry into the checkpoint at all and the case is unreachable.
+    _DTYPE_PAIRS = ((torch.float32, torch.bfloat16), (torch.bfloat16, torch.float32))
+
+    @pytest.mark.parametrize("save_dtype, load_dtype", _DTYPE_PAIRS)
+    def test_load_low_cpu_mem_usage_keeps_modules_to_save_dtype(self, save_dtype, load_dtype, tmp_path):
+        # `assign=True` swaps the checkpoint tensor object into the module, so the loaded
+        # weight takes the checkpoint's dtype rather than the model's. That is what makes
+        # the fast path fast for freshly injected adapter weights, which sit on meta until
+        # they are replaced, but modules_to_save weights already exist as real tensors on
+        # the model. Loading an adapter saved in one dtype into a base model in another
+        # left them at the checkpoint dtype, and the first forward raised
+        # "mat1 and mat2 must have the same dtype".
+        config = LoraConfig(r=4, target_modules=["linear"], modules_to_save=["lm_head"])
+        inputs = torch.randint(0, 9, (2, 4))
+        tmp_dir = tmp_path / f"{save_dtype}_{load_dtype}"
+
+        model = get_peft_model(DummyModel().to(save_dtype), config)
+        model.save_pretrained(tmp_dir)
+        del model
+
+        loaded = PeftModel.from_pretrained(
+            DummyModel().to(load_dtype), tmp_dir, low_cpu_mem_usage=True, torch_device="cpu"
+        )
+        dtypes = {p.dtype for name, p in loaded.named_parameters() if "modules_to_save" in name}
+        assert dtypes == {load_dtype}
+
+        # and it runs, which is what the dtype mismatch used to break
+        loaded.eval()
+        with torch.no_grad():
+            loaded(inputs)
+
+    @pytest.mark.parametrize("save_dtype, load_dtype", _DTYPE_PAIRS)
+    def test_load_low_cpu_mem_usage_keeps_base_embedding_dtype(self, save_dtype, load_dtype, tmp_path):
+        # Same statement, different class of key. When the adapter targets an embedding,
+        # save_embedding_layers writes the BASE embedding weight into the checkpoint, so
+        # `assign=True` replaced the base model's own embedding with the checkpoint tensor.
+        # In the checkpoint-lower-precision direction there is no error at all, and the
+        # whole embedding table quietly changes dtype.
+        #
+        # This one cannot use DummyModel: save_embedding_layers auto-detection bails out on
+        # a plain nn.Module ("Could not identify embedding layer(s) because the model is not
+        # a transformers model"), so no base embedding reaches the checkpoint and the test
+        # would assert nothing. It is built in process rather than pulled from the hub so the
+        # test needs no network.
         config = LlamaConfig(
             vocab_size=64,
             hidden_size=16,
@@ -348,60 +386,26 @@ class TestInjectAdapterFromStateDict:
             num_attention_heads=4,
             num_key_value_heads=4,
             max_position_embeddings=64,
-            tie_word_embeddings=False,
         )
-        torch.manual_seed(0)
-        return AutoModelForCausalLM.from_config(config).to(dtype)
 
-    def test_load_low_cpu_mem_usage_keeps_modules_to_save_dtype(self):
-        # `assign=True` swaps the checkpoint tensor object into the module, so the loaded
-        # weight takes the checkpoint's dtype rather than the model's. That is what makes
-        # the fast path fast for freshly injected adapter weights, which sit on meta until
-        # they are replaced, but modules_to_save weights already exist as real tensors on
-        # the model. Loading an adapter saved in one dtype into a base model in another
-        # left them at the checkpoint dtype, and the first forward raised
-        # "expected m1 and m2 to have the same dtype".
-        config = LoraConfig(r=4, target_modules=["q_proj"], modules_to_save=["lm_head"])
-        inputs = torch.randint(0, 60, (2, 8))
+        def build(dtype):
+            torch.manual_seed(0)
+            return AutoModelForCausalLM.from_config(config).to(dtype)
 
-        for save_dtype, load_dtype in ((torch.float32, torch.bfloat16), (torch.bfloat16, torch.float32)):
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                model = get_peft_model(self._tiny_causal_lm(save_dtype), config)
-                model.save_pretrained(tmp_dir)
-                del model
+        lora_config = LoraConfig(r=4, target_modules=["embed_tokens"])
+        tmp_dir = tmp_path / f"{save_dtype}_{load_dtype}"
 
-                loaded = PeftModel.from_pretrained(
-                    self._tiny_causal_lm(load_dtype), tmp_dir, low_cpu_mem_usage=True, torch_device="cpu"
-                )
-                dtypes = {p.dtype for name, p in loaded.named_parameters() if "modules_to_save" in name}
-                assert dtypes == {load_dtype}, (save_dtype, load_dtype, dtypes)
+        model = get_peft_model(build(save_dtype), lora_config)
+        model.save_pretrained(tmp_dir)
+        del model
 
-                # and it runs, which is what the dtype mismatch used to break
-                loaded.eval()
-                with torch.no_grad():
-                    loaded(inputs)
-
-    def test_load_low_cpu_mem_usage_keeps_base_embedding_dtype(self):
-        # Same statement, different class of key. When the adapter targets an embedding,
-        # save_embedding_layers writes the BASE embedding weight into the checkpoint, so
-        # `assign=True` replaced the base model's own embedding with the checkpoint tensor.
-        # In the checkpoint-lower-precision direction there is no error at all, and the
-        # whole embedding table quietly changes dtype.
-        config = LoraConfig(r=4, target_modules=["embed_tokens"])
-
-        for save_dtype, load_dtype in ((torch.float32, torch.bfloat16), (torch.bfloat16, torch.float32)):
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                model = get_peft_model(self._tiny_causal_lm(save_dtype), config)
-                model.save_pretrained(tmp_dir)
-                del model
-
-                loaded = PeftModel.from_pretrained(
-                    self._tiny_causal_lm(load_dtype), tmp_dir, low_cpu_mem_usage=True, torch_device="cpu"
-                )
-                dtypes = {
-                    p.dtype for name, p in loaded.named_parameters() if name.endswith("embed_tokens.base_layer.weight")
-                }
-                assert dtypes == {load_dtype}, (save_dtype, load_dtype, dtypes)
+        loaded = PeftModel.from_pretrained(
+            build(load_dtype), tmp_dir, low_cpu_mem_usage=True, torch_device="cpu"
+        )
+        dtypes = {
+            p.dtype for name, p in loaded.named_parameters() if name.endswith("embed_tokens.base_layer.weight")
+        }
+        assert dtypes == {load_dtype}
 
     def test_inject_from_state_dict_missing_keys_warning(self):
         # check that if the PEFT config specifies **more** target modules than the state_dict, we get a warning for that
