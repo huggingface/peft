@@ -63,8 +63,8 @@ class SupertuningConfig(PeftConfig):
         save_precomputed_indices (`bool`):
             Whether to save the sparse-support indices in the state dict. Defaults to `True`. Set to `False` to trim
             checkpoint size — indices will be reconstructed deterministically from the base weight magnitudes at load
-            time. Reconstruction assumes the base model weights are identical to those used at training time;
-            small numerical drift can cause topk tie-breaks to differ.
+            time. Reconstruction assumes the base model weights are identical to those used at training time; small
+            numerical drift can cause topk tie-breaks to differ.
 
     Paper: https://arxiv.org/abs/2607.09287
     """
