@@ -24,10 +24,28 @@ from peft.tuners.lycoris_utils import LycorisLayer
 from .config import LoHaConfig
 
 
+def khatri_rao(w1_b: torch.Tensor, w2_b: torch.Tensor) -> torch.Tensor:
+    """Column-wise Kronecker product: (r, d_in), (r, d_in) -> (r*r, d_in)."""
+    return (w1_b.unsqueeze(1) * w2_b.unsqueeze(0)).reshape(-1, w1_b.shape[1])
+
+
+def face_split(w1_a: torch.Tensor, w2_a: torch.Tensor) -> torch.Tensor:
+    """Row-wise Kronecker (face-splitting) product: (d_out, r), (d_out, r) -> (d_out, r*r)."""
+    return (w1_a.unsqueeze(2) * w2_a.unsqueeze(1)).reshape(w1_a.shape[0], -1)
+
+
 class LoHaLayer(nn.Module, LycorisLayer):
     # All names of layers that may contain adapter weights
     adapter_layer_names = ("hada_w1_a", "hada_w1_b", "hada_w2_a", "hada_w2_b", "hada_t1", "hada_t2")
-    # other_param_names is defined on parent class
+    other_param_names = (
+        "r",
+        "alpha",
+        "scaling",
+        "rank_dropout",
+        "rank_dropout_scale",
+        "module_dropout",
+        "use_khatri_rao",
+    )
 
     def __init__(self, base_layer: nn.Module):
         super().__init__()
@@ -40,6 +58,7 @@ class LoHaLayer(nn.Module, LycorisLayer):
         self.hada_w2_b = nn.ParameterDict({})
         self.hada_t1 = nn.ParameterDict({})
         self.hada_t2 = nn.ParameterDict({})
+        self.use_khatri_rao = {}
 
     @property
     def _available_adapters(self) -> set[str]:
@@ -100,6 +119,25 @@ class LoHaLayer(nn.Module, LycorisLayer):
             nn.init.kaiming_uniform_(self.hada_t1[adapter_name], a=math.sqrt(5))
             nn.init.kaiming_uniform_(self.hada_t2[adapter_name], a=math.sqrt(5))
 
+    def reset_adapter_parameters_lora_anchored(self, adapter_name: str):
+        # LoRA-anchored initialization for the Khatri-Rao path:
+        #   - the first factor pair is initialized like a plain LoRA pair (hada_w1_a takes the role of lora_B and is
+        #     zeroed, hada_w1_b takes the role of lora_A)
+        #   - the second factor pair is anchored so that hada_w2_a @ hada_w2_b is the all-ones matrix, thus the delta
+        #     weight starts out as (hada_w1_a @ hada_w1_b) * 1, i.e. exactly a plain LoRA delta
+        # The small noise on the remaining rows of hada_w2_b gives the other columns of hada_w2_a a gradient path once
+        # hada_w1_a @ hada_w1_b != 0, so higher-rank directions are learned gradually.
+        nn.init.zeros_(self.hada_w1_a[adapter_name])
+        nn.init.kaiming_uniform_(self.hada_w1_b[adapter_name], a=math.sqrt(5))
+        w2_a = self.hada_w2_a[adapter_name]
+        w2_b = self.hada_w2_b[adapter_name]
+        nn.init.zeros_(w2_a)
+        w2_a.data[:, 0] = 1.0
+        nn.init.zeros_(w2_b)
+        w2_b.data[0] = 1.0
+        if w2_b.shape[0] > 1:
+            w2_b.data[1:].normal_(std=w2_b.shape[1] ** -0.5)
+
     def update_layer(
         self,
         adapter_name: str,
@@ -120,6 +158,7 @@ class LoHaLayer(nn.Module, LycorisLayer):
         module_dropout = config.module_dropout
         init_weights = config.init_weights
         use_effective_conv2d = config.use_effective_conv2d
+        use_khatri_rao = config.use_khatri_rao
         inference_mode = config.inference_mode
 
         if r <= 0:
@@ -167,12 +206,20 @@ class LoHaLayer(nn.Module, LycorisLayer):
         else:
             raise TypeError(f"LoHa is not implemented for base layers of type {type(base_layer).__name__}")
 
+        # The Khatri-Rao identity does not apply to the Tucker decomposition (i.e. the effective conv2d case), so
+        # store the flag resolved per adapter: it indicates whether the factored path is actually used, which can
+        # deviate from the config value.
+        self.use_khatri_rao[adapter_name] = use_khatri_rao and (len(shape) == 2)
+
         # Create weights with provided shape
         self.create_adapter_parameters(adapter_name, r, shape)
 
         # Initialize weights
         if init_weights:
-            self.reset_adapter_parameters(adapter_name)
+            if self.use_khatri_rao[adapter_name]:
+                self.reset_adapter_parameters_lora_anchored(adapter_name)
+            else:
+                self.reset_adapter_parameters(adapter_name)
         else:
             self.reset_adapter_parameters_random(adapter_name)
 
@@ -218,6 +265,34 @@ class LoHaLayer(nn.Module, LycorisLayer):
             weight *= drop
 
         return weight
+
+    def get_effective_AB(self, adapter_name: str) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return factor-sized matrices (A, B) such that scaling * B @ A equals the 2D delta weight.
+
+        This uses the Khatri-Rao identity (w1_a @ w1_b) * (w2_a @ w2_b) = face_split(w1_a, w2_a) @ khatri_rao(w1_b,
+        w2_b), i.e. LoHa is an exact rank r² LoRA with A of shape (r², d_in) and B of shape (d_out, r²). The scaling is
+        not included in the returned factors. This identity does not apply to the Tucker decomposition, so it cannot be
+        used for adapters created with `use_effective_conv2d=True`.
+
+        """
+        if adapter_name in self.hada_t1.keys():
+            raise ValueError(
+                "get_effective_AB does not support the Tucker decomposition (i.e. use_effective_conv2d=True)"
+            )
+
+        A = khatri_rao(self.hada_w1_b[adapter_name], self.hada_w2_b[adapter_name])
+        B = face_split(self.hada_w1_a[adapter_name], self.hada_w2_a[adapter_name])
+
+        # Perform rank dropout during training; masking the rows of B is equivalent to masking the rows of the delta
+        # weight as done in get_delta_weight
+        rank_dropout = self.rank_dropout[adapter_name]
+        if self.training and rank_dropout:
+            drop = (torch.rand(B.size(0)) > rank_dropout).to(B.dtype)
+            drop = drop.view(-1, 1).to(B.device)
+            drop /= drop.mean()
+            B = B * drop
+
+        return A, B
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
@@ -267,6 +342,12 @@ class Linear(LoHaLayer):
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
+        if self.use_khatri_rao[adapter_name]:
+            # factored execution as a rank r² LoRA, the full delta weight is never materialized
+            A, B = self.get_effective_AB(adapter_name)
+            input = self._cast_input_dtype(input, A.dtype)
+            return self.scaling[adapter_name] * F.linear(F.linear(input, A), B)
+
         delta_weight = self.get_delta_weight(adapter_name)
         input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
@@ -301,18 +382,40 @@ class Conv2d(LoHaLayer):
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
-        delta_weight = self.get_delta_weight(adapter_name)
-        input = self._cast_input_dtype(input, delta_weight.dtype)
-        # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
-        return F.conv2d(
-            input,
-            delta_weight,
-            stride=base_layer.stride,
-            padding=base_layer.padding,
-            dilation=base_layer.dilation,
-            groups=base_layer.groups,
-        )
+        if self.use_khatri_rao[adapter_name]:
+            # Factored execution: the flattened delta weight is B @ A, so the delta conv splits into a conv with the
+            # rows of A as kernels, followed by a 1x1 conv with B. For grouped convs, A is tiled so that the inputs of
+            # each group are projected onto the same r² effective kernels.
+            A, B = self.get_effective_AB(adapter_name)
+            input = self._cast_input_dtype(input, A.dtype)
+            groups = base_layer.groups
+            weight_A = A.view(-1, *base_layer.weight.shape[1:])
+            if groups > 1:
+                weight_A = weight_A.repeat(groups, 1, 1, 1)
+            hidden = F.conv2d(
+                input,
+                weight_A,
+                stride=base_layer.stride,
+                padding=base_layer.padding,
+                dilation=base_layer.dilation,
+                groups=groups,
+            )
+            weight_B = B.unsqueeze(-1).unsqueeze(-1)
+            result = self.scaling[adapter_name] * F.conv2d(hidden, weight_B, groups=groups)
+        else:
+            delta_weight = self.get_delta_weight(adapter_name)
+            input = self._cast_input_dtype(input, delta_weight.dtype)
+            # don't add bias here, because the bias is already included in the output of the base_layer
+            result = F.conv2d(
+                input,
+                delta_weight,
+                stride=base_layer.stride,
+                padding=base_layer.padding,
+                dilation=base_layer.dilation,
+                groups=base_layer.groups,
+            )
+        return result
 
     def __repr__(self) -> str:
         rep = super().__repr__()
@@ -340,18 +443,38 @@ class Conv1d(LoHaLayer):
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
-        delta_weight = self.get_delta_weight(adapter_name)
-        input = self._cast_input_dtype(input, delta_weight.dtype)
-        # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
-        return F.conv1d(
-            input,
-            delta_weight,
-            stride=base_layer.stride,
-            padding=base_layer.padding,
-            dilation=base_layer.dilation,
-            groups=base_layer.groups,
-        )
+        if self.use_khatri_rao[adapter_name]:
+            # Factored execution, see the comment in Conv2d._get_delta_activations
+            A, B = self.get_effective_AB(adapter_name)
+            input = self._cast_input_dtype(input, A.dtype)
+            groups = base_layer.groups
+            weight_A = A.view(-1, *base_layer.weight.shape[1:])
+            if groups > 1:
+                weight_A = weight_A.repeat(groups, 1, 1)
+            hidden = F.conv1d(
+                input,
+                weight_A,
+                stride=base_layer.stride,
+                padding=base_layer.padding,
+                dilation=base_layer.dilation,
+                groups=groups,
+            )
+            weight_B = B.unsqueeze(-1)
+            result = self.scaling[adapter_name] * F.conv1d(hidden, weight_B, groups=groups)
+        else:
+            delta_weight = self.get_delta_weight(adapter_name)
+            input = self._cast_input_dtype(input, delta_weight.dtype)
+            # don't add bias here, because the bias is already included in the output of the base_layer
+            result = F.conv1d(
+                input,
+                delta_weight,
+                stride=base_layer.stride,
+                padding=base_layer.padding,
+                dilation=base_layer.dilation,
+                groups=base_layer.groups,
+            )
+        return result
 
     def __repr__(self) -> str:
         rep = super().__repr__()

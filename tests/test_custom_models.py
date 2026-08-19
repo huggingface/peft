@@ -408,6 +408,30 @@ TEST_CASES = [
     ("Conv2d 1x1 LOHA", "Conv2d1x1", LoHaConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d Groups LOHA", "Conv2dGroups", LoHaConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d Groups2 LOHA", "Conv2dGroups2", LoHaConfig, {"target_modules": ["conv2d"]}),
+    ("Vanilla MLP 8 LOHA", "MLP", LoHaConfig, {"target_modules": ["lin0", "lin1"], "use_khatri_rao": True}),
+    (
+        "Vanilla MLP 9 LOHA",
+        "MLP",
+        LoHaConfig,
+        {"target_modules": "lin0", "rank_dropout": 0.5, "use_khatri_rao": True},
+    ),
+    ("Conv2d 5 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d", "lin0"], "use_khatri_rao": True}),
+    (
+        "Conv2d 6 LOHA",
+        "Conv2d",
+        LoHaConfig,
+        {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True, "use_khatri_rao": True},
+    ),
+    ("Conv1d LOHA 5", "Conv1d", LoHaConfig, {"target_modules": ["conv1d"], "use_khatri_rao": True}),
+    (
+        "Conv1d Groups LOHA 2",
+        "Conv1dGroups",
+        LoHaConfig,
+        {"target_modules": ["conv1d"], "r": 4, "use_khatri_rao": True},
+    ),
+    ("Conv2d 1x1 LOHA 2", "Conv2d1x1", LoHaConfig, {"target_modules": ["conv2d"], "use_khatri_rao": True}),
+    ("Conv2d Groups LOHA 2", "Conv2dGroups", LoHaConfig, {"target_modules": ["conv2d"], "use_khatri_rao": True}),
+    ("Conv2d Groups2 LOHA 2", "Conv2dGroups2", LoHaConfig, {"target_modules": ["conv2d"], "use_khatri_rao": True}),
     # LoKr
     ("Vanilla MLP 1 LOKR", "MLP", LoKrConfig, {"target_modules": "lin0"}),
     ("Vanilla MLP 2 LOKR", "MLP", LoKrConfig, {"target_modules": ["lin0"]}),
@@ -2935,6 +2959,10 @@ class TestPeftCustomModel(PeftCommonTester):
             lr = 0.01  # otherwise we get nan
         elif issubclass(config_cls, AdaLoraConfig):
             lr = 1e-4  # AdaLoRA + init_lora_weights=False can blow up with multi-target SGD
+        elif issubclass(config_cls, LoHaConfig) and config_kwargs.get("use_khatri_rao"):
+            # the LoRA-anchored init receives full LoRA-scale gradients from the first step and the delta weight is
+            # degree 4 in the trainables, so with a high lr, training blows up and we get nan
+            lr = 1e-3
         elif issubclass(
             config_cls, PveraConfig
         ):  # needs a very small lr to not get nan in pvera_lambda_b due to high input values in this test (up to 90)
@@ -3041,6 +3069,10 @@ class TestPeftCustomModel(PeftCommonTester):
             lr = 1e-4  # needs smaller lr to not get nan
         if isinstance(config, AdaLoraConfig):
             lr = 1e-4  # AdaLoRA can blow up with multi-target SGD; use a smaller lr to avoid nan
+        if isinstance(config, LoHaConfig) and config.use_khatri_rao and (model_id == "Conv2dGroups2"):
+            # the LoRA-anchored init receives full LoRA-scale gradients from the first step (unattenuated by the
+            # Hadamard factor); with the huge input values of this model, the default lr quickly leads to nan
+            lr = 1e-5
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -4595,6 +4627,45 @@ class TestPeftCustomModel(PeftCommonTester):
         output2 = model(**inputs).logits
 
         assert (output1 == output2).all()
+
+    @pytest.mark.parametrize(
+        "model_cls, config_kwargs",
+        [
+            (MLP, {"target_modules": ["lin0", "lin1"]}),
+            (ModelConv1D, {"target_modules": ["conv1d"]}),
+            (ModelConv1DGroups, {"target_modules": ["conv1d"], "r": 4}),
+            (ModelConv2D, {"target_modules": ["conv2d", "lin0"]}),
+            # with use_effective_conv2d, the conv2d layer uses the Tucker decomposition, to which the Khatri-Rao
+            # factorization does not apply, i.e. only lin0 uses the factored path
+            (ModelConv2D, {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True}),
+            (ModelConv2D1x1, {"target_modules": ["conv2d"]}),
+            (ModelConv2DGroups, {"target_modules": ["conv2d"]}),
+        ],
+    )
+    def test_loha_kathri_rao_forward_matches_default_forward(self, model_cls, config_kwargs):
+        # the outputs with use_khatri_rao=True should be (numerically close to) identical to the default path
+        torch.manual_seed(0)
+        base_model = model_cls().to(self.torch_device)
+        config = LoHaConfig(init_weights=False, **config_kwargs)
+        model = get_peft_model(copy.deepcopy(base_model), config).eval()
+
+        X = self.prepare_inputs_for_testing()
+        with torch.inference_mode():
+            output_materialized = model(**X)
+
+        # sanity check: the adapter is not a no-op
+        with model.disable_adapter(), torch.inference_mode():
+            output_base = model(**X)
+        assert not torch.allclose(output_base, output_materialized, atol=1e-6, rtol=1e-6)
+
+        state_dict = get_peft_model_state_dict(model)
+        config_kr = LoHaConfig(init_weights=False, use_khatri_rao=True, **config_kwargs)
+        model_kr = get_peft_model(copy.deepcopy(base_model), config_kr).eval()
+        set_peft_model_state_dict(model_kr, state_dict)
+        with torch.inference_mode():
+            output_kr = model_kr(**X)
+
+        assert torch.allclose(output_materialized, output_kr, atol=1e-5, rtol=1e-5)
 
 
 class TestMultiRankAdapter:
