@@ -14,6 +14,7 @@
 
 import inspect
 import re
+import warnings
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from copy import deepcopy
@@ -604,9 +605,11 @@ class _SVDLinear(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         self.rank = rank
-        device_kwargs = {"device": device, "dtype": dtype}
-        self.v = nn.Linear(in_features, rank, bias=False, **device_kwargs)
-        self.u = nn.Linear(rank, out_features, bias=bias, **device_kwargs)
+        # Use meta device during init to avoid allocating memory for weights that are immediately
+        # overwritten after construction. The caller is responsible for assigning real weights.
+        meta_kwargs = {"device": "meta", "dtype": dtype}
+        self.v = nn.Linear(in_features, rank, bias=False, **meta_kwargs)
+        self.u = nn.Linear(rank, out_features, bias=bias, **meta_kwargs)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.u(self.v(x))
@@ -715,6 +718,31 @@ def _get_parent_and_child(model: nn.Module, qualified_name: str) -> tuple[nn.Mod
     return parent, parts[-1]
 
 
+def _find_tied_linear_modules(model: nn.Module) -> set[str]:
+    """Return the set of `nn.Linear` module names whose weight parameter is shared with another module.
+
+    This detects weight-tying (e.g. `lm_head` sharing weights with `embed_tokens`) by comparing data pointers
+    of all parameters in the model. When a linear layer's weight is tied to a non-linear module (such as an
+    embedding), replacing the linear would silently break the tying.
+    """
+    seen_ptrs: dict[int, str] = {}
+    tied_names: set[str] = set()
+    for param_name, param in model.named_parameters(remove_duplicate=False):
+        ptr = param.data_ptr()
+        if ptr in seen_ptrs:
+            # This parameter shares storage with another — check if it belongs to an nn.Linear
+            # We look up the module that owns this parameter by matching the parameter name prefix
+            # to module names.
+            module_name = param_name.rpartition(".")[0]
+            if module_name:
+                module = model.get_submodule(module_name)
+                if isinstance(module, nn.Linear):
+                    tied_names.add(module_name)
+        else:
+            seen_ptrs[ptr] = param_name
+    return tied_names
+
+
 @torch.no_grad()
 def get_emulator_model(
     model: nn.Module,
@@ -747,6 +775,10 @@ def get_emulator_model(
     Note:
         This function is inspired by EMLoC but is a generalized, standalone implementation that works with
         arbitrary `nn.Module` instances. It does not require PEFT layers.
+
+        Layers with tied weights (e.g. `lm_head` sharing weights with `embed_tokens` when
+        `tie_word_embeddings=True`) are automatically skipped to avoid silently breaking the tying.
+        A warning is emitted listing the skipped layers.
 
     Args:
         model (`nn.Module`):
@@ -805,9 +837,19 @@ def get_emulator_model(
     model.eval()
 
     # --- identify linear layers to compress ---
+    tied_modules = _find_tied_linear_modules(model)
+    if tied_modules:
+        warnings.warn(
+            "The following nn.Linear layers have tied weights and will be skipped to avoid "
+            f"breaking weight-tying: {sorted(tied_modules)}. If you want to compress these "
+            "layers, untie the weights first (e.g. by loading with `tie_word_embeddings=False`)."
+        )
+
     linear_modules: dict[str, nn.Linear] = {}
     for name, module in model.named_modules():
         if not isinstance(module, nn.Linear):
+            continue
+        if name in tied_modules:
             continue
         if ignore_modules and any(re.fullmatch(pattern, name) for pattern in ignore_modules):
             continue
@@ -835,6 +877,7 @@ def get_emulator_model(
 
         lora_a, lora_b, effective_rank = _apply_activation_aware_svd(weight, rank=rank, scaling=scaling)
 
+        # Construct on meta device, then materialize on the target device
         svd_layer = _SVDLinear(
             in_features=linear.in_features,
             out_features=linear.out_features,
@@ -843,6 +886,7 @@ def get_emulator_model(
             dtype=dtype,
             device=device,
         )
+        svd_layer = svd_layer.to_empty(device=device)
         svd_layer.v.weight.data = lora_a.to(dtype=dtype, device=device).contiguous()
         svd_layer.u.weight.data = lora_b.to(dtype=dtype, device=device).contiguous()
         if has_bias:

@@ -976,3 +976,31 @@ class TestGetEmulatorModel:
             if isinstance(module, _SVDLinear) and module.u.bias is not None:
                 svd_with_bias += 1
         assert svd_with_bias > 0, "Some SVD layers should have bias (those replacing biased linears)"
+
+    def test_tied_weights_skipped(self):
+        """Layers with tied weights (e.g. lm_head sharing with embed_tokens) should be skipped."""
+        from transformers import AutoModelForCausalLM
+
+        # OPT has tie_word_embeddings=True, so lm_head.weight is tied to decoder.embed_tokens.weight
+        # It also has many other nn.Linear layers (attention projections, FFN, etc.)
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        model.eval()
+        assert model.lm_head.weight is model.model.decoder.embed_tokens.weight, "OPT should have tied weights"
+
+        with pytest.warns(UserWarning, match="tied weights"):
+            emulator = get_emulator_model(deepcopy(model), rank=4)
+
+        from peft.helpers import _SVDLinear
+
+        # lm_head should NOT be replaced by _SVDLinear
+        assert not isinstance(emulator.lm_head, _SVDLinear), "lm_head should not be compressed (tied weights)"
+        assert isinstance(emulator.lm_head, nn.Linear), "lm_head should remain nn.Linear"
+
+        # But other linear layers should still be compressed
+        svd_count = sum(1 for m in emulator.modules() if isinstance(m, _SVDLinear))
+        assert svd_count > 0, "Other linear layers should still be compressed"
+
+        # The tying should be preserved
+        assert emulator.lm_head.weight is emulator.model.decoder.embed_tokens.weight, (
+            "Weight tying should be preserved after emulator construction"
+        )
