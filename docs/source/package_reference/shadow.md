@@ -27,14 +27,16 @@ Input
          ...                       (the (hidden, shadow) pair rides the loop together)
 ```
 
-Because the adaptation is an **input-dependent trajectory in layer space** (the shadow state evolves with the data) rather than a static weight-space delta, ShadowPEFT **cannot be merged** into the base weights. Calling `merge`, `merge_adapter`, or `merge_and_unload` raises an explicit error. To obtain the lightweight shadow network on its own (the analogue of `merge_and_unload`), use `model.base_model.unload_shadow()`, which returns a standalone [`~tuners.shadow.layers.DetachedShadowModel`].
+Because the adaptation is an **input-dependent trajectory in layer space** (the shadow state evolves with the data) rather than a static weight-space delta, ShadowPEFT **cannot be merged** into the base weights. Calling `merge`, `merge_adapter`, or `merge_and_unload` raises an explicit error. For Transformers language models, you can obtain the lightweight shadow network on its own with `model.base_model.unload_shadow()`, which returns a standalone [`~tuners.shadow.layers.DetachedShadowModel`]. Standalone unloading is not supported for Diffusers models because reconstructing a complete denoiser is architecture-specific.
 
 Adding multiple adapters, switching between them with `set_adapter`, deleting them, and enabling/disabling them all work as with other PEFT methods. Only **one** adapter can be active at a time, because the shadow state is a single trajectory through the network.
 
 The shadow backbone can be built in two ways, controlled by `ShadowConfig.shadow_model`:
 
-- `"mirror"` (default): a smaller copy of the base architecture (fewer layers via `shadow_num_hidden_layers`, optionally smaller hidden size / heads / MLP) is created automatically from the base model's config and randomly initialized. When the shadow hidden size matches the base, the frozen base input embeddings are shared (`share_embeddings`); when it differs, a trained projection bridges the gap.
-- a model id or local path: the backbone is loaded with Transformers `AutoModel`, letting you initialize the shadow network from a smaller pre-trained model.
+- `"mirror"` (default): a smaller shadow backbone is created automatically. Language models use a reduced copy of the base architecture. Diffusers architectures with a registered backend use a reduced architecture-alike model initialized from selected base weights; compatible architectures without a backend fall back to a token-wise residual MLP. When the shadow hidden size differs from the base, a trained projection bridges the gap.
+- a model id or local path: the backbone is loaded as a smaller pre-trained model. Transformers models use `AutoModel`; registered Diffusers backends define their own compatible checkpoint loading.
+
+Architecture-aware Diffusers support is selected automatically from the model class. Flux2 currently has a registered backend; other compatible transformer-based Diffusers models use the generic MLP fallback. Standalone `unload_shadow()` remains unsupported for all Diffusers models because reconstructing a complete denoiser is architecture-specific.
 
 Compared to LoRA-style methods, ShadowPEFT adds more parameters and compute (it runs a parallel network and wraps whole decoder blocks), but the adapter is a self-contained network that can be trained centrally, reused across tasks, and initialized from a pre-trained small model. An optional auxiliary loss (`auxiliary_loss_weight`) applies the task head to the initial shadow state `s^(0)` and adds it to the task loss, encouraging the detachable shadow path to solve the task on its own. For causal LM, the base output head is reused; include `"lm_head"` in `modules_to_save` to train and save it through the standard PEFT mechanism.
 
@@ -81,11 +83,11 @@ the base model's hidden states at every layer, so `logits` already reflects Shad
 to get the plain base model for comparison). The auxiliary loss additionally trains the shadow path to solve the task
 on its own.
 
-To evaluate the **standalone shadow network** (the detachable, lightweight model — the ShadowPEFT analogue of
-`merge_and_unload`), use `unload_shadow()`. It returns `head(projection(backbone(x)))` as a normal task model that you
-can evaluate like any other: for a causal-LM task it is a generation-capable causal LM (supports `generate()` and KV
-caching), and for a sequence-classification task it pools the last token and
-returns class logits.
+To evaluate the **standalone shadow network** for a Transformers language model (the detachable, lightweight model —
+the ShadowPEFT analogue of `merge_and_unload`), use `unload_shadow()`. It returns
+`head(projection(backbone(x)))` as a normal task model that you can evaluate like any other: for a causal-LM task it is
+a generation-capable causal LM (supports `generate()` and KV caching), and for a sequence-classification task it pools
+the last token and returns class logits. Calling this method for a Diffusers model raises `NotImplementedError`.
 
 ```py
 shadow = model.base_model.unload_shadow()  # a DetachedShadowModel (a PreTrainedModel)

@@ -29,12 +29,7 @@ from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import TaskType
 
 from .config import ShadowConfig
-from .diffusers import (
-    DetachedFluxShadowModel,
-    build_detached_flux_shadow,
-    freeze_flux_stem_embeddings,
-    validate_pretrained_flux_shadow,
-)
+from .diffusers import get_diffusion_shadow_backend
 from .layers import DetachedShadowModel, ShadowCache, ShadowCarrier, ShadowLayer
 
 
@@ -52,8 +47,8 @@ _SHADOW_ADAPTER_CONTAINERS = (
 )
 
 
-def _is_flux_like(model: nn.Module) -> bool:
-    """Diffusers Flux / Flux2 transformers expose `transformer_blocks` instead of HF `layers`/`h`."""
+def _is_diffusion_transformer(model: nn.Module) -> bool:
+    """Return whether the model exposes a Diffusers-style transformer block stack."""
     return isinstance(getattr(model, "single_transformer_blocks", None), nn.ModuleList) or (
         isinstance(getattr(model, "transformer_blocks", None), nn.ModuleList)
         and not isinstance(getattr(model, "layers", None), nn.ModuleList)
@@ -71,8 +66,8 @@ def _get_backbone(model: nn.Module) -> nn.Module:
             or isinstance(getattr(module, "transformer_blocks", None), nn.ModuleList)
         )
 
-    # Diffusers DiT / Flux models *are* the backbone (no nested `.model`).
-    if _is_flux_like(model):
+    # Diffusers transformer models are themselves the backbone (no nested `.model`).
+    if _is_diffusion_transformer(model):
         return model
 
     for attr in ("model", "transformer", "base_model", "decoder"):
@@ -122,7 +117,7 @@ def _get_hidden_size(config: Any) -> int:
 
 
 class _TokenShadowConfig(PretrainedConfig):
-    """Configuration for the token-wise shadow backbone used by Flux-like models."""
+    """Configuration for the token-wise shadow backbone used by compatible diffusion transformers."""
 
     model_type = "shadow_token_backbone"
 
@@ -132,24 +127,27 @@ class _TokenShadowConfig(PretrainedConfig):
 
 
 class _TokenShadowBackbone(nn.Module):
-    """A tiny token-wise MLP used as the ShadowPEFT mirror backbone on non-causal (e.g. Flux) models.
+    """A tiny token-wise MLP used as the ShadowPEFT mirror backbone on compatible diffusion transformers.
 
     Causal-LM ShadowPEFT mirrors the HF decoder class; Diffusers transformers do not share that constructor/config
     contract, so for those architectures we seed `s^(0)` with a small residual MLP over the entry hidden states.
     """
 
-    def __init__(self, in_features: int, hidden_size: int, num_layers: int = 1) -> None:
+    def __init__(
+        self, in_features: int, hidden_size: int, num_layers: int = 1, intermediate_size: Optional[int] = None
+    ) -> None:
         super().__init__()
         self.config = _TokenShadowConfig(hidden_size=hidden_size)
         self.proj_in = nn.Linear(in_features, hidden_size)
+        intermediate_size = intermediate_size or hidden_size
         n_layers = max(1, int(num_layers))
         self.blocks = nn.ModuleList(
             [
                 nn.Sequential(
                     nn.LayerNorm(hidden_size),
-                    nn.Linear(hidden_size, hidden_size),
+                    nn.Linear(hidden_size, intermediate_size),
                     nn.GELU(),
-                    nn.Linear(hidden_size, hidden_size),
+                    nn.Linear(intermediate_size, hidden_size),
                 )
                 for _ in range(n_layers)
             ]
@@ -354,6 +352,7 @@ class ShadowModel(BaseTuner):
     # ------------------------------------------------------------------------------------------ shadow backbone
 
     def _init_shadow_backbone(self, adapter_name: str, config: ShadowConfig) -> None:
+        diffusion_backend = get_diffusion_shadow_backend(self.model)
         loaded_projection = None
         if config.shadow_model == "mirror":
             backbone = self._build_shadow_backbone(config)
@@ -373,15 +372,8 @@ class ShadowModel(BaseTuner):
             projection = loaded_projection
         elif shadow_hidden != base_hidden:
             projection = nn.Linear(shadow_hidden, base_hidden, bias=False)
-            if isinstance(backbone, DetachedFluxShadowModel):
-                # The compact Flux student is initialized from the leading channels of the base model. Start its
-                # return projection as the matching zero-padded identity instead of destroying that structure with a
-                # random projection.
-                with torch.no_grad():
-                    projection.weight.zero_()
-                    projection.weight[:shadow_hidden, :shadow_hidden].copy_(
-                        torch.eye(shadow_hidden, dtype=projection.weight.dtype, device=projection.weight.device)
-                    )
+            if diffusion_backend is not None:
+                diffusion_backend.initialize_projection(projection, shadow_hidden)
         else:
             projection = nn.Identity()
 
@@ -395,6 +387,7 @@ class ShadowModel(BaseTuner):
         share = (
             config.share_embeddings
             and config.shadow_model == "mirror"
+            and not _is_diffusion_transformer(self.model)
             and supports_inputs_embeds
             and shadow_hidden == base_hidden
         )
@@ -419,40 +412,18 @@ class ShadowModel(BaseTuner):
                     module.to(device=base_param.device, dtype=base_param.dtype)
 
     def _build_shadow_backbone(self, config: ShadowConfig) -> nn.Module:
-        """Build a mirrored shadow backbone, pretrained-initialized for Flux2 and fresh for decoder models."""
-        # Flux2 exposes a complete Diffusers config/constructor contract. Build a reduced model initialized from
-        # evenly-spaced pretrained base blocks; unlike generic DiT fallbacks it can also reduce width while preserving
-        # the latent/text I/O contract required by the pipeline.
-        if _is_flux_like(self.model):
+        """Build a mirrored decoder/diffusion backbone, falling back to a token MLP for unknown diffusion models."""
+        if _is_diffusion_transformer(self.model):
+            backend = get_diffusion_shadow_backend(self.model)
+            if backend is not None:
+                return backend.build_mirror(self.model, config)
             base_hidden = self._base_hidden_size()
-            base_double = getattr(self.model, "transformer_blocks", None)
-            base_single = getattr(self.model, "single_transformer_blocks", None)
-            if (
-                config.shadow_model == "mirror"
-                and isinstance(base_double, nn.ModuleList)
-                and isinstance(base_single, nn.ModuleList)
-                and hasattr(self.model.__class__, "from_config")
-                and hasattr(self.model.config, "num_layers")
-                and hasattr(self.model.config, "num_single_layers")
-            ):
-                num_layers = config.shadow_num_hidden_layers or 1
-                num_single_layers = 2 * num_layers
-                return DetachedFluxShadowModel.from_base(
-                    self.model,
-                    num_layers=num_layers,
-                    num_single_layers=num_single_layers,
-                    share_embeddings=config.share_embeddings,
-                    hidden_size=config.shadow_hidden_size,
-                    num_attention_heads=config.shadow_num_attention_heads,
-                    intermediate_size=config.shadow_intermediate_size,
-                )
-
-            # Generic Diffusers/DiT fallback for architectures without a reconstructable Flux2 config.
             shadow_hidden = config.shadow_hidden_size or base_hidden
             return _TokenShadowBackbone(
                 in_features=base_hidden,
                 hidden_size=shadow_hidden,
                 num_layers=config.shadow_num_hidden_layers or 1,
+                intermediate_size=config.shadow_intermediate_size,
             )
 
         base_backbone = _get_backbone(self.model)
@@ -475,14 +446,18 @@ class ShadowModel(BaseTuner):
         'causal_lm_with_hidden_projection'`), which bundles a small backbone with a projection aligned to a larger
         base.
         """
+        if _is_diffusion_transformer(self.model):
+            backend = get_diffusion_shadow_backend(self.model)
+            if backend is not None:
+                return backend.load_pretrained(self.model, config.shadow_model), None
+            raise ValueError(
+                "Pretrained `shadow_model` checkpoints are not supported for this Diffusers architecture; use "
+                '`shadow_model="mirror"` to build the generic token-wise fallback.'
+            )
+
         config_file = cached_file(config.shadow_model, "config.json")
         with open(config_file) as f:
             raw_config = json.load(f)
-        if _is_flux_like(self.model) and raw_config.get("_class_name") == "Flux2Transformer2DModel":
-            from diffusers import Flux2Transformer2DModel
-
-            loaded = Flux2Transformer2DModel.from_pretrained(config.shadow_model)
-            return validate_pretrained_flux_shadow(self.model, loaded), None
         if raw_config.get("model_type") == "causal_lm_with_hidden_projection":
             return self._load_projected_shadow_backbone(config, raw_config)
         return AutoModel.from_pretrained(config.shadow_model), None
@@ -661,14 +636,8 @@ class ShadowModel(BaseTuner):
         # hook runs a second time during recomputation, and reusing the cached state would leave the shadow backbone
         # out of the recomputed graph (torch then rejects the mismatch in saved-tensor counts).
         if self._deferred_shadow_seed:
-            backbone_kwargs = dict(kwargs)
-            # Flux gradient checkpointing invokes single-stream blocks positionally as
-            # (hidden_states, encoder_hidden_states, temb_mod, image_rotary_emb, joint_attention_kwargs).
-            for name, value in zip(
-                ("encoder_hidden_states", "temb_mod", "image_rotary_emb", "joint_attention_kwargs"),
-                args[1:],
-            ):
-                backbone_kwargs.setdefault(name, value)
+            backend = get_diffusion_shadow_backend(self.model)
+            backbone_kwargs = backend.prepare_block_kwargs(args, kwargs) if backend is not None else None
             self._seed_shadow_state, self._shadow_past_out = self._compute_initial_shadow_state(
                 self.active_adapters[0],
                 input_ids=None,
@@ -729,8 +698,9 @@ class ShadowModel(BaseTuner):
                 raise ValueError("Either `input_ids` or `inputs_embeds` must be provided.")
             inputs_embeds = self.model.get_input_embeddings()(input_ids)
 
-        if isinstance(backbone, DetachedFluxShadowModel):
-            out = backbone(inputs_embeds=inputs_embeds, block_kwargs=backbone_kwargs)
+        diffusion_backend = get_diffusion_shadow_backend(self.model)
+        if diffusion_backend is not None and inputs_embeds is not None:
+            out = diffusion_backend.forward_backbone(backbone, inputs_embeds, backbone_kwargs or {})
         elif share or inputs_embeds is not None:
             out = backbone(inputs_embeds=inputs_embeds, **kwargs)
         else:
@@ -743,12 +713,12 @@ class ShadowModel(BaseTuner):
 
     # ------------------------------------------------------------------------------------------ trainability
 
-    @staticmethod
-    def _freeze_backbone_embeddings(backbone: nn.Module) -> None:
+    def _freeze_backbone_embeddings(self, backbone: nn.Module) -> None:
         """Keep a pretrained shadow backbone's (large) input/output embeddings frozen -- fine-tuning the embedding
         table is not parameter-efficient (it can dominate the trainable parameter count)."""
-        if isinstance(backbone, DetachedFluxShadowModel):
-            freeze_flux_stem_embeddings(backbone)
+        diffusion_backend = get_diffusion_shadow_backend(self.model)
+        if diffusion_backend is not None:
+            diffusion_backend.freeze_embeddings(backbone)
             return
         for getter in ("get_input_embeddings", "get_output_embeddings"):
             embed = None
@@ -906,9 +876,8 @@ class ShadowModel(BaseTuner):
         baked in, this hands back only the lightweight shadow network for high-efficiency / edge inference. It runs
         `head(projection(backbone(x)))` -- the per-block updates require the base outputs and so do not exist
         standalone. For language models, the result behaves like a normal causal LM (supports `generate()` and KV
-        caching). For Flux-style Diffusers transformers, the result preserves the original transformer interface and
-        uses a reduced-depth copy initialized from the pretrained stem, blocks, and output modules, so it can be
-        assigned directly to the original pipeline.
+        caching). Diffusers models are not supported because reconstructing a complete standalone denoiser is specific
+        to each diffusion architecture.
 
         Args:
             adapter_name (`str`, *optional*):
@@ -931,14 +900,10 @@ class ShadowModel(BaseTuner):
         if adapter_name not in self.shadow_backbone:
             raise ValueError(f"No shadow backbone found for adapter '{adapter_name}'.")
 
-        # Only Flux-style models with a single-stream stack can be reconstructed as a pipeline-compatible detached
-        # model. Other Diffusers backbones retain the existing generic detached-shadow behavior.
-        if isinstance(getattr(self.model, "single_transformer_blocks", None), nn.ModuleList):
-            return build_detached_flux_shadow(
-                self.model,
-                self.shadow_backbone[adapter_name],
-                self.shadow_projection[adapter_name],
-                copy=copy,
+        if _is_diffusion_transformer(self.model):
+            raise NotImplementedError(
+                "`unload_shadow()` is not supported for Diffusers models because a standalone denoiser requires "
+                "architecture-specific reconstruction."
             )
 
         maybe_copy = deepcopy if copy else (lambda module: module)

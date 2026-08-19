@@ -12,9 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections import OrderedDict
 from copy import copy as shallow_copy
-from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any
 
@@ -335,18 +333,6 @@ class DetachedFluxShadowModel(nn.Module):
             )
         return SimpleNamespace(last_hidden_state=hidden_states, past_key_values=None)
 
-    def detached_model(self, *, copy: bool = False) -> nn.Module:
-        if not copy:
-            return self.model
-
-        detached = deepcopy(self.model)
-        # A private detached checkpoint must own complete embedding modules rather than external shared references.
-        for name in _FLUX_EMBEDDING_MODULES:
-            embedding = getattr(detached, name, None)
-            if isinstance(embedding, _SharedModuleProxy):
-                setattr(detached, name, embedding.shared_module)
-        return detached
-
 
 def validate_pretrained_flux_shadow(base_model: nn.Module, shadow_model: nn.Module) -> DetachedFluxShadowModel:
     """Validate and wrap an independently pretrained Flux2 transformer for attached Shadow use."""
@@ -404,68 +390,100 @@ def freeze_flux_stem_embeddings(backbone: DetachedFluxShadowModel) -> None:
             module.requires_grad_(False)
 
 
-class DetachedFluxShadowBlock(nn.Module):
-    """Adapt a token-wise shadow backbone to a Flux single-stream block interface."""
+class DiffusionShadowBackend:
+    """Architecture-specific operations needed by an architecture-alike diffusion shadow."""
 
-    def __init__(self, backbone: nn.Module, projection: nn.Module) -> None:
-        super().__init__()
-        self.backbone = backbone
-        self.projection = projection
+    @classmethod
+    def supports(cls, model: nn.Module) -> bool:
+        raise NotImplementedError
 
-    def forward(self, hidden_states, *args: Any, **kwargs: Any):
-        output = self.backbone(inputs_embeds=hidden_states, return_dict=True)
-        return self.projection(output.last_hidden_state)
+    @classmethod
+    def build_mirror(cls, model: nn.Module, config: Any) -> nn.Module:
+        raise NotImplementedError
+
+    @classmethod
+    def load_pretrained(cls, model: nn.Module, model_id_or_path: str) -> nn.Module:
+        raise NotImplementedError
+
+    @classmethod
+    def prepare_block_kwargs(cls, args: tuple, kwargs: dict[str, Any]) -> dict[str, Any]:
+        return {}
+
+    @classmethod
+    def forward_backbone(cls, backbone: nn.Module, inputs_embeds: torch.Tensor, block_kwargs: dict[str, Any]) -> Any:
+        return backbone(inputs_embeds=inputs_embeds, **block_kwargs)
+
+    @classmethod
+    def initialize_projection(cls, projection: nn.Linear, shadow_hidden: int) -> None:
+        pass
+
+    @classmethod
+    def freeze_embeddings(cls, backbone: nn.Module) -> None:
+        pass
 
 
-def _clear_forward_hooks(module: nn.Module) -> None:
-    """Do not carry the parent ShadowModel's boundary hooks into the detached model."""
-    for name in (
-        "_forward_hooks",
-        "_forward_pre_hooks",
-        "_backward_hooks",
-        "_backward_pre_hooks",
-    ):
-        if hasattr(module, name):
-            setattr(module, name, OrderedDict())
+class Flux2ShadowBackend(DiffusionShadowBackend):
+    """Reduced, pretrained-initialized Flux2 shadow backend."""
+
+    @classmethod
+    def supports(cls, model: nn.Module) -> bool:
+        return model.__class__.__name__ == "Flux2Transformer2DModel"
+
+    @classmethod
+    def build_mirror(cls, model: nn.Module, config: Any) -> DetachedFluxShadowModel:
+        num_layers = config.shadow_num_hidden_layers or 1
+        return DetachedFluxShadowModel.from_base(
+            model,
+            num_layers=num_layers,
+            num_single_layers=2 * num_layers,
+            share_embeddings=config.share_embeddings,
+            hidden_size=config.shadow_hidden_size,
+            num_attention_heads=config.shadow_num_attention_heads,
+            intermediate_size=config.shadow_intermediate_size,
+        )
+
+    @classmethod
+    def load_pretrained(cls, model: nn.Module, model_id_or_path: str) -> DetachedFluxShadowModel:
+        from diffusers import Flux2Transformer2DModel
+
+        shadow_model = Flux2Transformer2DModel.from_pretrained(model_id_or_path)
+        return validate_pretrained_flux_shadow(model, shadow_model)
+
+    @classmethod
+    def prepare_block_kwargs(cls, args: tuple, kwargs: dict[str, Any]) -> dict[str, Any]:
+        block_kwargs = dict(kwargs)
+        # Gradient checkpointing invokes Flux2 single-stream blocks positionally.
+        for name, value in zip(
+            ("encoder_hidden_states", "temb_mod", "image_rotary_emb", "joint_attention_kwargs"),
+            args[1:],
+        ):
+            block_kwargs.setdefault(name, value)
+        return block_kwargs
+
+    @classmethod
+    def forward_backbone(
+        cls, backbone: DetachedFluxShadowModel, inputs_embeds: torch.Tensor, block_kwargs: dict[str, Any]
+    ) -> Any:
+        return backbone(inputs_embeds=inputs_embeds, block_kwargs=block_kwargs)
+
+    @classmethod
+    def initialize_projection(cls, projection: nn.Linear, shadow_hidden: int) -> None:
+        with torch.no_grad():
+            projection.weight.zero_()
+            projection.weight[:shadow_hidden, :shadow_hidden].copy_(
+                torch.eye(shadow_hidden, dtype=projection.weight.dtype, device=projection.weight.device)
+            )
+
+    @classmethod
+    def freeze_embeddings(cls, backbone: nn.Module) -> None:
+        freeze_flux_stem_embeddings(backbone)
 
 
-def build_detached_flux_shadow(
-    model: nn.Module,
-    backbone: nn.Module,
-    projection: nn.Module,
-    *,
-    copy: bool = False,
-) -> nn.Module:
-    """Build a pipeline-compatible Flux shadow without importing Diffusers.
+_DIFFUSION_SHADOW_BACKENDS: tuple[type[DiffusionShadowBackend], ...] = (Flux2ShadowBackend,)
 
-    A shallow model copy lets the detached model reuse the frozen Flux stem, double-stream blocks, output head, and
-    methods such as ``cache_context`` without duplicating their storage. The original single-stream stack is replaced
-    by the lightweight trained shadow backbone. ``copy=True`` deep-copies this reduced model after replacement.
-    """
-    if isinstance(backbone, DetachedFluxShadowModel):
-        return backbone.detached_model(copy=copy)
 
-    single_blocks = getattr(model, "single_transformer_blocks", None)
-    if not isinstance(single_blocks, nn.ModuleList):
-        raise TypeError("A detached Flux shadow requires a `single_transformer_blocks` ModuleList.")
-
-    detached = shallow_copy(model)
-    # nn.Module stores children/parameters/buffers in mutable registries. Copy them before assigning the reduced stack,
-    # otherwise the assignment would also mutate the original Flux model.
-    detached._modules = model._modules.copy()
-    detached._parameters = model._parameters.copy()
-    detached._buffers = model._buffers.copy()
-    _clear_forward_hooks(detached)
-
-    if hasattr(model, "_internal_dict"):
-        detached._internal_dict = deepcopy(model._internal_dict)
-    elif hasattr(model, "config"):
-        detached.config = deepcopy(model.config)
-
-    detached.single_transformer_blocks = nn.ModuleList([DetachedFluxShadowBlock(backbone, projection)])
-    if hasattr(detached, "register_to_config"):
-        detached.register_to_config(num_single_layers=1)
-    elif hasattr(detached, "config") and hasattr(detached.config, "num_single_layers"):
-        detached.config.num_single_layers = 1
-
-    return deepcopy(detached) if copy else detached
+def get_diffusion_shadow_backend(model: nn.Module) -> type[DiffusionShadowBackend] | None:
+    """Return the registered architecture backend for `model`, or `None` for the generic MLP fallback."""
+    for backend in _DIFFUSION_SHADOW_BACKENDS:
+        if backend.supports(model):
+            return backend

@@ -52,29 +52,27 @@ class ShadowConfig(PeftConfig):
             `B=0` convention). Don't change this unless you know what you are doing. Defaults to `True`.
         shadow_model (`str`):
             How to build the shadow backbone. `"mirror"` (default) builds a fresh backbone of the same architecture as
-            the base model but with fewer/smaller layers (see the `shadow_*` overrides below). Any other string is
-            treated as a model id or local path. For a Flux2 base, a standard Diffusers
-            `Flux2Transformer2DModel.save_pretrained` checkpoint is loaded and validated against the base pipeline
-            contract. For language models, a plain model is loaded with Transformers `AutoModel`, and a "projected"
-            shadow checkpoint (`model_type == "causal_lm_with_hidden_projection"`, e.g. `shadow-llm/Qwen3-0.6B-H8B`)
-            loads its pretrained backbone together with its trained shadow-hidden -> base-hidden projection. Explicit
-            checkpoints define their own architecture, so all mirror-only `shadow_*` size/depth overrides must remain
-            `None`.
+            the base model but with fewer/smaller layers (see the `shadow_*` overrides below). Diffusers architectures
+            with a registered Shadow backend use a reduced architecture-alike model; other compatible diffusion
+            transformers fall back to a generic token-wise MLP. Any other string is treated as a model id or local
+            path. A "projected" Transformers shadow checkpoint (`model_type == "causal_lm_with_hidden_projection"`,
+            e.g. `shadow-llm/Qwen3-0.6B-H8B`) loads its pretrained backbone together with its trained shadow-hidden ->
+            base-hidden projection. Explicit Diffusers checkpoints require a registered backend; currently Flux2 is
+            supported.
         shadow_num_hidden_layers (`Optional[int]`):
             The depth of the auto-built (`"mirror"`) shadow backbone. For Flux2 this creates the requested number of
-            double-stream blocks and twice as many single-stream blocks. Defaults to `None` (`1` layer, or `1` double
-            and `2` single blocks for Flux2).
+            double-stream blocks and twice as many single-stream blocks; for the generic Diffusers fallback, it is the
+            number of residual MLP blocks. Defaults to `None` (`1` layer).
         shadow_hidden_size (`Optional[int]`):
             The hidden size of the auto-built shadow backbone; may differ from the base hidden size (a projection is
-            inserted automatically). For Flux2 mirrors, reducing this value also reduces the transformer's inner width
-            and must preserve the base attention head dimension. Defaults to `None` (same as the base model).
+            inserted automatically). Architecture backends may impose additional constraints; Flux2 reductions must
+            preserve its base attention head dimension. Defaults to `None` (same as the base model).
         shadow_num_attention_heads (`Optional[int]`):
             The number of attention heads of the auto-built shadow backbone. Defaults to `None` (same as the base
-            model). For a pretrained-initialized Flux2 mirror, this and `shadow_hidden_size` must describe whole base
-            attention heads.
+            model). This option is used by architecture-aware backends but not by the generic Diffusers MLP fallback.
         shadow_intermediate_size (`Optional[int]`):
-            The feed-forward width of the auto-built shadow backbone. For Flux2 mirrors this is converted to the
-            corresponding MLP ratio. Defaults to `None` (same ratio/width as the base model).
+            The feed-forward width of the auto-built shadow backbone. Defaults to `None` (same as its hidden size for
+            the generic Diffusers MLP fallback).
         share_embeddings (`bool`):
             Whether to reuse the frozen base input embeddings to feed the shadow backbone (via `inputs_embeds`) instead
             of the shadow backbone's own embedding table. Defaults to `True`.
@@ -133,7 +131,8 @@ class ShadowConfig(PeftConfig):
         metadata={
             "help": (
                 "How to build the shadow backbone: 'mirror' (default) builds the same architecture as the base model; "
-                "any other string is loaded as a model id/path (including standard Diffusers Flux2 checkpoints)."
+                "registered Diffusers backends build reduced architecture-alike models and unknown compatible "
+                "diffusion transformers use a generic token-wise MLP; any other string is loaded as a model id/path."
             )
         },
     )
@@ -141,26 +140,19 @@ class ShadowConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "Depth of the auto-built shadow backbone. Flux2 uses N double-stream and 2N single-stream blocks "
-                "(default: None = 1)."
+                "Depth of the auto-built shadow backbone or generic token-wise Diffusers fallback (default: None = 1)."
             )
         },
     )
     shadow_hidden_size: Optional[int] = field(
         default=None,
-        metadata={
-            "help": (
-                "Hidden size of the shadow backbone, may differ from the base size. Flux2 reductions preserve the "
-                "base attention head dimension (default: None = base)."
-            )
-        },
+        metadata={"help": "Hidden size of the shadow backbone, may differ from the base size (default: None = base)."},
     )
     shadow_num_attention_heads: Optional[int] = field(
         default=None,
         metadata={
             "help": (
-                "Number of attention heads of the auto-built shadow backbone. Flux2 reductions select whole base "
-                "heads (default: None = base)."
+                "Number of attention heads of the auto-built shadow backbone where supported (default: None = base)."
             )
         },
     )
@@ -168,8 +160,7 @@ class ShadowConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "Feed-forward width of the auto-built shadow backbone; converted to an MLP ratio for Flux2 "
-                "(default: None = base)."
+                "Feed-forward width of the auto-built shadow backbone (default: None = base or shadow hidden size)."
             )
         },
     )

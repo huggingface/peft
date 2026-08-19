@@ -32,7 +32,7 @@ from peft import (
     get_peft_model,
 )
 from peft.tuners.shadow import DetachedShadowModel, ShadowCache
-from peft.tuners.shadow.diffusers import DetachedFluxShadowBlock, DetachedFluxShadowModel
+from peft.tuners.shadow.diffusers import DetachedFluxShadowModel
 from peft.tuners.shadow.layers import ShadowLayer
 from peft.utils.constants import SAFETENSORS_WEIGHTS_NAME
 
@@ -726,25 +726,62 @@ class TestShadowDiffusionTransformer:
         backbone = model.base_model.shadow_backbone["default"]
         assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in backbone.parameters())
 
-    def test_unload_shadow(self):
+    def test_unload_shadow_raises(self):
         model = self._make_peft_model()
-        shadow = model.base_model.unload_shadow(copy=True)
+        with pytest.raises(NotImplementedError, match="not supported for Diffusers models"):
+            model.base_model.unload_shadow(copy=True)
 
-        assert isinstance(shadow, _TinyDiT)
-        assert shadow.config is not model.base_model.model.config
-        assert len(shadow.single_transformer_blocks) == 1
-        shadow_block = shadow.single_transformer_blocks[0]
-        assert isinstance(shadow_block, DetachedFluxShadowBlock)
-        assert shadow_block.backbone is not model.base_model.shadow_backbone["default"]
-        # Building the detached model must not replace the original model's adapted block stack.
-        assert len(model.base_model.model.single_transformer_blocks) == 3
-        assert all(isinstance(block, ShadowLayer) for block in model.base_model.model.single_transformer_blocks)
+    def test_non_flux_diffusers_model_uses_mlp_fallback(self):
+        diffusers = pytest.importorskip("diffusers")
+        transformer_cls = getattr(diffusers, "SanaTransformer2DModel", None)
+        if transformer_cls is None:
+            pytest.skip("The installed Diffusers version does not provide SanaTransformer2DModel.")
 
-        hidden_states = torch.randn(2, 5, model.base_model.model.config.hidden_dim)
-        output = shadow(hidden_states=hidden_states)
-        assert output.shape == hidden_states.shape
+        base = transformer_cls(
+            in_channels=4,
+            out_channels=4,
+            num_attention_heads=2,
+            attention_head_dim=4,
+            num_layers=2,
+            num_cross_attention_heads=2,
+            cross_attention_head_dim=4,
+            cross_attention_dim=8,
+            caption_channels=8,
+            mlp_ratio=2.0,
+            sample_size=4,
+            patch_size=1,
+        )
+        model = get_peft_model(
+            base,
+            ShadowConfig(
+                target_modules=r"transformer_blocks\.\d+$",
+                share_embeddings=False,
+                shadow_hidden_size=4,
+                shadow_intermediate_size=6,
+                shadow_num_hidden_layers=2,
+                init_weights=False,
+            ),
+        )
+        backbone = model.base_model.shadow_backbone["default"]
+        assert backbone.__class__.__name__ == "_TokenShadowBackbone"
+        assert len(backbone.blocks) == 2
+        assert backbone.blocks[0][1].out_features == 6
 
-    def test_unload_shadow_matches_flux2_pipeline_contract(self):
+        inputs = {
+            "hidden_states": torch.randn(1, 4, 4, 4),
+            "encoder_hidden_states": torch.randn(1, 3, 8),
+            "timestep": torch.tensor([1]),
+            "return_dict": False,
+        }
+        output = model(**inputs)[0]
+        assert output.shape == inputs["hidden_states"].shape
+        output.square().mean().backward()
+        assert any(parameter.grad is not None for parameter in backbone.parameters())
+
+        with pytest.raises(NotImplementedError, match="not supported for Diffusers models"):
+            model.base_model.unload_shadow()
+
+    def test_flux2_uses_architecture_backend(self):
         diffusers = pytest.importorskip("diffusers")
         transformer_cls = getattr(diffusers, "Flux2Transformer2DModel", None)
         if transformer_cls is None:
@@ -789,37 +826,19 @@ class TestShadowDiffusionTransformer:
         assert isinstance(shadow_backbone, DetachedFluxShadowModel)
         assert shadow_backbone.model.x_embedder.shared_module is model.base_model.model.x_embedder
         assert not any("x_embedder.weight" in key for key in shadow_backbone.state_dict())
-        detached = model.base_model.unload_shadow()
-        assert isinstance(detached, transformer_cls)
-        assert detached.config.in_channels == base.config.in_channels
-        assert detached.config.num_layers == 1
-        assert detached.config.num_single_layers == 2
-        assert len(detached.single_transformer_blocks) == 2
-        assert len(model.base_model.model.single_transformer_blocks) == 2
-        source_last_block = model.base_model.model.single_transformer_blocks[-1].base_layer
-        assert torch.allclose(
-            next(detached.single_transformer_blocks[-1].parameters()),
-            next(source_last_block.parameters()),
-        )
+        assert shadow_backbone.model.config.num_layers == 1
+        assert shadow_backbone.model.config.num_single_layers == 2
 
-        with torch.no_grad(), detached.cache_context("cond"):
-            output = detached(**inputs)[0]
-        assert output.shape == inputs["hidden_states"].shape
-
-        # A standalone diffusion loss must train components used only by the detached model, not just the shared
-        # single-stream blocks that seed the attached Shadow path.
         model.zero_grad()
         attached_output = model(**inputs)[0]
-        detached_output = detached(**inputs)[0]
-        (attached_output.square().mean() + 0.05 * detached_output.square().mean()).backward()
-        assert next(shadow_backbone.model.transformer_blocks[0].parameters()).grad is not None
+        attached_output.square().mean().backward()
+        assert next(shadow_backbone.model.single_transformer_blocks.parameters()).grad is not None
         assert shadow_backbone.model.x_embedder.weight.grad is None
 
-        copied = model.base_model.unload_shadow(copy=True)
-        assert not hasattr(copied.x_embedder, "shared_module")
-        assert "x_embedder.weight" in copied.state_dict()
+        with pytest.raises(NotImplementedError, match="not supported for Diffusers models"):
+            model.base_model.unload_shadow()
 
-    def test_explicit_flux2_shadow_checkpoint_attached_detached_and_roundtrip(self, tmp_path):
+    def test_explicit_flux2_shadow_checkpoint_attached_and_roundtrip(self, tmp_path):
         diffusers = pytest.importorskip("diffusers")
         transformer_cls = getattr(diffusers, "Flux2Transformer2DModel", None)
         if transformer_cls is None:
@@ -867,12 +886,8 @@ class TestShadowDiffusionTransformer:
         output = model(**inputs)[0]
         output.square().mean().backward()
         assert next(backbone.model.single_transformer_blocks.parameters()).grad is not None
-        detached = model.base_model.unload_shadow()
-        assert detached is backbone.model
-        assert detached(**inputs)[0].shape == inputs["hidden_states"].shape
-        copied = model.base_model.unload_shadow(copy=True)
-        assert copied is not detached
-        assert torch.equal(copied.x_embedder.weight, detached.x_embedder.weight)
+        with pytest.raises(NotImplementedError, match="not supported for Diffusers models"):
+            model.base_model.unload_shadow()
 
         adapter_path = tmp_path / "adapter"
         model.save_pretrained(adapter_path)
@@ -882,7 +897,7 @@ class TestShadowDiffusionTransformer:
             is_trainable=True,
         )
         assert isinstance(reloaded.base_model.shadow_backbone["default"], DetachedFluxShadowModel)
-        assert reloaded.base_model.unload_shadow()(**inputs)[0].shape == inputs["hidden_states"].shape
+        assert reloaded(**inputs)[0].shape == inputs["hidden_states"].shape
 
     def test_explicit_flux2_shadow_rejects_incompatible_contract(self, tmp_path):
         diffusers = pytest.importorskip("diffusers")
@@ -959,16 +974,16 @@ class TestShadowDiffusionTransformer:
         )
         backbone = model.base_model.shadow_backbone["default"]
         projection = model.base_model.shadow_projection["default"]
-        detached = model.base_model.unload_shadow()
+        reduced = backbone.model
 
-        assert detached.config.num_attention_heads == 1
-        assert detached.config.attention_head_dim == 8
-        assert detached.config.mlp_ratio == 1.0
-        assert not hasattr(detached.x_embedder, "shared_module")
+        assert reduced.config.num_attention_heads == 1
+        assert reduced.config.attention_head_dim == 8
+        assert reduced.config.mlp_ratio == 1.0
+        assert not hasattr(reduced.x_embedder, "shared_module")
         assert (projection.in_features, projection.out_features) == (8, 16)
         assert torch.equal(projection.weight[:8], torch.eye(8))
         assert torch.count_nonzero(projection.weight[8:]) == 0
-        assert sum(parameter.numel() for parameter in detached.parameters()) < base_param_count / 4
+        assert sum(parameter.numel() for parameter in reduced.parameters()) < base_param_count / 4
 
         source_qkv_mlp = source_single.attn.to_qkv_mlp_proj.weight
         expected_qkv_mlp = torch.cat(
@@ -980,11 +995,11 @@ class TestShadowDiffusionTransformer:
                 source_qkv_mlp[80:88, :8],
             )
         )
-        assert torch.equal(detached.single_transformer_blocks[-1].attn.to_qkv_mlp_proj.weight, expected_qkv_mlp)
+        assert torch.equal(reduced.single_transformer_blocks[-1].attn.to_qkv_mlp_proj.weight, expected_qkv_mlp)
         expected_out = torch.cat(
             (source_single.attn.to_out.weight[:8, :8], source_single.attn.to_out.weight[:8, 16:24]), dim=1
         )
-        assert torch.equal(detached.single_transformer_blocks[-1].attn.to_out.weight, expected_out)
+        assert torch.equal(reduced.single_transformer_blocks[-1].attn.to_out.weight, expected_out)
 
         inputs = {
             "hidden_states": torch.randn(1, 4, 4),
@@ -996,16 +1011,13 @@ class TestShadowDiffusionTransformer:
             "return_dict": False,
         }
         attached_output = model(**inputs)[0]
-        detached_output = detached(**inputs)[0]
-        assert attached_output.shape == detached_output.shape == inputs["hidden_states"].shape
-        (attached_output.square().mean() + detached_output.square().mean()).backward()
-        assert next(backbone.model.transformer_blocks[0].parameters()).grad is not None
-        assert backbone.model.x_embedder.weight.grad is not None
+        assert attached_output.shape == inputs["hidden_states"].shape
+        attached_output.square().mean().backward()
+        assert next(backbone.model.single_transformer_blocks.parameters()).grad is not None
         assert model.base_model.model.x_embedder.weight.grad is None
 
-        copied = model.base_model.unload_shadow(copy=True)
-        assert copied is not detached
-        assert copied.x_embedder is not detached.x_embedder
+        with pytest.raises(NotImplementedError, match="not supported for Diffusers models"):
+            model.base_model.unload_shadow(copy=True)
 
     @pytest.mark.parametrize(
         ("hidden_size", "num_heads", "match"),
