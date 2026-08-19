@@ -118,3 +118,18 @@ class MultitaskPromptEmbedding(PromptEmbedding):
         prompt_embeddings *= task_prompts
 
         return prompt_embeddings
+
+    @classmethod
+    def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
+        prompt_encoder = model.prompt_encoder[adapter_name]
+        return {
+            "prefix_task_cols": prompt_encoder.prefix_task_cols,
+            "prefix_task_rows": prompt_encoder.prefix_task_rows,
+            "prompt_embeddings": prompt_encoder.embedding.weight,
+        }
+
+    def _load_adapter_state_dict(self, state_dict):
+        super()._load_adapter_state_dict(state_dict)
+        # additionally load prefix_task_cols and prefix_task_rows; not strict because the "prompt_embeddings" entry
+        # does not correspond to a parameter of this module
+        self.load_state_dict(state_dict, strict=False)

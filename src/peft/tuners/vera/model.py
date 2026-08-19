@@ -265,3 +265,47 @@ class VeraModel(BaseTuner):
         )
 
         return new_module
+
+    @classmethod
+    def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
+        to_return = super()._get_adapter_state_dict(model, config, adapter_name, state_dict, unwanted_adapter_names)
+        # Each layer holds a reference to the shared projections, so the state dict contains a duplicate of them for
+        # every layer. Remove all of them here; the canonical model-level entries ("base_model.vera_A.<adapter>" etc.)
+        # are only added back after the explicit save_projection check below.
+        to_return = {k: v for k, v in to_return.items() if (".vera_A." not in k) and (".vera_B." not in k)}
+        if config.save_projection:
+            # TODO: adding vera_A and vera_B to `self.get_base_layer` would
+            # make name to match here difficult to predict.
+            if f"base_model.vera_A.{adapter_name}" not in state_dict:
+                raise ValueError(
+                    "Model was initialised to not save vera_A and vera_B but config now specifies to save projection!"
+                    " Set `config.save_projection` to `False`."
+                )
+            to_return["base_model.vera_A." + adapter_name] = state_dict["base_model.vera_A." + adapter_name]
+            to_return["base_model.vera_B." + adapter_name] = state_dict["base_model.vera_B." + adapter_name]
+        return to_return
+
+    @classmethod
+    def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
+        # note that the remapping renames the projection keys from e.g. "base_model.vera_A" (checkpoint format) to
+        # "base_model.vera_A.{adapter_name}" (model format)
+        peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
+        if config.save_projection and f"base_model.vera_A.{adapter_name}" not in peft_model_state_dict:
+            raise ValueError(
+                "Specified to load vera_A and vera_B from state dictionary however they were not present!"
+            )
+        elif not config.save_projection and "base_model.vera_A" in peft_model_state_dict:
+            # note: with save_projection=False, the projection buffers are non-persistent and thus have no model state
+            # dict entry to be remapped to, so the checkpoint key is still in its unsuffixed form here
+            warnings.warn(
+                "Specified to not load vera_A and vera_B from state dictionary however they are present in state"
+                " dictionary! Consider using them to ensure checkpoint loading is correct on all platforms using"
+                " `peft_config.save_projection = True`"
+            )
+        elif not config.save_projection:  # and no vera_A in state dictionary
+            warnings.warn(
+                "Specified to not load vera_A and vera_B from state dictionary. This means we will be relying on"
+                " PRNG initialisation to restore these projections using `config.projection_prng_key`, which may"
+                " not be accurate on all system configurations."
+            )
+        return peft_model_state_dict

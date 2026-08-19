@@ -109,7 +109,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     Base model encompassing various Peft methods.
 
     Args:
-        model ([`~transformers.PreTrainedModel`]): The base transformer model used for Peft.
+        model ([`torch.nn.Module`]): The base model to be adapted, typically a Transformers model.
         peft_config ([`PeftConfig`]): The configuration of the Peft model.
         adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
         autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
@@ -138,7 +138,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
     def __init__(
         self,
-        model: PreTrainedModel,
+        model: torch.nn.Module,
         peft_config: PeftConfig,
         adapter_name: str = "default",
         autocast_adapter_dtype: bool = True,
@@ -281,46 +281,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     f" {list(self.peft_config.keys())} - got {selected_adapters}."
                 )
 
-        def save_mutated_as_lora(peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs):
-            if peft_config.use_rslora and (peft_config.rank_pattern or peft_config.alpha_pattern):
-                msg = (
-                    "Passing `path_initial_model_for_weight_conversion` to `save_pretrained` is not supported when "
-                    "using `rank_pattern` or `alpha_pattern` at the same time as `use_rslora=True`."
-                )
-                raise ValueError(msg)
-
-            if not any(
-                str(peft_config.init_lora_weights).lower().startswith(prefix)
-                for prefix in ["pissa", "corda", "olora", "lora_ga", "true"]
-            ):
-                warnings.warn(
-                    "`path_initial_model_for_weight_conversion` only works for converting a PiSSA/CorDA/OLoRA/LoRA-GA adapter to "
-                    "a LoRA adapter"
-                )
-            initial_adapter_name = os.path.basename(path_initial_model_for_weight_conversion)
-            try:
-                self.load_adapter(
-                    os.path.dirname(path_initial_model_for_weight_conversion),
-                    subfolder=initial_adapter_name,
-                    adapter_name=initial_adapter_name,
-                )
-                is_pissa = str(self.peft_config[initial_adapter_name].init_lora_weights).lower().startswith("pissa")
-                is_corda = str(self.peft_config[initial_adapter_name].init_lora_weights).lower() == "corda"
-                is_olora = str(self.peft_config[initial_adapter_name].init_lora_weights).lower() == "olora"
-                is_lora_ga = str(self.peft_config[initial_adapter_name].init_lora_weights).lower() == "lora_ga"
-                if is_pissa or is_corda or is_olora or is_lora_ga:
-                    raise ValueError(
-                        "The `init_lora_weights` parameter of the initial adapter should be set to `True`. "
-                        "Otherwise, `self.load_adapter` will subtract the decomposed values again based on the "
-                        "residual model."
-                    )
-                output_state_dict = self.base_model.subtract_mutated_init(
-                    output_state_dict, initial_adapter_name, kwargs
-                )
-            finally:
-                self.delete_adapter(initial_adapter_name)
-            return output_state_dict
-
         if is_main_process:
             os.makedirs(save_directory, exist_ok=True)
             self.create_or_update_model_card(save_directory)
@@ -361,10 +321,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
                 if path_initial_model_for_weight_conversion is not None:
                     peft_config = copy.deepcopy(peft_config)
-                    peft_config.init_lora_weights = True
+                    if peft_config.peft_type == PeftType.LORA:
+                        peft_config.init_lora_weights = True
+                    else:
+                        peft_config.init_weights = True
                     peft_config.save_pretrained(path_initial_model_for_weight_conversion)
-                    output_state_dict = save_mutated_as_lora(
-                        peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
+                    tuner_cls = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
+                    output_state_dict = tuner_cls._convert_state_dict_for_initial_model(
+                        self, peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
                     )
 
                 # Before exporting the parameters we need to make sure all the tensors are contiguous as saving
@@ -383,10 +347,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             elif is_main_process:
                 if path_initial_model_for_weight_conversion is not None:
                     peft_config = copy.deepcopy(peft_config)
-                    peft_config.init_lora_weights = True
+                    if peft_config.peft_type == PeftType.LORA:
+                        peft_config.init_lora_weights = True
+                    else:
+                        peft_config.init_weights = True
                     peft_config.save_pretrained(path_initial_model_for_weight_conversion)
-                    output_state_dict = save_mutated_as_lora(
-                        peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
+                    tuner_cls = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
+                    output_state_dict = tuner_cls._convert_state_dict_for_initial_model(
+                        self, peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
                     )
                 torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
 
@@ -630,23 +598,18 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # 1. Remove VB-LoRA vector bank, since it's a shared parameter set via the VBLoRAModel
         # 2. Remove the prompt encoder, as it does not need to be part of the checkpoint
         # 3. Remove TinyLoRA layer-level tinylora_v references (they share with model-level tinylora_v)
-        def is_expected_missing_key(k):
+        def is_shared_parameter(k):
             # TinyLoRA: layer-level tinylora_v is a reference to model-level, exclude from warning
             if "vblora_vector_bank" in k or "prompt_encoder" in k or ".tinylora_v." in k:
-                return False
-            if (
+                return True
+
+            return (
                 config.peft_type == PeftType.UNILORA
                 and ".unilora_theta_d." in k
                 and not k.startswith("base_model.unilora_theta_d.")
-            ):
-                return False
-            return not (
-                config.peft_type == PeftType.UNILORA
-                and not getattr(config, "save_indices", False)
-                and (".unilora_indices_" in k or ".unilora_scales_" in k)
             )
 
-        missing_keys = [k for k in load_result.missing_keys if is_expected_missing_key(k)]
+        missing_keys = [k for k in load_result.missing_keys if not is_shared_parameter(k)]
         if missing_keys:
             # Let's warn here since (in contrast to load_adapter) we don't return the load result, so it could be quite
             # difficult for users to even notice that something might have gone wrong here. As we filter out non PEFT
@@ -999,7 +962,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             f"trainable params: {trainable_params:,d} || all params: {all_param:,d} || trainable%: {100 * trainable_params / all_param:.4f}"
         )
 
-    def __getattr__(self, name: str):
+    def __getattr__(self, name: str) -> Any:
         """Forward missing attributes to the wrapped module."""
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
@@ -1310,6 +1273,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         prefix = "base_model.model."
         # rename offload index weight and model names
         adapter_names = list(self.peft_config.keys())
+        named_modules = dict(self.named_modules())
         for adapter_name in adapter_names:
             keys = list(offload_index.keys())
             block_id = keys[0].split(".")[0] + "."  # for writing safetensors key,
@@ -1318,7 +1282,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             for key in keys:
                 suffix_pos = key.rfind(".")
                 extended_prefix = prefix + key[:suffix_pos]
-                module = dict(self.named_modules())[extended_prefix]
+                module = named_modules[extended_prefix]
                 if isinstance(module, BaseTunerLayer):
                     new_key = prefix + key[:suffix_pos] + ".base_layer" + key[suffix_pos:]
                 else:
@@ -1348,8 +1312,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         safe_tensor = f.get_tensor(safe_key)
                         metadata = f.metadata()
                         suffix_pos = safe_key.rfind(".")
+                        # depending on how the checkpoint was saved, its keys may or may not contain the name of the
+                        # root container module (`block_id`), e.g. gpt2 keys lack the "transformer." prefix, whereas opt
+                        # keys start with "model."; so try both.
                         extended_prefix = prefix + block_id + safe_key[:suffix_pos]
-                        safe_module = dict(self.named_modules())[extended_prefix]
+                        if extended_prefix not in named_modules:
+                            extended_prefix = prefix + safe_key[:suffix_pos]
+                        safe_module = named_modules[extended_prefix]
                         if isinstance(safe_module, BaseTunerLayer):
                             final_key = extended_prefix + ".base_layer" + safe_key[suffix_pos:]
                             lora_dict = {key: val for key, val in adapters_weights.items() if extended_prefix in key}
@@ -1360,7 +1329,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                                 new_key = lora_key[:divide] + f".{adapter_name}" + lora_key[divide:]
                                 safe_dict[new_key] = lora_val
                         else:
-                            final_key = prefix + block_id + safe_key
+                            final_key = extended_prefix + safe_key[suffix_pos:]
                         safe_dict[final_key] = safe_tensor
                     files_seen.add(new_fname)
 
@@ -1509,12 +1478,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     tuner == PeftType.UNILORA
                     and ".unilora_theta_d." in key
                     and not key.startswith("base_model.unilora_theta_d.")
-                ):
-                    continue
-                if (
-                    tuner == PeftType.UNILORA
-                    and not getattr(self.peft_config[adapter_name], "save_indices", False)
-                    and (".unilora_indices_" in key or ".unilora_scales_" in key)
                 ):
                     continue
                 adapter_missing_keys.append(key)
@@ -3245,7 +3208,7 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
     - `available_adapters` (`list[str]`):
        The names of the available adapters, e.g. `["default"]`.
     - `devices` (`dict[str, list[str]]`):
-       The devices where the parameters of the given adapter are stored, e.g. `["cuda"]`.
+       The devices where the parameters of the given adapter are stored, e.g. `["cuda","xpu"]`.
     - `quantization_backend` (`str` or `None`):
        The name of the quantization backend, e.g. `"bnb 4bit"`, or `None` if not quantized.
 
@@ -3389,7 +3352,7 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
     - `available_adapters` (`list[str]`):
        The names of the available adapters, e.g. `["default"]`.
     - `devices` (`dict[str, list[str]]`):
-       The devices where the parameters of the given adapter are stored, e.g. `["cuda"]`.
+       The devices where the parameters of the given adapter are stored, e.g. `["cuda","xpu"]`.
     - `quantization_backend` (`str`, `None`, `Literal["irregular"]`):
        The name of the quantization backend, e.g. `"bnb 4bit"`, or `None` if not quantized. If the backend is not
        consistent across all layers, this will be `"irregular"`.

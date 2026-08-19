@@ -77,6 +77,8 @@ make quality  # just check
 make style  # check and fix
 ```
 
+Running `make quality` will also check if all methods/classes from PEFT's public API (i.e. everything that's mentioned in `peft.__all__`) are mentioned in the docs. These errors cannot be fixed by `make style`, you need to make sure to document new items in the public API in the docs to fix this error.
+
 You can also set up [`pre-commit`](https://pre-commit.com/) to run these fixes
 automatically as Git commit hooks.
 

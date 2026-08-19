@@ -19,21 +19,23 @@ from ..import_utils import is_transformers_le_4_53
 
 
 # needed for prefix-tuning of bloom model
-def bloom_model_postprocess_past_key_value(past_key_values):
-    past_key_values = torch.cat(past_key_values)
-    total_layers, batch_size, num_attention_heads, num_virtual_tokens, head_dim = past_key_values.shape
-    keys = past_key_values[: total_layers // 2]
+def bloom_model_postprocess_past_key_value(
+    past_key_values: tuple[torch.Tensor, ...],
+) -> tuple[tuple[torch.Tensor, torch.Tensor], ...]:
+    concatenated_past_key_values = torch.cat(past_key_values)
+    total_layers, batch_size, num_attention_heads, num_virtual_tokens, head_dim = concatenated_past_key_values.shape
+    keys = concatenated_past_key_values[: total_layers // 2]
     keys = keys.transpose(2, 3).reshape(
         total_layers // 2, batch_size * num_attention_heads, head_dim, num_virtual_tokens
     )
-    values = past_key_values[total_layers // 2 :]
+    values = concatenated_past_key_values[total_layers // 2 :]
     values = values.reshape(total_layers // 2, batch_size * num_attention_heads, num_virtual_tokens, head_dim)
 
     return tuple(zip(keys, values))
 
 
 # needed for prefix-tuning of StarCoder models
-def starcoder_model_postprocess_past_key_value(past_key_values):
+def starcoder_model_postprocess_past_key_value(past_key_values: tuple[torch.Tensor, ...]) -> tuple[torch.Tensor, ...]:
     result = []
     for k in past_key_values:
         k = k[:, :, 0]
