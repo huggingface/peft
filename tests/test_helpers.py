@@ -1015,6 +1015,50 @@ class TestGetEmulatorModel:
             "Weight tying should be preserved after emulator construction"
         )
 
+    def test_tied_weights_warning_not_emitted_when_not_targeted(self):
+        """No tied-weights warning when target_modules excludes the tied layer."""
+        from transformers import AutoModelForCausalLM
+
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        model.eval()
+        assert model.lm_head.weight is model.model.decoder.embed_tokens.weight, "OPT should have tied weights"
+
+        # Only target q_proj — lm_head (tied) is never a candidate, so no warning should fire
+        import warnings as w
+
+        with w.catch_warnings(record=True) as caught:
+            w.simplefilter("always")
+            emulator = get_emulator_model(deepcopy(model), rank=4, target_modules=["q_proj"])
+
+        tied_warnings = [c for c in caught if "tied weights" in str(c.message)]
+        assert len(tied_warnings) == 0, (
+            f"Should not warn about tied weights when lm_head is not targeted, got: {tied_warnings}"
+        )
+
+        from peft.helpers import _SVDLinear
+
+        svd_count = sum(1 for m in emulator.modules() if isinstance(m, _SVDLinear))
+        assert svd_count > 0, "q_proj layers should still be compressed"
+
+    def test_lm_head_warning_not_emitted_when_not_targeted(self):
+        """No LM head skip warning when target_modules excludes the LM head."""
+        from transformers import AutoModelForCausalLM
+
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-LlamaForCausalLM")
+        model.eval()
+
+        # Only target q_proj — lm_head is never a candidate, so no warning should fire
+        import warnings as w
+
+        with w.catch_warnings(record=True) as caught:
+            w.simplefilter("always")
+            emulator = get_emulator_model(deepcopy(model), rank=4, target_modules=["q_proj"])
+
+        skip_warnings = [c for c in caught if "skipped" in str(c.message)]
+        assert len(skip_warnings) == 0, (
+            f"Should not warn about skipped layers when they are not targeted, got: {skip_warnings}"
+        )
+
     def test_fast_svd_approximates_original(self, model_and_inputs):
         """fast_svd with int rank should produce a valid approximation of the original model."""
         model, input_ids = model_and_inputs

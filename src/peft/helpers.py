@@ -951,37 +951,34 @@ def get_emulator_model(
     model.eval()
 
     # --- identify linear layers to compress ---
-    skip_modules: set[str] = set()
-    skip_reasons: dict[str, str] = {}
-
-    lm_head_modules = _find_lm_head_modules(model)
-    for name in lm_head_modules:
-        skip_modules.add(name)
-        skip_reasons[name] = "LM head"
-
-    tied_modules = _find_tied_linear_modules(model)
-    for name in tied_modules:
-        skip_modules.add(name)
-        skip_reasons[name] = skip_reasons.get(name, "tied weights")
-
-    if tied_modules:
-        warnings.warn(
-            "The following nn.Linear layers have tied weights and will be skipped to avoid "
-            f"breaking weight-tying: {sorted(tied_modules)}. If you want to compress these "
-            "layers, untie the weights first (e.g. by loading with `tie_word_embeddings=False`)."
-        )
-
-    linear_modules: dict[str, nn.Linear] = {}
+    # First, determine which nn.Linear layers the user *would* target (before skip checks).
+    candidate_modules: dict[str, nn.Linear] = {}
     for name, module in model.named_modules():
         if not isinstance(module, nn.Linear):
-            continue
-        if name in skip_modules:
             continue
         if ignore_modules and _match_module(ignore_modules, name):
             continue
         if target_modules and not _match_module(target_modules, name):
             continue
-        linear_modules[name] = module
+        candidate_modules[name] = module
+
+    # Among the candidates, find which ones should be skipped (LM head, tied weights).
+    lm_head_modules = _find_lm_head_modules(model)
+    tied_modules = _find_tied_linear_modules(model)
+
+    skipped_tied = sorted(name for name in candidate_modules if name in tied_modules)
+    if skipped_tied:
+        warnings.warn(
+            "The following nn.Linear layers have tied weights and will be skipped to avoid "
+            f"breaking weight-tying: {skipped_tied}. If you want to compress these "
+            "layers, untie the weights first (e.g. by loading with `tie_word_embeddings=False`)."
+        )
+
+    skip_modules = lm_head_modules | set(skipped_tied)
+
+    linear_modules = {
+        name: module for name, module in candidate_modules.items() if name not in skip_modules
+    }
 
     if not linear_modules:
         raise TypeError("Could not detect any nn.Linear layer to compress.")
