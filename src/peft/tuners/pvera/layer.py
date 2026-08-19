@@ -30,18 +30,17 @@ from .config import PveraConfig
 class PveraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
     adapter_layer_names = ("pvera_lambda_b", "pvera_lambda_d")
-    other_param_names = ("pvera_A", "pvera_B", "pvera_dropout", "r", "sample_at_inference")
+    other_param_names = ("pvera_A", "pvera_B", "pvera_dropout", "r", "sample_at_inference", "pvera_generator")
 
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer
         self.r = {}
         self.pvera_dropout = nn.ModuleDict({})
         self.sample_at_inference = {}
-
-        # Seed for the sampling generators; the generators themselves are created lazily per device, see
-        # `_get_generator`.
-        self.generator_seed = None
-        self._generators: dict[tuple[str, Optional[int]], torch.Generator] = {}
+        # One generator per adapter, so that adding an adapter does not reset the sampling of the existing ones. A
+        # torch.Generator is bound to its device and is not moved by nn.Module.to(), hence these always live on CPU
+        # and the sampled noise is moved to the target device instead, see `_reparametrize`.
+        self.pvera_generator: dict[str, Optional[torch.Generator]] = {}
 
         # For storing vector scale
         self.pvera_lambda_b = nn.ParameterDict({})
@@ -79,7 +78,6 @@ class PveraLayer(BaseTunerLayer):
         pvera_B: BufferDict,
         r: int,
         config: PveraConfig,
-        sample_at_inference: bool = False,
         **kwargs,
     ) -> None:
         if r <= 0:
@@ -91,18 +89,18 @@ class PveraLayer(BaseTunerLayer):
         inference_mode = config.inference_mode
 
         self.r[adapter_name] = r
-        # `config.sample_at_inference` may be a dict mapping module names to bools, so the value that applies to *this*
-        # module is resolved by the model (see `PveraModel._resolve_sample_at_inference`) and passed in here.
-        self.sample_at_inference[adapter_name] = sample_at_inference
+        self.sample_at_inference[adapter_name] = config.sample_at_inference
         if pvera_dropout > 0.0:
             pvera_dropout_layer = nn.Dropout(p=pvera_dropout)
         else:
             pvera_dropout_layer = nn.Identity()
 
-        self.generator_seed = config.generator_seed
-        # Drop any generator built from a previous seed so that the sampling stream restarts, as it did when the
-        # generator was created eagerly here.
-        self._generators.clear()
+        if config.generator_seed is not None:
+            generator = torch.Generator()
+            generator.manual_seed(config.generator_seed)
+        else:
+            generator = None
+        self.pvera_generator[adapter_name] = generator
 
         self.pvera_dropout.update(nn.ModuleDict({adapter_name: pvera_dropout_layer}))
         # Actual trainable parameters
@@ -158,31 +156,18 @@ class PveraLayer(BaseTunerLayer):
                 nn.init.zeros_(self.pvera_lambda_d[adapter_name]).fill_(d_initial)
                 nn.init.zeros_(self.pvera_lambda_b[adapter_name])
 
-    def _get_generator(self, device: torch.device) -> Optional[torch.Generator]:
-        """Return the seeded generator for `device`, or `None` if no seed was configured.
+    def _reparametrize(self, mu, logvar, adapter_name):
+        if not (self.training or self.sample_at_inference[adapter_name]):
+            return mu
 
-        A `torch.Generator` is bound to a single device and is not moved by `nn.Module.to()`, so one is created lazily
-        per device instead of eagerly on CPU.
-        """
-        if self.generator_seed is None:
-            return None
-
-        key = (device.type, device.index)
-        generator = self._generators.get(key)
+        std = torch.exp(0.5 * logvar)
+        generator = self.pvera_generator[adapter_name]
         if generator is None:
-            generator = torch.Generator(device=device)
-            generator.manual_seed(self.generator_seed)
-            self._generators[key] = generator
-        return generator
-
-    def _reparametrize(self, mu, logvar, sample_at_inference):
-        if self.training or (not self.training and sample_at_inference):
-            std = torch.exp(0.5 * logvar)
-            eps = torch.randn_like(std, generator=self._get_generator(std.device))
-            z = mu + eps * std
+            eps = torch.randn_like(std)
         else:
-            z = mu
-        return z
+            # the generator is on CPU and cannot be moved, so sample on CPU and move the noise to the right device
+            eps = torch.randn(std.shape, dtype=std.dtype, generator=generator).to(std.device)
+        return mu + eps * std
 
 
 class Linear(nn.Linear, PveraLayer):
@@ -196,7 +181,6 @@ class Linear(nn.Linear, PveraLayer):
         r: int,
         config: PveraConfig,
         is_target_conv_1d_layer: bool = False,
-        sample_at_inference: bool = False,
         **kwargs,
     ) -> None:
         # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__, which should always be called
@@ -205,7 +189,7 @@ class Linear(nn.Linear, PveraLayer):
         self.fan_in_fan_out = config.fan_in_fan_out
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, pvera_A, pvera_B, r, config=config, sample_at_inference=sample_at_inference)
+        self.update_layer(adapter_name, pvera_A, pvera_B, r, config=config)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -330,9 +314,7 @@ class Linear(nn.Linear, PveraLayer):
                 dropout = self.pvera_dropout[active_adapter]
                 x = x.to(lambda_d.dtype)
                 mu, logvar = (lambda_d * F.linear(dropout(x), sliced_A)).chunk(2, dim=-1)
-                result = result + lambda_b * F.linear(
-                    self._reparametrize(mu, logvar, self.sample_at_inference[active_adapter]), sliced_B
-                )
+                result = result + lambda_b * F.linear(self._reparametrize(mu, logvar, active_adapter), sliced_B)
 
         result = result.to(previous_dtype)
         return result
