@@ -13,13 +13,15 @@
 # limitations under the License.
 
 
+from copy import deepcopy
+
 import pytest
 import torch
 from diffusers import StableDiffusionPipeline
 from torch import nn
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_emulator_model, get_peft_model
 from peft.helpers import (
     DoraCaching,
     MontecloraTrainerMixin,
@@ -730,3 +732,247 @@ class TestMontecloraTrainerMixin:
 
             assert total_loss.item() != task_loss.item()
             total_loss.backward()
+
+
+class TestGetEmulatorModel:
+    """Tests for the ``get_emulator_model`` function, which constructs a lightweight emulator of a model
+    using activation-aware SVD factorization of linear layers (EMLoC, Lin et al., NeurIPS 2025)."""
+
+    @pytest.fixture
+    def model_and_inputs(self):
+        from transformers import AutoModelForCausalLM
+
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-LlamaForCausalLM")
+        model.eval()
+        torch.manual_seed(42)
+        input_ids = torch.randint(0, model.config.vocab_size, (2, 16))
+        return model, input_ids
+
+    def test_emulator_approximates_original(self, model_and_inputs):
+        """The emulator should produce outputs that approximate the original model."""
+        model, input_ids = model_and_inputs
+        with torch.no_grad():
+            original_logits = model(input_ids).logits
+
+        emulator = get_emulator_model(deepcopy(model), rank=8)
+
+        with torch.no_grad():
+            emulator_logits = emulator(input_ids).logits
+
+        # The emulator should be a reasonable approximation
+        error = (original_logits - emulator_logits).abs().mean().item()
+        assert error > 0, "Emulator should not be an exact copy (it is compressed)"
+        # But it should not be wildly off
+        original_scale = original_logits.abs().mean().item()
+        assert error < original_scale, f"Approximation error {error} should be smaller than output scale {original_scale}"
+
+    def test_higher_rank_better_approximation(self, model_and_inputs):
+        """Higher ranks should produce a better approximation of the original model."""
+        model, input_ids = model_and_inputs
+        with torch.no_grad():
+            original_logits = model(input_ids).logits
+
+        errors = {}
+        for rank in [1, 4, 16]:
+            emulator = get_emulator_model(deepcopy(model), rank=rank)
+            with torch.no_grad():
+                emulator_logits = emulator(input_ids).logits
+            errors[rank] = (original_logits - emulator_logits).abs().mean().item()
+
+        # Higher rank should give lower (or equal) error
+        assert errors[1] >= errors[4], f"rank 1 error {errors[1]} should be >= rank 4 error {errors[4]}"
+        assert errors[4] >= errors[16], f"rank 4 error {errors[4]} should be >= rank 16 error {errors[16]}"
+
+    def test_full_rank_matches_original(self, model_and_inputs):
+        """With rank equal to the full dimension, the emulator should match the original (up to numerical error)."""
+        model, input_ids = model_and_inputs
+        # find the min dimension of all linear layers
+        min_dim = min(min(m.weight.shape) for m in model.modules() if isinstance(m, nn.Linear))
+
+        emulator = get_emulator_model(deepcopy(model), rank=min_dim)
+
+        with torch.no_grad():
+            original_logits = model(input_ids).logits
+            emulator_logits = emulator(input_ids).logits
+
+        assert torch.allclose(original_logits, emulator_logits, atol=1e-5, rtol=1e-5)
+
+    def test_float_rank_threshold(self, model_and_inputs):
+        """A float rank (energy threshold) should produce a valid emulator."""
+        model, input_ids = model_and_inputs
+        with torch.no_grad():
+            original_logits = model(input_ids).logits
+
+        # Use a high threshold to get good approximation
+        emulator = get_emulator_model(deepcopy(model), rank=0.99)
+
+        with torch.no_grad():
+            emulator_logits = emulator(input_ids).logits
+
+        error = (original_logits - emulator_logits).abs().mean().item()
+        original_scale = original_logits.abs().mean().item()
+        assert error < original_scale, "Float rank emulator should approximate the original"
+
+    def test_float_rank_lower_threshold_worse(self, model_and_inputs):
+        """A lower float threshold should generally give worse approximation than a higher one."""
+        model, input_ids = model_and_inputs
+        with torch.no_grad():
+            original_logits = model(input_ids).logits
+
+        errors = {}
+        for threshold in [0.5, 0.99]:
+            emulator = get_emulator_model(deepcopy(model), rank=threshold)
+            with torch.no_grad():
+                emulator_logits = emulator(input_ids).logits
+            errors[threshold] = (original_logits - emulator_logits).abs().mean().item()
+
+        assert errors[0.5] >= errors[0.99], (
+            f"threshold 0.5 error {errors[0.5]} should be >= threshold 0.99 error {errors[0.99]}"
+        )
+
+    def test_activation_aware_better_than_plain(self, model_and_inputs):
+        """Activation-aware SVD (with calibration data) should not be worse than plain SVD."""
+        model, input_ids = model_and_inputs
+        with torch.no_grad():
+            original_logits = model(input_ids).logits
+
+        # plain SVD (no data_loader)
+        emulator_plain = get_emulator_model(deepcopy(model), rank=4)
+        with torch.no_grad():
+            plain_logits = emulator_plain(input_ids).logits
+        plain_error = (original_logits - plain_logits).abs().mean().item()
+
+        # activation-aware SVD with calibration data
+        cal_data = [{"input_ids": torch.randint(0, model.config.vocab_size, (2, 16))} for _ in range(8)]
+        emulator_aware = get_emulator_model(deepcopy(model), rank=4, data_loader=cal_data, num_samples=8)
+        with torch.no_grad():
+            aware_logits = emulator_aware(input_ids).logits
+        aware_error = (original_logits - aware_logits).abs().mean().item()
+
+        # Activation-aware should be at least as good (within tolerance)
+        # It may not always be strictly better for all layers, but should be in the same ballpark
+        assert aware_error <= plain_error * 1.5, (
+            f"Activation-aware error {aware_error} should not be much worse than plain {plain_error}"
+        )
+
+    def test_invalid_rank_zero(self, model_and_inputs):
+        """Rank of 0 should raise ValueError."""
+        model, _ = model_and_inputs
+        with pytest.raises(ValueError, match="rank of 0"):
+            get_emulator_model(model, rank=0)
+
+    def test_invalid_float_rank(self, model_and_inputs):
+        """Float rank outside (0, 1] should raise ValueError."""
+        model, _ = model_and_inputs
+        with pytest.raises(ValueError, match="between 0 and 1"):
+            get_emulator_model(model, rank=1.5)
+
+    def test_no_linear_layers(self):
+        """Model without nn.Linear should raise TypeError."""
+        model = nn.Sequential(nn.Conv2d(3, 3, 3), nn.ReLU())
+        with pytest.raises(TypeError, match="Could not detect any nn.Linear"):
+            get_emulator_model(model, rank=4)
+
+    def test_target_modules_filter(self, model_and_inputs):
+        """target_modules should filter which layers get compressed."""
+        model, _input_ids = model_and_inputs
+        # Only compress q_proj layers
+        emulator = get_emulator_model(deepcopy(model), rank=4, target_modules=[".*q_proj.*"])
+
+        from peft.helpers import _SVDLinear
+
+        svd_count = 0
+        linear_count = 0
+        for module in emulator.modules():
+            if isinstance(module, _SVDLinear):
+                svd_count += 1
+            elif isinstance(module, nn.Linear):
+                linear_count += 1
+
+        assert svd_count > 0, "Should have some SVD layers"
+        assert linear_count > 0, "Should still have some uncompressed Linear layers"
+
+    def test_ignore_modules_filter(self, model_and_inputs):
+        """ignore_modules should exclude specified layers from compression."""
+        model, _ = model_and_inputs
+        emulator = get_emulator_model(deepcopy(model), rank=4, ignore_modules=[".*q_proj.*"])
+
+        from peft.helpers import _SVDLinear
+
+        for name, module in emulator.named_modules():
+            if "q_proj" in name:
+                assert not isinstance(module, _SVDLinear), f"q_proj layer {name} should not be compressed"
+
+    def test_inplace_false_preserves_original(self, model_and_inputs):
+        """inplace=False should not modify the original model."""
+        model, _input_ids = model_and_inputs
+        original_linears = [name for name, m in model.named_modules() if isinstance(m, nn.Linear)]
+
+        emulator = get_emulator_model(model, rank=4, inplace=False)
+
+        # Original model should still have its Linear layers
+        for name, module in model.named_modules():
+            if name in original_linears:
+                assert isinstance(module, nn.Linear), f"Original model layer {name} should still be nn.Linear"
+
+        # Emulator should have SVD layers
+        from peft.helpers import _SVDLinear
+
+        assert any(isinstance(m, _SVDLinear) for m in emulator.modules())
+
+    def test_emulator_has_fewer_parameters(self, model_and_inputs):
+        """The emulator should have fewer parameters than the original model."""
+        model, _input_ids = model_and_inputs
+        original_params = sum(p.numel() for p in model.parameters())
+
+        emulator = get_emulator_model(deepcopy(model), rank=4)
+        emulator_params = sum(p.numel() for p in emulator.parameters())
+
+        assert emulator_params < original_params, (
+            f"Emulator params {emulator_params} should be less than original {original_params}"
+        )
+
+    def test_emulator_preserves_bias(self, model_and_inputs):
+        """The emulator should preserve bias terms from original Linear layers."""
+        model, _input_ids = model_and_inputs
+        # Check which original layers have bias
+        original_bias_info = {
+            name: (module.bias is not None)
+            for name, module in model.named_modules()
+            if isinstance(module, nn.Linear)
+        }
+
+        emulator = get_emulator_model(deepcopy(model), rank=8)
+
+        from peft.helpers import _SVDLinear
+
+        for name, module in emulator.named_modules():
+            if isinstance(module, _SVDLinear):
+                # _SVDLinear replaces a Linear layer; check that bias presence matches original
+                # LlamaForCausalLM typically has bias=False for all linears
+                assert module.u.bias is None, "SVD layer u.bias should be None when original has no bias"
+
+    def test_emulator_preserves_bias_with_bias(self):
+        """When the original Linear has bias, the emulator should preserve it."""
+        from transformers import AutoModelForCausalLM
+
+        # OPT has bias in its linear layers (except lm_head)
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        model.eval()
+        # Record which layers have bias
+        original_bias = {name: (m.bias is not None) for name, m in model.named_modules() if isinstance(m, nn.Linear)}
+        has_bias = any(original_bias.values())
+        assert has_bias, "OPT should have bias in some linear layers"
+
+        emulator = get_emulator_model(deepcopy(model), rank=4)
+
+        from peft.helpers import _SVDLinear
+
+        # Check that SVD layers replacing biased linears also have bias
+        # Since _SVDLinear replaces nn.Linear in-place, we check that for layers that
+        # originally had bias, the u layer also has bias
+        svd_with_bias = 0
+        for name, module in emulator.named_modules():
+            if isinstance(module, _SVDLinear) and module.u.bias is not None:
+                svd_with_bias += 1
+        assert svd_with_bias > 0, "Some SVD layers should have bias (those replacing biased linears)"

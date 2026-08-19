@@ -25,7 +25,7 @@ from .auto import (
     AutoPeftModelForTokenClassification,
 )
 from .config import PeftConfig, PromptLearningConfig
-from .helpers import find_kappa_target_modules
+from .helpers import find_kappa_target_modules, get_emulator_model
 from .mapping import (
     PEFT_TYPE_TO_CONFIG_MAPPING,
     PEFT_TYPE_TO_MIXED_MODEL_MAPPING,
@@ -309,6 +309,7 @@ __all__ = [
     "create_arrow_model",
     "find_kappa_target_modules",
     "get_base_model_state_dict",
+    "get_emulator_model",
     "get_eva_state_dict",
     "get_layer_status",
     "get_model_status",

@@ -13,7 +13,8 @@
 # limitations under the License.
 
 import inspect
-from collections.abc import Iterator
+import re
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from copy import deepcopy
 from functools import update_wrapper
@@ -33,6 +34,7 @@ from tqdm.auto import tqdm
 
 from .peft_model import PeftConfig, PeftModel
 from .tuners.lora import LoraLayer, LoraModel, dora
+from .tuners.lora.conversion import _find_cutoff_index
 from .tuners.tuners_utils import BaseTunerLayer
 
 
@@ -578,3 +580,327 @@ def find_kappa_target_modules(
         "target_modules": target_modules,
         "target_parameters": target_parameters,
     }
+
+
+class _SVDLinear(nn.Module):
+    """Low-rank approximation of an ``nn.Linear`` layer using (optionally activation-aware) SVD.
+
+    Replaces ``W`` (shape ``[out_features, in_features]``) with two sequential linear layers ``v`` and ``u``
+    such that ``u(v(x)) ≈ W x``. When a *scaling* matrix ``S`` (derived from input activations) is provided,
+    the SVD is performed on ``W @ S``; the resulting ``V`` factor is then mapped back to the original input
+    space by ``S^{-1}``, following the *activation-aware SVD* approach of EMLoC (Lin et al., NeurIPS 2025).
+    """
+
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        rank: int,
+        bias: bool = False,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[str, torch.device]] = None,
+    ) -> None:
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.rank = rank
+        device_kwargs = {"device": device, "dtype": dtype}
+        self.v = nn.Linear(in_features, rank, bias=False, **device_kwargs)
+        self.u = nn.Linear(rank, out_features, bias=bias, **device_kwargs)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.u(self.v(x))
+
+
+def _get_input_stats(inputs: list[torch.Tensor]) -> torch.Tensor:
+    """Compute the input covariance/scaling matrix ``X^T X`` from collected input activations."""
+    xtx = torch.zeros(inputs[0].shape[-1], inputs[0].shape[-1], dtype=torch.float32)
+    for x in inputs:
+        x = x.reshape(-1, x.shape[-1]).to(dtype=torch.float32)
+        xtx += x.t() @ x
+    return xtx
+
+
+def _get_scaling(xtx: torch.Tensor) -> torch.Tensor:
+    """Compute the activation-aware scaling matrix ``S = Q * sqrt(L)`` via eigendecomposition of ``X^T X``."""
+    factor = torch.trace(xtx) / xtx.shape[0]
+    eps = 1e-7
+    eigvals = torch.zeros(xtx.shape[0])
+    eigvecs = torch.zeros_like(xtx)
+    for _retry in range(5):
+        try:
+            eigvals, eigvecs = torch.linalg.eigh(xtx / factor)
+            eigvals = torch.clamp(eigvals, min=1e-7) * factor
+            break
+        except Exception:
+            if _retry == 4:
+                raise
+            xtx = xtx + torch.eye(xtx.shape[0]) * eps
+            eps *= 5
+    scaling = eigvecs * torch.sqrt(eigvals)
+    return scaling
+
+
+def _apply_activation_aware_svd(
+    weight: torch.Tensor,
+    rank: Union[int, float],
+    scaling: Optional[torch.Tensor] = None,
+) -> tuple[torch.Tensor, torch.Tensor, int]:
+    """Perform (optionally activation-aware) truncated SVD on a weight matrix.
+
+    Args:
+        weight: The weight matrix of shape ``[out_features, in_features]``.
+        rank: Either an ``int`` for a fixed rank, or a ``float`` in ``(0, 1]`` interpreted as an energy
+            threshold (the smallest ``k`` such that the top-``k`` singular values account for at least that
+            fraction of total squared singular values).
+        scaling: Optional scaling matrix ``S`` of shape ``[in_features, in_features]``. When provided, SVD
+            is performed on ``weight @ S`` and the ``V`` factor is mapped back with ``S^{-1}``.
+
+    Returns:
+        A tuple ``(lora_A, lora_B, effective_rank)`` where ``lora_A`` has shape ``[rank, in_features]``
+        and ``lora_B`` has shape ``[out_features, rank]``, so that ``lora_B @ lora_A`` approximates the
+        (scaled) weight.
+    """
+    weight = weight.to(dtype=torch.float32)
+
+    if scaling is not None:
+        scaling = scaling.to(dtype=torch.float32, device=weight.device)
+        scaled_weight = weight @ scaling
+    else:
+        scaled_weight = weight
+
+    u, s, vh = torch.linalg.svd(scaled_weight, full_matrices=False)
+
+    if isinstance(rank, float):
+        if not (0 < rank <= 1):
+            raise ValueError(f"Float rank must be in (0, 1], got {rank}.")
+        effective_rank = _find_cutoff_index(s, threshold=rank)
+    else:
+        effective_rank = int(rank)
+
+    max_rank = u.shape[1]
+    if effective_rank > max_rank:
+        raise ValueError(
+            f"The chosen rank {effective_rank} is larger than the weight shape ({max_rank}), "
+            "please choose a lower rank."
+        )
+    if effective_rank == 0:
+        effective_rank = 1  # at least one component
+
+    s_truncated = s[:effective_rank]
+    sqrt_sigma = torch.sqrt(torch.diag(s_truncated))
+    u_truncated = u[:, :effective_rank]
+    vh_truncated = vh[:effective_rank, :]
+
+    if scaling is not None:
+        scaling_inv = torch.linalg.inv(scaling)
+        vh_truncated = vh_truncated @ scaling_inv
+
+    lora_b = u_truncated @ sqrt_sigma  # [out_features, rank]
+    lora_a = sqrt_sigma @ vh_truncated  # [rank, in_features]
+    return lora_a, lora_b, effective_rank
+
+
+def _replace_module(parent: nn.Module, name: str, new_module: nn.Module) -> None:
+    """Replace a child module by name."""
+    setattr(parent, name, new_module)
+
+
+def _get_parent_and_child(model: nn.Module, qualified_name: str) -> tuple[nn.Module, str]:
+    """Given a dotted module name, return the parent module and the child attribute name."""
+    parts = qualified_name.split(".")
+    parent = model
+    for part in parts[:-1]:
+        parent = getattr(parent, part)
+    return parent, parts[-1]
+
+
+@torch.no_grad()
+def get_emulator_model(
+    model: nn.Module,
+    rank: Union[int, float],
+    data_loader: Optional[Iterable] = None,
+    target_modules: Optional[list[str]] = None,
+    ignore_modules: Optional[list[str]] = None,
+    num_samples: int = 64,
+    inplace: bool = True,
+    progressbar: bool = False,
+) -> nn.Module:
+    """Construct a lightweight *emulator* of ``model`` by replacing ``nn.Linear`` layers with low-rank SVD factorizations.
+
+    This implements the emulator construction approach from the EMLoC paper (Lin et al., NeurIPS 2025). Each
+    ``nn.Linear`` layer is replaced by two sequential linear layers ``v`` (in→rank) and ``u`` (rank→out) whose
+    weights are derived from a truncated SVD of the original weight. When a calibration ``data_loader`` is
+    provided, the SVD is made *activation-aware*: a scaling matrix is computed from input activations and the
+    SVD is performed on the rescaled weight, which preserves the directions most relevant to the task data.
+
+    The ``rank`` argument controls the compression:
+
+    - ``int``: use a fixed rank ``k`` for every layer; the top-``k`` singular values are retained.
+    - ``float``: interpreted as an *energy threshold* in ``(0, 1]``; for each layer, the smallest ``k`` is chosen
+      such that the top-``k`` singular values account for at least that fraction of the total squared singular
+      values. This can result in different ranks per layer, similar to the logic in ``peft.tuners.lora.conversion``.
+
+    The emulator approximates the original model's outputs — higher ranks yield closer approximations, at the
+    cost of more parameters.
+
+    Note:
+        This function is inspired by EMLoC but is a generalized, standalone implementation that works with
+        arbitrary ``nn.Module`` instances. It does not require PEFT layers.
+
+    Args:
+        model (`nn.Module`):
+            The model to compress. Should contain ``nn.Linear`` layers.
+        rank (`int` or `float`):
+            The desired rank for the SVD factorization. An ``int`` uses a fixed rank for all layers. A
+            ``float`` in ``(0, 1]`` is interpreted as an energy threshold: for each layer, the smallest rank
+            ``k`` is chosen such that the top ``k`` singular values account for at least that fraction of the
+            total squared singular values. Higher values (closer to 1.0) result in a better approximation
+            but more parameters.
+        data_loader (`Iterable`, *optional*):
+            An iterator over calibration batches. Each batch should be a dict (or tuple) that can be passed
+            to ``model(**batch)`` or ``model(*batch)``. When provided, the SVD is activation-aware. When
+            ``None``, a plain SVD on the weight matrix is used (no activation information).
+        target_modules (`list[str]`, *optional*):
+            List of module name patterns (regex) to compress. If ``None``, all ``nn.Linear`` layers are
+            compressed. Module names matching these patterns are included.
+        ignore_modules (`list[str]`, *optional*):
+            List of module name patterns (regex) to exclude from compression. Takes precedence over
+            ``target_modules``.
+        num_samples (`int`):
+            Maximum number of calibration samples to use for activation collection. Only relevant when
+            ``data_loader`` is provided. Defaults to 64.
+        inplace (`bool`):
+            If ``True``, modify the model in-place. If ``False``, work on a deep copy. Defaults to ``True``.
+        progressbar (`bool`):
+            Whether to show a progress bar during compression. Defaults to ``False``.
+
+    Returns:
+        `nn.Module`: The emulator model with ``nn.Linear`` layers replaced by low-rank factorizations.
+
+    Raises:
+        `ValueError`: If the rank is invalid (0, or a float outside ``(0, 1]``).
+        `TypeError`: If no ``nn.Linear`` layers are found in the model.
+
+    Example:
+
+    ```python
+    >>> from peft import get_emulator_model
+    >>> from transformers import AutoModelForCausalLM
+    >>>
+    >>> model = AutoModelForCausalLM.from_pretrained("gpt2")
+    >>> # Using a fixed rank
+    >>> emulator = get_emulator_model(model, rank=4)
+    >>> # Using an energy threshold (activation-aware, with calibration data)
+    >>> emulator = get_emulator_model(model, rank=0.95, data_loader=loader)
+    ```
+    """
+    # --- validation ---
+    if rank == 0:
+        raise ValueError("Passing a rank of 0 doesn't make sense, please pass a valid value.")
+    if isinstance(rank, float) and not (0 < rank <= 1):
+        raise ValueError(f"If rank is a float, it is interpreted as a threshold. It must be between 0 and 1 but got {rank}.")
+    if not inplace:
+        model = deepcopy(model)
+    model.eval()
+
+    # --- identify linear layers to compress ---
+    linear_modules: dict[str, nn.Linear] = {}
+    for name, module in model.named_modules():
+        if not isinstance(module, nn.Linear):
+            continue
+        if ignore_modules and any(re.fullmatch(pattern, name) for pattern in ignore_modules):
+            continue
+        if target_modules and not any(re.fullmatch(pattern, name) for pattern in target_modules):
+            continue
+        linear_modules[name] = module
+
+    if not linear_modules:
+        raise TypeError("Could not detect any nn.Linear layer to compress.")
+
+    # --- collect input activations (if data_loader provided) ---
+    activation_stats: dict[str, torch.Tensor] = {}
+    if data_loader is not None:
+        activation_stats = _collect_activations(model, linear_modules, data_loader, num_samples, progressbar)
+
+    # --- replace each linear with SVD factorization ---
+    iterator = tqdm(linear_modules.items(), desc="Building emulator", disable=not progressbar)
+    for name, linear in iterator:
+        weight = linear.weight.data
+        has_bias = linear.bias is not None
+        dtype = weight.dtype
+        device = weight.device
+
+        scaling = activation_stats.get(name, None)
+
+        lora_a, lora_b, effective_rank = _apply_activation_aware_svd(weight, rank=rank, scaling=scaling)
+
+        svd_layer = _SVDLinear(
+            in_features=linear.in_features,
+            out_features=linear.out_features,
+            rank=effective_rank,
+            bias=has_bias,
+            dtype=dtype,
+            device=device,
+        )
+        svd_layer.v.weight.data = lora_a.to(dtype=dtype, device=device).contiguous()
+        svd_layer.u.weight.data = lora_b.to(dtype=dtype, device=device).contiguous()
+        if has_bias:
+            svd_layer.u.bias.data = linear.bias.data.to(device=device)
+
+        parent, child_name = _get_parent_and_child(model, name)
+        _replace_module(parent, child_name, svd_layer)
+
+    return model
+
+
+def _collect_activations(
+    model: nn.Module,
+    linear_modules: dict[str, nn.Linear],
+    data_loader: Iterable,
+    num_samples: int,
+    progressbar: bool,
+) -> dict[str, torch.Tensor]:
+    """Collect input activations for each target ``nn.Linear`` module via forward hooks."""
+    inputs_collected: dict[str, list[torch.Tensor]] = {name: [] for name in linear_modules}
+    sample_count = 0
+
+    handles = []
+    for name, module in linear_modules.items():
+        target_module = module
+
+        def make_hook(module_name):
+            def hook(mod, inp, out):
+                inputs_collected[module_name].append(inp[0].detach().cpu())
+
+            return hook
+
+        handle = target_module.register_forward_hook(make_hook(name))
+        handles.append(handle)
+
+    try:
+        with torch.no_grad():
+            loader_iter = iter(data_loader)
+            for batch in tqdm(loader_iter, desc="Collecting activations", total=num_samples, disable=not progressbar):
+                if sample_count >= num_samples:
+                    break
+                if isinstance(batch, dict):
+                    model(**batch)
+                elif isinstance(batch, (tuple, list)):
+                    model(*batch)
+                else:
+                    model(batch)
+                sample_count += 1
+    finally:
+        for handle in handles:
+            handle.remove()
+
+    # compute scaling matrices
+    scaling_matrices: dict[str, torch.Tensor] = {}
+    for name, inputs in inputs_collected.items():
+        if not inputs:
+            continue
+        xtx = _get_input_stats(inputs)
+        scaling_matrices[name] = _get_scaling(xtx)
+
+    return scaling_matrices
