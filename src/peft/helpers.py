@@ -13,17 +13,18 @@
 # limitations under the License.
 
 import inspect
-import re
 import warnings
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from copy import deepcopy
 from functools import update_wrapper
-from types import MethodType
+from types import MethodType, SimpleNamespace
 from typing import Any, Optional, Union
 
 import torch
 from torch import nn
+
+from .tuners.tuners_utils import _ExcludedModule, check_target_module_exists
 
 
 try:
@@ -823,13 +824,28 @@ def _find_lm_head_modules(model: nn.Module) -> set[str]:
     return head_names
 
 
+def _match_module(pattern: Union[list[str], str], key: str) -> bool:
+    """Check if a module key matches the given target/ignore pattern.
+
+    This delegates to PEFT's `check_target_module_exists` to ensure the same matching semantics
+    as `LoraConfig.target_modules`:
+
+    - `str`: treated as a regex pattern, matched with `re.fullmatch`.
+    - `list[str]`: each element is matched as an exact module name or as a suffix
+      (e.g. `"q_proj"` matches `model.layers.0.self_attn.q_proj`).
+    """
+    config = SimpleNamespace(target_modules=pattern, exclude_modules=None, modules_to_save=None)
+    result = check_target_module_exists(config, key)
+    return bool(result) and not isinstance(result, _ExcludedModule)
+
+
 @torch.no_grad()
 def get_emulator_model(
     model: nn.Module,
     rank: Union[int, float],
     data_loader: Optional[Iterable] = None,
-    target_modules: Optional[list[str]] = None,
-    ignore_modules: Optional[list[str]] = None,
+    target_modules: Optional[Union[list[str], str]] = None,
+    ignore_modules: Optional[Union[list[str], str]] = None,
     num_batches: int = 64,
     inplace: bool = True,
     progressbar: bool = False,
@@ -881,12 +897,15 @@ def get_emulator_model(
             An iterator over calibration batches. Each batch should be a dict (or tuple) that can be passed
             to `model(**batch)` or `model(*batch)`. When provided, the SVD is activation-aware. When
             `None`, a plain SVD on the weight matrix is used (no activation information).
-        target_modules (`list[str]`, *optional*):
-            List of module name patterns (regex) to compress. If `None`, all `nn.Linear` layers are
-            compressed. Module names matching these patterns are included.
-        ignore_modules (`list[str]`, *optional*):
-            List of module name patterns (regex) to exclude from compression. Takes precedence over
-            `target_modules`.
+        target_modules (`Union[list[str], str]`, *optional*):
+            Module names to compress. If `None`, all `nn.Linear` layers (except skipped ones) are
+            compressed. If a `list[str]`, each element is matched as a suffix of the module name
+            (e.g. `"q_proj"` matches `model.layers.0.self_attn.q_proj`), or as an exact module name.
+            If a `str`, it is treated as a regex pattern matched with `re.fullmatch`. This follows
+            the same convention as `LoraConfig.target_modules`.
+        ignore_modules (`Union[list[str], str]`, *optional*):
+            Module names to exclude from compression. Takes precedence over `target_modules`.
+            Matching semantics are the same as `target_modules`.
         num_batches (`int`):
             Maximum number of calibration batches to draw from `data_loader` for activation collection.
             Each batch is one element yielded by the iterator. Only relevant when `data_loader` is
@@ -958,9 +977,9 @@ def get_emulator_model(
             continue
         if name in skip_modules:
             continue
-        if ignore_modules and any(re.fullmatch(pattern, name) for pattern in ignore_modules):
+        if ignore_modules and _match_module(ignore_modules, name):
             continue
-        if target_modules and not any(re.fullmatch(pattern, name) for pattern in target_modules):
+        if target_modules and not _match_module(target_modules, name):
             continue
         linear_modules[name] = module
 

@@ -876,8 +876,8 @@ class TestGetEmulatorModel:
     def test_target_modules_filter(self, model_and_inputs):
         """target_modules should filter which layers get compressed."""
         model, _input_ids = model_and_inputs
-        # Only compress q_proj layers
-        emulator = get_emulator_model(deepcopy(model), rank=4, target_modules=[".*q_proj.*"])
+        # Only compress q_proj layers (suffix match, same convention as LoraConfig)
+        emulator = get_emulator_model(deepcopy(model), rank=4, target_modules=["q_proj"])
 
         from peft.helpers import _SVDLinear
 
@@ -892,10 +892,20 @@ class TestGetEmulatorModel:
         assert svd_count > 0, "Should have some SVD layers"
         assert linear_count > 0, "Should still have some uncompressed Linear layers"
 
+    def test_target_modules_regex_str(self, model_and_inputs):
+        """target_modules as a str should be treated as a regex pattern."""
+        model, _input_ids = model_and_inputs
+        emulator = get_emulator_model(deepcopy(model), rank=4, target_modules=r".*\.q_proj")
+
+        from peft.helpers import _SVDLinear
+
+        svd_count = sum(1 for m in emulator.modules() if isinstance(m, _SVDLinear))
+        assert svd_count > 0, "Regex str should match q_proj layers"
+
     def test_ignore_modules_filter(self, model_and_inputs):
         """ignore_modules should exclude specified layers from compression."""
         model, _ = model_and_inputs
-        emulator = get_emulator_model(deepcopy(model), rank=4, ignore_modules=[".*q_proj.*"])
+        emulator = get_emulator_model(deepcopy(model), rank=4, ignore_modules=["q_proj"])
 
         from peft.helpers import _SVDLinear
 
