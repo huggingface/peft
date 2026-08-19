@@ -2567,7 +2567,6 @@ class PeftModelForSeq2SeqLM(PeftModel):
             model_kwargs["task_ids"] = task_ids
         elif peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
             past_key_values = model_kwargs.get("past_key_values", None)
-            cache_position = model_kwargs.get("cache_position", [None])
             # check prefill stage
             is_prefill_stage = kwargs.get("is_first_iteration")
             if is_prefill_stage is None:  # transformers < v5
