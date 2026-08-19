@@ -645,15 +645,6 @@ class _SVDLinear(nn.Linear):
         return self.u(self.v(x))
 
 
-def _get_input_stats(inputs: list[torch.Tensor]) -> torch.Tensor:
-    """Compute the input covariance/scaling matrix `X^T X` from collected input activations."""
-    xtx = torch.zeros(inputs[0].shape[-1], inputs[0].shape[-1], dtype=torch.float32)
-    for x in inputs:
-        x = x.reshape(-1, x.shape[-1]).to(dtype=torch.float32)
-        xtx += x.t() @ x
-    return xtx
-
-
 def _get_scaling(xtx: torch.Tensor) -> torch.Tensor:
     """Compute the activation-aware scaling matrix `S = Q * sqrt(L)` via eigendecomposition of `X^T X`."""
     factor = torch.trace(xtx) / xtx.shape[0]
@@ -797,6 +788,41 @@ def _find_tied_linear_modules(model: nn.Module) -> set[str]:
     return tied_names
 
 
+def _find_lm_head_modules(model: nn.Module) -> set[str]:
+    """Return the set of module names that serve as the language modelling head.
+
+    The LM head maps hidden states to vocabulary logits. Compressing it is almost never desirable:
+    it directly controls the output distribution, and for tied models it shares weights with the
+    embedding layer. We detect it via `get_output_embeddings()` when available (Transformers convention)
+    and by checking common attribute names (`lm_head`, `output`, `cls`).
+    """
+    head_names: set[str] = set()
+
+    # Transformers convention: model.get_output_embeddings() returns the output projection
+    get_output = getattr(model, "get_output_embeddings", None)
+    if callable(get_output):
+        try:
+            out_emb = get_output()
+        except Exception:
+            out_emb = None
+        if out_emb is not None:
+            for name, module in model.named_modules():
+                if module is out_emb:
+                    head_names.add(name)
+                    break
+
+    # Common attribute names for the LM head on causal/seq-to-seq models
+    for name, module in model.named_modules():
+        if not isinstance(module, nn.Linear):
+            continue
+        # leaf name check: "lm_head", "output", "cls", "output_projection"
+        leaf = name.rpartition(".")[2]
+        if leaf in ("lm_head", "output", "cls", "output_projection"):
+            head_names.add(name)
+
+    return head_names
+
+
 @torch.no_grad()
 def get_emulator_model(
     model: nn.Module,
@@ -804,7 +830,7 @@ def get_emulator_model(
     data_loader: Optional[Iterable] = None,
     target_modules: Optional[list[str]] = None,
     ignore_modules: Optional[list[str]] = None,
-    num_samples: int = 64,
+    num_batches: int = 64,
     inplace: bool = True,
     progressbar: bool = False,
     fast_svd: bool = False,
@@ -831,8 +857,15 @@ def get_emulator_model(
         This function is inspired by EMLoC but is a generalized, standalone implementation that works with
         arbitrary `nn.Module` instances. It does not require PEFT layers.
 
-        Layers with tied weights (e.g. `lm_head` sharing weights with `embed_tokens` when
-        `tie_word_embeddings=True`) are automatically skipped to avoid silently breaking the tying.
+        The following layers are automatically skipped:
+
+        - **LM head** — compressing the output projection would severely degrade the output distribution.
+        - **Tied weights** — layers whose weight is shared with another module (e.g. `lm_head` tied to
+          `embed_tokens` when `tie_word_embeddings=True`) are skipped to avoid breaking the tying.
+        - **Layers where SVD would increase parameters** — if `rank * (in_features + out_features) >=
+          in_features * out_features`, the factored form uses at least as many parameters as the original,
+          so compression is pointless. For `float` rank the check uses the effective rank after truncation.
+
         A warning is emitted listing the skipped layers.
 
     Args:
@@ -854,9 +887,10 @@ def get_emulator_model(
         ignore_modules (`list[str]`, *optional*):
             List of module name patterns (regex) to exclude from compression. Takes precedence over
             `target_modules`.
-        num_samples (`int`):
-            Maximum number of calibration samples to use for activation collection. Only relevant when
-            `data_loader` is provided. Defaults to 64.
+        num_batches (`int`):
+            Maximum number of calibration batches to draw from `data_loader` for activation collection.
+            Each batch is one element yielded by the iterator. Only relevant when `data_loader` is
+            provided. Defaults to 64.
         inplace (`bool`):
             If `True`, modify the model in-place. If `False`, work on a deep copy. Defaults to `True`.
         progressbar (`bool`):
@@ -873,7 +907,7 @@ def get_emulator_model(
 
     Raises:
         `ValueError`: If the rank is invalid (0, or a float outside `(0, 1]`).
-        `TypeError`: If no `nn.Linear` layers are found in the model.
+        `TypeError`: If no compressible `nn.Linear` layers are found in the model.
 
     Example:
 
@@ -898,7 +932,19 @@ def get_emulator_model(
     model.eval()
 
     # --- identify linear layers to compress ---
+    skip_modules: set[str] = set()
+    skip_reasons: dict[str, str] = {}
+
+    lm_head_modules = _find_lm_head_modules(model)
+    for name in lm_head_modules:
+        skip_modules.add(name)
+        skip_reasons[name] = "LM head"
+
     tied_modules = _find_tied_linear_modules(model)
+    for name in tied_modules:
+        skip_modules.add(name)
+        skip_reasons[name] = skip_reasons.get(name, "tied weights")
+
     if tied_modules:
         warnings.warn(
             "The following nn.Linear layers have tied weights and will be skipped to avoid "
@@ -910,7 +956,7 @@ def get_emulator_model(
     for name, module in model.named_modules():
         if not isinstance(module, nn.Linear):
             continue
-        if name in tied_modules:
+        if name in skip_modules:
             continue
         if ignore_modules and any(re.fullmatch(pattern, name) for pattern in ignore_modules):
             continue
@@ -924,9 +970,10 @@ def get_emulator_model(
     # --- collect input activations (if data_loader provided) ---
     activation_stats: dict[str, torch.Tensor] = {}
     if data_loader is not None:
-        activation_stats = _collect_activations(model, linear_modules, data_loader, num_samples, progressbar)
+        activation_stats = _collect_activations(model, linear_modules, data_loader, num_batches, progressbar)
 
     # --- replace each linear with SVD factorization ---
+    skipped_too_small: list[str] = []
     iterator = tqdm(linear_modules.items(), desc="Building emulator", disable=not progressbar)
     for name, linear in iterator:
         weight = linear.weight.data
@@ -934,11 +981,30 @@ def get_emulator_model(
         dtype = weight.dtype
         device = weight.device
 
+        # Skip layers where the SVD factorization would use at least as many parameters as the
+        # original. For int rank this is known upfront; for float rank we can only check after
+        # the SVD, so we skip the pre-check and handle it post-SVD.
+        orig_params = linear.in_features * linear.out_features
+        if isinstance(rank, int):
+            # The effective rank is capped at min(in, out) by the SVD truncation
+            pre_rank = min(rank, min(linear.in_features, linear.out_features))
+            svd_params = pre_rank * (linear.in_features + linear.out_features)
+            if svd_params >= orig_params:
+                skipped_too_small.append(name)
+                continue
+
         scaling = activation_stats.get(name, None)
 
         lora_a, lora_b, effective_rank = _apply_activation_aware_svd(
             weight, rank=rank, scaling=scaling, fast_svd=fast_svd
         )
+
+        if isinstance(rank, float):
+            # For float rank the effective rank is only known after SVD — check now
+            svd_params = effective_rank * (linear.in_features + linear.out_features)
+            if svd_params >= orig_params:
+                skipped_too_small.append(name)
+                continue
 
         # Construct on meta device, then materialize on the target device
         svd_layer = _SVDLinear(
@@ -958,6 +1024,12 @@ def get_emulator_model(
         parent, child_name = _get_parent_and_child(model, name)
         _replace_module(parent, child_name, svd_layer)
 
+    if skipped_too_small:
+        warnings.warn(
+            f"The following layers were skipped because the SVD factorization at the chosen rank "
+            f"would use at least as many parameters as the original: {skipped_too_small}."
+        )
+
     return model
 
 
@@ -965,31 +1037,40 @@ def _collect_activations(
     model: nn.Module,
     linear_modules: dict[str, nn.Linear],
     data_loader: Iterable,
-    num_samples: int,
+    num_batches: int,
     progressbar: bool,
 ) -> dict[str, torch.Tensor]:
-    """Collect input activations for each target `nn.Linear` module via forward hooks."""
-    inputs_collected: dict[str, list[torch.Tensor]] = {name: [] for name in linear_modules}
-    sample_count = 0
+    """Collect activation statistics for each target `nn.Linear` module via forward hooks.
+
+    Rather than storing raw input activations (which can require >100 GB of CPU RAM for large models),
+    the running `X^T X` matrix is accumulated incrementally inside each hook. This keeps memory usage
+    at O(in_features^2) per layer regardless of how many batches or tokens are processed.
+    """
+    in_features_dim = {name: mod.in_features for name, mod in linear_modules.items()}
+    xtx_accum: dict[str, torch.Tensor] = {
+        name: torch.zeros(dim, dim, dtype=torch.float32) for name, dim in in_features_dim.items()
+    }
 
     handles = []
-    for name, module in linear_modules.items():
-        target_module = module
+    for name in linear_modules:
 
         def make_hook(module_name):
             def hook(mod, inp, out):
-                inputs_collected[module_name].append(inp[0].detach().cpu())
+                x = inp[0].detach().to(dtype=torch.float32)
+                x = x.reshape(-1, x.shape[-1])
+                xtx_accum[module_name] += x.t() @ x
 
             return hook
 
-        handle = target_module.register_forward_hook(make_hook(name))
+        handle = linear_modules[name].register_forward_hook(make_hook(name))
         handles.append(handle)
 
+    batch_count = 0
     try:
         with torch.no_grad():
             loader_iter = iter(data_loader)
-            for batch in tqdm(loader_iter, desc="Collecting activations", total=num_samples, disable=not progressbar):
-                if sample_count >= num_samples:
+            for batch in tqdm(loader_iter, desc="Collecting activations", total=num_batches, disable=not progressbar):
+                if batch_count >= num_batches:
                     break
                 if isinstance(batch, dict):
                     model(**batch)
@@ -997,17 +1078,16 @@ def _collect_activations(
                     model(*batch)
                 else:
                     model(batch)
-                sample_count += 1
+                batch_count += 1
     finally:
         for handle in handles:
             handle.remove()
 
-    # compute scaling matrices
+    # Compute scaling matrices from the accumulated X^T X statistics
     scaling_matrices: dict[str, torch.Tensor] = {}
-    for name, inputs in inputs_collected.items():
-        if not inputs:
+    for name, xtx in xtx_accum.items():
+        if xtx.sum() == 0:
             continue
-        xtx = _get_input_stats(inputs)
         scaling_matrices[name] = _get_scaling(xtx)
 
     return scaling_matrices

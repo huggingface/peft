@@ -57,6 +57,18 @@ The `rank` argument controls the compression:
 
 Higher ranks yield closer approximations to the original model at the cost of more parameters.
 
+The following layers are automatically skipped:
+
+- **LM head** — compressing the output projection would severely degrade the output distribution.
+- **Tied weights** — layers whose weight is shared with another module (e.g. `lm_head` tied to
+  `embed_tokens` when `tie_word_embeddings=True`).
+- **Layers where SVD would increase parameters** — if `rank * (in_features + out_features) >=
+  in_features * out_features`, the factored form uses at least as many parameters as the original.
+
+When calibration data is provided via `data_loader`, activation statistics (XᵀX) are accumulated
+incrementally inside forward hooks — raw activations are never stored, keeping memory usage at
+O(in_features²) per layer regardless of batch size or sequence length.
+
 ```python
 >>> from peft import get_emulator_model
 >>> from transformers import AutoModelForCausalLM

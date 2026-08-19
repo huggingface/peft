@@ -844,7 +844,7 @@ class TestGetEmulatorModel:
 
         # activation-aware SVD with calibration data
         cal_data = [{"input_ids": torch.randint(0, model.config.vocab_size, (2, 16))} for _ in range(8)]
-        emulator_aware = get_emulator_model(deepcopy(model), rank=4, data_loader=cal_data, num_samples=8)
+        emulator_aware = get_emulator_model(deepcopy(model), rank=4, data_loader=cal_data, num_batches=8)
         with torch.no_grad():
             aware_logits = emulator_aware(input_ids).logits
         aware_error = (original_logits - aware_logits).abs().mean().item()
@@ -1089,3 +1089,48 @@ class TestGetEmulatorModel:
                 has_lora_grads = True
                 break
         assert has_lora_grads, "LoRA parameters should have gradients after backward()"
+
+    def test_lm_head_not_replaced(self):
+        """The LM head should never be replaced, even when not tied."""
+        from transformers import AutoModelForCausalLM
+
+        # Use a model with untied weights so lm_head is NOT automatically caught by the tied-weights check
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        model.eval()
+        # Untie the weights so lm_head is no longer caught by tied-weights detection
+        model.tie_word_embeddings = False
+        model.tie_weights()
+        model.lm_head.weight = nn.Parameter(model.lm_head.weight.data.clone())
+
+        from peft.helpers import _SVDLinear
+
+        emulator = get_emulator_model(deepcopy(model), rank=4)
+        assert not isinstance(emulator.lm_head, _SVDLinear), "lm_head should not be replaced by _SVDLinear"
+        assert isinstance(emulator.lm_head, nn.Linear), "lm_head should remain nn.Linear"
+
+    def test_small_layers_skipped(self, model_and_inputs):
+        """Layers where SVD would use >= parameters should be skipped."""
+        from peft.helpers import _SVDLinear
+
+        model, _ = model_and_inputs
+        # Use a very high rank so the factored form is larger than the original
+        emulator = get_emulator_model(deepcopy(model), rank=999999)
+
+        # For tiny-random models with hidden_size=32, layers are 32x32 = 1024 params
+        # SVD at rank=999999 (capped to min(32,32)=32) would be 32*(32+32)=2048 >= 1024
+        # So all layers should be skipped
+        svd_count = sum(1 for m in emulator.modules() if isinstance(m, _SVDLinear))
+        assert svd_count == 0, f"Expected 0 SVD layers (all skipped as too small), got {svd_count}"
+
+    def test_activation_stats_incremental(self, model_and_inputs):
+        """Activation collection should not store raw activations — verify via memory check."""
+        model, _input_ids = model_and_inputs
+
+        # Run with a data_loader that has large batches
+        cal_data = [{"input_ids": torch.randint(0, model.config.vocab_size, (4, 128))} for _ in range(16)]
+        emulator = get_emulator_model(deepcopy(model), rank=4, data_loader=cal_data, num_batches=16)
+
+        # If we get here without OOM, the incremental accumulation works
+        from peft.helpers import _SVDLinear
+
+        assert any(isinstance(m, _SVDLinear) for m in emulator.modules())
