@@ -236,6 +236,17 @@ peft_model.print_trainable_parameters()
 print(peft_model.targeted_module_names)
 ```
 
+When a model contains multiple adapters, use `get_targeted_module_names` to inspect the layers targeted by a specific
+adapter. Unlike `targeted_module_names`, this does not deduplicate layers shared by multiple adapters.
+
+```python
+peft_model = get_peft_model(my_model, LoraConfig(target_modules=["lin0"]))
+peft_model.add_adapter("second", LoraConfig(target_modules=["lin0", "lin1"]))
+
+print(peft_model.get_targeted_module_names("second"))
+# ['lin0', 'lin1']
+```
+
 ## Unsupported module types
 
 Methods like LoRA only work if the target modules are supported by PEFT. For example, it's possible to apply LoRA to `nn.Linear` and `nn.Conv2d` layers, but not, for instance, to `nn.LSTM`. If you find a layer class you want to apply PEFT to is not supported, you can:

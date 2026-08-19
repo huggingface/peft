@@ -655,6 +655,18 @@ class TestExcludedModuleNames:
         model.add_adapter("other", LoraConfig(target_modules=["lin0", "lin1"]))
         assert model.base_model.targeted_module_names == ["lin1", "lin0"]
 
+    def test_targeted_module_names_by_adapter(self):
+        model = get_peft_model(MLP(), LoraConfig(target_modules=["lin0"]))
+        model.add_adapter("other", LoraConfig(target_modules=["lin0", "lin1"]))
+
+        assert model.get_targeted_module_names("default") == ["lin0"]
+        assert model.get_targeted_module_names("other") == ["lin0", "lin1"]
+        assert model.targeted_module_names == ["lin0", "lin1"]
+
+        model.delete_adapter("other")
+        with pytest.raises(ValueError, match="Adapter other does not exist"):
+            model.get_targeted_module_names("other")
+
     def test_some_modules_excluded_some_unmatched(self):
         model = MLP()
         with pytest.raises(ValueError, match="No modules were targeted for adaptation"):

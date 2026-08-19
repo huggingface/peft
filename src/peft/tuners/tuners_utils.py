@@ -279,6 +279,8 @@ class BaseTuner(nn.Module, ABC):
         targeted_module_names (`list[str]`):
             The list of module names that were actually adapted. Can be useful to inspect if you want to quickly
             double-check that the `config.target_modules` were specified correctly.
+        _targeted_module_names_by_adapter (`dict[str, list[str]]`):
+            The module names that were actually adapted, grouped by adapter name.
         targeted_parameter_names (`list[str]`):
             The list of parameter names that were actually adapted. Can be useful to inspect if you want to quickly
             double-check that the `config.target_parameters` were specified correctly.
@@ -309,6 +311,7 @@ class BaseTuner(nn.Module, ABC):
 
         self.model = model
         self.targeted_module_names: list[str] = []
+        self._targeted_module_names_by_adapter: dict[str, list[str]] = {}
         self.targeted_parameter_names: list[str] = []
 
         # For advanced developers, if you want to attach multiple adapters to your
@@ -574,7 +577,25 @@ class BaseTuner(nn.Module, ABC):
         new_adapter = delete_adapter(
             model=self.model, adapter_name=adapter_name, prefix=self.prefix, layer_cls=self.tuner_layer_cls
         )
+        self._targeted_module_names_by_adapter.pop(adapter_name, None)
         self.active_adapter = new_adapter or []
+
+    def get_targeted_module_names(self, adapter_name: str) -> list[str]:
+        """Get the module names that were adapted for one adapter.
+
+        This is a per-adapter counterpart to `targeted_module_names`, which contains a deduplicated aggregate of all
+        adapted modules.
+
+        Args:
+            adapter_name (`str`): The name of the adapter whose targeted modules should be returned.
+
+        Returns:
+            `list[str]`: The module names that were adapted for `adapter_name`, in injection order.
+
+        """
+        if adapter_name not in self.peft_config:
+            raise ValueError(f"Adapter {adapter_name} does not exist")
+        return self._targeted_module_names_by_adapter.get(adapter_name, []).copy()
 
     def set_requires_grad(self, adapter_names: str | Sequence[str], requires_grad: bool = True) -> None:
         """
@@ -1083,6 +1104,7 @@ class BaseTuner(nn.Module, ABC):
         # Now that the checks passed, merge this adapter's matches into the tuner-level bookkeeping. Duplicates
         # are skipped so that names stay unique when several adapters target the same modules.
         _extend_unique(self.targeted_module_names, targeted_module_names)
+        self._targeted_module_names_by_adapter[adapter_name] = targeted_module_names
         _extend_unique(self.targeted_parameter_names, targeted_parameter_names)
 
         ################
