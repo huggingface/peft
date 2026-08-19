@@ -1054,3 +1054,38 @@ class TestGetEmulatorModel:
 
         # Should still produce a valid approximation
         assert emulator_logits is not None
+
+    def test_lora_can_be_applied_to_emulator(self, model_and_inputs):
+        """LoRA should be applicable to the emulator model (requires _SVDLinear to be nn.Linear subclass)."""
+        from peft import LoraConfig, get_peft_model
+
+        model, input_ids = model_and_inputs
+        emulator = get_emulator_model(deepcopy(model), rank=4)
+
+        # _SVDLinear should be an nn.Linear subclass
+        from peft.helpers import _SVDLinear
+
+        assert any(isinstance(m, _SVDLinear) for m in emulator.modules())
+        assert issubclass(_SVDLinear, nn.Linear), "_SVDLinear must inherit from nn.Linear for LoRA to work"
+
+        # Apply LoRA to the emulator
+        config = LoraConfig(r=4, target_modules=["q_proj", "v_proj"])
+        peft_model = get_peft_model(emulator, config)
+
+        # Forward should work
+        with torch.no_grad():
+            out = peft_model(input_ids)
+        assert out.logits is not None
+
+        # Training step should work (gradients flow through LoRA layers)
+        peft_model.train()
+        out = peft_model(input_ids, labels=input_ids)
+        out.loss.backward()
+
+        # Check that LoRA parameters have gradients
+        has_lora_grads = False
+        for name, param in peft_model.named_parameters():
+            if "lora_" in name and param.requires_grad and param.grad is not None:
+                has_lora_grads = True
+                break
+        assert has_lora_grads, "LoRA parameters should have gradients after backward()"

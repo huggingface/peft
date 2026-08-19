@@ -583,13 +583,23 @@ def find_kappa_target_modules(
     }
 
 
-class _SVDLinear(nn.Module):
+class _SVDLinear(nn.Linear):
     """Low-rank approximation of an `nn.Linear` layer using (optionally activation-aware) SVD.
 
     Replaces `W` (shape `[out_features, in_features]`) with two sequential linear layers `v` and `u`
     such that `u(v(x)) ≈ W x`. When a *scaling* matrix `S` (derived from input activations) is provided,
     the SVD is performed on `W @ S`; the resulting `V` factor is then mapped back to the original input
     space by `S^{-1}`, following the *activation-aware SVD* approach of EMLoC (Lin et al., NeurIPS 2025).
+
+    Inherits from `nn.Linear` so that PEFT methods (e.g. LoRA) can be applied to the emulator via
+    `isinstance` checks. The inherited `weight` and `bias` parameters are replaced by the factored
+    `v` and `u` sub-layers; `forward` uses only `v` and `u`, not the inherited parameters.
+
+    Note:
+        The `weight` property returns the materialized effective weight `u.weight @ v.weight`. This
+        allows PEFT merge operations to read the correct weight, but setting `weight.data` (as merge
+        does) is a no-op — the factored form cannot be updated in-place. For LoRA training and
+        inference, this is not an issue. For merge, the adapter delta is not folded into the factors.
     """
 
     def __init__(
@@ -601,15 +611,35 @@ class _SVDLinear(nn.Module):
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[str, torch.device]] = None,
     ) -> None:
-        super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
+        super().__init__(in_features, out_features, bias=bias, device="meta", dtype=dtype)
+        # Remove the inherited weight and bias parameters — replaced by v, u sub-layers
+        del self._parameters["weight"]
+        if bias and "bias" in self._parameters:
+            del self._parameters["bias"]
         self.rank = rank
         # Use meta device during init to avoid allocating memory for weights that are immediately
         # overwritten after construction. The caller is responsible for assigning real weights.
         meta_kwargs = {"device": "meta", "dtype": dtype}
         self.v = nn.Linear(in_features, rank, bias=False, **meta_kwargs)
         self.u = nn.Linear(rank, out_features, bias=bias, **meta_kwargs)
+
+    @property
+    def weight(self) -> torch.Tensor:
+        """Materialized effective weight (u.weight @ v.weight). Read-only — use v and u to modify."""
+        return self.u.weight @ self.v.weight
+
+    @weight.setter
+    def weight(self, value: torch.Tensor) -> None:
+        # No-op: the weight is factored into u and v. Setting it directly is not supported.
+        pass
+
+    @property
+    def bias(self) -> Optional[torch.Tensor]:
+        return self.u.bias
+
+    @bias.setter
+    def bias(self, value: Optional[torch.Tensor]) -> None:
+        self.u.bias = value
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.u(self.v(x))
