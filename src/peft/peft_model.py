@@ -1017,6 +1017,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         ...     model(inputs)
         ```
         """
+        was_disabled = self._adapters_disabled
         if self.peft_config[self.active_adapter].is_prompt_learning:
             try:
                 # TODO: consider replacing this patching of methods with a more robust mechanism: setting a flag and
@@ -1030,16 +1031,18 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             finally:
                 self.forward = old_forward
                 self.prepare_inputs_for_generation = old_prepare_inputs_for_generation
-                self._adapters_disabled = False
+                self._adapters_disabled = was_disabled
 
         elif self.peft_config[self.active_adapter].is_adaption_prompt:
             try:
-                self.base_model.disable_adapter_layers()
+                if not was_disabled:
+                    self.base_model.disable_adapter_layers()
                 self._adapters_disabled = True
                 yield
             finally:
-                self.base_model.enable_adapter_layers()
-                self._adapters_disabled = False
+                if not was_disabled:
+                    self.base_model.enable_adapter_layers()
+                self._adapters_disabled = was_disabled
 
         else:  # LoRA, LoHa, etc.
             model_status = self.get_model_status()
@@ -1057,7 +1060,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 if model_status.enabled is not False:
                     # model_status.enabled is `True` or `"irregular"`
                     self.base_model.enable_adapter_layers()
-                self._adapters_disabled = False
+                self._adapters_disabled = was_disabled
 
     def get_base_model(self) -> torch.nn.Module:
         """
