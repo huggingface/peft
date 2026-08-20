@@ -180,7 +180,7 @@ class PveraModel(BaseTuner):
             )
         else:
             new_module = self._create_new_module(
-                pvera_config, self.pvera_A, self.pvera_B, adapter_name, target, current_key, **kwargs
+                pvera_config, self.pvera_A, self.pvera_B, adapter_name, target, **kwargs
             )
             if adapter_name not in self.active_adapter:
                 # adding an additional adapter: it is not automatically trainable
@@ -188,7 +188,7 @@ class PveraModel(BaseTuner):
             self._replace_module(parent, target_name, new_module, target)
 
     @staticmethod
-    def _create_new_module(pvera_config, pvera_A, pvera_B, adapter_name, target, current_key, **kwargs):
+    def _create_new_module(pvera_config, pvera_A, pvera_B, adapter_name, target, **kwargs):
         # avoid eager bnb import
         if is_bnb_available():
             import bitsandbytes as bnb
@@ -245,11 +245,6 @@ class PveraModel(BaseTuner):
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`, `transformers.pytorch_utils.Conv1D`."
             )
-
-        if isinstance(pvera_config.sample_at_inference, bool):
-            module_sample_at_inference = pvera_config.sample_at_inference
-        else:
-            module_sample_at_inference = pvera_config.sample_at_inference.get(current_key, False)
 
         new_module = Linear(
             target,

@@ -4596,6 +4596,34 @@ class TestPeftCustomModel(PeftCommonTester):
 
         assert (output1 == output2).all()
 
+    def test_pvera_generator_is_per_adapter(self):
+        # Each adapter gets its own generator, otherwise adding a second adapter would reset the sampling stream of
+        # the first one.
+        def get_config():
+            return PveraConfig(
+                r=8, init_weights=False, target_modules=["lin0"], sample_at_inference=True, generator_seed=0
+            )
+
+        model = get_peft_model(MLP(), get_config()).to(self.torch_device)
+        model.eval()
+        X = torch.randn(9, 10).to(self.torch_device)
+        with torch.no_grad():
+            model(X)  # ticks the state of the "default" generator forward
+
+        state = model.base_model.model.lin0.pvera_generator["default"].get_state()
+        model.add_adapter("other", get_config())
+
+        generators = model.base_model.model.lin0.pvera_generator
+        assert set(generators) == {"default", "other"}
+        assert (generators["default"].get_state() == state).all()
+        assert not (generators["other"].get_state() == state).all()
+
+    def test_pvera_no_generator_seed_means_no_generator(self):
+        config = PveraConfig(r=8, init_weights=False, target_modules=["lin0"], sample_at_inference=True)
+        model = get_peft_model(MLP(), config).to(self.torch_device)
+
+        assert model.base_model.model.lin0.pvera_generator["default"] is None
+
 
 class TestMultiRankAdapter:
     """Tests related to multirank LoRA adapters"""
