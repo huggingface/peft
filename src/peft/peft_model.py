@@ -165,7 +165,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         self._is_prompt_learning = peft_config.is_prompt_learning
         if self._is_prompt_learning:
-            self._peft_config = {adapter_name: peft_config}
+            self._peft_config = {}
             self.base_model = model
             self.add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
         else:
@@ -1108,6 +1108,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 only affect select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the
                 corresponding layer.
         """
+        if adapter_name in self.peft_config:
+            raise ValueError(f"Adapter with name '{adapter_name}' already exists.")
+
         prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(peft_config.peft_type)
         if prefix and adapter_name in prefix:
             warnings.warn(
@@ -2580,7 +2583,6 @@ class PeftModelForSeq2SeqLM(PeftModel):
             model_kwargs["task_ids"] = task_ids
         elif peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
             past_key_values = model_kwargs.get("past_key_values", None)
-            cache_position = model_kwargs.get("cache_position", [None])
             # check prefill stage
             is_prefill_stage = kwargs.get("is_first_iteration")
             if is_prefill_stage is None:  # transformers < v5

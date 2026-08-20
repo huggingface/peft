@@ -1664,6 +1664,7 @@ class PeftCommonTester:
                     # approximations
                     if "single" in adapter_name:
                         new_delta_weight = target.get_delta_weight(adapter_name)
+                        # A negative merge weight must also negate the resulting delta weight.
                         weighted_original_delta_weights = target.get_delta_weight(adapter_list[0]) * weight_list[0]
                         assert torch.allclose(new_delta_weight, weighted_original_delta_weights, atol=1e-4, rtol=1e-4)
                     elif "svd" in adapter_name:
@@ -1753,7 +1754,6 @@ class PeftCommonTester:
                 self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, negative_weight_list)
             elif isinstance(config, IA3Config):
                 self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, negative_weight_list)
-            else:
                 pytest.skip(f"Test not applicable for {config}")
 
     def _test_disable_adapter(self, model_id, config_cls, config_kwargs):
