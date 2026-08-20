@@ -13,23 +13,32 @@
 # limitations under the License.
 
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.tuners_utils import (
-    BaseTuner,
-    get_device_map,
-)
+import warnings
+
+import torch
+
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_OFT_TARGET_MODULES_MAPPING,
-    get_quantization_config,
+    get_quantization_kwargs,
+    resolve_quantization_backend,
 )
 
-from .aqlm import dispatch_aqlm
-from .awq import dispatch_awq
-from .eetq import dispatch_eetq
-from .gptq import dispatch_gptq
-from .hqq import dispatch_hqq
-from .inc import dispatch_inc
-from .layer import OFTLayer, dispatch_default
+from .layer import Conv2d, Embedding, Linear, OFTLayer
+
+
+def _get_tuner_layer_class(target_base_layer: torch.nn.Module) -> type[OFTLayer] | None:
+    layer_cls: type[OFTLayer] | None = None
+    if isinstance(target_base_layer, torch.nn.Linear):
+        layer_cls = Linear
+    elif isinstance(target_base_layer, torch.nn.Conv2d):
+        layer_cls = Conv2d
+    elif isinstance(target_base_layer, torch.nn.Embedding):
+        layer_cls = Embedding
+    elif (quant_backend := resolve_quantization_backend(target_base_layer)) is not None:
+        layer_cls = {"linear": Linear, "conv2d": Conv2d}.get(quant_backend.layer_type)
+
+    return layer_cls
 
 
 class OFTModel(BaseTuner):
@@ -104,20 +113,12 @@ class OFTModel(BaseTuner):
         kwargs = {
             "r": oft_config.r,
             "fan_in_fan_out": oft_config.fan_in_fan_out,
-            "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
-            "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
-
-        quant_methods = ["gptq", "aqlm", "awq"]
-        for quant_method in quant_methods:
-            quantization_config = get_quantization_config(self.model, method=quant_method)
-            if quantization_config is not None:
-                kwargs[f"{quant_method}_quantization_config"] = quantization_config
+        kwargs.update(get_quantization_kwargs(self))
 
         # If it is not a OFTLayer, create a new module, else update it with new adapters
         if not isinstance(target, OFTLayer):
-            device_map = get_device_map(self.model)
-            new_module = self._create_new_module(oft_config, adapter_name, target, device_map=device_map, **kwargs)
+            new_module = self._create_new_module(oft_config, adapter_name, target, **kwargs)
             if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
@@ -131,46 +132,30 @@ class OFTModel(BaseTuner):
 
     @staticmethod
     def _create_new_module(oft_config, adapter_name, target, **kwargs):
-        # Collect dispatcher functions to decide what backend to use for the replaced OFT layer. The order matters,
-        # because the first match is always used. Therefore, the default layers should be checked last.
-        dispatchers = []
+        if isinstance(target, BaseTunerLayer):
+            target_base_layer = target.get_base_layer()
+        else:
+            target_base_layer = target
 
-        # avoid eager bnb import
-        if is_bnb_available():
-            from .bnb import dispatch_bnb_8bit
-
-            dispatchers.append(dispatch_bnb_8bit)
-
-        if is_bnb_4bit_available():
-            from .bnb import dispatch_bnb_4bit
-
-            dispatchers.append(dispatch_bnb_4bit)
-
-        dispatchers.extend(
-            [
-                dispatch_eetq,
-                dispatch_aqlm,
-                dispatch_awq,
-                dispatch_gptq,
-                dispatch_hqq,
-                dispatch_inc,
-                dispatch_default,
-            ]
-        )
-
-        new_module = None
-        for dispatcher in dispatchers:
-            new_module = dispatcher(target, adapter_name, oft_config=oft_config, **kwargs)
-            if new_module is not None:  # first match wins
-                break
-
-        if new_module is None:
-            # no module could be matched
-            raise ValueError(
-                f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                "`torch.nn.Linear`, `torch.nn.Conv2d`."
+        layer_cls = _get_tuner_layer_class(target_base_layer)
+        if layer_cls is None:
+            raise TypeError(
+                f"Target module {target} is not supported. Currently, only `torch.nn.Linear`, `torch.nn.Conv2d`, "
+                "`torch.nn.Embedding` (optionally quantized) are supported."
             )
 
+        if (layer_cls == Linear) and kwargs.get("fan_in_fan_out", False):
+            warnings.warn(
+                "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
+                "Setting fan_in_fan_out to False."
+            )
+            oft_config.fan_in_fan_out = False
+            kwargs["fan_in_fan_out"] = False
+
+        if layer_cls == Embedding:
+            kwargs.pop("fan_in_fan_out", None)
+
+        new_module = layer_cls(target, adapter_name, config=oft_config, **kwargs)
         return new_module
 
     def _check_merge_allowed(self):
