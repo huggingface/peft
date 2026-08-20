@@ -16,8 +16,8 @@ import math
 from typing import Optional, Union
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from .config import TRANSFORMERS_MODEL_CONFIG
 
@@ -36,7 +36,7 @@ class _BaseAdaptedAttention(nn.Module):
             model: The original transformer attention module that is being wrapped.
         """
         if isinstance(model, _BaseAdaptedAttention):
-            raise ValueError("Unable to stack multiple adaption prompts")
+            raise TypeError("Unable to stack multiple adaption prompts")
         super().__init__()
         self.model_type = model_type
         self.model = model
@@ -49,17 +49,8 @@ class _BaseAdaptedAttention(nn.Module):
         # https://github.com/ZrrSkywalker/LLaMA-Adapter/blob/41c3546fe1997ab8a65809dc8d8f9252b19d9faf/llama/model.py#L234
         # (bsz, adapter_len, hidden_size)
 
-        if hasattr(self.model, "hidden_size"):
-            # TODO: remove this clause after 2026-01-01
-            hidden_size = self.model.hidden_size
-        else:  # changed in https://github.com/huggingface/transformers/pull/35235
-            hidden_size = self.model.config.hidden_size
-
-        if hasattr(self.model, "num_heads"):
-            # TODO: remove this clause after 2026-01-01
-            self.num_heads = self.model.num_heads
-        else:  # changed in https://github.com/huggingface/transformers/pull/35235
-            self.num_heads = self.model.config.num_attention_heads
+        hidden_size = self.model.config.hidden_size
+        self.num_heads = self.model.config.num_attention_heads
 
         self.adaption_prompt = nn.Parameter(
             torch.empty(1, adapter_len, hidden_size, device=device, dtype=target_dtype).normal_()
@@ -187,11 +178,7 @@ class AdaptedAttention(_BaseAdaptedAttention):
             key = getattr(self.model, k_proj_layer)(self.adaption_prompt)
             value = getattr(self.model, v_proj_layer)(self.adaption_prompt)
 
-        if hasattr(self.model, "num_heads"):
-            # TODO: remove this clause after 2026-01-01
-            num_heads = self.model.num_heads
-        else:  # changed in https://github.com/huggingface/transformers/pull/35235
-            num_heads = self.model.config.num_attention_heads
+        num_heads = self.model.config.num_attention_heads
         # (bsz, num_key_value_heads, adapter_len, head_dim)
         adapter_k = (
             key.view(1, self.adapter_len, (num_heads // factor), self.model.head_dim)

@@ -19,6 +19,40 @@ from typing import Optional
 class PeftType(str, enum.Enum):
     """
     Enum class for the different types of adapters in PEFT.
+
+    Supported PEFT types:
+    - PROMPT_TUNING
+    - MULTITASK_PROMPT_TUNING
+    - P_TUNING
+    - PREFIX_TUNING
+    - LORA
+    - ADALORA
+    - BOFT
+    - ADAPTION_PROMPT
+    - IA3
+    - BEFT
+    - LOHA
+    - LOKR
+    - OFT
+    - XLORA
+    - POLY
+    - LN_TUNING
+    - VERA
+    - FROD
+    - FOURIERFT
+    - HRA
+    - BONE
+    - MISS
+    - RANDLORA
+    - SHIRA
+    - C3A
+    - ROAD
+    - WAVEFT
+    - OSF
+    - DELORA
+    - GRALORA
+    - ADAMSS
+    - DEFT
     """
 
     PROMPT_TUNING = "PROMPT_TUNING"
@@ -27,9 +61,11 @@ class PeftType(str, enum.Enum):
     PREFIX_TUNING = "PREFIX_TUNING"
     LORA = "LORA"
     ADALORA = "ADALORA"
+    ADAMSS = "ADAMSS"
     BOFT = "BOFT"
     ADAPTION_PROMPT = "ADAPTION_PROMPT"
     IA3 = "IA3"
+    BEFT = "BEFT"
     LILY = "LILY"
     LOHA = "LOHA"
     LOKR = "LOKR"
@@ -37,16 +73,20 @@ class PeftType(str, enum.Enum):
     POLY = "POLY"
     LN_TUNING = "LN_TUNING"
     VERA = "VERA"
+    FROD = "FROD"
     PVERA = "PVERA"
     FOURIERFT = "FOURIERFT"
+    GLORA = "GLORA"
     XLORA = "XLORA"
     HRA = "HRA"
     VBLORA = "VBLORA"
+    UNILORA = "UNILORA"
     CPT = "CPT"
     MISS = "MISS"
     RANDLORA = "RANDLORA"
     ROAD = "ROAD"
     TRAINABLE_TOKENS = "TRAINABLE_TOKENS"
+    HIRA = "HIRA"
     SHIRA = "SHIRA"
     C3A = "C3A"
     WAVEFT = "WAVEFT"
@@ -54,8 +94,10 @@ class PeftType(str, enum.Enum):
     DELORA = "DELORA"
     GRALORA = "GRALORA"
     CARTRIDGE = "CARTRIDGE"
+    TINYLORA = "TINYLORA"
     PSOFT = "PSOFT"
     PEANUT = "PEANUT"
+    DEFT = "DEFT"
 
 
 class TaskType(str, enum.Enum):

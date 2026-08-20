@@ -103,15 +103,7 @@ class OFTModel(BaseTuner):
 
         kwargs = {
             "r": oft_config.r,
-            "oft_block_size": oft_config.oft_block_size,
-            "module_dropout": oft_config.module_dropout,
-            "coft": oft_config.coft,
-            "eps": oft_config.eps,
-            "block_share": oft_config.block_share,
-            "use_cayley_neumann": oft_config.use_cayley_neumann,
-            "num_cayley_neumann_terms": oft_config.num_cayley_neumann_terms,
             "fan_in_fan_out": oft_config.fan_in_fan_out,
-            "init_weights": oft_config.init_weights,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -134,14 +126,7 @@ class OFTModel(BaseTuner):
             target.update_layer(
                 adapter_name,
                 r=oft_config.r,
-                oft_block_size=oft_config.oft_block_size,
-                module_dropout=oft_config.module_dropout,
-                coft=oft_config.coft,
-                eps=oft_config.eps,
-                block_share=oft_config.block_share,
-                use_cayley_neumann=oft_config.use_cayley_neumann,
-                num_cayley_neumann_terms=oft_config.num_cayley_neumann_terms,
-                init_weights=oft_config.init_weights,
+                config=oft_config,
             )
 
     @staticmethod
@@ -198,3 +183,12 @@ class OFTModel(BaseTuner):
             raise ValueError("Cannot merge OFT layers when the model is gptq quantized")
         if self.peft_config.get("layer_replication"):
             raise ValueError("Cannot merge OFT layers when base model layers are replicated")
+
+    @classmethod
+    def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
+        peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
+        if any(".oft_r." in key for key in peft_model_state_dict):
+            raise ValueError(
+                "Trying to load old OFT checkpoint, which is no longer supported. Please install PEFT <= v0.15.2 to load it or train a new OFT adapter."
+            )
+        return peft_model_state_dict

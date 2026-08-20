@@ -50,11 +50,12 @@ from utils import (
     get_train_config,
     init_accelerator,
     log_results,
+    upload_checkpoint_to_bucket,
     validate_experiment_path,
 )
 
 from data import get_train_valid_test_datasets, get_wiki_small
-from peft import AdaLoraConfig, PeftConfig
+from peft import AdaLoraConfig, AdamssConfig, PeftConfig, initialize_kv_prefix_from_text
 from peft.utils import CONFIG_NAME, infer_device
 
 
@@ -82,7 +83,10 @@ def get_generation_config(*, seq_len, generate_kwargs) -> GenerationConfig:
 
 def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm: bool = False) -> tuple[list[str], list[str]]:
     generate_kwargs = generate_kwargs.copy()
-    generate_kwargs["pad_token_id"] = tokenizer.eos_token_id
+
+    if "pad_token_id" not in generate_kwargs:
+        generate_kwargs["pad_token_id"] = tokenizer.pad_token_id
+
     with torch.inference_mode():
         predictions = []
         responses = []
@@ -100,7 +104,7 @@ def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm: bool =
     return predictions, responses
 
 
-@torch.inference_mode  # type: ignore
+@torch.inference_mode()
 def calculate_mean_per_token_loss(model, tokenizer, rows: list[str], batch_size: int, max_length: int) -> float:
     """Calculate the mean loss per token on the given dataset.
 
@@ -114,12 +118,15 @@ def calculate_mean_per_token_loss(model, tokenizer, rows: list[str], batch_size:
         sliced = rows[j : j + batch_size]
         batch = tokenizer(sliced, truncation=True, max_length=max_length)
         batch = tokenizer.pad(batch, return_tensors="pt", padding_side="left").to(model.device)
-        outputs = model(**batch, pad_token_id=tokenizer.eos_token_id)
+        outputs = model(**batch)
         logits = outputs.logits
         for logit, target, mask in zip(logits, batch["input_ids"], batch["attention_mask"]):
             # calculate loss per token so that the mean is not skewed by sequence length of sample, padding from left
+            # note: mask correctly calculates the tokens, it does *not* include potential virtual tokens
             num_tokens = mask.sum()
-            token_losses = torch.nn.functional.cross_entropy(logit[-num_tokens:], target[-num_tokens:], reduction="none")
+            logit = logit[-num_tokens:]
+            target = target[-num_tokens:]
+            token_losses = torch.nn.functional.cross_entropy(logit[:-1], target[1:], reduction="none")
             losses.extend(loss.item() for loss in token_losses)
     return torch.tensor(losses).mean().item()
 
@@ -156,6 +163,8 @@ def train(
     lr_scheduler_arg: Optional[Literal["cosine"]],
     use_amp: bool,
     is_adalora: bool,
+    init_kv_cache_prefix: Optional[str],
+    is_adamss: bool,
 ) -> TrainResult:
     accelerator_memory_allocated_log = []
     accelerator_memory_reserved_log = []
@@ -182,6 +191,10 @@ def train(
         lr_scheduler_arg=lr_scheduler_arg,
         **optimizer_kwargs,
     )
+
+    if init_kv_cache_prefix is not None:
+        initialize_kv_prefix_from_text(model, tokenizer, text=init_kv_cache_prefix)
+
     # print this after getting the optimizer, in case it modifies requires_gard
     if hasattr(model, "get_nb_trainable_parameters"):
         num_trainable_params, num_params = model.get_nb_trainable_parameters()
@@ -200,10 +213,27 @@ def train(
 
     rows_wiki = get_wiki_small()
     model.eval()
-    # use small batch_size, not batch_size_eval, to prevent this from taking too much memory and affecting the max memory metric
-    wiki_loss_before = calculate_mean_per_token_loss(
-        model=model, tokenizer=tokenizer, rows=rows_wiki, batch_size=batch_size, max_length=768
-    )
+
+    # Ensure that we calculate the the wiki loss on the base model. Otherwise, PEFT models that are not zero-initialized
+    # (e.g. prompt tuning) will have very bad initial loss, leading to artificially low or negative forgetting. Note: We
+    # could hard-code the value (1.58611) but it would be easy to forget to update the value if we change the
+    # calculation or dataset.
+    is_full_fine_tune = not hasattr(model, "peft_config")
+    base_model_context = nullcontext if is_full_fine_tune else model.disable_adapter
+    with base_model_context():
+        # use small batch_size, not batch_size_eval, to prevent this from taking too much memory and affecting the max
+        # memory metric
+        wiki_loss_before = calculate_mean_per_token_loss(
+            model=model,
+            tokenizer=tokenizer,
+            rows=rows_wiki,
+            batch_size=batch_size,
+            max_length=768,
+        )
+        assert 1 < wiki_loss_before < 2, (
+            "Sanity check failed: The wiki loss before training should be between 1.0 and 2.0"
+        )
+
     model.train()
 
     ds_train, ds_valid, ds_test = get_train_valid_test_datasets(
@@ -256,7 +286,7 @@ def train(
             grad_scaler.update()
             lr_scheduler.step()
 
-            if is_adalora:
+            if is_adalora or is_adamss:
                 model.base_model.update_and_allocate(step)
 
             losses.append(loss.item())
@@ -344,7 +374,7 @@ def train(
             tokenizer=tokenizer,
             ds=ds_test,
             batch_size=batch_size_eval,
-            generate_kwargs={**generation_kwargs, "pad_token_id": tokenizer.eos_token_id},
+            generate_kwargs={**generation_kwargs},
             use_tqdm=len(ds_test) > 100,
         )
         accuracy = get_accuracy(predictions=predictions, responses=responses)
@@ -397,7 +427,7 @@ def train(
     return train_result
 
 
-def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
+def main(*, path_experiment: str, experiment_name: str, clean: bool, bucket_name: Optional[str]) -> None:
     tic_total = time.perf_counter()
     start_date = dt.datetime.now(tz=dt.timezone.utc).replace(microsecond=0).isoformat()
 
@@ -430,6 +460,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         model_id=train_config.model_id,
         dtype=train_config.dtype,
         compile=train_config.compile,
+        use_gc=train_config.use_gc,
         attn_implementation=train_config.attn_implementation,
         peft_config=peft_config,
         autocast_adapter_dtype=train_config.autocast_adapter_dtype,
@@ -453,6 +484,8 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         lr_scheduler_arg=train_config.lr_scheduler,
         use_amp=train_config.use_amp,
         is_adalora=isinstance(peft_config, AdaLoraConfig),
+        init_kv_cache_prefix=train_config.init_kv_cache_prefix,
+        is_adamss=isinstance(peft_config, AdamssConfig),
     )
 
     if train_result.status == TrainStatus.FAILED:
@@ -465,6 +498,9 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool) -> None:
         clean=clean,
         print_fn=print_verbose,
     )
+
+    if bucket_name is not None:
+        upload_checkpoint_to_bucket(model, experiment_name, bucket_name)
 
     time_total = time.perf_counter() - tic_total
     # log results: print and save to file
@@ -492,6 +528,7 @@ if __name__ == "__main__":
         action="store_true",
         help="Delete training artifacts after run finishes (logs are still saved)",
     )
+    parser.add_argument("--bucket_name", type=str, help="HF bucket to upload checkpoints to.")
     args = parser.parse_args()
 
     experiment_name = validate_experiment_path(args.path_experiment)
@@ -510,4 +547,5 @@ if __name__ == "__main__":
         path_experiment=args.path_experiment,
         experiment_name=experiment_name,
         clean=args.clean,
+        bucket_name=args.bucket_name,
     )

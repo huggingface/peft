@@ -1,0 +1,26 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "group_size": 64,
+  "inference_mode": false,
+  "init_weights": true,
+  "modules_to_save": null,
+  "peft_type": "ROAD",
+  "peft_version": "0.18.2.dev0@UNKNOWN",
+  "revision": null,
+  "target_modules": [
+    "linear_out",
+    "to_qkv_mlp_proj",
+    "to_k",
+    "add_k_proj",
+    "add_v_proj",
+    "to_v",
+    "add_q_proj",
+    "to_out.0",
+    "to_add_out",
+    "linear_in",
+    "to_q"
+  ],
+  "task_type": null,
+  "variant": "road_1"
+}

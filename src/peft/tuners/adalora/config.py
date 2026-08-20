@@ -23,7 +23,7 @@ from peft.utils import PeftType
 @dataclass
 class AdaLoraConfig(LoraConfig):
     """
-    This is the configuration class to store the configuration of a [`~peft.AdaLora`].
+    This is the configuration class to store the configuration of a [`AdaLoraModel`].
 
     AdaLoRA has three phases defined by `tinit`, `tfinal` and `total_step`.
 
@@ -88,7 +88,7 @@ class AdaLoraConfig(LoraConfig):
             raise ValueError("`layers_to_transform` cannot be used when `target_modules` is a str.")
 
         # check for layers_to_transform and layers_pattern
-        if self.layers_pattern and not self.layers_to_transform:
+        if self.layers_pattern and self.layers_to_transform is None:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
 
         # Check if 'r' has been set to a non-default value
@@ -100,6 +100,11 @@ class AdaLoraConfig(LoraConfig):
 
         if self.total_step is None or self.total_step <= 0:
             raise ValueError("AdaLoRA does not work when `total_step` is None, supply a value > 0.")
+
+        if self.orth_reg_weight < 0:
+            raise ValueError(
+                f"`orth_reg_weight` should be greater than or equal to 0, but the value passed is {self.orth_reg_weight}"
+            )
 
         if self.tinit >= (self.total_step - self.tfinal):
             raise ValueError(

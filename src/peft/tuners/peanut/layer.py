@@ -22,6 +22,8 @@ from transformers.activations import ACT2FN
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
+from .config import PeanutConfig
+
 
 class PeanutLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
@@ -44,7 +46,7 @@ class PeanutLayer(BaseTunerLayer):
 
         self._disable_adapters = False
         self.merged_adapters = []
-        self._cached_delta_weights = {}
+        self._base_weight_before_merge: Optional[torch.Tensor] = None
 
         base_layer = self.get_base_layer()
 
@@ -64,14 +66,16 @@ class PeanutLayer(BaseTunerLayer):
 
     def update_layer(
         self,
-        adapter_name,
-        r,
-        depth,
-        scaling,
-        act_fn,
-        init_weights: bool = True,
-        inference_mode: bool = False,
-    ):
+        adapter_name: str,
+        r: int,
+        config: PeanutConfig,
+    ) -> None:
+        depth = config.depth
+        scaling = config.scaling
+        act_fn = config.act_fn
+        init_weights = config.init_weights
+        inference_mode = config.inference_mode
+
         self.r[adapter_name] = r
         self.depth[adapter_name] = depth
         self.res_num[adapter_name] = depth
@@ -103,6 +107,12 @@ class PeanutLayer(BaseTunerLayer):
         else:
             nn.init.kaiming_uniform_(self.peanut_B[adapter_name].weight, a=math.sqrt(5))
 
+    def _get_base_weight_before_merge(self) -> torch.Tensor:
+        base_weight = self.get_base_layer().weight
+        if self._base_weight_before_merge is None:
+            self._base_weight_before_merge = base_weight.data.detach().clone().cpu()
+        return self._base_weight_before_merge.to(device=base_weight.device, dtype=base_weight.dtype)
+
 
 class Linear(nn.Module, PeanutLayer):
     # PEANuT implemented in a dense layer
@@ -110,11 +120,8 @@ class Linear(nn.Module, PeanutLayer):
         self,
         base_layer,
         adapter_name: str,
-        r: int = 32,
-        depth: int = 0,
-        scaling: float = 1.0,
-        act_fn: str = "relu",
-        init_weights: bool = True,
+        r: int,
+        config: PeanutConfig,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -122,14 +129,7 @@ class Linear(nn.Module, PeanutLayer):
 
         self._active_adapter = adapter_name
 
-        self.update_layer(
-            adapter_name,
-            r,
-            depth=depth,
-            scaling=scaling,
-            act_fn=act_fn,
-            init_weights=init_weights,
-        )
+        self.update_layer(adapter_name, r, config=config)
 
     def _compute_delta_weight(self, adapter: str, base_weight: torch.Tensor) -> torch.Tensor:
         if adapter not in self.peanut_A:
@@ -170,7 +170,7 @@ class Linear(nn.Module, PeanutLayer):
             return
 
         base_layer = self.get_base_layer()
-        merge_base_weight = base_layer.weight.data.detach().clone()
+        merge_base_weight = self._get_base_weight_before_merge()
 
         for active_adapter in adapter_names:
             if active_adapter not in self.peanut_A:
@@ -193,11 +193,6 @@ class Linear(nn.Module, PeanutLayer):
                 else:
                     base_layer.weight.data.add_(delta_weight)
 
-            if delta_weight.device.type != "cpu":
-                cached_delta_weight = delta_weight.detach().to("cpu")
-            else:
-                cached_delta_weight = delta_weight.detach()
-            self._cached_delta_weights[active_adapter] = cached_delta_weight
             self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -206,18 +201,11 @@ class Linear(nn.Module, PeanutLayer):
             return
 
         base_layer = self.get_base_layer()
-        while len(self.merged_adapters) > 0:
-            active_adapter = self.merged_adapters.pop()
-            if active_adapter not in self.peanut_A:
-                continue
-
-            delta_weight = self._cached_delta_weights.pop(active_adapter, None)
-            if delta_weight is None:
-                raise ValueError(f"Cached delta weight for adapter '{active_adapter}' is missing; cannot unmerge.")
-
-            base_layer.weight.data.sub_(
-                delta_weight.to(dtype=base_layer.weight.dtype, device=base_layer.weight.device)
-            )
+        base_layer.weight.data.copy_(
+            self._base_weight_before_merge.to(device=base_layer.weight.device, dtype=base_layer.weight.dtype)
+        )
+        self._base_weight_before_merge = None
+        self.merged_adapters.clear()
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         if self.disable_adapters:

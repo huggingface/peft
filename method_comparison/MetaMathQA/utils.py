@@ -44,8 +44,8 @@ from transformers import (
 )
 
 import peft
-from peft import PeftConfig, get_peft_model, prepare_model_for_kbit_training
-from peft.optimizers import create_lorafa_optimizer, create_loraplus_optimizer
+from peft import PeftConfig, get_peft_model
+from peft.optimizers import create_lorafa_optimizer, create_loraplus_optimizer, create_riemannian_optimizer
 from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 
 
@@ -80,6 +80,7 @@ class TrainConfig:
         max_steps: The maximum number of steps to train for
         eval_steps: The number of steps between evaluations
         compile: Whether to compile the model
+        use_gc: Whether to use gradient checkpointing.
         query_template: The template for the query
         seed: The random seed
         grad_norm_clip: The gradient norm clipping value (set to 0 to skip)
@@ -100,6 +101,7 @@ class TrainConfig:
     max_steps: int
     eval_steps: int
     compile: bool
+    use_gc: bool
     query_template: str
     seed: int
     grad_norm_clip: float  # set to 0 to skip
@@ -110,10 +112,11 @@ class TrainConfig:
     autocast_adapter_dtype: bool
     generation_kwargs: dict[str, Any]
     attn_implementation: Optional[str]
+    init_kv_cache_prefix: Optional[str]
 
     def __post_init__(self) -> None:
         if not isinstance(self.model_id, str):
-            raise ValueError(f"Invalid model_id: {self.model_id}")
+            raise TypeError(f"Invalid model_id: {self.model_id}")
         if self.dtype not in ["float32", "float16", "bfloat16", "int8", "int4"]:
             raise ValueError(f"Invalid dtype: {self.dtype}")
         if self.max_seq_length < 0:
@@ -130,7 +133,9 @@ class TrainConfig:
             raise ValueError(f"Invalid eval_steps: {self.eval_steps} > max_steps: {self.max_steps}")
         if self.grad_norm_clip < 0:
             raise ValueError(f"Invalid grad_norm_clip: {self.grad_norm_clip}")
-        if self.optimizer_type not in ["lora+", "lora-fa"] and not hasattr(torch.optim, self.optimizer_type):
+        if self.optimizer_type not in ["lora+", "lora-fa", "riemannian"] and not hasattr(
+            torch.optim, self.optimizer_type
+        ):
             raise ValueError(f"Invalid optimizer_type: {self.optimizer_type}")
         if self.lr_scheduler not in [None, "cosine"]:
             raise ValueError(f"Invalid lr_scheduler: {self.lr_scheduler}, must be None or 'cosine'")
@@ -199,8 +204,14 @@ def init_accelerator() -> int:
 def get_tokenizer(*, model_id: str, max_seq_length: int):
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.model_max_length = max_seq_length
-    if not tokenizer.pad_token:
-        tokenizer.pad_token = tokenizer.eos_token
+
+    # Override tokenizer settings to match our code.
+    # We assume that inputs are padded on the right side and we also assume
+    # the padding token to be the EOS token. We'll use this in the label
+    # creation so that we always have an EOS token at the end. See train().
+    tokenizer.padding_side = "right"
+    tokenizer.pad_token = tokenizer.eos_token
+
     return tokenizer
 
 
@@ -209,6 +220,7 @@ def get_base_model(
     model_id: str,
     dtype: Literal["float32", "float16", "bfloat16", "int8", "int4"],
     attn_implementation: Optional[str],
+    use_gc: bool,
 ) -> PreTrainedModel:
     kwargs: dict[str, Any] = {
         "pretrained_model_name_or_path": model_id,
@@ -229,9 +241,9 @@ def get_base_model(
         raise ValueError(f"Invalid dtype: {dtype}")
 
     model = AutoModelForCausalLM.from_pretrained(**kwargs)
-
-    if dtype in ["int8", "int4"]:
-        model = prepare_model_for_kbit_training(model)
+    if use_gc:
+        model.enable_input_require_grads()
+        model.gradient_checkpointing_enable()
 
     return model
 
@@ -241,11 +253,12 @@ def get_model(
     model_id: str,
     dtype: Literal["float32", "float16", "bfloat16", "int8", "int4"],
     compile: bool,
+    use_gc: bool,
     attn_implementation: Optional[str],
     peft_config: Optional[PeftConfig],
     autocast_adapter_dtype: bool,
 ) -> nn.Module:
-    base_model = get_base_model(model_id=model_id, dtype=dtype, attn_implementation=attn_implementation)
+    base_model = get_base_model(model_id=model_id, dtype=dtype, attn_implementation=attn_implementation, use_gc=use_gc)
     if peft_config is None:
         model = base_model
     else:
@@ -276,6 +289,8 @@ def get_optimizer_and_scheduler(
         optimizer = create_loraplus_optimizer(model, optimizer_cls=torch.optim.AdamW, **optimizer_kwargs)
     elif optimizer_type == "lora-fa":
         optimizer = create_lorafa_optimizer(model, **optimizer_kwargs)
+    elif optimizer_type == "riemannian":
+        optimizer = create_riemannian_optimizer(model, optimizer_cls=torch.optim.AdamW, **optimizer_kwargs)
     else:
         cls = getattr(torch.optim, optimizer_type)
         optimizer = cls(model.parameters(), **optimizer_kwargs)
@@ -337,6 +352,18 @@ class BucketIterator:
         if len(self.ds) % bucket_size != 0:
             bucket = self.ds[-(len(self.ds) % bucket_size) :]
             yield from self._batch_iterator(bucket)
+
+
+def upload_checkpoint_to_bucket(model: nn.Module, experiment_name: str, bucket_name: str):
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True, delete=True) as tmp_dir:
+            model.save_pretrained(tmp_dir)
+            huggingface_hub.batch_bucket_files(
+                bucket_name,
+                add=[(os.path.join(tmp_dir, fname), f"{experiment_name}/{fname}") for fname in os.listdir(tmp_dir)],
+            )
+    except Exception as exc:
+        print(f"Failed to upload model checkpoint to hub: {exc}")
 
 
 def get_file_size(
@@ -502,10 +529,12 @@ def get_dataset_info(dataset_id: str) -> Optional[huggingface_hub.DatasetInfo]:
 
 
 def get_git_hash(module) -> Optional[str]:
-    if "site-packages" in module.__path__[0]:
+    module_path = module.__path__[0]
+    if "site-packages" in module_path or "dist-packages" in module_path:
+        # dist-packages is required for Kaggle installs.
         return None
 
-    return subprocess.check_output("git rev-parse HEAD".split(), cwd=os.path.dirname(module.__file__)).decode().strip()
+    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=os.path.dirname(module.__file__)).decode().strip()
 
 
 def get_package_info() -> dict[str, Optional[str]]:
@@ -557,10 +586,19 @@ def get_meta_info() -> MetaInfo:
 
 def get_peft_branch() -> str:
     return (
-        subprocess.check_output("git rev-parse --abbrev-ref HEAD".split(), cwd=os.path.dirname(peft.__file__))
+        subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=os.path.dirname(peft.__file__))
         .decode()
         .strip()
     )
+
+
+def get_peft_worktree_is_dirty() -> bool:
+    """Check if the PEFT git worktree has uncommitted changes."""
+    peft_dir = os.path.dirname(peft.__file__)
+    # Exit code 0 means clean, non-zero means dirty (or error, which we treat as dirty)
+    result = subprocess.run(["git", "diff", "--quiet"], cwd=peft_dir)
+    result_cached = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=peft_dir)
+    return result.returncode != 0 or result_cached.returncode != 0
 
 
 class TrainStatus(enum.Enum):
@@ -682,6 +720,7 @@ def log_results(
             "total_time": time_total,
             "experiment_name": experiment_name,
             "peft_branch": peft_branch,
+            "peft_worktree_is_dirty": get_peft_worktree_is_dirty(),
             "train_config": asdict(train_config),
             "peft_config": peft_config_dict,
             "error_msg": train_result.error_msg,

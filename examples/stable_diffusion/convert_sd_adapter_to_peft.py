@@ -9,12 +9,15 @@ from typing import Optional, Union
 
 import safetensors
 import torch
-import torch.nn as nn
 from diffusers import UNet2DConditionModel
+from torch import nn
 from transformers import CLIPTextModel
 
 from peft import LoHaConfig, LoKrConfig, LoraConfig, PeftType, get_peft_model, set_peft_model_state_dict
 from peft.tuners.lokr.layer import factorization
+
+
+logger = logging.getLogger(__name__)
 
 
 # Default kohya_ss LoRA replacement modules
@@ -495,7 +498,7 @@ if __name__ == "__main__":
             and getattr(config, "use_effective_conv2d", False)
             and args.loha_conv2d_weights_fix is False
         ):
-            logging.warning(
+            logger.warning(
                 'lycoris-lora<=1.9.0 LoHa implementation contains a bug, which can be fixed with "--loha_conv2d_weights_fix".\n'
                 "For more info, please refer to https://github.com/huggingface/peft/pull/1021 and https://github.com/KohakuBlueleaf/LyCORIS/pull/115"
             )

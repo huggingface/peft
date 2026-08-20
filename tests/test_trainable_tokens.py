@@ -346,7 +346,7 @@ class TestTrainableTokens:
         ],
     )
     def test_load_multiple_adapters(self, model, peft_config, tmp_path):
-        # tests if having more than one adpater (even with just the same config) works
+        # tests if having more than one adapter (even with just the same config) works
         original_model = copy.deepcopy(model)
         model = get_peft_model(model, peft_config)
 
@@ -450,6 +450,58 @@ class TestTrainableTokens:
     @pytest.mark.parametrize(
         "peft_config_factory",
         [
+            lambda token_indices: LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"embed_tokens": token_indices},
+            ),
+        ],
+    )
+    def test_multiple_adapters_overlapping_token_indices_merging_sequentially(self, model, peft_config_factory):
+        # merging one adapter at a time must reject the same overlap that a single combined call rejects, since the
+        # second merge would otherwise overwrite the first adapter's values for the shared indices with no way to
+        # restore them on unmerge
+        token_indices_1 = [0, 1, 2]
+        token_indices_2 = [2, 3, 4]
+
+        peft_config_1 = peft_config_factory(token_indices_1)
+        peft_config_2 = peft_config_factory(token_indices_2)
+
+        model = get_peft_model(model, peft_config_1, adapter_name="adapter_1")
+        model.add_adapter("adapter_2", peft_config_2)
+
+        model.merge_adapter(adapter_names=["adapter_1"])
+        with pytest.raises(ValueError) as e:
+            model.merge_adapter(adapter_names=["adapter_2"])
+        assert "adapter_2" in str(e.value)
+        assert "are already defined and would result in undefined merging behavior" in str(e.value)
+
+    @pytest.mark.parametrize(
+        "peft_config_factory",
+        [
+            lambda token_indices: LoraConfig(
+                target_modules="all-linear",
+                trainable_token_indices={"embed_tokens": token_indices},
+            ),
+        ],
+    )
+    def test_multiple_adapters_disjunct_token_indices_merging_sequentially(self, model, peft_config_factory):
+        # control for the test above: disjunct indices must still merge one at a time
+        peft_config_1 = peft_config_factory([0, 1, 2])
+        peft_config_2 = peft_config_factory([3, 4, 5])
+
+        model = get_peft_model(model, peft_config_1, adapter_name="adapter_1")
+        model.add_adapter("adapter_2", peft_config_2)
+
+        model.merge_adapter(adapter_names=["adapter_1"])
+        model.merge_adapter(adapter_names=["adapter_2"])
+
+        for module in model.modules():
+            if isinstance(module, TrainableTokensLayer):
+                assert module.merged_adapters == ["adapter_1", "adapter_2"]
+
+    @pytest.mark.parametrize(
+        "peft_config_factory",
+        [
             lambda targets, token_indices: LoraConfig(
                 target_modules=targets,
                 trainable_token_indices={"embed_tokens": token_indices},
@@ -528,7 +580,7 @@ class TestTrainableTokens:
         # same as test_stand_alone_raises_target_layer_not_found but tests the peft method integration
         with pytest.raises(ValueError) as e:
             model = get_peft_model(model, peft_config)
-        assert f"Target modules {{{repr(target_layer_name)}}} not found in the base model." in str(e)
+        assert f"Target modules {{{target_layer_name!r}}} not found in the base model." in str(e)
 
     def test_multiple_targets(self, model_multi_embedding):
         # tests the ability of targeting two modules with the same token indices
@@ -733,8 +785,8 @@ class TestTrainableTokens:
         peft_state_dict = get_peft_model_state_dict(peft_model)
 
         # the state dict or the peft model state dict must not include tied adapter weights
-        state_dict_keys = [n for n, _ in state_dict.items() if "tied_adapter." in n]
-        peft_state_dict_keys = [n for n, _ in peft_state_dict.items() if "tied_adapter." in n]
+        state_dict_keys = [n for n in state_dict.keys() if "tied_adapter." in n]
+        peft_state_dict_keys = [n for n in peft_state_dict.keys() if "tied_adapter." in n]
 
         assert not state_dict_keys
         assert not peft_state_dict_keys

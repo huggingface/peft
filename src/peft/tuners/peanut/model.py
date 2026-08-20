@@ -65,10 +65,7 @@ class PeanutModel(BaseTuner):
             target.update_layer(
                 adapter_name,
                 peanut_config.r,
-                depth=peanut_config.depth,
-                scaling=peanut_config.scaling,
-                act_fn=peanut_config.act_fn,
-                init_weights=peanut_config.init_weights,
+                config=peanut_config,
             )
         else:
             new_module = self._create_new_module(peanut_config, adapter_name, target)
@@ -88,10 +85,19 @@ class PeanutModel(BaseTuner):
                 target,
                 adapter_name,
                 r=peanut_config.r,
-                depth=peanut_config.depth,
-                scaling=peanut_config.scaling,
-                act_fn=peanut_config.act_fn,
-                init_weights=peanut_config.init_weights,
+                config=peanut_config,
             )
 
         raise NotImplementedError(f"PEANuT does not support target modules of type {type(target_base_layer)} yet.")
+
+    @classmethod
+    def _remove_adapter_name_from_key(cls, key, adapter_name):
+        if "." in key:
+            # PEANuT stores residual blocks as ModuleDict[adapter] -> ModuleList.
+            # Their keys look like `...peanut_encoders.<adapter>.0.weight` (and similarly for decoders),
+            # where adapter_name is not in the second-to-last position.
+            for container in ("peanut_encoders", "peanut_decoders"):
+                marker = f".{container}.{adapter_name}."
+                if marker in key:
+                    return key.replace(marker, f".{container}.")
+        return super()._remove_adapter_name_from_key(key, adapter_name)

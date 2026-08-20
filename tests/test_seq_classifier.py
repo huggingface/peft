@@ -17,11 +17,17 @@ from transformers import AutoModelForSequenceClassification
 
 from peft import (
     AdaLoraConfig,
+    AdamssConfig,
+    BeftConfig,
     BOFTConfig,
     C3AConfig,
+    DeftConfig,
     DeloraConfig,
     FourierFTConfig,
+    FrodConfig,
+    GloraConfig,
     GraloraConfig,
+    HiraConfig,
     HRAConfig,
     IA3Config,
     LilyConfig,
@@ -34,8 +40,10 @@ from peft import (
     PromptTuningConfig,
     PromptTuningInit,
     PsoftConfig,
+    RandLoraConfig,
     RoadConfig,
     ShiraConfig,
+    TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -65,6 +73,13 @@ ALL_CONFIGS = [
         },
     ),
     (
+        BeftConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+        },
+    ),
+    (
         BOFTConfig,
         {
             "task_type": "SEQ_CLS",
@@ -77,6 +92,13 @@ ALL_CONFIGS = [
             "task_type": "SEQ_CLS",
             "target_modules": None,
             "r": 2,
+        },
+    ),
+    (
+        DeftConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
         },
     ),
     (
@@ -96,7 +118,29 @@ ALL_CONFIGS = [
         },
     ),
     (
+        FrodConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "sparse_rate": 0.01,
+        },
+    ),
+    (
+        GloraConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+        },
+    ),
+    (
         GraloraConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+        },
+    ),
+    (
+        HiraConfig,
         {
             "task_type": "SEQ_CLS",
             "target_modules": None,
@@ -184,8 +228,8 @@ ALL_CONFIGS = [
         PsoftConfig,
         {
             "task_type": "SEQ_CLS",
-            "r": 32,
-            "psoft_alpha": 32,
+            "r": 16,  # tiny llama has hidden size 16, so don't choose a greater value
+            "psoft_alpha": 16,
             "target_modules": None,
         },
     ),
@@ -197,6 +241,15 @@ ALL_CONFIGS = [
             "act_fn": "relu",
             "task_type": "SEQ_CLS",
             "target_modules": None,
+        },
+    ),
+    (
+        RandLoraConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "r": 8,
+            "randlora_alpha": 1,
         },
     ),
     (
@@ -240,6 +293,13 @@ ALL_CONFIGS = [
         },
     ),
     (
+        TinyLoraConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+        },
+    ),
+    (
         C3AConfig,
         {
             "task_type": "SEQ_CLS",
@@ -253,6 +313,14 @@ ALL_CONFIGS = [
             "task_type": "SEQ_CLS",
             "n_frequency": 8,
             "target_modules": None,
+        },
+    ),
+    (
+        AdamssConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "r": 8,
         },
     ),
 ]
@@ -345,3 +413,77 @@ class TestSequenceClassificationModels(PeftCommonTester):
             if classifier is None:
                 raise ValueError(f"Could not determine classifier layer name for {model_id}, please fix the test")
             assert isinstance(classifier, ModulesToSaveWrapper)
+
+    @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_forward_with_labels(self, model_id, config_cls, config_kwargs):
+        # Check the full forward pass including the loss computation. This is especially relevant for prompt learning
+        # methods, whose sequence classification forward (including the _prefix_tuning_forward fallback for models whose
+        # forward does not accept past_key_values) is implemented in PeftModelForSequenceClassification itself.
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+
+            if getattr(model.config, "pad_token_id", None) is None:
+                # needed for a batched forward pass with sequence classification models like Llama
+                model.config.pad_token_id = 0
+
+            config = config_cls(
+                base_model_name_or_path=model_id,
+                **config_kwargs,
+            )
+            model = get_peft_model(model, config).to(self.torch_device)
+            model.eval()
+
+            inputs = self.prepare_inputs_for_testing()
+            num_labels = model.config.num_labels
+            if num_labels == 1:
+                # a single label means that transformers infers regression as the problem type and uses an MSE loss on
+                # float labels; this is the case for the tiny Llama model, whose head has a single output
+                labels = torch.tensor([0.5, -0.5]).to(self.torch_device)
+            else:
+                labels = torch.tensor([0, num_labels - 1]).to(self.torch_device)
+
+            with torch.no_grad():
+                output = model(**inputs, labels=labels)
+
+            assert output.loss is not None
+            assert torch.isfinite(output.loss)
+            assert output.logits.shape == (2, num_labels)
+
+            if num_labels == 1:
+                expected_loss = torch.nn.functional.mse_loss(output.logits.squeeze().float(), labels)
+            else:
+                # int labels and num_labels > 1 result in single label classification, i.e. plain cross entropy
+                expected_loss = torch.nn.functional.cross_entropy(output.logits.float(), labels)
+            # ensure same dtype for allclose call
+            expected_loss = expected_loss.to(dtype=output.loss.dtype)
+
+            if config_cls == AdaLoraConfig:
+                # AdaLora adds an orthogonal regularization term to the loss, so it does not equal the plain task loss
+                assert output.loss > expected_loss
+            else:
+                assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)
+
+    @pytest.mark.parametrize(
+        "config_cls,config_kwargs",
+        [
+            (PrefixTuningConfig, {"task_type": "SEQ_CLS", "num_virtual_tokens": 4}),
+            (PromptEncoderConfig, {"task_type": "SEQ_CLS", "num_virtual_tokens": 4, "encoder_hidden_size": 32}),
+            (PromptTuningConfig, {"task_type": "SEQ_CLS", "num_virtual_tokens": 4}),
+        ],
+    )
+    def test_prompt_learning_forward_with_inputs_embeds(self, config_cls, config_kwargs):
+        # Passing inputs_embeds instead of input_ids should be equivalent.
+        model_id = PEFT_SEQ_CLS_MODELS_TO_TEST[0]
+        with hub_online_once(model_id):
+            base_model = AutoModelForSequenceClassification.from_pretrained(model_id).to(self.torch_device)
+            model = get_peft_model(base_model, config_cls(base_model_name_or_path=model_id, **config_kwargs))
+            model.eval()
+
+            input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
+            attention_mask = torch.ones_like(input_ids)
+            with torch.no_grad():
+                output_ids = model(input_ids=input_ids, attention_mask=attention_mask)
+                inputs_embeds = model.get_input_embeddings()(input_ids)
+                output_embeds = model(inputs_embeds=inputs_embeds, attention_mask=attention_mask)
+            assert torch.allclose(output_ids.logits, output_embeds.logits, atol=1e-5, rtol=1e-5)

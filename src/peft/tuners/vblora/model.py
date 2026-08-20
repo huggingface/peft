@@ -16,7 +16,7 @@ from __future__ import annotations
 import warnings
 
 import torch
-import torch.nn as nn
+from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
@@ -102,11 +102,7 @@ class VBLoRAModel(BaseTuner):
                 adapter_name=adapter_name,
                 vblora_vector_bank=self.vblora_vector_bank,
                 r=vblora_config.r,
-                topk=vblora_config.topk,
-                num_vectors=vblora_config.num_vectors,
-                vector_length=vblora_config.vector_length,
-                vblora_dropout=vblora_config.vblora_dropout,
-                init_logits_std=vblora_config.init_logits_std,
+                config=vblora_config,
             )
         else:
             new_module = self._create_new_module(
@@ -129,21 +125,21 @@ class VBLoRAModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            if kwargs["fan_in_fan_out"]:
+            if vblora_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
-                kwargs["fan_in_fan_out"] = vblora_config.fan_in_fan_out = False
+                vblora_config.fan_in_fan_out = False
         elif isinstance(target_base_layer, Conv1D):
             kwargs["is_target_conv_1d_layer"] = True
-            if not kwargs["fan_in_fan_out"]:
+            if not vblora_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
-                kwargs["fan_in_fan_out"] = vblora_config.fan_in_fan_out = True
+                vblora_config.fan_in_fan_out = True
         else:
-            raise ValueError(
+            raise TypeError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`, `transformers.pytorch_utils.Conv1D`."
             )
@@ -151,12 +147,8 @@ class VBLoRAModel(BaseTuner):
             base_layer=target,
             vblora_vector_bank=vblora_vector_bank,
             adapter_name=adapter_name,
+            config=vblora_config,
             r=vblora_config.r,
-            num_vectors=vblora_config.num_vectors,
-            vector_length=vblora_config.vector_length,
-            topk=vblora_config.topk,
-            vblora_dropout=vblora_config.vblora_dropout,
-            init_logits_std=vblora_config.init_logits_std,
             **kwargs,
         )
 
@@ -207,3 +199,72 @@ class VBLoRAModel(BaseTuner):
             f"VB-LoRA params to-be-saved (float32-equivalent): {vblora_params:,d} "
             f"|| total params to-be-saved: {(vblora_params + other_params):,d}"
         )
+
+    @classmethod
+    def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
+        to_return = {}
+        # choose the most efficient dtype for indices
+        if config.num_vectors < 2**8:
+            indices_dtype = torch.uint8
+        elif config.num_vectors < 2**15:
+            indices_dtype = torch.int16
+        elif config.num_vectors < 2**31:
+            indices_dtype = torch.int32
+        else:
+            indices_dtype = torch.int64
+        if config.save_only_topk_weights:
+            # in save_only_topk_weights mode, we save topk_indices and topk_weights for parameter efficiency
+            for k in state_dict:
+                if "vblora_logits" in k:
+                    logits, indices = state_dict[k].topk(config.topk)
+                    to_return.update({k + "_topk_indices": indices.to(dtype=indices_dtype)})
+                    to_return.update({k + "_topk_weights": torch.softmax(logits, dim=-1)[:, :, :-1].contiguous()})
+        else:
+            to_return = {k: state_dict[k] for k in state_dict if "vblora_logits" in k}
+        to_return["base_model.vblora_vector_bank." + adapter_name] = state_dict[
+            "base_model.vblora_vector_bank." + adapter_name
+        ]
+        to_return.update(cls._get_learnable_bias_state_dict(model, state_dict, config))
+        return to_return
+
+    @classmethod
+    def _remove_adapter_name_from_key(cls, key, adapter_name):
+        if "." in key and not key.endswith(f".{adapter_name}"):
+            key_without_suffix, _, suffix = key.rpartition(".")
+            if suffix.startswith(f"{adapter_name}_"):
+                # special case: VBLoRA creates keys that require this replacement:
+                # base_model.model.lin0.vblora_logits_A.default_topk_indices =>
+                # base_model.model.lin0.vblora_logits_A_topk_indices
+                return key_without_suffix + "_" + suffix.removeprefix(f"{adapter_name}_")
+        return super()._remove_adapter_name_from_key(key, adapter_name)
+
+    @classmethod
+    def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
+        if config.save_only_topk_weights:
+            num_vectors, _ = model.vblora_vector_bank[adapter_name].shape
+            state_dict_keys = list(state_dict.keys())
+            for k in state_dict_keys:
+                # in save_only_topk_weights mode, only topk_indices and topk_weights are saved
+                # note that topk_indices and topk_weights serve as an efficient representation of the logits
+                # so we need to recover the logits from the topk_indices and topk_weights
+                if "_topk_indices" in k:
+                    v = state_dict[k].to(torch.long)
+                    original_key = k.replace("_topk_indices", "")
+                    # find the corresponding topk_weights from the state_dict
+                    topk_weights = state_dict[k.replace("_topk_indices", "_topk_weights")]
+                    # as we only save the first k-1 topk_weights, here we recover the last one
+                    topk_weights = torch.cat([topk_weights, 1 - topk_weights.sum(-1, keepdim=True)], dim=-1)
+                    # convert the weights to logits
+                    topk_logits = torch.log(topk_weights)
+                    matrix = (
+                        torch.zeros([*(topk_logits.shape[:-1]), num_vectors])
+                        .fill_(float("-inf"))
+                        .to(topk_logits.device)
+                        .scatter(-1, v, topk_logits)
+                    )
+                    # add logits to the state_dict
+                    state_dict[original_key] = matrix
+                    # delete the topk_indices and topk_weights from the state_dict
+                    del state_dict[k]
+                    del state_dict[k.replace("_topk_indices", "_topk_weights")]
+        return super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)

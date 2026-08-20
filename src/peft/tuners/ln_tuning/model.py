@@ -33,7 +33,7 @@ class LNTuningModel(BaseTuner):
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.
-        config ([`LNTuningConfig`]): The configuration of the Lora model.
+        config ([`LNTuningConfig`]): The configuration of the LN tuning model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             This option has no effect on LN tuning but exists for consistency with other PEFT methods.
@@ -58,7 +58,7 @@ class LNTuningModel(BaseTuner):
 
     **Attributes**:
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
-        - **peft_config** ([`LNTuningConfig`]): The configuration of the Lora model.
+        - **peft_config** ([`LNTuningConfig`]): The configuration of the LN tuning model.
     """
 
     prefix: str = "ln_tuning_"
@@ -87,10 +87,10 @@ class LNTuningModel(BaseTuner):
         adapter_name: str,
     ) -> Module:
         if not isinstance(target, LNTuningLayer):
-            new_module = LNTuningLayer(target, adapter_name)
+            new_module = LNTuningLayer(target, adapter_name, config=peft_config)
         else:
             new_module = target
-            new_module.update_layer(target.base_layer, adapter_name)
+            new_module.update_layer(target.base_layer, adapter_name, config=peft_config)
         return new_module
 
     def _unloading_checks(self, adapter_names: Optional[list[str]]):

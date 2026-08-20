@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from .constants import ALLOWED_COMPUTE_DTYPES, UPCAST_DTYPES
+from .error import NoMatchingPeftModuleError, PeftError
 from .integrations import map_cache_to_layer_device_map
 from .loftq_utils import replace_lora_weights_loftq
 from .other import (
@@ -19,10 +21,16 @@ from .other import (
     INCLUDE_LINEAR_LAYERS_SHORTHAND,
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_BEFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_DEFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_FROD_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_GLORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_GRALORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
@@ -41,6 +49,8 @@ from .other import (
     TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_TINYLORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_UNILORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING,
@@ -68,19 +78,33 @@ from .other import (
     transpose,
 )
 from .peft_types import PeftType, TaskType, register_peft_method
-from .save_and_load import get_peft_model_state_dict, load_peft_weights, set_peft_model_state_dict
+from .quantization_utils import get_quantization_kwargs, quantization_extra_repr, resolve_quantization_backend
+from .save_and_load import (
+    get_base_model_state_dict,
+    get_peft_model_state_dict,
+    load_peft_weights,
+    set_base_model_state_dict,
+    set_peft_model_state_dict,
+)
 from .warning import PeftWarning
 
 
 __all__ = [
+    "ALLOWED_COMPUTE_DTYPES",
     "CONFIG_NAME",
     "INCLUDE_LINEAR_LAYERS_SHORTHAND",
     "SAFETENSORS_WEIGHTS_NAME",
     "TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_BEFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_DEFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_FROD_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_GLORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_GRALORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING",
@@ -99,12 +123,17 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_TINYLORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_UNILORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING",
+    "UPCAST_DTYPES",
     "WEIGHTS_NAME",
     "AuxiliaryTrainingWrapper",
     "ModulesToSaveWrapper",
+    "NoMatchingPeftModuleError",
+    "PeftError",
     "PeftType",
     "PeftWarning",
     "TaskType",
@@ -119,17 +148,22 @@ __all__ = [
     "_set_trainable",
     "bloom_model_postprocess_past_key_value",
     "cast_mixed_precision_params",
+    "get_base_model_state_dict",
     "get_gptqmodel_quant_linear",
     "get_peft_model_state_dict",
     "get_quantization_config",
+    "get_quantization_kwargs",
     "id_tensor_storage",
     "infer_device",
     "load_peft_weights",
     "map_cache_to_layer_device_map",
     "prepare_model_for_kbit_training",
+    "quantization_extra_repr",
     "register_peft_method",
     "replace_lora_weights_loftq",
+    "resolve_quantization_backend",
     "set_additional_trainable_modules",
+    "set_base_model_state_dict",
     "set_peft_model_state_dict",
     "shift_tokens_right",
     "transpose",

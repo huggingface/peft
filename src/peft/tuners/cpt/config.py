@@ -65,13 +65,14 @@ class CPTConfig(PromptLearningConfig):
             "help": "The tokenizer to use for prompt tuning initialization. Only used if prompt_tuning_init is `TEXT`"
         },
     )
-    # Neet to define CPT-specific static attributes
+    # Need to define CPT-specific static attributes
     is_prompt_learning = True  # Indicates that CPT is a prompt-learning method.
 
     def __post_init__(self):
         """
         Post-initialization hook to set additional attributes after the config is initialized.
         """
+        super().__post_init__()
         # CPT-specific static attributes
         self.is_prompt_learning = True  # Indicates that CPT is a prompt-learning method.
         self.num_layers = None  # Number of layers (optional, not always required).

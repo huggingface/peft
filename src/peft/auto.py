@@ -52,6 +52,27 @@ MODEL_TYPE_TO_PEFT_MODEL_MAPPING: dict[str, type[PeftModel]] = {
 }
 
 
+def get_default_import_allowlist():
+    return [
+        "diffusers",
+        "lerobot",
+        "megatron-core",
+        "transformers",
+    ]
+
+
+def check_import_allowlist(allowlist, parent_name):
+    """Ensure that the parent_name is in the allowlist or, at least, the prefix (e.g., "transformers.").
+    This is done because PEFT uses importlib.import_module on adapter config values. To prevent PEFT being used as a
+    means to execute code by importing a potentially malicious package (i.e. as a means to execute planted code), we
+    limit the possible packages to a known value.
+    """
+    if parent_name in allowlist:
+        return True
+
+    return any(parent_name.startswith(f"{allowed}.") for allowed in allowlist)
+
+
 class _BaseAutoPeftModel:
     _target_class = None
     _target_peft_class = None
@@ -72,16 +93,29 @@ class _BaseAutoPeftModel:
         is_trainable: bool = False,
         config: Optional[PeftConfig] = None,
         revision: Optional[str] = None,
+        import_allowlist: Optional[list[str]] = None,
         **kwargs,
     ):
         r"""
         A wrapper around all the preprocessing steps a user needs to perform in order to load a PEFT model. The kwargs
         are passed along to `PeftConfig` that automatically takes care of filtering the kwargs of the Hub methods and
         the config object init.
+
+        The parameters are equivalent to the ones of [`PeftModel.from_pretrained`]. Differences are documented below.
+
+        Args:
+            import_allowlist (`list[str]`, *optional*, defaults to `{get_default_import_allowlist()}`)
+                AutoPeftModel will attempt to instantiate the base model that is configured in the adapter config.
+                Since this operation needs to potentially import other packages, this allowlist is a safe-guard to
+                prevent importing malicious packages. You may need to specify your package's import name here if it is
+                not in the defaults.
         """
         peft_config = PeftConfig.from_pretrained(pretrained_model_name_or_path, revision=revision, **kwargs)
         base_model_path = peft_config.base_model_name_or_path
         base_model_revision = peft_config.revision
+
+        if import_allowlist is None:
+            import_allowlist = get_default_import_allowlist()
 
         task_type = getattr(peft_config, "task_type", None)
 
@@ -105,6 +139,13 @@ class _BaseAutoPeftModel:
             base_model_class = auto_mapping["base_model_class"]
             parent_library_name = auto_mapping["parent_library"]
 
+            if not check_import_allowlist(import_allowlist, parent_library_name):
+                raise ValueError(
+                    f"The auto mapping wants to import '{parent_library_name}' which is not in the import allowlist. "
+                    "If you are sure that importing this library is safe, specify "
+                    f"`import_allowlist=['{parent_library_name}']` in `from_pretrained()`."
+                )
+
             parent_library = importlib.import_module(parent_library_name)
             target_class = getattr(parent_library, base_model_class)
         else:
@@ -114,14 +155,14 @@ class _BaseAutoPeftModel:
 
         base_model = target_class.from_pretrained(base_model_path, revision=base_model_revision, **kwargs)
 
+        token = kwargs.get("token", None)
+        if token is None:
+            token = kwargs.get("use_auth_token", None)
+
         tokenizer_exists = False
         if os.path.exists(os.path.join(pretrained_model_name_or_path, TOKENIZER_CONFIG_NAME)):
             tokenizer_exists = True
         else:
-            token = kwargs.get("token", None)
-            if token is None:
-                token = kwargs.get("use_auth_token", None)
-
             tokenizer_exists = check_file_exists_on_hf_hub(
                 repo_id=pretrained_model_name_or_path,
                 filename=TOKENIZER_CONFIG_NAME,
@@ -132,7 +173,10 @@ class _BaseAutoPeftModel:
 
         if tokenizer_exists and hasattr(base_model, "get_input_embeddings"):
             tokenizer = AutoTokenizer.from_pretrained(
-                pretrained_model_name_or_path, trust_remote_code=kwargs.get("trust_remote_code", False)
+                pretrained_model_name_or_path,
+                revision=revision,
+                token=token,
+                trust_remote_code=kwargs.get("trust_remote_code", False),
             )
             embedding_size = base_model.get_input_embeddings().weight.shape[0]
             if len(tokenizer) > embedding_size:
@@ -145,6 +189,7 @@ class _BaseAutoPeftModel:
             adapter_name=adapter_name,
             is_trainable=is_trainable,
             config=config,
+            revision=revision,
             **kwargs,
         )
 

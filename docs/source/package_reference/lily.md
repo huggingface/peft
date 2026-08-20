@@ -32,6 +32,17 @@ The abstract from the paper is:
 
 > Low-rank adaptation (LoRA) is a widely used parameter-efficient fine-tuning (PEFT) method that learns weight updates ΔW = AB for pretrained weights W through low-rank adapters A and B. While LoRA ensures hardware efficiency, its low-rank weight updates limit adaptation performance. In this paper, we propose low-rank interconnected adaptation across layers (Lily), a novel PEFT method that introduces an interconnected framework with locally shared A and globally shared B experts. This structure eliminates redundant per-layer AB pairs, enabling higher-rank ΔW with equal or fewer parameters. To enhance expressiveness, we use data-dependent routers to determine A-B interconnections, preventing B experts from converging to the same behavior and improving representational power across domains. Experiments across modalities, architectures, and model sizes demonstrate Lily's superior performance and efficiency.
 
+## Benchmark overview
+
+<iframe
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=LILY"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
+
+# API
+
 ## LilyConfig
 
 [[autodoc]] tuners.lily.config.LilyConfig

@@ -62,7 +62,7 @@ def prompt_embeddings_from_past_key_values(
 
     # Each layer: (key, value), where key/value are [batch, num_heads, seq_len, head_dim]
     num_layers = len(legacy)
-    key0, value0 = legacy[0]
+    key0, _ = legacy[0]
     if key0.ndim != 4:
         raise ValueError(f"Expected key/value tensors with rank 4, got key.ndim={key0.ndim}.")
     if key0.shape[0] != 1:

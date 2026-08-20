@@ -35,11 +35,12 @@ class ScriptArguments(SFTConfig):
         default=True,
         metadata={
             "help": (
-                "True -> MiSS efficience and balance; `bat` -> Bat, `mini` -> smaller MiSS efficience and balance"
+                "True -> MiSS efficiency and balance; `bat` -> Bat, `mini` -> smaller MiSS efficiency and balance"
             ),
         },
     )
     miss_r: int = field(default=16)
+    miss_dropout: float = field(default=0.0)
     merge_and_save: bool = field(default=False)
     # dataset configs
     data_path: str = field(default="imdb", metadata={"help": "Path to the training data."})
@@ -70,6 +71,7 @@ elif script_args.base_model_name_or_path is not None:
     tokenizer.pad_token_id = tokenizer.eos_token_id
     miss_config = MissConfig(
         r=script_args.miss_r,
+        miss_dropout=script_args.miss_dropout,
         target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
         bias="none",
         task_type="CAUSAL_LM",

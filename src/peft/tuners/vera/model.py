@@ -19,20 +19,31 @@ import warnings
 from typing import Union
 
 import torch
-import torch.nn as nn
+from torch import nn
 from torch.nn.init import _calculate_correct_fan
 from transformers.pytorch_utils import Conv1D
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, _get_in_out_features
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
+    get_quantization_kwargs,
+    resolve_quantization_backend,
 )
 
 from .._buffer_dict import BufferDict
 from ..tuners_utils import _maybe_include_all_linear_layers
 from .config import VeraConfig
 from .layer import Linear, VeraLayer
+
+
+def _get_tuner_layer_class(target_base_layer: torch.nn.Module) -> type[VeraLayer] | None:
+    layer_cls: type[VeraLayer] | None = None
+    if isinstance(target_base_layer, (torch.nn.Linear, Conv1D)):
+        layer_cls = Linear
+    elif (quant_backend := resolve_quantization_backend(target_base_layer)) is not None:
+        layer_cls = {"linear": Linear}.get(quant_backend.layer_type)
+
+    return layer_cls
 
 
 def _kaiming_init(
@@ -114,13 +125,10 @@ class VeraModel(BaseTuner):
             if not self._check_target_module_exists(peft_config, key):
                 continue
 
-            if isinstance(module, nn.Linear):
-                module_shape = module.out_features, module.in_features
-            elif isinstance(module, Conv1D):
-                module_shape = module.weight.ds_shape if hasattr(module.weight, "ds_shape") else module.weight.shape
-                module_shape = module_shape[::-1]
-            else:
+            if _get_tuner_layer_class(module) is None:
                 continue
+            in_features, out_features = _get_in_out_features(module)
+            module_shape = (out_features, in_features)
 
             if largest_shape is None:
                 largest_shape = module_shape
@@ -197,13 +205,11 @@ class VeraModel(BaseTuner):
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "r": r,
-            "vera_dropout": vera_config.vera_dropout,
-            "fan_in_fan_out": vera_config.fan_in_fan_out,
-            "init_weights": vera_config.init_weights,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
+            "bias": bias,
         }
-        kwargs["bias"] = bias
+        kwargs.update(get_quantization_kwargs(self))
 
         if isinstance(target, Linear):
             target.update_layer(
@@ -211,9 +217,7 @@ class VeraModel(BaseTuner):
                 self.vera_A,
                 self.vera_B,
                 r,
-                vera_config.vera_dropout,
-                vera_config.init_weights,
-                d_initial=vera_config.d_initial,
+                config=vera_config,
             )
         else:
             new_module = self._create_new_module(vera_config, self.vera_A, self.vera_B, adapter_name, target, **kwargs)
@@ -224,71 +228,84 @@ class VeraModel(BaseTuner):
 
     @staticmethod
     def _create_new_module(vera_config, vera_A, vera_B, adapter_name, target, **kwargs):
-        # avoid eager bnb import
-        if is_bnb_available():
-            import bitsandbytes as bnb
-
-            from .bnb import Linear8bitLt
-
-        if is_bnb_4bit_available():
-            from .bnb import Linear4bit
-
-        bias = kwargs.pop("bias", False)
-        loaded_in_8bit = kwargs.get("loaded_in_8bit", False)
-        loaded_in_4bit = kwargs.get("loaded_in_4bit", False)
-
         if isinstance(target, BaseTunerLayer):
             target_base_layer = target.get_base_layer()
         else:
             target_base_layer = target
 
-        if loaded_in_8bit and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
-            eightbit_kwargs = kwargs.copy()
-            eightbit_kwargs.update(
-                {
-                    "has_fp16_weights": target_base_layer.state.has_fp16_weights,
-                    "threshold": target_base_layer.state.threshold,
-                    "index": target_base_layer.index,
-                }
+        layer_cls = _get_tuner_layer_class(target_base_layer)
+        if layer_cls is None:
+            raise TypeError(
+                f"Target module {target} is not supported. Currently, only `torch.nn.Linear` (optionally quantized) "
+                "and `transformers.pytorch_utils.Conv1D` are supported."
             )
-            return Linear8bitLt(target, adapter_name, vera_A, vera_B, **eightbit_kwargs)
-        elif loaded_in_4bit and isinstance(target_base_layer, bnb.nn.Linear4bit):
-            fourbit_kwargs = kwargs.copy()
-            fourbit_kwargs.update(
-                {
-                    "compute_dtype": target_base_layer.compute_dtype,
-                    "compress_statistics": target_base_layer.weight.compress_statistics,
-                    "quant_type": target_base_layer.weight.quant_type,
-                }
-            )
-            return Linear4bit(target, adapter_name, vera_A, vera_B, **fourbit_kwargs)
-        elif isinstance(target_base_layer, torch.nn.Linear):
-            if kwargs["fan_in_fan_out"]:
-                warnings.warn(
-                    "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
-                    "Setting fan_in_fan_out to False."
-                )
-                kwargs["fan_in_fan_out"] = vera_config.fan_in_fan_out = False
-        elif isinstance(target_base_layer, Conv1D):
+
+        if isinstance(target_base_layer, Conv1D):
             kwargs["is_target_conv_1d_layer"] = True
-            if not kwargs["fan_in_fan_out"]:
+            if not vera_config.fan_in_fan_out:
                 warnings.warn(
                     "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
                 )
-                kwargs["fan_in_fan_out"] = vera_config.fan_in_fan_out = True
-        else:
-            raise ValueError(
-                f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                "`torch.nn.Linear`, `transformers.pytorch_utils.Conv1D`."
+                vera_config.fan_in_fan_out = True
+        elif vera_config.fan_in_fan_out:
+            # nn.Linear or a quantized linear layer
+            warnings.warn(
+                "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
+                "Setting fan_in_fan_out to False."
             )
-        new_module = Linear(
+            vera_config.fan_in_fan_out = False
+
+        new_module = layer_cls(
             target,
             vera_A,
             vera_B,
             adapter_name,
-            bias=bias,
-            d_initial=vera_config.d_initial,
+            config=vera_config,
             **kwargs,
         )
 
         return new_module
+
+    @classmethod
+    def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
+        to_return = super()._get_adapter_state_dict(model, config, adapter_name, state_dict, unwanted_adapter_names)
+        # Each layer holds a reference to the shared projections, so the state dict contains a duplicate of them for
+        # every layer. Remove all of them here; the canonical model-level entries ("base_model.vera_A.<adapter>" etc.)
+        # are only added back after the explicit save_projection check below.
+        to_return = {k: v for k, v in to_return.items() if (".vera_A." not in k) and (".vera_B." not in k)}
+        if config.save_projection:
+            # TODO: adding vera_A and vera_B to `self.get_base_layer` would
+            # make name to match here difficult to predict.
+            if f"base_model.vera_A.{adapter_name}" not in state_dict:
+                raise ValueError(
+                    "Model was initialised to not save vera_A and vera_B but config now specifies to save projection!"
+                    " Set `config.save_projection` to `False`."
+                )
+            to_return["base_model.vera_A." + adapter_name] = state_dict["base_model.vera_A." + adapter_name]
+            to_return["base_model.vera_B." + adapter_name] = state_dict["base_model.vera_B." + adapter_name]
+        return to_return
+
+    @classmethod
+    def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
+        # note that the remapping renames the projection keys from e.g. "base_model.vera_A" (checkpoint format) to
+        # "base_model.vera_A.{adapter_name}" (model format)
+        peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
+        if config.save_projection and f"base_model.vera_A.{adapter_name}" not in peft_model_state_dict:
+            raise ValueError(
+                "Specified to load vera_A and vera_B from state dictionary however they were not present!"
+            )
+        elif not config.save_projection and "base_model.vera_A" in peft_model_state_dict:
+            # note: with save_projection=False, the projection buffers are non-persistent and thus have no model state
+            # dict entry to be remapped to, so the checkpoint key is still in its unsuffixed form here
+            warnings.warn(
+                "Specified to not load vera_A and vera_B from state dictionary however they are present in state"
+                " dictionary! Consider using them to ensure checkpoint loading is correct on all platforms using"
+                " `peft_config.save_projection = True`"
+            )
+        elif not config.save_projection:  # and no vera_A in state dictionary
+            warnings.warn(
+                "Specified to not load vera_A and vera_B from state dictionary. This means we will be relying on"
+                " PRNG initialisation to restore these projections using `config.projection_prng_key`, which may"
+                " not be accurate on all system configurations."
+            )
+        return peft_model_state_dict

@@ -5,7 +5,7 @@ import logging
 import math
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from random import randint
 from typing import Any, Union
@@ -402,7 +402,7 @@ def evaluation_loop(model, eval_dataloader, processor, normalizer, metric, force
     eval_metrics = {"eval/wer": wer, "eval/normalized_wer": normalized_wer}
     if accelerator.get_tracker("wandb"):
         sample_size = min(len(predictions), 256)
-        ids = [randint(0, len(predictions) - 1) for p in range(0, sample_size)]
+        ids = [randint(0, len(predictions) - 1) for p in range(sample_size)]
         sample_predictions = [predictions[i] for i in ids]
         sample_references = [references[i] for i in ids]
         sample_normalized_predictions = [normalized_predictions[i] for i in ids]
@@ -639,7 +639,7 @@ def main():
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if args.with_tracking:
-        run_name = f"run-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
+        run_name = f"run-{datetime.now(timezone.utc).strftime('%Y-%m-%d_%H-%M-%S')}"
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
         experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"].value

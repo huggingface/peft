@@ -24,6 +24,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     DataCollatorForLanguageModeling,
+    DynamicCache,
     Trainer,
     TrainingArguments,
 )
@@ -31,13 +32,18 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from peft import (
     AdaLoraConfig,
+    BeftConfig,
     BOFTConfig,
     C3AConfig,
     CartridgeConfig,
     CPTConfig,
+    DeftConfig,
     DeloraConfig,
     FourierFTConfig,
+    FrodConfig,
+    GloraConfig,
     GraloraConfig,
+    HiraConfig,
     HRAConfig,
     IA3Config,
     LoraConfig,
@@ -51,9 +57,12 @@ from peft import (
     PromptTuningInit,
     PsoftConfig,
     PveraConfig,
+    RandLoraConfig,
     RoadConfig,
     ShiraConfig,
     TaskType,
+    TinyLoraConfig,
+    UniLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     WaveFTConfig,
@@ -96,6 +105,13 @@ ALL_CONFIGS = [
         },
     ),
     (
+        BeftConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+        },
+    ),
+    (
         BOFTConfig,
         {
             "task_type": "CAUSAL_LM",
@@ -120,6 +136,13 @@ ALL_CONFIGS = [
         },
     ),
     (
+        DeftConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+        },
+    ),
+    (
         DeloraConfig,
         {
             "task_type": "CAUSAL_LM",
@@ -133,6 +156,14 @@ ALL_CONFIGS = [
             "task_type": "CAUSAL_LM",
             "n_frequency": 10,
             "target_modules": None,
+        },
+    ),
+    (
+        FrodConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "sparse_rate": 0.01,
         },
     ),
     (
@@ -157,6 +188,29 @@ ALL_CONFIGS = [
             "gralora_dropout": 0.05,
             "gralora_k": 4,
             "hybrid_r": 4,
+        },
+    ),
+    (
+        GloraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "init_weights": True,
+        },
+    ),
+    (
+        GloraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "init_weights": False,
+        },
+    ),
+    (
+        HiraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
         },
     ),
     (
@@ -239,6 +293,14 @@ ALL_CONFIGS = [
         },
     ),
     (
+        PrefixTuningConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "num_virtual_tokens": 10,
+            "init_weights": "zero",
+        },
+    ),
+    (
         PromptEncoderConfig,
         {
             "task_type": "CAUSAL_LM",
@@ -251,6 +313,15 @@ ALL_CONFIGS = [
         {
             "task_type": "CAUSAL_LM",
             "num_virtual_tokens": 10,
+        },
+    ),
+    (
+        RandLoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "r": 8,
+            "randlora_alpha": 1,
         },
     ),
     (
@@ -291,6 +362,21 @@ ALL_CONFIGS = [
             "d_initial": 0.1,
             "save_projection": True,
             "bias": "none",
+        },
+    ),
+    (
+        UniLoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "theta_d_length": 257,
+        },
+    ),
+    (
+        TinyLoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
         },
     ),
     (
@@ -336,7 +422,9 @@ ALL_CONFIGS = [
 
 def _skip_if_not_conv1d_supported(model_id, config_cls):
     if "GPT2LMHeadModel" in model_id and config_cls in [
+        BeftConfig,
         BOFTConfig,
+        GloraConfig,
         HRAConfig,
         OFTConfig,
         OSFConfig,
@@ -347,7 +435,7 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         DeloraConfig,
         PsoftConfig,
     ]:
-        pytest.skip("Skipping BOFT/HRA/OFT/Road/SHiRA/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel")
+        pytest.skip("Skipping Beft/BOFT/GLoRA/HRA/OFT/Road/SHiRA/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel")
 
 
 def _skip_alora_no_activation(config_cls, config_kwargs):
@@ -360,6 +448,19 @@ def _skip_osf_disable_adapter_test(config_cls):
         pytest.skip(
             "Skipping OSF for disable_adapter test because OSF uses exact SVD decomposition, so outputs are identical until training."
         )
+
+
+def check_beft_config(config_cls, model_id, config_kwargs):
+    if isinstance(config_cls, BeftConfig):
+        return
+    elif "gptj" in model_id.lower():
+        config_kwargs["target_modules"] = ["fc_out"]
+    elif "llama" in model_id.lower():
+        pytest.skip("Skip tests for Llama models because layers have no bias term")
+    elif "gemma3" in model_id.lower():
+        pytest.skip("Skip tests for Gemma3 models because layers have no bias term")
+    else:
+        return
 
 
 class TestDecoderModels(PeftCommonTester):
@@ -550,6 +651,7 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_merge_layers(self, model_id, config_cls, config_kwargs):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        check_beft_config(config_cls, model_id, config_kwargs)
         self._test_merge_layers(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
@@ -557,12 +659,14 @@ class TestDecoderModels(PeftCommonTester):
     def test_merge_layers_multi(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        check_beft_config(config_cls, model_id, config_kwargs)
         self._test_merge_layers_multi(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        check_beft_config(config_cls, model_id, config_kwargs)
         self._test_merge_layers_nan(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
@@ -597,6 +701,8 @@ class TestDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
+        config_kwargs = config_kwargs.copy()
+        check_beft_config(config_cls, model_id, config_kwargs)
         self._test_merge_layers_fp16(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
@@ -717,7 +823,8 @@ class TestDecoderModels(PeftCommonTester):
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = LoraConfig(base_model_name_or_path=model_id, **config_kwargs)
 
-        assert len(model.model.layers), "Expected 2 layers in original model." == 2
+        assert len(model.model.layers) == 2, "Expected 2 layers in original model."
+
         model = get_peft_model(model, config)
         layers = model.base_model.model.model.layers
         assert len(layers) == 4, "Expected 4 layers in adapted model."
@@ -827,6 +934,45 @@ class TestDecoderModels(PeftCommonTester):
                 data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
             )
             trainer.train()
+
+    def test_prompt_tuning_prepare_inputs_for_generation_4d_attention_mask(self):
+        # Some setups pass a 4d attention mask to prepare_inputs_for_generation. PEFT re-creates the mask to account
+        # for the inserted virtual tokens using create_attention_mask.
+        model_id = "hf-internal-testing/tiny-random-Gemma3ForCausalLM"
+        with hub_online_once(model_id):
+            base = AutoModelForCausalLM.from_pretrained(model_id)
+            num_virtual_tokens = 4
+            model = get_peft_model(
+                base, PromptTuningConfig(num_virtual_tokens=num_virtual_tokens, task_type="CAUSAL_LM")
+            )
+
+            input_ids = torch.tensor([[1, 2, 3]])
+            attention_mask_4d = torch.ones((1, 1, input_ids.shape[1], input_ids.shape[1]))
+            cache_position = torch.arange(input_ids.shape[1])
+
+            def fake_prepare_inputs_for_generation(*args, **kwargs):
+                # generate initializes an empty cache before the first call to prepare_inputs_for_generation
+                return {
+                    "input_ids": input_ids,
+                    "attention_mask": attention_mask_4d,
+                    "cache_position": cache_position.clone(),
+                    "past_key_values": DynamicCache(),
+                }
+
+            model.base_model_prepare_inputs_for_generation = fake_prepare_inputs_for_generation
+            model_kwargs = model.prepare_inputs_for_generation(input_ids)
+
+            total_seq_len = num_virtual_tokens + input_ids.shape[1]
+            assert model_kwargs["input_ids"] is None
+            assert model_kwargs["inputs_embeds"].shape[1] == total_seq_len
+            assert "attention_mask" in model_kwargs
+            # depending on the model and attention implementation, the re-created mask can be a 4d tensor, a dict of
+            # masks, or None (no masking needed)
+            new_mask = model_kwargs["attention_mask"]
+            if isinstance(new_mask, torch.Tensor):
+                assert new_mask.shape[-1] == total_seq_len
+            elif isinstance(new_mask, dict):
+                assert all(mask.shape[-1] == total_seq_len for mask in new_mask.values() if mask is not None)
 
     @pytest.mark.parametrize("model_id", SMALL_GRID_MODELS)
     @pytest.mark.parametrize(
@@ -1047,3 +1193,107 @@ class TestDecoderModels(PeftCommonTester):
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_lora_conversion(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_get_base_model_state_dict(self, model_id, config_cls, config_kwargs):
+        _skip_if_not_conv1d_supported(model_id, config_cls)
+        self._test_get_base_model_state_dict(model_id, config_cls, config_kwargs.copy())
+
+    def test_merge_and_unload_fixes_tie_word_embeddings_config(self):
+        # See https://github.com/huggingface/transformers/issues/45127
+        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id, tie_word_embeddings=True)
+            assert model.config.tie_word_embeddings
+
+            peft_model = get_peft_model(model, LoraConfig(target_modules=["embed_tokens"], init_lora_weights=False))
+
+            with pytest.warns(UserWarning, match="Setting.*tie_word_embeddings"):
+                merged = peft_model.merge_and_unload()
+
+        assert not merged.config.tie_word_embeddings
+        assert merged.lm_head.weight is not merged.model.embed_tokens.weight
+        assert merged.lm_head.weight.data_ptr() != merged.model.embed_tokens.weight.data_ptr()
+
+    def test_prefix_tuning_gemma4_works(self):
+        # see #3201
+        # The issue was that head dim differs depending on whether sliding window attention is being used or not:
+        # https://github.com/huggingface/transformers/blob/223fe5231b783fbfb25296bb0a243dad5d158cde/src/transformers/models/gemma4/modeling_gemma4.py#L1147
+        # Prefix tuning could deal with different sizes, resulting in a size error
+
+        model_id = "peft-internal-testing/tiny-random-gemma4-E2B"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                dtype=torch.bfloat16,
+            ).to(self.torch_device)
+            config = PrefixTuningConfig(
+                task_type=TaskType.CAUSAL_LM,
+                num_virtual_tokens=20,
+                prefix_projection=False,
+            )
+            model = get_peft_model(model, config)
+
+            inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+            model(inputs)  # does not raise
+
+            # do mini training run
+            torch.manual_seed(0)
+            labels = torch.ones_like(inputs)
+            optim = torch.optim.SGD(model.parameters(), lr=100.0)
+            losses = []
+            for _ in range(5):
+                optim.zero_grad()
+                outputs = model(inputs, labels=labels)
+                loss = outputs.loss
+                loss.backward()
+                optim.step()
+                losses.append(loss)
+
+            assert torch.isfinite(loss)
+            assert not torch.isclose(losses[0], losses[-1], atol=1e-6, rtol=1e-3)
+
+    def test_prefix_tuning_gemma4_warns_if_some_layers_skipped(self):
+        # See previous test_prefix_tuning_gemma4_works. When the embedding matrix is too small to fit any layer targeted
+        # by prefix tuning, raise an error
+        model_id = "peft-internal-testing/tiny-random-gemma4-E2B"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                dtype=torch.bfloat16,
+            ).to(self.torch_device)
+            config = PrefixTuningConfig(
+                task_type=TaskType.CAUSAL_LM,
+                num_virtual_tokens=20,
+                prefix_projection=False,
+            )
+            text_config = model.config.get_text_config()
+            text_config.num_kv_shared_layers = 1  # set to lower value (was 2)
+            model = get_peft_model(model, config)
+
+            inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+            with pytest.warns(UserWarning, match=r"skipped \[.*\] due to KV shape"):
+                model(inputs)
+
+    def test_prefix_tuning_gemma4_raises_if_all_layers_skipped(self):
+        # See previous test_prefix_tuning_gemma4_works. When the embedding matrix is too small to fit any layer targeted
+        # by prefix tuning, raise an error
+        model_id = "peft-internal-testing/tiny-random-gemma4-E2B"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                dtype=torch.bfloat16,
+            ).to(self.torch_device)
+            config = PrefixTuningConfig(
+                task_type=TaskType.CAUSAL_LM,
+                num_virtual_tokens=20,
+                prefix_projection=False,
+            )
+            model = get_peft_model(model, config)
+            text_config = model.config.get_text_config()
+            text_config.num_key_value_heads = 999
+
+            inputs = torch.arange(10).view(1, -1).to(self.torch_device)
+            with pytest.raises(ValueError, match="skipped every layer"):
+                model(inputs)

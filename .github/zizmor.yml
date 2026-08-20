@@ -8,11 +8,15 @@ rules:
       # the docker buildx binary is cached and zizmor warns about a cache poisoning attack.
       # OTOH this cache would make us more resilient against an intrusion on docker-buildx' side.
       # There is no obvious benefit so we leave it as it is.
-      - build_docker_images.yml:37:9
-      - build_docker_images.yml:70:9
-      - build_docker_images.yml:103:9
-      - build_docker_images.yml:136:9
-      - build_docker_images.yml:169:9
+      - build_docker_images.yml:39:9
+      - build_docker_images.yml:74:9
+  secrets-outside-env:
+    ignore:
+      # Zizmor warns about HF_TOKEN being used there but the token is not exposed to external users:
+      # > With the exception of GITHUB_TOKEN, secrets are not passed to the runner when a workflow is triggered from a forked repository.
+      # https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets#using-secrets-in-a-workflow
+      # Moreover, the workflow needs to be manually triggered by maintainers, who will review the code first
+      - tests.yml:131:25
   unpinned-images:
     ignore:
       # We want to test these images with the latest version and we're not using them

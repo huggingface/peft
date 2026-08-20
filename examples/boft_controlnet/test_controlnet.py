@@ -36,7 +36,7 @@ from utils.unet_2d_condition import UNet2DConditionNewModel
 
 
 sys.path.append("../../src")
-from peft import PeftModel  # noqa: E402
+from peft import PeftModel
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.

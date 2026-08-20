@@ -20,7 +20,7 @@ Below is a table that summarizes the compatibility between PEFT's LoRA, [`bitsan
 
 For DeepSpeed Stage 3 + QLoRA, please refer to the section [Use PEFT QLoRA and DeepSpeed with ZeRO3 for finetuning large models on multiple GPUs](#use-peft-qlora-and-deepspeed-with-zero3-for-finetuning-large-models-on-multiple-gpus) below.
 
-For confirming these observations, we ran the SFT (Supervised Fine-tuning) [offical example scripts](https://github.com/huggingface/trl/tree/main/examples) of the [Transformers Reinforcement Learning (TRL) library](https://github.com/huggingface/trl) using QLoRA + PEFT and the accelerate configs available [here](https://github.com/huggingface/trl/tree/main/examples/accelerate_configs). We ran these experiments on a 2x NVIDIA T4 GPU.
+For confirming these observations, we ran the SFT (Supervised Fine-tuning) [official example scripts](https://github.com/huggingface/trl/tree/main/examples) of the [Transformers Reinforcement Learning (TRL) library](https://github.com/huggingface/trl) using QLoRA + PEFT and the accelerate configs available [here](https://github.com/huggingface/trl/tree/main/examples/accelerate_configs). We ran these experiments on a 2x NVIDIA T4 GPU.
 
 # Use PEFT and DeepSpeed with ZeRO3 for finetuning large models on multiple devices and multiple nodes
 
@@ -399,7 +399,7 @@ That is all! The rest of the script handles the training loop, evaluation, and e
 Run the following command to launch the training script. Earlier, you saved the configuration file to `ds_zero3_cpu.yaml`, so you'll need to pass the path to the launcher with the `--config_file` argument like this:
 
 ```bash
-accelerate launch --config_file ds_zero3_cpu.yaml examples/peft_lora_seq2seq_accelerate_ds_zero3_offload.py
+accelerate launch --config_file ds_zero3_cpu.yaml examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py
 ```
 
 You'll see some output logs that track memory usage during training, and once it's completed, the script returns the accuracy and compares the predictions to the labels:

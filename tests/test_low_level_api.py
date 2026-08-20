@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,7 +19,14 @@ import pytest
 import torch
 from diffusers import StableDiffusionPipeline
 from torch import nn
-from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoModelForSequenceClassification
+from transformers import (
+    AutoModel,
+    AutoModelForCausalLM,
+    AutoModelForSeq2SeqLM,
+    AutoModelForSequenceClassification,
+    CLIPTextModel,
+    CLIPTextModelWithProjection,
+)
 
 from peft import (
     AdaLoraConfig,
@@ -30,9 +34,11 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     RandLoraConfig,
+    get_base_model_state_dict,
     get_peft_model,
     get_peft_model_state_dict,
     inject_adapter_in_model,
+    set_base_model_state_dict,
     set_peft_model_state_dict,
 )
 from peft.tuners import lora
@@ -164,7 +170,7 @@ class TestInjectAdapterFromStateDict:
 
             sd_after = get_peft_model_state_dict(model)
 
-            # We exepct the same keys and the same shapes of the weights. Don't check the values: injection is only
+            # We expect the same keys and the same shapes of the weights. Don't check the values: injection is only
             # about creating the PEFT adapter, not about loading the actual weights
             assert len(sd_before) > 0
             assert sd_before.keys() == sd_after.keys()
@@ -185,7 +191,7 @@ class TestInjectAdapterFromStateDict:
             model = inject_adapter_in_model(config, model, state_dict=sd_before)
             sd_after = get_peft_model_state_dict(model)
 
-            # We exepct the same keys and the same shapes of the weights. Don't check the values: injection is only
+            # We expect the same keys and the same shapes of the weights. Don't check the values: injection is only
             # about creating the PEFT adapter, not about loading the actual weights
             assert len(sd_before) > 0
             assert sd_before.keys() == sd_after.keys()
@@ -209,7 +215,7 @@ class TestInjectAdapterFromStateDict:
             model = inject_adapter_in_model(config, model, state_dict=sd_before)
             sd_after = get_peft_model_state_dict(model)
 
-            # We exepct the same keys and the same shapes of the weights. Don't check the values: injection is only
+            # We expect the same keys and the same shapes of the weights. Don't check the values: injection is only
             # about creating the PEFT adapter, not about loading the actual weights
             assert len(sd_before) > 0
             assert sd_before.keys() == sd_after.keys()
@@ -299,7 +305,7 @@ class TestInjectAdapterFromStateDict:
             sd_te_after = get_peft_model_state_dict(pipe.text_encoder)
             sd_unet_after = get_peft_model_state_dict(pipe.unet)
 
-            # We exepct the same keys and the same shapes of the weights. Don't check the values: injection is only
+            # We expect the same keys and the same shapes of the weights. Don't check the values: injection is only
             # about creating the PEFT adapter, not about loading the actual weights
             assert len(sd_te_before) > 0
             assert sd_te_before.keys() == sd_te_after.keys()
@@ -328,7 +334,7 @@ class TestInjectAdapterFromStateDict:
             assert {p.device.type for p in get_peft_model_state_dict(model).values()} == {"meta"}
 
     def test_inject_from_state_dict_missing_keys_warning(self):
-        # check that if the PEFT config specifies **more** taget modules than the state_dict, we get a warning for that
+        # check that if the PEFT config specifies **more** target modules than the state_dict, we get a warning for that
         model_id = "peft-internal-testing/opt-125m"
         config = LoraConfig()
 
@@ -362,7 +368,7 @@ class TestInjectAdapterFromStateDict:
                 assert sd_before[key].shape == sd_after[key].shape
 
     def test_inject_from_state_dict_extra_keys_warning(self):
-        # check that if the PEFT config specifies **fewer** taget modules than the state_dict, we get a warning for that
+        # check that if the PEFT config specifies **fewer** target modules than the state_dict, we get a warning for that
         model_id = "peft-internal-testing/opt-125m"
         config = LoraConfig()
 
@@ -421,12 +427,80 @@ class TestInjectAdapterFromStateDict:
                 # work
                 sd_after = {k.removeprefix("_orig_mod."): v for k, v in sd_after.items()}
 
-            # We exepct the same keys and the same shapes of the weights. Don't check the values: injection is only
+            # We expect the same keys and the same shapes of the weights. Don't check the values: injection is only
             # about creating the PEFT adapter, not about loading the actual weights
             assert len(sd_before) > 0
             assert sd_before.keys() == sd_after.keys()
             for key in sd_before.keys():
                 assert sd_before[key].shape == sd_after[key].shape
+
+    def test_inject_from_state_dict_low_cpu_mem_usage_with_weight_conversion(self):
+        # Tests if we can inject LoRA state dict with low_cpu_mem_usage for a model that uses Transformers weight
+        # conversion. This checks a regression reported by Sayak of this Diffusers test:
+        # tests/lora/test_lora_layers_flux.py::FluxLoRATests::test_low_cpu_mem_usage_with_injection
+        config = LoraConfig(target_modules=["q_proj", "v_proj"])
+        # must be a model with `get_checkpoint_conversion_mapping(model_type) != None`
+        model_id = "peft-internal-testing/tiny-clip-text-2"
+
+        with hub_online_once(model_id):
+            model = CLIPTextModel.from_pretrained(model_id)
+            inject_adapter_in_model(config, model, low_cpu_mem_usage=True)
+            assert all(p.device.type == "meta" for n, p in model.named_parameters() if "lora." in n)
+
+            state_dict = get_peft_model_state_dict(model)
+            state_dict_no_meta = {k: torch.randn(v.shape, dtype=v.dtype) for k, v in state_dict.items()}
+            set_peft_model_state_dict(model, state_dict_no_meta, low_cpu_mem_usage=True)
+            assert not any(p.device.type == "meta" for p in model.parameters())
+
+    def test_inject_from_state_dict_model_with_weight_conversion(self):
+        # similar test to test_inject_from_state_dict_low_cpu_mem_usage_with_weight_conversion but without
+        # low_cpu_mem_usage
+        config = LoraConfig(target_modules=["q_proj", "v_proj"])
+        # must be a model with `get_checkpoint_conversion_mapping(model_type) != None`
+        model_id = "peft-internal-testing/tiny-clip-text-2"
+
+        with hub_online_once(model_id):
+            model = CLIPTextModel.from_pretrained(model_id)
+            inject_adapter_in_model(config, model)
+            # sanity check:
+            assert (model.encoder.layers[0].self_attn.v_proj.lora_B.default.weight == 0).all()
+
+            state_dict = get_peft_model_state_dict(model)
+            state_dict = {k: torch.ones_like(v) * 555 for k, v in state_dict.items()}
+            load_result = set_peft_model_state_dict(model, state_dict)
+
+            assert not load_result.unexpected_keys
+            # base model weights may be missing, but LoRA weights should never be missing
+            assert not any("lora" in k for k in load_result.missing_keys)
+
+            # sanity check:
+            assert (model.encoder.layers[0].self_attn.v_proj.lora_B.default.weight == 555).all()
+
+    def test_prefix_removal_is_undone(self):
+        # See discussion starting here: https://github.com/huggingface/peft/pull/3212#issuecomment-4402677775.
+        # For some models like CLIPTextModelWithProjection, transformers would add a removal of the 'text_model.' prefix
+        # to the conversions, but this removal is incorrect. Therefore, there is a logic in transformers to undo the
+        # removal if there is not entry in the state_dict for the renamed key. This logic was missing in PEFT, resulting
+        # in missing and unexpected keys.
+        config = LoraConfig(target_modules=["q_proj", "v_proj"])
+        model_id = "peft-internal-testing/tiny-clip-text-2"
+
+        with hub_online_once(model_id):
+            model = CLIPTextModelWithProjection.from_pretrained(model_id)
+            inject_adapter_in_model(config, model)
+            # sanity check:
+            assert (model.text_model.encoder.layers[0].self_attn.v_proj.lora_B.default.weight == 0).all()
+
+            state_dict = get_peft_model_state_dict(model)
+            state_dict = {k: torch.ones_like(v) * 555 for k, v in state_dict.items()}
+            load_result = set_peft_model_state_dict(model, state_dict)
+
+            assert not load_result.unexpected_keys
+            # base model weights may be missing, but LoRA weights should never be missing
+            assert not any("lora" in k for k in load_result.missing_keys)
+
+            # sanity check:
+            assert (model.text_model.encoder.layers[0].self_attn.v_proj.lora_B.default.weight == 555).all()
 
 
 class TestPeftStateDict:
@@ -656,3 +730,115 @@ class TestPeftStateDict:
             target_modules=["foo", "foo_baz", "baz_foo", "foo_baz_foo", "baz_foo_baz"], init_lora_weights=False
         )
         self.check_peft_model_weights_loaded_correctly(MyModel, config, nested=nested, adapter_name="foo")
+
+    @pytest.mark.parametrize("config_cls", [LoraConfig, LoKrConfig])
+    def test_base_model_module_named_like_peft_prefix(self, config_cls):
+        # Here the base model contains a module whose name contains the PEFT prefix of the method (e.g. "lora_"). Such
+        # a module must be treated like any other base model module: it must not be included in the PEFT state_dict
+        # (it would needlessly blow up the checkpoint size) and it must not be trainable.
+        prefix = {LoraConfig: "lora_", LoKrConfig: "lokr_"}[config_cls]
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(5, 5)
+                # module whose name contains the PEFT prefix, e.g. "lora_foobar"
+                setattr(self, f"{prefix}foobar", nn.Linear(5, 5))
+
+            def forward(self, x):
+                return getattr(self, f"{prefix}foobar")(self.lin0(x))
+
+        torch.manual_seed(0)
+        model = get_peft_model(MyModel(), config_cls(target_modules=["lin0"]))
+        imposter = getattr(model.base_model.model, f"{prefix}foobar")
+        assert not imposter.weight.requires_grad
+        assert not imposter.bias.requires_grad
+
+        sd = get_peft_model_state_dict(model)
+        assert len(sd) > 0  # sanity check
+        assert not any(f"{prefix}foobar" in key for key in sd)
+        # sanity check: the keys of the actual adapter are present
+        assert any("lin0" in key for key in sd)
+
+    def test_trained_modules_to_save_module_named_like_peft_prefix_round_trip(self):
+        # Similar to test_base_model_module_named_like_peft_prefix but with modules_to_save: the colliding module is
+        # trained via modules_to_save and must survive a save/load round trip.
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(5, 5)
+                self.lora_head = nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.lora_head(self.lin0(x))
+
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lora_head"])
+        torch.manual_seed(0)
+        source = get_peft_model(MyModel(), config)
+        with torch.no_grad():
+            source.base_model.model.lora_head.modules_to_save["default"].weight.fill_(123.0)
+
+        state_dict = get_peft_model_state_dict(source)
+
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lora_head"])
+        torch.manual_seed(0)
+        target = get_peft_model(MyModel(), config)
+        result = set_peft_model_state_dict(target, state_dict)
+
+        assert not [key for key in result.unexpected_keys if "lora_head" in key]
+        weight = target.base_model.model.lora_head.modules_to_save["default"].weight
+        assert torch.allclose(weight, torch.full_like(weight, 123.0))
+
+
+class TestGetBaseModelStateDict:
+    # Tests for get_base_model_state_dict / set_base_model_state_dict. The per-method and per-model coverage lives in
+    # PeftCommonTester._test_get_base_model_state_dict (see testing_common.py), which is called from
+    # test_decoder_models.py, test_encoder_decoder_models.py and test_custom_models.py and covers key matching, value
+    # matching and the get/set roundtrip for every tuner config in those matrices. The tests here cover the cases that
+    # are independent of the tuner method and therefore not worth running once per config: the strict bookkeeping and
+    # multiple adapters.
+    model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+
+    def get_lora_model(self):
+        with hub_online_once(self.model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(self.model_id)
+        return get_peft_model(base_model, LoraConfig(r=4, lora_alpha=2, target_modules="all-linear"))
+
+    def test_strict_missing_keys(self):
+        # a state dict that misses a base model key is rejected with strict=True and reported with strict=False
+        peft_model = self.get_lora_model()
+        state_dict = get_base_model_state_dict(peft_model)
+        removed_key = next(iter(state_dict.keys()))
+        del state_dict[removed_key]
+
+        with pytest.raises(RuntimeError, match="Missing key"):
+            set_base_model_state_dict(peft_model, state_dict, strict=True)
+
+        result = set_base_model_state_dict(peft_model, state_dict, strict=False)
+        assert removed_key in result.missing_keys
+
+    def test_strict_unexpected_keys(self):
+        # a state dict with an unknown key is rejected with strict=True and reported with strict=False
+        peft_model = self.get_lora_model()
+        state_dict = get_base_model_state_dict(peft_model)
+        state_dict["unexpected.weight"] = torch.zeros(10)
+
+        with pytest.raises(RuntimeError, match="Unexpected key"):
+            set_base_model_state_dict(peft_model, state_dict, strict=True)
+
+        result = set_base_model_state_dict(peft_model, state_dict, strict=False)
+        assert "unexpected.weight" in result.unexpected_keys
+
+    def test_multiple_adapters(self):
+        # adapters added after the first one must not leak into the base model state dict either
+        with hub_online_once(self.model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(self.model_id)
+
+        base_model_keys = set(base_model.state_dict().keys())
+
+        peft_model = get_peft_model(
+            base_model, LoraConfig(r=4, lora_alpha=2, target_modules=["q_proj", "v_proj"]), adapter_name="adapter1"
+        )
+        peft_model.add_adapter("adapter2", LoraConfig(r=8, lora_alpha=4, target_modules=["k_proj", "out_proj"]))
+
+        assert set(get_base_model_state_dict(peft_model).keys()) == base_model_keys

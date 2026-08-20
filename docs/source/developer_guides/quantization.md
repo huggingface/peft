@@ -145,11 +145,11 @@ config = LoraConfig(target_modules="all-linear", ...)
 
 ## GPTQ quantization
 
-You can learn more about gptq based `[2, 3, 4, 8]` bits quantization at [GPTQModel](https://github.com/ModelCloud/GPTQModel) and the Transformers [GPTQ](https://huggingface.co/docs/transformers/quantization/gptq) doc. Post-quant training, PEFT can use both [GPTQModel](https://github.com/ModelCloud/GPTQModel) or [AutoGPTQ](https://github.com/autogptq/autogptq) libraries, but we recommend GPTQModel because AutoGPTQ will be deprecated in a future release.
+You can learn more about GPTQ-based `[2, 3, 4, 8]` bit quantization at [GPT-QModel](https://github.com/ModelCloud/GPTQModel) and in the Transformers [GPTQ](https://huggingface.co/docs/transformers/quantization/gptq) documentation. PEFT supports GPTQ post-training through GPT-QModel.
 
 ```bash
-# gptqmodel install
-pip install gptqmodel --no-build-isolation
+# GPT-QModel install
+pip install "gptqmodel>=7.0.0"
 ```
 
 ```py
@@ -258,9 +258,10 @@ PEFT supports models quantized with [torchao](https://github.com/pytorch/ao) ("a
 ```python
 from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, TorchAoConfig
+from torchao.quantization import Int8WeightOnlyConfig
 
 model_id = ...
-quantization_config = TorchAoConfig(quant_type="int8_weight_only")
+quantization_config = TorchAoConfig(quant_type=Int8WeightOnlyConfig())
 base_model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=quantization_config)
 peft_config = LoraConfig(...)
 model = get_peft_model(base_model, peft_config)

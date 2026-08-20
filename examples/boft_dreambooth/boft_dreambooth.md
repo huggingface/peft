@@ -49,7 +49,7 @@ conda install xformers -c xformers
 pip install -r requirements.txt
 pip install git+https://github.com/huggingface/peft
 ```
-The follwing environment setuo is validated work on Intel XPU:
+The following environment setup is validated work on Intel XPU:
 
 ### Intel XPU
 ```bash

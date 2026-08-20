@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from peft.config import PromptLearningConfig
 from peft.utils import PeftType
@@ -24,10 +25,19 @@ class PrefixTuningConfig(PromptLearningConfig):
     This is the configuration class to store the configuration of a [`PrefixEncoder`].
 
     Args:
+        init_weights (`Optional[str]`): If not set, weights are initialized at random, if set to "zero"
+            the weights are initialized so that the activations will be a no-op (zero).
         encoder_hidden_size (`int`): The hidden size of the prompt encoder.
         prefix_projection (`bool`): Whether to project the prefix embeddings.
     """
 
+    init_weights: Literal["zero"] | None = field(
+        default=None,
+        metadata={
+            "help": 'If not set, weights are initialized at random, if set to "zero" the '
+            "weights are initialized so that the activations will be a no-op (zero)."
+        },
+    )
     encoder_hidden_size: int = field(
         default=None,
         metadata={"help": "The hidden size of the encoder"},

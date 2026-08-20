@@ -38,6 +38,8 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
 
         if config.use_dora:
             raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
+        if config.velora_config is not None:
+            raise ValueError(f"{self.__class__.__name__} does not support VeLoRA yet, please set it to False")
 
         # self.base_layer and self.quant_linear_module are the same; we need the former for consistency and the latter
         # for backwards compatibility
@@ -51,6 +53,8 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
         )
 
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
+        if config.velora_config is not None:
+            raise ValueError(f"{self.__class__.__name__} does not support VeLoRA.")
         if config.use_dora and config.use_qalora:
             raise NotImplementedError(
                 f"DoRA and QA-LoRA at the same time is not supported for {self.__class__.__name__} (yet)."
@@ -104,12 +108,6 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "lora." + rep
-
-    # TODO: Check if it is better as suggested by users https://github.com/PanQiWei/AutoGPTQ/pull/102
-    # def reset_lora_parameters(self, adapter_name):
-    #     if adapter_name in self.lora_A.keys():
-    #         torch.nn.init.xavier_uniform_(self.lora_A[adapter_name].weight)
-    #         torch.nn.init.zeros_(self.lora_B[adapter_name].weight)
 
 
 def dispatch_gptq(

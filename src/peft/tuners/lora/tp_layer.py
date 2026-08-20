@@ -19,8 +19,8 @@ import warnings
 from typing import Any, Optional
 
 import torch
-import torch.nn as nn
-import torch.nn.init as init
+from torch import nn
+from torch.nn import init
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils import transpose
@@ -28,6 +28,13 @@ from peft.utils.integrations import gather_params_ctx
 
 from .config import LoraConfig
 from .layer import LoraLayer
+
+
+def get_default_module_allowlist():
+    """Allowed module names that config.megatron_core can reference for import"""
+    return [
+        "megatron",
+    ]
 
 
 class LoraParallelLinear(nn.Module, LoraLayer):
@@ -57,6 +64,10 @@ class LoraParallelLinear(nn.Module, LoraLayer):
 
         if config.use_dora:
             raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
+        if config.velora_config is not None:
+            raise ValueError(
+                f"{self.__class__.__name__} does not support VeLoRA yet, please set `velora_config=None`."
+            )
 
         self.backend = backend
         self.is_parallel_a = isinstance(base_layer, backend.RowParallelLinear)
@@ -313,6 +324,12 @@ def dispatch_megatron(
         target_base_layer = target
 
     if config.megatron_config:
+        if not any(config.megatron_core.startswith(f"{prefix}.") for prefix in get_default_module_allowlist()):
+            raise ValueError(
+                f"{config.megatron_core=} does not start with a valid prefix ({get_default_module_allowlist()}) "
+                "which is unsupported due to being a potential security risk. If you think it should be supported, "
+                "please raise an issue in PEFT."
+            )
         megatron_core = importlib.import_module(config.megatron_core)
     else:
         megatron_core = None

@@ -16,9 +16,23 @@
 import torch
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
-from peft.utils import TRANSFORMERS_MODELS_TO_MISS_TARGET_MODULES_MAPPING
+from peft.utils import (
+    TRANSFORMERS_MODELS_TO_MISS_TARGET_MODULES_MAPPING,
+    get_quantization_kwargs,
+    resolve_quantization_backend,
+)
 
 from .layer import MissLayer, MissLinear
+
+
+def _get_tuner_layer_class(target_base_layer: torch.nn.Module) -> type[MissLayer] | None:
+    layer_cls: type[MissLayer] | None = None
+    if isinstance(target_base_layer, torch.nn.Linear):
+        layer_cls = MissLinear
+    elif (quant_backend := resolve_quantization_backend(target_base_layer)) is not None:
+        layer_cls = {"linear": MissLinear}.get(quant_backend.layer_type)
+
+    return layer_cls
 
 
 class MissModel(BaseTuner):
@@ -91,11 +105,9 @@ class MissModel(BaseTuner):
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "r": miss_config.r,
-            "mini_r": miss_config.mini_r,
-            "miss_dropout": miss_config.miss_dropout,
-            "init_weights": miss_config.init_weights,
+            "bias": bias,
         }
-        kwargs["bias"] = bias
+        kwargs.update(get_quantization_kwargs(self))
 
         # If it is not a MissLayer, create a new module, else update it with new adapters
         if not isinstance(target, MissLayer):
@@ -107,10 +119,8 @@ class MissModel(BaseTuner):
         else:
             target.update_layer(
                 adapter_name,
-                r=miss_config.r,
-                init_weights=miss_config.init_weights,
-                miss_dropout=miss_config.miss_dropout,
-                mini_r=miss_config.mini_r,
+                config=miss_config,
+                **kwargs,
             )
 
     @staticmethod
@@ -120,11 +130,12 @@ class MissModel(BaseTuner):
         else:
             target_base_layer = target
 
-        if isinstance(target_base_layer, torch.nn.Linear):
-            new_module = MissLinear(target, adapter_name, **kwargs)
-        else:
-            raise ValueError(
-                f"Target module {target} is not supported. Currently, only `torch.nn.Linear` is supported."
+        layer_cls = _get_tuner_layer_class(target_base_layer)
+        if layer_cls is None:
+            raise TypeError(
+                f"Target module {target} is not supported. Currently, only `torch.nn.Linear` (optionally quantized) "
+                "is supported."
             )
 
+        new_module = layer_cls(target, adapter_name, config=miss_config, **kwargs)
         return new_module

@@ -40,7 +40,7 @@ def train(
     save_step: int = 100,
     device_map: str = "auto",
     waveft_n_frequency: int = 2592,
-    waveft_target_modules: list[str] = None,
+    waveft_target_modules: Optional[list[str]] = None,
     waveft_scaling: float = 25.0,
     waveft_wavelet_family: str = "db1",
     waveft_use_idwt: bool = True,
@@ -48,7 +48,7 @@ def train(
     seed: Optional[int] = None,
 ):
     # Set device_map to the right place when enabling DDP.
-    world_size = int(os.environ.get("WORLD_SIZE", 0)) or int(os.environ.get("PMI_SIZE", 0))
+    world_size = int(os.environ.get("WORLD_SIZE", "0")) or int(os.environ.get("PMI_SIZE", "0"))
     if world_size > 1 and device_map != "cpu":
         from accelerate import Accelerator
 

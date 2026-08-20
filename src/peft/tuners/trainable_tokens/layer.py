@@ -19,12 +19,14 @@ from typing import Optional
 
 import torch
 import torch.distributed as dist
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 from peft.utils.integrations import check_deepspeed_zero3_enabled, gather_params_ctx
+
+from .config import TrainableTokensConfig
 
 
 class TrainableTokensLayer(nn.Module, BaseTunerLayer):
@@ -38,7 +40,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         self,
         base_layer: nn.Module,
         adapter_name: str,
-        token_indices: list[int],
+        config: TrainableTokensConfig | dict | None = None,
         tied_adapter: Optional[TrainableTokensLayer] = None,
         **kwargs,
     ) -> None:
@@ -104,13 +106,23 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
         dist.broadcast(token_weights, src=src_rank)
         return token_weights
 
-    def update_layer(self, adapter_name, **kwargs):
-        if kwargs.get("tied_adapter", None):
-            # as a tied adapter, we're just following whatever the adpater we're tied to does, we don't update anything.
+    def update_layer(
+        self,
+        adapter_name,
+        config: TrainableTokensConfig | None = None,
+        tied_adapter: nn.Module | None = None,
+        **kwargs,
+    ):
+        # config can be None when update_layer is called through _set_trainable, in which case the relevant
+        # arguments should be in kwargs
+        if tied_adapter is not None:
+            # as a tied adapter, we're just following whatever the adapter we're tied to does, we don't update anything.
             return
 
-        self.token_indices[adapter_name] = kwargs["token_indices"]
-        init_weights = kwargs.get("init_weights", True)
+        token_indices = config.token_indices if (config is not None) else kwargs["token_indices"]
+        init_weights = config.init_weights if (config is not None) else kwargs.get("init_weights", True)
+
+        self.token_indices[adapter_name] = token_indices
 
         # we initialize the delta embedding weights from the base embedding matrix and replace values instead of
         # adding/subtracting deltas. we do it this way and use `embedding.weight.index_copy()` to write the updated
@@ -145,18 +157,21 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
-    def _check_overlapping_tokens(self, adapter_names):
+    def _check_overlapping_tokens(self, adapter_names: list[str]):
         """Raises an error if the token indices of the given adapter names are overlapping.
         This is currently not supported and can lead to undefined behavior of the model if no specific merging between
         the overlapping indices' values is applied.
         """
-        if len(adapter_names) <= 1:
+        # We take already merged adapters into account as well since they can be overridden by new adapters as well.
+        # Merged ones come first so that the adapter reported in the error is the one being added. Duplicates are
+        # dropped so that a name repeated within one call is not reported as overlapping with itself.
+        adapters_to_check = list(dict.fromkeys(self.merged_adapters + adapter_names))
+        if len(adapters_to_check) <= 1:
             return
 
         indices = set()
 
-        # we take already merged adapters into account as well since they can be overridden by new adapters as well.
-        for adapter_name in set(adapter_names + self.merged_adapters):
+        for adapter_name in adapters_to_check:
             index_set = set(self.token_indices[adapter_name])
             if len(indices.intersection(index_set)):
                 raise ValueError(

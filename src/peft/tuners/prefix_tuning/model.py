@@ -16,8 +16,10 @@
 # with some refactor
 import torch
 
+from peft.tuners.tuners_utils import BasePromptEncoder
 
-class PrefixEncoder(torch.nn.Module):
+
+class PrefixEncoder(BasePromptEncoder):
     r"""
     The `torch.nn` model to encode the prefix.
 
@@ -60,6 +62,7 @@ class PrefixEncoder(torch.nn.Module):
         num_layers = config.num_layers
         encoder_hidden_size = config.encoder_hidden_size
         num_virtual_tokens = config.num_virtual_tokens
+        init_weights = config.init_weights
         if self.prefix_projection and not config.inference_mode:
             # Use a two-layer MLP to encode the prefix
             self.embedding = torch.nn.Embedding(num_virtual_tokens, token_dim)
@@ -68,8 +71,14 @@ class PrefixEncoder(torch.nn.Module):
                 torch.nn.Tanh(),
                 torch.nn.Linear(encoder_hidden_size, num_layers * 2 * token_dim),
             )
+
+            if init_weights == "zero":
+                torch.nn.init.zeros_(self.transform[-1].weight.data)
+                torch.nn.init.zeros_(self.transform[-1].bias.data)
         else:
             self.embedding = torch.nn.Embedding(num_virtual_tokens, num_layers * 2 * token_dim)
+            if init_weights == "zero":
+                torch.nn.init.zeros_(self.embedding.weight.data)
 
     def forward(self, prefix: torch.Tensor):
         if self.prefix_projection:

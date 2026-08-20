@@ -1,0 +1,21 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "bias": "none",
+  "fan_in_fan_out": false,
+  "inference_mode": false,
+  "init_weights": true,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "modules_to_save": null,
+  "peft_type": "TINYLORA",
+  "projection_seed": 42,
+  "r": 2,
+  "revision": null,
+  "save_projection": true,
+  "target_modules": null,
+  "task_type": null,
+  "tinylora_dropout": 0.0,
+  "u": 64,
+  "weight_tying": 1.0
+}
