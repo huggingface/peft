@@ -16,8 +16,10 @@
 Test PEFT method x quantization method matrix, focusing on basic tests.
 """
 
+import importlib.metadata as importlib_metadata
 from dataclasses import dataclass
 
+import packaging
 import pytest
 import torch
 from accelerate.utils.memory import clear_device_cache
@@ -109,7 +111,13 @@ class TorchAoInt8WeightOnlyLoader:
 class TorchAoInt8DynamicActivationInt8WeightLoader:
     name = "torchao_int8_dynamic_activation_int8"
     backend_cls = TorchaoBackend
-    supports_merge = False
+    # On torchao < 0.18.0, LinearActivationQuantizedTensor does not support dequantize, so merging
+    # is not available. On torchao >= 0.18.0, Int8Tensor supports dequantize, so merging works.
+    supports_merge = (
+        packaging.version.parse(importlib_metadata.version("torchao")) >= packaging.version.parse("0.18.0")
+        if is_torchao_available()
+        else False
+    )
     supports_non_quantized_comparison = True
     model_id = "peft-internal-testing/opt-125m"
     expected_layer_count = 24  # (q_proj, v_proj) x 12 layers
@@ -272,7 +280,7 @@ class TestQuantization:
         model = get_peft_model(model, config)
 
         if not _config_supports_forward(config, quant):
-            with pytest.raises(ValueError, match="is not supported for quantization with"), torch.inference_mode():
+            with pytest.raises(ValueError, match="is not supported"), torch.inference_mode():
                 model(dummy_input).logits
             return
 
@@ -302,7 +310,7 @@ class TestQuantization:
         model = get_peft_model(model, config).eval()
 
         if not _config_supports_forward(config, quant):
-            with pytest.raises(ValueError, match="is not supported for quantization with"), torch.inference_mode():
+            with pytest.raises(ValueError, match="is not supported"), torch.inference_mode():
                 model(dummy_input).logits
             return
 

@@ -4600,6 +4600,7 @@ class TestPeftTorchao:
 
     @pytest.mark.single_gpu_tests
     def test_causal_lm_training_single_gpu_torchao_dora_int8_dynamic_activation_int8_weight_raises(self):
+        import torchao
         from transformers import TorchAoConfig
 
         device = 0
@@ -4619,7 +4620,13 @@ class TestPeftTorchao:
             task_type="CAUSAL_LM",
             use_dora=True,
         )
-        with pytest.raises(NotImplementedError):
+        torchao_version = packaging.version.parse(torchao.__version__)
+        if torchao_version < packaging.version.parse("0.18.0"):
+            # LinearActivationQuantizedTensor does not support dequantize, so DoRA fails
+            with pytest.raises(NotImplementedError):
+                get_peft_model(model, config)
+        else:
+            # Int8Tensor supports dequantize, so DoRA works
             get_peft_model(model, config)
 
     @pytest.mark.single_gpu_tests
@@ -4848,7 +4855,11 @@ class TestPeftTorchao:
 
     @pytest.mark.single_gpu_tests
     def test_torchao_merge_layers_int8_dynamic_activation_int8_weight_raises(self):
-        # int8_dynamic_activation_int8_weight does not support dequantize, thus merging does not work
+        # int8_dynamic_activation_int8_weight: on torchao < 0.18.0, the weight is a
+        # LinearActivationQuantizedTensor which does not support dequantize, so merging
+        # raises NotImplementedError. On torchao >= 0.18.0, the weight is an Int8Tensor
+        # which supports dequantize, so merging works.
+        import torchao
         from transformers import TorchAoConfig
 
         quant_type = "int8_dynamic_activation_int8_weight"
@@ -4871,11 +4882,17 @@ class TestPeftTorchao:
         )
         model = get_peft_model(model, config)
 
-        msg = re.escape(
-            "Weights of type LinearActivationQuantizedTensor do not support dequantization (yet), which is needed to "
-            "support merging."
-        )
-        with pytest.raises(NotImplementedError, match=msg):
+        torchao_version = packaging.version.parse(torchao.__version__)
+        if torchao_version < packaging.version.parse("0.18.0"):
+            # LinearActivationQuantizedTensor does not support dequantize
+            msg = re.escape(
+                "Weights of type LinearActivationQuantizedTensor do not support dequantization (yet), which is needed to "
+                "support merging."
+            )
+            with pytest.raises(NotImplementedError, match=msg):
+                model.merge_adapter()
+        else:
+            # Int8Tensor with act_quant_kwargs supports dequantize, so merging works
             model.merge_adapter()
 
     @pytest.mark.single_gpu_tests
