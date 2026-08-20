@@ -161,9 +161,8 @@ def is_torchao_available() -> bool:
 def is_torchao_ge_v0_18_0() -> bool:
     """Return True if torchao is installed and its version is >= 0.18.0.
 
-    torchao 0.18.0 removed the v1 tensor subclass system (AffineQuantizedTensor,
-    LinearActivationQuantizedTensor) in favor of v2 tensor subclasses (Int8Tensor,
-    Int4Tensor, etc.) that inherit from TorchAOBaseTensor.
+    torchao 0.18.0 removed the v1 tensor subclass system (AffineQuantizedTensor, LinearActivationQuantizedTensor) in
+    favor of v2 tensor subclasses (Int8Tensor, Int4Tensor, etc.) that inherit from TorchAOBaseTensor.
     """
     if not is_torchao_available():
         return False
