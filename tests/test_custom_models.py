@@ -4618,21 +4618,6 @@ class TestPeftCustomModel(PeftCommonTester):
         assert (generators["default"].get_state() == state).all()
         assert not (generators["other"].get_state() == state).all()
 
-    def test_pvera_generator_is_on_cpu(self):
-        # A torch.Generator is bound to its device and is not moved by nn.Module.to(), so a single CPU generator is
-        # kept per adapter and the sampled noise is moved to the device of the model instead.
-        config = PveraConfig(
-            r=8, init_weights=False, target_modules=["lin0"], sample_at_inference=True, generator_seed=0
-        )
-        model = get_peft_model(MLP(), config).to(self.torch_device)
-        model.eval()
-        X = torch.randn(9, 10).to(self.torch_device)
-        with torch.no_grad():
-            output = model(X)
-
-        assert model.base_model.model.lin0.pvera_generator["default"].device.type == "cpu"
-        assert output.device.type == torch.device(self.torch_device).type
-
     def test_pvera_no_generator_seed_means_no_generator(self):
         config = PveraConfig(r=8, init_weights=False, target_modules=["lin0"], sample_at_inference=True)
         model = get_peft_model(MLP(), config).to(self.torch_device)

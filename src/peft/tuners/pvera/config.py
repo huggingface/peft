@@ -71,8 +71,7 @@ class PveraConfig(PeftConfig):
         sample_at_inference (`bool`, defaults to `False`):
             Whether to sample from the learned PVeRA distribution at inference. If False, the learned mean is used.
         generator_seed (`int`, defaults to None):
-            Random seed for the generator used to sample from the learned distribution. Each adapter gets its own
-            generator, so adding a second adapter does not affect the sampling of the first one.
+            Random seed for the generator used to sample from the learned distribution.
     """
 
     r: int = field(
@@ -184,10 +183,7 @@ class PveraConfig(PeftConfig):
     generator_seed: Optional[int] = field(
         default=None,
         metadata={
-            "help": (
-                "Random seed for the generator used to sample from the learned distribution. Each adapter gets its "
-                "own generator, so adding a second adapter does not affect the sampling of the first one."
-            )
+            "help": "Random seed for the generator used to sample from the learned distribution."
         },
     )
 
