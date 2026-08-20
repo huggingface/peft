@@ -4600,7 +4600,7 @@ class TestPeftTorchao:
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.single_gpu_tests
-    def test_causal_lm_training_single_gpu_torchao_dora_int8_dynamic_activation_int8_weight_raises(self):
+    def test_causal_lm_training_single_gpu_torchao_dora_int8_dynamic_activation_int8_weight(self):
         from transformers import TorchAoConfig
 
         device = 0
@@ -4853,7 +4853,7 @@ class TestPeftTorchao:
         assert torch.allclose(logits, logits_merged_unloaded, atol=atol, rtol=rtol)
 
     @pytest.mark.single_gpu_tests
-    def test_torchao_merge_layers_int8_dynamic_activation_int8_weight_raises(self):
+    def test_torchao_merge_layers_int8_dynamic_activation_int8_weight(self):
         # int8_dynamic_activation_int8_weight: on torchao < 0.18.0, the weight is a
         # LinearActivationQuantizedTensor which does not support dequantize, so merging
         # raises NotImplementedError. On torchao >= 0.18.0, the weight is an Int8Tensor
