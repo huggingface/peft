@@ -18,9 +18,9 @@ import tempfile
 import pytest
 import torch
 from torch.testing import assert_close
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, GPT2Config, GPT2LMHeadModel
 
-from peft import get_peft_model
+from peft import PromptTuningConfig, TaskType, get_peft_model
 from peft.peft_model import PeftModel
 from peft.tuners.adaption_prompt import AdaptionPromptConfig
 from peft.utils import infer_device
@@ -414,3 +414,63 @@ class TestAdaptionPrompt:
         with model.disable_adapter():
             output_peft_disabled = model(dummy_input).logits
         assert torch.allclose(output_before, output_peft_disabled)
+
+    def test_disable_adapter_nested_context_does_not_raise(self):
+        # Regression test for https://github.com/huggingface/peft/issues/3555
+        # Nesting `disable_adapter()` context managers used to raise `KeyError: 'default'` because the inner context
+        # tried to remove the already-removed adapted attentions a second time, and the outer context's cleanup then
+        # masked the original exception. This is a small, from-scratch model so no checkpoint download is needed.
+        gpt2_config = GPT2Config(
+            n_layer=2,
+            n_head=2,
+            n_embd=16,
+            n_positions=32,
+            n_ctx=32,
+            vocab_size=64,
+            bos_token_id=1,
+            eos_token_id=2,
+        )
+        model = get_peft_model(
+            GPT2LMHeadModel(gpt2_config),
+            AdaptionPromptConfig(adapter_layers=1, adapter_len=2, task_type="CAUSAL_LM"),
+        )
+
+        with model.disable_adapter():
+            assert model._adapters_disabled
+            with model.disable_adapter():
+                assert model._adapters_disabled
+            # still disabled, the inner context must not have re-enabled the adapter
+            assert model._adapters_disabled
+        # outer context restores the enabled state
+        assert not model._adapters_disabled
+
+    def test_prompt_tuning_disable_adapter_nested_context_preserves_state(self):
+        # Regression test for https://github.com/huggingface/peft/issues/3555
+        # For prompt learning methods, nested `disable_adapter()` contexts used to leave
+        # `has_active_enabled_adapter` reporting `True` once the inner context exited, even though the outer context
+        # was still active and forwarding should remain disabled. This is a small, from-scratch model so no
+        # checkpoint download is needed.
+        gpt2_config = GPT2Config(
+            n_layer=2,
+            n_head=2,
+            n_embd=16,
+            n_positions=32,
+            n_ctx=32,
+            vocab_size=64,
+            bos_token_id=1,
+            eos_token_id=2,
+        )
+        model = get_peft_model(
+            GPT2LMHeadModel(gpt2_config),
+            PromptTuningConfig(task_type=TaskType.CAUSAL_LM, num_virtual_tokens=2),
+        )
+
+        assert model.has_active_enabled_adapter
+        with model.disable_adapter():
+            assert not model.has_active_enabled_adapter
+            with model.disable_adapter():
+                assert not model.has_active_enabled_adapter
+            # still disabled, the inner context must not have re-enabled adapters early
+            assert not model.has_active_enabled_adapter
+        # outer context restores the enabled state
+        assert model.has_active_enabled_adapter

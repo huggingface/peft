@@ -1030,6 +1030,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         ```
         """
         if self.peft_config[self.active_adapter].is_prompt_learning:
+            # Snapshot the state from before this context was entered so that nested contexts don't clobber each
+            # other: only the outermost context that actually disabled the adapters should restore them.
+            was_disabled = getattr(self, "_adapters_disabled", False)
             try:
                 # TODO: consider replacing this patching of methods with a more robust mechanism: setting a flag and
                 # letting the underlying methods deal with it, same as how LoRA does it.
@@ -1040,18 +1043,25 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self._adapters_disabled = True
                 yield
             finally:
-                self.forward = old_forward
-                self.prepare_inputs_for_generation = old_prepare_inputs_for_generation
-                self._adapters_disabled = False
+                if not was_disabled:
+                    self.forward = old_forward
+                    self.prepare_inputs_for_generation = old_prepare_inputs_for_generation
+                self._adapters_disabled = was_disabled
 
         elif self.peft_config[self.active_adapter].is_adaption_prompt:
+            # Snapshot the state from before this context was entered so that nested contexts don't clobber each
+            # other: only the outermost context that actually disabled the adapters should re-enable them, and a
+            # nested context should not try to remove the already-removed adapted attentions again.
+            was_disabled = getattr(self, "_adapters_disabled", False)
             try:
-                self.base_model.disable_adapter_layers()
+                if not was_disabled:
+                    self.base_model.disable_adapter_layers()
                 self._adapters_disabled = True
                 yield
             finally:
-                self.base_model.enable_adapter_layers()
-                self._adapters_disabled = False
+                if not was_disabled:
+                    self.base_model.enable_adapter_layers()
+                self._adapters_disabled = was_disabled
 
         else:  # LoRA, LoHa, etc.
             model_status = self.get_model_status()
