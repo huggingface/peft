@@ -153,7 +153,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         self._is_prompt_learning = peft_config.is_prompt_learning
         if self._is_prompt_learning:
-            self._peft_config = {adapter_name: peft_config}
+            self._peft_config = {}
             self.base_model = model
             self.add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
         else:
