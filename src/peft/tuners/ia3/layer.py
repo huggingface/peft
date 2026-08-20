@@ -333,4 +333,4 @@ class Conv3d(_ConvNd):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if not self._kernel_dim == 5:
-            raise ValueError(f"Conv2d layer kernel must have 5 dimensions, not {self._kernel_dim}")
+            raise ValueError(f"Conv3d layer kernel must have 5 dimensions, not {self._kernel_dim}")
