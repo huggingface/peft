@@ -31,6 +31,8 @@ from peft import (
     HRAConfig,
     IA3Config,
     LilyConfig,
+    LoHaConfig,
+    LoKrConfig,
     LoraConfig,
     MissConfig,
     OFTConfig,
@@ -61,7 +63,7 @@ PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST = [
     "peft-internal-testing/tiny-random-DebertaV2Model",
 ]
 
-# TODO Missing from this list are LoKr, LoHa, LN Tuning, add them
+# LN Tuning is not included because these model types have no default target modules.
 ALL_CONFIGS = [
     (
         AdaLoraConfig,
@@ -168,6 +170,20 @@ ALL_CONFIGS = [
             "r": 8,
             "stride_A": 1,
             "num_B": 2,
+        },
+    ),
+    (
+        LoHaConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+        },
+    ),
+    (
+        LoKrConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
         },
     ),
     (
