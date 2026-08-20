@@ -94,6 +94,7 @@ from peft import (
 from peft.import_utils import (
     is_diffusers_available,
     is_te_available,
+    is_torchao_ge_v0_18_0,
     is_transformers_ge_v5,
     is_transformers_ge_v5_13_0,
     is_xpu_available,
@@ -4600,7 +4601,6 @@ class TestPeftTorchao:
 
     @pytest.mark.single_gpu_tests
     def test_causal_lm_training_single_gpu_torchao_dora_int8_dynamic_activation_int8_weight_raises(self):
-        import torchao
         from transformers import TorchAoConfig
 
         device = 0
@@ -4620,8 +4620,7 @@ class TestPeftTorchao:
             task_type="CAUSAL_LM",
             use_dora=True,
         )
-        torchao_version = packaging.version.parse(torchao.__version__)
-        if torchao_version < packaging.version.parse("0.18.0"):
+        if not is_torchao_ge_v0_18_0():
             # LinearActivationQuantizedTensor does not support dequantize, so DoRA fails
             with pytest.raises(NotImplementedError):
                 get_peft_model(model, config)
@@ -4859,7 +4858,6 @@ class TestPeftTorchao:
         # LinearActivationQuantizedTensor which does not support dequantize, so merging
         # raises NotImplementedError. On torchao >= 0.18.0, the weight is an Int8Tensor
         # which supports dequantize, so merging works.
-        import torchao
         from transformers import TorchAoConfig
 
         quant_type = "int8_dynamic_activation_int8_weight"
@@ -4882,8 +4880,7 @@ class TestPeftTorchao:
         )
         model = get_peft_model(model, config)
 
-        torchao_version = packaging.version.parse(torchao.__version__)
-        if torchao_version < packaging.version.parse("0.18.0"):
+        if not is_torchao_ge_v0_18_0():
             # LinearActivationQuantizedTensor does not support dequantize
             msg = re.escape(
                 "Weights of type LinearActivationQuantizedTensor do not support dequantization (yet), which is needed to "
