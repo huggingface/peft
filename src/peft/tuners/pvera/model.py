@@ -198,7 +198,7 @@ class PveraModel(BaseTuner):
         if is_bnb_4bit_available():
             from .bnb import Linear4bit
 
-        bias = kwargs.pop("bias", False)
+        _ = kwargs.pop("bias", False)
         loaded_in_8bit = kwargs.get("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.get("loaded_in_4bit", False)
 
