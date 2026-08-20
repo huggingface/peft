@@ -182,9 +182,7 @@ class PveraConfig(PeftConfig):
     )
     generator_seed: Optional[int] = field(
         default=None,
-        metadata={
-            "help": "Random seed for the generator used to sample from the learned distribution."
-        },
+        metadata={"help": "Random seed for the generator used to sample from the learned distribution."},
     )
 
     def __post_init__(self):
