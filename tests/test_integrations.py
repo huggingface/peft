@@ -326,6 +326,37 @@ class TestTransformersV5:
         expected_num_lora_layers = 12  # 2 layers with 6 lora layers each
         assert num_lora_layers == expected_num_lora_layers
 
+    def test_build_peft_weight_mapping_without_distributed_operation(self):
+        # Regression test for compatibility with the DTensor-based TP rework in Transformers
+        # (https://github.com/huggingface/transformers/pull/47579), which removed the
+        # ``distributed_operation`` attribute from ``WeightConverter``. PEFT used to copy
+        # that attribute when building new converters; without the attribute it must not
+        # raise.
+        from transformers.core_model_loading import Concatenate, MergeModulelist, WeightConverter
+
+        from peft.utils.transformers_weight_conversion import build_peft_weight_mapping
+
+        weight_conversions = [
+            WeightConverter(
+                source_patterns=["model.experts.*.w1.weight", "model.experts.*.w3.weight"],
+                target_patterns=["model.experts.gate_up_proj"],
+                operations=[MergeModulelist(dim=0), Concatenate(dim=1)],
+            ),
+            WeightConverter(
+                source_patterns=["model.experts.*.w2.weight"],
+                target_patterns=["model.experts.down_proj"],
+                operations=[MergeModulelist(dim=0)],
+            ),
+        ]
+
+        result = build_peft_weight_mapping(weight_conversions, adapter_name="default")
+        assert len(result) > 0
+        # On older Transformers, distributed_operation is propagated; on newer versions
+        # (post PR #47579) it does not exist and must be silently skipped.
+        for entry in result:
+            if isinstance(entry, WeightConverter):
+                assert hasattr(entry, "quantization_operation")
+
     def test_qwen_v4_lora_weight_conversion_peft_model_from_pretrained(self):
         # Load a PEFT adapter trained with transformers v4 on Qwen3 MoE, which now has converted weights (MoE), using
         # PeftModel.from_pretrained
