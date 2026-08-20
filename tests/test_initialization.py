@@ -39,6 +39,7 @@ from peft import (
     FrodConfig,
     GraloraConfig,
     HiraConfig,
+    HRAConfig,
     IA3Config,
     KasaConfig,
     LilyConfig,
@@ -2991,6 +2992,28 @@ class TestHiraInitialization:
         base_model = self.get_model_conv_groups(conv_cls, groups=2)
         config = HiraConfig(target_modules=["conv"], r=4)
         with pytest.raises(NotImplementedError, match="HiRA does not support .* layers with groups > 1"):
+            get_peft_model(base_model, config)
+
+
+class TestHraInitialization:
+    """Test class to check the initialization of HRA adapters."""
+
+    torch_device = infer_device()
+
+    def test_error_raised_for_conv2d_groups_greater_than_one(self):
+        # HRA does not support grouped convolutions, so constructing an adapter for a Conv2d layer with
+        # `groups > 1` must fail immediately and clearly.
+        class ModelConvGroups(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(4, 8, kernel_size=3, groups=2)
+
+            def forward(self, X):
+                return self.conv(X)
+
+        base_model = ModelConvGroups().eval().to(self.torch_device)
+        config = HRAConfig(target_modules=["conv"], r=4)
+        with pytest.raises(NotImplementedError, match="HRA does not support .* layers with groups > 1"):
             get_peft_model(base_model, config)
 
 
