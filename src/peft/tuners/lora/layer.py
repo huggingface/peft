@@ -2442,9 +2442,9 @@ class ParamWrapper(nn.Module, LoraLayer):
     def get_delta_factors(self, adapter_name):
         """`(lhs, rhs, scaling)` such that the delta weight is `scaling * lhs @ rhs`.
 
-        Keeping the two low-rank factors instead of their product lets the caller fold the
-        update into the base weight with a single `baddbmm`, which avoids materialising a
-        second tensor the size of the whole expert stack on every forward.
+        Keeping the two low-rank factors instead of their product lets the caller fold the update into the base weight
+        with a single `baddbmm`, which avoids materialising a second tensor the size of the whole expert stack on every
+        forward.
         """
         weight_A = self.lora_A[adapter_name].weight
         weight_B = self.lora_B[adapter_name].weight
