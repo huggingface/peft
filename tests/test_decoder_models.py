@@ -60,6 +60,7 @@ from peft import (
     RandLoraConfig,
     RoadConfig,
     ShiraConfig,
+    SupertuningConfig,
     TaskType,
     TinyLoraConfig,
     UniLoraConfig,
@@ -342,6 +343,26 @@ ALL_CONFIGS = [
         },
     ),
     (
+        SupertuningConfig,
+        {
+            "sparsity": 0.9,
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "init_weights": False,
+        },
+    ),
+    (
+        SupertuningConfig,
+        {
+            "sparsity": 0.9,
+            "r": 2,
+            "select_top": False,
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "init_weights": False,
+        },
+    ),
+    (
         VBLoRAConfig,
         {
             "task_type": "CAUSAL_LM",
@@ -430,12 +451,15 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         OSFConfig,
         RoadConfig,
         ShiraConfig,
+        SupertuningConfig,
         C3AConfig,
         MissConfig,
         DeloraConfig,
         PsoftConfig,
     ]:
-        pytest.skip("Skipping Beft/BOFT/GLoRA/HRA/OFT/Road/SHiRA/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel")
+        pytest.skip(
+            "Skipping Beft/BOFT/GLoRA/HRA/OFT/Road/SHiRA/Supertuning/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel"
+        )
 
 
 def _skip_alora_no_activation(config_cls, config_kwargs):
