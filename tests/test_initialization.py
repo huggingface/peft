@@ -1794,7 +1794,8 @@ class TestLoraInitialization:
 
 
 class TestShadowInitialization:
-    def test_adding_multiple_sequence_classification_adapters_raises(self):
+    @pytest.mark.parametrize("other_task_type", ["SEQ_CLS", "CAUSAL_LM"])
+    def test_adding_an_adapter_when_sequence_classification_is_present_raises(self, other_task_type):
         base_config = LlamaConfig(
             vocab_size=32,
             hidden_size=16,
@@ -1808,9 +1809,9 @@ class TestShadowInitialization:
             ShadowConfig(task_type="SEQ_CLS"),
         )
 
-        msg = "does not support multiple sequence classification adapters"
+        msg = "does not support multiple adapters when any adapter uses sequence classification"
         with pytest.raises(ValueError, match=msg):
-            model.add_adapter("other", ShadowConfig(task_type="SEQ_CLS"))
+            model.add_adapter("other", ShadowConfig(task_type=other_task_type))
 
         assert "other" not in model.peft_config
 

@@ -231,7 +231,7 @@ class ShadowLayer(nn.Module, BaseTunerLayer):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
-        d = self._base_hidden_size()
+        d = self.hidden_size
         update_hidden = config.update_hidden_size or r
 
         self.shadow_r[adapter_name] = r
@@ -257,9 +257,6 @@ class ShadowLayer(nn.Module, BaseTunerLayer):
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
-
-    def _base_hidden_size(self) -> int:
-        return self.hidden_size
 
     def forward(self, hidden_states: Any, *args: Any, **kwargs: Any) -> Any:
         # `hidden_states` is a ShadowCarrier exactly when the shadow path is active for this pass (the entry pre-hook
@@ -424,6 +421,7 @@ class DetachedShadowModel(PreTrainedModel, GenerationMixin):
         return self.backbone.get_input_embeddings()
 
     def set_input_embeddings(self, value):
+        # Transformers calls this hook when replacing the embedding table, e.g. from `resize_token_embeddings()`.
         if self._shared_input_embeddings[0] is not None:
             self._shared_input_embeddings[0] = value
             return

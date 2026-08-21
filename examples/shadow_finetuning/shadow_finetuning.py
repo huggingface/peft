@@ -37,7 +37,7 @@ def parse_args():
     parser.add_argument(
         "--shadow_model",
         type=str,
-        default="shadow-llm/Qwen3-0.6B-H8B",
+        default="mirror",
         help=(
             "Shadow backbone source: set to 'mirror' to build a fresh mirrored backbone from the base config, "
             "or pass a model id/path for an explicit pretrained shadow."

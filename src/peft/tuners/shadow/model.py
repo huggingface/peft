@@ -29,7 +29,7 @@ from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import TaskType
 
 from .config import ShadowConfig
-from .diffusers import get_diffusion_shadow_backend
+from .diffusion_models import get_diffusion_shadow_backend
 from .layers import DetachedShadowModel, ShadowCache, ShadowCarrier, ShadowLayer
 
 
@@ -317,8 +317,9 @@ class ShadowModel(BaseTuner):
             peft_config.task_type == TaskType.SEQ_CLS for peft_config in self.peft_config.values()
         ):
             raise ValueError(
-                "ShadowPEFT does not support multiple sequence classification adapters because each adapter requires "
-                "both a classifier in `modules_to_save` and a separate `shadow_head`."
+                "ShadowPEFT does not support multiple adapters when any adapter uses sequence classification because "
+                "the sequence classification adapter requires both a classifier in `modules_to_save` and a separate "
+                "`shadow_head`."
             )
 
     def _create_and_replace(
@@ -474,7 +475,7 @@ class ShadowModel(BaseTuner):
         backbone_state = {
             key[len(backbone_prefix) :]: value for key, value in weights.items() if key.startswith(backbone_prefix)
         }
-        backbone.load_state_dict(backbone_state, strict=False)
+        backbone.load_state_dict(backbone_state, strict=True)
 
         projection_weight = weights.get("shadow_hidden_projection.weight")
         if projection_weight is None:

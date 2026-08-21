@@ -14,10 +14,13 @@
 
 import copy
 import json
+import platform
 
 import pytest
 import torch
+import torch.distributed as dist
 from safetensors import safe_open
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForSequenceClassification,
@@ -30,9 +33,11 @@ from peft import (
     PeftModel,
     ShadowConfig,
     get_peft_model,
+    get_peft_model_state_dict,
+    set_peft_model_state_dict,
 )
 from peft.tuners.shadow import DetachedShadowModel, ShadowCache
-from peft.tuners.shadow.diffusers import DetachedFluxShadowModel
+from peft.tuners.shadow.diffusion_models import DetachedFluxShadowModel
 from peft.tuners.shadow.layers import ShadowLayer
 from peft.utils.constants import SAFETENSORS_WEIGHTS_NAME
 
@@ -58,6 +63,44 @@ def make_llama_seqcls(num_labels=3):
 @pytest.fixture(autouse=True)
 def _seed():
     torch.manual_seed(0)
+
+
+@pytest.mark.skipif(platform.system() != "Linux", reason="Run FSDP tests only on Linux")
+@pytest.mark.skipif(not dist.is_available(), reason="These tests require torch.distributed")
+class TestShadowFsdpStateDict:
+    @pytest.fixture(autouse=True)
+    def fsdp_process_group(self):
+        dist.init_process_group(
+            backend="gloo",
+            store=dist.HashStore(),
+            rank=0,
+            world_size=1,
+        )
+        try:
+            yield
+        finally:
+            dist.destroy_process_group()
+
+    def test_save_load_roundtrip_fsdp_wrapped(self):
+        config = ShadowConfig(task_type="CAUSAL_LM", init_weights=False, shadow_num_hidden_layers=2)
+        model = get_peft_model(make_llama_causal(), config).eval()
+        model = FSDP(model, use_orig_params=True, device_id=torch.device("cpu"))
+        input_ids = torch.randint(0, 128, (2, 6))
+
+        with torch.no_grad():
+            output_before = model(input_ids=input_ids).logits
+
+        state_dict = get_peft_model_state_dict(model)
+        assert any(".shadow_backbone." in key for key in state_dict)
+        assert not any("_fsdp_wrapped_module" in key for key in state_dict)
+        del model
+
+        model = get_peft_model(make_llama_causal(), config).eval()
+        set_peft_model_state_dict(model, state_dict)
+        with torch.no_grad():
+            output_after = model(input_ids=input_ids).logits
+
+        assert torch.allclose(output_after, output_before, atol=1e-6)
 
 
 class TestShadowCausalLM:
@@ -579,6 +622,36 @@ class TestShadowBackboneVariants:
         ids = torch.randint(0, 128, (2, 6))
         model(input_ids=ids, labels=ids.clone()).loss.backward()
         assert embed.weight.grad is None
+
+    def test_pretrained_projected_shadow_checkpoint_requires_complete_backbone(self, tmp_path):
+        from safetensors.torch import save_file
+        from transformers import LlamaModel
+
+        base = make_llama_causal()
+        base_hidden = base.config.hidden_size
+        shadow_hidden = base_hidden // 2
+        inner_cfg = LlamaConfig(
+            vocab_size=base.config.vocab_size,
+            hidden_size=shadow_hidden,
+            intermediate_size=2 * shadow_hidden,
+            num_hidden_layers=1,
+            num_attention_heads=base.config.num_attention_heads,
+            num_key_value_heads=getattr(base.config, "num_key_value_heads", base.config.num_attention_heads),
+            max_position_embeddings=base.config.max_position_embeddings,
+        )
+        shadow_backbone = LlamaModel(inner_cfg)
+        state = {f"shadow_model.{key}": value for key, value in shadow_backbone.state_dict().items()}
+        state.pop(next(iter(state)))
+        state["shadow_hidden_projection.weight"] = torch.empty(base_hidden, shadow_hidden)
+        save_file(state, str(tmp_path / "model.safetensors"))
+        raw_config = {
+            "model_type": "causal_lm_with_hidden_projection",
+            "shadow_model_config": inner_cfg.to_dict(),
+        }
+        (tmp_path / "config.json").write_text(json.dumps(raw_config))
+
+        with pytest.raises(RuntimeError, match=r"Missing key\(s\) in state_dict"):
+            get_peft_model(base, ShadowConfig(task_type="CAUSAL_LM", shadow_model=str(tmp_path)))
 
     def test_unload_shadow_returns_standalone_generatable_model(self):
         # unload_shadow returns the standalone shadow network (backbone + projection + head) as a causal LM. This is how

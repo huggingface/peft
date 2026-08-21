@@ -19,7 +19,7 @@ The shadow backbone is built automatically from the base model's config (fewer l
 MLP/attention). This is the default `shadow_model="mirror"`:
 
 ```bash
-python shadow_finetuning.py --base_model_name_or_path Qwen/Qwen3-0.6B --shadow_num_hidden_layers 1 --r 8
+python shadow_finetuning.py --base_model_name_or_path Qwen/Qwen3-8B
 ```
 
 ShadowPEFT supports cached generation by maintaining separate KV caches for the frozen base model and the shadow
@@ -33,9 +33,9 @@ inserts a trainable projection to bridge the two hidden spaces. After training, 
 shadow network:
 
 ```bash
-python shadow_explicit_finetuning.py \
+python shadow_finetuning.py \
     --base_model_name_or_path Qwen/Qwen3-8B \
-    --shadow_model Qwen/Qwen3-0.6B
+    --shadow_model shadow-llm/Qwen3-0.6B-H8B
 ```
 
 ## Citation

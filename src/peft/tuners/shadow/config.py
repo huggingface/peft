@@ -223,7 +223,3 @@ class ShadowConfig(PeftConfig):
                     "Explicit `shadow_model` checkpoints define their architecture; unset these mirror-only "
                     f"overrides: {', '.join(configured)}."
                 )
-
-    @property
-    def is_shadow(self) -> bool:
-        return True
