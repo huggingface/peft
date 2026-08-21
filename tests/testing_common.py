@@ -1711,6 +1711,9 @@ class PeftCommonTester:
             model(**dummy_input)[0]
 
     def _test_weighted_combination_of_adapters(self, model_id, config_cls, config_kwargs):
+        if not issubclass(config_cls, (LoraConfig, IA3Config)):
+            # This test is only applicable for Lora and IA3 configs
+            return pytest.skip(f"Test not applicable for {config_cls}")
         if issubclass(config_cls, AdaLoraConfig):
             # AdaLora does not support adding more than 1 adapter
             return pytest.skip(f"Test not applicable for {config_cls}")
@@ -1729,21 +1732,15 @@ class PeftCommonTester:
             **config_kwargs,
         )
 
-        if not isinstance(config, (LoraConfig, IA3Config)):
-            # This test is only applicable for Lora and IA3 configs
-            return pytest.skip(f"Test not applicable for {config}")
-
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
-            model = get_peft_model(model, config, adapter_list[0])
+            model = get_peft_model(model, copy.deepcopy(config), adapter_list[0])
 
             # test positive weights
             if isinstance(config, LoraConfig):
                 self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, weight_list)
             elif isinstance(config, IA3Config):
                 self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, weight_list)
-            else:
-                pytest.skip(f"Test not applicable for {config}")
 
             del model
             model = self.transformers_class.from_pretrained(model_id)
@@ -1754,7 +1751,6 @@ class PeftCommonTester:
                 self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, negative_weight_list)
             elif isinstance(config, IA3Config):
                 self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, negative_weight_list)
-                pytest.skip(f"Test not applicable for {config}")
 
     def _test_disable_adapter(self, model_id, config_cls, config_kwargs):
         task_type = config_kwargs.get("task_type")
