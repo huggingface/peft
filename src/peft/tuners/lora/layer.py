@@ -2302,17 +2302,23 @@ class ParamWrapper(nn.Module, LoraLayer):
         # For ParamWrapper, we don't derive the in_features and out_features based on the base layer type, but directly
         # from the targeted parameter.
         param = self.get_param()
-        if param.ndim == 3:
-            num_experts, in_features, out_features = param.shape
+        # Under DeepSpeed ZeRO-3 the parameter is already partitioned, so `param.shape` is empty and the real shape
+        # lives in `ds_shape` -- the same handling `tuners_utils`, `deft` and `randlora` already use.
+        shape = getattr(param, "ds_shape", param.shape)
+        if len(shape) == 3:
+            num_experts, in_features, out_features = shape
+        elif len(shape) == 2:
+            num_experts, in_features, out_features = 1, shape[1], shape[0]
         else:
-            num_experts, in_features, out_features = 1, param.shape[1], param.shape[0]
-        if param.ndim not in (2, 3):
             raise ValueError(
-                f"lora.{self.__class__.__name__} was initialized with {param.ndim} dimensional Parameter, but only 2d "
+                f"lora.{self.__class__.__name__} was initialized with {len(shape)} dimensional Parameter, but only 2d "
                 "and 3d are supported."
             )
         # we have to store the num_experts attribute here, as the parent class only stores in_features and out_features.
         self.num_experts = num_experts
+        # store the rank too: `update_layer` needs it, and by then reading `param.ndim` under ZeRO-3 would see the
+        # partitioned (empty) shape rather than the real one.
+        self._param_ndim = len(shape)
         return in_features, out_features
 
     def update_layer(
@@ -2339,7 +2345,7 @@ class ParamWrapper(nn.Module, LoraLayer):
 
         # for some MoE layers, the order is (experts, out_features, in_features)
         is_transposed = getattr(self.get_base_layer(), "is_transposed", False)
-        swap_in_out_features = (self.get_param().ndim == 3) and not is_transposed
+        swap_in_out_features = (self._param_ndim == 3) and not is_transposed
         if swap_in_out_features and not self._did_swap_in_out_features:
             self.in_features, self.out_features = self.out_features, self.in_features
             self._did_swap_in_out_features = True
