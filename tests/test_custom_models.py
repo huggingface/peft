@@ -64,6 +64,7 @@ from peft import (
     RandLoraConfig,
     RoadConfig,
     ShiraConfig,
+    SupertuningConfig,
     TaskType,
     TinyLoraConfig,
     TrainableTokensConfig,
@@ -759,6 +760,24 @@ TEST_CASES = [
         ShiraConfig,
         {"r": 1, "target_modules": ["lin0"]},
     ),
+    ###############
+    # Supertuning #
+    ###############
+    ("Vanilla MLP 1 Supertuning", "MLP", SupertuningConfig, {"sparsity": 0.5, "target_modules": "lin0"}),
+    ("Vanilla MLP 2 Supertuning", "MLP", SupertuningConfig, {"sparsity": 0.5, "target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 Supertuning", "MLP", SupertuningConfig, {"sparsity": 0.5, "target_modules": ["lin1"]}),
+    (
+        "Vanilla MLP 4 Supertuning bottom-k",
+        "MLP",
+        SupertuningConfig,
+        {"sparsity": 0.5, "target_modules": ["lin0", "lin1"], "select_top": False},
+    ),
+    (
+        "Vanilla MLP 5 Supertuning Supra (r=2)",
+        "MLP",
+        SupertuningConfig,
+        {"sparsity": 0.5, "target_modules": ["lin0"], "r": 2},
+    ),
     ########
     # VeRA #
     ########
@@ -1384,7 +1403,7 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         "lora+trainable_tokens",
         LoraConfig,
         {"target_modules": ["lin0"], "init_lora_weights": False, "trainable_token_indices": {"emb": [0, 1, 2]}},
-        {"target_modules": ["lin1"], "init_lora_weights": False, "trainable_token_indices": {"emb": [3, 4, 5, 6]}},
+        {"target_modules": ["conv1d"], "init_lora_weights": False, "trainable_token_indices": {"emb": [3, 4, 5, 6]}},
     ),
     (
         "LoRA targeting nn.Parameter Same",
@@ -1525,6 +1544,21 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         ShiraConfig,
         {"r": 1, "target_modules": ["lin0"], "init_weights": False},
         {"r": 1, "target_modules": ["lin1"], "init_weights": False},
+    ),
+    # Check Supra (r set) here: if the hybrid works with multiple adapters, pure Super does too.
+    (
+        "Supertuning Same",
+        "supertuning",
+        SupertuningConfig,
+        {"sparsity": 0.5, "target_modules": ["lin0"], "r": 2, "init_weights": False},
+        {"sparsity": 0.5, "target_modules": ["lin0"], "r": 2, "init_weights": False},
+    ),
+    (
+        "Supertuning Different",
+        "supertuning",
+        SupertuningConfig,
+        {"sparsity": 0.5, "target_modules": ["lin0"], "r": 2, "init_weights": False},
+        {"sparsity": 0.5, "target_modules": ["lin1"], "r": 2, "init_weights": False},
     ),
     # Note: Currently, we cannot target lin0 and lin1 with different adapters when using VeRA. The reason is that the
     # first adapter being created will result in a vera_A or vera_B shape that is too small for the next adapter
@@ -3288,6 +3322,26 @@ class TestPeftCustomModel(PeftCommonTester):
         # model.active_adapter would not work, thus we have to check the base_model directly
         assert model.base_model.active_adapter == ["default", "other"]
 
+    @pytest.mark.parametrize("mixed", [False, True])
+    def test_add_adapter_rejects_duplicate_name_without_mutation(self, mixed):
+        # A duplicate name must fail before replacing the existing config or reinitializing its weights.
+        # LoRA is sufficient here because all PEFT methods go through the same add_adapter code path.
+        config = LoraConfig(target_modules=["lin0"], r=2, init_lora_weights=False)
+        model = get_peft_model(MLP(), config, adapter_name="existing", mixed=mixed)
+
+        config_before = model.peft_config["existing"]
+        state_dict_before = copy.deepcopy(model.state_dict())
+        replacement_config = LoraConfig(target_modules=["lin0"], r=4, init_lora_weights=False)
+
+        with pytest.raises(ValueError, match="Adapter with name 'existing' already exists"):
+            model.add_adapter("existing", replacement_config)
+
+        assert model.peft_config["existing"] is config_before
+        state_dict_after = model.state_dict()
+        assert state_dict_after.keys() == state_dict_before.keys()
+        for key, value in state_dict_before.items():
+            assert torch.equal(state_dict_after[key], value)
+
     @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
     def test_set_adapter_non_overlapping_modules(self, config_cls):
         # Ensure that when setting multiple adapters, the active adapters are correctly being set, even if
@@ -3483,7 +3537,7 @@ class TestPeftCustomModel(PeftCommonTester):
             target_modules=["layers.0.lin0"], modules_to_save=["layers.0.lin1", "layers.1.lin1"], **extra_kwargs
         )
         config1 = config_cls(
-            target_modules=["0layers..lin0"], modules_to_save=["layers.2.lin1", "layers.1.lin1"], **extra_kwargs
+            target_modules=["layers.0.lin0"], modules_to_save=["layers.2.lin1", "layers.1.lin1"], **extra_kwargs
         )
         model = get_peft_model(model, config0, adapter_name="default")
         # adding the adapter is fine
@@ -3967,7 +4021,18 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize(
         "config_cls",
-        [IA3Config, BeftConfig, FrodConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig, MissConfig],
+        [
+            IA3Config,
+            BeftConfig,
+            FrodConfig,
+            LoHaConfig,
+            LoKrConfig,
+            LoraConfig,
+            HRAConfig,
+            ShiraConfig,
+            SupertuningConfig,
+            MissConfig,
+        ],
     )
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
@@ -3980,6 +4045,8 @@ class TestPeftCustomModel(PeftCommonTester):
             config_cls = partial(config_cls, r=2)
         if config_cls == ShiraConfig:
             config_cls = partial(config_cls, r=1)
+        if config_cls == SupertuningConfig:
+            config_cls = partial(config_cls, sparsity=0.5)
 
         config0 = config_cls(target_modules=["lin0"], modules_to_save=["lin1"])
         config1 = config_cls(target_modules=["lin0"])
@@ -4000,7 +4067,17 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize(
         "config_cls",
-        [IA3Config, BeftConfig, FrodConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig],
+        [
+            IA3Config,
+            BeftConfig,
+            FrodConfig,
+            LoHaConfig,
+            LoKrConfig,
+            LoraConfig,
+            HRAConfig,
+            ShiraConfig,
+            SupertuningConfig,
+        ],
     )
     def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
         # See issue 1574
@@ -4012,6 +4089,8 @@ class TestPeftCustomModel(PeftCommonTester):
             config_cls = partial(config_cls, r=2)
         if config_cls == ShiraConfig:
             config_cls = partial(config_cls, r=1)
+        if config_cls == SupertuningConfig:
+            config_cls = partial(config_cls, sparsity=0.5)
 
         config0 = config_cls(target_modules=["lin0"])
         config1 = config_cls(target_modules=["lin0"], modules_to_save=["lin1"])
@@ -4599,6 +4678,34 @@ class TestPeftCustomModel(PeftCommonTester):
         output2 = model(**inputs).logits
 
         assert (output1 == output2).all()
+
+    def test_pvera_generator_is_per_adapter(self):
+        # Each adapter gets its own generator, otherwise adding a second adapter would reset the sampling stream of
+        # the first one.
+        def get_config():
+            return PveraConfig(
+                r=8, init_weights=False, target_modules=["lin0"], sample_at_inference=True, generator_seed=0
+            )
+
+        model = get_peft_model(MLP(), get_config()).to(self.torch_device)
+        model.eval()
+        X = torch.randn(9, 10).to(self.torch_device)
+        with torch.no_grad():
+            model(X)  # ticks the state of the "default" generator forward
+
+        state = model.base_model.model.lin0.pvera_generator["default"].get_state()
+        model.add_adapter("other", get_config())
+
+        generators = model.base_model.model.lin0.pvera_generator
+        assert set(generators) == {"default", "other"}
+        assert (generators["default"].get_state() == state).all()
+        assert not (generators["other"].get_state() == state).all()
+
+    def test_pvera_no_generator_seed_means_no_generator(self):
+        config = PveraConfig(r=8, init_weights=False, target_modules=["lin0"], sample_at_inference=True)
+        model = get_peft_model(MLP(), config).to(self.torch_device)
+
+        assert model.base_model.model.lin0.pvera_generator["default"] is None
 
 
 class TestMultiRankAdapter:

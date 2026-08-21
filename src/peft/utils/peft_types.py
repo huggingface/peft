@@ -99,6 +99,7 @@ class PeftType(str, enum.Enum):
     PSOFT = "PSOFT"
     PEANUT = "PEANUT"
     SHADOW = "SHADOW"
+    SUPERTUNING = "SUPERTUNING"
     DEFT = "DEFT"
 
 

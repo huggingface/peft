@@ -46,6 +46,7 @@ from peft import (
     RandLoraConfig,
     RoadConfig,
     ShiraConfig,
+    SupertuningConfig,
     TaskType,
     TinyLoraConfig,
     UniLoraConfig,
@@ -56,7 +57,7 @@ from peft import (
 )
 
 from .testing_common import PeftCommonTester
-from .testing_utils import set_init_weights_false
+from .testing_utils import hub_online_once, set_init_weights_false
 
 
 # Note: models from peft-internal-testing are just the safetensors versions of hf-internal-testing
@@ -256,6 +257,15 @@ ALL_CONFIGS = [
         ShiraConfig,
         {
             "r": 1,
+            "task_type": "SEQ_2_SEQ_LM",
+            "target_modules": None,
+            "init_weights": False,
+        },
+    ),
+    (
+        SupertuningConfig,
+        {
+            "sparsity": 0.9,
             "task_type": "SEQ_2_SEQ_LM",
             "target_modules": None,
             "init_weights": False,
@@ -570,3 +580,32 @@ class TestEncoderDecoderModels(PeftCommonTester):
         with tempfile.TemporaryDirectory() as tmp_dir:
             # This should work fine
             model.save_pretrained(tmp_dir, safe_serialization=True)
+
+    @pytest.mark.parametrize(
+        "config_cls,config_kwargs",
+        [
+            (PrefixTuningConfig, {"task_type": "SEQ_2_SEQ_LM", "num_virtual_tokens": 4}),
+            (PromptEncoderConfig, {"task_type": "SEQ_2_SEQ_LM", "num_virtual_tokens": 4, "encoder_hidden_size": 32}),
+            (PromptTuningConfig, {"task_type": "SEQ_2_SEQ_LM", "num_virtual_tokens": 4}),
+        ],
+    )
+    def test_prompt_learning_forward_with_inputs_embeds(self, config_cls, config_kwargs):
+        # Passing inputs_embeds instead of input_ids should be equivalent.
+        model_id = PEFT_ENCODER_DECODER_MODELS_TO_TEST[0]
+        with hub_online_once(model_id):
+            base_model = AutoModelForSeq2SeqLM.from_pretrained(model_id).to(self.torch_device)
+            model = get_peft_model(base_model, config_cls(base_model_name_or_path=model_id, **config_kwargs))
+            model.eval()
+
+            input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
+            attention_mask = torch.ones_like(input_ids)
+            decoder_input_ids = torch.tensor([[0, 1, 1], [0, 2, 1]]).to(self.torch_device)
+            with torch.no_grad():
+                output_ids = model(
+                    input_ids=input_ids, attention_mask=attention_mask, decoder_input_ids=decoder_input_ids
+                )
+                inputs_embeds = model.get_input_embeddings()(input_ids)
+                output_embeds = model(
+                    inputs_embeds=inputs_embeds, attention_mask=attention_mask, decoder_input_ids=decoder_input_ids
+                )
+            assert torch.allclose(output_ids.logits, output_embeds.logits, atol=1e-5, rtol=1e-5)

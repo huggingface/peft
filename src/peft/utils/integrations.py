@@ -101,8 +101,6 @@ def dequantize_bnb_weight(weight: torch.nn.Parameter, state: Optional[Any] = Non
     """Helper function to dequantize 4bit or 8bit bnb weights."""
     import bitsandbytes as bnb
 
-    device = weight.device
-
     cls_name = weight.__class__.__name__
     if cls_name == "Params4bit":
         dequantized = bnb.functional.dequantize_4bit(weight.data, weight.quant_state)
