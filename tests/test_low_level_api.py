@@ -33,6 +33,7 @@ from peft import (
     IA3Config,
     LoKrConfig,
     LoraConfig,
+    PeftWarning,
     RandLoraConfig,
     get_base_model_state_dict,
     get_peft_model,
@@ -842,3 +843,23 @@ class TestGetBaseModelStateDict:
         peft_model.add_adapter("adapter2", LoraConfig(r=8, lora_alpha=4, target_modules=["k_proj", "out_proj"]))
 
         assert set(get_base_model_state_dict(peft_model).keys()) == base_model_keys
+
+
+class TestStateDictFsdpShapeValidation:
+    # Mitigation for a potential error in DeepSpeed ZeRO-3 / FSDP settings where the
+    # gather context was forgot when retrieving the state dict. See #3251
+    # for details.
+
+    def test_save_pretrained_warns_for_unsharded_state_dict(self, tmp_path):
+        peft_model = get_peft_model(DummyModel(), LoraConfig(target_modules=["linear"], r=4))
+        # Emulate the ungathered ZeRO-3 / FSDP shard: lora_A is left as a flat (1-D) tensor instead of (r, in_dim).
+        peft_model.base_model.model.linear.lora_A["default"].weight.data = torch.zeros(32)
+        with pytest.warns(PeftWarning, match=r"DeepSpeed ZeRO-3 / FSDP shards"):
+            peft_model.save_pretrained(tmp_path / "broken-adapter")
+        # Warning must not block the write — existing callers may intentionally skip gathering.
+        assert (tmp_path / "broken-adapter" / "adapter_config.json").exists()
+
+    def test_save_pretrained_succeeds_for_normal_lora(self, tmp_path):
+        peft_model = get_peft_model(DummyModel(), LoraConfig(target_modules=["linear"], r=4))
+        peft_model.save_pretrained(tmp_path / "ok-adapter")
+        assert (tmp_path / "ok-adapter" / "adapter_config.json").exists()
