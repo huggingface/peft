@@ -15,7 +15,7 @@ import tempfile
 
 import pytest
 import torch
-from transformers import AutoModelForSeq2SeqLM, AutoModelForTokenClassification
+from transformers import AutoModelForSeq2SeqLM, AutoModelForTokenClassification, EncoderDecoderCache
 
 from peft import (
     AdaLoraConfig,
@@ -545,6 +545,71 @@ class TestEncoderDecoderModels(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_prompt_learning_forward_with_labels(self, model_id, config_cls, config_kwargs):
+        # For seq2seq models, the virtual tokens are added on the encoder side (prompt tuning / p-tuning) or to the KV
+        # cache (prefix tuning), the decoder sequence itself is not extended. The loss should therefore equal the plain
+        # cross entropy between the decoder logits and the unmodified labels.
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        if not config.is_prompt_learning:
+            pytest.skip("This test is only for prompt learning methods.")
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config)
+        model.eval()
+
+        input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
+        attention_mask = torch.ones_like(input_ids)
+        labels = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
+        # the decoder_input_ids are created by the base model from the labels
+        with torch.no_grad():
+            output = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+
+        assert output.loss is not None
+        assert torch.isfinite(output.loss)
+        assert output.logits.shape[1] == labels.shape[1]
+        expected_loss = torch.nn.functional.cross_entropy(
+            output.logits.reshape(-1, output.logits.shape[-1]).float(), labels.view(-1), ignore_index=-100
+        )
+        assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)
+
+    @pytest.mark.parametrize(
+        "config_cls,config_kwargs",
+        [
+            (PrefixTuningConfig, {"task_type": "SEQ_2_SEQ_LM", "num_virtual_tokens": 4}),
+            (PromptTuningConfig, {"task_type": "SEQ_2_SEQ_LM", "num_virtual_tokens": 4}),
+        ],
+    )
+    def test_prompt_learning_forward_with_decoder_attention_mask(self, config_cls, config_kwargs):
+        # For prefix tuning, the decoder_attention_mask must be extended by the number of virtual tokens (the decoder KV
+        # cache contains the prefix), for prompt tuning it is passed unchanged. Either way, an all-ones
+        # decoder_attention_mask must give the same result as passing no decoder_attention_mask (a wrong mask length
+        # would raise a shape error inside the model).
+        model_id = PEFT_ENCODER_DECODER_MODELS_TO_TEST[0]
+        base_model = AutoModelForSeq2SeqLM.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(base_model, config_cls(base_model_name_or_path=model_id, **config_kwargs))
+        model.eval()
+
+        input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
+        attention_mask = torch.ones_like(input_ids)
+        decoder_input_ids = torch.tensor([[0, 1, 1], [0, 2, 1]]).to(self.torch_device)
+        with torch.no_grad():
+            output_no_mask = model(
+                input_ids=input_ids, attention_mask=attention_mask, decoder_input_ids=decoder_input_ids
+            )
+            output_with_mask = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                decoder_input_ids=decoder_input_ids,
+                decoder_attention_mask=torch.ones_like(decoder_input_ids),
+            )
+        assert torch.allclose(output_no_mask.logits, output_with_mask.logits, atol=1e-5, rtol=1e-5)
+
+    @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_disable_adapter(self, model_id, config_cls, config_kwargs):
         _skip_osf_disable_adapter_test(config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
@@ -563,6 +628,42 @@ class TestEncoderDecoderModels(PeftCommonTester):
         config = PromptEncoderConfig(task_type=TaskType.SEQ_2_SEQ_LM, num_virtual_tokens=10)
         model = get_peft_model(model, config)
         assert model.active_adapters == ["default"]
+
+    def test_prefix_tuning_get_prompt_returns_encoder_decoder_cache(self):
+        # Directly check the cache that get_prompt builds for prefix tuning with a seq2seq model: an EncoderDecoderCache
+        # whose self-attention cache is pre-filled with the virtual tokens and whose cross-attention cache is empty and
+        # marked as not updated (the virtual tokens change the encoder output, so a cached cross-attention would be
+        # stale).
+        model_id = PEFT_ENCODER_DECODER_MODELS_TO_TEST[0]
+        base_model = AutoModelForSeq2SeqLM.from_pretrained(model_id).to(self.torch_device)
+        num_virtual_tokens = 4
+        config = PrefixTuningConfig(task_type=TaskType.SEQ_2_SEQ_LM, num_virtual_tokens=num_virtual_tokens)
+        model = get_peft_model(base_model, config)
+
+        past_key_values = model.get_prompt(batch_size=2)
+        assert isinstance(past_key_values, EncoderDecoderCache)
+        assert past_key_values.self_attention_cache.get_seq_length() == num_virtual_tokens
+        assert past_key_values.cross_attention_cache.get_seq_length() == 0
+        assert not any(past_key_values.is_updated.values())
+
+    def test_prompt_tuning_generate_with_encoder_outputs_warns(self):
+        # encoder_outputs cannot be re-used because the virtual tokens change the encoder sequence; PEFT warns and
+        # ignores the passed encoder_outputs.
+        model_id = PEFT_ENCODER_DECODER_MODELS_TO_TEST[0]
+        base_model = AutoModelForSeq2SeqLM.from_pretrained(model_id).to(self.torch_device)
+        config = PromptTuningConfig(task_type=TaskType.SEQ_2_SEQ_LM, num_virtual_tokens=4)
+        model = get_peft_model(base_model, config)
+
+        input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
+        attention_mask = torch.ones_like(input_ids)
+        encoder_outputs = model.get_base_model().get_encoder()(input_ids=input_ids, attention_mask=attention_mask)
+        with pytest.warns(UserWarning, match="`encoder_outputs` should not be passed"):
+            _ = model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                encoder_outputs=encoder_outputs,
+                max_new_tokens=3,
+            )
 
     def test_save_shared_tensors(self):
         model_id = "peft-internal-testing/tiny-random-RobertaModel"
