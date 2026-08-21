@@ -25,7 +25,7 @@ from .auto import (
     AutoPeftModelForTokenClassification,
 )
 from .config import PeftConfig, PromptLearningConfig
-from .helpers import find_kappa_target_modules
+from .helpers import FineGatesTrainerMixin, find_kappa_target_modules
 from .mapping import (
     PEFT_TYPE_TO_CONFIG_MAPPING,
     PEFT_TYPE_TO_MIXED_MODEL_MAPPING,
@@ -70,6 +70,8 @@ from .tuners import (
     DeloraConfig,
     DeloraModel,
     EvaConfig,
+    FineGatesConfig,
+    FineGatesModel,
     FourierFTConfig,
     FourierFTModel,
     FrodConfig,
@@ -215,6 +217,9 @@ __all__ = [
     "DeloraConfig",
     "DeloraModel",
     "EvaConfig",
+    "FineGatesConfig",
+    "FineGatesModel",
+    "FineGatesTrainerMixin",
     "FourierFTConfig",
     "FourierFTModel",
     "FrodConfig",
