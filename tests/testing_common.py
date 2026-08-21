@@ -1651,21 +1651,7 @@ class PeftCommonTester:
                 density=0.5,
             )
 
-        new_adapters = [
-            "single_adapter_reweighting",
-            "multi_adapter_svd_reweighting",
-            "multi_adapter_ties_svd_reweighting",
-            "multi_adapter_dare_linear_svd_reweighting",
-            "multi_adapter_dare_ties_svd_reweighting",
-            "multi_adapter_magnitude_prune_svd_reweighting",
-            "multi_adapter_cat_reweighting",
-            "multi_adapter_linear_reweighting",
-            "multi_adapter_linear_reweighting_single_enabled",
-            "multi_adapter_ties_reweighting",
-            "multi_adapter_dare_linear_reweighting",
-            "multi_adapter_dare_ties_reweighting",
-            "multi_adapter_magnitude_prune_reweighting",
-        ]
+        new_adapters = [k for k in model.peft_config.keys() if not k.startswith("adapter_")]
         for new_adapter in new_adapters:
             assert new_adapter in model.peft_config
 
@@ -1674,6 +1660,8 @@ class PeftCommonTester:
             _, target, _ = _get_submodules(model, key)
             if isinstance(target, LoraLayer):
                 for adapter_name in new_adapters:
+                    # for a single adapter, the result should be exact and we can check that; otherwise, we deal with
+                    # approximations
                     if "single" in adapter_name:
                         new_delta_weight = target.get_delta_weight(adapter_name)
                         # A negative merge weight must also negate the resulting delta weight.
@@ -1723,6 +1711,9 @@ class PeftCommonTester:
             model(**dummy_input)[0]
 
     def _test_weighted_combination_of_adapters(self, model_id, config_cls, config_kwargs):
+        if not issubclass(config_cls, (LoraConfig, IA3Config)):
+            # This test is only applicable for Lora and IA3 configs
+            return pytest.skip(f"Test not applicable for {config_cls}")
         if issubclass(config_cls, AdaLoraConfig):
             # AdaLora does not support adding more than 1 adapter
             return pytest.skip(f"Test not applicable for {config_cls}")
@@ -1732,7 +1723,7 @@ class PeftCommonTester:
         if "gemma" in model_id.lower():
             return pytest.skip("Combining Gemma adapters with SVD is currently failing")
 
-        adapter_list = ["adapter1", "adapter_2", "adapter_3"]
+        adapter_list = ["adapter_1", "adapter_2", "adapter_3"]
         weight_list = [0.5, 1.5, 1.5]
         negative_weight_list = [-0.5, -0.8, -1.2]
         # Initialize the config
@@ -1741,29 +1732,25 @@ class PeftCommonTester:
             **config_kwargs,
         )
 
-        if not isinstance(config, (LoraConfig, IA3Config)):
-            # This test is only applicable for Lora and IA3 configs
-            return pytest.skip(f"Test not applicable for {config}")
-
         with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            model = get_peft_model(model, copy.deepcopy(config), adapter_list[0])
 
-            def create_model():
-                # Positive and negative scenarios reuse adapter names, so they need isolated registries.
-                model = self.transformers_class.from_pretrained(model_id)
-                return get_peft_model(model, copy.deepcopy(config), adapter_list[0])
-
+            # test positive weights
             if isinstance(config, LoraConfig):
-                self._test_weighted_combination_of_adapters_lora(create_model(), config, adapter_list, weight_list)
-                self._test_weighted_combination_of_adapters_lora(
-                    create_model(), config, adapter_list, negative_weight_list
-                )
+                self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, weight_list)
             elif isinstance(config, IA3Config):
-                self._test_weighted_combination_of_adapters_ia3(create_model(), config, adapter_list, weight_list)
-                self._test_weighted_combination_of_adapters_ia3(
-                    create_model(), config, adapter_list, negative_weight_list
-                )
-            else:
-                pytest.skip(f"Test not applicable for {config}")
+                self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, weight_list)
+
+            del model
+            model = self.transformers_class.from_pretrained(model_id)
+            model = get_peft_model(model, config, adapter_list[0])
+
+            # test negative weights
+            if isinstance(config, LoraConfig):
+                self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, negative_weight_list)
+            elif isinstance(config, IA3Config):
+                self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, negative_weight_list)
 
     def _test_disable_adapter(self, model_id, config_cls, config_kwargs):
         task_type = config_kwargs.get("task_type")
