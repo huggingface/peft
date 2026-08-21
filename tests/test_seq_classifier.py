@@ -454,6 +454,7 @@ class TestSequenceClassificationModels(PeftCommonTester):
         # Check the full forward pass including the loss computation. This is especially relevant for prompt learning
         # methods, whose sequence classification forward (including the _prefix_tuning_forward fallback for models whose
         # forward does not accept past_key_values) is implemented in PeftModelForSequenceClassification itself.
+        _skip_encoder_models(model_id, config_cls)
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
 
@@ -495,6 +496,9 @@ class TestSequenceClassificationModels(PeftCommonTester):
             if config_cls == AdaLoraConfig:
                 # AdaLora adds an orthogonal regularization term to the loss, so it does not equal the plain task loss
                 assert output.loss > expected_loss
+            elif config_cls == ShadowConfig:
+                expected_loss = expected_loss + config.auxiliary_loss_weight * output.shadow_loss
+                assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)
             else:
                 assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)
 

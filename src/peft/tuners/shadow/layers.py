@@ -24,6 +24,16 @@ from peft.tuners.tuners_utils import BaseTunerLayer
 from .config import ShadowConfig
 
 
+def _sequence_classification_loss(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    """Match Transformers' regression, single-label, and multi-label sequence-classification losses."""
+    num_labels = logits.shape[-1]
+    if num_labels == 1:
+        return torch.nn.functional.mse_loss(logits.squeeze(-1), labels.to(logits.dtype).view(-1))
+    if labels.dtype in (torch.long, torch.int):
+        return torch.nn.functional.cross_entropy(logits.view(-1, num_labels), labels.view(-1))
+    return torch.nn.functional.binary_cross_entropy_with_logits(logits, labels)
+
+
 class ShadowCarrier:
     """Couples the base `hidden_states` with the parallel `shadow_states` so the pair rides the base decoder loop."""
 
@@ -466,7 +476,7 @@ class DetachedShadowModel(PreTrainedModel, GenerationMixin):
             logits = self.head(pooled)
             loss = None
             if labels is not None:
-                loss = torch.nn.functional.cross_entropy(logits, labels.view(-1))
+                loss = _sequence_classification_loss(logits, labels)
             return SequenceClassifierOutput(loss=loss, logits=logits)
 
         logits = self.head(hidden)

@@ -30,7 +30,7 @@ from peft.utils import TaskType
 
 from .config import ShadowConfig
 from .diffusion_models import get_diffusion_shadow_backend
-from .layers import DetachedShadowModel, ShadowCache, ShadowCarrier, ShadowLayer
+from .layers import DetachedShadowModel, ShadowCache, ShadowCarrier, ShadowLayer, _sequence_classification_loss
 
 
 # --------------------------------------------------------------------------------------------------- backbone helpers
@@ -812,7 +812,7 @@ class ShadowModel(BaseTuner):
             return _shifted_ce_loss(shadow_logits, labels)
         pooled = _pool_last_token(shadow_state, attention_mask)
         shadow_logits = head(pooled)
-        return F.cross_entropy(shadow_logits, labels)
+        return _sequence_classification_loss(shadow_logits, labels)
 
     # ------------------------------------------------------------------------------------- PEFT tuner interface
 
