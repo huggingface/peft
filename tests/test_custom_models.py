@@ -2499,6 +2499,39 @@ class TestPeftCustomModel(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_safe_merge(model_id, config_cls, config_kwargs)
 
+    @pytest.mark.parametrize("conv_cls", [nn.Conv2d, nn.Conv3d])
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    def test_ia3_grouped_conv_feedforward_merge(self, conv_cls, safe_merge):
+        # Regression test for #3511: feedforward IA3 scales all input channels, while grouped
+        # convolution weights store only the input channels belonging to each group.
+        class GroupedConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = conv_cls(4, 6, kernel_size=3, groups=2)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        torch.manual_seed(0)
+        input_shape = (2, 4, 5, 5) if conv_cls is nn.Conv2d else (2, 4, 5, 5, 5)
+        inputs = torch.randn(input_shape)
+        config = IA3Config(target_modules=["conv"], feedforward_modules=["conv"], init_ia3_weights=False)
+        model = get_peft_model(GroupedConvModel(), config).eval()
+        ia3_scaling = model.base_model.model.conv.ia3_l["default"]
+        ia3_scaling.data.copy_(torch.tensor([0.5, 1.0, 1.5, 2.0]).reshape_as(ia3_scaling))
+        original_weight = model.base_model.model.conv.base_layer.weight.data.clone()
+
+        with torch.inference_mode():
+            output_unmerged = model(inputs)
+            model.merge_adapter(safe_merge=safe_merge)
+            output_merged = model(inputs)
+            model.unmerge_adapter()
+            output_unmerged_again = model(inputs)
+
+        assert torch.allclose(output_unmerged, output_merged, atol=1e-6, rtol=1e-6)
+        assert torch.allclose(output_unmerged, output_unmerged_again, atol=1e-6, rtol=1e-6)
+        assert torch.allclose(model.base_model.model.conv.base_layer.weight.data, original_weight)
+
     def test_glora_safe_merge_does_not_corrupt_base_layer_on_non_finite_adapter(self):
         # Regression test: GLoRA's merge() used to accumulate the merged weights directly onto
         # base_layer.weight.data/bias.data *before* the safe_merge isfinite check, so a broken
