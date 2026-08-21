@@ -7050,8 +7050,8 @@ def test_kappatune_with_4bit_model():
     model = AutoModelForCausalLM.from_pretrained(
         "hf-internal-testing/tiny-random-LlamaForCausalLM",
         quantization_config=quantization_config,
-        device_map="cuda",
-        torch_dtype=torch.float16,
+        device_map=torch_device,
+        dtype=torch.float16,
     )
 
     # Run KappaTune
