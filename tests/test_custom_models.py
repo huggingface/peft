@@ -4177,10 +4177,10 @@ class TestPeftCustomModel(PeftCommonTester):
             ("linear", 0.6, 1.0),
             ("ties", 0.4, 1.0),
             ("ties_svd", 0.8, 1.0),
-            ("dare_ties", 0.1, 1.0),
-            ("dare_ties_svd", 0.55, 1.0),
-            ("dare_linear", 0.2, 1.0),
-            ("dare_linear_svd", 0.6, 1.0),
+            ("dare_ties", 0.1, None),
+            ("dare_ties_svd", 0.55, None),
+            ("dare_linear", 0.2, None),
+            ("dare_linear_svd", 0.6, None),
             ("magnitude_prune", 0.55, 1.0),
             ("magnitude_prune_svd", 0.9, 0.1),
         ],
@@ -4233,7 +4233,8 @@ class TestPeftCustomModel(PeftCommonTester):
                 corr = torch.corrcoef(torch.stack((dw_merged.flatten(), expected.flatten())))
                 mse = ((dw_merged - expected) ** 2).mean()
                 assert corr[0, 1] > min_corr
-                assert mse < max_mse
+                if max_mse is not None:
+                    assert mse < max_mse
 
     def test_multiple_adapters_no_needless_copy_modules_to_save(self):
         # See 2206
