@@ -27,7 +27,7 @@ class GraloraConfig(PeftConfig):
     Args:
         r (`int`):
             GraLoRA attention dimension determines the rank of the GraLoRA adapter. The total parameter count of the
-            GraLoRA adapter is same as LoRA with same rank r, while the expressivitiy is multiplied by gralora_k.
+            GraLoRA adapter is same as LoRA with same rank r, while the expressivity is multiplied by gralora_k.
         hybrid_r (`int`):
             Hybrid GraLoRA rank determines the rank allocated to vanilla LoRA method when using Hybrid GraLoRA method.
             Hybrid GraLoRA, a combination of GraLoRA and vanilla LoRA, becomes available when hybrid_r > 0. The
@@ -36,7 +36,7 @@ class GraloraConfig(PeftConfig):
             List of module names or regex expression of the module names to replace with GraLoRA. For example, ['q',
             'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. This can also be a wildcard 'all-linear'
             which matches all linear/Conv1D (if the model is a PreTrainedModel, the output layer excluded). If not
-            specified, modules will be chosen according to the model architecture. If the architecture is not known, an
+            specified, modules will be chosen according to the model architecture. if the architecture is not known, an
             error will be raised -- in this case, you should specify the target modules manually.
         alpha (`int`): GraLoRA alpha.
             GraLoRA alpha is the scaling factor for the GraLoRA adapter. Scale becomes alpha / (r + hybrid_r).
