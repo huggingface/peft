@@ -23,10 +23,12 @@ from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
+    GPT2Config,
+    GPT2LMHeadModel,
     LlavaForConditionalGeneration,
 )
 
-from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model
+from peft import LoraConfig, PeftModel, PromptTuningConfig, TaskType, VeraConfig, get_peft_model
 from peft.import_utils import is_transformers_ge_v5_1_0, is_transformers_ge_v5_6_0
 from peft.utils.other import (
     ModulesToSaveWrapper,
@@ -277,6 +279,45 @@ class TestModulesToSaveAttributeAccess:
         model.base_model.model.lin1._active_adapter = "does-not-exist"
         with pytest.raises(AttributeError, match="has no attribute 'weight'"):
             model.lin1.weight
+
+
+class TestDisableAdapterReentrant:
+    @pytest.fixture
+    def gpt2_config(self):
+        return GPT2Config(
+            n_layer=2,
+            n_head=2,
+            n_embd=16,
+            n_positions=32,
+            n_ctx=32,
+            vocab_size=64,
+            bos_token_id=1,
+            eos_token_id=2,
+        )
+
+    def test_prompt_tuning_disable_adapter_is_reentrant(self, gpt2_config):
+        model = get_peft_model(
+            GPT2LMHeadModel(gpt2_config),
+            PromptTuningConfig(task_type=TaskType.CAUSAL_LM, num_virtual_tokens=2),
+        )
+
+        with model.disable_adapter():
+            assert not model.has_active_enabled_adapter
+            with model.disable_adapter():
+                assert not model.has_active_enabled_adapter
+            assert not model.has_active_enabled_adapter
+
+    def test_lora_disable_adapter_is_reentrant(self, gpt2_config):
+        model = get_peft_model(
+            GPT2LMHeadModel(gpt2_config),
+            LoraConfig(task_type=TaskType.CAUSAL_LM, r=2, lora_alpha=4, target_modules=["c_attn"]),
+        )
+
+        with model.disable_adapter():
+            assert not model.has_active_enabled_adapter
+            with model.disable_adapter():
+                assert not model.has_active_enabled_adapter
+            assert not model.has_active_enabled_adapter
 
 
 class TestModulesToSaveKwargsOnlyForward:
