@@ -82,6 +82,7 @@ from peft.tuners.lora.config import BdLoraConfig
 from peft.tuners.lora.monteclora import MontecloraSampler
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
+from peft.utils.merge_utils import random_pruning
 
 from .testing_common import (
     PeftCommonTester,
@@ -4266,6 +4267,46 @@ class TestPeftCustomModel(PeftCommonTester):
         dummy_input = torch.randn(2, 10)
         output = model(dummy_input)
         assert output is not None
+
+    @pytest.mark.parametrize("combination_type", ["ties", "dare_ties", "dare_linear", "magnitude_prune"])
+    def test_add_weighted_adapter_zero_density_prunes_everything(self, combination_type):
+        # density=0 means "prune all values", so every density-aware combination type has to produce
+        # a zero delta. The two dare types rescale the survivors with `pruned / density` to preserve
+        # the expected value, which at density=0 divides zero by zero and fills the merged adapter
+        # with NaN instead, with nothing raised. The magnitude-based types were always correct here.
+        torch.manual_seed(42)
+        model = MLP()
+        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+
+        model = get_peft_model(model, config, adapter_name="adapter1")
+        model.add_adapter("adapter2", config)
+
+        model.add_weighted_adapter(
+            adapters=["adapter1", "adapter2"],
+            weights=[0.5, 0.5],
+            adapter_name="merged",
+            combination_type=combination_type,
+            density=0.0,
+        )
+
+        for module in model.modules():
+            if isinstance(module, lora.LoraLayer):
+                delta_weight = module.get_delta_weight("merged")
+                assert not torch.isnan(delta_weight).any()
+                assert torch.equal(delta_weight, torch.zeros_like(delta_weight))
+
+    def test_random_pruning_rescales_for_nonzero_density(self):
+        # Guarding density=0 must not disable the rescaling for the densities that do use it: the
+        # surviving values are divided by density so that the expected value is preserved.
+        torch.manual_seed(42)
+        tensor = torch.ones(10000)
+
+        pruned = random_pruning(tensor, density=0.5, rescale=True)
+
+        assert torch.isfinite(pruned).all()
+        # a value either does not survive or is rescaled to 1 / 0.5
+        assert set(pruned.unique().tolist()) == {0.0, 2.0}
+        assert pruned.mean().item() == pytest.approx(1.0, abs=0.05)
 
     def test_multiple_adapters_no_needless_copy_modules_to_save(self):
         # See 2206
