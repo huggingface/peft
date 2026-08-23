@@ -486,7 +486,9 @@ def set_peft_model_state_dict(
 
     """
     config = model.peft_config[adapter_name]
-    state_dict = peft_model_state_dict
+    # Copy first: modules_to_save remapping inserts/deletes keys, and callers
+    # reuse the same checkpoint dict across model instances.
+    state_dict = dict(peft_model_state_dict)
     if config.peft_type not in PEFT_TYPE_TO_TUNER_MAPPING:
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 

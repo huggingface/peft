@@ -789,6 +789,27 @@ class TestPeftStateDict:
         weight = target.base_model.model.lora_head.modules_to_save["default"].weight
         assert torch.allclose(weight, torch.full_like(weight, 123.0))
 
+    def test_set_peft_model_state_dict_does_not_mutate_modules_to_save_checkpoint(self):
+        class Tiny(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj = nn.Linear(4, 4)
+                self.head = nn.Linear(4, 2)
+
+            def forward(self, x):
+                return self.head(self.proj(x))
+
+        config = LoraConfig(target_modules=["proj"], modules_to_save=["head"])
+        source = get_peft_model(Tiny(), config)
+        state_dict = get_peft_model_state_dict(source)
+        keys_before = tuple(state_dict)
+
+        set_peft_model_state_dict(get_peft_model(Tiny(), config), state_dict)
+        assert tuple(state_dict) == keys_before
+
+        # Same in-memory checkpoint used to KeyError on a second load.
+        set_peft_model_state_dict(get_peft_model(Tiny(), config), state_dict)
+
 
 class TestGetBaseModelStateDict:
     # Tests for get_base_model_state_dict / set_base_model_state_dict. The per-method and per-model coverage lives in
