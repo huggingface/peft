@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import importlib
 import warnings
 from dataclasses import dataclass, field
@@ -23,6 +24,19 @@ from torch import nn
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
+
+
+def _nested_config_from_dict(value, config_cls):
+    """Convert a nested sub-config that was loaded as a plain dict back into its dataclass type.
+
+    `save_pretrained` serializes nested sub-configs recursively (via `asdict`), so after loading from
+    `adapter_config.json` they arrive as plain dicts. Fields declared with `init=False` are serialized but not accepted
+    by `__init__`, so they are filtered out here.
+    """
+    if not isinstance(value, dict):
+        return value
+    init_keys = {f.name for f in dataclasses.fields(config_cls) if f.init}
+    return config_cls(**{k: v for k, v in value.items() if k in init_keys})
 
 
 @dataclass
@@ -1012,6 +1026,14 @@ class LoraConfig(PeftConfig):
             self.kasa_config = KasaConfig(**self.kasa_config)
         elif self.kasa_config is not None and not isinstance(self.kasa_config, KasaConfig):
             raise TypeError("`kasa_config` must be a `KasaConfig`, a dict, or None.")
+
+        # Same treatment for the remaining nested sub-configs: save_pretrained serializes them via asdict, so after
+        # loading from a checkpoint they arrive as plain dicts and must be converted back (see issue #3583).
+        self.eva_config = _nested_config_from_dict(self.eva_config, EvaConfig)
+        self.corda_config = _nested_config_from_dict(self.corda_config, CordaConfig)
+        self.lora_ga_config = _nested_config_from_dict(self.lora_ga_config, LoraGAConfig)
+        self.arrow_config = _nested_config_from_dict(self.arrow_config, ArrowConfig)
+        self.use_bdlora = _nested_config_from_dict(self.use_bdlora, BdLoraConfig)
 
         if isinstance(self.target_parameters, str):
             raise TypeError("`target_parameters` must be a list of strings or None.")
