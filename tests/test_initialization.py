@@ -6353,3 +6353,47 @@ class TestTinyLoraInitialization:
         model_control = get_peft_model(mlp_control, config_b2, adapter_name="b")
 
         assert len(model.tinylora_v["b"]) == len(model_control.tinylora_v["b"]) == 1
+
+
+class TestAdapterNameCollisionWarning:
+    # Regression test for https://github.com/huggingface/peft/issues/3584:
+    # when another adapter's NAME equals a base-model module path component
+    # (e.g. an adapter called "mlp" while a submodule is literally named "mlp"),
+    # the negative name filter silently removed the saved adapter's tensors from
+    # the checkpoint. This now emits a RuntimeWarning so the truncation is visible.
+
+    @pytest.fixture
+    def mlp_net(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(32, 32)
+                self.mlp = nn.Linear(32, 32)
+                self.act = nn.ReLU()
+
+            def forward(self, x):
+                return self.mlp(self.act(self.lin0(x)))
+
+        return Net()
+
+    def test_partial_collision_warns(self, mlp_net, tmp_path):
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0", "mlp"], lora_dropout=0.0),
+        )
+        model.add_adapter("mlp", LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0))
+
+        with pytest.warns(RuntimeWarning, match="adapter-name filter"):
+            model.save_pretrained(str(tmp_path), selected_adapters=["default"])
+
+    def test_full_collision_warns(self, mlp_net, tmp_path):
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            LoraConfig(r=4, lora_alpha=8, target_modules=["mlp"], lora_dropout=0.0),
+        )
+        model.add_adapter("mlp", LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0))
+
+        with pytest.warns(RuntimeWarning, match="adapter-name filter"):
+            model.save_pretrained(str(tmp_path), selected_adapters=["default"])

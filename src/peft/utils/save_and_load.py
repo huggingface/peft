@@ -135,6 +135,24 @@ def get_peft_model_state_dict(
     if not config.is_prompt_learning:
         # Prompt learning methods don't support multiple adapters and hence don't have the adapter name in the Parameter
         # name.
+        # The filter below matches by plain string containment, so an adapter whose NAME equals a module path segment
+        # of this adapter's tensors (e.g. an adapter called "mlp" while a submodule is named "mlp") would silently
+        # remove those tensors from the checkpoint. Detect that situation and warn, since the loss is otherwise
+        # invisible (see #3584).
+        colliding_keys = [
+            key
+            for key in state_dict
+            if (f".{adapter_name}." in key or key.endswith(f".{adapter_name}"))
+            and any(f".{n}." in key or key.endswith(f".{n}") for n in unwanted_adapter_names)
+        ]
+        if colliding_keys:
+            warnings.warn(
+                f"{len(colliding_keys)} tensor(s) of adapter '{adapter_name}' match the name of another adapter "
+                f"({unwanted_adapter_names}) as a path segment (e.g. '{colliding_keys[0]}') and will be removed from "
+                "the checkpoint by the adapter-name filter. Consider renaming the adapters to avoid silent checkpoint "
+                "truncation.",
+                RuntimeWarning,
+            )
         state_dict_filtered_for_adapter_name = _filter_state_dict_for_adapter_name(state_dict, unwanted_adapter_names)
         if len(state_dict_filtered_for_adapter_name) > 0:
             # If, after filtering the state dict for the adapter name, we end up with an empty state dict, it means that
