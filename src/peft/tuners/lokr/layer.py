@@ -253,7 +253,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
-    def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
+    def get_delta_weight(self, adapter_name: str, *, apply_rank_dropout: bool = True) -> torch.Tensor:
         # https://github.com/KohakuBlueleaf/LyCORIS/blob/e4259b870d3354a9615a96be61cb5d07455c58ea/lycoris/modules/lokr.py#L224
         if adapter_name in self.lokr_w1:
             w1 = self.lokr_w1[adapter_name]
@@ -277,8 +277,9 @@ class LoKrLayer(nn.Module, LycorisLayer):
         weight = weight.reshape(base_layer.weight.shape)
 
         # Perform rank dropout during training - drop rows of addition weights
+        # Merge/unmerge pass `apply_rank_dropout=False` so that the folded weights don't depend on RNG state (#3586).
         rank_dropout = self.rank_dropout[adapter_name]
-        if self.training and rank_dropout:
+        if apply_rank_dropout and self.training and rank_dropout:
             drop = (torch.rand(weight.size(0)) > rank_dropout).float()
             drop = drop.view(-1, *[1] * len(weight.shape[1:])).to(weight.device)
             if self.rank_dropout_scale[adapter_name]:

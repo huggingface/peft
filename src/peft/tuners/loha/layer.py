@@ -180,7 +180,7 @@ class LoHaLayer(nn.Module, LycorisLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
-    def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
+    def get_delta_weight(self, adapter_name: str, *, apply_rank_dropout: bool = True) -> torch.Tensor:
         # https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/loha.py#L178
         if adapter_name in self.hada_t1.keys():
             weight = make_weight_cp(
@@ -207,8 +207,9 @@ class LoHaLayer(nn.Module, LycorisLayer):
         weight = weight.reshape(base_layer.weight.shape)
 
         # Perform rank dropout during training - drop rows of addition weights
+        # Merge/unmerge pass `apply_rank_dropout=False` so that the folded weights don't depend on RNG state (#3586).
         rank_dropout = self.rank_dropout[adapter_name]
-        if self.training and rank_dropout:
+        if apply_rank_dropout and self.training and rank_dropout:
             drop = (torch.rand(weight.size(0)) > rank_dropout).to(weight.dtype)
             drop = drop.view(-1, *[1] * len(weight.shape[1:])).to(weight.device)
             # TODO: Investigate if there should be a scaler like in normal dropout during training
