@@ -6353,3 +6353,49 @@ class TestTinyLoraInitialization:
         model_control = get_peft_model(mlp_control, config_b2, adapter_name="b")
 
         assert len(model.tinylora_v["b"]) == len(model_control.tinylora_v["b"]) == 1
+
+
+class TestPatternKeyZeroMatchWarning:
+    # Regression test for https://github.com/huggingface/peft/issues/3582:
+    # rank_pattern / alpha_pattern keys that match no targeted module used to be
+    # silently ignored (e.g. anchored keys like "^lin0", which can never match
+    # under the internal "(.*\.)?key$" suffix-matching rule).
+
+    @pytest.fixture
+    def small_mlp(self):
+        class Mlp(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(8, 8)
+                self.lin1 = nn.Linear(8, 8)
+
+        return Mlp()
+
+    def test_unmatched_alpha_pattern_key_warns(self, small_mlp):
+        # Fully-qualified anchored keys (as shown in the LoraConfig docstring) can never match a bare module
+        # path like "lin0"; previously they were silently ignored.
+        with pytest.warns(RuntimeWarning, match="alpha_pattern.*did not match any targeted module"):
+            get_peft_model(
+                small_mlp,
+                LoraConfig(target_modules=["lin0"], alpha_pattern={"^model\\.lin0$": 100}),
+            )
+
+    def test_unmatched_rank_pattern_key_warns(self, small_mlp):
+        with pytest.warns(RuntimeWarning, match="rank_pattern.*did not match any targeted module"):
+            get_peft_model(
+                small_mlp,
+                LoraConfig(target_modules=["lin0"], rank_pattern={"some.other.path.lin1": 2}),
+            )
+
+    def test_matched_pattern_keys_do_not_warn(self, small_mlp):
+        # A key that genuinely suffix-matches a targeted module must not trigger the warning.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            get_peft_model(
+                small_mlp,
+                LoraConfig(target_modules=["lin0"], alpha_pattern={"lin0": 100}),
+            )
+
+        assert not [w for w in caught if "did not match any targeted module" in str(w.message)], (
+            "matching pattern key should not warn"
+        )
