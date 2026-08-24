@@ -350,8 +350,7 @@ class BaseTuner(nn.Module, ABC):
         return self.active_adapter
 
     def forward(self, *args: Any, **kwargs: Any):
-        # Call the module, not `.forward()`, so module hooks fire — FSDP2 applied to the wrapped model
-        # (e.g. transformers `DistributedConfig(fsdp_size=...)`) registers its root pre-forward hook there.
+        # Call the module, not `.forward()`, so module hooks fire
         return self.model(*args, **kwargs)
 
     def _pre_injection_hook(self, model: nn.Module, config: PeftConfig, adapter_name: str) -> None:
