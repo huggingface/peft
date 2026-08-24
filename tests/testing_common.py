@@ -13,6 +13,7 @@
 # limitations under the License.
 import copy
 import json
+import math
 import os
 import pickle
 import platform
@@ -1248,28 +1249,34 @@ class PeftCommonTester:
 
             inputs = self.prepare_inputs_for_testing()
 
-            # invocation to get the reference non-zero grads that are supposed to exist without gradient checkpointing;
-            # note we're squaring the output for bigger gradients
-            output = model(**inputs)[0] ** 2
+            def get_grads():
+                for _, param in params:
+                    param.grad = None
+                # note we're squaring the output for bigger gradients
+                output = model(**inputs)[0] ** 2
+                loss = output.sum()
+                loss.backward()
+                return {n: param.grad.abs().sum().item() for n, param in params}
 
-            loss = output.sum()
-            loss.backward()
+            # Gradients that are mathematically zero can end up being tiny non-zero floating point noise, or not, since
+            # the reduction order inside the kernels is not deterministic on all devices, so ignore those.
+            grads_normal = get_grads()
+            grads_repeated = get_grads()
+            threshold = max(grads_normal.values(), default=0.0) * 1e-6
+            noise = {
+                n
+                for n, grad in grads_normal.items()
+                if grad <= threshold or not math.isclose(grad, grads_repeated[n], rel_tol=1e-3)
+            }
 
-            non_zero_grad_params_normal = {n for n, p in params if p.grad.abs().sum() > 0}
-
-            for name, param in params:
-                param.grad = None
+            non_zero_grad_params_normal = {n for n, grad in grads_normal.items() if grad > 0} - noise
 
             # invocation with gradient checkpointing for comparison
             model.prepare_model_for_gradient_checkpointing(model)
             model.gradient_checkpointing_enable({"use_reentrant": use_reentrant})
 
-            output = model(**inputs)[0] ** 2
-
-            loss = output.sum()
-            loss.backward()
-
-            non_zero_grad_params_checkpointing = {n for n, p in params if p.grad.abs().sum() > 0}
+            grads_checkpointing = get_grads()
+            non_zero_grad_params_checkpointing = {n for n, grad in grads_checkpointing.items() if grad > 0} - noise
             assert non_zero_grad_params_normal == non_zero_grad_params_checkpointing
 
             for n, param in model.named_parameters():
