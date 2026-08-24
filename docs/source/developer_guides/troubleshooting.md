@@ -114,6 +114,40 @@ To avoid this, use the following order:
 2. Wrap it with [`get_peft_model`].
 3. Only then register hooks or create the optimizer.
 
+## Target modules don't match the model
+
+If training runs without errors but the loss barely moves — or the model shows no improvement after fine-tuning — the configured `target_modules` may not match the actual module names in the model. This is common with hybrid architectures such as Mamba, Jamba, or NemotronH, which use different layer names than standard Transformer models.
+
+PEFT raises an error only when *none* of the configured `target_modules` match any module in the model. If *some* match and *some* do not, the non-matching entries are silently skipped — there is no warning. A large fraction of the model can remain frozen without any indication.
+
+The first diagnostic is to check the trainable parameter count:
+
+```python
+from peft import LoraConfig, get_peft_model
+
+config = LoraConfig(target_modules=["q_proj", "v_proj", "gate_proj"])
+model = get_peft_model(base_model, config)
+model.print_trainable_parameters()
+```
+
+If the reported number is much lower than expected, list the model's linear layers and compare them against your `target_modules`:
+
+```python
+import torch
+
+for name, module in model.named_modules():
+    if isinstance(module, torch.nn.Linear):
+        print(name)
+```
+
+Any `target_modules` entry that does not appear in this list is silently skipped. Update `target_modules` to match the actual module names in the model.
+
+> [!TIP]
+> This issue affects all PEFT methods that use `target_modules` (LoRA, LoHa, IA³, etc.), not just LoRA. The diagnostic steps are the same regardless of the method. If you are unsure which module names a given architecture uses, check the model's documentation or inspect `model.named_modules()` before configuring the adapter.
+
+> [!TIP]
+> Some modules are forbidden by PEFT on certain architectures. For example, `out_proj` and `conv1d` are not allowed on Mamba-based models because the fused SSM kernels bypass adapter layers. PEFT raises a `ValueError` in these cases, so the error is visible — unlike the silent skipping described above.
+
 ## Bad results from a loaded PEFT model
 
 There can be several reasons for getting a poor result from a loaded PEFT model which are listed below. If you're still unable to troubleshoot the problem, see if anyone else had a similar [issue](https://github.com/huggingface/peft/issues) on GitHub, and if you can't find any, open a new issue.
