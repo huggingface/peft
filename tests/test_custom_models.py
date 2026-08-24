@@ -3627,6 +3627,31 @@ class TestPeftCustomModel(PeftCommonTester):
         assert all(module.disable_adapters for module in tuner_modules)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_disable_adapter_is_reentrant(self, test_name, model_id, config_cls, config_kwargs):
+        # Nested disable_adapter() contexts should keep adapters disabled until the outer context exits.
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        tuner_modules = [module for module in model.modules() if isinstance(module, BaseTunerLayer)]
+
+        assert all(not module.disable_adapters for module in tuner_modules)
+        assert model.has_active_enabled_adapter
+        with model.disable_adapter():
+            assert all(module.disable_adapters for module in tuner_modules)
+            assert not model.has_active_enabled_adapter
+            with model.disable_adapter():
+                assert all(module.disable_adapters for module in tuner_modules)
+                assert not model.has_active_enabled_adapter
+            # exiting the inner context must not re-enable adapters
+            assert all(module.disable_adapters for module in tuner_modules)
+            assert not model.has_active_enabled_adapter
+        assert all(not module.disable_adapters for module in tuner_modules)
+        assert model.has_active_enabled_adapter
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_disable_adapters_exiting_context_irregular_state(self, test_name, model_id, config_cls, config_kwargs):
         # When we have a model where some adapters are enabled and others are disabled, we should get a warning when
         # entering the disable_adapter context because we cannot correctly restore the state of the adapters from
