@@ -2205,12 +2205,9 @@ class _LoraParameterProxy(nn.Module):
     Intended to be used in conjunction with `nn.utils.parametrize`, see `ParamWrapper`.
     """
 
-    def __init__(self, delta_weight, delta_factors=None):
+    def __init__(self, delta_weight):
         super().__init__()
         self.delta_weight = delta_weight
-        # (lhs, rhs, scaling) for the single-adapter case, so that `W + scaling * lhs @ rhs`
-        # can be fused into one `baddbmm` instead of materialising the delta separately.
-        self.delta_factors = delta_factors
 
     @staticmethod
     def _low_prec_add(x, y):
@@ -2234,10 +2231,25 @@ class _LoraParameterProxy(nn.Module):
     def forward(self, W):
         if any(getattr(torch, dtype_name, None) == W.dtype for dtype_name in UPCAST_DTYPES):
             return self._low_prec_add(W, self.delta_weight)
-        if self.delta_factors is not None:
-            lhs, rhs, scaling = self.delta_factors
-            return torch.baddbmm(W, lhs, rhs, alpha=scaling)
         return W + self.delta_weight
+
+
+class _LoraFactorsProxy(nn.Module):
+    """This proxies an `nn.Parameter` that is targeted with a single LoRA adapter, keeping the low-rank factors.
+
+    Folding `W + scaling * lhs @ rhs` into one `baddbmm` avoids materialising a delta the size of the full parameter
+    (e.g. a whole expert stack) on every forward. Intended to be used in conjunction with `nn.utils.parametrize`, see
+    `ParamWrapper`.
+    """
+
+    def __init__(self, lhs, rhs, scaling):
+        super().__init__()
+        self.lhs = lhs
+        self.rhs = rhs
+        self.scaling = scaling
+
+    def forward(self, W):
+        return torch.baddbmm(W, self.lhs, self.rhs, alpha=self.scaling)
 
 
 # copied from:
@@ -2493,21 +2505,22 @@ class ParamWrapper(nn.Module, LoraLayer):
             return
 
         adapters = [a for a in active_adapters if a in self.lora_A]
-        delta_weight = delta_factors = None
-        if len(adapters) == 1 and self.num_experts > 1:
-            delta_factors = self.get_delta_factors(adapters[0])
+        param = self.get_param()
+        is_low_precision = any(getattr(torch, dtype_name, None) == param.dtype for dtype_name in UPCAST_DTYPES)
+        if len(adapters) == 1 and self.num_experts > 1 and not is_low_precision:
+            proxy = _LoraFactorsProxy(*self.get_delta_factors(adapters[0]))
         else:
+            delta_weight = None
             for active_adapter in adapters:
                 if delta_weight is None:
                     delta_weight = self.get_delta_weight(active_adapter)
                 else:
                     delta_weight = delta_weight + self.get_delta_weight(active_adapter)
+            proxy = _LoraParameterProxy(delta_weight)
 
         base_layer = self.get_base_layer()
-        requires_grad_before = self.get_param().requires_grad
-        nn.utils.parametrize.register_parametrization(
-            base_layer, self.parameter_name, _LoraParameterProxy(delta_weight, delta_factors)
-        )
+        requires_grad_before = param.requires_grad
+        nn.utils.parametrize.register_parametrization(base_layer, self.parameter_name, proxy)
         # set requires_grad, as it defaults to False
         base_layer.parametrizations[self.parameter_name].original.requires_grad_(requires_grad_before)
         try:
