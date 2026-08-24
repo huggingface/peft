@@ -486,7 +486,7 @@ def set_peft_model_state_dict(
 
     """
     config = model.peft_config[adapter_name]
-    state_dict = peft_model_state_dict
+    state_dict = peft_model_state_dict.copy()
     if config.peft_type not in PEFT_TYPE_TO_TUNER_MAPPING:
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 
@@ -521,7 +521,7 @@ def set_peft_model_state_dict(
 
                 state_dict[store_key] = peft_model_state_dict[lookup_key]
 
-                # delete the old key from the previous `state_dict = peft_model_state_dict` statement.
+                # Delete the saved key after translating it to the wrapper's load key.
                 del state_dict[lookup_key]
 
     # Remapping the keys of the loaded state_dict to fit the model is method-specific and thus delegated to the tuner
