@@ -6419,6 +6419,11 @@ class TestRequiresGrad:
         assert out_merged.shape == (2, 2)
         peft_model.unmerge_adapter()
 
+        # Symmetric direction: the default adapter targets layernorm0 only, so layernorm1 is untargeted.
+        peft_model.set_adapter("default")
+        out_default = peft_model(x)
+        assert out_default.shape == (2, 2)
+
     def test_requires_grad_vera_different_targets(self):
         # Test two different VeRA adapters that target different modules. Most notably, ensure that vera_A and vera_B
         # don't require grads.
