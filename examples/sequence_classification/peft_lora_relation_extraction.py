@@ -194,6 +194,24 @@ def main():
     tokenizer.save_pretrained(args.output_dir)
     print("Fine-tuning completed successfully!")
 
+    # Example: Loading the saved PEFT adapter for inference
+    # -----------------------------------------------------
+    # from peft import PeftModel
+    #
+    # tokenizer = AutoTokenizer.from_pretrained(args.output_dir)
+    # base_model = AutoModelForSequenceClassification.from_pretrained(
+    #     args.model_name_or_path,
+    #     num_labels=num_labels,
+    #     id2label=id2label,
+    #     label2id=label2id,
+    # )
+    # # IMPORTANT: You must resize the token embeddings of the base model before
+    # # loading the PEFT adapter because custom special tokens (<e1>, </e1>, <e2>, </e2>)
+    # # were added during training.
+    # base_model.resize_token_embeddings(len(tokenizer))
+    # inference_model = PeftModel.from_pretrained(base_model, args.output_dir)
+
 
 if __name__ == "__main__":
     main()
+
