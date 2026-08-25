@@ -847,7 +847,6 @@ class BaseTuner(nn.Module, ABC):
 
         if not existing_adapter_prefixes:
             existing_parameter_trainability = []
-        had_trainable_parameters = any(requires_grad for _, requires_grad in existing_parameter_trainability)
 
         uses_dummy_target_modules = getattr(peft_config, "target_modules", None) == DUMMY_TARGET_MODULES
         if uses_dummy_target_modules:
@@ -1078,10 +1077,6 @@ class BaseTuner(nn.Module, ABC):
             for n, p in model.named_parameters():
                 if adapter_name in n:
                     p.requires_grad = False
-        elif existing_parameter_trainability and not had_trainable_parameters:
-            for name, parameter in model.named_parameters():
-                if f".{adapter_name}." in name or name.endswith(f".{adapter_name}"):
-                    parameter.requires_grad = True
 
         set_additional_trainable_modules(
             model=model,
