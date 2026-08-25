@@ -2483,8 +2483,6 @@ class TestPeftCustomModel(PeftCommonTester):
         inputs = torch.randn(input_shape)
         config = IA3Config(target_modules=["conv"], feedforward_modules=["conv"], init_ia3_weights=False)
         model = get_peft_model(GroupedConvModel(), config).eval()
-        ia3_scaling = model.base_model.model.conv.ia3_l["default"]
-        ia3_scaling.data.copy_(torch.tensor([0.5, 1.0, 1.5, 2.0]).reshape_as(ia3_scaling))
         original_weight = model.base_model.model.conv.base_layer.weight.data.clone()
 
         with torch.inference_mode():
