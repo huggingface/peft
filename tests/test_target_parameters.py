@@ -470,6 +470,37 @@ class TestTargetParameters:
             for key in lora_weights_before.keys():
                 assert not torch.allclose(lora_weights_before[key], lora_weights_after[key], atol=atol, rtol=rtol)
 
+    def test_target_parameters_forward_under_autocast(self, monkeypatch):
+        # Folding the LoRA update into the parameter uses baddbmm, which autocast casts down to the autocast dtype.
+        # Since a parametrization may not change the dtype of the parameter, registering it then failed, see #3601.
+        torch.manual_seed(0)
+        model_id = "trl-internal-testing/tiny-Llama4ForCausalLM"
+        with hub_online_once(model_id):
+            model = MyAutoModelForCausalLM.from_pretrained(model_id)
+            x = torch.arange(10).view(2, 5)
+            config = LoraConfig(target_parameters=["feed_forward.experts.gate_up_proj"], init_lora_weights=False)
+            model = get_peft_model(model, config)
+
+            # log the dtypes of the folded weights seen during the forward call
+            dtypes = []
+
+            def mock_forward(self, W):
+                out = orig_forward(self, W)
+                dtypes.append(out.dtype)
+                return out
+
+            from peft.tuners.lora.layer import _LoraFactorsProxy
+
+            orig_forward = _LoraFactorsProxy.forward
+            monkeypatch.setattr(_LoraFactorsProxy, "forward", mock_forward)
+
+            with torch.inference_mode(), torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                model(x)
+
+            # the fold must preserve the dtype of the targeted parameter, even under autocast
+            assert dtypes
+            assert set(dtypes) == {torch.float32}
+
     def test_target_parameters_works_with_existing_parametrization(self):
         # When a parameter is already parametrized, we want the LoRA parametrization to work with it correctly.
         class MyLinear(nn.Linear):
