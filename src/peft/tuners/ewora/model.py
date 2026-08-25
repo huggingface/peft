@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import re
-import warnings
 
 import torch
 from transformers.pytorch_utils import Conv1D
@@ -80,21 +79,8 @@ class EworaModel(BaseTuner):
     def _create_new_module(ewora_config, adapter_name, target, r):
         target_base_layer = target.get_base_layer() if isinstance(target, BaseTunerLayer) else target
 
-        if isinstance(target_base_layer, torch.nn.Linear):
-            if ewora_config.fan_in_fan_out:
-                warnings.warn(
-                    "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
-                    "Setting fan_in_fan_out to False."
-                )
-                ewora_config.fan_in_fan_out = False
+        if isinstance(target_base_layer, (torch.nn.Linear, Conv1D)):
             return Linear(target, adapter_name, config=ewora_config, r=r)
-        elif isinstance(target_base_layer, Conv1D):
-            if not ewora_config.fan_in_fan_out:
-                warnings.warn(
-                    "fan_in_fan_out is set to False but the target module is `Conv1D`. Setting fan_in_fan_out to True."
-                )
-                ewora_config.fan_in_fan_out = True
-            return Linear(target, adapter_name, config=ewora_config, r=r, is_target_conv_1d_layer=True)
 
         raise TypeError(
             f"Target module {target} is not supported. Currently, only the following modules are supported: "

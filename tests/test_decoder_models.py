@@ -38,6 +38,7 @@ from peft import (
     CPTConfig,
     DeftConfig,
     DeloraConfig,
+    EworaConfig,
     FourierFTConfig,
     FrodConfig,
     GloraConfig,
@@ -146,6 +147,16 @@ ALL_CONFIGS = [
             "task_type": "CAUSAL_LM",
             "target_modules": None,
             "r": 2,
+        },
+    ),
+    (
+        EworaConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "r": 2,
+            "num_experts": 2,
+            "init_weights": False,
         },
     ),
     (

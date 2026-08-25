@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -28,7 +28,7 @@ class EworaConfig(PeftConfig):
 
     Args:
         r (`int`):
-            The rank of each individual expert adapter (defaults to 256). EWoRA partitions the adaptation into
+            The rank of each individual expert adapter (defaults to 8). EWoRA partitions the adaptation into
             `num_experts` independent rank-`r` experts, so the LoRA-equivalent total rank is `r * num_experts`.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
@@ -39,7 +39,7 @@ class EworaConfig(PeftConfig):
             architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
             the target modules manually.
         num_experts (`int`):
-            The number of independent low-rank experts the adapter is partitioned into (defaults to 8). Their outputs
+            The number of independent low-rank experts the adapter is partitioned into (defaults to 4). Their outputs
             are aggregated per input by a learned routing matrix.
         ewora_dropout (`float`):
             The dropout probability for Ewora layers (defaults to 0.0).
@@ -47,13 +47,6 @@ class EworaConfig(PeftConfig):
             Whether to initialize the adapter as an identity transform, i.e. with the expert `B` matrices set to zero
             (defaults to `True`). Setting this to `False` gives a non-identity initialization and is mainly useful for
             testing.
-        fan_in_fan_out (`bool`):
-            Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
-            `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
-        bias (`str`):
-            Bias type for EWoRA. Can be 'none', 'all' or 'ewora_only'. If 'all' or 'ewora_only', the corresponding
-            biases will be updated during training. Be aware that this means that, even when disabling the adapters,
-            the model will not produce the same output as the base model would have without adaptation.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
         layers_to_transform (`Union[List[int], int]`):
@@ -65,28 +58,9 @@ class EworaConfig(PeftConfig):
         rank_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default rank
             specified by `r`.
-        megatron_config (`Optional[dict]`):
-            The TransformerConfig arguments for Megatron. It is used to create EWoRA's parallel linear layer. You can
-            get it like this, `core_transformer_config_from_args(get_args())`, these two functions being from Megatron.
-            The arguments will be used to initialize the TransformerConfig of Megatron. You need to specify this
-            parameter when you want to apply EWoRA to the ColumnParallelLinear and RowParallelLinear layers of
-            megatron.
-        megatron_core (`Optional[str]`):
-            The core module from Megatron to use, defaults to `"megatron.core"`.
-        use_dora (`bool`):
-            Enable 'Weight-Decomposed Low-Rank Adaptation' (DoRA). This technique decomposes the updates of the weights
-            into two parts, magnitude and direction. Direction is handled by normal EWoRA, whereas the magnitude is
-            handled by a separate learnable parameter. This can improve the performance of LoRA especially at low
-            ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger overhead than pure
-            LoRA, so it is recommended to merge weights for inference. For more information, see
-            https://arxiv.org/abs/2402.09353.
-        layer_replication (`List[Tuple[int, int]]`):
-            Build a new stack of layers by stacking the original model layers according to the ranges specified. This
-            allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
-            all have separate EWoRA adapters attached to them.
     """
 
-    r: int = field(default=256, metadata={"help": "Rank of each expert adapter"})
+    r: int = field(default=8, metadata={"help": "Rank of each expert adapter"})
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
@@ -100,7 +74,7 @@ class EworaConfig(PeftConfig):
         },
     )
     num_experts: int = field(
-        default=8,
+        default=4,
         metadata={"help": "Number of independent low-rank experts"},
     )
     ewora_dropout: float = field(default=0.0, metadata={"help": "Ewora dropout"})
@@ -112,13 +86,6 @@ class EworaConfig(PeftConfig):
                 "Set to False for a non-identity initialization, which is mainly useful for testing."
             )
         },
-    )
-    fan_in_fan_out: bool = field(
-        default=False,
-        metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
-    )
-    bias: Literal["none", "all", "ewora_only"] = field(
-        default="none", metadata={"help": "Bias type for Ewora. Can be 'none', 'all' or 'ewora_only'"}
     )
     modules_to_save: Optional[list[str]] = field(
         default=None,
@@ -151,65 +118,6 @@ class EworaConfig(PeftConfig):
             )
         },
     )
-    megatron_config: Optional[dict] = field(
-        default=None,
-        metadata={
-            "help": (
-                "The TransformerConfig from Megatron. It is used to create EWoRA's parallel linear layer."
-                "You can get it like this, `core_transformer_config_from_args(get_args())`, "
-                "these two functions being from Megatron."
-                "You need to specify this parameter when you want to apply EWoRA to the ColumnParallelLinear and "
-                "RowParallelLinear layers of megatron."
-                "It should be noted that we may not be able to use the `save_pretrained` and `from_pretrained` "
-                "functions, because TransformerConfig may not necessarily be serialized."
-                "But when using megatron, we can use `get_peft_model_state_dict` function and "
-                "megatron's framework, they can also save and load models and configurations."
-            )
-        },
-    )
-    megatron_core: Optional[str] = field(
-        default="megatron.core",
-        metadata={
-            "help": (
-                "The core module from Megatron, it is used to create EWoRA's parallel linear layer. "
-                "It only needs to be passed in when you need to use your own modified megatron core module. "
-                "Otherwise, it will use the default value `megatron.core`. "
-            )
-        },
-    )
-    use_dora: bool = field(
-        default=False,
-        metadata={
-            "help": (
-                "Enable 'Weight-Decomposed Low-Rank Adaptation' (DoRA). This technique decomposes the updates of the "
-                "weights into two parts, magnitude and direction. Direction is handled by normal EWoRA, whereas the "
-                "magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, "
-                "especially at low ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger"
-                "overhead than pure LoRA, so it is recommended to merge weights for inference. For more information, "
-                "see  https://arxiv.org/abs/2402.09353."
-            )
-        },
-    )
-    # Enables replicating layers in a model to expand it to a larger model.
-    layer_replication: Optional[list[tuple[int, int]]] = field(
-        default=None,
-        metadata={
-            "help": (
-                "This enables using EWoRA to effectively expand a transformer model to a larger size by repeating some layers. "
-                "The transformation handles models (currently Llama, Bert or Falcon compatible architectures) with "
-                "a module list in the model which it modifies to expand the number of modules. "
-                "Base weights are shared so the memory usage is close to the original model. The intended use is these base weights "
-                "remain fixed during finetuning but each layer has a separate EWoRA adapter so the layers can be specialed via "
-                "the adapter layers fit during fine tuning."
-                "The format is a list of [start, end) pairs which specify the layer ranges to stack. For example:\n"
-                "   Original model has 5 layers labelled by their position in the model: `[0, 1, 2, 3, 4]`\n"
-                "   layer_replication: `[[0, 4], [2, 5]]`\n"
-                "   Final model will have this arrangement of original layers: `[0, 1, 2, 3, 2, 3, 4]`\n"
-                "This format is based on what is used for pass-through merges in mergekit. It makes it simple to select sequential "
-                "ranges of a model and stack them while reusing layers at either end of each sequence."
-            )
-        },
-    )
 
     def __post_init__(self):
         super().__post_init__()
@@ -224,6 +132,3 @@ class EworaConfig(PeftConfig):
         # if target_modules is a regex expression, then layers_pattern should be None
         if isinstance(self.target_modules, str) and self.layers_pattern is not None:
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
-
-        if self.use_dora and self.megatron_config:
-            raise ValueError("DoRA does not support megatron_core, please set `use_dora=False`.")

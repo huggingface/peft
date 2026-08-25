@@ -19,9 +19,8 @@ from typing import Optional
 import torch
 import torch.nn.functional as F
 from torch import nn
-from transformers.pytorch_utils import Conv1D
 
-from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features
 
 from .config import EworaConfig
 
@@ -46,35 +45,8 @@ class EworaLayer(BaseTunerLayer):
         self.merged_adapters = []
 
         base_layer = self.get_base_layer()
-        if isinstance(base_layer, nn.Linear):
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif isinstance(base_layer, nn.Conv2d):
-            in_features, out_features = base_layer.in_channels, base_layer.out_channels
-        elif isinstance(base_layer, nn.Embedding):
-            in_features, out_features = base_layer.num_embeddings, base_layer.embedding_dim
-        elif isinstance(base_layer, Conv1D):
-            in_features, out_features = (
-                base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
-            )
-        elif hasattr(base_layer, "infeatures") and hasattr(base_layer, "outfeatures"):
-            # QuantLinear
-            in_features, out_features = base_layer.infeatures, base_layer.outfeatures
-        elif hasattr(base_layer, "input_size") and hasattr(base_layer, "output_size"):
-            # Megatron ColumnParallelLinear,RowParallelLinear
-            in_features, out_features = base_layer.input_size, base_layer.output_size
-        elif hasattr(base_layer, "codebooks") and base_layer.__class__.__name__ == "QuantizedLinear":
-            # AQLM QuantLinear
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif hasattr(base_layer, "w_bit") and base_layer.__class__.__name__ == "WQLinear_GEMM":
-            # Awq layers
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif base_layer.__class__.__name__ == "EetqLinear":
-            # Eetq layers
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif hasattr(base_layer, "W_q") and base_layer.__class__.__name__ == "HQQLinear":
-            # HQQ layers
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        else:
+        in_features, out_features = _get_in_out_features(base_layer)
+        if in_features is None:
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
         self.in_features = in_features
@@ -97,7 +69,7 @@ class EworaLayer(BaseTunerLayer):
             ewora_dropout_layer = nn.Dropout(p=config.ewora_dropout)
         else:
             ewora_dropout_layer = nn.Identity()
-        self.ewora_dropout.update(nn.ModuleDict({adapter_name: ewora_dropout_layer}))
+        self.ewora_dropout[adapter_name] = ewora_dropout_layer
 
         # Actual trainable parameters
         self.ewora_As[adapter_name] = nn.Parameter(torch.Tensor(num_experts, self.in_features, r), requires_grad=True)
@@ -143,16 +115,13 @@ class Linear(nn.Linear, EworaLayer):
         adapter_name: str,
         config: EworaConfig,
         r: int,
-        is_target_conv_1d_layer: bool = False,
         **kwargs,
     ) -> None:
         # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__, which should always be called
         super(nn.Linear, self).__init__()
         EworaLayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = config.fan_in_fan_out
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, config)
-        self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
@@ -185,6 +154,8 @@ class Linear(nn.Linear, EworaLayer):
                 scores = weighting(F.relu(intermediate.reshape(*intermediate.shape[:-2], -1)))
                 final = torch.einsum("...ij, ijk -> ...ik", intermediate, ewora_Bs)
 
+                # the learned routing scores act as the input-dependent scaling of the expert outputs, taking the
+                # place of LoRA's static alpha/r factor
                 final = final * scores.unsqueeze(-1)
                 result = result + final.sum(dim=-2)
 

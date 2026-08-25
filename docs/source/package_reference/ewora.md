@@ -18,10 +18,25 @@ rendered properly in your Markdown viewer.
 
 [EWoRA](https://aclanthology.org/2025.findings-ijcnlp.108/) (Expert Weighted Low-Rank Adaptation) is a LoRA variant designed for finetuning on heterogeneous data. Instead of a single low-rank adapter, EWoRA uses several independent low-rank "expert" adapters (`num_experts`) and learns a lightweight routing matrix that dynamically weights the experts for each input. This lets a single adapter capture the diverse expertise needed across a heterogeneous corpus while keeping the same low-rank parameter budget as LoRA. EWoRA was introduced in [EWoRA: Expert Weighted Low-Rank Adaptation for Heterogeneous Data](https://aclanthology.org/2025.findings-ijcnlp.108/) (AACL-IJCNLP 2025, Findings).
 
+Compared to LoRA, EWoRA is most useful when a single adapter must serve a heterogeneous finetuning corpus (e.g. mixed domains or tasks), where its per-input expert weighting can capture specialized behaviors that a single low-rank adapter struggles to represent. The tradeoffs are a small additional routing computation at inference time and, because the expert weighting depends on the input, the adapter cannot be merged into the base weights like LoRA can.
+
 EWoRA currently has the following constraints:
 
 - Only `nn.Linear` and `transformers.pytorch_utils.Conv1D` layers are supported.
 - Because the experts are weighted dynamically at the forward pass, EWoRA cannot be merged into the base model: `merge()` and `merge_and_unload()` raise `NotImplementedError`. Use `unload()` to remove the adapters and recover the base model.
+
+## Usage
+
+```py
+import torch
+from transformers import AutoModelForCausalLM
+from peft import EworaConfig, get_peft_model
+
+base_model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-1B")
+config = EworaConfig(r=8, num_experts=4, target_modules=["q_proj", "v_proj"], task_type="CAUSAL_LM")
+peft_model = get_peft_model(base_model, config)
+peft_model.print_trainable_parameters()
+```
 
 The abstract from the paper is:
 
