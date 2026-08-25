@@ -757,7 +757,6 @@ TEST_CASES = [
         ShiraConfig,
         {"r": 1, "target_modules": ["lin0"]},
     ),
-
     #########
     # EWoRA #
     #########
@@ -765,7 +764,6 @@ TEST_CASES = [
     ("Vanilla MLP 2 EWoRA", "MLP", EworaConfig, {"r": 2, "num_experts": 2, "target_modules": ["lin0"]}),
     ("Vanilla MLP 3 EWoRA", "MLP", EworaConfig, {"r": 2, "num_experts": 2, "target_modules": ["lin1"]}),
     ("Vanilla MLP 4 EWoRA", "MLP", EworaConfig, {"r": 2, "num_experts": 4, "target_modules": ["lin0", "lin1"]}),
-
     ###############
     # Supertuning #
     ###############
@@ -784,7 +782,6 @@ TEST_CASES = [
         SupertuningConfig,
         {"sparsity": 0.5, "target_modules": ["lin0"], "r": 2},
     ),
-
     ########
     # VeRA #
     ########
