@@ -114,6 +114,39 @@ To avoid this, use the following order:
 2. Wrap it with [`get_peft_model`].
 3. Only then register hooks or create the optimizer.
 
+### `target_modules` do not match the layers you expect
+
+A related symptom is that training runs fine (the loss may even go down) but the resulting model barely differs from the base model — for instance, DPO loss stuck at `ln(2)`, or evaluation metrics near zero. A common cause is that `target_modules` only targets modules whose names actually exist in the model. Any name in `target_modules` that does not match a module in the model is **silently skipped** — by default, PEFT does not warn about this.
+
+This is especially easy to miss with **hybrid architectures** that mix, say, attention and Mamba/SSM layers (e.g. Nemotron-H, Jamba, or Granite-H). The majority of layers may be Mamba/SSM layers with different module names (e.g. `in_proj`, `out_proj`, `A_log`, `D`) than the standard attention projections (`q_proj`, `k_proj`, `v_proj`, `o_proj`). If you only target the attention projections, a large fraction of the model's capacity stays frozen, which can look like the adapter "isn't learning".
+
+To verify that your `target_modules` actually match the layers you intend to train:
+
+```python
+from peft import get_peft_model
+
+peft_model = get_peft_model(model, config)
+# Shows the number of trainable parameters. If this is far lower than expected,
+# your target_modules are probably not matching many layers.
+peft_model.print_trainable_parameters()
+# trainable params: 18,657,408 || all params: 9,162,137,216 || trainable%: 0.203
+```
+
+You can also inspect the actual module names in the model to pick `target_modules` that match:
+
+```python
+import torch
+from torch import nn
+
+# List the names of all linear-like modules so you can choose target_modules correctly.
+for name, module in model.named_modules():
+    if isinstance(module, (nn.Linear, nn.Conv1d, nn.Conv2d)):
+        print(name)
+```
+
+> [!TIP]
+> Some modules intentionally cannot be targeted (e.g. structured SSM parameters such as `A_log` or `D`), so check the method-specific documentation for which modules are supported.
+
 ## Bad results from a loaded PEFT model
 
 There can be several reasons for getting a poor result from a loaded PEFT model which are listed below. If you're still unable to troubleshoot the problem, see if anyone else had a similar [issue](https://github.com/huggingface/peft/issues) on GitHub, and if you can't find any, open a new issue.
