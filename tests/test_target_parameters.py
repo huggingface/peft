@@ -423,10 +423,10 @@ class TestTargetParameters:
                 weights.append(W)
                 return orig_forward(self, W)
 
-            from peft.tuners.lora.layer import _LoraParameterProxy
+            from peft.tuners.lora.layer import _LoraFactorsProxy
 
-            orig_forward = _LoraParameterProxy.forward
-            monkeypatch.setattr(_LoraParameterProxy, "forward", mock_forward)
+            orig_forward = _LoraFactorsProxy.forward
+            monkeypatch.setattr(_LoraFactorsProxy, "forward", mock_forward)
 
             num_steps = 3
             with torch.inference_mode():
@@ -557,9 +557,9 @@ class TestTargetParameters:
             return wrapper
 
         monkeypatch.setattr(
-            peft.tuners.lora.layer._LoraParameterProxy,
+            peft.tuners.lora.layer._LoraFactorsProxy,
             "forward",
-            store_tensors_deco(peft.tuners.lora.layer._LoraParameterProxy.forward),
+            store_tensors_deco(peft.tuners.lora.layer._LoraFactorsProxy.forward),
         )
 
         with hub_online_once(model_id):
