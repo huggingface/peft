@@ -25,7 +25,11 @@ from .config import ShadowConfig
 
 
 def _sequence_classification_loss(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-    """Match Transformers' regression, single-label, and multi-label sequence-classification losses."""
+    """Match Transformers' regression, single-label, and multi-label sequence-classification losses.
+
+    Mirrors ``ForSequenceClassificationLoss``:
+    https://github.com/huggingface/transformers/blob/4347de898732cb439cb2e343ddbc64fde0420ea9/src/transformers/loss/loss_utils.py#L94-L118
+    """
     num_labels = logits.shape[-1]
     if num_labels == 1:
         return torch.nn.functional.mse_loss(logits.squeeze(-1), labels.to(logits.dtype).view(-1))
