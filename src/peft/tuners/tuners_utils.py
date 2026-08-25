@@ -783,18 +783,6 @@ class BaseTuner(nn.Module, ABC):
         ###################################
         # PREPARATION OF MODEL AND CONFIG #
         ###################################
-        # Adding an adapter must not change the trainability of parameters that were already present. Some tuners
-        # create their new adapter parameters before calling this method, so exclude those from the snapshot.
-        existing_adapter_parameters = (
-            [
-                (param, param.requires_grad)
-                for name, param in model.named_parameters()
-                if f".{adapter_name}." not in name and not name.endswith(f".{adapter_name}")
-            ]
-            if any(isinstance(module, BaseTunerLayer) for module in model.modules())
-            else []
-        )
-
         is_transformers_like_model = hasattr(getattr(model, "config", None), "model_type")
         if is_transformers_ge_v5 and is_transformers_like_model:
             # TODO remove once transformers < v5.0 is no longer supported
@@ -841,6 +829,26 @@ class BaseTuner(nn.Module, ABC):
         named_modules = list(model.named_modules())
         key_list = [key for key, _ in named_modules]
 
+        # Adding an adapter must not change the trainability of parameters that were already present. Some tuners
+        # create their new adapter parameters before calling this method, so exclude those from the snapshot.
+        existing_adapter_prefixes = []
+        existing_parameter_trainability = []
+        seen_parameters = set()
+        for key, module in named_modules:
+            if isinstance(module, BaseTunerLayer):
+                existing_adapter_prefixes.append(key + ".")
+            for parameter_name, parameter in module.named_parameters(recurse=False):
+                full_name = f"{key}.{parameter_name}" if key else parameter_name
+                if id(parameter) in seen_parameters:
+                    continue
+                seen_parameters.add(id(parameter))
+                if f".{adapter_name}." not in full_name and not full_name.endswith(f".{adapter_name}"):
+                    existing_parameter_trainability.append((parameter, parameter.requires_grad))
+
+        if not existing_adapter_prefixes:
+            existing_parameter_trainability = []
+        had_trainable_parameters = any(requires_grad for _, requires_grad in existing_parameter_trainability)
+
         uses_dummy_target_modules = getattr(peft_config, "target_modules", None) == DUMMY_TARGET_MODULES
         if uses_dummy_target_modules:
             # dummy adapter, we allow not matching any module
@@ -878,11 +886,6 @@ class BaseTuner(nn.Module, ABC):
         ###############################
         # MATCHING & CREATING MODULES #
         ###############################
-
-        existing_adapter_prefixes = []
-        for key, module in named_modules:
-            if isinstance(module, BaseTunerLayer):
-                existing_adapter_prefixes.append(key + ".")
 
         # TODO: check if this the most robust way
         module_names: set[str] = set()
@@ -1068,13 +1071,17 @@ class BaseTuner(nn.Module, ABC):
         self.set_adapter(self.active_adapters, inference_mode=peft_config.inference_mode)
         self._mark_only_adapters_as_trainable(model)
 
-        for param, requires_grad in existing_adapter_parameters:
-            param.requires_grad = requires_grad
+        for parameter, requires_grad in existing_parameter_trainability:
+            parameter.requires_grad = requires_grad
 
         if self.peft_config[adapter_name].inference_mode:
             for n, p in model.named_parameters():
                 if adapter_name in n:
                     p.requires_grad = False
+        elif existing_parameter_trainability and not had_trainable_parameters:
+            for name, parameter in model.named_parameters():
+                if f".{adapter_name}." in name or name.endswith(f".{adapter_name}"):
+                    parameter.requires_grad = True
 
         set_additional_trainable_modules(
             model=model,
