@@ -236,3 +236,21 @@ class UniLoraModel(BaseTuner):
             config=unilora_config,
             **kwargs,
         )
+
+    @classmethod
+    def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
+        theta_d_key = f"base_model.unilora_theta_d.{adapter_name}"
+        if theta_d_key not in state_dict:
+            raise KeyError(f"Expected UniLora parameter '{theta_d_key}' in the model state dict.")
+        to_return = {theta_d_key: state_dict[theta_d_key]}
+        if config.save_indices:
+            to_return.update(
+                {
+                    k: v
+                    for k, v in state_dict.items()
+                    if (("unilora_indices" in k or "unilora_scales" in k) and f".{adapter_name}" in k)
+                }
+            )
+
+        to_return.update(cls._get_learnable_bias_state_dict(model, state_dict, config))
+        return to_return

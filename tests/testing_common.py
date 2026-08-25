@@ -1684,9 +1684,8 @@ class PeftCommonTester:
                 for adapter_name in new_adapters:
                     if "single" in adapter_name:
                         new_delta_weight = target.get_delta_weight(adapter_name)
+                        # A negative merge weight must also negate the resulting delta weight.
                         weighted_original_delta_weights = target.get_delta_weight(adapter_list[0]) * weight_list[0]
-                        sign = 1 if weight_list[0] > 0 else -1
-                        weighted_original_delta_weights = sign * weighted_original_delta_weights
                         assert torch.allclose(new_delta_weight, weighted_original_delta_weights, atol=1e-4, rtol=1e-4)
                     elif "svd" in adapter_name:
                         assert target.r[adapter_name] == 20
@@ -1755,15 +1754,22 @@ class PeftCommonTester:
             return pytest.skip(f"Test not applicable for {config}")
 
         with hub_online_once(model_id):
-            model = self.transformers_class.from_pretrained(model_id)
-            model = get_peft_model(model, config, adapter_list[0])
+
+            def create_model():
+                # Positive and negative scenarios reuse adapter names, so they need isolated registries.
+                model = self.transformers_class.from_pretrained(model_id)
+                return get_peft_model(model, copy.deepcopy(config), adapter_list[0])
 
             if isinstance(config, LoraConfig):
-                self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, weight_list)
-                self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, negative_weight_list)
+                self._test_weighted_combination_of_adapters_lora(create_model(), config, adapter_list, weight_list)
+                self._test_weighted_combination_of_adapters_lora(
+                    create_model(), config, adapter_list, negative_weight_list
+                )
             elif isinstance(config, IA3Config):
-                self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, weight_list)
-                self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, negative_weight_list)
+                self._test_weighted_combination_of_adapters_ia3(create_model(), config, adapter_list, weight_list)
+                self._test_weighted_combination_of_adapters_ia3(
+                    create_model(), config, adapter_list, negative_weight_list
+                )
             else:
                 pytest.skip(f"Test not applicable for {config}")
 

@@ -131,6 +131,8 @@
         title: RoAd
       - local: package_reference/shira
         title: SHiRA
+      - local: package_reference/supertuning
+        title: Super-Tuning
       - local: package_reference/tinylora
         title: TinyLoRA
       - local: package_reference/unilora
@@ -252,6 +254,8 @@
       title: RoAd
     - local: package_reference/shira
       title: SHiRA
+    - local: package_reference/supertuning
+      title: Super-Tuning
     - local: package_reference/tinylora
       title: TinyLoRA
     - local: package_reference/unilora
@@ -280,5 +284,7 @@
       title: Converting non-LoRA adapters to LoRA
     - local: package_reference/warnings
       title: Warnings emitted by PEFT
+    - local: package_reference/errors
+      title: Errors raised by PEFT
     title: Utilities
   title: API reference
