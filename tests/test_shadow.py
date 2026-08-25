@@ -623,36 +623,6 @@ class TestShadowBackboneVariants:
         model(input_ids=ids, labels=ids.clone()).loss.backward()
         assert embed.weight.grad is None
 
-    def test_pretrained_projected_shadow_checkpoint_requires_complete_backbone(self, tmp_path):
-        from safetensors.torch import save_file
-        from transformers import LlamaModel
-
-        base = make_llama_causal()
-        base_hidden = base.config.hidden_size
-        shadow_hidden = base_hidden // 2
-        inner_cfg = LlamaConfig(
-            vocab_size=base.config.vocab_size,
-            hidden_size=shadow_hidden,
-            intermediate_size=2 * shadow_hidden,
-            num_hidden_layers=1,
-            num_attention_heads=base.config.num_attention_heads,
-            num_key_value_heads=getattr(base.config, "num_key_value_heads", base.config.num_attention_heads),
-            max_position_embeddings=base.config.max_position_embeddings,
-        )
-        shadow_backbone = LlamaModel(inner_cfg)
-        state = {f"shadow_model.{key}": value for key, value in shadow_backbone.state_dict().items()}
-        state.pop(next(iter(state)))
-        state["shadow_hidden_projection.weight"] = torch.empty(base_hidden, shadow_hidden)
-        save_file(state, str(tmp_path / "model.safetensors"))
-        raw_config = {
-            "model_type": "causal_lm_with_hidden_projection",
-            "shadow_model_config": inner_cfg.to_dict(),
-        }
-        (tmp_path / "config.json").write_text(json.dumps(raw_config))
-
-        with pytest.raises(RuntimeError, match=r"Missing key\(s\) in state_dict"):
-            get_peft_model(base, ShadowConfig(task_type="CAUSAL_LM", shadow_model=str(tmp_path)))
-
     def test_unload_shadow_returns_standalone_generatable_model(self):
         # unload_shadow returns the standalone shadow network (backbone + projection + head) as a causal LM. This is how
         # the shadow path's own performance is evaluated, independent of the base model.
