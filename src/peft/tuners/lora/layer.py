@@ -2249,7 +2249,10 @@ class _LoraFactorsProxy(nn.Module):
         self.scaling = scaling
 
     def forward(self, W):
-        return torch.baddbmm(W, self.lhs, self.rhs, alpha=self.scaling)
+        # autocast would cast the baddbmm down to the autocast dtype, but a parametrization may not change the dtype of
+        # the parameter, so the fold is performed in the dtype of W (which is also what the non-folded path does).
+        with torch.autocast(device_type=W.device.type, enabled=False):
+            return torch.baddbmm(W, self.lhs, self.rhs, alpha=self.scaling)
 
 
 # copied from:
