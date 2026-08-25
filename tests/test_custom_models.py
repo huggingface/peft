@@ -6364,6 +6364,30 @@ class TestRequiresGrad:
             "base_model.model.layernorm0.ln_tuning_layers.adapter1.bias",
         )
 
+    def test_lntuning_different_targets_forward_and_merge(self):
+        # Regression test for #3574: when multiple LN tuning adapters target different modules, activating
+        # one adapter must not raise a KeyError on the layers that are not targeted by it.
+        config0 = LNTuningConfig(target_modules=["layernorm0"])
+        peft_model = get_peft_model(MLP_LayerNorm(), config0)
+
+        config1 = LNTuningConfig(target_modules=["layernorm1"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # Activate the adapter that only targets layernorm1; layernorm0 has no "adapter1" layer.
+        peft_model.set_adapter("adapter1")
+
+        x = torch.randn(2, 10)
+
+        # Forward must fall back to the base layer for layernorm0 instead of indexing a missing layer.
+        out = peft_model(x)
+        assert out.shape == (2, 2)
+
+        # Merging the active adapter must skip layers that don't target it instead of raising.
+        peft_model.merge_adapter()
+        out_merged = peft_model(x)
+        assert out_merged.shape == (2, 2)
+        peft_model.unmerge_adapter()
+
     def test_requires_grad_vera_different_targets(self):
         # Test two different VeRA adapters that target different modules. Most notably, ensure that vera_A and vera_B
         # don't require grads.

@@ -71,6 +71,10 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
     def merge(self, adapter_names: Optional[list[str]] = None, safe_merge: bool = False):
         # note that there is no actual merging, so whether safe_merge is True or False is irrelevant
         adapter_names = check_adapters_to_merge(self, adapter_names)
+        # Only merge adapters that actually target this layer. When several adapters target different
+        # modules, the active adapter may not be present on this layer, in which case there is nothing
+        # to merge (the layer falls back to its base layer instead).
+        adapter_names = [name for name in adapter_names if name in self.ln_tuning_layers]
         if not adapter_names:
             # no adapter to merge
             return
@@ -117,7 +121,12 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
                     f"adapters, but LN tuning does not allow inference with more than one adapter at a time"
                 )
             active_adapter = self.active_adapters[0]
-            result = self.ln_tuning_layers[active_adapter](x, *args, **kwargs)
+            if active_adapter in self.ln_tuning_layers:
+                result = self.ln_tuning_layers[active_adapter](x, *args, **kwargs)
+            else:
+                # The active adapter does not target this layer. Fall back to the base layer, the same
+                # way other PEFT methods (e.g. LoRA) skip adapters that are not present on a layer.
+                result = self.base_layer(x, *args, **kwargs)
 
         return result
 
