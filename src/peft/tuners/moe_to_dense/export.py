@@ -32,6 +32,7 @@ from tqdm import tqdm
 from peft.utils.other import _get_submodules
 
 from .arch import MoeArchSpec, infer_layer_index, set_config_value
+from .layer import MoeToDenseLayer
 
 
 def _first_param(module: nn.Module) -> torch.Tensor | None:
@@ -183,7 +184,9 @@ def _patch_moe_config(config, spec: MoeArchSpec, intermediate_size: int) -> None
     set_config_value(config, spec.expert_intermediate_fields, intermediate_size)
 
 
-def export_one_expert(model: nn.Module, layers: list, adapter_name: str, spec: MoeArchSpec, progressbar: bool) -> None:
+def export_one_expert(
+    model: nn.Module, layers: list[tuple[str, MoeToDenseLayer]], adapter_name: str, progressbar: bool
+) -> None:
     """
     Generic export: keep the MoE layer structure, but with a single expert (the dense FFN) and a router that always
     selects it with weight 1. The config is patched accordingly (1 expert, top-1 routing, bigger intermediate size).
@@ -232,7 +235,7 @@ def export_one_expert(model: nn.Module, layers: list, adapter_name: str, spec: M
         parent, _, target_name = _get_submodules(model, key)
         config = layer.base_layer.config
         if id(config) not in configs_patched:
-            _patch_moe_config(config, spec, intermediate_size)
+            _patch_moe_config(config, layer.spec, intermediate_size)
             configs_patched.add(id(config))
 
         if not verified:
@@ -319,7 +322,7 @@ def _dense_mlp_export_problem(model: nn.Module, layers: list, adapter_name: str,
 
 
 def export_dense_mlp(
-    model: nn.Module, layers: list[tuple[str, nn.Module]], adapter_name: str, spec: MoeArchSpec, progressbar: bool
+    model: nn.Module, layers: list[tuple[str, MoeToDenseLayer]], adapter_name: str, progressbar: bool
 ) -> None:
     """
     Export to the architecture's dense MLP class, e.g. `Qwen3MoeMLP` for Qwen3-MoE: the whole MoE block (router +
@@ -328,17 +331,22 @@ def export_dense_mlp(
 
     Falls back to the generic "one expert" export if the architecture does not allow this.
     """
-    problem = _dense_mlp_export_problem(model, layers, adapter_name, spec)
+    _, first_layer = layers[0]
+    spec0 = first_layer.spec
+    problem = _dense_mlp_export_problem(model, layers, adapter_name, spec0)
     if problem is not None:
         warnings.warn(f"Cannot export to dense MLPs because {problem}. Falling back to the 'one_expert' export.")
-        export_one_expert(model, layers, adapter_name, spec, progressbar)
+        export_one_expert(model, layers, adapter_name, progressbar)
         return
 
-    _, first_layer = layers[0]
-    mlp_cls = _get_mlp_class_from_transformers(spec)
+    # at this point, we must be in the case that dense_layers_field and dense_intermediate_field are defined
+    if not spec0.dense_layers_field or not spec0.dense_intermediate_field:
+        raise ValueError("`dense_layers_field` and `dense_intermediate_field` must be defined for dense MLP export")
+
+    mlp_cls = _get_mlp_class_from_transformers(spec0)
     config = first_layer.base_layer.config
     intermediate_size = first_layer.num_experts_to_keep[adapter_name] * first_layer.layout.intermediate_size
-    dense_layer_indices = set(getattr(config, spec.dense_layers_field, None) or [])
+    dense_layer_indices = set(getattr(config, spec0.dense_layers_field, None) or [])
 
     for key, layer in tqdm(layers, disable=not progressbar, desc="Exporting dense model"):
         grandparent, _, block_name = _get_submodules(model, key.rpartition(".")[0])
@@ -357,11 +365,11 @@ def export_dense_mlp(
         setattr(grandparent, block_name, mlp)
         dense_layer_indices.add(infer_layer_index(key))
 
-    setattr(config, spec.dense_layers_field, sorted(dense_layer_indices))
-    setattr(config, spec.dense_intermediate_field, intermediate_size)
+    setattr(config, spec0.dense_layers_field, sorted(dense_layer_indices))
+    setattr(config, spec0.dense_intermediate_field, intermediate_size)
 
 
-EXPORT_STRATEGIES: dict[str, Callable[[nn.Module, list, str, MoeArchSpec, bool], None]] = {
+EXPORT_STRATEGIES: dict[str, Callable[[nn.Module, list, str, bool], None]] = {
     "one_expert": export_one_expert,
     "dense_mlp": export_dense_mlp,
 }

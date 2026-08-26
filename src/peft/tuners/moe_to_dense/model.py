@@ -271,7 +271,15 @@ class MoeToDenseModel(BaseTuner):
             raise ValueError(f"All MoE layers must use the same export strategy, got {sorted(exports)}.")
 
         export = EXPORT_STRATEGIES[exports.pop()]
-        export(self.model, layers, adapter_name, layers[0][1].spec, progressbar)
+        try:
+            export(self.model, layers, adapter_name, progressbar)
+        except Exception as exc:
+            raise RuntimeError(
+                "There was an error during the export process, which can leave the model in a broken state. It is "
+                "recommended that you reload the model before doing further work with. Please report the error with "
+                "a reproducer here: https://github.com/huggingface/peft/issues"
+            ) from exc
+
         # replace the `modules_to_save` wrappers by the trained copies
         self._unwrap_auxiliary_modules(keep_trained=True, adapter_names=[adapter_name])
 

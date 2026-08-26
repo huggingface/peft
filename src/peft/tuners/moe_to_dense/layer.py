@@ -297,6 +297,18 @@ class MoeToDenseLayer(nn.Module, BaseTunerLayer):
                 self._warned_unallocated = True
             return self.base_layer(hidden_states, *args, **kwargs)
 
+        # sanity check on the arguments: we assume that the MoE module is called only with 3 arguments:
+        # - hidden_states
+        # - top_k_index
+        # - top_k_weights
+        # `hidden_states, *args, **kwargs` should thus total 3 arguments (there are no defaults)
+        num_fw_args = 1 + len(args) + len(kwargs)
+        if num_fw_args != 3:
+            raise RuntimeError(
+                f"The signature of the MoE layer is different from what PEFT expects ({num_fw_args} arguments "
+                "instead of 3 arguments). We cannot be sure that we're calling it correctly."
+            )
+
         dense = self.moe_to_dense_experts[adapter_name]
         shape = hidden_states.shape
         hidden_states = hidden_states.reshape(-1, shape[-1])
