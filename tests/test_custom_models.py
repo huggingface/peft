@@ -5019,6 +5019,53 @@ class TestMultipleActiveAdapters:
         assert torch.allclose(disabled_adapter_output, base_output, atol=1e-4)
 
     @pytest.mark.parametrize(
+        "model_cls, module_name",
+        [(MLP, "lin0"), (ModelEmbConv1D, "emb"), (ModelConv2D, "conv2d")],
+    )
+    @pytest.mark.parametrize("num_adapters", [2, 3])
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    def test_multiple_active_dora_adapters_merge_matches_forward(
+        self, model_cls, module_name, num_adapters, safe_merge
+    ):
+        # DoRA normalizes by the norm of the unmerged base weight. Adapters are merged one after another, so from the
+        # second adapter on, the weight being merged into already holds the previously merged ones; taking the norm
+        # from it makes the merged model differ from the unmerged forward pass. The adapters have to share a target
+        # module for this to show up.
+        torch.manual_seed(0)
+
+        model = model_cls().to(self.torch_device).eval()
+        X = self.prepare_inputs_for_testing()
+        base_output = model(**X)
+
+        def config():
+            return LoraConfig(target_modules=[module_name], init_lora_weights=False, use_dora=True)
+
+        peft_model = get_peft_model(model, config(), adapter_name="adapter_0").eval()
+        adapters = ["adapter_0"]
+        for i in range(1, num_adapters):
+            peft_model.add_adapter(f"adapter_{i}", config())
+            adapters.append(f"adapter_{i}")
+
+        # the DoRA magnitude equals the weight norm at initialization, which makes the factor 1 no matter which weight
+        # it was computed from; move it away from that value to emulate a trained adapter
+        for module in peft_model.modules():
+            if isinstance(module, lora.LoraLayer) and module.lora_magnitude_vector:
+                for magnitude in module.lora_magnitude_vector.values():
+                    magnitude.weight.data += 0.5
+
+        self.set_multiple_active_adapters(peft_model, adapters)
+        combined_output = peft_model(**X)
+
+        peft_model.merge_adapter(safe_merge=safe_merge)
+        assert torch.allclose(peft_model(**X), combined_output, atol=1e-4)
+
+        peft_model.unmerge_adapter()
+        assert torch.allclose(peft_model(**X), combined_output, atol=1e-4)
+
+        with peft_model.disable_adapter():
+            assert torch.allclose(peft_model(**X), base_output, atol=1e-4)
+
+    @pytest.mark.parametrize(
         "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
     )
     def test_merge_layers_multi(self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2):

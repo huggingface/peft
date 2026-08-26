@@ -24,7 +24,7 @@ from torch import nn
 
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.lora.config import BdLoraConfig, MontecloraConfig
-from peft.utils.integrations import gather_params_ctx
+from peft.utils.integrations import dequantize_module_weight, gather_params_ctx
 from peft.utils.other import transpose
 
 from .arrow import ArrowLoraLinearLayer
@@ -172,11 +172,17 @@ class DoraLinearVariant(LoraVariant):
         delta_weight = module.get_delta_weight(active_adapter)
 
         # since delta_weight already includes scaling, set it to 1 here
-        weight_norm = (
-            module.lora_magnitude_vector[active_adapter]
-            .get_weight_norm(orig_weight, transpose(delta_weight, module.fan_in_fan_out), scaling=1)
-            .detach()
-        )
+        # The weight norm has to be based on the unmerged weight, the same way `forward` computes it. When several
+        # DoRA adapters are merged in turn, the weight passed in already holds the previously merged ones.
+        with module._unmerged_base_weight(safe_merge=True) as base_weight:
+            weight_norm = (
+                module.lora_magnitude_vector[active_adapter]
+                .get_weight_norm(base_weight, transpose(delta_weight, module.fan_in_fan_out), scaling=1)
+                .detach()
+            )
+        # `merge` copied the weight before the replay above rebuilt it, and rebuilding is not bit exact in
+        # lower precisions, so continue from the weight the replay produced rather than from that copy.
+        orig_weight = dequantize_module_weight(module.get_base_layer())
         # We need to cache weight_norm because it has to be based on the original weights. We
         # cannot calculate it on the fly based on the merged weights when unmerging because its a
         # different value
@@ -191,11 +197,14 @@ class DoraLinearVariant(LoraVariant):
     def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
         orig_dtype = orig_weight.dtype
         delta_weight = module.get_delta_weight(active_adapter)
-        weight_norm = (
-            module.lora_magnitude_vector[active_adapter]
-            .get_weight_norm(orig_weight, transpose(delta_weight, module.fan_in_fan_out), scaling=1)
-            .detach()
-        )
+        # The weight norm has to be based on the unmerged weight, the same way `forward` computes it. When several
+        # DoRA adapters are merged in turn, the weight passed in already holds the previously merged ones.
+        with module._unmerged_base_weight() as base_weight:
+            weight_norm = (
+                module.lora_magnitude_vector[active_adapter]
+                .get_weight_norm(base_weight, transpose(delta_weight, module.fan_in_fan_out), scaling=1)
+                .detach()
+            )
         # We need to cache weight_norm because it has to be based on the original weights. We
         # cannot calculate it on the fly based on the merged weights when unmerging because its a
         # different value
@@ -270,11 +279,17 @@ class DoraEmbeddingVariant(DoraLinearVariant):
         delta_weight = module.get_delta_weight(active_adapter)
 
         # since delta_weight already includes scaling, set it to 1 here
-        weight_norm = (
-            module.lora_magnitude_vector[active_adapter]
-            .get_weight_norm(orig_weight, delta_weight.T, scaling=1)
-            .detach()
-        )
+        # The weight norm has to be based on the unmerged weight, the same way `forward` computes it. When several
+        # DoRA adapters are merged in turn, the weight passed in already holds the previously merged ones.
+        with module._unmerged_base_weight(safe_merge=True) as base_weight:
+            weight_norm = (
+                module.lora_magnitude_vector[active_adapter]
+                .get_weight_norm(base_weight, delta_weight.T, scaling=1)
+                .detach()
+            )
+        # `merge` copied the weight before the replay above rebuilt it, and rebuilding is not bit exact in
+        # lower precisions, so continue from the weight the replay produced rather than from that copy.
+        orig_weight = dequantize_module_weight(module.get_base_layer())
         # We need to cache weight_norm because it has to be based on the original weights. We
         # cannot calculate it on the fly based on the merged weights when unmerging because its a
         # different value
@@ -289,11 +304,14 @@ class DoraEmbeddingVariant(DoraLinearVariant):
     def merge_unsafe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> None:
         orig_dtype = orig_weight.dtype
         delta_weight = module.get_delta_weight(active_adapter)
-        weight_norm = (
-            module.lora_magnitude_vector[active_adapter]
-            .get_weight_norm(orig_weight, delta_weight.T, scaling=1)
-            .detach()
-        )
+        # The weight norm has to be based on the unmerged weight, the same way `forward` computes it. When several
+        # DoRA adapters are merged in turn, the weight passed in already holds the previously merged ones.
+        with module._unmerged_base_weight() as base_weight:
+            weight_norm = (
+                module.lora_magnitude_vector[active_adapter]
+                .get_weight_norm(base_weight, delta_weight.T, scaling=1)
+                .detach()
+            )
         # We need to cache weight_norm because it has to be based on the original weights. We
         # cannot calculate it on the fly based on the merged weights when unmerging because its a
         # different value
@@ -366,9 +384,17 @@ class _DoraConvNdVariant(LoraVariant):
         delta_weight = module.get_delta_weight(active_adapter)
 
         # since delta_weight already includes scaling, set it to 1 here
-        weight_norm = (
-            module.lora_magnitude_vector[active_adapter].get_weight_norm(orig_weight, delta_weight, scaling=1).detach()
-        )
+        # The weight norm has to be based on the unmerged weight, the same way `forward` computes it. When several
+        # DoRA adapters are merged in turn, the weight passed in already holds the previously merged ones.
+        with module._unmerged_base_weight(safe_merge=True) as base_weight:
+            weight_norm = (
+                module.lora_magnitude_vector[active_adapter]
+                .get_weight_norm(base_weight, delta_weight, scaling=1)
+                .detach()
+            )
+        # `merge` copied the weight before the replay above rebuilt it, and rebuilding is not bit exact in
+        # lower precisions, so continue from the weight the replay produced rather than from that copy.
+        orig_weight = dequantize_module_weight(module.get_base_layer())
         # We need to cache weight_norm because it has to be based on the original weights. We
         # cannot calculate it on the fly based on the merged weights when unmerging because its a
         # different value
@@ -383,9 +409,14 @@ class _DoraConvNdVariant(LoraVariant):
         orig_dtype = orig_weight.dtype
         delta_weight = module.get_delta_weight(active_adapter)
         # since delta_weight already includes scaling, set it to 1 here
-        weight_norm = (
-            module.lora_magnitude_vector[active_adapter].get_weight_norm(orig_weight, delta_weight, scaling=1).detach()
-        )
+        # The weight norm has to be based on the unmerged weight, the same way `forward` computes it. When several
+        # DoRA adapters are merged in turn, the weight passed in already holds the previously merged ones.
+        with module._unmerged_base_weight() as base_weight:
+            weight_norm = (
+                module.lora_magnitude_vector[active_adapter]
+                .get_weight_norm(base_weight, delta_weight, scaling=1)
+                .detach()
+            )
         # We need to cache weight_norm because it has to be based on the original weights. We
         # cannot calculate it on the fly based on the merged weights when unmerging because its a
         # different value

@@ -144,6 +144,8 @@ class LoraLayer(BaseTunerLayer):
         self.lora_bias: dict[str, bool] = {}
         self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA
         self._caches: dict[str, Any] = {}  # small ad hoc cache; values are not part of the state_dict
+        # set while `_unmerged_base_weight` is active, not part of the state_dict
+        self._unmerged_base_weight_cache: Optional[torch.Tensor] = None
         self.ephemeral_gpu_offload: bool = ephemeral_gpu_offload
         # flag to enable/disable casting of input to weight dtype during forward call
         self.cast_input_dtype_enabled: bool = True
@@ -733,6 +735,39 @@ class LoraLayer(BaseTunerLayer):
 
         # Remove redundant fields
         del base_layer._peft_loraga_grad
+
+    @contextmanager
+    def _unmerged_base_weight(self, safe_merge: bool = False):
+        """Yield the base weight with the already merged adapters taken out of it.
+
+        `merge` applies the adapters one after another, so from the second adapter on, the weight already contains the
+        previously merged ones. Variants whose delta depends on the base weight need it unmerged, the same way
+        `forward` sees it, so the merged adapters are unmerged here and merged again afterwards. Nothing is kept
+        between calls to `merge`.
+
+        Merging the adapters again re-enters this method for each of them. They are given the weight recovered by the
+        outermost call, both because it is the weight they have to normalize against anyway and because unmerging per
+        adapter would make merging grow exponentially with their number.
+        """
+        if self._unmerged_base_weight_cache is not None:
+            yield self._unmerged_base_weight_cache
+            return
+
+        merged_adapters = self.merged_adapters[:]
+        try:
+            if merged_adapters:
+                self.unmerge()
+            self._unmerged_base_weight_cache = dequantize_module_weight(self.get_base_layer()).detach().clone()
+            yield self._unmerged_base_weight_cache
+        finally:
+            try:
+                # only the adapters that were actually unmerged, so that an unmerge that failed halfway does not
+                # merge anything twice
+                to_merge = [name for name in merged_adapters if name not in self.merged_adapters]
+                if to_merge:
+                    self.merge(safe_merge=safe_merge, adapter_names=to_merge)
+            finally:
+                self._unmerged_base_weight_cache = None
 
     def _cache_store(self, key: str, value: Any) -> None:
         # cache intermediate values, e.g. weight norm of DoRA
