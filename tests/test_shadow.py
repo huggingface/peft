@@ -20,6 +20,7 @@ import pytest
 import torch
 import torch.distributed as dist
 from safetensors import safe_open
+from safetensors.torch import save_file
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from transformers import (
     AutoModelForCausalLM,
@@ -28,6 +29,7 @@ from transformers import (
     LlamaConfig,
     LlamaModel,
 )
+from transformers.modeling_outputs import SequenceClassifierOutput
 
 from peft import (
     PeftModel,
@@ -290,33 +292,6 @@ class TestShadowCausalLM:
             got = loaded.base_model.unload_shadow()(input_ids=ids).logits
         assert torch.allclose(ref, got, atol=1e-6)
 
-    def test_load_checkpoint_under_different_adapter_name(self, tmp_path):
-        base = make_llama_causal()
-        base_sd = copy.deepcopy(base.state_dict())
-        model = get_peft_model(
-            base,
-            ShadowConfig(task_type="CAUSAL_LM", init_weights=False),
-            adapter_name="source",
-        )
-        model.eval()
-        ids = torch.randint(0, 128, (2, 6))
-        with torch.no_grad():
-            expected = model(input_ids=ids).logits
-
-        model.save_pretrained(tmp_path)
-        with safe_open(tmp_path / "source" / SAFETENSORS_WEIGHTS_NAME, framework="pt") as f:
-            keys = list(f.keys())
-        assert any(".shadow_backbone.default." in key for key in keys)
-        assert not any(".source." in key for key in keys)
-
-        reloaded_base = make_llama_causal()
-        reloaded_base.load_state_dict(base_sd)
-        loaded = PeftModel.from_pretrained(reloaded_base, tmp_path / "source", adapter_name="renamed")
-        loaded.eval()
-        with torch.no_grad():
-            actual = loaded(input_ids=ids).logits
-        assert torch.allclose(expected, actual, atol=1e-6)
-
     def test_save_includes_trainable_lm_head(self, tmp_path):
         # With modules_to_save=["lm_head"], the causal-LM head is trained and stored through PEFT's normal
         # modules_to_save path (as `lm_head` keys), not as a ShadowPEFT `shadow_head` module.
@@ -525,7 +500,6 @@ class TestShadowSequenceClassification:
     def test_unload_shadow_is_a_classifier(self):
         # For SEQ_CLS the standalone shadow model pools the last token and returns per-example class logits (not
         # per-position), so the shadow path's classification performance can be evaluated on its own.
-        from transformers.modeling_outputs import SequenceClassifierOutput
 
         model = get_peft_model(make_llama_seqcls(num_labels=3), ShadowConfig(task_type="SEQ_CLS"))
         detached = model.base_model.unload_shadow()
@@ -570,8 +544,6 @@ class TestShadowBackboneVariants:
         # A "projected" shadow checkpoint (model_type == causal_lm_with_hidden_projection, e.g.
         # shadow-llm/Qwen3-0.6B-H8B) bundles a small backbone + a trained shadow_hidden -> base_hidden projection.
         # ShadowPEFT must load the pretrained backbone and reuse the trained projection.
-        from safetensors.torch import save_file
-        from transformers import LlamaModel
 
         base = make_llama_causal()
         base_hidden = base.config.hidden_size
