@@ -13,7 +13,6 @@
 # limitations under the License.
 import copy
 import json
-import math
 import os
 import pickle
 import platform
@@ -1258,26 +1257,24 @@ class PeftCommonTester:
                 loss.backward()
                 return {n: param.grad.abs().sum().item() for n, param in params}
 
-            # Gradients that are mathematically zero can end up being tiny non-zero floating point noise, or not, since
-            # the reduction order inside the kernels is not deterministic on all devices, so ignore those.
+            # invocation to get the reference grads that are supposed to exist without gradient checkpointing
             grads_normal = get_grads()
-            grads_repeated = get_grads()
-            threshold = max(grads_normal.values(), default=0.0) * 1e-6
-            noise = {
-                n
-                for n, grad in grads_normal.items()
-                if grad <= threshold or not math.isclose(grad, grads_repeated[n], rel_tol=1e-3)
-            }
-
-            non_zero_grad_params_normal = {n for n, grad in grads_normal.items() if grad > 0} - noise
 
             # invocation with gradient checkpointing for comparison
             model.prepare_model_for_gradient_checkpointing(model)
             model.gradient_checkpointing_enable({"use_reentrant": use_reentrant})
 
             grads_checkpointing = get_grads()
-            non_zero_grad_params_checkpointing = {n for n, grad in grads_checkpointing.items() if grad > 0} - noise
-            assert non_zero_grad_params_normal == non_zero_grad_params_checkpointing
+
+            # Gradients that are mathematically zero can end up being tiny non-zero values because of floating point
+            # errors, and whether they do is not deterministic on all devices. Therefore only require gradients that
+            # are clearly non-zero to be non-zero in the other invocation as well.
+            threshold = max([*grads_normal.values(), *grads_checkpointing.values()], default=0.0) * 1e-6
+            for n in grads_normal:
+                if grads_normal[n] > threshold:
+                    assert grads_checkpointing[n] > 0, n
+                if grads_checkpointing[n] > threshold:
+                    assert grads_normal[n] > 0, n
 
             for n, param in model.named_parameters():
                 if "prompt_encoder." in n:  # prompt tuning methods
