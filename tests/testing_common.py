@@ -1257,18 +1257,16 @@ class PeftCommonTester:
                 loss.backward()
                 return {n: param.grad.abs().sum().item() for n, param in params}
 
-            # invocation to get the reference grads that are supposed to exist without gradient checkpointing
+            # reference grads without gradient checkpointing
             grads_normal = get_grads()
 
-            # invocation with gradient checkpointing for comparison
+            # grads with gradient checkpointing
             model.prepare_model_for_gradient_checkpointing(model)
             model.gradient_checkpointing_enable({"use_reentrant": use_reentrant})
 
             grads_checkpointing = get_grads()
 
-            # Gradients that are mathematically zero can end up being tiny non-zero values because of floating point
-            # errors, and whether they do is not deterministic on all devices. Therefore only require gradients that
-            # are clearly non-zero to be non-zero in the other invocation as well.
+            # zero gradients can show up as floating point noise, so only check the clearly non-zero ones
             threshold = max([*grads_normal.values(), *grads_checkpointing.values()], default=0.0) * 1e-6
             for n in grads_normal:
                 if grads_normal[n] > threshold:
