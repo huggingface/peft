@@ -1,0 +1,15 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "fan_in_fan_out": false,
+  "inference_mode": false,
+  "init_weights": true,
+  "mask_type": "random",
+  "modules_to_save": null,
+  "peft_type": "SHIRA",
+  "r": 32,
+  "random_seed": 42,
+  "revision": null,
+  "target_modules": null,
+  "task_type": null
+}

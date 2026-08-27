@@ -1,8 +1,3 @@
-# flake8: noqa
-# There's no way to ignore "F401 '...' imported but unused" warnings in this
-# module, but to preserve other warnings. So, don't check this module at all
-
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,23 +12,177 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from .adalora import AdaLoraConfig, AdaLoraModel
+from .adamss import AdamssConfig, AdamssModel
 from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
-from .lora import LoraConfig, LoraModel, LoftQConfig, LoraRuntimeConfig
+from .beft import BeftConfig, BeftModel
+from .boft import BOFTConfig, BOFTModel
+from .c3a import C3AConfig, C3AModel
+from .cartridge import CartridgeConfig, CartridgeEncoder
+from .cpt import CPTConfig, CPTEmbedding
+from .deft import DeftConfig, DeftModel
+from .delora import DeloraConfig, DeloraModel
+from .fourierft import FourierFTConfig, FourierFTModel
+from .frod import FrodConfig, FrodModel
+from .glora import GloraConfig, GloraModel
+from .gralora import GraloraConfig, GraloraModel
+from .hira import HiraConfig, HiraModel
+from .hra import HRAConfig, HRAModel
+from .ia3 import IA3Config, IA3Model
+from .lily import LilyConfig, LilyModel
+from .ln_tuning import LNTuningConfig, LNTuningModel
 from .loha import LoHaConfig, LoHaModel
 from .lokr import LoKrConfig, LoKrModel
-from .ia3 import IA3Config, IA3Model
-from .adalora import AdaLoraConfig, AdaLoraModel
-from .boft import BOFTConfig, BOFTModel
-from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparameterizationType
-from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
-from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
+from .lora import (
+    ArrowConfig,
+    BdLoraConfig,
+    EvaConfig,
+    KasaConfig,
+    LoftQConfig,
+    LoraConfig,
+    LoraGAConfig,
+    LoraModel,
+    LoraRuntimeConfig,
+    MontecloraConfig,
+    VeloraConfig,
+    convert_to_lora,
+    create_arrow_model,
+    get_eva_state_dict,
+    initialize_lora_eva_weights,
+    preprocess_loraga,
+    save_as_lora,
+)
+from .miss import MissConfig, MissModel
+from .mixed import MixedModel
 from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTuningConfig, MultitaskPromptTuningInit
 from .oft import OFTConfig, OFTModel
-from .mixed import MixedModel
+from .osf import OSFConfig, OSFModel
+from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparameterizationType
+from .peanut import PeanutConfig, PeanutModel
 from .poly import PolyConfig, PolyModel
-from .ln_tuning import LNTuningConfig, LNTuningModel
-from .vera import VeraConfig, VeraModel
-from .fourierft import FourierFTConfig, FourierFTModel
-from .xlora import XLoraConfig, XLoraModel
-from .hra import HRAConfig, HRAModel
+from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
+from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
+from .psoft import PsoftConfig, PsoftModel
+from .pvera import PveraConfig, PveraModel
+from .randlora import RandLoraConfig, RandLoraModel
+from .road import RoadConfig, RoadModel
+from .shira import ShiraConfig, ShiraModel
+from .supertuning import SupertuningConfig, SupertuningModel
+from .tinylora import TinyLoraConfig, TinyLoraModel
+from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
+from .unilora import UniLoraConfig, UniLoraModel
 from .vblora import VBLoRAConfig, VBLoRAModel
+from .vera import VeraConfig, VeraModel
+from .waveft import WaveFTConfig, WaveFTModel
+from .xlora import XLoraConfig, XLoraModel
+
+
+__all__ = [
+    "AdaLoraConfig",
+    "AdaLoraModel",
+    "AdamssConfig",
+    "AdamssModel",
+    "AdaptionPromptConfig",
+    "AdaptionPromptModel",
+    "ArrowConfig",
+    "BOFTConfig",
+    "BOFTModel",
+    "BdLoraConfig",
+    "BeftConfig",
+    "BeftModel",
+    "C3AConfig",
+    "C3AModel",
+    "CPTConfig",
+    "CPTEmbedding",
+    "CartridgeConfig",
+    "CartridgeEncoder",
+    "DeftConfig",
+    "DeftModel",
+    "DeloraConfig",
+    "DeloraModel",
+    "EvaConfig",
+    "FourierFTConfig",
+    "FourierFTModel",
+    "FrodConfig",
+    "FrodModel",
+    "GloraConfig",
+    "GloraModel",
+    "GraloraConfig",
+    "GraloraModel",
+    "HRAConfig",
+    "HRAModel",
+    "HiraConfig",
+    "HiraModel",
+    "IA3Config",
+    "IA3Model",
+    "KasaConfig",
+    "LNTuningConfig",
+    "LNTuningModel",
+    "LilyConfig",
+    "LilyModel",
+    "LoHaConfig",
+    "LoHaModel",
+    "LoKrConfig",
+    "LoKrModel",
+    "LoftQConfig",
+    "LoraConfig",
+    "LoraGAConfig",
+    "LoraModel",
+    "LoraRuntimeConfig",
+    "MissConfig",
+    "MissModel",
+    "MixedModel",
+    "MontecloraConfig",
+    "MultitaskPromptEmbedding",
+    "MultitaskPromptTuningConfig",
+    "MultitaskPromptTuningInit",
+    "OFTConfig",
+    "OFTModel",
+    "OSFConfig",
+    "OSFModel",
+    "PeanutConfig",
+    "PeanutModel",
+    "PolyConfig",
+    "PolyModel",
+    "PrefixEncoder",
+    "PrefixTuningConfig",
+    "PromptEmbedding",
+    "PromptEncoder",
+    "PromptEncoderConfig",
+    "PromptEncoderReparameterizationType",
+    "PromptTuningConfig",
+    "PromptTuningInit",
+    "PsoftConfig",
+    "PsoftModel",
+    "PveraConfig",
+    "PveraModel",
+    "RandLoraConfig",
+    "RandLoraModel",
+    "RoadConfig",
+    "RoadModel",
+    "ShiraConfig",
+    "ShiraModel",
+    "SupertuningConfig",
+    "SupertuningModel",
+    "TinyLoraConfig",
+    "TinyLoraModel",
+    "TrainableTokensConfig",
+    "TrainableTokensModel",
+    "UniLoraConfig",
+    "UniLoraModel",
+    "VBLoRAConfig",
+    "VBLoRAModel",
+    "VeloraConfig",
+    "VeraConfig",
+    "VeraModel",
+    "WaveFTConfig",
+    "WaveFTModel",
+    "XLoraConfig",
+    "XLoraModel",
+    "convert_to_lora",
+    "create_arrow_model",
+    "get_eva_state_dict",
+    "initialize_lora_eva_weights",
+    "preprocess_loraga",
+    "save_as_lora",
+]

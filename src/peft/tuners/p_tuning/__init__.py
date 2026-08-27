@@ -12,8 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from peft.utils import register_peft_method
+
 from .config import PromptEncoderConfig, PromptEncoderReparameterizationType
 from .model import PromptEncoder
 
 
 __all__ = ["PromptEncoder", "PromptEncoderConfig", "PromptEncoderReparameterizationType"]
+
+register_peft_method(name="p_tuning", config_cls=PromptEncoderConfig, model_cls=PromptEncoder)

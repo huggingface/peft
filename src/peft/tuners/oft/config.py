@@ -14,8 +14,11 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
+
+import packaging.version
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -27,8 +30,22 @@ class OFTConfig(PeftConfig):
     This is the configuration class to store the configuration of a [`OFTModel`].
 
     Args:
-        r (`int`): OFT rank, number of OFT blocks per injected layer.
-        oft_block_size (`int`): OFT block size across different layers.
+        r (`int`):
+            OFT rank, number of OFT blocks per injected layer. Bigger `r` results in more sparse update matrices with
+            fewer trainable parameters. You can only specify either `r` or `oft_block_size`, but not both
+            simultaneously, because `r` × `oft_block_size` = layer dimension. For simplicity, we let you specify either
+            `r` or `oft_block_size` and infer the other one. Default set to `r = 0`, the user is advised to set the
+            `oft_block_size` instead for better clarity.
+        oft_block_size (`int`): OFT block size across different layers. Bigger `oft_block_size` results in more dense
+            update matrices with more trainable parameters. Choose `oft_block_size` to be divisible by layer's input
+            dimension (`in_features`), e.g., 4, 8, 16. You can only specify either `r` or `oft_block_size`, but not
+            both simultaneously, because `r` × `oft_block_size` = layer dimension. For simplicity, we let you specify
+            either `r` or `oft_block_size` and infer the other one. Default set to `oft_block_size = 32`.
+        use_cayley_neumann (bool): Specifies whether to use the Cayley-Neumann parameterization (efficient but
+            approximate) or the vanilla Cayley parameterization (exact but computationally expensive because of matrix
+            inverse). We recommend to set it to `True` for better efficiency, but performance may be slightly worse
+            because of the approximation error. Please test both settings (`True` and `False`) depending on your needs.
+            Default is `False`.
         module_dropout (`float`):
             The multiplicative dropout probability, by setting OFT blocks to identity during training, similar to the
             dropout layer in LoRA.
@@ -54,11 +71,9 @@ class OFTConfig(PeftConfig):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
             layer at this index.
-        layers_pattern (`str`):
-            The layer pattern name, used only if `layers_to_transform` is different from `None`.
-        rank_pattern (`dict`):
-            The mapping from layer names or regexp expression to ranks which are different from the default rank
-            specified by `r`.
+        layers_pattern (`Optional[Union[List[str], str]]`):
+            The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
+            `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
         coft (`bool`):
@@ -69,9 +84,9 @@ class OFTConfig(PeftConfig):
             Whether to share the OFT parameters between blocks or not. This is `False` by default.
     """
 
-    r: int = field(default=8, metadata={"help": "OFT rank, number of OFT blocks per injected layer."})
+    r: int = field(default=0, metadata={"help": "OFT rank, number of OFT blocks per injected layer."})
     oft_block_size: int = field(
-        default=0,
+        default=32,
         metadata={
             "help": "OFT block size across different layers.",
             "note": "You can only specify either r or oft_block_size, but not both simultaneously, because r x oft_block_size = layer dimension.",
@@ -117,10 +132,11 @@ class OFTConfig(PeftConfig):
             "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index."
         },
     )
-    layers_pattern: Optional[str] = field(
+    layers_pattern: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
-            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
+            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern. "
+            "This should target the `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`."
         },
     )
     modules_to_save: Optional[list[str]] = field(
@@ -145,28 +161,21 @@ class OFTConfig(PeftConfig):
         default=False,
         metadata={"help": "Whether to share the OFT parameters between blocks or not."},
     )
-    rank_pattern: Optional[dict] = field(
-        default_factory=dict,
+    use_cayley_neumann: bool = field(
+        default=True,
         metadata={
-            "help": (
-                "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
-                "Important: the rank pattern won't be applied to the layers after 0.12.1.dev0!"
-            )
+            "help": "Whether to use the Cayley-Neumann Formulation of OFT or not. Set to True to improve computational efficiency but comes at costs of bigger approximation error for orthogonality."
         },
     )
-    alpha_pattern: Optional[dict] = field(
-        default_factory=dict,
+    num_cayley_neumann_terms: int = field(
+        default=5,
         metadata={
-            "help": (
-                "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `alpha`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`}"
-                "Important: the alpha pattern won't be applied to the layers after 0.12.1.dev0!"
-            )
+            "help": "Number of Cayley-Neumann terms to use. Higher number results in less approximation error for orthogonality."
         },
     )
 
     def __post_init__(self):
+        super().__post_init__()
         self.peft_type = PeftType.OFT
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
@@ -174,6 +183,9 @@ class OFTConfig(PeftConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
+        # check for layers_to_transform and layers_pattern
+        if self.layers_pattern and self.layers_to_transform is None:
+            raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
         if self.r == 0 and self.oft_block_size == 0:
             raise ValueError(
                 f"Either `r` or `oft_block_size` must be non-zero. Currently, r = {self.r} and oft_block_size = {self.oft_block_size}."
@@ -198,4 +210,18 @@ class OFTConfig(PeftConfig):
                 "with the latest version of OFT. Please retrain your adapter weights with newer PEFT versions. "
                 "Alternatively, downgrade PEFT to version 0.13.0 to use the old adapter weights."
             )
+        if kwargs.get("use_cayley_neumann", False):
+            peft_version = kwargs.get("peft_version", "0.0.0")  # if not present, set a low dummy version
+            # remove commit hash, if present
+            peft_version = peft_version.partition("@")[0]
+            parsed_version = packaging.version.Version(peft_version)
+            min_version = packaging.version.Version("0.18.0")
+            # note: config.peft_version was added in 0.18.0, so if it's missing, it means we're below min version
+            if parsed_version < min_version:
+                msg = (
+                    "The cayley-neumann parameterization has been slightly changed to be more numerically stable in "
+                    "PEFT 0.18.0. Please retrain your adapter weights with newer PEFT versions. Alternatively, "
+                    "downgrade PEFT to version 0.17.0 to use the old parameterization."
+                )
+                warnings.warn(msg)
         return super().check_kwargs(**kwargs)

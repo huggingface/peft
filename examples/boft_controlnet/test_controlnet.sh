@@ -13,7 +13,7 @@ export DATASET_NAME="oftverse/control-celeba-hq"
 export CKPT_NAME="checkpoint-${ITER_NUM}"
 export OUTPUT_DIR="./output/${DATASET_NAME}/${RUN_NAME}/${CKPT_NAME}"
 export CONTROLNET_PATH="${OUTPUT_DIR}/controlnet/model.safetensors"
-export UNET_PATH="${OUTPUT_DIR}/unet/${RUN_NAME}"
+export UNET_PATH="${OUTPUT_DIR}/unet"
 export RESULTS_PATH="${OUTPUT_DIR}/results"
 
 

@@ -1,7 +1,7 @@
 # OLoRA: Orthonormal Low Rank Adaptation of Large Language Models
 
 ## Introduction
-[OLoRA](https://arxiv.org/abs/2406.01775) is a novel approach that leverages orthonormal low rank adaptation through QR decomposition. Unlike the default LoRA implementation, OLoRA decomposes original weights into their $\mathbf{Q}$ and $\mathbf{R}$ parts, and then uses the first `rank` rows of $\mathbf{R}$ and the first `rank` columns of $\mathbf{Q}$ to initialize $\mathbf{A}$ and $\mathbf{B}$, respectively. This results in significantly faster convergence, more stable training, and superior performance.
+[OLoRA](https://huggingface.co/papers/2406.01775) is a novel approach that leverages orthonormal low rank adaptation through QR decomposition. Unlike the default LoRA implementation, OLoRA decomposes original weights into their $\mathbf{Q}$ and $\mathbf{R}$ parts, and then uses the first `rank` rows of $\mathbf{R}$ and the first `rank` columns of $\mathbf{Q}$ to initialize $\mathbf{A}$ and $\mathbf{B}$, respectively. This results in significantly faster convergence, more stable training, and superior performance.
 
 ## Quick start
 ```python
@@ -11,18 +11,18 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import SFTConfig, SFTTrainer
 from datasets import load_dataset
 
-model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m", torch_dtype=torch.bfloat16, device_map="auto")
+model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m", dtype=torch.bfloat16, device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
 dataset = load_dataset("imdb", split="train[:1%]")
 lora_config = LoraConfig(
     init_lora_weights="olora"
 )
 peft_model = get_peft_model(model, lora_config)
-training_args = SFTConfig(dataset_text_field="text", max_seq_length=128)
+training_args = SFTConfig(dataset_text_field="text", max_length=128)
 trainer = SFTTrainer(
     model=peft_model,
     train_dataset=dataset,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
 )
 trainer.train()
 peft_model.save_pretrained("olora-opt-350m")
@@ -38,6 +38,19 @@ python3 examples/olora_finetuning/olora_finetuning.py --base_model facebook/opt-
 OLoRA also supports quantization. To use 4-bit quantization try:
 ```bash
 python3 examples/olora_finetuning/olora_finetuning.py --base_model facebook/opt-350m --quantize
+```
+or you can just pass a quantized model without the quantize flag.
+
+If you want to run DDP by [accelerate](https://huggingface.co/docs/accelerate/en/index), please run `accelerate config` to set your ddp config, and run:
+```bash
+accelerate launch examples/olora_finetuning/olora_finetuning.py --base_model facebook/opt-350m
+```
+please add `--device_map cpu` if you want to run finetune on CPU.
+
+If you want to train a quantized model like AWQ and GPTQ which do not support olora init method, please pass `--init_lora_weights gaussian`. For example:
+```bash
+python3 examples/olora_finetuning/olora_finetuning.py --base_model hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4 --init_lora_weights gaussian
+
 ```
 
 

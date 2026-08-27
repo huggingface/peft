@@ -13,25 +13,57 @@
 # limitations under the License.
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_eetq_available
+from peft.utils import register_peft_method
 
-from .config import LoftQConfig, LoraConfig, LoraRuntimeConfig
-from .gptq import QuantLinear
-from .layer import Conv2d, Conv3d, Embedding, Linear, LoraLayer
+from .arrow import create_arrow_model
+from .config import (
+    ArrowConfig,
+    BdLoraConfig,
+    EvaConfig,
+    KasaConfig,
+    LoftQConfig,
+    LoraConfig,
+    LoraGAConfig,
+    LoraRuntimeConfig,
+    MontecloraConfig,
+    VeloraConfig,
+)
+from .conversion import convert_to_lora, save_as_lora
+from .eva import get_eva_state_dict, initialize_lora_eva_weights
+from .gptq import GPTQLoraLinear
+from .layer import Conv2d, Conv3d, Embedding, Linear, LoraLayer, ParamWrapper
+from .loraga import preprocess_loraga
 from .model import LoraModel
 
 
 __all__ = [
-    "LoraConfig",
-    "LoraRuntimeConfig",
-    "LoftQConfig",
+    "ArrowConfig",
+    "BdLoraConfig",
     "Conv2d",
     "Conv3d",
     "Embedding",
-    "LoraLayer",
+    "EvaConfig",
+    "GPTQLoraLinear",
+    "KasaConfig",
     "Linear",
+    "LoftQConfig",
+    "LoraConfig",
+    "LoraGAConfig",
+    "LoraLayer",
     "LoraModel",
-    "QuantLinear",
+    "LoraRuntimeConfig",
+    "MontecloraConfig",
+    "ParamWrapper",
+    "VeloraConfig",
+    "convert_to_lora",
+    "create_arrow_model",
+    "get_eva_state_dict",
+    "initialize_lora_eva_weights",
+    "preprocess_loraga",
+    "save_as_lora",
 ]
+
+register_peft_method(name="lora", config_cls=LoraConfig, model_cls=LoraModel, is_mixed_compatible=True)
 
 
 def __getattr__(name):

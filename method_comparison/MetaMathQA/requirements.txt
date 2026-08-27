@@ -1,0 +1,4 @@
+bitsandbytes
+datasets
+numpy
+tqdm

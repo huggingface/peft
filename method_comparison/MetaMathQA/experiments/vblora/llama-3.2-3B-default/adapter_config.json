@@ -1,0 +1,26 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "bias": "none",
+  "exclude_modules": null,
+  "fan_in_fan_out": false,
+  "inference_mode": false,
+  "init_logits_std": 0.1,
+  "init_vector_bank_bound": 0.02,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "modules_to_save": null,
+  "num_vectors": 256,
+  "peft_type": "VBLORA",
+  "r": 4,
+  "revision": null,
+  "save_only_topk_weights": false,
+  "target_modules": [
+    "v_proj",
+    "q_proj"
+  ],
+  "task_type": null,
+  "topk": 2,
+  "vblora_dropout": 0.0,
+  "vector_length": 256
+}

@@ -11,19 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import importlib.metadata as importlib_metadata
 from typing import Any, Optional
 
-import packaging.version
 import torch
 
-from peft.import_utils import is_auto_awq_available
+from peft.import_utils import is_gptqmodel_available
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.utils.other import is_gptqmodel_awq_layer
 
-
-if is_auto_awq_available():
-    from awq.modules.linear import WQLinear_GEMM
+from .config import LoraConfig
 
 
 class AwqLoraLinear(torch.nn.Module, LoraLayer):
@@ -31,13 +28,16 @@ class AwqLoraLinear(torch.nn.Module, LoraLayer):
         self,
         base_layer,
         adapter_name,
+        config: LoraConfig,
         r: int = 0,
         lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
-        init_lora_weights: bool = True,
-        use_rslora: bool = False,
         **kwargs,
     ):
+        if config.use_dora:
+            raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
+        if config.velora_config is not None:
+            raise ValueError(f"{self.__class__.__name__} does not support VeLoRA yet, please set it to False")
+
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
@@ -46,7 +46,12 @@ class AwqLoraLinear(torch.nn.Module, LoraLayer):
         self.quant_linear_module = base_layer
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+        self.update_layer(
+            adapter_name,
+            r,
+            lora_alpha=lora_alpha,
+            config=config,
+        )
 
     def forward(self, x: torch.Tensor):
         result = self.quant_linear_module(x)
@@ -65,7 +70,7 @@ class AwqLoraLinear(torch.nn.Module, LoraLayer):
             requires_conversion = not torch.is_autocast_enabled()
             if requires_conversion:
                 expected_dtype = result.dtype
-                x = x.to(lora_A.weight.dtype)
+                x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
             output = lora_B(lora_A(dropout(x)))
             if requires_conversion:
@@ -82,6 +87,7 @@ class AwqLoraLinear(torch.nn.Module, LoraLayer):
 def dispatch_awq(
     target: torch.nn.Module,
     adapter_name: str,
+    config: LoraConfig,
     **kwargs: Any,
 ) -> Optional[torch.nn.Module]:
     new_module = None
@@ -91,18 +97,8 @@ def dispatch_awq(
     else:
         target_base_layer = target
 
-    if is_auto_awq_available() and isinstance(target_base_layer, WQLinear_GEMM):
-        # Raise the error only at the dispatch level
-        AUTOAWQ_MINIMUM_VERSION = packaging.version.parse("0.2.0")
-        version_autoawq = packaging.version.parse(importlib_metadata.version("autoawq"))
-
-        if AUTOAWQ_MINIMUM_VERSION > version_autoawq:
-            raise ImportError(
-                f"Found an incompatible version of auto-awq. Found version {version_autoawq}, "
-                f"but only versions above {AUTOAWQ_MINIMUM_VERSION} are supported for PEFT."
-            )
-
-        new_module = AwqLoraLinear(target, adapter_name, **kwargs)
+    if is_gptqmodel_available() and is_gptqmodel_awq_layer(target_base_layer):
+        new_module = AwqLoraLinear(target, adapter_name, config=config, **kwargs)
         target.qweight = target_base_layer.qweight
 
     return new_module

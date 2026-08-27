@@ -25,8 +25,8 @@ from peft.utils import PeftType
 class PolyConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`PolyModel`].
-        - [Polytropon (Poly)](https://arxiv.org/abs/2202.13914)
-        - [Multi-Head Routing (MHR)](https://arxiv.org/abs/2211.03831)
+        - [Polytropon (Poly)](https://huggingface.co/papers/2202.13914)
+        - [Multi-Head Routing (MHR)](https://huggingface.co/papers/2211.03831)
 
     Args:
         r (`int`): Attention dimension of each Lora in Poly.
@@ -93,6 +93,7 @@ class PolyConfig(PeftConfig):
     )
 
     def __post_init__(self):
+        super().__post_init__()
         self.peft_type = PeftType.POLY
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules

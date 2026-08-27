@@ -1,0 +1,21 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "bias": "none",
+  "fan_in_fan_out": false,
+  "alpha": 64,
+  "gralora_dropout": 0.0,
+  "gralora_k": 2,
+  "hybrid_r": 0,
+  "inference_mode": false,
+  "init_weights": true,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "modules_to_save": null,
+  "peft_type": "GRALORA",
+  "peft_version": "0.17.2.dev0@UNKNOWN",
+  "r": 32,
+  "revision": null,
+  "target_modules": null,
+  "task_type": null
+}

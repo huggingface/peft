@@ -1,0 +1,20 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "bias": "none",
+  "boft_block_num": 0,
+  "boft_block_size": 4,
+  "boft_dropout": 0.0,
+  "boft_n_butterfly_factor": 1,
+  "exclude_modules": null,
+  "fan_in_fan_out": false,
+  "inference_mode": false,
+  "init_weights": true,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "modules_to_save": null,
+  "peft_type": "BOFT",
+  "revision": null,
+  "target_modules": null,
+  "task_type": null
+}

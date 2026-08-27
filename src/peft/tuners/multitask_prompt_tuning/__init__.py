@@ -12,8 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from peft.utils import register_peft_method
+
 from .config import MultitaskPromptTuningConfig, MultitaskPromptTuningInit
 from .model import MultitaskPromptEmbedding
 
 
-__all__ = ["MultitaskPromptTuningConfig", "MultitaskPromptTuningInit", "MultitaskPromptEmbedding"]
+__all__ = ["MultitaskPromptEmbedding", "MultitaskPromptTuningConfig", "MultitaskPromptTuningInit"]
+
+register_peft_method(
+    name="multitask_prompt_tuning", config_cls=MultitaskPromptTuningConfig, model_cls=MultitaskPromptEmbedding
+)

@@ -12,9 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import inspect
+from typing import Optional
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 
 def llama_rotate_half(x: torch.Tensor) -> torch.Tensor:
@@ -67,12 +68,11 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
     position_ids = kwargs.get("position_ids")
     past_key_value = kwargs.get("past_key_value")
     bsz, q_len, _ = hidden_states.size()
-    query_states = model.q_proj(hidden_states).view(bsz, q_len, model.num_heads, model.head_dim).transpose(1, 2)
+    num_heads = model.config.num_attention_heads
+    query_states = model.q_proj(hidden_states).view(bsz, q_len, num_heads, model.head_dim).transpose(1, 2)
 
     factor = model.k_proj.in_features // model.k_proj.out_features
-    value_states = (
-        model.v_proj(hidden_states).view(bsz, q_len, (model.num_heads // factor), model.head_dim).transpose(1, 2)
-    )
+    value_states = model.v_proj(hidden_states).view(bsz, q_len, (num_heads // factor), model.head_dim).transpose(1, 2)
 
     seq_len = q_len
 
@@ -83,6 +83,14 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
         else:
             # since transformers 4.36, this is a DynamicCache instance
             seq_len += past_key_value.get_seq_length(model.layer_idx)
+
+    # model.rotary_emb is deprecated and will be removed in transformers > 4.47.0. Instead, the position embeddings are
+    # passed via the kwargs
+    if "position_embeddings" in kwargs:
+        cos, sin = kwargs["position_embeddings"]
+        cos = cos.unsqueeze(1)
+        sin = sin.unsqueeze(1)
+        return (query_states * cos) + (llama_rotate_half(query_states) * sin)
 
     # For transformers > 4.37.2 `position_ids` became a required arguments in the rotary embedding's forward pass.
     if "position_ids" not in inspect.signature(model.rotary_emb.forward).parameters:
@@ -114,6 +122,31 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
         sin = sin.unsqueeze(1)
 
     return (query_states * cos) + (llama_rotate_half(query_states) * sin)
+
+
+def gpt2_compute_query_states(
+    model: nn.Module,
+    hidden_states: Optional[tuple[torch.FloatTensor]],
+    encoder_hidden_states: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """
+    Compute query states for GPT2 models. They need to be recomputed as the forward() method of the GPT@ in the
+    transformers library does not return them. See the related discussion in the PR:
+    """
+    if encoder_hidden_states is not None:
+        if not hasattr(model, "q_attn"):
+            raise ValueError(
+                f"If `{model.__class__.__name__}` is used as cross attention, the weights `q_attn` must be defined. "
+                f"Please make sure to instantiate it with `GPT2Attention(..., is_cross_attention=True)`."
+            )
+        query_states = model.q_attn(hidden_states)
+    else:
+        query_states, _, _ = model.c_attn(hidden_states).split(model.split_size, dim=2)
+
+    shape_q = (*query_states.shape[:-1], -1, model.head_dim)
+    query_states = query_states.view(shape_q).transpose(1, 2)
+
+    return query_states
 
 
 def is_adaption_prompt_trainable(params: str) -> bool:

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from operator import attrgetter
 
-import torch.nn as nn
+from torch import nn
 from torch.optim import Optimizer
 from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 from transformers.trainer_pt_utils import get_parameter_names
@@ -35,7 +35,7 @@ def create_loraplus_optimizer(
     """
     Creates a LoraPlus optimizer.
 
-    Efficient Low Rank Adaptation of Large Models: https://arxiv.org/abs/2402.12354
+    Efficient Low Rank Adaptation of Large Models: https://huggingface.co/papers/2402.12354
 
     Reference: https://github.com/nikhil-ghosh-berkeley/loraplus/
 
@@ -71,7 +71,11 @@ def create_loraplus_optimizer(
         if not param.requires_grad:
             continue
 
-        module = attrgetter(name)(model)
+        # The parameters of a tuner layer live in a `ModuleDict`/`ParameterDict` below it, e.g.
+        # `<...>.embedding.lora_embedding_A.default`, hence strip the last two parts to get the tuner layer. If nothing
+        # is left, the parameter is not held by such a dict and there is no tuner layer to look up.
+        module_name = ".".join(name.split(".")[:-2])
+        module = attrgetter(module_name)(model) if module_name else None
         if isinstance(module, Embedding):
             param_groups["embedding"][name] = param
         elif "lora_B" in name or param.ndim == 1:

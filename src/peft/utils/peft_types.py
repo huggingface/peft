@@ -1,8 +1,3 @@
-# flake8: noqa
-# There's no way to ignore "F401 '...' imported but unused" warnings in this
-# module, but to preserve other warnings. So, don't check this module at all
-
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,7 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 import enum
+from typing import Optional
 
 
 class PeftType(str, enum.Enum):
@@ -33,6 +30,7 @@ class PeftType(str, enum.Enum):
     - BOFT
     - ADAPTION_PROMPT
     - IA3
+    - BEFT
     - LOHA
     - LOKR
     - OFT
@@ -40,8 +38,21 @@ class PeftType(str, enum.Enum):
     - POLY
     - LN_TUNING
     - VERA
+    - FROD
     - FOURIERFT
     - HRA
+    - BONE
+    - MISS
+    - RANDLORA
+    - SHIRA
+    - C3A
+    - ROAD
+    - WAVEFT
+    - OSF
+    - DELORA
+    - GRALORA
+    - ADAMSS
+    - DEFT
     """
 
     PROMPT_TUNING = "PROMPT_TUNING"
@@ -50,19 +61,44 @@ class PeftType(str, enum.Enum):
     PREFIX_TUNING = "PREFIX_TUNING"
     LORA = "LORA"
     ADALORA = "ADALORA"
+    ADAMSS = "ADAMSS"
     BOFT = "BOFT"
     ADAPTION_PROMPT = "ADAPTION_PROMPT"
     IA3 = "IA3"
+    BEFT = "BEFT"
+    LILY = "LILY"
     LOHA = "LOHA"
     LOKR = "LOKR"
     OFT = "OFT"
     POLY = "POLY"
     LN_TUNING = "LN_TUNING"
     VERA = "VERA"
+    FROD = "FROD"
+    PVERA = "PVERA"
     FOURIERFT = "FOURIERFT"
+    GLORA = "GLORA"
     XLORA = "XLORA"
     HRA = "HRA"
     VBLORA = "VBLORA"
+    UNILORA = "UNILORA"
+    CPT = "CPT"
+    MISS = "MISS"
+    RANDLORA = "RANDLORA"
+    ROAD = "ROAD"
+    TRAINABLE_TOKENS = "TRAINABLE_TOKENS"
+    HIRA = "HIRA"
+    SHIRA = "SHIRA"
+    C3A = "C3A"
+    WAVEFT = "WAVEFT"
+    OSF = "OSF"
+    DELORA = "DELORA"
+    GRALORA = "GRALORA"
+    CARTRIDGE = "CARTRIDGE"
+    TINYLORA = "TINYLORA"
+    PSOFT = "PSOFT"
+    PEANUT = "PEANUT"
+    SUPERTUNING = "SUPERTUNING"
+    DEFT = "DEFT"
 
 
 class TaskType(str, enum.Enum):
@@ -85,3 +121,80 @@ class TaskType(str, enum.Enum):
     TOKEN_CLS = "TOKEN_CLS"
     QUESTION_ANS = "QUESTION_ANS"
     FEATURE_EXTRACTION = "FEATURE_EXTRACTION"
+
+
+def register_peft_method(
+    *, name: str, config_cls, model_cls, prefix: Optional[str] = None, is_mixed_compatible=False
+) -> None:
+    """
+    Function to register a finetuning method like LoRA to be available in PEFT.
+
+    This method takes care of registering the PEFT method's configuration class, the model class, and optionally the
+    prefix.
+
+    Args:
+        name (str):
+            The name of the PEFT method. It must be unique.
+        config_cls:
+            The configuration class of the PEFT method.
+        model_cls:
+            The model class of the PEFT method.
+        prefix (Optional[str], optional):
+            The prefix of the PEFT method. It should be unique. If not provided, the name of the PEFT method is used as
+            the prefix.
+        is_mixed_compatible (bool, optional):
+            Whether the PEFT method is compatible with `PeftMixedModel`. If you're not sure, leave it as False
+            (default).
+
+    Example:
+
+        ```py
+        # inside of peft/tuners/my_peft_method/__init__.py
+        from peft.utils import register_peft_method
+
+        register_peft_method(name="my_peft_method", config_cls=MyConfig, model_cls=MyModel)
+        ```
+    """
+    from peft.mapping import (
+        PEFT_TYPE_TO_CONFIG_MAPPING,
+        PEFT_TYPE_TO_MIXED_MODEL_MAPPING,
+        PEFT_TYPE_TO_PREFIX_MAPPING,
+        PEFT_TYPE_TO_TUNER_MAPPING,
+    )
+
+    if name.endswith("_"):
+        raise ValueError(f"Please pass the name of the PEFT method without '_' suffix, got {name}.")
+
+    if not name.islower():
+        raise ValueError(f"The name of the PEFT method should be in lower case letters, got {name}.")
+
+    if name.upper() not in list(PeftType):
+        raise ValueError(f"Unknown PEFT type {name.upper()}, please add an entry to peft.utils.peft_types.PeftType.")
+
+    peft_type = getattr(PeftType, name.upper())
+
+    # model_cls can be None for prompt learning methods, which don't have dedicated model classes
+    if prefix is None:
+        prefix = name + "_"
+
+    if (
+        (peft_type in PEFT_TYPE_TO_CONFIG_MAPPING)
+        or (peft_type in PEFT_TYPE_TO_TUNER_MAPPING)
+        or (peft_type in PEFT_TYPE_TO_MIXED_MODEL_MAPPING)
+    ):
+        raise KeyError(f"There is already PEFT method called '{name}', please choose a unique name.")
+
+    if prefix in PEFT_TYPE_TO_PREFIX_MAPPING:
+        raise KeyError(f"There is already a prefix called '{prefix}', please choose a unique prefix.")
+
+    model_cls_prefix = getattr(model_cls, "prefix", None)
+    if (model_cls_prefix is not None) and (model_cls_prefix != prefix):
+        raise ValueError(
+            f"Inconsistent prefixes found: '{prefix}' and '{model_cls_prefix}' (they should be the same)."
+        )
+
+    PEFT_TYPE_TO_PREFIX_MAPPING[peft_type] = prefix
+    PEFT_TYPE_TO_CONFIG_MAPPING[peft_type] = config_cls
+    PEFT_TYPE_TO_TUNER_MAPPING[peft_type] = model_cls
+    if is_mixed_compatible:
+        PEFT_TYPE_TO_MIXED_MODEL_MAPPING[peft_type] = model_cls

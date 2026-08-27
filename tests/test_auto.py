@@ -12,9 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import tempfile
-import unittest
 
+import pytest
 import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import (
     AutoPeftModel,
@@ -24,6 +25,8 @@ from peft import (
     AutoPeftModelForSeq2SeqLM,
     AutoPeftModelForSequenceClassification,
     AutoPeftModelForTokenClassification,
+    LoraConfig,
+    PeftConfig,
     PeftModel,
     PeftModelForCausalLM,
     PeftModelForFeatureExtraction,
@@ -31,16 +34,20 @@ from peft import (
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
+    get_peft_model,
 )
 from peft.utils import infer_device
 
+from .testing_common import hub_online_once
 
-class PeftAutoModelTester(unittest.TestCase):
+
+class TestPeftAutoModel:
     dtype = torch.float16 if infer_device() == "mps" else torch.bfloat16
 
     def test_peft_causal_lm(self):
         model_id = "peft-internal-testing/tiny-OPTForCausalLM-lora"
-        model = AutoPeftModelForCausalLM.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoPeftModelForCausalLM.from_pretrained(model_id)
         assert isinstance(model, PeftModelForCausalLM)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
@@ -50,33 +57,40 @@ class PeftAutoModelTester(unittest.TestCase):
             assert isinstance(model, PeftModelForCausalLM)
 
         # check if kwargs are passed correctly
-        model = AutoPeftModelForCausalLM.from_pretrained(model_id, torch_dtype=self.dtype)
+        model = AutoPeftModelForCausalLM.from_pretrained(model_id, dtype=self.dtype)
         assert isinstance(model, PeftModelForCausalLM)
         assert model.base_model.lm_head.weight.dtype == self.dtype
 
         adapter_name = "default"
         is_trainable = False
-        # This should work
-        _ = AutoPeftModelForCausalLM.from_pretrained(model_id, adapter_name, is_trainable, torch_dtype=self.dtype)
+
+        with hub_online_once(model_id):
+            # This should work
+            _ = AutoPeftModelForCausalLM.from_pretrained(model_id, adapter_name, is_trainable, dtype=self.dtype)
 
     def test_peft_causal_lm_extended_vocab(self):
         model_id = "peft-internal-testing/tiny-random-OPTForCausalLM-extended-vocab"
-        model = AutoPeftModelForCausalLM.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoPeftModelForCausalLM.from_pretrained(model_id)
         assert isinstance(model, PeftModelForCausalLM)
 
         # check if kwargs are passed correctly
-        model = AutoPeftModelForCausalLM.from_pretrained(model_id, torch_dtype=self.dtype)
+        with hub_online_once(model_id):
+            model = AutoPeftModelForCausalLM.from_pretrained(model_id, dtype=self.dtype)
         assert isinstance(model, PeftModelForCausalLM)
         assert model.base_model.lm_head.weight.dtype == self.dtype
 
         adapter_name = "default"
         is_trainable = False
-        # This should work
-        _ = AutoPeftModelForCausalLM.from_pretrained(model_id, adapter_name, is_trainable, torch_dtype=self.dtype)
+
+        with hub_online_once(model_id):
+            # This should work
+            _ = AutoPeftModelForCausalLM.from_pretrained(model_id, adapter_name, is_trainable, dtype=self.dtype)
 
     def test_peft_seq2seq_lm(self):
         model_id = "peft-internal-testing/tiny_T5ForSeq2SeqLM-lora"
-        model = AutoPeftModelForSeq2SeqLM.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoPeftModelForSeq2SeqLM.from_pretrained(model_id)
         assert isinstance(model, PeftModelForSeq2SeqLM)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
@@ -86,18 +100,22 @@ class PeftAutoModelTester(unittest.TestCase):
             assert isinstance(model, PeftModelForSeq2SeqLM)
 
         # check if kwargs are passed correctly
-        model = AutoPeftModelForSeq2SeqLM.from_pretrained(model_id, torch_dtype=self.dtype)
+        with hub_online_once(model_id):
+            model = AutoPeftModelForSeq2SeqLM.from_pretrained(model_id, dtype=self.dtype)
         assert isinstance(model, PeftModelForSeq2SeqLM)
         assert model.base_model.lm_head.weight.dtype == self.dtype
 
         adapter_name = "default"
         is_trainable = False
-        # This should work
-        _ = AutoPeftModelForSeq2SeqLM.from_pretrained(model_id, adapter_name, is_trainable, torch_dtype=self.dtype)
+
+        with hub_online_once(model_id):
+            # This should work
+            _ = AutoPeftModelForSeq2SeqLM.from_pretrained(model_id, adapter_name, is_trainable, dtype=self.dtype)
 
     def test_peft_sequence_cls(self):
         model_id = "peft-internal-testing/tiny_OPTForSequenceClassification-lora"
-        model = AutoPeftModelForSequenceClassification.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoPeftModelForSequenceClassification.from_pretrained(model_id)
         assert isinstance(model, PeftModelForSequenceClassification)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
@@ -107,20 +125,24 @@ class PeftAutoModelTester(unittest.TestCase):
             assert isinstance(model, PeftModelForSequenceClassification)
 
         # check if kwargs are passed correctly
-        model = AutoPeftModelForSequenceClassification.from_pretrained(model_id, torch_dtype=self.dtype)
+        with hub_online_once(model_id):
+            model = AutoPeftModelForSequenceClassification.from_pretrained(model_id, dtype=self.dtype)
         assert isinstance(model, PeftModelForSequenceClassification)
         assert model.score.original_module.weight.dtype == self.dtype
 
         adapter_name = "default"
         is_trainable = False
-        # This should work
-        _ = AutoPeftModelForSequenceClassification.from_pretrained(
-            model_id, adapter_name, is_trainable, torch_dtype=self.dtype
-        )
+
+        with hub_online_once(model_id):
+            # This should work
+            _ = AutoPeftModelForSequenceClassification.from_pretrained(
+                model_id, adapter_name, is_trainable, dtype=self.dtype
+            )
 
     def test_peft_token_classification(self):
         model_id = "peft-internal-testing/tiny_GPT2ForTokenClassification-lora"
-        model = AutoPeftModelForTokenClassification.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoPeftModelForTokenClassification.from_pretrained(model_id)
         assert isinstance(model, PeftModelForTokenClassification)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
@@ -130,20 +152,23 @@ class PeftAutoModelTester(unittest.TestCase):
             assert isinstance(model, PeftModelForTokenClassification)
 
         # check if kwargs are passed correctly
-        model = AutoPeftModelForTokenClassification.from_pretrained(model_id, torch_dtype=self.dtype)
+        with hub_online_once(model_id):
+            model = AutoPeftModelForTokenClassification.from_pretrained(model_id, dtype=self.dtype)
         assert isinstance(model, PeftModelForTokenClassification)
         assert model.base_model.classifier.original_module.weight.dtype == self.dtype
 
         adapter_name = "default"
         is_trainable = False
-        # This should work
-        _ = AutoPeftModelForTokenClassification.from_pretrained(
-            model_id, adapter_name, is_trainable, torch_dtype=self.dtype
-        )
+        with hub_online_once(model_id):
+            # This should work
+            _ = AutoPeftModelForTokenClassification.from_pretrained(
+                model_id, adapter_name, is_trainable, dtype=self.dtype
+            )
 
     def test_peft_question_answering(self):
         model_id = "peft-internal-testing/tiny_OPTForQuestionAnswering-lora"
-        model = AutoPeftModelForQuestionAnswering.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoPeftModelForQuestionAnswering.from_pretrained(model_id)
         assert isinstance(model, PeftModelForQuestionAnswering)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
@@ -153,20 +178,23 @@ class PeftAutoModelTester(unittest.TestCase):
             assert isinstance(model, PeftModelForQuestionAnswering)
 
         # check if kwargs are passed correctly
-        model = AutoPeftModelForQuestionAnswering.from_pretrained(model_id, torch_dtype=self.dtype)
+        with hub_online_once(model_id):
+            model = AutoPeftModelForQuestionAnswering.from_pretrained(model_id, dtype=self.dtype)
         assert isinstance(model, PeftModelForQuestionAnswering)
         assert model.base_model.qa_outputs.original_module.weight.dtype == self.dtype
 
         adapter_name = "default"
         is_trainable = False
-        # This should work
-        _ = AutoPeftModelForQuestionAnswering.from_pretrained(
-            model_id, adapter_name, is_trainable, torch_dtype=self.dtype
-        )
+        with hub_online_once(model_id):
+            # This should work
+            _ = AutoPeftModelForQuestionAnswering.from_pretrained(
+                model_id, adapter_name, is_trainable, dtype=self.dtype
+            )
 
     def test_peft_feature_extraction(self):
         model_id = "peft-internal-testing/tiny_OPTForFeatureExtraction-lora"
-        model = AutoPeftModelForFeatureExtraction.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoPeftModelForFeatureExtraction.from_pretrained(model_id)
         assert isinstance(model, PeftModelForFeatureExtraction)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
@@ -176,20 +204,24 @@ class PeftAutoModelTester(unittest.TestCase):
             assert isinstance(model, PeftModelForFeatureExtraction)
 
         # check if kwargs are passed correctly
-        model = AutoPeftModelForFeatureExtraction.from_pretrained(model_id, torch_dtype=self.dtype)
+        with hub_online_once(model_id):
+            model = AutoPeftModelForFeatureExtraction.from_pretrained(model_id, dtype=self.dtype)
         assert isinstance(model, PeftModelForFeatureExtraction)
         assert model.base_model.model.decoder.embed_tokens.weight.dtype == self.dtype
 
         adapter_name = "default"
         is_trainable = False
-        # This should work
-        _ = AutoPeftModelForFeatureExtraction.from_pretrained(
-            model_id, adapter_name, is_trainable, torch_dtype=self.dtype
-        )
+
+        with hub_online_once(model_id):
+            # This should work
+            _ = AutoPeftModelForFeatureExtraction.from_pretrained(
+                model_id, adapter_name, is_trainable, dtype=self.dtype
+            )
 
     def test_peft_whisper(self):
         model_id = "peft-internal-testing/tiny_WhisperForConditionalGeneration-lora"
-        model = AutoPeftModel.from_pretrained(model_id)
+        with hub_online_once(model_id):
+            model = AutoPeftModel.from_pretrained(model_id)
         assert isinstance(model, PeftModel)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
@@ -199,11 +231,59 @@ class PeftAutoModelTester(unittest.TestCase):
             assert isinstance(model, PeftModel)
 
         # check if kwargs are passed correctly
-        model = AutoPeftModel.from_pretrained(model_id, torch_dtype=self.dtype)
+        with hub_online_once(model_id):
+            model = AutoPeftModel.from_pretrained(model_id, dtype=self.dtype)
         assert isinstance(model, PeftModel)
         assert model.base_model.model.model.encoder.embed_positions.weight.dtype == self.dtype
 
         adapter_name = "default"
         is_trainable = False
-        # This should work
-        _ = AutoPeftModel.from_pretrained(model_id, adapter_name, is_trainable, torch_dtype=self.dtype)
+        with hub_online_once(model_id):
+            # This should work
+            _ = AutoPeftModel.from_pretrained(model_id, adapter_name, is_trainable, dtype=self.dtype)
+
+    def test_embedding_size_not_reduced_if_greater_vocab_size(self, tmp_path):
+        # See 2415
+        # There was a bug in AutoPeftModels where the embedding was always resized to the vocab size of the tokenizer
+        # when the tokenizer was found. This makes sense if the vocabulary was extended, but some models like Qwen
+        # already start out with "spare" embeddings, i.e. the embedding size is larger than the vocab size. This could
+        # result in the embedding being shrunk, which in turn resulted in an error when loading the weights.
+
+        # first create a checkpoint; it is important that the tokenizer is also saved in the same location
+        model_id = "Qwen/Qwen2-0.5B"
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        model = get_peft_model(model, LoraConfig(modules_to_save=["lm_head", "embed_token"]))
+        model.save_pretrained(tmp_path)
+        tokenizer.save_pretrained(tmp_path)
+
+        # does not raise; without the fix, it raises:
+        # > size mismatch for base_model.model.lm_head.modules_to_save.default.weight: copying a param with shape
+        # torch.Size([151936, 896]) from checkpoint, the shape in current model is torch.Size([151646, 896]).
+        AutoPeftModelForCausalLM.from_pretrained(tmp_path)
+
+    @pytest.mark.parametrize(
+        "auto_class, model_id",
+        [
+            (AutoPeftModelForCausalLM, "peft-internal-testing/tiny-OPTForCausalLM-lora"),
+            (AutoPeftModelForSeq2SeqLM, "peft-internal-testing/tiny_T5ForSeq2SeqLM-lora"),
+            (AutoPeftModelForSequenceClassification, "peft-internal-testing/tiny_OPTForSequenceClassification-lora"),
+            (AutoPeftModelForTokenClassification, "peft-internal-testing/tiny_GPT2ForTokenClassification-lora"),
+            (AutoPeftModelForQuestionAnswering, "peft-internal-testing/tiny_OPTForQuestionAnswering-lora"),
+            (AutoPeftModelForFeatureExtraction, "peft-internal-testing/tiny_OPTForFeatureExtraction-lora"),
+            (AutoPeftModel, "peft-internal-testing/tiny_WhisperForConditionalGeneration-lora"),
+        ],
+    )
+    def test_import_allow_list_prevents_arbitrary_imports(self, auto_class, model_id, tmp_path):
+        with hub_online_once(model_id):
+            model = auto_class.from_pretrained(model_id)
+        model.save_pretrained(tmp_path)
+
+        config = PeftConfig.from_pretrained(tmp_path)
+        config.auto_mapping = {"parent_library": "os", "base_model_class": "system"}
+        config.task_type = None
+        config.save_pretrained(tmp_path)
+
+        with pytest.raises(ValueError) as e:
+            model = auto_class.from_pretrained(tmp_path)
+        assert "which is not in the import allowlist" in str(e)

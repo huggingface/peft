@@ -20,6 +20,8 @@ from peft.import_utils import is_aqlm_available
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 
+from .config import LoraConfig
+
 
 if is_aqlm_available():
     from aqlm import QuantizedLinear
@@ -30,18 +32,26 @@ class AqlmLoraLinear(torch.nn.Module, LoraLayer):
         self,
         base_layer,
         adapter_name: str,
+        config: LoraConfig,
         r: int = 0,
         lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
-        init_lora_weights: bool = True,
-        use_rslora: bool = False,
         **kwargs,
     ):
+        if config.use_dora:
+            raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
+        if config.velora_config is not None:
+            raise ValueError(f"{self.__class__.__name__} does not support VeLoRA yet, please set it to False")
+
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+        self.update_layer(
+            adapter_name,
+            r,
+            lora_alpha=lora_alpha,
+            config=config,
+        )
 
     def forward(self, x: torch.Tensor):
         # note: logic differs from default Linear because merging is not supported
@@ -61,7 +71,7 @@ class AqlmLoraLinear(torch.nn.Module, LoraLayer):
             requires_conversion = not torch.is_autocast_enabled()
             if requires_conversion:
                 expected_dtype = result.dtype
-                x = x.to(lora_A.weight.dtype)
+                x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
             output = lora_B(lora_A(dropout(x)))
             if requires_conversion:
@@ -74,16 +84,11 @@ class AqlmLoraLinear(torch.nn.Module, LoraLayer):
         rep = super().__repr__()
         return "lora." + rep
 
-    # TODO: Check if it is better as suggested by users https://github.com/PanQiWei/AutoGPTQ/pull/102
-    # def reset_lora_parameters(self, adapter_name):
-    #     if adapter_name in self.lora_A.keys():
-    #         torch.nn.init.xavier_uniform_(self.lora_A[adapter_name].weight)
-    #         torch.nn.init.zeros_(self.lora_B[adapter_name].weight)
-
 
 def dispatch_aqlm(
     target: torch.nn.Module,
     adapter_name: str,
+    config: LoraConfig,
     **kwargs: Any,
 ) -> Optional[torch.nn.Module]:
     new_module = None
@@ -94,7 +99,7 @@ def dispatch_aqlm(
         target_base_layer = target
 
     if is_aqlm_available() and isinstance(target_base_layer, QuantizedLinear):
-        new_module = AqlmLoraLinear(target, adapter_name, **kwargs)
+        new_module = AqlmLoraLinear(target, adapter_name, config=config, **kwargs)
         target.qweight = target_base_layer.codes
 
     return new_module

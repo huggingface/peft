@@ -68,15 +68,16 @@ class FourierFTConfig(PeftConfig):
             The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes
             that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at
             this index.
-        layers_pattern (`str`):
+        layers_pattern (`Optional[Union[List[str], str]]`):
             The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is
-            not in the common layers pattern.
+            not in the common layers pattern. This should target the `nn.ModuleList` of the model, which is often
+            called `'layers'` or `'h'`.
         n_frequency_pattern (`dict`):
             The mapping from layer names or regexp expression to n_frequency which are different from the default
             specified. For example, `{model.decoder.layers.0.encoder_attn.k_proj: 1000`}.
         init_weights (`bool`):
-            The initialization of the Fourier weights. Set this to False if the spectrum are initialized to a standard
-            normal distribution. Set this to True if the spectrum are initialized to zeros.
+            The initialization of the Fourier weights. Set this to False (the default) if the spectrum are initialized
+            to a standard normal distribution. Set this to True if the spectrum are initialized to zeros.
     """
 
     n_frequency: int = field(
@@ -154,12 +155,13 @@ class FourierFTConfig(PeftConfig):
             )
         },
     )
-    layers_pattern: Optional[str] = field(
+    layers_pattern: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
             "help": (
                 "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer"
-                " pattern is not in the common layers pattern."
+                " pattern is not in the common layers pattern. This should target the `nn.ModuleList` of the "
+                "model, which is often called `'layers'` or `'h'`."
             )
         },
     )
@@ -176,13 +178,15 @@ class FourierFTConfig(PeftConfig):
         default=False,
         metadata={
             "help": (
-                "The initialization of the Fourier weights. Set this to False if the spectrum should be initialized to a standard normal distribution."
-                "Set this to True if the spectrum should be initialized to zeros."
+                "The initialization of the Fourier weights. Set this to False (the default) if the spectrum should be "
+                "initialized to a standard normal distribution. Set this to True if the spectrum should be initialized "
+                "to zeros."
             )
         },
     )
 
     def __post_init__(self):
+        super().__post_init__()
         self.peft_type = PeftType.FOURIERFT
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
@@ -197,3 +201,6 @@ class FourierFTConfig(PeftConfig):
         # if target_modules is a regex expression, then layers_pattern should be None
         if isinstance(self.target_modules, str) and self.layers_pattern is not None:
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
+        # check for layers_to_transform and layers_pattern
+        if self.layers_pattern and self.layers_to_transform is None:
+            raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")

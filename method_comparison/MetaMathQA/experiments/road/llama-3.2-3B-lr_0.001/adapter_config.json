@@ -1,0 +1,12 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "group_size": 64,
+  "inference_mode": false,
+  "init_weights": true,
+  "peft_type": "ROAD",
+  "revision": null,
+  "target_modules": null,
+  "task_type": null,
+  "variant": "road_2"
+}

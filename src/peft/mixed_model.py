@@ -27,25 +27,8 @@ from peft.utils.constants import DUMMY_MODEL_CONFIG
 
 from .config import PeftConfig
 from .peft_model import PeftModel
-from .tuners import (
-    AdaLoraModel,
-    IA3Model,
-    LoHaModel,
-    LoKrModel,
-    LoraModel,
-    MixedModel,
-)
-from .tuners.mixed import COMPATIBLE_TUNER_TYPES
-from .utils import PeftType, _set_adapter, _set_trainable
-
-
-PEFT_TYPE_TO_MODEL_MAPPING = {
-    PeftType.LORA: LoraModel,
-    PeftType.LOHA: LoHaModel,
-    PeftType.LOKR: LoKrModel,
-    PeftType.ADALORA: AdaLoraModel,
-    PeftType.IA3: IA3Model,
-}
+from .tuners import MixedModel
+from .utils import _set_adapter, _set_trainable
 
 
 def _prepare_model_for_gradient_checkpointing(model: nn.Module) -> None:
@@ -72,6 +55,8 @@ def _prepare_model_for_gradient_checkpointing(model: nn.Module) -> None:
 
 
 def _check_config_compatible(peft_config: PeftConfig) -> None:
+    from .tuners.mixed import COMPATIBLE_TUNER_TYPES
+
     if peft_config.peft_type not in COMPATIBLE_TUNER_TYPES:
         raise ValueError(
             f"The provided `peft_type` '{peft_config.peft_type.value}' is not compatible with the `PeftMixedModel`. "
@@ -86,12 +71,8 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
     This class does not support loading/saving, and it shouldn't usually be initialized directly. Instead, use
     `get_peft_model` with the argument `mixed=True`.
 
-    <Tip>
-
-    Read the [Mixed adapter types](https://huggingface.co/docs/peft/en/developer_guides/mixed_models) guide to learn
-    more about using different adapter types.
-
-    </Tip>
+    > [!TIP] > Read the [Mixed adapter types](https://huggingface.co/docs/peft/en/developer_guides/mixed_models) guide
+    to learn > more about using different adapter types.
 
     Example:
 
@@ -187,7 +168,7 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
             f"trainable%: {100 * trainable_params / all_param:.4f}"
         )
 
-    def __getattr__(self, name: str):
+    def __getattr__(self, name: str) -> Any:
         """Forward missing attributes to the wrapped module."""
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
@@ -219,7 +200,13 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         finally:
             self.base_model.enable_adapter_layers()
 
-    def add_adapter(self, adapter_name: str, peft_config: PeftConfig, low_cpu_mem_usage: bool = False) -> None:
+    def add_adapter(
+        self,
+        adapter_name: str,
+        peft_config: PeftConfig,
+        low_cpu_mem_usage: bool = False,
+        autocast_adapter_dtype: bool = True,
+    ) -> None:
         """
         Add an adapter to the model based on the passed configuration.
 
@@ -239,13 +226,17 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
                 Create empty adapter weights on meta device. Useful to speed up the process when loading saved
                 adapters.
 
-                <Tip>
-
-                Don't use `low_cpu_mem_usage=True` when creating a new PEFT adapter for training (training is untested
-                and discouraged for PeftMixedModel in general).
-
-                </Tip>
+                > [!TIP] > Don't use `low_cpu_mem_usage=True` when creating a new PEFT adapter for training (training
+                is untested > and discouraged for PeftMixedModel in general).
+            autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
+                Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter
+                weights using float16 and bfloat16 to float32, as this is typically required for stable training, and
+                only affect select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the
+                corresponding layer.
         """
+        if adapter_name in self.peft_config:
+            raise ValueError(f"Adapter with name '{adapter_name}' already exists.")
+
         _check_config_compatible(peft_config)
 
         try:
@@ -255,6 +246,8 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
             if adapter_name in self.peft_config:
                 del self.peft_config[adapter_name]
             raise
+
+        self.base_model._cast_adapter_dtype(adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
 
         self.set_modules_to_save(peft_config, adapter_name)
 
@@ -266,9 +259,14 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
             self.modules_to_save = set(modules_to_save)
         else:
             self.modules_to_save.update(modules_to_save)
-        _set_trainable(self, adapter_name)
+        _set_trainable(
+            self,
+            adapter_name,
+            module_names=getattr(peft_config, "modules_to_save", None),
+            inference_mode=peft_config.inference_mode,
+        )
 
-    def set_adapter(self, adapter_name: Union[str, list[str]]) -> None:
+    def set_adapter(self, adapter_name: Union[str, list[str]], inference_mode: bool = False) -> None:
         """
         Sets the active adapter(s) for the model.
 
@@ -277,18 +275,14 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         order in which the adapters were loaded into the model. The active adapters only determine which adapters are
         active during the forward pass, but not the order in which they are applied.
 
-        Additionally, this function will set the specified adapters to trainable (i.e., requires_grad=True). If this is
-        not desired, use the following code.
-
-        ```py
-        >>> for name, param in model_peft.named_parameters():
-        ...     if ...:  # some check on name (ex. if 'lora' in name)
-        ...         param.requires_grad = False
-        ```
+        Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True) unless
+        inference_mode is True.
 
         Args:
-            adapter_name (`str` or `List[str]`):
-                The name of the adapter(s) to be activated.
+            adapter_name (str, list[str]):
+                The name(s) of the adapter(s) to set as active
+            inference_mode (bool, optional):
+                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
         if isinstance(adapter_name, str):
             adapter_name = [adapter_name]
@@ -299,8 +293,8 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
                 f"Adapter(s) {sorted(mismatched)} not found, available adapters: {sorted(self.peft_config.keys())}"
             )
 
-        self.base_model.set_adapter(adapter_name)
-        _set_adapter(self, adapter_name)
+        self.base_model.set_adapter(adapter_name, inference_mode=inference_mode)
+        _set_adapter(self, adapter_name, inference_mode=inference_mode)
 
     def delete_adapter(self, adapter_name: Union[str, list[str]]) -> None:
         if isinstance(adapter_name, str):
@@ -347,6 +341,9 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
     @classmethod
     def _split_kwargs(cls, kwargs: dict[str, Any]):
         return PeftModel._split_kwargs(kwargs)
+
+    def _check_new_adapter_config(self, peft_config: PeftConfig, is_trainable: bool) -> None:
+        return PeftModel._check_new_adapter_config(self, peft_config, is_trainable=is_trainable)
 
     def load_adapter(self, model_id: str, adapter_name: str, *args: Any, **kwargs: Any):
         """
@@ -437,26 +434,28 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
                 Additional keyword arguments passed along to the specific PEFT configuration class.
         """
         # note: adapted from PeftModel.from_pretrained
-        from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING
+        from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_MIXED_MODEL_MAPPING
 
         # load the config
         if config is None:
-            config = PEFT_TYPE_TO_CONFIG_MAPPING[
-                PeftConfig._get_peft_type(
-                    model_id,
-                    subfolder=kwargs.get("subfolder", None),
-                    revision=kwargs.get("revision", None),
-                    cache_dir=kwargs.get("cache_dir", None),
-                    use_auth_token=kwargs.get("use_auth_token", None),
-                )
-            ].from_pretrained(model_id, **kwargs)
+            hf_kwargs = {
+                "subfolder": kwargs.get("subfolder", None),
+                "revision": kwargs.get("revision", None),
+                "cache_dir": kwargs.get("cache_dir", None),
+                "token": kwargs.get("token", None),
+            }
+            if use_auth_token := kwargs.get("use_auth_token", None):
+                hf_kwargs["use_auth_token"] = use_auth_token
+            config = PEFT_TYPE_TO_CONFIG_MAPPING[PeftConfig._get_peft_type(model_id, **hf_kwargs)].from_pretrained(
+                model_id, **kwargs
+            )
         elif isinstance(config, PeftConfig):
             config.inference_mode = not is_trainable
         else:
             raise ValueError(f"The input config must be a PeftConfig, got {config.__class__}")
 
         # note: this is different from PeftModel.from_pretrained
-        if config.peft_type not in PEFT_TYPE_TO_MODEL_MAPPING:
+        if config.peft_type not in PEFT_TYPE_TO_MIXED_MODEL_MAPPING:
             raise ValueError(f"Adapter of type {config.peft_type} is not supported for mixed models.")
 
         if (getattr(model, "hf_device_map", None) is not None) and len(

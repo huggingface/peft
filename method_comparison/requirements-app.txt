@@ -1,0 +1,5 @@
+dash
+datasets
+gradio>=6.0.2
+huggingface_hub
+pandas

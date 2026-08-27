@@ -48,6 +48,8 @@
 # tests/regression/<TEST_NAME>/ will be loaded and compared to the current output.
 #
 # When implementing new tests, check the existing ones as well as the description in the docstring of RegressionTester.
+#
+# Note: For 4-bit tests using XPU (regardless of REGRESSION_CREATION_MODE), set `PEFT_USE_XPU=True` to enable the correct XPU path.
 
 import os
 import shutil
@@ -79,38 +81,46 @@ from peft import (
 )
 from peft.utils import infer_device
 
+from ..testing_utils import require_bitsandbytes, require_deterministic_for_xpu, require_non_cpu
+
 
 PEFT_VERSION = peft.__version__
 REGRESSION_DIR = tempfile.mkdtemp(prefix="peft_regression_")
 HF_TOKEN = os.environ.get("HF_TOKEN")
 # the repo has to be created manually once, it is not automatically created
 HF_REPO = "peft-internal-testing/regression-tests"
+# note: For XPU devices, a separate regression test repository(for 4 bit) is used due to hardware and implementation
+# differences that can lead to different numerical results compared to CUDA-based devices.
+# See PR https://github.com/huggingface/peft/pull/2843
+HF_REPO_XPU = "Intel/peft-regression-tests"
+LORA_4BIT_FOLDER = "lora_opt-350m_bnb_4bit"
 
 
 @pytest.fixture(scope="session", autouse=True)
-def setup_tearndown():
+def setup_teardown():
     # Use a pytest session-scoped fixture to setup and teardown exactly once per session. AFAICT, unittest does not
     # provide such a feature
-
-    # download regression artifacts from Hugging Face Hub at the start
-    snapshot_download(
-        repo_id=HF_REPO,
-        local_dir=REGRESSION_DIR,
-        # Don't use symlink, because this prevents us from properly cleaning up the files once finished
-        local_dir_use_symlinks=False,
-    )
-
     yield
 
     # delete regression artifacts at the end of the test session; optionally, upload them first if in creation mode
     creation_mode = strtobool(os.environ.get("REGRESSION_CREATION_MODE", "False"))
+    use_xpu = strtobool(os.environ.get("PEFT_USE_XPU", "False")) and (infer_device() == "xpu")
     if creation_mode:
-        # upload the regression directory to Hugging Face Hub, will overwrite by default
-        upload_folder(
-            repo_id=HF_REPO,
-            folder_path=REGRESSION_DIR,
-            token=HF_TOKEN,
-        )
+        if use_xpu:
+            lora_4bit_folder_path = os.path.join(REGRESSION_DIR, LORA_4BIT_FOLDER)
+            upload_folder(
+                repo_id=HF_REPO_XPU,
+                folder_path=lora_4bit_folder_path,
+                path_in_repo=LORA_4BIT_FOLDER,
+                token=HF_TOKEN,
+            )
+        else:
+            # upload the regression directory to Hugging Face Hub, will overwrite by default
+            upload_folder(
+                repo_id=HF_REPO,
+                folder_path=REGRESSION_DIR,
+                token=HF_TOKEN,
+            )
 
     shutil.rmtree(REGRESSION_DIR)
 
@@ -124,36 +134,6 @@ def strtobool(val):
         return 0
     else:
         raise ValueError(f"invalid truth value {val!r}")
-
-
-# same as in ..testing_utils.py but cannot be imported
-def require_torch_gpu(test_case):
-    """
-    Decorator marking a test that requires a GPU. Will be skipped when no GPU is available.
-
-    Copies from tsting_utils.py.
-
-    """
-    if not torch.cuda.is_available():
-        return unittest.skip("test requires GPU")(test_case)
-    else:
-        return test_case
-
-
-# same as in ..testing_utils.py but cannot be imported
-def require_bitsandbytes(test_case):
-    """
-    Decorator marking a test that requires the bitsandbytes library. Will be skipped when the library is not installed.
-
-    Copies from tsting_utils.py.
-
-    """
-    try:
-        import bitsandbytes  # noqa: F401
-    except ImportError:
-        return unittest.skip("test requires bitsandbytes")(test_case)
-    else:
-        return test_case
 
 
 def save_output(output, name, force=False):
@@ -189,6 +169,15 @@ def save_model(model, name, force=False):
 def load_output(name):
     filename = os.path.join(REGRESSION_DIR, name, "output.pt")
     return torch.load(filename, map_location=infer_device())
+
+
+def download_regression_artifact(name):
+    # WARNING: If running on XPU, LORA_4BIT_FOLDER artifacts are loaded from HF_REPO_XPU, which is outside of peft
+    # direct control. The load_output function uses torch.load, which can execute arbitrary code from pickle files.
+    # Users should be aware of this potential security risk.
+    use_xpu = strtobool(os.environ.get("PEFT_USE_XPU", "False")) and (infer_device() == "xpu")
+    repo_id = HF_REPO_XPU if (name == LORA_4BIT_FOLDER and use_xpu) else HF_REPO
+    snapshot_download(repo_id=repo_id, local_dir=REGRESSION_DIR, allow_patterns=[f"{name}/**"])
 
 
 @pytest.mark.regression
@@ -236,9 +225,11 @@ class RegressionTester(unittest.TestCase):
             else:
                 raise RuntimeError("Git commit is not tagged") from exc
 
+    @require_deterministic_for_xpu
     def assert_results_equal_or_store(self, model, name):
         """Check if the outputs are the same or save the outputs if in creation mode."""
         if not self.creation_mode:  # normal regression testing mode
+            download_regression_artifact(name)
             self._assert_results_equal(name)
         else:
             output = self.get_output(model)
@@ -328,6 +319,7 @@ class TestMlp(RegressionTester):
             r=8,
             init_lora_weights=False,
             target_modules=["lin0"],
+            total_step=1,
         )
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "adalora_mlp")
@@ -551,7 +543,10 @@ class TestOpt(RegressionTester):
 
     def load_base_model(self):
         self.fix_seed()
-        return AutoModelForCausalLM.from_pretrained("facebook/opt-350m").to(self.torch_device)
+        # Note: Since transformers v5, the default dtype for opt has changed from float32 to float16. This causes the
+        # regression test to fail. Therefore, ensure that a float32 model is being used.
+        dtype = torch.float32
+        return AutoModelForCausalLM.from_pretrained("facebook/opt-350m", dtype=dtype).to(self.torch_device)
 
     def test_lora(self):
         base_model = self.load_base_model()
@@ -567,6 +562,7 @@ class TestOpt(RegressionTester):
         config = AdaLoraConfig(
             r=8,
             init_lora_weights=False,
+            total_step=1,
         )
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "adalora_opt-350m")
@@ -578,7 +574,7 @@ class TestOpt(RegressionTester):
         self.assert_results_equal_or_store(model, "ia3_opt-350m")
 
 
-@require_torch_gpu
+@require_non_cpu
 @require_bitsandbytes
 class TestOpt8bitBnb(RegressionTester):
     def get_output(self, model):
@@ -621,6 +617,7 @@ class TestOpt8bitBnb(RegressionTester):
             target_r=4,
             tinit=50,
             tfinal=100,
+            total_step=200,
             deltaT=5,
             beta1=0.3,
             beta2=0.3,
@@ -634,7 +631,7 @@ class TestOpt8bitBnb(RegressionTester):
         self.assert_results_equal_or_store(model, "adalora_opt-350m_8bit")
 
 
-@require_torch_gpu
+@require_non_cpu
 @require_bitsandbytes
 class TestOpt4bitBnb(RegressionTester):
     def get_output(self, model):
@@ -653,7 +650,7 @@ class TestOpt4bitBnb(RegressionTester):
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-350m",
             quantization_config=bnb_config,
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
         )
         return model
 
@@ -667,7 +664,13 @@ class TestOpt4bitBnb(RegressionTester):
             init_lora_weights=False,
         )
         model = get_peft_model(base_model, config)
-        self.assert_results_equal_or_store(model, "lora_opt-350m_bnb_4bit")
+        # NVIDIA A100 requires a lower tol to pass the test.
+        old_tol = self.tol
+        self.tol = 3e-2
+        try:
+            self.assert_results_equal_or_store(model, LORA_4BIT_FOLDER)
+        finally:
+            self.tol = old_tol
 
     def test_adalora(self):
         # TODO
@@ -681,6 +684,7 @@ class TestOpt4bitBnb(RegressionTester):
             target_r=4,
             tinit=50,
             tfinal=100,
+            total_step=200,
             deltaT=5,
             beta1=0.3,
             beta2=0.3,

@@ -1,0 +1,7 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "peft_type": "TRAINABLE_TOKENS",
+  "token_indices": [128000, 128001],
+  "task_type": "CAUSAL_LM"
+}

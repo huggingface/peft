@@ -16,13 +16,17 @@ rendered properly in your Markdown viewer.
 
 # X-LoRA
 
-Mixture of LoRA Experts ([X-LoRA](https://arxiv.org/abs/2402.07148)) is a PEFT method enabling sparse or dense mixture of LoRA experts based on a high granularity (token, layer, sequence) scalings matrix. This leverages frozen LoRA adapters and a frozen base model to drastically reduces the number of parameters that need to be fine-tuned.
+Mixture of LoRA Experts ([X-LoRA](https://huggingface.co/papers/2402.07148)) is a PEFT method enabling sparse or dense mixture of LoRA experts based on a high granularity (token, layer, sequence) scalings matrix. This leverages frozen LoRA adapters and a frozen base model to drastically reduces the number of parameters that need to be fine-tuned.
 
 A unique aspect of X-LoRA is its versatility: it can be applied to any `transformers` base model with LoRA adapters. This means that, despite the mixture of experts strategy, no changes to the model code must be made.
 
 The below graphic demonstrates how the scalings change for different prompts for each token. This highlights the activation of different adapters as the generation progresses and the sequence creates new context.
 
 ![Token-by-token scalings](https://github.com/EricLBuehler/xlora/raw/master/res/token_by_token_scalings.gif)
+
+For each step, X-LoRA requires the base model to be run twice: first, to get hidden states without any LoRA adapters, and secondly, the hidden states are used to calculate scalings which are applied to the LoRA adapters and the model is run a second time. The output of the second run is the result of the model step.
+
+Ultimately, X-LoRA allows the model to reflect upon its knowledge because of the dual forward pass scheme, and dynamically reconfigure the architecture.
 
 The abstract from the paper is:
 
@@ -46,6 +50,8 @@ Please cite X-LoRA as:
     eprint = {https://pubs.aip.org/aip/aml/article-pdf/doi/10.1063/5.0203126/19964043/026119\_1\_5.0203126.pdf},
 }
 ```
+
+# API
 
 ## XLoraConfig
 

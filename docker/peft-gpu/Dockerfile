@@ -4,47 +4,31 @@
 # Use base conda image to reduce time
 FROM continuumio/miniconda3:latest AS compile-image
 # Specify py version
-ENV PYTHON_VERSION=3.8
+ENV PYTHON_VERSION=3.11
 # Install apt libs - copied from https://github.com/huggingface/accelerate/blob/main/docker/accelerate-gpu/Dockerfile
+# Install audio-related libraries
 RUN apt-get update && \
-    apt-get install -y curl git wget software-properties-common git-lfs && \
+    apt-get install -y curl git wget git-lfs ffmpeg libsndfile1-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists*
 
-# Install audio-related libraries 
-RUN apt-get update && \
-    apt install -y ffmpeg
-
-RUN apt install -y libsndfile1-dev
 RUN git lfs install
 
 # Create our conda env - copied from https://github.com/huggingface/accelerate/blob/main/docker/accelerate-gpu/Dockerfile
 RUN conda create --name peft python=${PYTHON_VERSION} ipython jupyter pip
-RUN python3 -m pip install --no-cache-dir --upgrade pip
 
 # Below is copied from https://github.com/huggingface/accelerate/blob/main/docker/accelerate-gpu/Dockerfile
 # We don't install pytorch here yet since CUDA isn't available
 # instead we use the direct torch wheel
-ENV PATH /opt/conda/envs/peft/bin:$PATH
+ENV PATH=/opt/conda/envs/peft/bin:$PATH
 # Activate our bash shell
 RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
 
 # Stage 2
-FROM nvidia/cuda:12.2.2-devel-ubuntu22.04 AS build-image
+FROM nvidia/cuda:13.2.1-cudnn-devel-ubuntu24.04 AS build-image
 COPY --from=compile-image /opt/conda /opt/conda
-ENV PATH /opt/conda/bin:$PATH
-
-RUN chsh -s /bin/bash
-SHELL ["/bin/bash", "-c"]
-RUN source activate peft && \ 
-    python3 -m pip install --no-cache-dir bitsandbytes optimum auto-gptq
-
-# Add autoawq for quantization testing
-RUN source activate peft && \
-    python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ/releases/download/v0.2.4/autoawq-0.2.4-cp38-cp38-linux_x86_64.whl
-RUN source activate peft && \
-    python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ_kernels/releases/download/v0.0.6/autoawq_kernels-0.0.6-cp38-cp38-linux_x86_64.whl
+ENV PATH=/opt/conda/bin:$PATH
 
 # Install apt libs
 RUN apt-get update && \
@@ -52,31 +36,50 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists*
 
-# Add eetq for quantization testing
-RUN source activate peft && \
-    python3 -m pip install git+https://github.com/NetEase-FuXi/EETQ.git
+RUN chsh -s /bin/bash
+SHELL ["/bin/bash", "-c"]
+
+RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum
+
+# Note: we are hard-coding CUDA_ARCH_LIST here since `gptqmodel` requires either nvidia-smi
+# or CUDA_ARCH_LIST for compute capability information. Since the docker build is unlikely
+# to have compute hardware available we use the information from the CI runner (which hosts
+# a NVIDIA L4). So we fix the compute capability to 8.9. In the future we might extend this
+# to a list of compute capabilities (separated by ;).
+# TODO pcre, which is used by gptqmodel, is resulting in a core dump, remove once it's resolved
+# RUN CUDA_ARCH_LIST=8.9 conda run -n peft pip install "gptqmodel>=7.0.0"
+
+RUN \
+    # Add eetq for quantization testing; needs to run without build isolation since the setup
+    # script directly imports torch from the environment which would fail with isolation.
+    # Ninja should speed up build time.
+    conda run -n peft pip install ninja && conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
+
+# TODO: Importing TE results in: undefined symbol: cublasLtGroupedMatrixLayoutInit_internal, version libcublasLt.so.13
+# Reinstate TE when the issue is resolved (probably this one: https://github.com/NVIDIA/TransformerEngine/issues/2504)
+# RUN NVTE_BUILD_USE_NVIDIA_WHEELS=1 \
+#     CPATH="/usr/local/cuda/include:${CPATH}" \
+#     conda run -n peft pip install --no-build-isolation "transformer_engine[pytorch]"
 
 # Activate the conda env and install transformers + accelerate from source
-RUN source activate peft && \
-    python3 -m pip install -U --no-cache-dir \
-    librosa \
-    "soundfile>=0.12.1" \
-    scipy \
-    torchao \
-    git+https://github.com/huggingface/transformers \
-    git+https://github.com/huggingface/accelerate \
-    peft[test]@git+https://github.com/huggingface/peft
+RUN conda run -n peft pip install -U --no-cache-dir \
+        librosa \
+        "soundfile>=0.12.1" \
+        scipy \
+        torchao \
+        "fbgemm-gpu-genai>=1.2.0" \
+        git+https://github.com/huggingface/transformers \
+        git+https://github.com/huggingface/accelerate \
+        peft[test]@git+https://github.com/huggingface/peft \
+        # Add aqlm for quantization testing
+        aqlm[gpu]>=1.0.2 \
+        # Add HQQ for quantization testing
+        hqq \
+        deepspeed \
+        "kernels<0.16" \
+        && conda run -n peft pip install -U --no-cache-dir mslk --index-url https://download.pytorch.org/whl/cu132
 
-# Add aqlm for quantization testing
-RUN source activate peft && \
-    pip install aqlm[gpu]>=1.0.2
-
-# Add HQQ for quantization testing
-RUN source activate peft && \
-pip install hqq
-
-RUN source activate peft && \ 
-    pip freeze | grep transformers
+RUN conda run -n peft pip freeze | grep transformers
 
 RUN echo "source activate peft" >> ~/.profile
 

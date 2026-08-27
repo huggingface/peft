@@ -6,13 +6,63 @@ on:
     paths-ignore:
         - 'docs/**'
 
+permissions: {}
+
 jobs:
   tests:
+    # GH Environment for extra protection: https://github.com/huggingface/peft/settings/environments
+    environment: branch-protection-main
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Make space for cache + models
+        # Ubuntu runner have less space free which is problematic since the model
+        # cache + dependencies fill up the disk, leaving no space for execution.
+        # So we remove some of the stuff we don't need (Java, .NET, etc.)
+        #
+        # Idea: https://dev.to/mathio/squeezing-disk-space-from-github-actions-runners-an-engineers-guide-3pjg
+        if: matrix.os != 'windows-latest'
+        run: |
+          df -h
+
+          # Remove Java (JDKs)
+          sudo rm -rf /usr/lib/jvm
+
+          # Remove .NET SDKs
+          sudo rm -rf /usr/share/dotnet
+
+          # Remove Swift toolchain
+          sudo rm -rf /usr/share/swift
+
+          # Remove Haskell (GHC)
+          sudo rm -rf /usr/local/.ghcup
+
+          # Remove Julia
+          sudo rm -rf /usr/local/julia*
+
+          # Remove Android SDKs
+          sudo rm -rf /usr/local/lib/android
+
+          # Remove Chromium (optional if not using for browser tests)
+          sudo rm -rf /usr/local/share/chromium
+
+          # Remove Microsoft/Edge and Google Chrome builds
+          sudo rm -rf /opt/microsoft /opt/google
+
+          # Remove Azure CLI
+          sudo rm -rf /opt/az
+
+          # Remove PowerShell
+          sudo rm -rf /usr/local/share/powershell
+
+          # Remove CodeQL and other toolcaches
+          sudo rm -rf /opt/hostedtoolcache
+
+          df -h
       - name: Set up Python 3.11
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: 3.11
           cache: "pip"
@@ -24,11 +74,14 @@ jobs:
           pip install -U git+https://github.com/huggingface/transformers.git
           pip install -e .[test]
       - name: Test with pytest
+        env:
+          TRANSFORMERS_IS_CI: 1
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           make test
       - name: Post to Slack
         if: always()
-        uses: huggingface/hf-workflows/.github/actions/post-slack@main
+        uses: huggingface/hf-workflows/.github/actions/post-slack@3f88d63d3761558a32e8e46fc2a8536e04bb2aea  # main from Feb 2025-02-24
         with:
           slack_channel: ${{ secrets.SLACK_CHANNEL_ID }}
           title: 🤗 Results of transformers main tests

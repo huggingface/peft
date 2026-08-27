@@ -1,0 +1,1565 @@
+# Copyright 2023-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+from __future__ import annotations
+
+import collections
+import warnings
+from typing import Any, Optional
+
+import torch
+import torch.nn.functional as F
+from accelerate.utils.imports import is_xpu_available
+from torch import nn
+
+from peft.tuners._buffer_dict import BufferDict
+from peft.tuners.lora.config import BdLoraConfig, MontecloraConfig
+from peft.utils.integrations import gather_params_ctx
+from peft.utils.other import transpose
+
+from .arrow import ArrowLoraLinearLayer
+from .config import LoraConfig, PeftConfig
+from .dora import DoraConv1dLayer, DoraConv2dLayer, DoraConv3dLayer, DoraEmbeddingLayer, DoraLinearLayer
+from .layer import Conv1d, Conv2d, Conv3d, Embedding, Linear, LoraLayer, LoraVariant, _ConvNd
+from .monteclora import MontecloraSampler
+from .velora import VeloraFunction, _get_group_dim, _normalize_projection, _reshape_to_grouped_subtokens
+
+
+class ArrowLinearVariant(LoraVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs):
+        """
+        Initialise the ArrowLoraLinearLayer() inside lora_arrow. lora_arrow is nn.ModuleDict(), serving as a container
+        for ArrowLoraLinearLayer(). A layer of the base model with LoRA adapter loaded on it will be like:
+        ----------------------------------------------------
+             (qkv_proj): lora.Linear4bit or lora.Linear(
+                (base_layer): Linear4bit or Linear (lora_dropout): ModuleDict( ... ) (lora_A): ModuleDict( ... )
+                (lora_B): ModuleDict( ... ) (lora_embedding_A): ParameterDict( ... ) (lora_embedding_B): ParameterDict(
+                ... ) (lora_magnitude_vector): ModuleDict( ... ) (lora_arrow): ModuleDict(
+                    (arrow_router): ArrowLoraLinearLayer() )
+            )
+        ----------------------------------------------------
+
+        Args:
+            module (Linear): LoRA Layer of the model, containing base_layer, lora_A, lora_B, etc.
+            adapter_name (str): name of the adapter that will be put in lora_arrow.
+            The adapter_name is "arrow_router" by default, set in create_arrow_model() in ./arrow.py
+        """
+        # Checking for arrow necessary config
+        arrow_config = config.arrow_config
+        if arrow_config is None:
+            raise ValueError("ArrowLinearVariant.init() did not receive an arrow_config")
+
+        # 1-a) build the ArrowLoRALayer
+        arrow_layer = ArrowLoraLinearLayer(
+            in_features=module.in_features,
+            arrow_config=arrow_config,
+        ).to(module.weight.device)
+
+        # 1-b) register a container if it doesn’t exist yet
+        if not hasattr(module, "lora_arrow"):
+            module.lora_arrow = nn.ModuleDict()
+
+        module.lora_arrow[adapter_name] = arrow_layer
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        *,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        """
+        Parameters mirror those in PEFT’s `LoraVariant.forward`. Called every time the host Linear does a fwd pass.
+
+        build_prototypes() and gen_know_sub() should run only once before routing. Both are implemented in
+        ArrowLoraLinearLayer (see ./arrow.py). They are lazily invoked in the forward pass below. Attributes of
+        ArrowLoraLinearLayer() class ensure they execute only a single time.
+
+        Args:
+            module (Linear): LoRA Layer of the model
+            active_adapter (str): name of the arrow route, which should be active to perform arrow.
+            x (torch.Tensor): input to the layer
+            result (torch.Tensor): output of the base layer.
+
+        Return value:
+            output of the base model + delta weight computed by arrow layer.
+        """
+        arrow = module.lora_arrow[active_adapter]  # ArrowLoraLinearLayer
+        # Apply GenKnowSub the 1st time if applicable. By calling arrow/on_adapter_change(),
+        # gen_know_sub() is redone for newly added adapters after arrow.create_arrow_model().
+        arrow.gen_know_sub(module.lora_A, module.lora_B)
+        # lazily build prototypes the 1st time after GenKnowSub. By calling arrow/on_adapter_change(),
+        # build_prototypes() is redone for newly added adapters after arrow.create_arrow_model().
+        arrow.build_prototypes(module.lora_A, module.lora_B)
+
+        # A forward path of ArrowLoraLinearLayer is called so routing performs.
+        # Accept and ignore extra variant kwargs (e.g., 'alora_offsets') for compatibility
+        delta = arrow(
+            x,
+            lora_A=module.lora_A,
+            lora_B=module.lora_B,
+            dropout=module.lora_dropout[active_adapter],
+            scaling=module.scaling,
+        )
+        return result + delta
+
+    """
+    Since Arrow is a Mixture-of-Experts (MoE) approach, merging adapters is not meaningful or even possible: for each
+    token, the top-k LoRA experts are dynamically selected and routed. Because of this per-token routing, there is no
+    single set of weights that can represent a merged adapter.
+    """
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        raise RuntimeError("Cannot merge an active Arrow router adapter. Remove it first.")
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        raise RuntimeError("Cannot merge an active Arrow router adapter. Remove it first.")
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        raise RuntimeError("Cannot unmerge an active Arrow router adapter. Remove it first.")
+
+
+class DoraLinearVariant(LoraVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
+        if not module.lora_magnitude_vector:
+            # first dora layer being added, add lora_magnitude_vector to the list of learnable parameters
+            module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_magnitude_vector",)
+
+        dora_layer = DoraLinearLayer(fan_in_fan_out=getattr(module, "fan_in_fan_out", False))
+        lora_A = module.lora_A[adapter_name].weight
+        lora_B = module.lora_B[adapter_name].weight
+        place_on_cpu = module.ephemeral_gpu_offload and (lora_A.device.type == "cpu" or lora_B.device.type == "cpu")
+        if module.ephemeral_gpu_offload:
+            if lora_A.device.type in ["cuda", "xpu"]:
+                lora_B = lora_B.to(lora_A.device)
+            else:
+                if lora_B.device.type not in ["cuda", "xpu"]:
+                    if is_xpu_available():
+                        lora_B = lora_B.to("xpu")
+                    else:
+                        lora_B = lora_B.to("cuda")
+                lora_A = lora_A.to(lora_B.device)
+        scaling = module.scaling[adapter_name]
+        dora_layer.update_layer(
+            base_layer=module.get_base_layer(),
+            lora_A=lora_A,
+            lora_B=lora_B,
+            scaling=scaling,
+            place_on_cpu=place_on_cpu,
+        )
+        module.lora_magnitude_vector[adapter_name] = dora_layer
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+
+        # since delta_weight already includes scaling, set it to 1 here
+        weight_norm = (
+            module.lora_magnitude_vector[active_adapter]
+            .get_weight_norm(orig_weight, transpose(delta_weight, module.fan_in_fan_out), scaling=1)
+            .detach()
+        )
+        # We need to cache weight_norm because it has to be based on the original weights. We
+        # cannot calculate it on the fly based on the merged weights when unmerging because its a
+        # different value
+        module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+        dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        dora_factor = transpose(dora_factor.view(-1, 1), module.fan_in_fan_out)
+        new_weight = dora_factor * (orig_weight + delta_weight)
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+        weight_norm = (
+            module.lora_magnitude_vector[active_adapter]
+            .get_weight_norm(orig_weight, transpose(delta_weight, module.fan_in_fan_out), scaling=1)
+            .detach()
+        )
+        # We need to cache weight_norm because it has to be based on the original weights. We
+        # cannot calculate it on the fly based on the merged weights when unmerging because its a
+        # different value
+        module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+        dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        dora_factor = transpose(dora_factor.view(-1, 1), module.fan_in_fan_out)
+        new_weight = dora_factor * (orig_weight.data + delta_weight)
+        new_weight = new_weight.to(orig_dtype)
+        orig_weight.data = new_weight
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+        weight_norm = module._cache_pop(f"{active_adapter}-weight_norm")
+        dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        dora_factor = transpose(dora_factor.view(-1, 1), module.fan_in_fan_out)
+        new_weight = orig_weight.data / dora_factor - delta_weight
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+
+        if isinstance(dropout, nn.Identity) or not module.training:
+            base_result = result
+        else:
+            x = dropout(x)
+            base_result = None
+
+        result = result + module.lora_magnitude_vector[active_adapter](
+            x,
+            lora_A=lora_A,
+            lora_B=lora_B,
+            scaling=scaling,
+            base_layer=module.get_base_layer(),
+            base_result=base_result,
+            adapter_name=active_adapter,
+        )
+        return result
+
+
+class DoraEmbeddingVariant(DoraLinearVariant):
+    @staticmethod
+    def init(module: Embedding, adapter_name: str, **kwargs: Any) -> None:
+        if module.lora_magnitude_vector is None:
+            # first dora layer being added, add lora_magnitude_vector to the list of learnable parameters
+            module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_magnitude_vector",)
+
+        dora_layer = DoraEmbeddingLayer(fan_in_fan_out=True)
+        lora_embedding_A = module.lora_embedding_A[adapter_name]
+        lora_embedding_B = module.lora_embedding_B[adapter_name]
+        scaling = module.scaling[adapter_name]
+        dora_layer.update_layer(
+            base_layer=module.get_base_layer(), lora_A=lora_embedding_A, lora_B=lora_embedding_B, scaling=scaling
+        )
+        module.lora_magnitude_vector[adapter_name] = dora_layer
+
+    @staticmethod
+    def merge_safe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+
+        # since delta_weight already includes scaling, set it to 1 here
+        weight_norm = (
+            module.lora_magnitude_vector[active_adapter]
+            .get_weight_norm(orig_weight, delta_weight.T, scaling=1)
+            .detach()
+        )
+        # We need to cache weight_norm because it has to be based on the original weights. We
+        # cannot calculate it on the fly based on the merged weights when unmerging because its a
+        # different value
+        module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+        dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        dora_factor = dora_factor.view(1, -1)
+        new_weight = dora_factor * (orig_weight + delta_weight)
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
+
+    @staticmethod
+    def merge_unsafe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+        weight_norm = (
+            module.lora_magnitude_vector[active_adapter]
+            .get_weight_norm(orig_weight, delta_weight.T, scaling=1)
+            .detach()
+        )
+        # We need to cache weight_norm because it has to be based on the original weights. We
+        # cannot calculate it on the fly based on the merged weights when unmerging because its a
+        # different value
+        module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+        dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        dora_factor = dora_factor.view(1, -1)
+        new_weight = dora_factor * (orig_weight.data + delta_weight)
+        new_weight = new_weight.to(orig_dtype)
+        orig_weight.data = new_weight
+
+    @staticmethod
+    def unmerge(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+        weight_norm = module._cache_pop(f"{active_adapter}-weight_norm")
+        dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        new_weight = orig_weight.data / dora_factor.view(1, -1) - delta_weight
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
+
+    @staticmethod
+    def forward(
+        module: Embedding,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        embedding_A = module.lora_embedding_A[active_adapter].T
+        embedding_B = module.lora_embedding_B[active_adapter].T
+        scaling = module.scaling[active_adapter]
+
+        mag_norm_scale, dora_result = module.lora_magnitude_vector[active_adapter](
+            x,
+            lora_A=embedding_A,
+            lora_B=embedding_B,
+            scaling=scaling,
+            base_layer=module.get_base_layer(),
+            embed_fn=module._embed,
+            adapter_name=active_adapter,
+        )
+
+        # Some embedding layers (e.g., Gemma3TextScaledWordEmbedding) apply scaling in their forward method.
+        # Since base_layer(x) already includes this scaling, we need to apply it to DoRA contributions too.
+        # Note: embed_scale is applied AFTER weight norm calculation to preserve DoRA's weight geometry semantics.
+        embed_scale = module._get_embed_scale()
+        if embed_scale is not None:
+            dora_result = dora_result * embed_scale.to(dora_result.dtype)
+
+        result = mag_norm_scale * result + dora_result
+        return result
+
+
+class _DoraConvNdVariant(LoraVariant):
+    @staticmethod
+    def init_convd_variant(module: _ConvNd, adapter_name: str, dora_layer: nn.Module) -> None:
+        if module.lora_magnitude_vector is None:
+            # first dora layer being added, add lora_magnitude_vector to the list of learnable parameters
+            module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_magnitude_vector",)
+
+        lora_A = module.lora_A[adapter_name].weight
+        lora_B = module.lora_B[adapter_name].weight
+        scaling = module.scaling[adapter_name]
+        dora_layer.update_layer(base_layer=module.get_base_layer(), lora_A=lora_A, lora_B=lora_B, scaling=scaling)
+        module.lora_magnitude_vector[adapter_name] = dora_layer
+
+    @staticmethod
+    def merge_safe(module: _ConvNd, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+
+        # since delta_weight already includes scaling, set it to 1 here
+        weight_norm = (
+            module.lora_magnitude_vector[active_adapter].get_weight_norm(orig_weight, delta_weight, scaling=1).detach()
+        )
+        # We need to cache weight_norm because it has to be based on the original weights. We
+        # cannot calculate it on the fly based on the merged weights when unmerging because its a
+        # different value
+        module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+        dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        new_weight = dora_factor.view(*module._get_dora_factor_view()) * (orig_weight + delta_weight)
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
+
+    @staticmethod
+    def merge_unsafe(module: _ConvNd, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+        # since delta_weight already includes scaling, set it to 1 here
+        weight_norm = (
+            module.lora_magnitude_vector[active_adapter].get_weight_norm(orig_weight, delta_weight, scaling=1).detach()
+        )
+        # We need to cache weight_norm because it has to be based on the original weights. We
+        # cannot calculate it on the fly based on the merged weights when unmerging because its a
+        # different value
+        module._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+        dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        new_weight = dora_factor.view(*module._get_dora_factor_view()) * (orig_weight.data + delta_weight)
+        new_weight = new_weight.to(orig_dtype)
+        orig_weight.data = new_weight
+
+    @staticmethod
+    def unmerge(module: _ConvNd, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+        weight_norm = module._cache_pop(f"{active_adapter}-weight_norm")
+        dora_factor = module.lora_magnitude_vector[active_adapter].weight / weight_norm
+        new_weight = orig_weight.data / dora_factor.view(*module._get_dora_factor_view()) - delta_weight
+        new_weight = new_weight.to(orig_dtype)
+        return new_weight
+
+    @staticmethod
+    def forward(
+        module: _ConvNd,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+
+        if isinstance(dropout, nn.Identity) or not module.training:
+            base_result = result
+        else:
+            x = dropout(x)
+            base_result = None
+
+        result = result + module.lora_magnitude_vector[active_adapter](
+            x,
+            lora_A=lora_A,
+            lora_B=lora_B,
+            scaling=scaling,
+            base_layer=module.get_base_layer(),
+            base_result=base_result,
+            adapter_name=active_adapter,
+        )
+        return result
+
+
+class DoraConv1dVariant(_DoraConvNdVariant):
+    @staticmethod
+    def init(module: Conv1d, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
+        dora_layer = DoraConv1dLayer(fan_in_fan_out=False)
+        _DoraConvNdVariant.init_convd_variant(module, adapter_name, dora_layer=dora_layer)
+
+
+class DoraConv2dVariant(_DoraConvNdVariant):
+    @staticmethod
+    def init(module: Conv2d, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
+        dora_layer = DoraConv2dLayer(fan_in_fan_out=False)
+        _DoraConvNdVariant.init_convd_variant(module, adapter_name, dora_layer=dora_layer)
+
+
+class DoraConv3dVariant(_DoraConvNdVariant):
+    @staticmethod
+    def init(module: Conv3d, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
+        dora_layer = DoraConv3dLayer(fan_in_fan_out=False)
+        _DoraConvNdVariant.init_convd_variant(module, adapter_name, dora_layer=dora_layer)
+
+
+class QALoraLinearVariant(LoraVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
+        """
+        Initializes QALoRA specific parameters for a given adapter.
+
+        Args:
+            module (Linear): The linear module to be adapted.
+            adapter_name (str): The name of the adapter.
+            config (LoraConfig): The config of the LoRA adapter.
+            **kwargs: Additional keyword arguments.
+        """
+        qalora_group_size = config.qalora_group_size
+        if module.in_features is not None and module.in_features % qalora_group_size != 0:
+            raise ValueError(
+                f"`use_qalora=True` requires `module.in_features` ({module.in_features}) to be"
+                f"divisible by 'qalora_group_size' ({qalora_group_size})"
+            )
+
+        if "qalora_group_size" not in module.other_param_names:
+            module.other_param_names = module.other_param_names + ("qalora_group_size",)
+
+        if not hasattr(module, "qalora_group_size"):
+            module.qalora_group_size = {}
+        module.qalora_group_size[adapter_name] = qalora_group_size
+
+        old_lora_A_layer = module.lora_A[adapter_name]
+        r = old_lora_A_layer.out_features
+        device = old_lora_A_layer.weight.device
+        dtype = old_lora_A_layer.weight.dtype
+
+        new_lora_A_layer = nn.Linear(
+            old_lora_A_layer.in_features // module.qalora_group_size[adapter_name],
+            r,
+            bias=False,
+            device=device,
+            dtype=dtype,
+        )
+        module.lora_A[adapter_name] = new_lora_A_layer
+
+    @staticmethod
+    def get_delta_weight(module: Linear, active_adapter: str) -> torch.Tensor:
+        raise NotImplementedError("QALoRA for GPTQ layers does not support 'get_delta_weight'.")
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError("QALoRA for GPTQ layers does not support 'safe_merge'.")
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        raise NotImplementedError("QALoRA for GPTQ layers does not support 'merge_unsafe'.")
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError("QALoRA for GPTQ layers does not support 'unmerge'.")
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        lora_A_weight = module.lora_A[active_adapter].weight
+        lora_B_weight = module.lora_B[active_adapter].weight
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+        group_size = module.qalora_group_size[active_adapter]
+
+        x_dropped = dropout(x) if module.training and not isinstance(dropout, nn.Identity) else x
+        orig_shape = x_dropped.shape
+
+        # Reshape to 2D
+        if len(orig_shape) > 2:
+            x_flat = x_dropped.view(-1, module.in_features)
+        else:
+            x_flat = x_dropped
+
+        batch_size, in_features = x_flat.shape
+        pooled_features = in_features // group_size
+
+        x_pooled = x_flat.view(batch_size, pooled_features, group_size).mean(dim=2)
+
+        x_pooled_scaled = x_pooled * pooled_features
+
+        # LoRA computation
+        delta = x_pooled_scaled @ lora_A_weight.t() @ lora_B_weight.t() * scaling
+
+        # Reshape back
+        if len(orig_shape) > 2:
+            delta = delta.view(orig_shape[:-1] + (delta.size(-1),))
+
+        return result + delta
+
+
+class ALoraLinearVariant(LoraVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
+        pass
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError("aLoRA does not support safe merging.")
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        raise NotImplementedError("aLoRA does not support merging.")
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError("aLoRA does not support unmerging.")
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        alora_offsets = kwargs.get("alora_offsets", None)
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+        x = x.to(lora_A.weight.dtype)
+        result_shape = result.shape
+        B = result_shape[0]  # batch
+        if len(result_shape) == 3:
+            T = result_shape[1]  # tokens
+        else:
+            T = 1
+        D = result_shape[-1]  # dimensions
+        Dx = x.shape[-1]
+        device = result.device
+        if alora_offsets is None:  # use base model only, but ensure 0 gradient
+            mask = torch.zeros((B, T), dtype=torch.bool)
+        else:
+            # If alora_offsets[i] is None, this means that the invocation sequence was not found in the
+            # input. As a result, the weights should not be activated anywhere (equivalent to base model).
+            # Convert None -> 0 and clip to T
+            offsets = torch.tensor(
+                [0 if o is None else min(int(o), T) for o in alora_offsets],
+                device=device,
+                dtype=torch.long,
+            )
+            # Mask True on the last `offsets[i]` positions for each row i
+            pos = torch.arange(T, device=device).unsqueeze(0)  # [1, T]
+            mask = pos >= (T - offsets).unsqueeze(1)
+
+        # Flatten for vectorization
+        x_flat = x.view(-1, Dx)
+        res_flat = result.view(-1, D)
+        mask_flat = mask.view(-1)
+
+        # Compute adapter on the selected tokens only
+        res_flat[mask_flat] += lora_B(lora_A(dropout(x_flat[mask_flat]))) * scaling
+        return result
+
+
+def calculate_alora_offsets(
+    peft_config: PeftConfig, active_adapter: str, input_ids: torch.Tensor, adapter_names: Optional[list[str]] = None
+) -> list[int]:
+    """
+    This is a helper function for Activated LoRA (aLoRA) that searches each input token sequence for the last
+    occurrence of the appropriate "alora_invocation_tokens" invocation sequence. The calculated alora_offset is the
+    location of the *start* of the invocation tokens, counting backward from the end (will therefore always be >=
+    len(alora_invocation_tokens). If adapter_names is passed, then each input uses the appropriate invocation sequence
+    for the specified adapter for that row. Logic is provided to handle mixed collections of adapters for which not all
+    are aLoRAs (e.g. some base model, some LoRA).
+    """
+    if input_ids is None:
+        return []
+
+    batch_size = input_ids.shape[0]
+    alora_offsets = [None] * batch_size
+
+    cached_invocation_tensors = {}
+    adapters_to_process_indices = collections.defaultdict(list)
+
+    for i in range(batch_size):
+        current_adapter_name = adapter_names[i] if adapter_names and i < len(adapter_names) else active_adapter
+
+        if current_adapter_name == "__base__":
+            alora_offsets[i] = None
+            continue
+
+        if current_adapter_name not in peft_config:
+            warnings.warn(f"Adapter '{current_adapter_name}' not found in peft_config. Using base model for row {i}.")
+            alora_offsets[i] = None
+            continue
+
+        current_peft_config = peft_config[current_adapter_name]
+
+        invocation_tokens = getattr(current_peft_config, "alora_invocation_tokens", None)
+        if invocation_tokens is None:
+            alora_offsets[i] = None  # Not an aLoRA adapter or wrong type
+            continue
+
+        if current_adapter_name not in cached_invocation_tensors:
+            cached_invocation_tensors[current_adapter_name] = torch.tensor(
+                invocation_tokens, dtype=torch.long, device=input_ids.device
+            )
+
+        adapters_to_process_indices[current_adapter_name].append(i)
+
+    for adapter_name_to_process, indices in adapters_to_process_indices.items():
+        current_invocation_ids_tensor = cached_invocation_tensors[adapter_name_to_process]
+        invocation_len = len(current_invocation_ids_tensor)
+
+        for i in indices:
+            sequence = input_ids[i]
+            seq_len = len(sequence)
+            best_match_start_idx = -1
+
+            possible_starts = (sequence == current_invocation_ids_tensor[0]).nonzero(as_tuple=True)[0]
+
+            for start_idx_tensor in possible_starts:
+                idx = start_idx_tensor.item()
+                if idx + invocation_len <= seq_len:
+                    if torch.equal(sequence[idx : idx + invocation_len], current_invocation_ids_tensor):
+                        best_match_start_idx = max(best_match_start_idx, idx)
+
+            if best_match_start_idx != -1:
+                offset_val = seq_len - best_match_start_idx
+                alora_offsets[i] = offset_val if offset_val > 0 else None
+            else:  # Invocation sequence not found in input
+                alora_offsets[i] = None
+    return alora_offsets
+
+
+def is_alora_relevant_in_batch(model: nn.Module, adapter_names: Optional[list[str]] = None):
+    """
+    Helper function to determine if the current batch has any aLoRA adapters.
+    """
+    is_alora_relevant = False
+    if getattr(model.active_peft_config, "alora_invocation_tokens", None):
+        is_alora_relevant = True
+    elif adapter_names:
+        for name in adapter_names:
+            if name == "__base__":
+                continue
+            config_ = model.peft_config.get(name)
+            if config_ and getattr(config_, "alora_invocation_tokens", None):
+                is_alora_relevant = True
+                break
+
+    return is_alora_relevant
+
+
+def get_alora_offsets_for_forward(
+    model: nn.Module, input_ids: torch.Tensor = None, inputs_embeds: torch.Tensor = None, **kwargs
+):
+    """
+    Wrapper around calculate_alora_offsets, for the .forward of the model. It only calculates alora_offsets if the
+    batch contains aLoRA adapters.
+    """
+    adapter_names_for_offset_calc = kwargs.get("adapter_names", None)
+    if not is_alora_relevant_in_batch(model, adapter_names_for_offset_calc):
+        # Nothing to compute
+        return kwargs
+    alora_offsets = kwargs.get("alora_offsets")
+    if alora_offsets is None:
+        if input_ids is None and inputs_embeds is not None:
+            warnings.warn(
+                "Cannot calculate aLoRA offsets when only inputs_embeds are provided. Disabling aLoRA for this forward pass."
+            )
+            kwargs["alora_offsets"] = None
+        elif input_ids is not None:
+            kwargs["alora_offsets"] = calculate_alora_offsets(
+                model.peft_config,
+                model.active_adapter,
+                input_ids,
+                adapter_names=adapter_names_for_offset_calc,
+            )
+        else:
+            kwargs["alora_offsets"] = None
+    return kwargs
+
+
+def get_alora_offsets_for_generate(model: nn.module, *args, **kwargs):
+    """
+    Wrapper around calculate_alora_offsets, for the .generate of the model. It only calculates alora_offsets if the
+    batch contains aLoRA adapters.
+    """
+    adapter_names_for_offset_calc = kwargs.get("adapter_names")
+    if not is_alora_relevant_in_batch(model, adapter_names_for_offset_calc):
+        # Nothing to compute
+        return kwargs
+    alora_offsets_from_kwargs = kwargs.get("alora_offsets")
+    if alora_offsets_from_kwargs is None:
+        current_input_ids = kwargs.get("input_ids")
+        if current_input_ids is None:  # args[0] is usually input_ids
+            if args and isinstance(args[0], torch.Tensor):
+                current_input_ids = args[0]
+            else:
+                current_input_ids = None
+
+        if current_input_ids is not None:
+            if current_input_ids.ndim == 1:
+                current_input_ids = current_input_ids.unsqueeze(0)
+            calculated_offsets = calculate_alora_offsets(
+                model.peft_config,
+                model.active_adapter,
+                current_input_ids,
+                adapter_names=adapter_names_for_offset_calc,
+            )
+            kwargs["alora_offsets"] = calculated_offsets
+
+        else:
+            warnings.warn(
+                "Cannot calculate aLoRA offsets during generate as input_ids are not available. Disabling aLoRA."
+            )
+
+            kwargs["alora_offsets"] = None
+    return kwargs
+
+
+class VeloraLinearVariant(LoraVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
+        if not hasattr(module, "lora_velora_embed"):
+            module.lora_velora_embed = BufferDict({}, persistent=True)
+        if not hasattr(module, "lora_velora_initialized"):
+            module.lora_velora_initialized = {}
+        if not hasattr(module, "lora_velora_num_groups"):
+            module.lora_velora_num_groups = {}
+        if not hasattr(module, "lora_velora_init_type"):
+            module.lora_velora_init_type = {}
+        if not hasattr(module, "lora_velora_scale"):
+            module.lora_velora_scale = {}
+
+        velora_param_names = (
+            "lora_velora_embed",
+            "lora_velora_initialized",
+            "lora_velora_num_groups",
+            "lora_velora_init_type",
+            "lora_velora_scale",
+        )
+        for param_name in velora_param_names:
+            if param_name not in module.other_param_names:
+                module.other_param_names = module.other_param_names + (param_name,)
+
+        module.lora_velora_num_groups[adapter_name] = config.velora_config.num_groups
+        module.lora_velora_init_type[adapter_name] = config.velora_config.init_type
+        module.lora_velora_scale[adapter_name] = config.velora_config.scale
+
+        group_dim = _get_group_dim(module.in_features, config.velora_config.num_groups)
+        base_layer = module.get_base_layer()
+        dtype = base_layer.weight.dtype
+        device = base_layer.weight.device
+
+        if config.velora_config.init_type == "random":
+            embed = _normalize_projection(torch.randn(group_dim, device=device, dtype=dtype)).to(dtype=dtype)
+            initialized = True
+        else:
+            embed = torch.zeros(group_dim, device=device, dtype=dtype)
+            initialized = False
+
+        module.lora_velora_embed[adapter_name] = embed
+        module.lora_velora_initialized[adapter_name] = initialized
+        module._move_adapter_to_device_of_base_layer(adapter_name)
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+        return orig_weight + delta_weight.to(orig_dtype)
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        orig_weight.data += module.get_delta_weight(active_adapter)
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+        return orig_weight - delta_weight.to(orig_dtype)
+
+    @staticmethod
+    def _maybe_update_embed(module: Linear, adapter_name: str, x: torch.Tensor) -> None:
+        if adapter_name not in module.lora_velora_initialized:
+            return
+
+        init_type = module.lora_velora_init_type[adapter_name]
+        if init_type == "random":
+            return
+        if init_type == "batch_average_once":
+            initialized = module.lora_velora_initialized[adapter_name]
+            if initialized:
+                return
+
+        num_groups = module.lora_velora_num_groups[adapter_name]
+        with torch.no_grad():
+            subtokens = _reshape_to_grouped_subtokens(x.detach(), num_groups)
+            subtokens = subtokens.reshape(-1, subtokens.shape[-1])
+            embed = _normalize_projection(subtokens.mean(dim=0))
+            target = module.lora_velora_embed[adapter_name]
+            module.lora_velora_embed[adapter_name] = embed.to(device=target.device, dtype=target.dtype)
+            module.lora_velora_initialized[adapter_name] = True
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+
+        x = dropout(x)
+
+        if module.training and torch.is_grad_enabled():
+            VeloraLinearVariant._maybe_update_embed(module, active_adapter, x)
+            after_A = VeloraFunction.apply(
+                x,
+                lora_A.weight,
+                lora_A.bias,
+                module.lora_velora_embed[active_adapter],
+                module.lora_velora_num_groups[active_adapter],
+                module.lora_velora_scale[active_adapter],
+            )
+        else:
+            after_A = lora_A(x)
+
+        result = result + lora_B(after_A) * scaling
+        return result
+
+
+class BlockDiagonalLinear(nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        nblocks: int,
+        init_zero: bool = False,
+        dtype: torch.dtype = torch.float32,
+        device: torch.device | None = None,
+    ):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.nblocks = nblocks
+        device = device or torch.device("cpu")
+        if self.in_features % nblocks != 0 or self.out_features % nblocks != 0:
+            raise ValueError(
+                f"self.in_features={self.in_features} or self.out_features={self.out_features} not divisible by {self.nblocks}"
+            )
+        # Create weight with specified dtype and device
+        self.weight = nn.Parameter(torch.empty(out_features, in_features // nblocks, dtype=dtype, device=device))
+
+        if init_zero:
+            torch.nn.init.zeros_(self.weight)
+        else:
+            torch.nn.init.kaiming_uniform_(self.weight)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        first_dims = x.shape[:-1]
+        if x.dim() != 2:
+            x = x.reshape(-1, x.shape[-1])
+        B = x.shape[0]
+        nb = self.nblocks
+        m = x.shape[-1] // nb
+        n = self.out_features // nb
+        x = x.reshape(B, nb, m)
+        w = self.weight.view(nb, n, m)
+        out = torch.einsum("bim,inm->bin", x, w)
+        return out.reshape(*first_dims, -1)
+
+    def weight_as_blockdiagonal_matrix(self):
+        """Returns weight in a format similar to a vanilla LoRA adapter. For this, we stack the blocks on the diagonal,
+        leaving the off-diagonals padded with zero."""
+        return torch.block_diag(*torch.chunk(self.weight, self.nblocks, dim=0))
+
+
+class BdLoraLinearVariant(LoraVariant):
+    @staticmethod
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs) -> None:
+        use_bdlora = config.use_bdlora
+        target_name = kwargs.get("target_name", "")
+
+        # Handle case where use_bdlora is a dict (from saved config) instead of BdLoraConfig object
+        if isinstance(use_bdlora, dict):
+            use_bdlora = BdLoraConfig(**use_bdlora)
+
+        lora_a_blockdiagonal_pattern = use_bdlora.target_modules_bd_a or []
+        lora_b_blockdiagonal_pattern = use_bdlora.target_modules_bd_b or []
+        nblocks = use_bdlora.nblocks
+
+        has_lora_a_blockdiagonal = any(pattern in target_name for pattern in lora_a_blockdiagonal_pattern)
+        has_lora_b_blockdiagonal = any(pattern in target_name for pattern in lora_b_blockdiagonal_pattern)
+
+        if has_lora_a_blockdiagonal and has_lora_b_blockdiagonal:
+            raise ValueError(f"Target {target_name} matches both A and B block-diagonal patterns")
+        if use_bdlora.match_strict and not (has_lora_a_blockdiagonal or has_lora_b_blockdiagonal):
+            raise ValueError(
+                f"Target {target_name} matches neither A nor B block-diagonal patterns."
+                "If this is intentional, set match_strict=False in BdLoraConfig during initialization. "
+            )
+
+        if has_lora_a_blockdiagonal:
+            r = module.lora_A[adapter_name].out_features
+            base_layer = module.get_base_layer()
+            layer = BlockDiagonalLinear(
+                base_layer.in_features,
+                r,
+                nblocks=nblocks,
+                init_zero=False,
+                dtype=base_layer.weight.dtype,
+                device=base_layer.weight.device,
+            )
+            module.lora_A[adapter_name] = layer
+        elif has_lora_b_blockdiagonal:
+            r = module.lora_B[adapter_name].in_features
+            base_layer = module.get_base_layer()
+            layer = BlockDiagonalLinear(
+                r,
+                base_layer.out_features,
+                nblocks=nblocks,
+                init_zero=True,
+                dtype=base_layer.weight.dtype,
+                device=base_layer.weight.device,
+            )
+            module.lora_B[adapter_name] = layer
+
+    @staticmethod
+    def forward(module: Linear, active_adapter: str, x: torch.Tensor, result: torch.Tensor, **kwargs) -> torch.Tensor:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+        x = dropout(x)
+        # Cast input dtype to match lora_A weight dtype
+        x = module._cast_input_dtype(x, lora_A.weight.dtype)
+        result += lora_B(lora_A(x)) * scaling
+        return result
+
+    @staticmethod
+    def _get_weight_from_module_maybe_blockdiagonal(module: nn.Module) -> torch.Tensor:
+        if isinstance(module, BlockDiagonalLinear):
+            return module.weight_as_blockdiagonal_matrix()
+        else:
+            return module.weight  # type: ignore
+
+    @staticmethod
+    def _get_bdlora_delta_weight(module: Linear, adapter: str) -> torch.Tensor:
+        """Similar to get_delta_weight for a linear module, but we have to eventually reshape the blocks
+        of the weights."""
+        device = module.lora_B[adapter].weight.device
+        # Use base layer dtype to ensure compatibility with merge/unmerge operations
+        base_layer = module.get_base_layer()
+        dtype = base_layer.weight.dtype
+        cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
+
+        weight_A = BdLoraLinearVariant._get_weight_from_module_maybe_blockdiagonal(module.lora_A[adapter])
+        weight_B = BdLoraLinearVariant._get_weight_from_module_maybe_blockdiagonal(module.lora_B[adapter])
+
+        if cast_to_fp32:
+            weight_A = weight_A.float()
+            weight_B = weight_B.float()
+
+        output_tensor = transpose(weight_B @ weight_A, module.fan_in_fan_out) * module.scaling[adapter]
+
+        if cast_to_fp32:
+            output_tensor = output_tensor.to(dtype=dtype)
+
+        # Ensure output tensor matches base layer dtype
+        return output_tensor.to(dtype=dtype)
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return orig_weight + BdLoraLinearVariant._get_bdlora_delta_weight(module, active_adapter)
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        orig_weight.data += BdLoraLinearVariant._get_bdlora_delta_weight(module, active_adapter)
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return orig_weight - BdLoraLinearVariant._get_bdlora_delta_weight(module, active_adapter)
+
+
+class MontecloraLinearVariant(LoraVariant):
+    """
+    Monteclora (Monte Carlo Low-Rank Adaptation) variant implementation.
+
+    This variant adds variational inference to LoRA by introducing Monte Carlo sampling to the adapter weights during
+    training. The sampling is controlled by a MontecloraSampler that maintains variational parameters and produces
+    perturbations to the LoRA weights.
+    """
+
+    @staticmethod
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
+        """
+        Initialize Monteclora for a LoRA layer.
+
+        This adds a MontecloraSampler to the layer that will be used during forward passes to sample variational
+        perturbations for the LoRA A matrix.
+
+        Args:
+            module: The Linear LoRA layer to add Monteclora to
+            adapter_name: Name of the adapter
+            config: The `LoraConfig` which carries the `monteclora_config`.
+        """
+        monteclora_config = config.monteclora_config
+
+        if not hasattr(module, "lora_monteclora_sampler"):
+            module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_monteclora_sampler",)
+            module.lora_monteclora_sampler = nn.ModuleDict()
+        if not hasattr(module, "_lora_monteclora_config"):
+            module._lora_monteclora_config = {}
+        module._lora_monteclora_config[adapter_name] = monteclora_config
+
+        lora_A = module.lora_A[adapter_name]
+        # When low_cpu_mem_usage=True, adapters can be initialized on meta device.
+        # Defer sampler creation until first forward on a concrete device.
+        if lora_A.weight.device.type != "meta":
+            module.lora_monteclora_sampler[adapter_name] = MontecloraLinearVariant._create_sampler(
+                module, adapter_name, monteclora_config
+            )
+
+    @staticmethod
+    def _create_sampler(module: Linear, adapter_name: str, monteclora_config: MontecloraConfig) -> MontecloraSampler:
+        lora_A = module.lora_A[adapter_name]
+        return MontecloraSampler(
+            in_features=module.in_features,
+            out_features=lora_A.out_features,
+            num_samples=monteclora_config.num_samples,
+            use_entropy=monteclora_config.use_entropy,
+            dirichlet_prior=monteclora_config.dirichlet_prior,
+            sample_scaler=monteclora_config.sample_scaler,
+            kl_loss_weight=monteclora_config.kl_loss_weight,
+            buffer_size=monteclora_config.buffer_size,
+            device=lora_A.weight.device,
+            dtype=lora_A.weight.dtype,
+        )
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        """
+        Safely merge Monteclora adapter weights into base weights.
+
+        For merging, we ignore the MC sampling and just use the base LoRA weights (lora_A and lora_B). This is
+        equivalent to merging a standard LoRA adapter.
+
+        Args:
+            module: The Linear LoRA layer
+            active_adapter: Name of the adapter to merge
+            orig_weight: Original base layer weight
+
+        Returns:
+            New weight with adapter merged
+        """
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+        new_weight = orig_weight + delta_weight.to(orig_dtype)
+        return new_weight
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        """
+        Merge Monteclora adapter weights into base weights (in-place).
+
+        For merging, we ignore the MC sampling and just use the base LoRA weights (lora_A and lora_B). This is
+        equivalent to merging a standard LoRA adapter.
+
+        Args:
+            module: The Linear LoRA layer
+            active_adapter: Name of the adapter to merge
+            orig_weight: Original base layer weight (modified in-place)
+        """
+        delta_weight = module.get_delta_weight(active_adapter)
+        orig_weight.data += delta_weight
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        """
+        Unmerge Monteclora adapter weights from base weights.
+
+        For unmerging, we ignore the MC sampling and just use the base LoRA weights (lora_A and lora_B). This is
+        equivalent to unmerging a standard LoRA adapter.
+
+        Args:
+            module: The Linear LoRA layer
+            active_adapter: Name of the adapter to unmerge
+            orig_weight: Current weight with adapter merged
+
+        Returns:
+            Weight with adapter unmerged
+        """
+        orig_dtype = orig_weight.dtype
+        delta_weight = module.get_delta_weight(active_adapter)
+        new_weight = orig_weight - delta_weight.to(orig_dtype)
+        return new_weight
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        """
+        Forward pass with Monteclora sampling.
+
+        This samples variational perturbations from the MontecloraSampler and applies them to the LoRA A weights before
+        computing the LoRA update.
+
+        Args:
+            module: The Linear LoRA layer
+            active_adapter: Name of the active adapter
+            x: Input tensor
+            result: Output from the base layer
+            **kwargs: Additional arguments (unused)
+
+        Returns:
+            result + LoRA update with Monteclora sampling applied
+        """
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[
+            active_adapter
+        ]  # lora_B is zero in the beginning. test for stochasticity of outputs might fail because of this
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+        if active_adapter not in module.lora_monteclora_sampler:
+            # Sampler creation was deferred in `init` because the LoRA weights were on the meta device
+            # (e.g. when `low_cpu_mem_usage=True`). Now that we have a real tensor at forward time, we can
+            # finally create the sampler on the correct device.
+            monteclora_config = module._lora_monteclora_config[active_adapter]
+            module.lora_monteclora_sampler[active_adapter] = MontecloraLinearVariant._create_sampler(
+                module, active_adapter, monteclora_config
+            )
+        sampler = module.lora_monteclora_sampler[active_adapter]
+
+        x = x.to(lora_A.weight.dtype)
+        if isinstance(dropout, nn.Identity) or not module.training:
+            x_dropped = x
+        else:
+            x_dropped = dropout(x)
+
+        current_weight_A = lora_A.weight
+
+        if module.training:
+            lora_A_vars, lora_A_wts = sampler()
+            if torch.isnan(lora_A_vars).any() or torch.isnan(lora_A_wts).any():
+                warnings.warn("Monteclora sampling produced NaNs, using base weights.")
+            else:
+                noise = torch.nan_to_num(lora_A_vars, nan=0.0)
+                base_w = lora_A.weight.T
+                perturbed_w = base_w + noise
+                averaged_w = torch.einsum("n,nij->ij", lora_A_wts, perturbed_w)
+                current_weight_A = averaged_w.T
+        out_A = F.linear(x_dropped, current_weight_A)
+        result = result + lora_B(out_A) * scaling
+        return result
+
+
+def _register_frozen_peft_weight(module: LoraLayer, adapter_name: str, weight_name: str) -> None:
+    """Register an adapter weight that should stay frozen for this PEFT layer."""
+    frozen_peft_weight_names = module.frozen_peft_weight_names.copy()
+    frozen_peft_weight_names.setdefault(adapter_name, ())
+
+    if weight_name not in frozen_peft_weight_names[adapter_name]:
+        frozen_peft_weight_names[adapter_name] += (weight_name,)
+
+    module.frozen_peft_weight_names = frozen_peft_weight_names
+    module._freeze_non_trainable_peft_weights(adapter_name)
+
+
+class MiCALinearVariant(LoraVariant):
+    """Variant for Minor Component Adaptation (MiCA), https://arxiv.org/abs/2604.01694.
+
+    The actual SVD-based initialization is performed in `LoraLayer.mica_init` (called from `update_layer`); this
+    variant declares `lora_B` as frozen. Forward and merge semantics are identical to vanilla LoRA, since `delta_W =
+    scaling * B @ A` and only `A` is updated.
+    """
+
+    @staticmethod
+    def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
+        _register_frozen_peft_weight(module, adapter_name, "lora_B")
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return orig_weight + module.get_delta_weight(active_adapter).to(orig_weight.dtype)
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        orig_weight.data += module.get_delta_weight(active_adapter).to(orig_weight.dtype)
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return orig_weight - module.get_delta_weight(active_adapter).to(orig_weight.dtype)
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+        return result + lora_B(lora_A(dropout(x))) * scaling
+
+
+class MiCAEmbeddingVariant(LoraVariant):
+    """Embedding variant for Minor Component Adaptation (MiCA), https://arxiv.org/abs/2604.01694."""
+
+    @staticmethod
+    def init(module: Embedding, adapter_name: str, **kwargs: Any) -> None:
+        _register_frozen_peft_weight(module, adapter_name, "lora_embedding_B")
+
+    @staticmethod
+    def merge_safe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return orig_weight + module.get_delta_weight(active_adapter).to(orig_weight.dtype)
+
+    @staticmethod
+    def merge_unsafe(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        orig_weight.data += module.get_delta_weight(active_adapter).to(orig_weight.dtype)
+
+    @staticmethod
+    def unmerge(module: Embedding, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        return orig_weight - module.get_delta_weight(active_adapter).to(orig_weight.dtype)
+
+    @staticmethod
+    def forward(
+        module: Embedding,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        embedding_A = module.lora_embedding_A[active_adapter].T
+        embedding_B = module.lora_embedding_B[active_adapter].T
+        scaling = module.scaling[active_adapter]
+        input_fn = module.input_fns.get(active_adapter, None)
+        output_fn = module.output_fns.get(active_adapter, None)
+
+        after_A = module._embed(x, embedding_A, input_fn=input_fn, output_fn=output_fn)
+        adapter_output = (after_A @ embedding_B) * scaling
+
+        embed_scale = module._get_embed_scale()
+        if embed_scale is not None:
+            adapter_output = adapter_output * embed_scale.to(adapter_output.dtype)
+
+        return result + adapter_output
+
+
+class KasaLinearVariant(LoraVariant):
+    """
+    KaSA (Knowledge-aware Singular-value Adaptation) variant for linear layers.
+
+    Reference: "KaSA: Knowledge-Aware Singular-Value Adaptation of Large Language Models"
+    ([arXiv:2412.06071](https://huggingface.co/papers/2412.06071)), reference implementation:
+    https://github.com/juyongjiang/KaSA.
+
+    KaSA changes vanilla LoRA in two ways:
+
+    1. Knowledge-based SVD truncation of the frozen base weight (one-time, non-trainable). At init the base weight `W`
+       is SVD-factored `W = U S V^T` and its `r` smallest ("noisy"/long-tail) singular components are discarded,
+       leaving the rank-`(k - r)` approximation (`k = min(in_features, out_features)`) as the new frozen base. The
+       trainable LoRA branch then re-learns in the discarded residual subspace.
+
+    2. Knowledge-aware singular-value adaptation (trainable update). The update is parametrized in SVD form with a
+       learnable diagonal of singular values `lora_diag` (`ΔΣ`) inserted between the LoRA `A` and `B` factors: `ΔW =
+       scaling * B @ diag(ΔΣ) @ A`. `lora_diag` is a learnable `r`-vector (the only new parameter per layer); `B` is
+       zero-initialized as in vanilla LoRA, so the update is zero at init.
+
+    See the `KasaConfig` docstring for user-facing notes on the destructive base-weight truncation and the auxiliary
+    regularizers.
+    """
+
+    def supports_lora_conversion(self) -> bool:
+        # The KaSA update depends on lora_diag and on the destructive truncation of the base weight, neither of which
+        # is representable in a vanilla scaling * B @ A adapter on the unmodified base.
+        return False
+
+    @staticmethod
+    def _truncate_base_weight(module: Linear, r: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Replace the frozen base weight in-place with its rank-`(k - r)` SVD approximation (drop the `r` smallest
+        singular components). `k = min(in_features, out_features)`.
+
+        Returns the dropped low-rank component as fp32 factors `(U_d * S_d, Vh_d)` with shapes `(out, r)` and `(r,
+        in)`, so callers on the deferred path can cheaply correct an output that was computed with the un-truncated
+        weight (see `forward`).
+        """
+        base_layer = module.get_base_layer()
+        weight = base_layer.weight
+        orig_dtype = weight.dtype
+        # `nn.Linear.weight` has shape (out_features, in_features). For Conv1D (transposed storage) the variant is not
+        # dispatched, so we always deal with a standard linear weight here.
+        out_features, in_features = weight.shape
+        k = min(in_features, out_features)
+        if r >= k:
+            raise ValueError(
+                f"KaSA requires `r` ({r}) to be smaller than min(in_features, out_features) ({k}) so that at least one "
+                "singular component of the base weight is preserved after truncation."
+            )
+        svd_rank = k - r
+        # SVD must run on a dequantized fp32 weight for numerical stability and to support (b)float16 CPU weights.
+        weight_fp32 = weight.detach().to(torch.float32)
+        U, S, Vh = torch.linalg.svd(weight_fp32, full_matrices=False)
+        # Keep the principal (largest-sigma) `svd_rank` components; discard the `r` smallest.
+        U_p = U[:, :svd_rank]
+        S_p = S[:svd_rank]
+        Vh_p = Vh[:svd_rank, :]
+        truncated = (U_p * S_p) @ Vh_p
+        base_layer.weight.data = truncated.to(orig_dtype)
+        return U[:, svd_rank:] * S[svd_rank:], Vh[svd_rank:, :]
+
+    @staticmethod
+    def _apply_deferred_truncation(module: Linear, active_adapter: str) -> Optional[tuple[torch.Tensor, torch.Tensor]]:
+        """Apply the SVD truncation that was deferred at init (meta device / low_cpu_mem_usage), if still pending.
+
+        The destructive base-weight truncation cannot run at init when the base weight is on the meta device, so it is
+        applied lazily on the first operation that needs the real base weight: `forward`, but also `merge_safe` /
+        `merge_unsafe`, which would otherwise silently merge into the un-truncated weight (and, once merged, the
+        variant `forward` is never called, so the truncation would never happen at all). `lora_diag` is re-created on
+        the real device if it is still a meta tensor.
+
+        Returns the dropped low-rank factors from `_truncate_base_weight` if the truncation ran now, or `None` if
+        nothing was pending.
+        """
+        deferred = getattr(module, "_lora_kasa_truncation_deferred", None)
+        if not deferred or active_adapter not in deferred:
+            return None
+        base_weight = module.get_base_layer().weight
+        if base_weight.device.type == "meta":
+            raise RuntimeError(
+                "KaSA could not apply its SVD base-weight truncation because the base weight is still on the "
+                "meta device. Materialize the base model weights before running a forward pass or merging."
+            )
+        r = module.r[active_adapter]
+        old_diag = module.lora_diag[active_adapter]
+        if old_diag.device.type == "meta":
+            # lora_diag was not overwritten by a loaded state dict, so this is the point where its values first
+            # materialize; randn mirrors the initialization of the regular (non-deferred) init path.
+            module.lora_diag[active_adapter] = nn.Parameter(
+                torch.randn(r, device=base_weight.device, dtype=base_weight.dtype)
+            )
+        with gather_params_ctx(base_weight):
+            dropped = KasaLinearVariant._truncate_base_weight(module, r)
+        deferred.discard(active_adapter)
+        return dropped
+
+    @staticmethod
+    def init(module: Linear, adapter_name: str, config: LoraConfig, **kwargs: Any) -> None:
+        if getattr(module, "fan_in_fan_out", False):
+            # The reference implementation is for nn.Linear (out, in) weights only. fan_in_fan_out (e.g. Conv1D) would
+            # require transposing the weight before SVD; this is not supported to avoid a silently wrong truncation.
+            raise ValueError(
+                "KaSA does not support `fan_in_fan_out=True` layers (e.g. Conv1D). Please target nn.Linear layers."
+            )
+
+        if not hasattr(module, "lora_diag"):
+            # First KaSA layer being added: register `lora_diag` as a learnable adapter parameter so it is saved/loaded.
+            module.lora_diag = nn.ParameterDict({})
+            module.adapter_layer_names = module.adapter_layer_names[:] + ("lora_diag",)
+        if not hasattr(module, "_lora_kasa_truncation_deferred"):
+            # Set of adapters whose destructive base-weight truncation could not run at init (meta device) and must
+            # therefore be applied lazily at the first forward, once a real base weight is available.
+            module._lora_kasa_truncation_deferred = set()
+
+        r = module.r[adapter_name]
+        lora_A = module.lora_A[adapter_name].weight
+        device = lora_A.device
+        dtype = lora_A.dtype
+
+        if device.type == "meta":
+            # With low_cpu_mem_usage=True adapters may be initialized on the meta device. We cannot SVD a meta tensor,
+            # so we only create the (meta) lora_diag parameter and defer the destructive truncation to the first
+            # forward (see KasaLinearVariant.forward), which mirrors the deferral pattern used by Monteclora. Without
+            # this re-trigger the SVD truncation would be silently skipped on the low_cpu_mem_usage path and the model
+            # would compute the wrong thing (full base + an adapter trained against the truncated base). A meta tensor
+            # has no values, so empty is used; the values are either loaded from a state dict or initialized when the
+            # deferred truncation is applied.
+            module.lora_diag[adapter_name] = nn.Parameter(torch.empty(r, device=device, dtype=dtype))
+            module._lora_kasa_truncation_deferred.add(adapter_name)
+            return
+
+        # The learnable diagonal of singular values (ΔΣ). randn is fine because lora_B is zero-init, so the update is
+        # zero at step 0 regardless of the diag values (see reference reset_lora_parameters).
+        module.lora_diag[adapter_name] = nn.Parameter(torch.randn(r, device=device, dtype=dtype))
+
+        # One-time destructive SVD truncation of the frozen base weight. gather_params_ctx is used so the weight is
+        # materialized when using DeepSpeed ZeRO-3, consistent with the other SVD-based inits (pissa/corda).
+        with gather_params_ctx(module.get_base_layer().weight):
+            KasaLinearVariant._truncate_base_weight(module, r)
+
+    @staticmethod
+    def _get_delta_weight(module: Linear, adapter: str) -> torch.Tensor:
+        """Compute ΔW = scaling * B @ diag(lora_diag) @ A (transposed for fan_in_fan_out)."""
+        device = module.lora_B[adapter].weight.device
+        dtype = module.lora_B[adapter].weight.dtype
+        cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
+
+        weight_A = module.lora_A[adapter].weight
+        weight_B = module.lora_B[adapter].weight
+        diag = module.lora_diag[adapter]
+
+        if cast_to_fp32:
+            weight_A = weight_A.float()
+            weight_B = weight_B.float()
+            diag = diag.float()
+
+        # (out, r) * (r,) -> scale columns of B by the diagonal, then (out, r) @ (r, in) -> (out, in).
+        delta = (weight_B * diag) @ weight_A
+        output_tensor = transpose(delta, module.fan_in_fan_out) * module.scaling[adapter]
+
+        if cast_to_fp32:
+            output_tensor = output_tensor.to(dtype=dtype)
+
+        return output_tensor
+
+    @staticmethod
+    def merge_safe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        if KasaLinearVariant._apply_deferred_truncation(module, active_adapter) is not None:
+            # The passed `orig_weight` was cloned from the base weight before the truncation ran; refresh it so the
+            # delta is merged into the truncated weight.
+            orig_weight = module.get_base_layer().weight.data.clone()
+        orig_dtype = orig_weight.dtype
+        delta_weight = KasaLinearVariant._get_delta_weight(module, active_adapter)
+        return orig_weight + delta_weight.to(orig_dtype)
+
+    @staticmethod
+    def merge_unsafe(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> None:
+        # `orig_weight` is the live base weight Parameter, so it reflects the truncation if one just ran.
+        KasaLinearVariant._apply_deferred_truncation(module, active_adapter)
+        orig_dtype = orig_weight.dtype
+        delta_weight = KasaLinearVariant._get_delta_weight(module, active_adapter)
+        orig_weight.data += delta_weight.to(orig_dtype)
+
+    @staticmethod
+    def unmerge(module: Linear, active_adapter: str, orig_weight: torch.Tensor) -> torch.Tensor:
+        orig_dtype = orig_weight.dtype
+        delta_weight = KasaLinearVariant._get_delta_weight(module, active_adapter)
+        return orig_weight - delta_weight.to(orig_dtype)
+
+    @staticmethod
+    def forward(
+        module: Linear,
+        active_adapter: str,
+        x: torch.Tensor,
+        result: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        # A truncation is only pending here on the first forward after the adapter was initialized on the meta device
+        # (e.g. PeftModel.from_pretrained(..., low_cpu_mem_usage=True)); in the regular init path it already ran.
+        dropped = KasaLinearVariant._apply_deferred_truncation(module, active_adapter)
+        if dropped is not None:
+            # `result` was computed by the caller using the *un-truncated* base weight (the base forward runs before
+            # this variant forward). Subtract the dropped low-rank component so this first forward already reflects
+            # the truncated weight, matching every subsequent call. Correcting instead of recomputing the base forward
+            # preserves the contributions other active adapters may already have added to `result`, and stays in the
+            # right dtype (`x` was cast to the adapter dtype by the caller, which may differ from the base dtype).
+            dropped_us, dropped_vh = dropped
+            correction = F.linear(F.linear(x.to(dropped_vh.dtype), dropped_vh), dropped_us)
+            result = result - correction.to(result.dtype)
+
+        lora_A = module.lora_A[active_adapter]
+        lora_B = module.lora_B[active_adapter]
+        dropout = module.lora_dropout[active_adapter]
+        scaling = module.scaling[active_adapter]
+        diag = module.lora_diag[active_adapter]
+
+        # h = h_base + scaling * B( diag(ΔΣ) * A(dropout(x)) ). The diagonal multiply is an elementwise scaling of the
+        # r-dim intermediate, equivalent to (and cheaper than) constructing torch.diag(diag).
+        after_A = lora_A(dropout(x))
+        result = result + lora_B(after_A * diag) * scaling
+        return result
+
+
+def _kasa_layer_regularization_loss(module: Linear, adapter_name: str, beta: float, gamma: float) -> torch.Tensor:
+    """Per-layer KaSA regularization for a single adapter, used by `LoraModel._get_kasa_loss`.
+
+    Returns `beta * L2 + gamma * L3` where (paper Eq. 9-11):
+
+    - `L2 = ||lora_diag||_F^2 = sum(lora_diag ** 2)` (singular-value penalty), and
+    - `L3 = ||B^T B - I||_F + ||A A^T - I||_F` (orthogonal regularization of the adapter factors).
+    """
+    diag = module.lora_diag[adapter_name]
+    weight_A = module.lora_A[adapter_name].weight  # (r, in)
+    weight_B = module.lora_B[adapter_name].weight  # (out, r)
+    r = diag.shape[0]
+
+    # Compute in fp32 for numerical stability, regardless of the adapter dtype.
+    diag_f = diag.float()
+    A = weight_A.float()
+    B = weight_B.float()
+    eye = torch.eye(r, device=diag.device, dtype=torch.float32)
+
+    l2 = (diag_f**2).sum()
+    gram_B = B.transpose(-1, -2) @ B  # (r, r) == ΔU^T ΔU
+    gram_A = A @ A.transpose(-1, -2)  # (r, r) == ΔV^T ΔV
+    l3 = torch.linalg.norm(gram_B - eye) + torch.linalg.norm(gram_A - eye)
+
+    return beta * l2 + gamma * l3

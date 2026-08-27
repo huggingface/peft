@@ -2,7 +2,7 @@ import argparse
 import os
 from collections import Counter
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Optional
 
 import safetensors
 import torch
@@ -30,13 +30,13 @@ class LoRAInfo:
     lora_A: Optional[torch.Tensor] = None
     lora_B: Optional[torch.Tensor] = None
 
-    def peft_state_dict(self) -> Dict[str, torch.Tensor]:
+    def peft_state_dict(self) -> dict[str, torch.Tensor]:
         if self.lora_A is None or self.lora_B is None:
             raise ValueError("At least one of lora_A or lora_B is None, they must both be provided")
         return {f"{peft_key}.lora_A.weight": self.lora_A, f"{peft_key}.lora_B.weight": self.lora_A}
 
 
-def construct_peft_loraconfig(info: Dict[str, LoRAInfo]) -> LoraConfig:
+def construct_peft_loraconfig(info: dict[str, LoRAInfo]) -> LoraConfig:
     """Constructs LoraConfig from data extracted from kohya checkpoint
 
     Args:
@@ -75,7 +75,7 @@ def construct_peft_loraconfig(info: Dict[str, LoRAInfo]) -> LoraConfig:
     return config
 
 
-def combine_peft_state_dict(info: Dict[str, LoRAInfo]) -> Dict[str, torch.Tensor]:
+def combine_peft_state_dict(info: dict[str, LoRAInfo]) -> dict[str, torch.Tensor]:
     result = {}
     for key_name, key_info in info.items():
         result[f"base_model.model.{key_name}.lora_A.weight"] = key_info.lora_A
@@ -115,7 +115,7 @@ if __name__ == "__main__":
         )
 
     # Store conversion info (model_type -> peft_key -> LoRAInfo)
-    lora_info: Dict[str, Dict[str, LoRAInfo]] = {
+    lora_info: dict[str, dict[str, LoRAInfo]] = {
         "text_encoder": {},
         "unet": {},
     }

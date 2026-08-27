@@ -1,0 +1,6 @@
+{
+  "init_kv_cache_prefix": "You are a helpful math assistant. Solve mathematical problems by thinking step by step. First, identify what the problem is asking. Then, break down the solution into clear logical steps. Show all your work and calculations. Finally, verify that your answer makes sense.",
+  "optimizer_kwargs": {
+    "lr": 0.005
+  }
+}

@@ -12,9 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from peft.utils import register_peft_method
+
 from .config import PolyConfig
 from .layer import Linear, PolyLayer
 from .model import PolyModel
 
 
 __all__ = ["Linear", "PolyConfig", "PolyLayer", "PolyModel"]
+
+register_peft_method(name="poly", config_cls=PolyConfig, model_cls=PolyModel)

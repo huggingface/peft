@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import torch
 
@@ -19,22 +19,35 @@ from peft.import_utils import is_eetq_available
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
 
+from .config import LoraConfig
+
 
 if is_eetq_available():
     from eetq import EetqLinear
+
+    try:
+        from transformers.integrations.eetq import EetqLinear as TransformersEetqLinear
+
+        # in newer transformers versions, EETQ quantization uses a transformers-specific class
+        eetq_classes = (EetqLinear, TransformersEetqLinear)
+    except ImportError:
+        eetq_classes = (EetqLinear,)
 
     class EetqLoraLinear(torch.nn.Module, LoraLayer):
         def __init__(
             self,
             base_layer,
             adapter_name,
+            config: LoraConfig,
             r: int = 0,
             lora_alpha: int = 1,
-            lora_dropout: float = 0.0,
-            init_lora_weights: bool = True,
-            use_rslora: bool = False,
             **kwargs,
         ):
+            if config.use_dora:
+                raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
+            if config.velora_config is not None:
+                raise ValueError(f"{self.__class__.__name__} does not support VeLoRA yet, please set it to False")
+
             super().__init__()
             LoraLayer.__init__(self, base_layer)
 
@@ -43,7 +56,12 @@ if is_eetq_available():
             self.quant_linear_module = base_layer
 
             self._active_adapter = adapter_name
-            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+            self.update_layer(
+                adapter_name,
+                r,
+                lora_alpha=lora_alpha,
+                config=config,
+            )
 
         def forward(self, x: torch.Tensor):
             result = self.quant_linear_module(x)
@@ -62,7 +80,7 @@ if is_eetq_available():
                 requires_conversion = not torch.is_autocast_enabled()
                 if requires_conversion:
                     expected_dtype = result.dtype
-                    x = x.to(lora_A.weight.dtype)
+                    x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
                 output = lora_B(lora_A(dropout(x)))
                 if requires_conversion:
@@ -71,7 +89,7 @@ if is_eetq_available():
                 result = result + output
             return result
 
-        def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+        def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             raise AttributeError("Merging LoRA layers is not supported for Eetq layers.")
 
         def unmerge(self) -> None:
@@ -85,6 +103,7 @@ if is_eetq_available():
 def dispatch_eetq(
     target: torch.nn.Module,
     adapter_name: str,
+    config: LoraConfig,
     **kwargs: Any,
 ) -> Optional[torch.nn.Module]:
     new_module = None
@@ -94,8 +113,8 @@ def dispatch_eetq(
     else:
         target_base_layer = target
 
-    if is_eetq_available() and isinstance(target_base_layer, EetqLinear):
-        new_module = EetqLoraLinear(target, adapter_name, **kwargs)
+    if is_eetq_available() and isinstance(target_base_layer, eetq_classes):
+        new_module = EetqLoraLinear(target, adapter_name, config=config, **kwargs)
         target.weight = target_base_layer.weight
 
         if hasattr(target, "bias"):

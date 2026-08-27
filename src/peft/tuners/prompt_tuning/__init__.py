@@ -12,8 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from peft.utils import register_peft_method
+
 from .config import PromptTuningConfig, PromptTuningInit
 from .model import PromptEmbedding
 
 
-__all__ = ["PromptTuningConfig", "PromptEmbedding", "PromptTuningInit"]
+__all__ = ["PromptEmbedding", "PromptTuningConfig", "PromptTuningInit"]
+
+register_peft_method(name="prompt_tuning", config_cls=PromptTuningConfig, model_cls=PromptEmbedding)

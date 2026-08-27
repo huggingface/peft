@@ -1,0 +1,20 @@
+{
+  "lambda_pattern": {},
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "bias": "none",
+  "exclude_modules": null,
+  "inference_mode": false,
+  "init_weights": true,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "delora_lambda": 15,
+  "module_dropout": 0.0,
+  "modules_to_save": null,
+  "peft_type": "DELORA",
+  "r": 32,
+  "rank_pattern": {},
+  "revision": null,
+  "target_modules": null,
+  "task_type": "CAUSAL_LM"
+}

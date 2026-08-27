@@ -1,0 +1,22 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "bias": "none",
+  "fan_in_fan_out": false,
+  "inference_mode": false,
+  "init_weights": true,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "modules_to_save": null,
+  "peft_type": "RANDLORA",
+  "projection_prng_key": 0,
+  "r": 32,
+  "randlora_alpha": 640,
+  "randlora_dropout": 0.0,
+  "revision": null,
+  "save_projection": true,
+  "sparse": false,
+  "target_modules": null,
+  "task_type": null,
+  "very_sparse": false
+}

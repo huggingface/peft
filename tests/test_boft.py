@@ -30,7 +30,7 @@ class TestBoft:
         torch.manual_seed(0)
 
         inputs = torch.arange(10).view(-1, 1).to(self.device)
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
         model.eval()
         output_base = model(inputs).logits
@@ -64,7 +64,7 @@ class TestBoft:
         torch.manual_seed(0)
 
         inputs = torch.arange(10).view(-1, 1).to(self.device)
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
 
         # first create the expected output

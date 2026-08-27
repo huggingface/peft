@@ -78,7 +78,7 @@ train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=2, collate
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
 
 model.train()
 

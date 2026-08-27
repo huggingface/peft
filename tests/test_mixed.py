@@ -31,6 +31,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    OFTConfig,
     PeftMixedModel,
     PrefixTuningConfig,
     get_peft_model,
@@ -395,7 +396,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 LoraConfig(target_modules=["lin0"], init_lora_weights=False),
                 LoHaConfig(target_modules=["lin0"], init_weights=False),
                 LoKrConfig(target_modules=["lin0"], init_weights=False),
-                AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
+                AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
             ],
             r=2,
         ),
@@ -415,7 +416,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 LoraConfig(target_modules=["lin1"], init_lora_weights=False),
                 LoHaConfig(target_modules=["lin1"], init_weights=False),
                 LoKrConfig(target_modules=["lin1"], init_weights=False),
-                AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False),
+                AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False, total_step=1),
             ],
             r=2,
         ),
@@ -439,7 +440,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 LoraConfig(init_lora_weights=False),
                 LoHaConfig(init_weights=False),
                 LoKrConfig(init_weights=False),
-                AdaLoraConfig(init_lora_weights=False),
+                AdaLoraConfig(init_lora_weights=False, total_step=1),
             ],
             r=2,
         ),
@@ -480,8 +481,8 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 LoKrConfig(target_modules=["lin1"], init_weights=False),
             ),
             (
-                AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False),
-                AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False),
+                AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False, total_step=1),
+                AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False, total_step=1),
             ),
         ],
         name_func=_param_name_func,
@@ -509,8 +510,8 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 LoKrConfig(target_modules=["lin0"], init_weights=False),
             ),
             (
-                AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
-                AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
+                AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
+                AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False, total_step=1),
             ),
         ],
         name_func=_param_name_func,
@@ -526,7 +527,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
     def test_deeply_nested(self):
         # a somewhat absurdly nested model using different adapter types
         if platform.system() == "Linux":
-            self.skipTest("This test fails but only on GitHub CI with Linux systems.")
+            pytest.skip("This test fails but only on GitHub CI with Linux systems.")
 
         atol = 1e-5
         rtol = 1e-5
@@ -542,7 +543,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         config1 = LoHaConfig(r=4, alpha=4, target_modules=["lin0"], init_weights=False)
         peft_model.add_adapter("adapter1", config1)
 
-        config2 = AdaLoraConfig(r=4, lora_alpha=4, target_modules=["lin1"], init_lora_weights=False)
+        config2 = AdaLoraConfig(r=4, lora_alpha=4, target_modules=["lin1"], init_lora_weights=False, total_step=1)
         peft_model.add_adapter("adapter2", config2)
 
         config3 = LoKrConfig(r=4, alpha=4, target_modules=["lin0", "lin1"], init_weights=False)
@@ -651,6 +652,33 @@ class TestMixedAdapterTypes(unittest.TestCase):
         output_deleted_01 = peft_model(input)
         assert torch.allclose(output_deleted_01, output_base, atol=atol, rtol=rtol)
 
+    def test_delete_merged_adapter_is_atomic(self):
+        model = SimpleNet().eval().to(self.torch_device)
+        config0 = LoraConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(model, config0, "adapter0", mixed=True)
+        config1 = LoHaConfig(target_modules=["lin1"])
+        peft_model.add_adapter("adapter1", config1)
+        peft_model.base_model.merge_adapter(adapter_names=["adapter1"])
+
+        msg = "Cannot delete adapter(s) ['adapter1'] while they are merged. Please unmerge them first."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            peft_model.delete_adapter(["adapter0", "adapter1"])
+
+        assert set(peft_model.peft_config) == {"adapter0", "adapter1"}
+        available_adapters = set()
+        for module in peft_model.modules():
+            if isinstance(module, BaseTunerLayer):
+                available_adapters.update(module._all_available_adapter_names())
+        assert available_adapters == {"adapter0", "adapter1"}
+
+        # "adapter0" is not merged, so deleting it on its own works while "adapter1" stays merged
+        peft_model.delete_adapter(["adapter0"])
+        assert set(peft_model.peft_config) == {"adapter1"}
+
+        peft_model.base_model.unmerge_adapter()
+        peft_model.delete_adapter(["adapter1"])
+        assert not peft_model.peft_config
+
     def test_modules_to_save(self):
         model = SimpleNet().eval().to(self.torch_device)
         config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
@@ -660,8 +688,43 @@ class TestMixedAdapterTypes(unittest.TestCase):
         # TODO: theoretically, we could allow this if it's the same target layer
         config1 = LoHaConfig(target_modules=["lin0"], modules_to_save=["lin1"])
         peft_model.add_adapter("adapter1", config1)
-        with pytest.raises(ValueError, match="Only one adapter can be set at a time for modules_to_save"):
+        with pytest.raises(ValueError, match="Only one adapter can be set at a time for ModulesToSaveWrapper"):
             peft_model.set_adapter(["adapter0", "adapter1"])
+
+    def test_unload_modules_to_save_when_active_adapter_does_not_use_it(self):
+        # Unloading used to crash when the active adapter did not use modules_to_save on a wrapped module; see
+        # TestModulesToSaveUnloadNoActiveAdapter in test_other.py. This covers MixedModel's separate unload path.
+        atol = 1e-5
+        rtol = 1e-5
+        input = torch.arange(90).reshape(9, 10).to(self.torch_device)
+
+        config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = self._get_model(SimpleNet, config0, "adapter0")
+        torch.manual_seed(1)
+        config1 = LoHaConfig(target_modules=["lin0"], init_weights=False)
+        peft_model.add_adapter("adapter1", config1)
+        peft_model.set_adapter(["adapter1"])
+
+        # modify the modules_to_save copy of adapter0 to ensure that unloading does not use it
+        lin1_weight_before = peft_model.base_model.model.lin1.original_module.weight.data.clone()
+        peft_model.base_model.model.lin1.modules_to_save["adapter0"].weight.data.fill_(42.0)
+        output_peft = peft_model(input)
+
+        model_merged = copy.deepcopy(peft_model).merge_and_unload()
+        assert isinstance(model_merged.lin1, nn.Linear)
+        assert torch.equal(model_merged.lin1.weight.data, lin1_weight_before)
+        output_merged = model_merged(input)
+        # merging must reproduce the output of the model with adapter1 active; merging requires a bit higher
+        # tolerance, like in _check_merging
+        assert torch.allclose(output_peft, output_merged, atol=1e-4, rtol=1e-4)
+
+        model_unloaded = peft_model.unload()
+        assert isinstance(model_unloaded.lin1, nn.Linear)
+        assert torch.equal(model_unloaded.lin1.weight.data, lin1_weight_before)
+        output_unloaded = model_unloaded(input)
+        # unloading without merging must restore the base model output
+        output_base = self._get_model(SimpleNet)(input)
+        assert torch.allclose(output_base, output_unloaded, atol=atol, rtol=rtol)
 
     def test_get_nb_trainable_parameters(self):
         model = SimpleNet().eval().to(self.torch_device)
@@ -683,7 +746,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         assert trainable_params1 == (params_lora + params_loha)
         assert all_param1 == ((params_base + params_lora) + params_loha)
 
-        config2 = AdaLoraConfig(target_modules=["lin0", "lin1"])
+        config2 = AdaLoraConfig(target_modules=["lin0", "lin1"], total_step=1)
         peft_model.add_adapter("adapter2", config2)
         peft_model.set_adapter(["adapter0", "adapter1", "adapter2"])
         params_adalora = sum(p.numel() for n, p in model.named_parameters() if "adapter2" in n)
@@ -691,6 +754,17 @@ class TestMixedAdapterTypes(unittest.TestCase):
         # remove 2 params because we need to exclude "ranknum" for AdaLora trainable params
         assert trainable_params2 == (((params_lora + params_loha) + params_adalora) - 2)
         assert all_param2 == (((params_base + params_lora) + params_loha) + params_adalora)
+
+    def test_bias_only_honored_for_non_lora_tuner(self):
+        # `bias="<prefix>_only"` should be honored for any mixed-compatible tuner, not just LoRA. Previously the
+        # mixed model hardcoded `bias == "lora_only"` and raised `ValueError: Requested bias: oft_only, is not
+        # implemented.` for e.g. OFT, even though standalone OFT supports `bias="oft_only"`.
+        model = SimpleNet().eval().to(self.torch_device)
+        config = OFTConfig(target_modules=["lin1"], oft_block_size=8, bias="oft_only")
+        peft_model = get_peft_model(model, config, "adapter0", mixed=True)
+
+        trainable_biases = [n for n, p in peft_model.named_parameters() if n.endswith("bias") and p.requires_grad]
+        assert trainable_biases, "expected at least one trainable bias with bias='oft_only'"
 
     def test_incompatible_config_raises(self):
         model = SimpleNet().eval().to(self.torch_device)
@@ -706,7 +780,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         # test a somewhat realistic model instead of a toy model
         torch.manual_seed(0)
 
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
         model = AutoModelForCausalLM.from_pretrained(model_id).eval().to(self.torch_device)
         input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
         attention_mask = torch.tensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
@@ -732,7 +806,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         assert not torch.allclose(output0, output1)
 
         torch.manual_seed(2)
-        config2 = AdaLoraConfig(task_type="CAUSAL_LM", init_lora_weights=False)
+        config2 = AdaLoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, total_step=1)
         peft_model.add_adapter("adapter2", config2)
         peft_model.set_adapter(["adapter0", "adapter1", "adapter2"])
         output2 = peft_model.generate(**input_dict)

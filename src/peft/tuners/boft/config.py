@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # The implementation is based on "Parameter-Efficient Orthogonal Finetuning
-# via Butterfly Factorization" (https://arxiv.org/abs/2311.06243) in ICLR 2024.
+# via Butterfly Factorization" (https://huggingface.co/papers/2311.06243) in ICLR 2024.
 
 from __future__ import annotations
 
@@ -30,9 +30,19 @@ class BOFTConfig(PeftConfig):
     This is the configuration class to store the configuration of a [`BOFTModel`].
 
     Args:
-        boft_block_size (`int`): BOFT block size across different layers.
-        boft_block_num (`int`): Number of BOFT blocks per injected layer.
-        boft_n_butterfly_factor (`int`): Number of butterfly factors across different layers.
+        boft_block_size (`int`): BOFT matrix block size across different layers, expressed in `int`. Bigger
+            block sizes results in more dense update matrices with more trainable parameters. Choose `boft_block_size`
+            to be divisible by most layer's input dimension (`in_features`), e.g., 4, 8, 16. Also, please only specify
+            either `boft_block_size` or `boft_block_num`, but not both simultaneously or leaving both to 0, because
+            `boft_block_size` x `boft_block_num` must equal the layer's input dimension.
+        boft_block_num (`int`): Number of BOFT blocks per injected layer. Bigger `boft_block_num` result in sparser
+            update matrices with **fewer** trainable parameters. **Note**, please choose `boft_block_num` to be
+            divisible by most layer's input dimension (`in_features`), e.g., 4, 8, 16. Only specify either
+            `boft_block_size` or `boft_block_num`, but not both simultaneously or leaving both to 0, because
+            `boft_block_size` x `boft_block_num` must equal the layer's input dimension.
+        boft_n_butterfly_factor (`int`): Number of butterfly factors across different layers. For
+            `boft_n_butterfly_factor=1`, BOFT is the same as vanilla OFT, for `boft_n_butterfly_factor=2`, the
+            effective block size of OFT becomes twice as big and the number of blocks become half.
         target_modules (`Union[List[str],str]`): The names of the modules to apply the adapter to.
         exclude_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
@@ -53,9 +63,10 @@ class BOFTConfig(PeftConfig):
             The layer indexes to transform, if this argument is specified, it will apply the BOFT transformations on
             the layer indexes that are specified in this list. If a single integer is passed, it will apply the BOFT
             transformations on the layer at this index.
-        layers_pattern (`str`):
+        layers_pattern (`Optional[Union[List[str], str]]`):
             The layer pattern name, used only if `layers_to_transform` is different from `None` and if the layer
-            pattern is not in the common layers pattern.
+            pattern is not in the common layers pattern. This should target the `nn.ModuleList` of the model, which is
+            often called `'layers'` or `'h'`.
     """
 
     boft_block_size: int = field(
@@ -129,14 +140,16 @@ class BOFTConfig(PeftConfig):
             "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index."
         },
     )
-    layers_pattern: Optional[str] = field(
+    layers_pattern: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
-            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
+            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern. "
+            "This should target the `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`."
         },
     )
 
     def __post_init__(self):
+        super().__post_init__()
         self.peft_type = PeftType.BOFT
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
@@ -144,6 +157,9 @@ class BOFTConfig(PeftConfig):
         self.exclude_modules = (
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
+        # check for layers_to_transform and layers_pattern
+        if self.layers_pattern and self.layers_to_transform is None:
+            raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
         if self.boft_block_size == 0 and self.boft_block_num == 0:
             raise ValueError(
                 f"Either `boft_block_size` or `boft_block_num` must be non-zero. Currently, boft_block_size = {self.boft_block_size} and boft_block_num = {self.boft_block_num}."

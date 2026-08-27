@@ -22,7 +22,7 @@ HRA provides a new perspective connecting LoRA to OFT and achieves encouraging p
 HRA adapts a pre-trained model by multiplying each frozen weight matrix with a chain of r learnable Householder reflections (HRs).
 HRA can be interpreted as either an OFT adapter or an adaptive LoRA. 
 Consequently, it harnesses the advantages of both strategies, reducing parameters and computation costs while penalizing the loss of pre-training knowledge.
-For further details on HRA, please consult the [original HRA paper](https://arxiv.org/abs/2405.17484).
+For further details on HRA, please consult the [original HRA paper](https://huggingface.co/papers/2405.17484).
 
 In this guide we provide a Dreambooth fine-tuning script that is available in [PEFT's GitHub repo examples](https://github.com/huggingface/peft/tree/main/examples/hra_dreambooth). This implementation is adapted from [peft's boft_dreambooth](https://github.com/huggingface/peft/tree/main/examples/boft_dreambooth). 
 

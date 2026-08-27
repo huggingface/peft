@@ -139,3 +139,7 @@ dmypy.json
 
 # More test things
 wandb
+
+# method_comparison logs
+method_comparison/MetaMathQA/cancelled_results/
+method_comparison/MetaMathQA/temporary_results/

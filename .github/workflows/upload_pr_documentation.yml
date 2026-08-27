@@ -6,9 +6,11 @@ on:
     types:
       - completed
 
+permissions: {}
+
 jobs:
   build:
-    uses: huggingface/doc-builder/.github/workflows/upload_pr_documentation.yml@main
+    uses: huggingface/doc-builder/.github/workflows/upload_pr_documentation.yml@7ccf6c02dc2e3aea1b07f6668f783b20c3bf407c  # main
     with:
       package_name: peft
     secrets:

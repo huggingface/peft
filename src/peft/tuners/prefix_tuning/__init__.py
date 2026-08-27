@@ -12,8 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from peft.utils import register_peft_method
+
 from .config import PrefixTuningConfig
 from .model import PrefixEncoder
 
 
-__all__ = ["PrefixTuningConfig", "PrefixEncoder"]
+__all__ = ["PrefixEncoder", "PrefixTuningConfig"]
+
+register_peft_method(name="prefix_tuning", config_cls=PrefixTuningConfig, model_cls=PrefixEncoder)

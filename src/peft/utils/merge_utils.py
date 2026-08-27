@@ -13,14 +13,14 @@
 # limitations under the License.
 
 import warnings
-from typing import List, Literal
+from typing import Literal
 
 import torch
 
 
-def reshape_weight_task_tensors(task_tensors, weights):
+def reshape_weight_task_tensors(task_tensors: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
     """
-    Reshapes `weights` to match the shape of `task_tensors` by unsqeezing in the remaining dimenions.
+    Reshapes `weights` to match the shape of `task_tensors` by unsqueezing in the remaining dimensions.
 
     Args:
         task_tensors (`torch.Tensor`): The tensors that will be used to reshape `weights`.
@@ -68,7 +68,7 @@ def random_pruning(tensor: torch.Tensor, density: float, rescale: bool) -> torch
     mask = torch.bernoulli(torch.full_like(input=tensor, fill_value=density))
     pruned_tensor = tensor * mask
     if rescale:
-        torch.div(input=pruned_tensor, other=density)
+        pruned_tensor = pruned_tensor / density
     return pruned_tensor
 
 
@@ -141,7 +141,7 @@ def disjoint_merge(task_tensors: torch.Tensor, majority_sign_mask: torch.Tensor)
     return mixed_task_tensors / torch.clamp(num_params_preserved, min=1.0)
 
 
-def task_arithmetic(task_tensors: List[torch.Tensor], weights: torch.Tensor) -> torch.Tensor:
+def task_arithmetic(task_tensors: list[torch.Tensor], weights: torch.Tensor) -> torch.Tensor:
     """
     Merge the task tensors using `task arithmetic`.
 
@@ -160,7 +160,7 @@ def task_arithmetic(task_tensors: List[torch.Tensor], weights: torch.Tensor) -> 
     return mixed_task_tensors
 
 
-def magnitude_prune(task_tensors: List[torch.Tensor], weights: torch.Tensor, density: float) -> torch.Tensor:
+def magnitude_prune(task_tensors: list[torch.Tensor], weights: torch.Tensor, density: float) -> torch.Tensor:
     """
     Merge the task tensors using `task arithmetic`.
 
@@ -183,7 +183,7 @@ def magnitude_prune(task_tensors: List[torch.Tensor], weights: torch.Tensor, den
 
 
 def ties(
-    task_tensors: List[torch.Tensor],
+    task_tensors: list[torch.Tensor],
     weights: torch.Tensor,
     density: float,
     majority_sign_method: Literal["total", "frequency"] = "total",
@@ -214,7 +214,7 @@ def ties(
     return mixed_task_tensors
 
 
-def dare_linear(task_tensors: List[torch.Tensor], weights: torch.Tensor, density: float) -> torch.Tensor:
+def dare_linear(task_tensors: list[torch.Tensor], weights: torch.Tensor, density: float) -> torch.Tensor:
     """
     Merge the task tensors using `dare linear`.
 
@@ -237,7 +237,7 @@ def dare_linear(task_tensors: List[torch.Tensor], weights: torch.Tensor, density
 
 
 def dare_ties(
-    task_tensors: List[torch.Tensor],
+    task_tensors: list[torch.Tensor],
     weights: torch.Tensor,
     density: float,
     majority_sign_method: Literal["total", "frequency"] = "total",

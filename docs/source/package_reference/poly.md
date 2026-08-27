@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # Polytropon
 
-[Polytropon](https://hf.co/papers/2202.13914) is a multitask model with a number of different LoRA adapters in it's "inventory". The model learns the correct combination of adapters from the inventory with a routing function to choose the best subset of modules for a specific task. PEFT also supports [Multi-Head Adapter Routing (MHR)](https://hf.co/papers/2211.03831) for Polytropon which builds on and improves the routing function by combining the adapter heads more granularly. The adapter heads are separated into disjoint blocks and a different routing function is learned for each one, allowing for more expressivity.
+[Polytropon](https://hf.co/papers/2202.13914) is a multitask model with a number of different LoRA adapters in its "inventory". The model learns the correct combination of adapters from the inventory with a routing function to choose the best subset of modules for a specific task. PEFT also supports [Multi-Head Adapter Routing (MHR)](https://hf.co/papers/2211.03831) for Polytropon which builds on and improves the routing function by combining the adapter heads more granularly. The adapter heads are separated into disjoint blocks and a different routing function is learned for each one, allowing for more expressivity.
 
 <hfoptions id="paper">
 <hfoption id="Combining Modular Skills in Multitask Learning">
@@ -34,6 +34,10 @@ The abstract from the paper is:
 
 </hfoption>
 </hfoptions>
+
+In case you want to try out routing without training first, you can check out the [Arrow LoRA variant](./lora#Arrow).
+
+# API
 
 ## PolyConfig
 

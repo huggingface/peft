@@ -23,7 +23,8 @@ from peft.import_utils import is_hqq_available
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.other import transpose
 
-from .layer import LoraLayer
+from .config import LoraConfig
+from .layer import LoraLayer, LoraVariant
 
 
 if is_hqq_available():
@@ -35,14 +36,14 @@ if is_hqq_available():
             self,
             base_layer: torch.nn.Module,
             adapter_name: str,
+            config: LoraConfig,
             r: int = 0,
             lora_alpha: int = 1,
-            lora_dropout: float = 0.0,
-            init_lora_weights: bool = True,
-            use_rslora: bool = False,
-            use_dora: bool = False,
             **kwargs,
         ) -> None:
+            if config.lora_bias:
+                raise ValueError(f"{self.__class__.__name__} does not support lora_bias yet, set it to False")
+
             super().__init__()
             LoraLayer.__init__(self, base_layer)
             self.fan_in_fan_out = False
@@ -52,11 +53,18 @@ if is_hqq_available():
                 adapter_name,
                 r,
                 lora_alpha=lora_alpha,
-                lora_dropout=lora_dropout,
-                init_lora_weights=init_lora_weights,
-                use_rslora=use_rslora,
-                use_dora=use_dora,
+                config=config,
             )
+
+        def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
+            if config.velora_config is not None:
+                raise ValueError(f"{self.__class__.__name__} does not support VeLoRA.")
+            if not config.use_dora:
+                return None
+
+            from .variants import DoraLinearVariant
+
+            return DoraLinearVariant()
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
@@ -82,26 +90,19 @@ if is_hqq_available():
 
                 layer = self.get_base_layer()
                 quant_config = {**copy.deepcopy(layer.quant_config), "offload_meta": layer.offload_meta}
-                lora_data = self.get_delta_weight(active_adapter)
 
                 output = layer.dequantize()
-                if not self.use_dora[active_adapter]:
+                if active_adapter not in self.lora_variant:  # vanilla LoRA
+                    lora_data = self.get_delta_weight(active_adapter)
                     w_data = output + lora_data
                 else:
-                    # handle dora
-                    # since output already includes scaling, set it to 1 here
-                    weight_norm = self._get_weight_norm(output, lora_data, scaling=1).detach()
-                    # We need to cache weight_norm because it has to be based on the original weights. We
-                    # cannot calculate it on the fly based on the merged weights when unmerging because its a
-                    # different value
-                    self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
-                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
-                    w_data = dora_factor.view(-1, 1) * (output + lora_data)
+                    w_data = self.lora_variant[active_adapter].merge_safe(self, active_adapter, output)
 
                 if safe_merge and not torch.isfinite(w_data).all():
                     raise ValueError(
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                     )
+
                 new_hqq_layer = HQQLinear(None, quant_config, compute_dtype=layer.compute_dtype, device=layer.device)
                 quant_config.pop("offload_meta", None)
                 new_hqq_layer.quantize(w_data, **quant_config)
@@ -121,17 +122,15 @@ if is_hqq_available():
                 if active_adapter not in self.lora_A.keys():
                     continue
 
-                lora_data = self.get_delta_weight(active_adapter)
                 layer = self.get_base_layer()
                 quant_config = {**copy.deepcopy(layer.quant_config), "offload_meta": layer.offload_meta}
                 output = layer.dequantize()
 
-                if not self.use_dora[active_adapter]:
-                    w_data = output - lora_data
+                if active_adapter not in self.lora_variant:  # vanilla LoRA
+                    lora_data = self.get_delta_weight(active_adapter)
+                    w_data = output.to(lora_data.dtype).to(lora_data.device) - lora_data
                 else:
-                    weight_norm = self._cache_pop(f"{active_adapter}-weight_norm")
-                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
-                    w_data = output.data / dora_factor.view(-1, 1) - lora_data
+                    w_data = self.lora_variant[active_adapter].unmerge(self, active_adapter, output)
 
                 new_hqq_layer = HQQLinear(None, quant_config, compute_dtype=layer.compute_dtype, device=layer.device)
                 quant_config.pop("offload_meta", None)
@@ -173,9 +172,7 @@ if is_hqq_available():
                 requires_conversion = not torch.is_autocast_enabled()
                 if requires_conversion:
                     expected_dtype = result.dtype
-                    compute_dtype = lora_A.weight.dtype
-                    if x.dtype != compute_dtype:
-                        x = x.to(compute_dtype)
+                    x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
                 # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
                 # layer output
@@ -213,18 +210,20 @@ if is_hqq_available():
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:
                         expected_dtype = result.dtype
-                        compute_dtype = lora_A.weight.dtype
-                        if x.dtype != compute_dtype:
-                            x = x.to(compute_dtype)
+                        x = self._cast_input_dtype(x, lora_A.weight.dtype)
 
-                    if not self.use_dora[active_adapter]:
-                        output = lora_B(lora_A(dropout(x))) * scaling
+                    if active_adapter not in self.lora_variant:  # vanilla LoRA
+                        result = result + lora_B(lora_A(dropout(x))) * scaling
                     else:
-                        output = self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
-                    if requires_conversion:
-                        output = output.to(expected_dtype)
+                        result = self.lora_variant[active_adapter].forward(
+                            self,
+                            active_adapter=active_adapter,
+                            x=x,
+                            result=result,
+                        )
 
-                    result = result + output
+                    if requires_conversion:
+                        result = result.to(expected_dtype)
 
             return result
 
@@ -233,7 +232,7 @@ if is_hqq_available():
             return "lora." + rep
 
 
-def dispatch_hqq(target: torch.nn.Module, adapter_name: str, **kwargs):
+def dispatch_hqq(target: torch.nn.Module, adapter_name: str, config: LoraConfig, **kwargs):
     new_module = None
 
     if isinstance(target, BaseTunerLayer):
@@ -242,6 +241,6 @@ def dispatch_hqq(target: torch.nn.Module, adapter_name: str, **kwargs):
         target_base_layer = target
 
     if is_hqq_available() and isinstance(target_base_layer, HQQLinear):
-        new_module = HqqLoraLinear(target_base_layer, adapter_name, **kwargs)
+        new_module = HqqLoraLinear(target_base_layer, adapter_name, config=config, **kwargs)
 
     return new_module

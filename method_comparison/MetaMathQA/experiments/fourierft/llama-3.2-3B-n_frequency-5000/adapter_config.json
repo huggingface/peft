@@ -1,0 +1,23 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "bias": "none",
+  "exclude_modules": null,
+  "fan_in_fan_out": false,
+  "inference_mode": false,
+  "init_weights": false,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "modules_to_save": null,
+  "n_frequency": 5000,
+  "n_frequency_pattern": {},
+  "peft_type": "FOURIERFT",
+  "random_loc_seed": 777,
+  "revision": null,
+  "scaling": 300,
+  "target_modules": [
+    "v_proj",
+    "q_proj"
+  ],
+  "task_type": null
+}

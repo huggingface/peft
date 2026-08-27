@@ -1,0 +1,27 @@
+{
+  "alpha_pattern": {},
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "bias": "none",
+  "block_share": false,
+  "coft": false,
+  "eps": 6e-05,
+  "exclude_modules": null,
+  "fan_in_fan_out": false,
+  "inference_mode": false,
+  "init_weights": true,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "module_dropout": 0.0,
+  "modules_to_save": null,
+  "oft_block_size": 0,
+  "peft_type": "OFT",
+  "r": 32,
+  "rank_pattern": {},
+  "revision": null,
+  "target_modules": [
+    "q_proj",
+    "v_proj"
+  ],
+  "task_type": null
+}

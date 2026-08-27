@@ -39,9 +39,11 @@ Installing PEFT from source is useful for keeping up with the latest development
 python -m pip install git+https://github.com/huggingface/peft
 ```
 
-## ValueError: Attempting to unscale FP16 gradients
+## Dtype-related issues
 
-This error probably occurred because the model was loaded with `torch_dtype=torch.float16` and then used in an automatic mixed precision (AMP) context, e.g. by setting `fp16=True` in the [`~transformers.Trainer`] class from 🤗 Transformers. The reason is that when using AMP, trainable weights should never use fp16. To make this work without loading the whole model in fp32, add the following to your code:
+### ValueError: Attempting to unscale FP16 gradients
+
+This error probably occurred because the model was loaded with `dtype=torch.float16` and then used in an automatic mixed precision (AMP) context, e.g. by setting `fp16=True` in the [`~transformers.Trainer`] class from 🤗 Transformers. The reason is that when using AMP, trainable weights should never use fp16. To make this work without loading the whole model in fp32, add the following to your code:
 
 ```python
 peft_model = get_peft_model(...)
@@ -69,11 +71,79 @@ trainer = Trainer(model=peft_model, fp16=True, ...)
 trainer.train()
 ```
 
-<Tip>
+> [!TIP]
+> Starting from PEFT version v0.12.0, PEFT automatically promotes the dtype of adapter weights from `torch.float16` and `torch.bfloat16` to `torch.float32` where appropriate. To _prevent_ this behavior, you can pass `autocast_adapter_dtype=False` to [`~get_peft_model`], to [`~PeftModel.from_pretrained`], and to [`~PeftModel.load_adapter`].
 
-Starting from PEFT verion v0.12.0, PEFT automatically promotes the dtype of adapter weights from `torch.float16` and `torch.bfloat16` to `torch.float32` where appropriate. To _prevent_ this behavior, you can pass `autocast_adapter_dtype=False` to [`~get_peft_model`], to [`~PeftModel.from_pretrained`], and to [`~PeftModel.load_adapter`].
+### Selecting the dtype of the adapter
 
-</Tip>
+Most PEFT methods, like LoRA, work by adding trainable adapter weights. By default, those weights are stored in float32 dtype (fp32), i.e. at a relatively high precision. Therefore, even if the base model is loaded in float16 (fp16) or bfloat16 (bf16), the adapter weights are float32. When the adapter results are calculated during the forward pass, the input will typically be in the dtype of the base model, thus it will be upcast to float32 if necessary, then cast back to the original dtype.
+
+If you prefer to have the adapter weights in the lower precision of the base model, i.e. in float16 or bfloat16, you can pass `autocast_adapter_dtype=False` when creating the model ([`~get_peft_model`]) or loading the model ([`~PeftModel.from_pretrained`]). There are some advantages and disadvantages to this:
+
+Advantages of half precision adapter:
+- computation slightly faster
+- slightly less memory
+- smaller file size of checkpoint (half the size)
+
+Disadvantages of half precision adapter:
+- slightly worse loss
+- higher risk of overflow or underflow
+
+Note that for most use cases, overall runtime and memory cost will be determined by the size of the base model and by the dataset, while the dtype of the PEFT adapter will only have a small impact.
+
+## Training runs but the model does not improve
+
+If training appears healthy (the loss goes down, checkpoints are saved without errors) but the resulting model performs no better than the base model, check whether the trainable parameters actually changed during training:
+
+```python
+# before training
+sample_param = next(p for p in model.parameters() if p.requires_grad)
+before = sample_param.detach().clone()
+
+# ... train for at least three optimizer steps ...
+
+after = next(p for p in model.parameters() if p.requires_grad)
+print("weights updated:", not torch.allclose(before, after.detach().cpu()))
+```
+
+### Missing forward or backward hooks
+
+If the weights did not move, a likely cause is that parameter references were captured before the parameters were materialized on their target device. This can happen when the base model is wrapped with [`get_peft_model`] while its parameters have not yet been moved to the target device, and a third-party library then registers forward/backward hooks (for example, per-sample gradient hooks from a differential privacy framework) or an optimizer is created before the first forward call. When the parameters are materialized later, those hooks and optimizer references point at stale tensors and every update becomes a silent no-op.
+
+To avoid this, use the following order:
+
+1. Load the base model and move it to the target device (e.g. `model.to(device)`).
+2. Wrap it with [`get_peft_model`].
+3. Only then register hooks or create the optimizer.
+
+### Target modules don't match the model
+
+If training runs without errors but the loss barely moves — or the model shows no improvement after fine-tuning — the configured `target_modules` (or the default `target_modules` if not specified otherwise by the user) may not match the actual module names in the model. This is common with hybrid architectures such as Mamba, Jamba, or NemotronH, which use different layer names than standard Transformer models.
+
+PEFT raises an error only when *none* of the configured `target_modules` match any module in the model. If *some* match and *some* do not, the non-matching entries are silently skipped — there is no warning. A large fraction of the model can remain frozen without any indication.
+
+The first diagnostic is to check the trainable parameter count:
+
+```python
+from peft import LoraConfig, get_peft_model
+
+config = LoraConfig(target_modules=["q_proj", "v_proj", "gate_proj"])
+model = get_peft_model(base_model, config)
+model.print_trainable_parameters()
+```
+
+If the reported number is much lower than expected, inspect the adapter layers in the model:
+
+```python
+print(model.get_layer_status())
+```
+
+This returns a list of `TunerLayerStatus` entries showing each adapter layer's name, module type, enabled state, and active adapters. Alternatively, printing the model repr (`print(model)`) gives an overview of the full module hierarchy, which is useful for identifying the correct layer names on unfamiliar architectures.
+
+Any `target_modules` entry that does not correspond to a module in the model is silently skipped. Update `target_modules` to match the actual module names.
+
+> [!TIP]
+> This issue affects all PEFT methods that use `target_modules` (LoRA, LoHa, IA³, etc.), not just LoRA. The diagnostic steps are the same regardless of the method. If you are unsure which module names a given architecture uses, check the model's documentation or inspect `model.named_modules()` before configuring the adapter.
 
 ## Bad results from a loaded PEFT model
 
@@ -103,7 +173,7 @@ peft_model = PeftModel.from_pretrained(base_model, peft_model_id)
 
 ### Randomly initialized layers
 
-For some tasks, it is important to correctly configure `modules_to_save` in the config to account for randomly initialized layers. 
+For some tasks, it is important to correctly configure `modules_to_save` in the config to account for randomly initialized layers.
 
 As an example, this is necessary if you use LoRA to fine-tune a language model for sequence classification because 🤗 Transformers adds a randomly initialized classification head on top of the model. If you do not add this layer to `modules_to_save`, the classification head won't be saved. The next time you load the model, you'll get a _different_ randomly initialized classification head, resulting in completely different results.
 
@@ -118,11 +188,42 @@ You should probably TRAIN this model on a down-stream task to be able to use it 
 
 The mentioned layers should be added to `modules_to_save` in the config to avoid the described problem.
 
+> [!TIP]
+> As an example, when loading a model that is using the DeBERTa architecture for sequence classification, you'll see a warning that the following weights are newly initialized: `['classifier.bias', 'classifier.weight', 'pooler.dense.bias', 'pooler.dense.weight']`. From this, it follows that the `classifier` and `pooler` layers should be added to: `modules_to_save=["classifier", "pooler"]`.
+
 ### Extending the vocabulary
 
-For many language fine-tuning tasks, extending the model's vocabulary is necessary since new tokens are being introduced. This requires extending the embedding layer to account for the new tokens and also storing the embedding layer in addition to the adapter weights when saving the adapter.
+For many language fine-tuning tasks, extending the model's vocabulary is necessary since new tokens are being introduced. This requires extending the embedding layer to account for the new tokens and, depending on the fine-tuning method, also storing the embedding layer in addition to the adapter weights when saving the adapter. There are a few ways of achieving this ordered by parameter effectiveness:
 
-Save the embedding layer by adding it to the `target_modules` of the config. The embedding layer name must follow the standard naming scheme from Transformers. For example, the Mistral config could look like this:
+- [trainable tokens](../package_reference/trainable_tokens), train only the specified tokens, optionally store only the updated values
+- training an adapter on the embedding matrix, optionally store only the updated values
+- full-finetuning of the embedding layer
+
+#### Using trainable tokens
+
+Let's start with trainable tokens, in this case its [LoRA integration](../package_reference/lora#efficiently-train-tokens-alongside-lora).  If you're interested in only training the new embeddings and nothing else, refer to the [standalone documentation](../package_reference/trainable_tokens).
+
+To enable selective token training of the embedding layer, you'll need to supply the token ids of your newly added tokens via the `trainable_token_indices` parameter.  Optionally you can specify which layer to target if there is more than one embedding layer. For a Mistral model this could look like this:
+
+```python
+new_tokens = ['<think>', '</think>']
+tokenizer.add_tokens(new_tokens)
+base_model.resize_token_embeddings(len(tokenizer))
+
+lora_config = LoraConfig(
+    ...,
+    trainable_token_indices={'embed_tokens': tokenizer.convert_tokens_to_ids(new_tokens)},
+)
+```
+
+If your model uses tied weights (such as the `lm_head`), trainable tokens will try to resolve those and keep them updated as well, so in that case there should be no need for adding `modules_to_save=["lm_head"]`. This only works if the model uses the Transformers convention for tying weights.
+
+Saving the model with `model.save_pretrained` may save the full embedding matrix instead of
+only the difference as a precaution because the embedding matrix was resized. To save space you can disable this behavior by setting `save_embedding_layers=False` when calling `save_pretrained`. This is safe to do as long as you don't modify the embedding matrix through other means as well, as such changes will be not tracked by trainable tokens.
+
+#### Using an adapter, e.g. LoRA
+
+Prepare the embedding layer by adding it to the `target_modules` of your adapter config. For example, the Mistral config could look like this:
 
 ```python
 config = LoraConfig(..., target_modules=["embed_tokens", "lm_head", "q_proj", "v_proj"])
@@ -130,7 +231,7 @@ config = LoraConfig(..., target_modules=["embed_tokens", "lm_head", "q_proj", "v
 
 Once added to `target_modules`, PEFT automatically stores the embedding layer when saving the adapter if the model has the [`~transformers.PreTrainedModel.get_input_embeddings`] and [`~transformers.PreTrainedModel.get_output_embeddings`]. This is generally the case for Transformers models.
 
-If the model's embedding layer doesn't follow the Transformer's naming scheme, you can still save it by manually passing `save_embedding_layers=True` when saving the adapter:
+If the model's embedding layer doesn't follow the Transformer's naming scheme but nevertheless implements `get_input_embeddings`, you can still save it by manually passing `save_embedding_layers=True` when saving the adapter:
 
 ```python
 model = get_peft_model(...)
@@ -142,9 +243,45 @@ For inference, load the base model first and resize it the same way you did befo
 
 For a complete example, please check out [this notebook](https://github.com/huggingface/peft/blob/main/examples/causal_language_modeling/peft_lora_clm_with_additional_tokens.ipynb).
 
+#### Full fine-tuning
+
+Full fine-tuning is more costly in terms of VRAM or storage space but if all else fails, you can fall back to this and see if it works for you. Achieve it by adding the name of the embedding layer to `modules_to_save`. Note that you need to add tied layers as well, e.g. `lm_head`. Example for a Mistral model with LoRA:
+
+```python
+config = LoraConfig(..., modules_to_save=["embed_tokens", "lm_head"], target_modules=["q_proj", "v_proj"])
+```
+
+### Getting a warning about "weights not being initialized from the model checkpoint"
+
+When you load your PEFT model which has been trained on a task (for example, classification), you may get a warning like:
+
+> Some weights of LlamaForSequenceClassification were not initialized from the model checkpoint at meta-llama/Llama-3.2-1B and are newly initialized: ['score.weight']. You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+
+Although this looks scary, it is most likely nothing to worry about. This warning comes from Transformers, and it isn't a PEFT specific warning. It lets you know that a randomly initialized classification head (`score`) is attached to the base model, and the head must be trained to produce sensible predictions.
+
+When you get this warning _before_ training the model, PEFT automatically takes care of making the classification head trainable if you correctly passed the `task_type` argument to the PEFT config.
+
+```python
+from peft import LoraConfig, TaskType
+
+lora_config = LoraConfig(..., task_type=TaskType.SEQ_CLS)
+```
+
+If your classification head does not follow the usual naming conventions from Transformers (which is rare), you have to explicitly tell PEFT the name of the head in `modules_to_save`.
+
+```python
+lora_config = LoraConfig(..., modules_to_save=["name-of-classification-head"])
+```
+
+To check the name of the classification head, print the model and it should be the last module.
+
+If you get this warning from your inference code, i.e. _after_ training the model, when you load the PEFT model, you always have to load the Transformers model first. Since Transformers does not know that you will load PEFT weights afterwards, it still gives the warning.
+
+As always, it is best practice to ensure the model works correctly for inference by running some validation on it.
+
 ### Check layer and model status
 
-Sometimes a PEFT model can end up in a bad state, especially when handling multiple adapters. There can be some confusion around what adapters exist, which one is active, which one is merged, etc. To help investigate this issue, call the [`~peft.PeftModel.get_layer_status`] and the [`~peft.PeftModel.get_model_status`] methods. 
+Sometimes a PEFT model can end up in a bad state, especially when handling multiple adapters. There can be some confusion around what adapters exist, which one is active, which one is merged, etc. To help investigate this issue, call the [`~peft.PeftModel.get_layer_status`] and the [`~peft.PeftModel.get_model_status`] methods.
 
 The [`~peft.PeftModel.get_layer_status`] method gives you a detailed overview of each targeted layer's active, merged, and available adapters.
 
@@ -211,7 +348,7 @@ It is possible to get this information for non-PEFT models if they are using PEF
 
 >>> path = "runwayml/stable-diffusion-v1-5"
 >>> lora_id = "takuma104/lora-test-text-encoder-lora-target"
->>> pipe = StableDiffusionPipeline.from_pretrained(path, torch_dtype=torch.float16)
+>>> pipe = StableDiffusionPipeline.from_pretrained(path, dtype=torch.float16)
 >>> pipe.load_lora_weights(lora_id, adapter_name="adapter-1")
 >>> pipe.load_lora_weights(lora_id, adapter_name="adapter-2")
 >>> pipe.set_lora_device(["adapter-2"], "cuda")
@@ -256,11 +393,8 @@ TunerModelStatus(
 
 Loading adapters like LoRA weights should generally be fast compared to loading the base model. However, there can be use cases where the adapter weights are quite large or where users need to load a large number of adapters -- the loading time can add up in this case. The reason for this is that the adapter weights are first initialized and then overridden by the loaded weights, which is wasteful. To speed up the loading time, you can pass the `low_cpu_mem_usage=True` argument to [`~PeftModel.from_pretrained`] and [`~PeftModel.load_adapter`].
 
-<Tip>
-
-If this option works well across different use casese, it may become the default for adapter loading in the future.
-
-</Tip>
+> [!TIP]
+> If this option works well across different use cases, it may become the default for adapter loading in the future.
 
 
 ## Reproducibility
@@ -284,3 +418,95 @@ config = LoraConfig(
 ```
 
 Depending on the type of model you use, the batch norm layers could have different names than `"normalization"`, so please ensure that the name matches your model architecture.
+
+## Version mismatch
+
+### Error while loading the config because of an unexpected keyword argument
+
+When you encounter an error like the one shown below, it means the adapter you're trying to load was trained with a more recent version of PEFT than the version you have installed on your system.
+
+```
+TypeError: LoraConfig.__init__() got an unexpected keyword argument <argument-name>
+```
+
+The best way to resolve this issue is to install the latest PEFT version:
+
+```sh
+python -m pip install -U PEFT
+```
+
+If the adapter was trained from a source install of PEFT (an unreleased version of PEFT), then you also need to install PEFT from source.
+
+```sh
+python -m pip install -U git+https://github.com/huggingface/peft.git
+```
+
+If it is not possible for you to upgrade PEFT, there is a workaround you can try.
+
+Assume the error message says that the unknown keyword argument is named `foobar`. Search inside the `adapter_config.json` of this PEFT adapter for the `foobar` entry and delete it from the file. Then save the file and try loading the model again.
+
+This solution works most of the time. As long as it is the default value for `foobar`, it can be ignored. However, when it is set to some other value, you will get incorrect results. Upgrading PEFT is the recommended solution.
+
+## Adapter handling
+
+### Using multiple adapters at the same time
+
+PEFT allows you to create more than one adapter on the same model. This can be useful in many situations. For example, for inference, you may want to serve two fine-tuned models from the same base model instead of loading the base model once for each fine-tuned model, which would cost more memory. However, multiple adapters can be activated at the same time. This way, the model may leverage the learnings from all those adapters at the same time. As an example, if you have a diffusion model, you may want to use one LoRA adapter to change the style and a different one to change the subject.
+
+Activating multiple adapters at the same time is generally possible on all PEFT methods (LoRA, LoHa, IA³, etc.) except for prompt learning methods (p-tuning, prefix tuning, etc.). The following example illustrates how to achieve this:
+
+```python
+from transformers import AutoModelForCausalLM
+from peft import PeftModel
+
+model_id = ...
+base_model = AutoModelForCausalLM.from_pretrained(model_id)
+model = PeftModel.from_pretrained(base_model, lora_path_0)  # default adapter_name is 'default'
+model.load_adapter(lora_path_1, adapter_name="other")
+# the 'other' adapter was loaded but it's not active yet, so to activate both adapters:
+model.base_model.set_adapter(["default", "other"])
+```
+
+> [!TIP]
+> In the example above, you can see that we need to call `model.base_model.set_adapter(["default", "other"])`. Why can we not call `model.set_adapter(["default", "other"])`? This is unfortunately not possible because, as explained earlier, some PEFT methods don't support activating more than one adapter at a time.
+
+It is also possible to train two adapters at the same time, but you should be careful to ensure that the weights of both adapters are known to the optimizer. Otherwise, only one adapter will receive updates.
+
+```python
+from transformers import AutoModelForCausalLM
+from peft import LoraConfig, get_peft_model
+
+model_id = ...
+base_model = AutoModelForCausalLM.from_pretrained(model_id)
+lora_config_0 = LoraConfig(...)
+lora_config_1 = LoraConfig(...)
+model = get_peft_model(base_model, lora_config_0)
+model.add_adapter(adapter_name="other", peft_config=lora_config_1)
+```
+
+If we would now call:
+
+```python
+from transformers import Trainer
+
+trainer = Trainer(model=model,  ...)
+trainer.train()
+```
+
+or
+
+```python
+optimizer = torch.optim.AdamW([param for param in model.parameters() if param.requires_grad], ...)
+```
+
+then the second LoRA adapter (`"other"`) would not be trained. This is because it is inactive at this moment, which means the `requires_grad` attribute on its parameters is set to `False` and the optimizer will ignore it. Therefore, make sure to activate all adapters that should be trained _before_ initializing the optimizer:
+
+```python
+# activate all adapters
+model.base_model.set_adapter(["default", "other"])
+trainer = Trainer(model=model,  ...)
+trainer.train()
+```
+
+> [!TIP]
+> This section deals with using multiple adapters _of the same type_ on the same model, for example, using multiple LoRA adapters at the same time. It does not apply to using _different types_ of adapters on the same model, for example one LoRA adapter and one LoHa adapter. For this, please check [`PeftMixedModel`](https://huggingface.co/docs/peft/developer_guides/mixed_models).

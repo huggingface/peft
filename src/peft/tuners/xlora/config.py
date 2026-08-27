@@ -76,6 +76,7 @@ class XLoraConfig(PeftConfig):
     global_scaling_weight: float = 1.0
 
     def __post_init__(self):
+        super().__post_init__()
         self.peft_type = PeftType.XLORA
 
         if self.hidden_size is None:
@@ -85,7 +86,7 @@ class XLoraConfig(PeftConfig):
             self.hidden_size = 4096
         if self.adapters is None:
             warnings.warn(
-                "No value was provided for for `adapters`. This will be set to empty, please ensure that this is correct."
+                "No value was provided for `adapters`. This will be set to empty, please ensure that this is correct."
             )
             self.adapters = {}
 

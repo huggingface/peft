@@ -20,7 +20,43 @@ We are happy to accept contributions to PEFT. If you plan to contribute, please 
 
 ## Installation
 
-For code contributions to PEFT, you should choose the ["source"](../install#source) installation method.
+Follow these steps to start contributing:
+
+1. Fork the [repository](https://github.com/huggingface/peft) by clicking on the 'Fork' button on the repository's page. This creates a copy of the code under your GitHub user account.
+
+2. Clone your fork to your local disk, and add the base repository as a remote. The following command assumes you have your public SSH key uploaded to GitHub. See the following guide for more [information](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository).
+
+   ```bash
+   git clone git@github.com:<your Github handle>/peft.git
+   cd peft
+   git remote add upstream https://github.com/huggingface/peft.git
+   ```
+
+3. Create a new branch to hold your development changes, and do this for every new PR you work on.
+
+   Start by synchronizing your `main` branch with the `upstream/main` branch (more details in the [GitHub Docs](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/syncing-a-fork)):
+
+   ```bash
+   git checkout main
+   git fetch upstream
+   git merge upstream/main
+   ```
+
+   Once your `main` branch is synchronized, create a new branch from it:
+
+   ```bash
+   git checkout -b a-descriptive-name-for-my-changes
+   ```
+
+   **Do not** work on the `main` branch.
+
+4. Set up a development environment by running the following command in a conda or a virtual environment you've created for working on this library:
+
+   ```bash
+   pip install -e ".[test]"
+   ```
+
+   (If PEFT was already installed in the virtual environment, remove it with `pip uninstall peft` before reinstalling it.)
 
 If you are new to creating a pull request, follow the [Creating a pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request) guide by GitHub.
 
@@ -41,6 +77,8 @@ make quality  # just check
 make style  # check and fix
 ```
 
+Running `make quality` will also check if all methods/classes from PEFT's public API (i.e. everything that's mentioned in `peft.__all__`) are mentioned in the docs. These errors cannot be fixed by `make style`, you need to make sure to document new items in the public API in the docs to fix this error.
+
 You can also set up [`pre-commit`](https://pre-commit.com/) to run these fixes
 automatically as Git commit hooks.
 
@@ -49,23 +87,35 @@ $ pip install pre-commit
 $ pre-commit install
 ```
 
-Running all the tests can take a couple of minutes, so during development it can be more efficient to only run tests specific to your change:
+Running all the tests can take a while, so during development it can be more efficient to only [run tests specific to your change](https://docs.pytest.org/en/6.2.x/usage.html#specifying-tests-selecting-tests), e.g. via:
 
 ```sh
-pytest tests/ -k <name-of-test>
+pytest tests/<test-file-name> -k <name-of-test>
 ```
 
-This should finish much quicker and allow for faster iteration. However, you should still run the whole test suite before creating a PR because your change can inadvertently break tests that at first glance are unrelated.
+This should finish much quicker and allow for faster iteration.
 
-If your change is specific to a hardware setting (e.g., it requires CUDA), take a look at [tests/test_gpu_examples.py](https://github.com/huggingface/peft/blob/1c1c7fdaa6e6abaa53939b865dee1eded82ad032/tests/test_gpu_examples.py) and [tests/test_common_gpu.py](https://github.com/huggingface/peft/blob/1c1c7fdaa6e6abaa53939b865dee1eded82ad032/tests/test_common_gpu.py) to see if it makes sense to add tests there. If your change could have an effect on saving and loading models, please run the tests with the `--regression` flag to trigger regression tests.
+If your change is specific to a hardware setting (e.g., it requires CUDA), take a look at [`tests/test_gpu_examples.py`](https://github.com/huggingface/peft/blob/1c1c7fdaa6e6abaa53939b865dee1eded82ad032/tests/test_gpu_examples.py) and [`tests/test_common_gpu.py`](https://github.com/huggingface/peft/blob/1c1c7fdaa6e6abaa53939b865dee1eded82ad032/tests/test_common_gpu.py) to see if it makes sense to add tests there. If your change could have an effect on saving and loading models, please run the tests with the `--regression` flag to trigger regression tests.
 
-It can happen that while you’re working on your PR, the underlying code base changes due to other changes being merged. If that happens – especially when there is a merge conflict – please update your branch with the latest changes. This can be a merge or a rebase, and we'll squash and merge the PR once it’s ready.
+It can happen that while you’re working on your PR, the underlying code base changes due to other changes being merged. If that happens – especially when there is a merge conflict – please update your branch with the latest changes. This can be a merge or a rebase, and we'll squash and merge the PR once it’s ready. If possible, **avoid force pushes** to make reviews easier.
 
 ## PR description
 
 When opening a PR, please provide a nice description of the change you're proposing. If it relates to other issues or PRs, please reference them. Providing a good description not only helps the reviewers review your code better and faster, it can also be used later (as a basis) for the commit message which helps with long term maintenance of the project.
 
+Keep the length and complexity of the PR description in line with the change. We don't need ten paragraphs of explanation for a trivial one-line change. Don't restate what is obvious from looking at the diff (e.g. "Fixed the typo in 'foobaar').
+
 If your code makes some non-trivial changes, it may also be a good idea to add comments to the code to explain those changes. For example, if you had to iterate on your implementation multiple times because the most obvious way didn’t work, it’s a good indication that a code comment is needed.
+
+If relevant, indicate how you tested the change, e.g. by showing the `pytest` test command or reproducer code.
+
+## Reviewer feedback
+
+After submitting your PR, a maintainer will typically give feedback within a couple of days. If you don't get any feedback within two weeks, your PR might have slipped their notice; feel free to ping the maintainers then, but no earlier.
+
+If the reviewer provides in-line comments, don't mark them as resolved if you addressed them. Leave these comments open, as they are helping the reviewer to resume their work.
+
+After working through reviewer feedback, ping the reviewer so that they know the PR is ready to review.
 
 ## Bugfixes
 
@@ -73,15 +123,45 @@ Please give a description of the circumstances that led to the bug. If there is 
 
 Ideally when a bugfix is provided, it should be accompanied by a test for the bug. The test should fail with the current code and pass with the bugfix. Add a comment to the test that references the issue or PR. Without a test, it is more difficult to prevent regressions in the future.
 
-## Add a new fine-tuning method
+## Documentation improvements
+
+We are happy to have fixes for broken links and missing or unclear documentation. Taking care of examples, making sure that they are up-to-date and running fine in this fast moving environment is also highly appreciated.
+
+Please refrain from sending pull requests that *only* correct typing errors as these generally create more work than they safe. Such changes are better combined with more substantial fixes (such as fixing broken links or extending/updating documentation).
+
+## Add a new PEFT fine-tuning method
 
 New parameter-efficient fine-tuning methods are developed all the time. If you would like to add a new and promising method to PEFT, please follow these steps.
 
-1. Before you start to implement the new method, please open a GitHub issue with your proposal. This way, the maintainers can give you some early feedback.
-2. Please add a link to the source (usually a paper) of the method. Some evidence should be provided there is general interest in using the method. We will not add new methods that are freshly published, but there is no evidence of demand for it.
-3. When implementing the method, it makes sense to look for existing implementations that already exist as a guide. Moreover, when you structure your code, please take inspiration from the other PEFT methods. For example, if your method is similar to LoRA, it makes sense to structure your code similarly or even reuse some functions or classes where it makes sense (some code duplication is okay, but don’t overdo it).
-4. Ideally, in addition to the implementation of the new method, there should also be examples (notebooks, scripts), documentation, and an extensive test suite that proves the method works with a variety of tasks. However, this can be more challenging so it is acceptable to only provide the implementation and at least one working example. Documentation and tests can be added in follow up PRs.
-5. Once you have something that seems to be working, don’t hesitate to create a draft PR even if it’s not in a mergeable state yet. The maintainers are happy to give you feedback and guidance along the way.
+1. If you're _not_ an author of the original paper, check for existing implementations and double check with the authors that they don't plan to submit a PR themselves.
+2. Start with the core integration work listed below.
+3. Check recent commits for new PEFT methods being added to take as inspiration.
+4. It can be useful to open a draft PR early once the method basically works and first tests pass, then ask for feedback.
+
+### Core integration of a new PEFT method
+
+- [ ] Open a proposal issue on `huggingface/peft` before investing too much work.
+- [ ] Link the source of the method, usually the final paper or another stable primary reference. We want to avoid work that is still under review, as the implementation should be stable.
+- [ ] Add a new `PeftType` entry in `src/peft/utils/peft_types.py`.
+- [ ] Create a new tuner package under `src/peft/tuners/` with the files your method needs (typically:  `config.py`, `model.py`, `layer.py`, and `__init__.py`).
+- [ ] Register the method in the tuner `__init__.py` with `register_peft_method(...)`.
+- [ ] Export the new config/model from `src/peft/tuners/__init__.py` and `src/peft/__init__.py`.
+- [ ] If the method needs default target modules for Transformers models, add the mapping in `src/peft/utils/constants.py`.
+- [ ] Add the method to the test matrix in `tests/test_custom_models.py` as these are the broadest and quickest tests. Check that the tests pass with `pytest tests/test_custom_models.py -k <method-name> -v`, fix failures if any.
+- [ ] Run style/quality checks with `make style` before pushing.
+- [ ] In the PR description, explain the method, link the paper, summarize tradeoffs, and list what was added.
+
+### Full PR to add a new PEFT method
+
+- [ ] Ensure that the configuration arguments that are specific to the method are well named and explained, don't assume that the user knows the paper inside out.
+- [ ] Follow the naming and coding conventions of PEFT.
+- [ ] Ensure that you didn't accidentally check in unrelated changes, e.g. the code formatter changing unrelated files.
+- [ ] If some implementation choices are non-trivial, document them with a code comment.
+- [ ] Complete the full test suite (`test_config.py`, `test_decoder_models.py`, etc.) by adding the PEFT method to the test matrix. Ensure that the tests pass.
+- [ ] Add docs in `docs/source/package_reference/` with a short explanation, paper link, usage snippet, and autodoc blocks. Explain the pros and cons compared to other methods like LoRA. Register that doc page in `docs/source/_toctree.yml`.
+- [ ] Add a runnable example under `examples/` (can be a copy of an existing example), with a short `README.md`.
+- [ ] Check the benchmarks in `method_comparison/` and add experiment settings for your new method. This is a good place to sanity check that the PEFT method trains as expected. Include one or two reasonable benchmark configurations (one default, one optimized for the benchmark).
+- [ ] Recommended: Add generic quantization support. Instead of having to explicitly add quantization layer types for each quantization method, support generic quantization. As an example, check how it's implemented in [BOFT](https://github.com/huggingface/peft/tree/main/src/peft/tuners/boft). Extend https://github.com/huggingface/peft/blob/main/tests/test_quantization.py by adding your PEFT method there. Ask maintainers for help if needed.
 
 ## Add other features
 

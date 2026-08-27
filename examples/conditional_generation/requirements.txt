@@ -4,3 +4,5 @@ evaluate
 deepspeed
 tqdm
 datasets
+safetensors
+scikit-learn

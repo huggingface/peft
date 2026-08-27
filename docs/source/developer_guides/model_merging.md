@@ -29,7 +29,7 @@ Models are merged with the [`~LoraModel.add_weighted_adapter`] method, and the s
 
 With TIES and DARE, merging is enabled by setting `combination_type` and `density` to a value of the weights to keep from the individual models. For example, let's merge three finetuned [TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T](https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T) models: [tinyllama_lora_nobots](https://huggingface.co/smangrul/tinyllama_lora_norobots), [tinyllama_lora_sql](https://huggingface.co/smangrul/tinyllama_lora_sql), and [tinyllama_lora_adcopy](https://huggingface.co/smangrul/tinyllama_lora_adcopy).
 
-<Tip warninig={true}>
+<Tip warning={true}>
 
 When you're attempting to merge fully trained models with TIES, you should be aware of any special tokens each model may have added to the embedding layer which are not a part of the original checkpoint's vocabulary. This may cause an issue because each model may have added a special token to the same embedding position. If this is the case, you should use the [`~transformers.PreTrainedModel.resize_token_embeddings`] method to avoid merging the special tokens at the same embedding index.
 
@@ -49,6 +49,9 @@ import torch
 config = PeftConfig.from_pretrained("smangrul/tinyllama_lora_norobots")
 model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path, load_in_4bit=True, device_map="auto").eval()
 tokenizer = AutoTokenizer.from_pretrained("smangrul/tinyllama_lora_norobots")
+
+model.config.vocab_size = 32005
+model.resize_token_embeddings(32005)
 
 model = PeftModel.from_pretrained(model, "smangrul/tinyllama_lora_norobots", adapter_name="norobots")
 _ = model.load_adapter("smangrul/tinyllama_lora_sql", adapter_name="sql")
@@ -96,12 +99,13 @@ Now you can use the merged model as an instruction-tuned model to write ad copy 
 <hfoption id="instruct">
 
 ```py
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
 messages = [
     {"role": "user", "content": "Write an essay about Generative AI."},
 ]
 text = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
 inputs = tokenizer(text, return_tensors="pt")
-inputs = {k: v.to("cuda") for k, v in inputs.items()}
+inputs = {k: v.to(device) for k, v in inputs.items()}
 outputs = model.generate(**inputs, max_new_tokens=256, do_sample=True, top_p=0.95, temperature=0.2, repetition_penalty=1.2, eos_token_id=tokenizer.eos_token_id)
 print(tokenizer.decode(outputs[0]))
 ```
@@ -110,13 +114,14 @@ print(tokenizer.decode(outputs[0]))
 <hfoption id="ad copy">
 
 ```py
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
 messages = [
     {"role": "system", "content": "Create a text ad given the following product and description."},
     {"role": "user", "content": "Product: Sony PS5 PlayStation Console\nDescription: The PS5 console unleashes new gaming possibilities that you never anticipated."},
 ]
 text = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
 inputs = tokenizer(text, return_tensors="pt")
-inputs = {k: v.to("cuda") for k, v in inputs.items()}
+inputs = {k: v.to(device) for k, v in inputs.items()}
 outputs = model.generate(**inputs, max_new_tokens=128, do_sample=True, top_p=0.95, temperature=0.2, repetition_penalty=1.2, eos_token_id=tokenizer.eos_token_id)
 print(tokenizer.decode(outputs[0]))
 ```
@@ -125,13 +130,15 @@ print(tokenizer.decode(outputs[0]))
 <hfoption id="SQL">
 
 ```py
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+
 text = """Table: 2-11365528-2
 Columns: ['Team', 'Head Coach', 'President', 'Home Ground', 'Location']
 Natural Query: Who is the Head Coach of the team whose President is Mario Volarevic?
 SQL Query:"""
 
 inputs = tokenizer(text, return_tensors="pt")
-inputs = {k: v.to("cuda") for k, v in inputs.items()}
+inputs = {k: v.to(device) for k, v in inputs.items()}
 outputs = model.generate(**inputs, max_new_tokens=64, repetition_penalty=1.1, eos_token_id=tokenizer("</s>").input_ids[-1])
 print(tokenizer.decode(outputs[0]))
 ```

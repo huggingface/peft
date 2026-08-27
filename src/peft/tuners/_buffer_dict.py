@@ -55,10 +55,10 @@ class BufferDict(Module):
                 (string, `torch.Tensor`).
         """
         super().__init__()
+        self.persistent = persistent
+
         if buffers is not None:
             self.update(buffers)
-
-        self.persistent = persistent
 
     def __getitem__(self, key):
         return self._buffers[key]
@@ -125,19 +125,17 @@ class BufferDict(Module):
                 "iterable of key/value pairs, but got " + type(buffers).__name__
             )
 
-        if isinstance(buffers, collections.abc.Mapping):
-            if isinstance(buffers, (OrderedDict, BufferDict)):
-                for key, buffer in buffers.items():
-                    self[key] = buffer
-            else:
-                for key, buffer in sorted(buffers.items()):
-                    self[key] = buffer
+        if isinstance(buffers, (OrderedDict, BufferDict)):
+            for key, buffer in buffers.items():
+                self[key] = buffer
+        elif isinstance(buffers, collections.abc.Mapping):
+            for key, buffer in sorted(buffers.items()):
+                self[key] = buffer
         else:
             for j, p in enumerate(buffers):
                 if not isinstance(p, collections.abc.Iterable):
                     raise TypeError(
-                        "BufferDict update sequence element "
-                        "#" + str(j) + " should be Iterable; is" + type(p).__name__
+                        "BufferDict update sequence element #" + str(j) + " should be Iterable; is" + type(p).__name__
                     )
                 if not len(p) == 2:
                     raise ValueError(
@@ -150,7 +148,8 @@ class BufferDict(Module):
         child_lines = []
         for k, p in self._buffers.items():
             size_str = "x".join(str(size) for size in p.size())
-            device_str = "" if not p.is_cuda else f" (GPU {p.get_device()})"
+            device_type = p.device.type
+            device_str = "" if device_type == "cpu" else f" ({device_type.upper()} {p.get_device()})"
             parastr = f"Buffer containing: [{torch.typename(p)} of size {size_str}{device_str}]"
             child_lines.append("  (" + k + "): " + parastr)
         tmpstr = "\n".join(child_lines)

@@ -264,7 +264,7 @@ def main():
 
         dataset = DatasetDict({"train": train_dataset, "validation": val_dataset})
     else:
-        dataset = load_dataset(args.dataset_name)
+        dataset = load_dataset(args.dataset_name, revision="main")
 
     def preprocess_function(examples):
         queries = examples["query"]
@@ -416,8 +416,7 @@ def main():
 
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
-        if args.with_tracking:
-            total_loss = 0
+        total_loss = 0
         if args.resume_from_checkpoint and epoch == starting_epoch and resume_step is not None:
             # We skip the first `n` batches in the dataloader when resuming from a checkpoint
             active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_step)
@@ -440,13 +439,13 @@ def main():
                 completed_steps += 1
 
             if (step + 1) % 100 == 0:
-                logger.info(f"Step: {step+1}, Loss: {total_loss/(step+1)}")
+                logger.info(f"Step: {step + 1}, Loss: {total_loss / (step + 1)}")
                 if args.with_tracking:
                     accelerator.log({"train/loss": total_loss / (step + 1)}, step=completed_steps)
 
             if isinstance(checkpointing_steps, int):
                 if completed_steps % checkpointing_steps == 0:
-                    output_dir = f"step_{completed_steps }"
+                    output_dir = f"step_{completed_steps}"
                     if args.output_dir is not None:
                         output_dir = os.path.join(args.output_dir, output_dir)
                     accelerator.save_state(output_dir)

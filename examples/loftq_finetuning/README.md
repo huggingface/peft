@@ -10,7 +10,7 @@ Steps:
 1. Apply LoftQ to a full-precision pre-trained weight and save.
 2. Load LoftQ initialization and train.
 
-For step 1, we have provided off-the-shelf LoftQ initializations (see [supported model list](#appendix-off-the-shelf-model-table)) 
+For step 1, we have provided off-the-shelf LoftQ initializations (see [supported model list](#appendix-off-the-shelf-model-list)) 
 in [Huggingface Hub LoftQ](https://huggingface.co/LoftQ).
 If you want to do it yourself, jump to [LoftQ DIY](#loftq-diy).
 
@@ -24,7 +24,7 @@ MODEL_ID = "LoftQ/Mistral-7B-v0.1-4bit-64rank"
 
 base_model = AutoModelForCausalLM.from_pretrained(
     MODEL_ID, 
-    torch_dtype=torch.bfloat16,  # you may change it with different models
+    dtype=torch.bfloat16,  # you may change it with different models
     quantization_config=BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_compute_dtype=torch.bfloat16,  # bfloat16 is recommended
@@ -46,7 +46,7 @@ peft_model = PeftModel.from_pretrained(
 
 ### Apply LoftQ and save
 We provide [quantize_save_load.py](quantize_save_load.py) as an example to apply LoftQ with 
-different bits(`--bits`), ranks(`--rank`), and alternating steps (`--iter`, a hyper-parameter in LoftQ, see Algorithm 1 in [LoftQ paper](https://arxiv.org/abs/2310.08659)). Currently, this example supports
+different bits(`--bits`), ranks(`--rank`), and alternating steps (`--iter`, a hyper-parameter in LoftQ, see Algorithm 1 in [LoftQ paper](https://huggingface.co/papers/2310.08659)). Currently, this example supports
 `llama-2`, `falcon`, `mistral`, `bart`, `t5`, `deberta`, `bert`, `roberta`.
 
 Below is an example of obtaining 4bit LLAMA-2-7b with 16-rank LoRA adapters by 5 alternating steps.
@@ -81,7 +81,7 @@ MODEL_DIR = "model_zoo/loftq/Llama-2-7b-hf-4bit-16rank"
 
 base_model = AutoModelForCausalLM.from_pretrained(
     MODEL_DIR, 
-    torch_dtype=torch.bfloat16,
+    dtype=torch.bfloat16,
     quantization_config=BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_compute_dtype=torch.bfloat16,

@@ -1,7 +1,7 @@
 import argparse
 import json
 import os
-from datetime import date
+from datetime import UTC, datetime
 from pathlib import Path
 
 from tabulate import tabulate
@@ -37,7 +37,7 @@ def main(slack_channel_name=None):
                 if line.get("nodeid", "") != "":
                     test = line["nodeid"]
                     if line.get("duration", None) is not None:
-                        duration = f'{line["duration"]:.4f}'
+                        duration = f"{line['duration']:.4f}"
                         if line.get("outcome", "") == "failed":
                             section_num_failed += 1
                             failed.append([test, duration, log.name.split("_")[0]])
@@ -127,7 +127,7 @@ def main(slack_channel_name=None):
             "elements": [
                 {
                     "type": "plain_text",
-                    "text": f"Nightly {os.environ.get('TEST_TYPE')} test results for {date.today()}",
+                    "text": f"Nightly {os.environ.get('TEST_TYPE')} test results for {datetime.now(UTC).date()}",
                 },
             ],
         }

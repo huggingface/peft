@@ -16,8 +16,10 @@
 # with some refactor
 import torch
 
+from peft.tuners.tuners_utils import BasePromptEncoder
 
-class PrefixEncoder(torch.nn.Module):
+
+class PrefixEncoder(BasePromptEncoder):
     r"""
     The `torch.nn` model to encode the prefix.
 
@@ -60,6 +62,7 @@ class PrefixEncoder(torch.nn.Module):
         num_layers = config.num_layers
         encoder_hidden_size = config.encoder_hidden_size
         num_virtual_tokens = config.num_virtual_tokens
+        init_weights = config.init_weights
         if self.prefix_projection and not config.inference_mode:
             # Use a two-layer MLP to encode the prefix
             self.embedding = torch.nn.Embedding(num_virtual_tokens, token_dim)
@@ -68,8 +71,14 @@ class PrefixEncoder(torch.nn.Module):
                 torch.nn.Tanh(),
                 torch.nn.Linear(encoder_hidden_size, num_layers * 2 * token_dim),
             )
+
+            if init_weights == "zero":
+                torch.nn.init.zeros_(self.transform[-1].weight.data)
+                torch.nn.init.zeros_(self.transform[-1].bias.data)
         else:
             self.embedding = torch.nn.Embedding(num_virtual_tokens, num_layers * 2 * token_dim)
+            if init_weights == "zero":
+                torch.nn.init.zeros_(self.embedding.weight.data)
 
     def forward(self, prefix: torch.Tensor):
         if self.prefix_projection:
@@ -78,3 +87,24 @@ class PrefixEncoder(torch.nn.Module):
         else:
             past_key_values = self.embedding(prefix)
         return past_key_values
+
+    def load_prompt_embeddings(self, prompt_embeddings: torch.Tensor) -> None:
+        """
+        Load the flattened prompt embeddings saved by PEFT (`prompt_embeddings`).
+
+        For prefix tuning, this is only supported when `prefix_projection=False`, because in that case the learned
+        parameters are the KV prefix itself (`embedding.weight` has shape `[num_virtual_tokens,
+        num_layers*2*token_dim]`).
+
+        If `prefix_projection=True`, the parameters are (virtual token embeddings + an MLP) and there is no general way
+        to invert the projection to recover those parameters from a flattened KV prefix.
+        """
+        if self.prefix_projection:
+            raise ValueError("Cannot load flattened prompt embeddings when `prefix_projection=True`.")
+        if prompt_embeddings.shape != self.embedding.weight.shape:
+            raise ValueError(
+                "Invalid `prompt_embeddings` shape. Expected "
+                f"{tuple(self.embedding.weight.shape)}, got {tuple(prompt_embeddings.shape)}."
+            )
+        with torch.no_grad():
+            self.embedding.weight.copy_(prompt_embeddings.to(self.embedding.weight.device))

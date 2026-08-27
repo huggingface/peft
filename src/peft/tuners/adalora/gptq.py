@@ -13,6 +13,7 @@
 # limitations under the License.
 import torch
 
+from .config import AdaLoraConfig
 from .layer import AdaLoraLayer
 
 
@@ -21,10 +22,9 @@ class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
         self,
         base_layer,
         adapter_name,
+        config: AdaLoraConfig,
         r: int = 0,
         lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
-        init_lora_weights: bool = True,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -34,7 +34,7 @@ class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
         # for backwards compatibility
         self.quant_linear_module = base_layer
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+        self.update_layer(adapter_name, r, lora_alpha=lora_alpha, config=config)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         result = self.quant_linear_module(x)
@@ -55,8 +55,7 @@ class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
             requires_conversion = not torch.is_autocast_enabled()
             if requires_conversion:
                 expected_dtype = result.dtype
-                if x.dtype != torch.float32:
-                    x = x.float()
+                x = self._cast_input_dtype(x, torch.float32)
 
             output = (dropout(x) @ (lora_A * lora_E).T @ lora_B.T) * scaling / ranknum
             # TODO: here, the dtype conversion is applied on the *whole expression*,
@@ -67,6 +66,6 @@ class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
             result += output
         return result
 
-        def __repr__(self) -> str:
-            rep = super().__repr__()
-            return "adalora." + rep
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "adalora." + rep

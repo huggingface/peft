@@ -1,0 +1,3 @@
+# Generating confidence intervals with PVeRA
+
+In normal mode, PVeRA samples from the learned distribution during training, and does a deterministic sample during inference at the learned latent distribution mean. Setting `sample_at_inference=True` enables to generate Monte Carlo confidence interval estimations by running multiple passes through each sample. The accompanying `examples/pvera/confidence_interval_generation.py` script shows an example of training a model on a simple dataset, saving the adapters, loading them with ```sample_at_inference=True```, and running a Monte Carlo confidence interval estimation on a sample.

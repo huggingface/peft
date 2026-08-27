@@ -1,14 +1,17 @@
 [tool.black]
 # Only used by `hf-doc-builder´.
 line-length = 119
-target-version = ['py38']
+target-version = ['py310']
 
 [tool.ruff]
-target-version = "py38"
+target-version = "py310"
 line-length = 119
-extend-exclude = ["*.ipynb"]
+extend-exclude = ["*.ipynb", "docs/**/*.md", "examples/**/*.md"]
+required-version = "~=0.16.2"
 
 [tool.ruff.lint]
+preview = true
+explicit-preview-rules = true
 extend-select = [
     "C", # Complexity
     "E", # PEP8 errors
@@ -17,11 +20,24 @@ extend-select = [
     "UP", # Pyupgrade upgrades
     "W", # PEP8 warnings
     "PT009", # Pytest assertions
+    "RUF022", # Sorting of __all__
+    "RUF068", # Duplicates in __all__
 ]
 ignore = [
     "C901", # Function too complex
     "E501", # Line length (handled by ruff-format)
+    "F841", # unused variable
     "UP007", # X | Y style Unions
+    "C420", # dict.fromkeys
+    "UP045", # don't force replacing Optional[X] with X | None
+    "SIM118", # `for key in dct.keys()` is allowed
+    "PLC0206", # allow iterating over dict keys and pulling values later, can be more consistent
+    "RUF012", # allow mutable default values, contrary to popular belief, not always evil
+    "B018", # a "useless expression" is not useless when it tests for an AttributeError
+    "SIM117", # allow nesting of `with` statements: can be *more* readable of they are long
+    "BLE001", # allow catching bare `Exception`
+    "SIM102", # collapse multiple `if` statements: nice to have but requires too many changes
+    "PYI041", # considers type annotations like int|float as redundant and wants float only, but type can carry semantic meaning (e.g. total number vs fraction)
 ]
 
 [tool.ruff.lint.isort]
@@ -35,11 +51,18 @@ doctest_optionflags = [
     "NUMBER",
 ]
 
-[tool.pytest.ini_options]
-addopts = "--cov=src/peft --cov-report=term-missing --durations=10"
+addopts = ["--cov=src/peft", "--cov-report=term-missing", "--durations=10"]
+
 markers = [
     "single_gpu_tests: tests that run on a single GPU",
     "multi_gpu_tests: tests that run on multiple GPUs",
     "regression: whether to run regression suite test",
-    "bitsandbytes: select bitsandbytes integration tests"
+    "bitsandbytes: select bitsandbytes integration tests",
+]
+
+filterwarnings = [
+    "error::DeprecationWarning:transformers",
+    # in sync with tests/conftest.py regarding BPE deprecation
+    "ignore:.*BPE.__init__ will not create from files anymore.*:DeprecationWarning:transformers",
+    "error::FutureWarning:transformers",
 ]

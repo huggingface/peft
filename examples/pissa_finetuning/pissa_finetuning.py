@@ -46,6 +46,7 @@ class ScriptArguments(SFTConfig):
     # dataset configs
     data_path: str = field(default="imdb", metadata={"help": "Path to the training data."})
     dataset_split: str = field(default="train[:1%]", metadata={"help": "(`['train', 'test', 'eval']`):"})
+    dataset_field: list[str] = field(default=None, metadata={"help": "Fields of dataset input and output."})
 
 
 parser = HfArgumentParser(ScriptArguments)
@@ -74,7 +75,7 @@ if script_args.bits in ["nf4", "fp4", "int8"]:
 elif script_args.residual_model_name_or_path is not None:
     res_model = AutoModelForCausalLM.from_pretrained(
         script_args.residual_model_name_or_path,
-        torch_dtype=(
+        dtype=(
             torch.float16
             if script_args.bits == "fp16"
             else (torch.bfloat16 if script_args.bits == "bf16" else torch.float32)
@@ -93,7 +94,7 @@ elif script_args.base_model_name_or_path is not None:
     )
     model = AutoModelForCausalLM.from_pretrained(
         script_args.base_model_name_or_path,
-        torch_dtype=(
+        dtype=(
             torch.float16
             if script_args.bits == "fp16"
             else (torch.bfloat16 if script_args.bits == "bf16" else torch.float32)
@@ -128,7 +129,7 @@ trainer = SFTTrainer(
     model=peft_model,
     args=script_args,
     train_dataset=dataset,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
 )
 trainer.train()
 trainer.save_state()
@@ -136,7 +137,7 @@ trainer.save_state()
 if script_args.convert_pissa_to_lora:
     peft_model.save_pretrained(
         os.path.join(script_args.output_dir, "pissa_lora"),
-        convert_pissa_to_lora=os.path.join(script_args.residual_model_name_or_path, "pissa_init"),
+        path_initial_model_for_weight_conversion=os.path.join(script_args.residual_model_name_or_path, "pissa_init"),
     )
 else:
     peft_model.save_pretrained(
