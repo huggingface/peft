@@ -25,9 +25,9 @@ from peft.utils.other import transpose
 
 
 class UniLoraLayer(BaseTunerLayer):
+    adapter_layer_names = ("unilora_theta_d",)
     other_param_names = (
         "r",
-        "unilora_theta_d",
         "unilora_indices_A",
         "unilora_indices_B",
         "unilora_scales_A",

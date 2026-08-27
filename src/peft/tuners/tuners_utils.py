@@ -1074,9 +1074,9 @@ class BaseTuner(nn.Module, ABC):
             parameter.requires_grad = requires_grad
 
         if self.peft_config[adapter_name].inference_mode:
-            for n, p in model.named_parameters():
-                if adapter_name in n:
-                    p.requires_grad = False
+            self.set_requires_grad(adapter_name, requires_grad=False)
+        elif not any(requires_grad for _, requires_grad in existing_parameter_trainability):
+            self.set_requires_grad(adapter_name)
 
         set_additional_trainable_modules(
             model=model,

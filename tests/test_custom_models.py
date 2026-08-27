@@ -6603,6 +6603,17 @@ class TestRequiresGrad:
         else:
             assert all(not p.requires_grad for p in model.parameters())
 
+        # load a third adapter with the opposite trainability; it is not automatically activated
+        model.load_adapter(tmp_path, adapter_name="opposite", is_trainable=not is_trainable)
+        for name, param in model.named_parameters():
+            if skip_ranknum and "ranknum" in name:
+                continue
+            expected_trainable_adapter = "default" if is_trainable else "opposite"
+            if f".{expected_trainable_adapter}" in name:
+                assert param.requires_grad
+            else:
+                assert not param.requires_grad
+
     @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
     @pytest.mark.parametrize("is_trainable", [False, True])  # note: default is False
     def test_loading_model_with_modules_to_save_requires_grad_set_correctly(self, config_cls, is_trainable, tmp_path):
@@ -6687,36 +6698,6 @@ class TestRequiresGrad:
                     assert not param.requires_grad
         else:
             assert all(not p.requires_grad for p in model.parameters())
-
-    @pytest.mark.xfail(strict=True)
-    @pytest.mark.parametrize("config_cls", [LoraConfig])  # no need to check each method, they all fail
-    def test_loading_model_requires_grad_set_correctly_switch_inference_mode(self, config_cls, tmp_path):
-        # Same as test_loading_model_requires_grad_set_correctly but this time we first load with is_trainable=False and
-        # then with is_trainable=True. Loading the second adapter should not affect the requires_grad of the first
-        # adapter, but it does. The reason is that is_training/inference_mode is taken from the current PEFT config, but
-        # that config does not necessarily belong to the active adapter, creating a mismatch.
-        # When/If this is fixed, the check can be integrated into test_loading_model_requires_grad_set_correctly and
-        # this test can be deleted.
-        model = DeepMLP(size=256)  # a size that works with all adapters
-        extra_kwargs = {}
-        config = config_cls(target_modules=["layers.0.lin0"])
-        model = get_peft_model(model, config)
-        model.save_pretrained(tmp_path)
-        del model
-
-        model = DeepMLP(size=256)
-        model = PeftModel.from_pretrained(model, tmp_path, is_trainable=False)
-        assert all(not p.requires_grad for p in model.parameters())
-
-        # load one more adapter; this adapter is not automatically activated
-        model.load_adapter(tmp_path, adapter_name="other", is_trainable=True)
-        params_with_grad = [n for n, p in model.named_parameters() if p.requires_grad]
-        expected = [
-            "base_model.model.layers.0.lin0.lora_A.other.weight",
-            "base_model.model.layers.0.lin0.lora_B.other.weight",
-        ]
-        # this fails, instead with get ...lora_A.default.weight and ...lora_B.default.weight
-        assert params_with_grad == expected
 
 
 # this is for PEFT methods that support mixed adapter batches.
