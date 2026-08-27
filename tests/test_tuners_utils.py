@@ -125,15 +125,19 @@ REGEX_TEST_CASES = [
     ("transformer.h.1.attn.attention.q_proj", ["q_proj", "v_proj"], [0, 1, 2], ["h"], True),
     ("foo.bar.q_proj", ["q_proj"], None, [], True),
     ("foo.bar.1.baz", ["baz"], [1], ["foo"], False),
-    # other corner cases. For ex, below is a case where layers_pattern
-    # is one of the target nn.modules
-    ("foo.bar.1.baz", ["baz"], [1], ["baz"], False),
-    # here, layers_pattern is 'bar', but only keys that contain '.bar' are valid.
     ("foo.bar.001.baz", ["baz"], [1], ["bar"], True),
     ("foo.bar.1.spam.2.baz", ["baz"], [1], ["bar"], True),
     ("foo.bar.2.spam.1.baz", ["baz"], [1], ["bar"], False),
-    # some realistic examples: module using nn.Sequential
-    # for the below test case, key should contain '.blocks' to be valid, because of how layers_pattern is matched
+    # same as previous 3 but without prefix before 'bar'; used not to match, but now matches
+    ("bar.001.baz", ["baz"], [1], ["bar"], True),
+    ("bar.1.spam.2.baz", ["baz"], [1], ["bar"], True),
+    ("bar.2.spam.1.baz", ["baz"], [1], ["bar"], False),
+    # other corner cases. For ex, below is a case where layers_pattern
+    # is one of the target nn.modules
+    ("foo.bar.1.baz", ["baz"], [1], ["baz"], False),
+    # some realistic examples: module using nn.Sequential, without and with prefix before 'blocks'
+    ("blocks.1.weight", ["weight"], [1], ["blocks"], True),
+    ("blocks.1.bias", ["weight"], [1], ["blocks"], False),
     ("mlp.blocks.1.weight", ["weight"], [1], ["blocks"], True),
     ("mlp.blocks.1.bias", ["weight"], [1], ["blocks"], False),
 ]
