@@ -2356,7 +2356,8 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
             else:
                 layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
                 for pattern in layers_pattern:
-                    match = re.match(rf"(.*\.)?{pattern}\.(?P<idx>\d+)\.", key)
+                    # Again, ensure to match the first index, not the last
+                    match = re.match(rf"(?:^|.*?\.){pattern}\.(?P<idx>\d+)\.", key)
                     if match is not None:
                         break
 

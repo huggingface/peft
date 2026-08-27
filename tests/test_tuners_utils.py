@@ -140,6 +140,11 @@ REGEX_TEST_CASES = [
     ("blocks.1.bias", ["weight"], [1], ["blocks"], False),
     ("mlp.blocks.1.weight", ["weight"], [1], ["blocks"], True),
     ("mlp.blocks.1.bias", ["weight"], [1], ["blocks"], False),
+    # multiple indices could potential match, we want the first one to count
+    ("model.layers.1.layers.0.up_proj", ["up_proj"], [1], ["layers"], True),
+    ("model.layers.1.layers.0.up_proj", ["up_proj"], [0], ["layers"], False),
+    ("layers.1.layers.0.up_proj", ["up_proj"], [1], ["layers"], True),
+    ("layers.1.layers.0.up_proj", ["up_proj"], [0], ["layers"], False),
 ]
 
 MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES = [
