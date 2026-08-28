@@ -2492,6 +2492,40 @@ class TestPeftCustomModel(PeftCommonTester):
         self._test_merge_layers_is_idempotent(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_merge_layers_is_deterministic_in_train_mode(self, test_name, model_id, config_cls, config_kwargs):
+        # Regression test for https://github.com/huggingface/peft/issues/3586: merging the same model twice in
+        # train mode must produce identical weights. The bug only matters for LoHa/LoKr (the only methods that
+        # use rank_dropout), but the contract is general and we parametrize over all mergeable configs for
+        # consistency with the other merge tests.
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        # LoHa/LoKr need a non-zero rank_dropout for the determinism contract to be meaningfully exercised;
+        # for other methods the param has no effect.
+        if config_cls in (LoHaConfig, LoKrConfig):
+            config_kwargs = {**config_kwargs, "rank_dropout": 0.5}
+
+        with hub_online_once(model_id):
+            base = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+            model = get_peft_model(base, config).to(self.torch_device)
+            model.train()  # the bug only manifests in train mode
+
+            model_a = copy.deepcopy(model)
+            model_b = copy.deepcopy(model)
+            model_a.merge_adapter()
+            model_b.merge_adapter()
+
+            merged_a = {n: p.detach().clone() for n, p in model_a.base_model.named_parameters()}
+            merged_b = {n: p.detach().clone() for n, p in model_b.base_model.named_parameters()}
+            assert merged_a.keys() == merged_b.keys()
+            for name in merged_a:
+                if not merged_a[name].is_floating_point():
+                    continue
+                assert torch.equal(merged_a[name], merged_b[name]), (
+                    f"Two merges in train mode diverged at {name} for {test_name} -- rank_dropout leaked into merge"
+                )
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_safe_merge(self, test_name, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 

@@ -109,7 +109,7 @@ class LycorisLayer(BaseTunerLayer):
         """Activations added on top of the base layer output (i.e. after the base layer forward pass)"""
 
     @abstractmethod
-    def get_delta_weight(self, adapter_name: str, *, apply_rank_dropout: bool = True) -> torch.Tensor: ...
+    def get_delta_weight(self, adapter_name: str, *, apply_rank_dropout: bool = False) -> torch.Tensor: ...
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -134,7 +134,7 @@ class LycorisLayer(BaseTunerLayer):
                 base_layer = self.get_base_layer()
                 if safe_merge:
                     orig_weights = base_layer.weight.data.clone()
-                    orig_weights += self.get_delta_weight(active_adapter, apply_rank_dropout=False)
+                    orig_weights += self.get_delta_weight(active_adapter)
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
@@ -143,7 +143,7 @@ class LycorisLayer(BaseTunerLayer):
 
                     base_layer.weight.data = orig_weights
                 else:
-                    base_layer.weight.data += self.get_delta_weight(active_adapter, apply_rank_dropout=False)
+                    base_layer.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
 
     @abstractmethod
@@ -175,7 +175,7 @@ class LycorisLayer(BaseTunerLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self._available_adapters:
-                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter, apply_rank_dropout=False)
+                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
 
     def unscale_layer(self, scale=None) -> None:
         for active_adapter in self.active_adapters:

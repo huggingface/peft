@@ -180,7 +180,7 @@ class LoHaLayer(nn.Module, LycorisLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters, inference_mode=inference_mode)
 
-    def get_delta_weight(self, adapter_name: str, *, apply_rank_dropout: bool = True) -> torch.Tensor:
+    def get_delta_weight(self, adapter_name: str, *, apply_rank_dropout: bool = False) -> torch.Tensor:
         # https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/loha.py#L178
         if adapter_name in self.hada_t1.keys():
             weight = make_weight_cp(
@@ -207,7 +207,8 @@ class LoHaLayer(nn.Module, LycorisLayer):
         weight = weight.reshape(base_layer.weight.shape)
 
         # Perform rank dropout during training - drop rows of addition weights
-        # Merge/unmerge pass `apply_rank_dropout=False` so that the folded weights don't depend on RNG state (#3586).
+        # Rank dropout is opt-in (default off) so merge/unmerge and any other callers that don't explicitly
+        # want a random mask get a deterministic delta. The forward path opts in via apply_rank_dropout=True.
         rank_dropout = self.rank_dropout[adapter_name]
         if apply_rank_dropout and self.training and rank_dropout:
             drop = (torch.rand(weight.size(0)) > rank_dropout).to(weight.dtype)
@@ -268,7 +269,7 @@ class Linear(LoHaLayer):
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
-        delta_weight = self.get_delta_weight(adapter_name)
+        delta_weight = self.get_delta_weight(adapter_name, apply_rank_dropout=True)
         input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         return F.linear(input, delta_weight)
@@ -302,7 +303,7 @@ class Conv2d(LoHaLayer):
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
-        delta_weight = self.get_delta_weight(adapter_name)
+        delta_weight = self.get_delta_weight(adapter_name, apply_rank_dropout=True)
         input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
@@ -341,7 +342,7 @@ class Conv1d(LoHaLayer):
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
-        delta_weight = self.get_delta_weight(adapter_name)
+        delta_weight = self.get_delta_weight(adapter_name, apply_rank_dropout=True)
         input = self._cast_input_dtype(input, delta_weight.dtype)
         # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
