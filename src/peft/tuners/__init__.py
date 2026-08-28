@@ -66,6 +66,7 @@ from .psoft import PsoftConfig, PsoftModel
 from .pvera import PveraConfig, PveraModel
 from .randlora import RandLoraConfig, RandLoraModel
 from .road import RoadConfig, RoadModel
+from .shadow import ShadowConfig, ShadowModel
 from .shira import ShiraConfig, ShiraModel
 from .supertuning import SupertuningConfig, SupertuningModel
 from .tinylora import TinyLoraConfig, TinyLoraModel
@@ -160,6 +161,8 @@ __all__ = [
     "RandLoraModel",
     "RoadConfig",
     "RoadModel",
+    "ShadowConfig",
+    "ShadowModel",
     "ShiraConfig",
     "ShiraModel",
     "SupertuningConfig",
