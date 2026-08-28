@@ -27,7 +27,7 @@ import torch.nn.functional as F
 from torch import nn, svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
-from peft.import_utils import is_transformers_ge_v5_4_0
+from peft.import_utils import is_transformers_dtensor_tp, is_transformers_ge_v5_4_0
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import (
     BaseTunerLayer,
@@ -43,6 +43,7 @@ from peft.utils.integrations import (
 )
 from peft.utils.loftq_utils import loftq_init
 from peft.utils.other import transpose
+from peft.utils.tp import LoraEmbeddingATPHolder, make_embedding_lora_tp_fns
 from peft.utils.warning import PeftWarning
 
 from .config import LoraConfig
@@ -1086,16 +1087,6 @@ class Linear(nn.Module, LoraLayer):
         return "lora." + rep
 
 
-class _LoraEmbeddingAHolder(nn.Module):
-    """
-    A "fake" module to hold the lora_embedding_A weights for the TP hooks.
-    """
-
-    def __init__(self, lora_embedding_A_weight):
-        super().__init__()
-        self.weight = lora_embedding_A_weight.T  # lora_embedding_A shape is (r, vocab_size)
-
-
 class Embedding(nn.Module, LoraLayer):
     # LoRA implemented in a Embedding layer
     def __init__(
@@ -1222,13 +1213,22 @@ class Embedding(nn.Module, LoraLayer):
 
         # If there is tensor parallelism, we register the hooks for `self._embed`.
         if self.tp_layer is not None:
-            mod = _LoraEmbeddingAHolder(self.lora_embedding_A[adapter_name])
+            mod = LoraEmbeddingATPHolder(self.lora_embedding_A[adapter_name])
 
-            def input_fn(inputs):
-                return self.tp_layer._prepare_input_fn(mod, inputs, self.device_mesh)
+            if is_transformers_dtensor_tp:
+                # The new DTensor-based TP API has no `_prepare_input_fn`/`_prepare_output_fn`
+                # on `self.tp_layer`; shard `lora_embedding_A` and build equivalent callables.
+                sharded_weight, input_fn, output_fn = make_embedding_lora_tp_fns(
+                    self.tp_layer, mod, self.device_mesh
+                )
+                self.lora_embedding_A[adapter_name] = sharded_weight
+            else:
 
-            def output_fn(outputs):
-                return self.tp_layer._prepare_output_fn(mod, outputs, self.device_mesh)
+                def input_fn(inputs):
+                    return self.tp_layer._prepare_input_fn(mod, inputs, self.device_mesh)
+
+                def output_fn(outputs):
+                    return self.tp_layer._prepare_output_fn(mod, outputs, self.device_mesh)
 
             self.input_fns[adapter_name] = input_fn
             self.output_fns[adapter_name] = output_fn

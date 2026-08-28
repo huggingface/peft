@@ -27,7 +27,7 @@ from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
 from transformers.utils import http_user_agent
 
-from peft.import_utils import is_transformers_ge_v5
+from peft.import_utils import is_transformers_dtensor_tp, is_transformers_ge_v5
 from peft.mapping import PEFT_TYPE_TO_TUNER_MAPPING
 
 from .constants import INCLUDE_LINEAR_LAYERS_SHORTHAND
@@ -42,6 +42,7 @@ from .other import (
     match_target_against_key,
 )
 from .peft_types import PeftType
+from .tp import shard_lora_tensor_for_load
 
 
 def has_valid_embedding_base_layer(layer):
@@ -359,12 +360,13 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
     if not tp_lora_modules:
         return
 
-    from transformers.integrations.tensor_parallel import (
-        ALL_PARALLEL_STYLES,
-        ColwiseParallel,
-        EmbeddingParallel,
-        RowwiseParallel,
-    )
+    if not is_transformers_dtensor_tp:
+        from transformers.integrations.tensor_parallel import (
+            ALL_PARALLEL_STYLES,
+            ColwiseParallel,
+            EmbeddingParallel,
+            RowwiseParallel,
+        )
 
     should_check = True
     prefix_to_remove = None
@@ -406,6 +408,24 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
             name = name.removeprefix(prefix_to_remove)
         if prefix_to_add:
             name = prefix_to_add + name
+
+        if is_transformers_dtensor_tp:
+            if tp_plan == "colwise":
+                key = f"{name}.lora_B{adapter_name_in_key}.weight"
+            elif tp_plan == "rowwise":
+                key = f"{name}.lora_A{adapter_name_in_key}.weight"
+            elif tp_plan == "embedding_rowwise":
+                embedding_key = f"{name}.base_layer.weight"
+                if embedding_key in state_dict:
+                    state_dict[embedding_key] = shard_lora_tensor_for_load(
+                        state_dict[embedding_key], tp_plan, device_mesh, is_embedding_weight=True
+                    )
+                key = f"{name}.lora_embedding_A{adapter_name_in_key}"
+            else:
+                raise TypeError(f"Unknown tensor parallel plan {tp_plan} for {module.__class__.__name__}.")
+
+            state_dict[key] = shard_lora_tensor_for_load(state_dict[key], tp_plan, device_mesh)
+            continue
 
         # We create and initialize the TensorParallelLayer on the fly,
         # and we set the `empty_param` attribute depending on the proper

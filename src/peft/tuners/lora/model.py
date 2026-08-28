@@ -28,7 +28,12 @@ import torch
 import transformers
 from torch import nn
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_transformers_ge_v5_4_0
+from peft.import_utils import (
+    is_bnb_4bit_available,
+    is_bnb_available,
+    is_transformers_dtensor_tp,
+    is_transformers_ge_v5_4_0,
+)
 from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
@@ -49,6 +54,7 @@ from peft.utils.integrations import TpInfo
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 from peft.utils.other import get_pattern_key
 from peft.utils.save_and_load import _maybe_shard_state_dict_for_tp
+from peft.utils.tp import add_lora_tp_hooks_dtensor, stamp_tp_shim_attrs
 
 from .aqlm import dispatch_aqlm
 from .awq import dispatch_awq
@@ -277,7 +283,18 @@ class LoraModel(BaseTuner):
 
         # if the target is a ParamWrapper, we nest it to allow targeting multiple nn.Parameter on the same module
         wrap_target_param = isinstance(target, ParamWrapper) and (adapter_name in target.lora_A)
-        if isinstance(target, LoraLayer) and not isinstance(target, AdaLoraLayer) and not wrap_target_param:
+        is_existing_lora_layer = isinstance(target, LoraLayer) and not isinstance(target, AdaLoraLayer) and not wrap_target_param
+
+        if is_transformers_dtensor_tp:
+            # Transformers' newer DTensor-based TP API stores the plan/mesh on the top-level
+            # model (`model.tp_plan`/`model._device_mesh`) instead of per-module attributes. Stamp
+            # the old per-module attribute names onto the base layer before `update_layer`/
+            # `_create_new_module` run below.
+            stamp_tp_shim_attrs(
+                target.get_base_layer() if is_existing_lora_layer else target, self.model, current_key
+            )
+
+        if is_existing_lora_layer:
             target.update_layer(
                 adapter_name,
                 r,
@@ -314,9 +331,10 @@ class LoraModel(BaseTuner):
                     "The base model is tensor-parallel sharded but the installed version of Transformers does not "
                     "support LoRA with Tensor Parallelism. Please upgrade to transformers >= 5.4.0."
                 )
-            from transformers.integrations.tensor_parallel import (
-                add_tensor_parallel_hooks_to_module,
-            )
+            if not is_transformers_dtensor_tp:
+                from transformers.integrations.tensor_parallel import (
+                    add_tensor_parallel_hooks_to_module,
+                )
 
             _SUPPORTED_TP_PLANS = ("colwise", "rowwise", "embedding_rowwise")
 
@@ -339,13 +357,21 @@ class LoraModel(BaseTuner):
                         tp_module = lora_module.lora_A[adapter_name]
                         tp_layer_name = (f"{current_key}.lora_A.{adapter_name}",)
                     tp_plans.append(tp_plan)
-                    add_tensor_parallel_hooks_to_module(
-                        self.model,
-                        tp_module,
-                        tp_plan,
-                        tp_layer_name,
-                        device_mesh,
-                    )
+                    if is_transformers_dtensor_tp:
+                        add_lora_tp_hooks_dtensor(
+                            tp_module,
+                            tp_plan,
+                            device_mesh,
+                            parameter_name=f"{tp_layer_name[0]}.weight",
+                        )
+                    else:
+                        add_tensor_parallel_hooks_to_module(
+                            self.model,
+                            tp_module,
+                            tp_plan,
+                            tp_layer_name,
+                            device_mesh,
+                        )
                 else:  # embedding_rowwise
                     # TP hooks are  handled in the `_embed` method in lora/layer.py where they are explicitly called.
                     # Here we simply register the TP plans.

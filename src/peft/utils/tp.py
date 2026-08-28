@@ -34,22 +34,10 @@ from torch import nn
 
 
 def _replace_layer_number_by_wildcard(name: str) -> str:
-    """Port of `transformers.distributed.tensor_parallel.replace_layer_number_by_wildcard`.
-
-    Replaces numbers that sit between dots (or between a dot and the end of the string) with a
-    wildcard, matching how `model.tp_plan` keys are generated for `nn.ModuleList`/`nn.Sequential`
-    layers (e.g. `"model.layers.0.self_attn.q_proj"` -> `"model.layers.*.self_attn.q_proj"`).
-    """
     return re.sub(r"\.\d+(\.|$)", lambda m: ".*" + m.group(1), name)
 
 
 def get_tp_plan_and_mesh(model, current_key: str):
-    """New-path equivalent of reading `_hf_tp_plan`/`_hf_device_mesh` off a base layer.
-
-    In the DTensor API the plan lives on the top-level model as a dict keyed by wildcarded
-    module path, and the mesh is a single `model._device_mesh`. Returns `(None, None)` if
-    `current_key` has no entry in the plan.
-    """
     tp_plan = getattr(model, "tp_plan", None)
     device_mesh = getattr(model, "_device_mesh", None)
     if not tp_plan or device_mesh is None:
@@ -61,10 +49,6 @@ def get_tp_plan_and_mesh(model, current_key: str):
 
 
 def stamp_tp_shim_attrs(base_layer, model, current_key: str) -> None:
-    """Stamp `_hf_tp_plan`/`_hf_device_mesh` onto `base_layer`, mirroring what transformers' old
-    hook-based API used to set on every TP-sharded module, so the rest of PEFT's LoRA/TP code
-    (which reads those two attributes) keeps working unchanged under the new DTensor API.
-    """
     if getattr(base_layer, "_hf_tp_plan", None) is not None:
         return  # already set, e.g. when adding a 2nd adapter to an already-processed layer
     tp_plan, device_mesh = get_tp_plan_and_mesh(model, current_key)
@@ -75,15 +59,6 @@ def stamp_tp_shim_attrs(base_layer, model, current_key: str) -> None:
 
 
 def add_lora_tp_hooks_dtensor(tp_module: nn.Module, tp_plan_name: str, device_mesh, *, parameter_name: str) -> None:
-    """New-path replacement for `add_tensor_parallel_hooks_to_module`.
-
-    Mirrors the per-module body of `transformers.distributed.tensor_parallel.apply_tensor_parallelism`:
-    validate, shard the module's `weight` parameter in place (turns it into a DTensor), and wrap
-    `forward` to convert DTensor inputs/outputs. `tp_module` is a newly-created `lora_A`/`lora_B`
-    submodule (a plain `nn.Linear`), created after the base model was already TP-sharded, so it
-    needs the same treatment `apply_tensor_parallelism` would have given it if it had existed at
-    load time.
-    """
     from transformers.distributed.tensor_parallel import ALL_PARALLEL_STYLES
 
     style = ALL_PARALLEL_STYLES[tp_plan_name]
@@ -93,12 +68,6 @@ def add_lora_tp_hooks_dtensor(tp_module: nn.Module, tp_plan_name: str, device_me
 
 
 def shard_lora_tensor_for_load(full_tensor: torch.Tensor, tp_plan_name: str, device_mesh, *, is_embedding_weight: bool = False):
-    """New-path replacement for the old `tp_layer.shard_tensor(...)` call in
-    `_maybe_shard_state_dict_for_tp`. Returns a `DTensor` with the same global shape, mesh, and
-    placement `TensorParallelLayer.shard_param` would have produced for the corresponding live
-    module parameter, so it can be assigned via `model.load_state_dict(..., assign=True)` or
-    copied in place into the existing (already-sharded) `DTensor` parameter.
-    """
     from torch.distributed.tensor import Shard, distribute_tensor
 
     if tp_plan_name == "colwise":
@@ -116,14 +85,6 @@ def shard_lora_tensor_for_load(full_tensor: torch.Tensor, tp_plan_name: str, dev
 
 
 class LoraEmbeddingATPHolder(nn.Embedding):
-    """Minimal real `nn.Embedding` wrapping `lora_embedding_A` so the DTensor `RowwiseParallel`
-    style (whose methods branch on `isinstance(module, nn.Embedding)`) can shard/forward it. This
-    replaces the old `_LoraEmbeddingAHolder(nn.Module)` trick, which relied on the now-removed
-    `EmbeddingParallel._prepare_input_fn`/`_prepare_output_fn` not caring about module type.
-
-    Weight is stored as `(vocab_size, r)` — the transpose of `lora_embedding_A`'s own
-    `(r, vocab_size)` layout — matching what a real embedding table looks like.
-    """
 
     def __init__(self, lora_embedding_A_weight: nn.Parameter):
         nn.Module.__init__(self)
@@ -140,20 +101,13 @@ class LoraEmbeddingATPHolder(nn.Embedding):
         )
 
 
-def make_embedding_lora_tp_fns(style, lora_embedding_A_weight: nn.Parameter, device_mesh):
-    """New-path replacement for the old `EmbeddingParallel._prepare_input_fn`/`_prepare_output_fn`
-    wiring used by `Embedding.update_layer`. `style` is the "embedding_rowwise"
-    `RowwiseParallel` instance already built in `Embedding.__init__` (`self.tp_layer`).
-
-    Shards a copy of `lora_embedding_A_weight` along the vocab dimension (matching
-    "embedding_rowwise") and returns `(sharded_weight, input_fn, output_fn)`. The caller is
-    responsible for replacing `self.lora_embedding_A[adapter_name]` with `sharded_weight` (mirrors
-    how `TensorParallelLayer.shard_param` itself replaces the module's parameter object, rather
-    than mutating `.data` on the existing one in place).
+def make_embedding_lora_tp_fns(style, holder: LoraEmbeddingATPHolder, device_mesh):
+    """New-path replacement for `EmbeddingParallel._prepare_input_fn`/`_prepare_output_fn`.
+    `holder` is the same `LoraEmbeddingATPHolder` instance the old path also builds in
+    `Embedding.update_layer`, so construction stays symmetric between the two branches.
     """
-    holder = LoraEmbeddingATPHolder(lora_embedding_A_weight)
     style.shard_param(holder, "weight", device_mesh)
-    sharded_weight = nn.Parameter(holder.weight.T, requires_grad=lora_embedding_A_weight.requires_grad)
+    sharded_weight = nn.Parameter(holder.weight.T, requires_grad=holder.weight.requires_grad)
 
     def input_fn(inputs):
         (x,), _ = style.transform_inputs_pre_forward(holder, inputs, {}, device_mesh)
