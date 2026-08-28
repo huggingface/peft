@@ -454,17 +454,20 @@ def hotswap_adapter_from_state_dict(
     # Hot-swapping only manipulates the adapter weights, but a merged adapter has its delta already folded into the
     # base weights. In that case the swap would have no visible effect (merged forward ignores adapter weights) and a
     # subsequent unmerge would subtract the NEW delta from a base containing the OLD delta, corrupting the weights
-    # (see #3581). Refuse to run instead.
+    # (see #3581). Refuse to run instead. Note: a different adapter being merged is fine because it does not
+    # interact with the adapter being swapped out.
     from peft.tuners.tuners_utils import BaseTunerLayer
 
-    merged_layers = [
-        name for name, module in model.named_modules() if isinstance(module, BaseTunerLayer) and module.merged
-    ]
-    if merged_layers:
+    target_merged = any(
+        adapter_name in module.merged_adapters
+        for module in model.modules()
+        if isinstance(module, BaseTunerLayer)
+    )
+    if target_merged:
         raise ValueError(
-            f"Cannot hot-swap adapter '{adapter_name}' because some adapters are currently merged into the base "
-            f"weights (e.g. {merged_layers[0]}). Call `model.unmerge_adapter()` first; note that unmerging after a "
-            "swap of merged weights would otherwise corrupt them."
+            f"Cannot hot-swap adapter '{adapter_name}' because it is currently merged into the base weights. "
+            "Call `model.unmerge_adapter()` first; note that unmerging after a swap of merged weights would "
+            "otherwise corrupt them."
         )
 
     # Ensure that all the keys of the new adapter correspond exactly to the keys of the old adapter, otherwise

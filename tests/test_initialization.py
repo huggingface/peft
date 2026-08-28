@@ -4763,6 +4763,53 @@ class TestHotSwapping:
         # real check: model now behaves again like adapter 0
         assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
 
+    def test_hotswap_raises_when_target_adapter_merged(self, tmp_path):
+        # Regression test for https://github.com/huggingface/peft/issues/3581 (case 1):
+        # hot-swapping an adapter that is currently merged into the base weights would silently keep the old
+        # adapter active (merged forward ignores adapter weights) and a subsequent unmerge would subtract the NEW
+        # delta from a base containing the OLD delta, corrupting the weights. Hot-swapping must refuse to run in
+        # this case.
+        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+
+        torch.manual_seed(0)
+        model0 = get_peft_model(self.get_model(), config)
+        model0.save_pretrained(tmp_path / "adapter0")
+        del model0
+
+        torch.manual_seed(1)
+        model1 = get_peft_model(self.get_model(), config)
+        model1.save_pretrained(tmp_path / "adapter1")
+        del model1
+
+        model = PeftModel.from_pretrained(self.get_model(), tmp_path / "adapter0")
+        model.merge_adapter()
+
+        with pytest.raises(ValueError, match="merged"):
+            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+
+    def test_hotswap_allowed_when_other_adapter_merged(self, tmp_path):
+        # If the adapter that is being merged is NOT the one being swapped out, the swap is still safe because
+        # the merged adapter does not interact with the swapped-out adapter's weights. We should not raise.
+        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+
+        torch.manual_seed(0)
+        model0 = get_peft_model(self.get_model(), config)
+        model0.save_pretrained(tmp_path / "adapter0")
+        del model0
+
+        torch.manual_seed(1)
+        model1 = get_peft_model(self.get_model(), config)
+        model1.save_pretrained(tmp_path / "adapter1")
+        del model1
+
+        model = PeftModel.from_pretrained(self.get_model(), tmp_path / "adapter0")
+        # add a second adapter and merge IT, then hotswap the unrelated "default" adapter
+        model.add_adapter("other", config)
+        model.merge_adapter(adapter_names=["other"])
+
+        # must not raise: the adapter being swapped out ("default") is not merged
+        hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+
     def test_prepare_model_for_compiled_hotswap_scalings_are_tensors(self):
         config = LoraConfig(target_modules=["lin0", "lin1"])
         model = self.get_model()
@@ -6355,74 +6402,3 @@ class TestTinyLoraInitialization:
         assert len(model.tinylora_v["b"]) == len(model_control.tinylora_v["b"]) == 1
 
 
-class TestHotswapMergedGuard:
-    # Regression test for https://github.com/huggingface/peft/issues/3581 (case 1):
-    # hot-swapping an adapter while it was merged into the base weights silently
-    # kept the old adapter active (merged forward ignores adapter weights), and a
-    # subsequent unmerge subtracted the NEW delta from a base containing the OLD
-    # delta. Hot-swapping must refuse to run while adapters are merged.
-
-    @pytest.fixture
-    def two_lora_dirs(self, tmp_path):
-        from transformers import LlamaConfig, LlamaForCausalLM
-
-        def make(path, seed):
-            torch.manual_seed(seed)
-            base = LlamaForCausalLM(
-                LlamaConfig(
-                    vocab_size=64,
-                    hidden_size=32,
-                    intermediate_size=64,
-                    num_hidden_layers=2,
-                    num_attention_heads=4,
-                    num_key_value_heads=2,
-                )
-            )
-            model = get_peft_model(base, LoraConfig(r=4, lora_alpha=8, target_modules=["q_proj"], lora_dropout=0.0))
-            for name, param in model.named_parameters():
-                if "lora_" in name:
-                    torch.nn.init.normal_(param, std=0.1)
-            model.save_pretrained(path)
-
-        make(str(tmp_path / "a0"), 0)
-        make(str(tmp_path / "a1"), 1)
-        return str(tmp_path / "a0"), str(tmp_path / "a1")
-
-    def test_hotswap_raises_while_merged(self, two_lora_dirs):
-        from transformers import LlamaConfig, LlamaForCausalLM
-
-        base = LlamaForCausalLM(
-            LlamaConfig(
-                vocab_size=64,
-                hidden_size=32,
-                intermediate_size=64,
-                num_hidden_layers=2,
-                num_attention_heads=4,
-                num_key_value_heads=2,
-            )
-        )
-        d0, d1 = two_lora_dirs
-        model = PeftModel.from_pretrained(base, d0)
-        model.merge_adapter()
-
-        with pytest.raises(ValueError, match="merged"):
-            hotswap_adapter(model, d1, "default")
-
-    def test_hotswap_still_works_when_not_merged(self, two_lora_dirs):
-        from transformers import LlamaConfig, LlamaForCausalLM
-
-        base = LlamaForCausalLM(
-            LlamaConfig(
-                vocab_size=64,
-                hidden_size=32,
-                intermediate_size=64,
-                num_hidden_layers=2,
-                num_attention_heads=4,
-                num_key_value_heads=2,
-            )
-        )
-        d0, d1 = two_lora_dirs
-        model = PeftModel.from_pretrained(base, d0)
-        hotswap_adapter(model, d1, "default")  # must not raise
-        ids = torch.randint(0, 64, (2, 8))
-        assert model(ids).logits.shape == (2, 8, 64)
