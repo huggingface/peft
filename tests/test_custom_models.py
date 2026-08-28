@@ -6593,10 +6593,11 @@ class TestRequiresGrad:
             return
         model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
         if is_trainable:
+            expected_trainable_adapters = ("default", "other")
             for name, param in model.named_parameters():
                 if skip_ranknum and "ranknum" in name:
                     continue
-                if ".default" in name:
+                if any(f".{adapter_name}" in name for adapter_name in expected_trainable_adapters):
                     assert param.requires_grad
                 else:
                     assert not param.requires_grad
@@ -6605,14 +6606,44 @@ class TestRequiresGrad:
 
         # load a third adapter with the opposite trainability; it is not automatically activated
         model.load_adapter(tmp_path, adapter_name="opposite", is_trainable=not is_trainable)
+        expected_trainable_adapters = ("default", "other") if is_trainable else ("opposite",)
         for name, param in model.named_parameters():
             if skip_ranknum and "ranknum" in name:
                 continue
-            expected_trainable_adapter = "default" if is_trainable else "opposite"
-            if f".{expected_trainable_adapter}" in name:
+            if any(f".{adapter_name}" in name for adapter_name in expected_trainable_adapters):
                 assert param.requires_grad
             else:
                 assert not param.requires_grad
+
+        if config_cls is AdaLoraConfig:
+            # AdaLoRA structurally rejects adding another training-mode config.
+            return
+
+        # add_adapter does not request trainability; the new adapter stays frozen and existing state is unchanged
+        model.add_adapter(adapter_name="added", peft_config=config)
+        for name, param in model.named_parameters():
+            if skip_ranknum and "ranknum" in name:
+                continue
+            if any(f".{adapter_name}" in name for adapter_name in expected_trainable_adapters):
+                assert param.requires_grad
+            else:
+                assert not param.requires_grad
+
+    def test_loading_adapter_preserves_custom_requires_grad(self, tmp_path):
+        config = LoraConfig(target_modules=["layers.0.lin0"])
+        source_model = get_peft_model(DeepMLP(size=256), config)
+        source_model.save_pretrained(tmp_path)
+
+        model = get_peft_model(DeepMLP(size=256), config)
+        model.base_model.model.layers[0].lin0.base_layer.weight.requires_grad = True
+        model.base_model.model.layers[0].lin0.lora_A["default"].weight.requires_grad = False
+        existing_requires_grad = {name: param.requires_grad for name, param in model.named_parameters()}
+
+        model.load_adapter(tmp_path, adapter_name="other", is_trainable=False)
+
+        for name, requires_grad in existing_requires_grad.items():
+            assert model.get_parameter(name).requires_grad is requires_grad
+        assert all(not param.requires_grad for name, param in model.named_parameters() if ".other" in name)
 
     @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
     @pytest.mark.parametrize("is_trainable", [False, True])  # note: default is False
@@ -6657,10 +6688,11 @@ class TestRequiresGrad:
             return
         model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
         if is_trainable:
+            expected_trainable_adapters = ("default", "other")
             for name, param in model.named_parameters():
                 if skip_ranknum and "ranknum" in name:
                     continue
-                if ".default" in name:
+                if any(f".{adapter_name}" in name for adapter_name in expected_trainable_adapters):
                     assert param.requires_grad
                 else:
                     assert not param.requires_grad
@@ -6691,8 +6723,9 @@ class TestRequiresGrad:
         # load one more adapter
         model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
         if is_trainable:
+            expected_trainable_adapters = ("default", "other")
             for name, param in model.named_parameters():
-                if ".default" in name:
+                if any(f".{adapter_name}" in name for adapter_name in expected_trainable_adapters):
                     assert param.requires_grad
                 else:
                     assert not param.requires_grad

@@ -832,7 +832,7 @@ class BaseTuner(nn.Module, ABC):
         # Adding an adapter must not change the trainability of parameters that were already present. Some tuners
         # create their new adapter parameters before calling this method, so exclude those from the snapshot.
         existing_adapter_prefixes = []
-        existing_parameter_trainability = []
+        mapping_existing_parameter_requires_grad = []
         seen_parameters = set()
         for key, module in named_modules:
             if isinstance(module, BaseTunerLayer):
@@ -843,10 +843,11 @@ class BaseTuner(nn.Module, ABC):
                     continue
                 seen_parameters.add(id(parameter))
                 if f".{adapter_name}." not in full_name and not full_name.endswith(f".{adapter_name}"):
-                    existing_parameter_trainability.append((parameter, parameter.requires_grad))
+                    mapping_existing_parameter_requires_grad.append((parameter, parameter.requires_grad))
 
         if not existing_adapter_prefixes:
-            existing_parameter_trainability = []
+            # The first injection should freeze the base model instead of restoring its default trainability.
+            mapping_existing_parameter_requires_grad = []
 
         uses_dummy_target_modules = getattr(peft_config, "target_modules", None) == DUMMY_TARGET_MODULES
         if uses_dummy_target_modules:
@@ -1070,14 +1071,6 @@ class BaseTuner(nn.Module, ABC):
         self.set_adapter(self.active_adapters, inference_mode=peft_config.inference_mode)
         self._mark_only_adapters_as_trainable(model)
 
-        for parameter, requires_grad in existing_parameter_trainability:
-            parameter.requires_grad = requires_grad
-
-        if self.peft_config[adapter_name].inference_mode:
-            self.set_requires_grad(adapter_name, requires_grad=False)
-        elif not any(requires_grad for _, requires_grad in existing_parameter_trainability):
-            self.set_requires_grad(adapter_name)
-
         set_additional_trainable_modules(
             model=model,
             peft_config=peft_config,
@@ -1085,6 +1078,9 @@ class BaseTuner(nn.Module, ABC):
             adapter_name=adapter_name,
             activate_adapter=adapter_name in self.active_adapters,
         )
+
+        for parameter, requires_grad in mapping_existing_parameter_requires_grad:
+            parameter.requires_grad = requires_grad
 
     def _inject_parameters(
         self, peft_config: PeftConfig, model: nn.Module, adapter_name: str, low_cpu_mem_usage: bool
