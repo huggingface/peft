@@ -1266,7 +1266,14 @@ class PeftCommonTester:
 
             grads_checkpointing = get_grads()
 
-            # zero gradients can show up as floating point noise, so only check the clearly non-zero ones
+            # What is being checked is that the gradient reaches the parameter at all, not that its value is correct.
+            # If gradient checkpointing were broken, backward would not reach the parameter and the gradient would be
+            # exactly 0. A tiny value is instead the rounding residue of terms that cancelled, i.e. evidence that
+            # backward did reach the parameter, hence `> 0` is the right check. Whether such a residue ends up as 0 or
+            # as, say, 1e-9 depends on the reduction order inside the kernels and is not deterministic on all devices.
+            # The threshold therefore only decides whether a parameter is checked at all, keeping the range where noise
+            # and real gradients overlap out of the assertion. Using the threshold on both sides would put that
+            # ambiguous range back in, and no single value for it separates noise from signal for all parameters.
             threshold = max([*grads_normal.values(), *grads_checkpointing.values()], default=0.0) * 1e-6
             for n in grads_normal:
                 if grads_normal[n] > threshold:
