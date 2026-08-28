@@ -667,21 +667,25 @@ class TestLoraNestedConfigRoundTrip:
     # nested LoRA sub-configs used to come back as plain dicts after
     # save_pretrained → from_pretrained, crashing consumers with AttributeError.
     @pytest.mark.parametrize(
-        "attribute_name, nested_config_cls",
+        "attribute_name, nested_config_cls, dummy_field, dummy_value",
         [
-            ("eva_config", EvaConfig),
-            ("corda_config", CordaConfig),
-            ("arrow_config", ArrowConfig),
-            ("lora_ga_config", LoraGAConfig),
-            ("use_bdlora", BdLoraConfig),
+            ("eva_config", EvaConfig, "rho", 7.5),
+            ("corda_config", CordaConfig, "corda_method", "kpm"),
+            ("arrow_config", ArrowConfig, "top_k", 4),
+            ("lora_ga_config", LoraGAConfig, "direction", "ArBr"),
+            ("use_bdlora", BdLoraConfig, "nblocks", 4),
         ],
     )
-    def test_nested_config_survives_save_load_roundtrip(self, attribute_name, nested_config_cls):
+    def test_nested_config_survives_save_load_roundtrip(
+        self, attribute_name, nested_config_cls, dummy_field, dummy_value
+    ):
         config = LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0)
-        setattr(config, attribute_name, nested_config_cls())
+        setattr(config, attribute_name, nested_config_cls(**{dummy_field: dummy_value}))
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
             config.save_pretrained(tmp_dirname)
             loaded = LoraConfig.from_pretrained(tmp_dirname)
 
-        assert isinstance(getattr(loaded, attribute_name), nested_config_cls)
+        nested = getattr(loaded, attribute_name)
+        assert isinstance(nested, nested_config_cls)
+        assert getattr(nested, dummy_field) == dummy_value
