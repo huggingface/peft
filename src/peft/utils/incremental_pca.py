@@ -73,7 +73,7 @@ class IncrementalPCA:
             if self.n_components is None:
                 raise ValueError("n_components must be specified when using lowrank mode with lowrank_q=None.")
             self.lowrank_q = self.n_components * 2
-        elif self.lowrank_q < self.n_components:
+        elif self.n_components is not None and self.lowrank_q < self.n_components:
             raise ValueError("lowrank_q must be greater than or equal to n_components.")
 
     def _svd_fn_full(self, X):
@@ -105,16 +105,18 @@ class IncrementalPCA:
             X = X.clone()
 
         n_samples, n_features = X.shape
-        if self.n_components is None:
+        # once fitted, validate against the resolved number of components, since n_components may be None
+        n_components = getattr(self, "n_components_", self.n_components)
+        if n_components is None:
             pass
-        elif self.n_components > n_features:
+        elif n_components > n_features:
             raise ValueError(
-                f"n_components={self.n_components} invalid for n_features={n_features}, "
+                f"n_components={n_components} invalid for n_features={n_features}, "
                 "need more rows than columns for IncrementalPCA processing."
             )
-        elif self.n_components > n_samples:
+        elif n_components > n_samples:
             raise ValueError(
-                f"n_components={self.n_components} must be less or equal to the batch number of samples {n_samples}"
+                f"n_components={n_components} must be less or equal to the batch number of samples {n_samples}"
             )
 
         if X.dtype not in valid_dtypes:
@@ -205,6 +207,25 @@ class IncrementalPCA:
         v *= signs.view(-1, 1)
         return u, v
 
+    def _reset(self):
+        """Discards the fitted state so that the next `partial_fit` is treated as a first pass."""
+        fitted_attributes = (
+            "components_",
+            "singular_values_",
+            "explained_variance_",
+            "explained_variance_ratio_",
+            "noise_variance_",
+            "mean_",
+            "var_",
+            "n_samples_seen_",
+            "n_components_",
+            "batch_size_",
+        )
+        for attribute in fitted_attributes:
+            if hasattr(self, attribute):
+                delattr(self, attribute)
+        self.n_features_ = None
+
     def fit(self, X, check_input=True):
         """
         Fits the model with data `X` using minibatches of size `batch_size`.
@@ -216,13 +237,15 @@ class IncrementalPCA:
         Returns:
             IncrementalPCA: The fitted IPCA model.
         """
+        # `fit` starts from scratch, otherwise a second call would keep accumulating on the previous fit
+        self._reset()
+
         if check_input:
             X = self._validate_data(X)
         n_samples, n_features = X.shape
-        if self.batch_size is None:
-            self.batch_size = 5 * n_features
+        self.batch_size_ = 5 * n_features if self.batch_size is None else self.batch_size
 
-        for batch in self.gen_batches(n_samples, self.batch_size, min_batch_size=self.n_components or 0):
+        for batch in self.gen_batches(n_samples, self.batch_size_, min_batch_size=self.n_components or 0):
             self.partial_fit(X[batch], check_input=False)
 
         return self
@@ -250,8 +273,7 @@ class IncrementalPCA:
             self.var_ = None  # Will be initialized properly in _incremental_mean_and_var based on data dimensions
             self.n_samples_seen_ = torch.tensor([0], device=X.device)
             self.n_features_ = n_features
-            if not self.n_components:
-                self.n_components = min(n_samples, n_features)
+            self.n_components_ = self.n_components or min(n_samples, n_features)
 
         if n_features != self.n_features_:
             raise ValueError(
@@ -286,14 +308,14 @@ class IncrementalPCA:
         explained_variance_ratio = S**2 / torch.sum(col_var * n_total_samples)
 
         self.n_samples_seen_ = n_total_samples
-        self.components_ = Vt[: self.n_components]
-        self.singular_values_ = S[: self.n_components]
+        self.components_ = Vt[: self.n_components_]
+        self.singular_values_ = S[: self.n_components_]
         self.mean_ = col_mean
         self.var_ = col_var
-        self.explained_variance_ = explained_variance[: self.n_components]
-        self.explained_variance_ratio_ = explained_variance_ratio[: self.n_components]
-        if self.n_components not in (n_samples, n_features):
-            self.noise_variance_ = explained_variance[self.n_components :].mean()
+        self.explained_variance_ = explained_variance[: self.n_components_]
+        self.explained_variance_ratio_ = explained_variance_ratio[: self.n_components_]
+        if self.n_components_ not in (n_samples, n_features):
+            self.noise_variance_ = explained_variance[self.n_components_ :].mean()
         else:
             self.noise_variance_ = torch.tensor(0.0, device=X.device)
         return self
@@ -310,8 +332,10 @@ class IncrementalPCA:
         Returns:
             torch.Tensor: Transformed data tensor with shape (n_samples, n_components).
         """
+        dtype = X.dtype
+        # `self.mean_` is float64, so the subtraction below would otherwise promote the result
         X = X - self.mean_
-        return torch.mm(X.double(), self.components_.T).to(X.dtype)
+        return torch.mm(X.double(), self.components_.T).to(dtype)
 
     @staticmethod
     def gen_batches(n: int, batch_size: int, min_batch_size: int = 0):

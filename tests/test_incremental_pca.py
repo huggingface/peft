@@ -112,7 +112,9 @@ def test_n_components_none():
         # First partial_fit call, ipca.n_components_ is inferred from
         # min(X.shape)
         ipca.partial_fit(X)
-        assert ipca.n_components == min(X.shape)
+        assert ipca.n_components_ == min(X.shape)
+        # the constructor argument itself is left untouched
+        assert ipca.n_components is None
 
 
 def test_incremental_pca_num_features_change():
@@ -173,6 +175,57 @@ def test_incremental_pca_partial_fit():
     for i, j in pairwise(batch_itr):
         pipca.partial_fit(X[i:j, :])
     assert_close(ipca.components_, pipca.components_, rtol=1e-3, atol=1e-3)
+
+
+def test_incremental_pca_refit():
+    # Test that calling fit twice starts from scratch instead of accumulating.
+    n, p = 50, 3
+    X = torch.randn(n, p, dtype=torch.float64)
+
+    ipca = IncrementalPCA(n_components=2, batch_size=25)
+    ipca.fit(X)
+    n_samples_seen = ipca.n_samples_seen_.clone()
+    components = ipca.components_.clone()
+
+    ipca.fit(X)
+    assert_close(ipca.n_samples_seen_, n_samples_seen)
+    assert_close(ipca.components_, components)
+
+    # a fresh estimator on the same data must agree with the refitted one
+    reference = IncrementalPCA(n_components=2, batch_size=25).fit(X)
+    assert_close(ipca.components_, reference.components_)
+
+
+def test_incremental_pca_fit_does_not_mutate_params():
+    # Test that fit does not overwrite the constructor arguments.
+    ipca = IncrementalPCA()
+    ipca.fit(torch.randn(50, 8, dtype=torch.float64))
+    assert ipca.n_components is None
+    assert ipca.batch_size is None
+    assert ipca.n_components_ == 8
+    assert ipca.batch_size_ == 5 * 8
+
+    # the inferred batch size must follow the data of the current fit
+    ipca.fit(torch.randn(50, 4, dtype=torch.float64))
+    assert ipca.n_components_ == 4
+    assert ipca.batch_size_ == 5 * 4
+
+
+def test_incremental_pca_transform_preserves_dtype():
+    # Test that transform returns the dtype of its input.
+    X = torch.randn(50, 8, dtype=torch.float32)
+    ipca = IncrementalPCA(n_components=3).fit(X)
+    assert ipca.transform(X).dtype == torch.float32
+
+    X64 = X.double()
+    ipca64 = IncrementalPCA(n_components=3).fit(X64)
+    assert ipca64.transform(X64).dtype == torch.float64
+
+
+def test_incremental_pca_lowrank_q_without_n_components():
+    # Test that an explicit lowrank_q is accepted when n_components is None.
+    ipca = IncrementalPCA(n_components=None, lowrank=True, lowrank_q=4)
+    assert ipca.lowrank_q == 4
 
 
 def test_incremental_pca_lowrank(iris):
