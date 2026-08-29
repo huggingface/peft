@@ -2012,7 +2012,6 @@ class TestSameAdapterDifferentDevices:
         assert model.lin0.base_layer.weight.device.type == self.device
         assert model.lin0.ia3_l.other.device.type == self.device
 
-    @pytest.mark.xfail(reason="LN Tuning handling of multiple adapters may not be correct", strict=True)
     def test_ln_tuning_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using LN tuning
         config = LNTuningConfig(target_modules=["lin0"])
