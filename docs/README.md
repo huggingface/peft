@@ -158,7 +158,7 @@ If the description is too long to fit in one line (more than 119 characters in t
 before writing the description after the argument.
 
 Finally, to maintain uniformity if any *one* description is too long to fit on one line, the 
-rest of the parameters should follow suit and have an indention before their description.
+rest of the parameters should follow suit and have an indentation before their description.
 
 Here's an example showcasing everything so far:
 
