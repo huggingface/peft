@@ -223,9 +223,13 @@ def _pool_last_token(hidden: torch.Tensor, attention_mask: Optional[torch.Tensor
     """Pool the last non-padding token representation (used for sequence classification)."""
     if attention_mask is None:
         return hidden[:, -1, :]
-    token_counts = (attention_mask.long().sum(dim=1) - 1).clamp(min=0)
+    # `sum(dim=1) - 1` is the last index only for right padding. Weighting by position
+    # selects the final non-pad token for left-padded (and mixed) batches as well.
+    # See https://github.com/huggingface/peft/issues/3620
+    position_ids = torch.arange(hidden.size(1), device=hidden.device)
+    last_idx = (attention_mask.long() * position_ids).argmax(dim=1)
     batch_idx = torch.arange(hidden.size(0), device=hidden.device)
-    return hidden[batch_idx, token_counts]
+    return hidden[batch_idx, last_idx]
 
 
 # ------------------------------------------------------------------------------------------------------------- tuner

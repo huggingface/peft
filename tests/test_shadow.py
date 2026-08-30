@@ -41,6 +41,7 @@ from peft import (
 from peft.tuners.shadow import DetachedShadowModel, ShadowCache
 from peft.tuners.shadow.diffusion_models import DetachedFluxShadowModel
 from peft.tuners.shadow.layers import ShadowLayer
+from peft.tuners.shadow.model import _pool_last_token
 from peft.utils.constants import SAFETENSORS_WEIGHTS_NAME
 
 from .testing_utils import hub_online_once
@@ -512,6 +513,39 @@ class TestShadowSequenceClassification:
             out = detached(input_ids=ids, attention_mask=am)
         assert isinstance(out, SequenceClassifierOutput)
         assert out.logits.shape == (4, 3)
+
+    def test_pool_last_token_left_padding(self):
+        # Regression test for https://github.com/huggingface/peft/issues/3620
+        hidden = torch.tensor(
+            [
+                [[10.0], [20.0], [30.0], [40.0]],
+                [[10.0], [20.0], [30.0], [40.0]],
+            ]
+        )
+        attention_mask = torch.tensor(
+            [
+                [0, 0, 1, 1],
+                [0, 1, 1, 1],
+            ]
+        )
+        pooled = _pool_last_token(hidden, attention_mask).squeeze(-1)
+        assert torch.equal(pooled, torch.tensor([40.0, 40.0]))
+        detached_pooled = DetachedShadowModel._pool_last_token(hidden, attention_mask).squeeze(-1)
+        assert torch.equal(detached_pooled, torch.tensor([40.0, 40.0]))
+
+    def test_pool_last_token_right_padding(self):
+        # Right padding must keep selecting the last non-pad token (issue 3620).
+        hidden = torch.tensor([[[10.0], [20.0], [30.0], [40.0]]])
+        attention_mask = torch.tensor([[1, 1, 0, 0]])
+        pooled = _pool_last_token(hidden, attention_mask).squeeze(-1)
+        assert torch.equal(pooled, torch.tensor([20.0]))
+        detached_pooled = DetachedShadowModel._pool_last_token(hidden, attention_mask).squeeze(-1)
+        assert torch.equal(detached_pooled, torch.tensor([20.0]))
+
+    def test_pool_last_token_without_mask_uses_final_position(self):
+        hidden = torch.tensor([[[10.0], [20.0], [30.0]]])
+        pooled = _pool_last_token(hidden, None).squeeze(-1)
+        assert torch.equal(pooled, torch.tensor([30.0]))
 
 
 class TestShadowBackboneVariants:
