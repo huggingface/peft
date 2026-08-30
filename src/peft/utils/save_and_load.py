@@ -74,20 +74,43 @@ def _get_tp_info(model) -> TpInfo | None:
 
 
 def _filter_state_dict_for_adapter_name(
-    state_dict: dict[str, torch.Tensor], unwanted_adapter_names: list[str]
+    state_dict: dict[str, torch.Tensor],
+    unwanted_adapter_names: list[str],
+    selected_adapter_name: str | None = None,
 ) -> dict[str, torch.Tensor]:
-    """Filter the state dict to remove keys that correspond to the unwanted adapter
+    """Filter the state dict to remove keys that correspond to the unwanted adapter.
 
-    Use a negative filter to avoid removing keys that correspond to keys that contain no adapter name at all, e.g. when
-    using modules_to_save.
+    A naive `f".{name}." in k` check is too permissive: if an unwanted adapter's NAME happens to equal a
+    base-model module path segment (e.g. an adapter called "mlp" while a submodule is literally named "mlp"),
+    that match drops the selected adapter's own tensors. To avoid this, we only treat `unwanted_adapter_names`
+    as real adapter slots when they appear in a state-dict key in a tuner-slot position -- i.e. the segment
+    immediately after one of the tuner prefixes (e.g. `lora_A`, `lora_B`, `ia3_l`, `modules_to_save`, ...).
+    The tuner prefixes are derived from the selected adapter's own keys so this stays correct as new tuners are
+    added without any hardcoded list.
     """
-    return {
-        k: v
-        for k, v in state_dict.items()
-        if not any(
-            f".{adapter_name}." in k or k.endswith(f".{adapter_name}") for adapter_name in unwanted_adapter_names
-        )
-    }
+    tuner_prefixes: set[str] = set()
+    if selected_adapter_name is not None:
+        for k in state_dict:
+            needle = f".{selected_adapter_name}."
+            idx = k.find(needle)
+            if idx == -1:
+                continue
+            head = k[:idx]
+            prefix = head.rsplit(".", 1)[-1]
+            if prefix:
+                tuner_prefixes.add(prefix)
+
+    def _is_unwanted(key: str, name: str) -> bool:
+        if tuner_prefixes:
+            for prefix in tuner_prefixes:
+                if f".{prefix}.{name}." in key or key.endswith(f".{prefix}.{name}"):
+                    return True
+            return False
+        # Fallback: no tuner prefixes could be derived (e.g. selected adapter is prompt-learning only).
+        # Keep the historical behaviour to avoid behaviour changes in that niche path.
+        return f".{name}." in key or key.endswith(f".{name}")
+
+    return {k: v for k, v in state_dict.items() if not any(_is_unwanted(k, n) for n in unwanted_adapter_names)}
 
 
 def get_peft_model_state_dict(
@@ -135,25 +158,9 @@ def get_peft_model_state_dict(
     if not config.is_prompt_learning:
         # Prompt learning methods don't support multiple adapters and hence don't have the adapter name in the Parameter
         # name.
-        # The filter below matches by plain string containment, so an adapter whose NAME equals a module path segment
-        # of this adapter's tensors (e.g. an adapter called "mlp" while a submodule is named "mlp") would silently
-        # remove those tensors from the checkpoint. Detect that situation and warn, since the loss is otherwise
-        # invisible (see #3584).
-        colliding_keys = [
-            key
-            for key in state_dict
-            if (f".{adapter_name}." in key or key.endswith(f".{adapter_name}"))
-            and any(f".{n}." in key or key.endswith(f".{n}") for n in unwanted_adapter_names)
-        ]
-        if colliding_keys:
-            warnings.warn(
-                f"{len(colliding_keys)} tensor(s) of adapter '{adapter_name}' match the name of another adapter "
-                f"({unwanted_adapter_names}) as a path segment (e.g. '{colliding_keys[0]}') and will be removed from "
-                "the checkpoint by the adapter-name filter. Consider renaming the adapters to avoid silent checkpoint "
-                "truncation.",
-                RuntimeWarning,
-            )
-        state_dict_filtered_for_adapter_name = _filter_state_dict_for_adapter_name(state_dict, unwanted_adapter_names)
+        state_dict_filtered_for_adapter_name = _filter_state_dict_for_adapter_name(
+            state_dict, unwanted_adapter_names, selected_adapter_name=adapter_name
+        )
         if len(state_dict_filtered_for_adapter_name) > 0:
             # If, after filtering the state dict for the adapter name, we end up with an empty state dict, it means that
             # the adapter weights are not stored with the adapter name as suffix. This can happen e.g. for adaption
