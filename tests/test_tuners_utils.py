@@ -94,6 +94,7 @@ REGEX_TEST_CASES = [
     ("foobar", ".*oba.*", None, None, True),
     # with layers_to_transform
     ("foo.bar.1.baz", ["baz"], [1], ["bar"], True),
+    ("layers.1.self_attn.q_proj", ["q_proj"], [1], ["layers"], True),
     ("foo.bar.1.baz", ["baz"], [0], ["bar"], False),
     ("foo.bar.1.baz", ["baz"], [2], ["bar"], False),
     ("foo.bar.10.baz", ["baz"], [0], ["bar"], False),
