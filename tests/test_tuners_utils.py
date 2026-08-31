@@ -145,6 +145,12 @@ REGEX_TEST_CASES = [
     ("model.layers.1.layers.0.up_proj", ["up_proj"], [0], ["layers"], False),
     ("layers.1.layers.0.up_proj", ["up_proj"], [1], ["layers"], True),
     ("layers.1.layers.0.up_proj", ["up_proj"], [0], ["layers"], False),
+    # if the user specifies it, we can also target the later index with layers_to_transform
+    ("model.layers.1.layers.0.up_proj", ["up_proj"], [1], [r"\d+\.layers"], False),
+    ("model.layers.1.layers.0.up_proj", ["up_proj"], [0], [r"\d+\.layers"], True),
+    ("layers.1.layers.0.up_proj", ["up_proj"], [1], [r"\d+\.layers"], False),
+    ("layers.1.layers.0.up_proj", ["up_proj"], [0], [r"\d+\.layers"], True),
+
 ]
 
 MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES = [
