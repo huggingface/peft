@@ -307,6 +307,38 @@ class TestShadowCausalLM:
         assert any("lm_head" in key for key in keys)
         assert not any(".shadow_head." in key for key in keys)
 
+    def test_shadow_lm_head_trainable_after_set_adapter(self):
+        # Regression for #3626: lm_head via modules_to_save must stay trainable after set_adapter
+        model = get_peft_model(
+            make_llama_causal(),
+            ShadowConfig(task_type="CAUSAL_LM", modules_to_save=["lm_head"], shadow_num_hidden_layers=2),
+        )
+        ids = torch.randint(0, 128, (2, 8))
+        # initially trainable
+        assert any(p.requires_grad for p in model.get_output_embeddings().parameters())
+        model(ids, labels=ids).loss.backward()
+        assert model.get_output_embeddings().weight.grad is not None
+        model.zero_grad()
+        # add second adapter and switch — documented multi-adapter path
+        model.add_adapter(
+            "other", ShadowConfig(task_type="CAUSAL_LM", shadow_num_hidden_layers=2, modules_to_save=["lm_head"])
+        )
+        model.set_adapter("other")
+        assert model.get_output_embeddings().weight.requires_grad
+        model(ids, labels=ids).loss.backward()
+        grad = model.get_output_embeddings().weight.grad
+        assert grad is not None and float(grad.norm()) > 0
+
+    def test_shadow_lm_head_frozen_in_inference_mode(self):
+        model = get_peft_model(
+            make_llama_causal(),
+            ShadowConfig(task_type="CAUSAL_LM", modules_to_save=["lm_head"], shadow_num_hidden_layers=2),
+        )
+        model.set_adapter("default", inference_mode=True)
+        assert not model.get_output_embeddings().weight.requires_grad
+        model.set_adapter("default", inference_mode=False)
+        assert model.get_output_embeddings().weight.requires_grad
+
     def test_requires_two_layers(self):
         # A single decoder block means the shadow carrier has no loop to ride; injection needs >= 2 blocks.
         # Target only one block of the tiny 2-layer model so entry == exit.
