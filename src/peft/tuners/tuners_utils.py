@@ -174,8 +174,16 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     """
     if isinstance(module, nn.Linear):
         if _torch_supports_distributed and isinstance(module.weight, torch.distributed.tensor.DTensor):
-            # If Tensor Parallel is used, the weight is sharded, so we need to get the local shape
-            out_features, in_features = module.weight.to_local().shape
+            # Sharded weight. Under Tensor Parallel the module computes on its local shard, so the LoRA
+            # layers must match the local shape. Under FSDP2 (a mesh dimension named "fsdp") the storage is
+            # sharded but the module still computes the full projection, so the full shape is the right one.
+            # A mesh with no dimension names comes from plain `fully_shard(model)`, which builds its default
+            # mesh unnamed, so it is FSDP-sharded as well.
+            mesh_dim_names = module.weight.device_mesh.mesh_dim_names or ()
+            if set(mesh_dim_names) <= {"fsdp"}:
+                in_features, out_features = module.in_features, module.out_features
+            else:
+                out_features, in_features = module.weight.to_local().shape
         else:
             in_features, out_features = module.in_features, module.out_features
     elif isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
@@ -344,7 +352,7 @@ class BaseTuner(nn.Module, ABC):
         return self.active_adapter
 
     def forward(self, *args: Any, **kwargs: Any):
-        return self.model.forward(*args, **kwargs)
+        return self.model(*args, **kwargs)
 
     def _pre_injection_hook(self, model: nn.Module, config: PeftConfig, adapter_name: str) -> None:
         r"""
