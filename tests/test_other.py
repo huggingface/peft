@@ -21,8 +21,10 @@ import torch
 from torch import nn
 from transformers import (
     AutoModelForCausalLM,
+    AutoModelForQuestionAnswering,
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
+    AutoModelForTokenClassification,
     LlavaForConditionalGeneration,
 )
 
@@ -821,3 +823,62 @@ class TestPrepareModelForKbitTraining:
         ):
             prepare_model_for_kbit_training(fp16_model, use_gradient_checkpointing=False, auto_clear_cache=False)
         mock_empty_cache.assert_not_called()
+
+
+# PeftModelForSequenceClassification, PeftModelForTokenClassification and PeftModelForQuestionAnswering are the
+# task types that override __init__/add_adapter to inject their head into modules_to_save. A single tiny BERT
+# checkpoint covers all three, since the auto classes build the matching head from the same config.
+TASK_TYPE_CASES = [
+    ("SEQ_CLS", AutoModelForSequenceClassification, ["classifier", "score"]),
+    ("TOKEN_CLS", AutoModelForTokenClassification, ["classifier", "score"]),
+    ("QUESTION_ANS", AutoModelForQuestionAnswering, ["qa_outputs"]),
+]
+
+TASK_TYPE_MODEL_ID = "peft-internal-testing/tiny-random-BertForSequenceClassification"
+
+
+class TestTaskTypeAddAdapterAutocastDtype:
+    """The task-type PeftModel subclasses override add_adapter to extend modules_to_save.
+
+    These overrides used to drop the autocast_adapter_dtype argument when calling super(), so PeftModel's default of
+    True always won and the adapter was upcast to fp32 even though the user opted out. This also affected load_adapter,
+    which routes through the same add_adapter override.
+    """
+
+    def get_model(self, auto_cls):
+        with hub_online_once(TASK_TYPE_MODEL_ID):
+            return auto_cls.from_pretrained(TASK_TYPE_MODEL_ID, dtype=torch.float16)
+
+    def adapter_dtypes(self, model, adapter_name):
+        return {p.dtype for n, p in model.named_parameters() if model.prefix in n and f".{adapter_name}." in n}
+
+    @pytest.mark.parametrize("task_type, auto_cls, head_names", TASK_TYPE_CASES)
+    @pytest.mark.parametrize("autocast, expected_dtype", [(False, torch.float16), (True, torch.float32)])
+    def test_add_adapter_respects_autocast_adapter_dtype(
+        self, task_type, auto_cls, head_names, autocast, expected_dtype
+    ):
+        config = LoraConfig(task_type=task_type, target_modules=["query", "value"])
+        model = get_peft_model(self.get_model(auto_cls), config, autocast_adapter_dtype=autocast)
+        model.add_adapter(
+            "other",
+            LoraConfig(task_type=task_type, target_modules=["query", "value"]),
+            autocast_adapter_dtype=autocast,
+        )
+
+        # the adapter added via get_peft_model always honoured the flag, the one added via add_adapter did not
+        assert self.adapter_dtypes(model, "default") == {expected_dtype}
+        assert self.adapter_dtypes(model, "other") == {expected_dtype}
+
+    @pytest.mark.parametrize("task_type, auto_cls, head_names", TASK_TYPE_CASES)
+    @pytest.mark.parametrize("autocast, expected_dtype", [(False, torch.float16), (True, torch.float32)])
+    def test_load_adapter_respects_autocast_adapter_dtype(
+        self, task_type, auto_cls, head_names, autocast, expected_dtype, tmp_path
+    ):
+        config = LoraConfig(task_type=task_type, target_modules=["query", "value"])
+        model = get_peft_model(self.get_model(auto_cls), config, autocast_adapter_dtype=False)
+        model.save_pretrained(tmp_path)
+
+        with hub_online_once(TASK_TYPE_MODEL_ID):
+            model.load_adapter(tmp_path, adapter_name="loaded", autocast_adapter_dtype=autocast)
+
+        assert self.adapter_dtypes(model, "loaded") == {expected_dtype}
