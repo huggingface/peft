@@ -233,10 +233,6 @@ def export_one_expert(
         tqdm(layers, disable=not progressbar, desc="Exporting dense model"), new_routers
     ):
         parent, _, target_name = _get_submodules(model, key)
-        config = layer.base_layer.config
-        if id(config) not in configs_patched:
-            _patch_moe_config(config, layer.spec, intermediate_size)
-            configs_patched.add(id(config))
 
         if not verified:
             # Compare the output of the whole MoE block before and after the replacement (once, as all layers share
@@ -244,6 +240,12 @@ def export_one_expert(
             dense_param = layer.moe_to_dense_experts[adapter_name].down_proj
             x = torch.randn(1, 4, layer.layout.hidden_size, device=dense_param.device, dtype=dense_param.dtype)
             expected = _try_forward(parent, x)
+
+        # patch config _after_ determining the reference output, in case the output depends on a config value
+        config = layer.base_layer.config
+        if id(config) not in configs_patched:
+            _patch_moe_config(config, layer.spec, intermediate_size)
+            configs_patched.add(id(config))
 
         dense = _prepare_dense_module(layer, adapter_name, config)
         setattr(parent, target_name, dense)

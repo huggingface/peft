@@ -37,7 +37,7 @@ from transformers.models.nemotron_h.modeling_nemotron_h import NemotronHExperts
 from peft import MoeToDenseConfig, PeftModel, get_peft_model
 from peft.tuners.moe_to_dense.arch import ExpertsLayout, build_dense_expert_tensors, is_experts_module
 from peft.tuners.moe_to_dense.layer import MoeToDenseLayer, forward_kl_divergence
-from peft.tuners.moe_to_dense.scoring import conditional_prob_scores
+from peft.tuners.moe_to_dense.scoring import SCORING_FUNCTIONS, conditional_prob_scores
 
 
 VOCAB_SIZE = 64
@@ -173,30 +173,36 @@ class TestMoeToDense:
             assert layer._router_hook_handle is not None
         peft_model.print_trainable_parameters()
 
-    def test_explicit_target_modules(self, base_model, model_type):
+    def test_explicit_target_modules(self, base_model):
         target = "experts"
         peft_model = get_peft_model(copy.deepcopy(base_model), MoeToDenseConfig(target_modules=[target]))
         assert len(get_layers(peft_model)) == NUM_LAYERS
 
-    def test_forward_before_allocation_is_passthrough(self, base_model, peft_model):
+    def test_forward_before_allocation_is_passthrough(self, base_model, peft_model, recwarn):
         inputs = get_inputs()
         with torch.no_grad():
             expected = base_model(**inputs).logits
-        with pytest.warns(UserWarning, match="has not been allocated yet"), torch.no_grad():
+
+        with torch.no_grad():
             output = peft_model(**inputs).logits
+        msg = "has not been allocated yet"
+        assert any(msg in str(w.message) for w in recwarn.list)
         assert torch.allclose(output, expected)
+
         # the warning is only given once
+        recwarn.list.clear()
         with torch.no_grad():
             peft_model(**inputs)
+        assert not recwarn.list
 
-    def test_update_and_allocate(self, allocated_model, model_type):
+    def test_update_and_allocate(self, allocated_model):
         layers = get_layers(allocated_model)
         for layer in layers:
             assert layer.is_allocated("default")
             assert layer._router_hook_handle is None
             selected = layer.selected_experts["default"]
             assert len(selected) == TOP_K == len(set(selected))
-            scores = conditional_prob_scores(layer.stats)
+            scores = conditional_prob_scores(layer.stats["default"])
             assert sorted(selected) == sorted(torch.topk(scores, TOP_K).indices.tolist())
 
         # calling it again is a no-op
@@ -211,14 +217,20 @@ class TestMoeToDense:
         with pytest.raises(RuntimeError, match="router was never called"):
             peft_model.update_and_allocate()
 
-    def test_uninterpretable_router_output(self, peft_model):
+    def test_uninterpretable_router_output(self, peft_model, recwarn):
         # simulate a router whose output structure is not understood by calling the hook directly
         layers = get_layers(peft_model)
         output = {"nope": torch.zeros(14, NUM_EXPERTS)}
-        with pytest.warns(UserWarning, match="could not be interpreted.*but got dict"):
-            layers[0]._router_hook(layers[0].router, (), output)
+
+        layers[0]._router_hook(layers[0].router, (), output, adapter_name="default")
+        msg = "could not be interpreted"
+        assert any(msg in str(w.message) for w in recwarn.list)
+
+        recwarn.list.clear()
+        layers[0]._router_hook(layers[0].router, (), output, adapter_name="default")
         # warned only once per layer
-        layers[0]._router_hook(layers[0].router, (), output)
+        assert not any(recwarn.list)
+
         with pytest.raises(RuntimeError, match=r"router .* was called 2 times, because its output could not be"):
             peft_model.update_and_allocate()
 
@@ -725,3 +737,42 @@ class TestMoeToDense:
         with torch.no_grad():
             output = dense_model(**inputs).logits
         assert torch.allclose(output, expected, atol=1e-5)
+
+    def test_adapters_dont_share_stats(self, peft_model):
+        # create a custom scoring function that logs the stats
+        stat_logs = []
+
+        def dummy_scoring_fn(stats):
+            stat_logs.append(stats)
+            return torch.randn(NUM_EXPERTS)
+
+        SCORING_FUNCTIONS["dummy_scoring_fn"] = dummy_scoring_fn
+        peft_model.peft_config["default"].scoring = "dummy_scoring_fn"
+
+        layers = get_layers(peft_model)
+        calibrate(peft_model, num_batches=2)
+        peft_model.update_and_allocate()
+        assert len(stat_logs) == NUM_LAYERS
+
+        # sanity check: all layers got the same, non-empty input
+        first_num_tokens = stat_logs[0].num_tokens
+        assert first_num_tokens > 0
+        assert all(log.num_tokens == first_num_tokens for log in stat_logs)
+
+        peft_model.add_adapter("other", MoeToDenseConfig(scoring="dummy_scoring_fn"))
+        peft_model.set_adapter("other")
+        msg = "No routing statistics have been collected"
+        with pytest.raises(RuntimeError, match=msg):
+            # should not work because 'other' was not calibrated
+            peft_model.update_and_allocate()
+
+        calibrate(peft_model, num_batches=3)
+        peft_model.update_and_allocate()
+        assert len(stat_logs) == 2 * NUM_LAYERS
+
+        # sanity check: nothing changed for the first stats
+        assert all(log.num_tokens == first_num_tokens for log in stat_logs[:NUM_LAYERS])
+        # the expected number of tokens is 3 / 2 times the previous number, because the first adapter was calibrated
+        # with 2 batches and the second adapter with 3 batches
+        second_num_tokens = first_num_tokens * 3 / 2
+        assert all(log.num_tokens == second_num_tokens for log in stat_logs[NUM_LAYERS:])

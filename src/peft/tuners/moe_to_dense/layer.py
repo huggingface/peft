@@ -14,6 +14,7 @@
 
 import warnings
 from collections.abc import Callable
+from functools import partial
 from typing import Any, Optional
 
 import torch
@@ -55,7 +56,7 @@ class MoeToDenseLayer(nn.Module, BaseTunerLayer):
 
     adapter_layer_names = ("moe_to_dense_experts",)
     # per-adapter bookkeeping (dicts keyed by adapter name), cleaned up by `delete_adapter`
-    other_param_names = ("num_experts_to_keep", "selected_experts", "_allocated_cache")
+    other_param_names = ("num_experts_to_keep", "selected_experts", "stats", "_allocated_cache", "_router_calls")
 
     def __init__(
         self,
@@ -88,36 +89,36 @@ class MoeToDenseLayer(nn.Module, BaseTunerLayer):
         self.router_name = router_name
         self._router_ref = [router]
         # if the experts were deliberately left on the meta device (see `allocate`), keep the statistics on the CPU
-        stats_device = None if self.base_layer.down_proj.is_meta else self.base_layer.down_proj.device
-        self.stats = ExpertRoutingStats(self.layout.num_experts, device=stats_device)
+        self.stats = {}
         self._router_hook_handle = None
         self._allocated_cache: dict[str, bool] = {}
         self._warned_unallocated = False
-        self._router_calls = 0
+        self._router_calls = {}
         self._router_output_description: str | None = None
         self.num_experts_to_keep: dict[str, int] = {}
         self.selected_experts: dict[str, list[int]] = {}
 
-        self.register_router_hook()
         self.update_layer(adapter_name, peft_config)
 
     @property
     def router(self) -> nn.Module:
         return self._router_ref[0]
 
-    def register_router_hook(self) -> None:
+    def register_router_hook(self, adapter_name: str) -> None:
         if self._router_hook_handle is None:
-            self._router_hook_handle = self.router.register_forward_hook(self._router_hook)
+            self._router_hook_handle = self.router.register_forward_hook(
+                partial(self._router_hook, adapter_name=adapter_name)
+            )
 
     def remove_router_hook(self) -> None:
         if self._router_hook_handle is not None:
             self._router_hook_handle.remove()
             self._router_hook_handle = None
 
-    def _router_hook(self, module: nn.Module, args: tuple, output: Any) -> None:
+    def _router_hook(self, module: nn.Module, args: tuple, output: Any, adapter_name: str) -> None:
         # Routers return the selected expert indices, the routing weights, and the logits or probabilities over all
         # experts, but not in a standardized order, so find them by dtype and shape.
-        self._router_calls += 1
+        self._router_calls[adapter_name] += 1
         tensors = [o for o in output if torch.is_tensor(o)] if isinstance(output, (tuple, list)) else []
         indices = next((o for o in tensors if not o.is_floating_point()), None)
         scores = next((o for o in tensors if o.is_floating_point() and o.shape[-1] == self.layout.num_experts), None)
@@ -143,7 +144,7 @@ class MoeToDenseLayer(nn.Module, BaseTunerLayer):
             returns_probs = bool((probs >= 0).all()) and bool(torch.allclose(sums, torch.ones_like(sums), atol=1e-3))
         if not returns_probs:
             probs = torch.softmax(probs, dim=-1)
-        self.stats.update(probs, indices.detach())
+        self.stats[adapter_name].update(probs, indices.detach())
 
     def update_layer(self, adapter_name: str, peft_config: MoeToDenseConfig) -> None:
         """Create the (not yet allocated) dense FFN for the given adapter."""
@@ -170,9 +171,12 @@ class MoeToDenseLayer(nn.Module, BaseTunerLayer):
         self.moe_to_dense_experts[adapter_name] = dense
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.num_experts_to_keep[adapter_name] = num_experts_to_keep
+        stats_device = None if self.get_base_layer().down_proj.is_meta else self.base_layer.down_proj.device
+        self.stats[adapter_name] = ExpertRoutingStats(self.layout.num_experts, device=stats_device)
+        self._router_calls[adapter_name] = 0
         self._allocated_cache.pop(adapter_name, None)
         # the new adapter needs routing statistics (unless its weights are loaded from a checkpoint afterwards)
-        self.register_router_hook()
+        self.register_router_hook(adapter_name)
         self.set_adapter(self.active_adapters)
 
     def _get_base_layer_device_and_dtype(self, base_layer):
@@ -219,17 +223,18 @@ class MoeToDenseLayer(nn.Module, BaseTunerLayer):
         if self.is_allocated(adapter_name):
             return False
 
-        if self.stats.num_tokens == 0:
-            if self._router_calls == 0:
+        if self.stats[adapter_name].num_tokens == 0:
+            if self._router_calls[adapter_name] == 0:
                 raise RuntimeError(
-                    "No routing statistics have been collected yet because the router was never called. Run forward "
-                    "passes on calibration data with the MoE model before calling `update_and_allocate()`."
+                    f"No routing statistics have been collected yet for adapter {adapter_name} because the router was "
+                    "never called. Run forward passes on calibration data with the MoE model before calling "
+                    "`update_and_allocate()`."
                 )
             raise RuntimeError(
                 f"No routing statistics have been collected although the router of type {type(self.router).__name__} "
-                f"was called {self._router_calls} times, because its output could not be interpreted: expected a "
-                f"tuple containing an integer tensor with the indices of the selected experts and a float tensor of "
-                f"shape [..., {self.layout.num_experts}] with the routing logits or probabilities, but got "
+                f"was called {self._router_calls[adapter_name]} times, because its output could not be interpreted: "
+                f"expected a tuple containing an integer tensor with the indices of the selected experts and a float "
+                f"tensor of shape [..., {self.layout.num_experts}] with the routing logits or probabilities, but got "
                 f"{self._router_output_description}. This architecture is probably not supported. Please open an "
                 f"issue on PEFT with a reproducer: https://github.com/huggingface/peft/issues."
             )
@@ -243,7 +248,7 @@ class MoeToDenseLayer(nn.Module, BaseTunerLayer):
 
         dense = self.moe_to_dense_experts[adapter_name]
         num_experts_to_keep = self.num_experts_to_keep[adapter_name]
-        scores = scoring_fn(self.stats).float().cpu()
+        scores = scoring_fn(self.stats[adapter_name]).float().cpu()
         # top-K selection by importance score (Section 3.1 of the paper); the selected experts are sorted by index so
         # that the order of concatenation is deterministic (the order does not affect the function of the dense FFN)
         selected = torch.topk(scores, num_experts_to_keep).indices.sort().values
