@@ -1,0 +1,18 @@
+{
+  "apply_GS": false,
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "bias": "none",
+  "exclude_modules": null,
+  "inference_mode": false,
+  "init_weights": true,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "modules_to_save": null,
+  "peft_type": "HRA",
+  "peft_version": "0.19.2.dev0@UNKNOWN",
+  "r": 32,
+  "revision": null,
+  "target_modules": null,
+  "task_type": null
+}

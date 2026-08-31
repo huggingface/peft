@@ -80,8 +80,15 @@ class HRALayer(BaseTunerLayer):
         if isinstance(base_layer, nn.Linear):
             self.hra_u[adapter_name] = nn.Parameter(torch.empty(self.in_features, r), requires_grad=True)
         elif isinstance(base_layer, nn.Conv2d):
+            if base_layer.groups != 1:
+                # HRA composes the adapted weight as W @ H, with H acting on the flattened
+                # in_channels * kernel_size dimension. This has no well-defined generalization to grouped
+                # convolutions, where each group only sees a slice of the input channels.
+                raise NotImplementedError(
+                    f"HRA does not support Conv2d layers with groups > 1 (got groups={base_layer.groups})."
+                )
             self.hra_u[adapter_name] = nn.Parameter(
-                torch.empty(self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0], r),
+                torch.empty(self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[1], r),
                 requires_grad=True,
             )
         else:
@@ -126,6 +133,50 @@ class HRALayer(BaseTunerLayer):
                 continue
 
             warnings.warn("Unscaling operation for HRA not supported! Keeping scale at 1.")
+
+    def _get_householder_vt(self, adapter_name: str) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return (V, T) of the compact WY representation of this adapter's reflection, H = I - V @ T @ V.T.
+
+        The r x r matrix T is upper triangular, so applying H (or H.T, via T.T) only takes thin matmuls instead of r
+        sequential rank-1 updates. The returned tensors are in float32 (or higher): torch.linalg does not support half
+        precision dtypes, and the triangular solve benefits from the extra precision anyway.
+        """
+        opt_u = self.hra_u[adapter_name]
+        rank = self.hra_r[adapter_name]
+        compute_dtype = torch.promote_types(opt_u.dtype, torch.float32)
+        eye = torch.eye(rank, device=opt_u.device, dtype=compute_dtype)
+
+        if self.hra_apply_GS[adapter_name]:
+            # The reflection is I - 2 @ Q @ Q.T for an orthonormal basis Q of span(u). The projector Q @ Q.T does
+            # not depend on the choice of basis, so QR is equivalent to Gram-Schmidt orthonormalization while being
+            # faster and numerically more stable.
+            v = torch.linalg.qr(opt_u.to(compute_dtype), mode="reduced").Q
+            t = 2 * eye
+        else:
+            # Product of the Householder reflections P_i = I - 2 @ u_i @ u_i.T of the normalized columns u_i:
+            # P_0 @ ... @ P_{r-1} = I - V @ T @ V.T with T^-1 = I/2 + triu(V.T @ V, 1)
+            # (compact WY representation, cf. Schreiber & Van Loan, 1989).
+            v = opt_u.to(compute_dtype)
+            v = v / v.norm(dim=0)
+            tinv = 0.5 * eye + torch.triu(v.T @ v, diagonal=1)
+            t = torch.linalg.solve_triangular(tinv, eye, upper=True)
+        return v, t
+
+    def get_delta_weight(self, adapter_name: str, reverse: bool = False) -> torch.Tensor:
+        opt_u = self.hra_u[adapter_name]
+        v, t = self._get_householder_vt(adapter_name)
+        if reverse:
+            # the reflections are applied in reverse order, i.e. H.T = I - V @ T.T @ V.T
+            t = t.T
+        weight = torch.eye(v.shape[0], device=v.device, dtype=v.dtype) - (v @ t) @ v.T
+        return weight.to(opt_u.dtype)
+
+    def _apply_delta_weight_to_input(self, x: torch.Tensor, adapter_name: str) -> torch.Tensor:
+        # Applying H.T directly to x avoids materializing the dense H and W @ H matrices.
+        v, t = self._get_householder_vt(adapter_name)
+        v = v.to(x.dtype)
+        t = t.to(x.dtype)
+        return x - ((x @ v) @ t.T) @ v.T
 
 
 class HRALinear(nn.Module, HRALayer):
@@ -205,36 +256,6 @@ class HRALinear(nn.Module, HRALayer):
                 new_weight = torch.mm(orig_weight.to(delta_weight.dtype), delta_weight)
                 base_layer.weight.data = new_weight.to(orig_dtype)
 
-    def get_delta_weight(self, adapter_name: str, reverse: bool = False) -> torch.Tensor:
-        rank = self.hra_r[adapter_name]
-        apply_GS = self.hra_apply_GS[adapter_name]
-        opt_u = self.hra_u[adapter_name]
-        shape = opt_u.shape
-
-        if apply_GS:
-            weight = [(opt_u[:, 0] / opt_u[:, 0].norm()).view(-1, 1)]
-            for i in range(1, rank):
-                ui = opt_u[:, i].view(-1, 1)
-                for j in range(i):
-                    ui = ui - (weight[j].t() @ ui) * weight[j]
-                weight.append((ui / ui.norm()).view(-1, 1))
-            weight = torch.cat(weight, dim=1)
-            weight = torch.eye(shape[0], device=opt_u.device, dtype=opt_u.dtype) - 2 * weight @ weight.t()
-
-        else:
-            opt_u = opt_u / opt_u.norm(dim=0)
-            weight = torch.eye(shape[0], device=opt_u.device, dtype=opt_u.dtype)
-            if reverse:
-                indices = range(rank - 1, -1, -1)
-            else:
-                indices = range(rank)
-
-            for i in indices:
-                ui = opt_u[:, i].view(-1, 1)
-                weight = weight - 2 * weight @ ui @ ui.t()
-
-        return weight
-
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
 
@@ -245,24 +266,18 @@ class HRALinear(nn.Module, HRALayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            new_weight = torch.eye(self.in_features, device=x.device)
-
-            for active_adapter in self.active_adapters:
-                if active_adapter not in self.hra_u.keys():
-                    continue
-                delta_weight = self.get_delta_weight(active_adapter)
-                new_weight = torch.mm(new_weight.to(delta_weight.dtype), delta_weight)
-
-            orig_weight = self.get_base_layer().weight.data
-            orig_weight = self._cast_input_dtype(orig_weight, new_weight.dtype)
-            new_weight = torch.mm(orig_weight, new_weight)
-            bias = self._cast_input_dtype(self.base_layer.bias, new_weight.dtype)
-
-            if self.cast_input_dtype_enabled:
-                x = self._cast_input_dtype(x, new_weight.dtype)
+            active_adapters = [adapter for adapter in self.active_adapters if adapter in self.hra_u.keys()]
+            if not active_adapters:
+                result = self.base_layer(x, *args, **kwargs)
             else:
-                x = x.to(self.get_base_layer().weight.data.dtype)
-            result = F.linear(input=x, weight=new_weight, bias=bias)
+                base_layer = self.get_base_layer()
+                orig_dtype = base_layer.weight.dtype
+                # The adapted weight is W @ H_0 @ H_1 (see merge), so H_1.T must be applied to x first.
+                for active_adapter in reversed(active_adapters):
+                    x = self._cast_input_dtype(x, self.hra_u[active_adapter].dtype)
+                    x = self._apply_delta_weight_to_input(x, active_adapter)
+                x = x.to(dtype=orig_dtype)
+                result = F.linear(input=x, weight=base_layer.weight, bias=base_layer.bias)
 
         result = result.to(previous_dtype)
         return result
@@ -284,7 +299,7 @@ class HRAConv2d(nn.Module, HRALayer):
         **kwargs,
     ):
         super().__init__()
-        HRALayer.__init__(self, base_layer)
+        HRALayer.__init__(self, base_layer, **kwargs)
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, config=config, **kwargs)
 
@@ -316,7 +331,7 @@ class HRAConv2d(nn.Module, HRALayer):
                     orig_weight = base_layer.weight.data.clone()
                     orig_weight = orig_weight.view(
                         self.out_features,
-                        self.in_features * base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
+                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[1],
                     )
                     delta_weight = self.get_delta_weight(active_adapter)
                     orig_weight = torch.mm(orig_weight.to(delta_weight.dtype), delta_weight)
@@ -324,7 +339,7 @@ class HRAConv2d(nn.Module, HRALayer):
                         self.out_features,
                         self.in_features,
                         base_layer.kernel_size[0],
-                        base_layer.kernel_size[0],
+                        base_layer.kernel_size[1],
                     )
 
                     if not torch.isfinite(orig_weight).all():
@@ -337,7 +352,7 @@ class HRAConv2d(nn.Module, HRALayer):
                     orig_weight = base_layer.weight.data
                     orig_weight = orig_weight.view(
                         self.out_features,
-                        self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
+                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[1],
                     )
                     delta_weight = self.get_delta_weight(active_adapter)
                     orig_weight = torch.mm(orig_weight.to(delta_weight.dtype), delta_weight)
@@ -345,7 +360,7 @@ class HRAConv2d(nn.Module, HRALayer):
                         self.out_features,
                         self.in_features,
                         base_layer.kernel_size[0],
-                        base_layer.kernel_size[0],
+                        base_layer.kernel_size[1],
                     )
 
                     base_layer.weight.data = orig_weight.to(orig_dtype)
@@ -366,45 +381,25 @@ class HRAConv2d(nn.Module, HRALayer):
                 orig_weight = base_layer.weight.data.clone()
                 orig_weight = orig_weight.view(
                     self.out_features,
-                    self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0],
+                    self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[1],
                 )
                 delta_weight = self.get_delta_weight(active_adapter, reverse=True)
                 orig_weight = torch.mm(orig_weight.to(delta_weight.dtype), delta_weight)
                 orig_weight = orig_weight.view(
-                    self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
+                    self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[1]
                 )
 
                 base_layer.weight.data = orig_weight.to(orig_dtype)
 
-    def get_delta_weight(self, adapter_name: str, reverse: bool = False) -> torch.Tensor:
-        rank = self.hra_r[adapter_name]
-        apply_GS = self.hra_apply_GS[adapter_name]
-        opt_u = self.hra_u[adapter_name]
-        shape = opt_u.shape
-
-        if apply_GS:
-            weight = [(opt_u[:, 0] / opt_u[:, 0].norm()).view(-1, 1)]
-            for i in range(1, rank):
-                ui = opt_u[:, i].view(-1, 1)
-                for j in range(i):
-                    ui = ui - (weight[j].t() @ ui) * weight[j]
-                weight.append((ui / ui.norm()).view(-1, 1))
-            weight = torch.cat(weight, dim=1)
-            weight = torch.eye(shape[0], device=opt_u.device, dtype=opt_u.dtype) - 2 * weight @ weight.t()
-
-        else:
-            opt_u = opt_u / opt_u.norm(dim=0)
-            weight = torch.eye(shape[0], device=opt_u.device, dtype=opt_u.dtype)
-            if reverse:
-                indices = range(rank - 1, -1, -1)
-            else:
-                indices = range(rank)
-
-            for i in indices:
-                ui = opt_u[:, i].view(-1, 1)
-                weight = weight - 2 * weight @ ui @ ui.t()
-
-        return weight
+    def _get_output_size(self, x: torch.Tensor) -> tuple[int, int]:
+        base_layer = self.get_base_layer()
+        kernel_size = base_layer.kernel_size
+        dilation = base_layer.dilation
+        padding = base_layer.padding
+        stride = base_layer.stride
+        height = (x.shape[-2] + 2 * padding[0] - dilation[0] * (kernel_size[0] - 1) - 1) // stride[0] + 1
+        width = (x.shape[-1] + 2 * padding[1] - dilation[1] * (kernel_size[1] - 1) - 1) // stride[1] + 1
+        return height, width
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
@@ -416,43 +411,52 @@ class HRAConv2d(nn.Module, HRALayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            new_weight = torch.eye(
-                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
-                device=x.device,
-            )
-            for active_adapter in self.active_adapters:
-                if active_adapter not in self.hra_u.keys():
-                    continue
-                delta_weight = self.get_delta_weight(active_adapter)
-                new_weight = torch.mm(new_weight.to(delta_weight.dtype), delta_weight)
-
-            orig_weight = self.base_layer.weight.data
-            orig_weight = orig_weight.view(
-                self.out_features,
-                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
-            )
-            orig_weight = self._cast_input_dtype(orig_weight, new_weight.dtype)
-            bias = self._cast_input_dtype(self.base_layer.bias, new_weight.dtype)
-
-            new_weight = torch.mm(orig_weight, new_weight)
-            new_weight = new_weight.view(
-                self.out_features,
-                self.in_features,
-                self.base_layer.kernel_size[0],
-                self.base_layer.kernel_size[0],
-            )
-
-            if self.cast_input_dtype_enabled:
-                x = self._cast_input_dtype(x, new_weight.dtype)
+            active_adapters = [adapter for adapter in self.active_adapters if adapter in self.hra_u.keys()]
+            if not active_adapters:
+                result = self.base_layer(x, *args, **kwargs)
             else:
-                x = x.to(self.get_base_layer().weight.data.dtype)
-            result = F.conv2d(
-                input=x,
-                weight=new_weight,
-                bias=bias,
-                padding=self.base_layer.padding[0],
-                stride=self.base_layer.stride[0],
-            )
+                base_layer = self.get_base_layer()
+                orig_dtype = base_layer.weight.dtype
+
+                if base_layer.kernel_size == (1, 1):
+                    # For 1x1 convolutions, each patch is just the channel vector, so HRA can be applied directly to
+                    # the channel dimension instead of materializing unfolded patches.
+                    x = x.permute(0, 2, 3, 1)
+                    # The adapted weight is W @ H_0 @ H_1 (see merge), so H_1.T must be applied to x first.
+                    for active_adapter in reversed(active_adapters):
+                        x = self._cast_input_dtype(x, self.hra_u[active_adapter].dtype)
+                        x = self._apply_delta_weight_to_input(x, active_adapter)
+                    x = x.permute(0, 3, 1, 2)
+                    x = x.to(dtype=orig_dtype)
+                    result = F.conv2d(
+                        input=x,
+                        weight=base_layer.weight,
+                        bias=base_layer.bias,
+                        padding=base_layer.padding,
+                        stride=base_layer.stride,
+                        dilation=base_layer.dilation,
+                    )
+                else:
+                    patches = F.unfold(
+                        x,
+                        kernel_size=base_layer.kernel_size,
+                        dilation=base_layer.dilation,
+                        padding=base_layer.padding,
+                        stride=base_layer.stride,
+                    ).transpose(1, 2)
+                    # The adapted weight is W @ H_0 @ H_1 (see merge), so H_1.T must be applied to x first.
+                    for active_adapter in reversed(active_adapters):
+                        patches = self._cast_input_dtype(patches, self.hra_u[active_adapter].dtype)
+                        patches = self._apply_delta_weight_to_input(patches, active_adapter)
+
+                    patches = patches.to(dtype=orig_dtype)
+                    orig_weight = base_layer.weight.view(
+                        self.out_features,
+                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[1],
+                    )
+                    result = F.linear(input=patches, weight=orig_weight, bias=base_layer.bias).transpose(1, 2)
+                    height, width = self._get_output_size(x)
+                    result = result.view(x.shape[0], self.out_features, height, width)
 
         result = result.to(previous_dtype)
         return result
