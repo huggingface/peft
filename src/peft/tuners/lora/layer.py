@@ -144,8 +144,6 @@ class LoraLayer(BaseTunerLayer):
         self.lora_bias: dict[str, bool] = {}
         self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA
         self._caches: dict[str, Any] = {}  # small ad hoc cache; values are not part of the state_dict
-        # set while `_unmerged_base_weight` is active, not part of the state_dict
-        self._unmerged_base_weight_cache: Optional[torch.Tensor] = None
         self.ephemeral_gpu_offload: bool = ephemeral_gpu_offload
         # flag to enable/disable casting of input to weight dtype during forward call
         self.cast_input_dtype_enabled: bool = True
@@ -749,16 +747,19 @@ class LoraLayer(BaseTunerLayer):
         outermost call, both because it is the weight they have to normalize against anyway and because unmerging per
         adapter would make merging grow exponentially with their number.
         """
-        if self._unmerged_base_weight_cache is not None:
-            yield self._unmerged_base_weight_cache
+        key = "unmerged_base_weight"
+        if key in self._caches:
+            yield self._caches[key]
             return
 
         merged_adapters = self.merged_adapters[:]
         try:
             if merged_adapters:
                 self.unmerge()
-            self._unmerged_base_weight_cache = dequantize_module_weight(self.get_base_layer()).detach().clone()
-            yield self._unmerged_base_weight_cache
+            # a copy, because merging a plain LoRA adapter below writes into the base weight in place
+            weight = dequantize_module_weight(self.get_base_layer()).detach().clone()
+            self._cache_store(key, weight)
+            yield weight
         finally:
             try:
                 # only the adapters that were actually unmerged, so that an unmerge that failed halfway does not
@@ -767,7 +768,7 @@ class LoraLayer(BaseTunerLayer):
                 if to_merge:
                     self.merge(safe_merge=safe_merge, adapter_names=to_merge)
             finally:
-                self._unmerged_base_weight_cache = None
+                self._caches.pop(key, None)
 
     def _cache_store(self, key: str, value: Any) -> None:
         # cache intermediate values, e.g. weight norm of DoRA
