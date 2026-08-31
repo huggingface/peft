@@ -29,7 +29,7 @@ from transformers import (
     LlamaConfig,
     LlamaModel,
 )
-from transformers.modeling_outputs import SequenceClassifierOutput
+from transformers.modeling_outputs import BaseModelOutput, SequenceClassifierOutput
 
 from peft import (
     PeftModel,
@@ -496,6 +496,57 @@ class TestShadowSequenceClassification:
         model = get_peft_model(make_llama_seqcls(num_labels=3), ShadowConfig(task_type="SEQ_CLS"))
         trainable = {n for n, p in model.named_parameters() if p.requires_grad}
         assert any("shadow_head" in n for n in trainable)
+
+    def test_classification_pooling_respects_padding_side(self, monkeypatch):
+        # Regression test for https://github.com/huggingface/peft/issues/3620.
+        config = LlamaConfig(
+            vocab_size=32,
+            hidden_size=8,
+            intermediate_size=16,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            num_key_value_heads=2,
+            num_labels=3,
+        )
+        base = AutoModelForSequenceClassification.from_config(config)
+        model = get_peft_model(
+            base,
+            ShadowConfig(task_type="SEQ_CLS", shadow_num_hidden_layers=1),
+        )
+        tuner = model.base_model
+        tuner.shadow_head["default"] = torch.nn.Identity()
+
+        hidden = torch.arange(24, dtype=torch.float32).reshape(2, 4, 3)
+        labels = torch.tensor([0, 2])
+        detached = tuner.unload_shadow()
+        detached.shadow_hidden_projection = torch.nn.Identity()
+        detached.head = torch.nn.Identity()
+        monkeypatch.setattr(
+            detached.backbone,
+            "forward",
+            lambda *args, **kwargs: BaseModelOutput(last_hidden_state=hidden),
+        )
+
+        cases = (
+            (torch.tensor([[0, 0, 1, 1], [0, 1, 1, 1]]), torch.tensor([3, 3])),
+            (torch.tensor([[1, 1, 0, 0], [1, 1, 1, 0]]), torch.tensor([1, 2])),
+            (torch.tensor([[0, 0, 0, 0], [1, 1, 1, 1]]), torch.tensor([0, 3])),
+            (None, torch.tensor([3, 3])),
+        )
+        batch_idx = torch.arange(hidden.shape[0])
+        for attention_mask, expected_indices in cases:
+            expected_logits = hidden[batch_idx, expected_indices]
+
+            tuner._seed_shadow_state = hidden
+            actual_loss = tuner.shadow_auxiliary_loss(labels, attention_mask=attention_mask)
+            expected_loss = torch.nn.functional.cross_entropy(expected_logits, labels)
+            torch.testing.assert_close(actual_loss, expected_loss)
+
+            output = detached(
+                inputs_embeds=torch.zeros(2, 4, config.hidden_size),
+                attention_mask=attention_mask,
+            )
+            torch.testing.assert_close(output.logits, expected_logits)
 
     def test_unload_shadow_is_a_classifier(self):
         # For SEQ_CLS the standalone shadow model pools the last token and returns per-example class logits (not
