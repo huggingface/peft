@@ -174,8 +174,16 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     """
     if isinstance(module, nn.Linear):
         if _torch_supports_distributed and isinstance(module.weight, torch.distributed.tensor.DTensor):
-            # If Tensor Parallel is used, the weight is sharded, so we need to get the local shape
-            out_features, in_features = module.weight.to_local().shape
+            # Sharded weight. Under Tensor Parallel the module computes on its local shard, so the LoRA
+            # layers must match the local shape. Under FSDP2 (a mesh dimension named "fsdp") the storage is
+            # sharded but the module still computes the full projection, so the full shape is the right one.
+            # A mesh with no dimension names comes from plain `fully_shard(model)`, which builds its default
+            # mesh unnamed, so it is FSDP-sharded as well.
+            mesh_dim_names = module.weight.device_mesh.mesh_dim_names or ()
+            if set(mesh_dim_names) <= {"fsdp"}:
+                in_features, out_features = module.in_features, module.out_features
+            else:
+                out_features, in_features = module.weight.to_local().shape
         else:
             in_features, out_features = module.in_features, module.out_features
     elif isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
@@ -344,7 +352,7 @@ class BaseTuner(nn.Module, ABC):
         return self.active_adapter
 
     def forward(self, *args: Any, **kwargs: Any):
-        return self.model.forward(*args, **kwargs)
+        return self.model(*args, **kwargs)
 
     def _pre_injection_hook(self, model: nn.Module, config: PeftConfig, adapter_name: str) -> None:
         r"""
@@ -2155,10 +2163,17 @@ class BaseTunerLayer(ABC):
             if any(p.device == meta for p in adapter_layer.parameters()):
                 continue
 
-            if target_dtype is not None:
-                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(target_device, dtype=target_dtype)
+            # Don't cast the dtype of integer parameters/buffers (e.g. index buffers) to the base layer's
+            # float dtype, even when the base layer is float — that would corrupt the integer data. Modules
+            # (nn.ModuleDict entries) have no single dtype; their own `.to(dtype=...)` already skips integer
+            # sub-buffers, so they take the regular cast path.
+            item = adapter_layer[adapter_name]
+            item_dtype = getattr(item, "dtype", None)
+            cast_dtype = item_dtype is None or item_dtype.is_floating_point or item_dtype.is_complex
+            if target_dtype is not None and cast_dtype:
+                adapter_layer[adapter_name] = item.to(target_device, dtype=target_dtype)
             else:
-                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(target_device)
+                adapter_layer[adapter_name] = item.to(target_device)
 
     @overload
     def _cast_input_dtype(self, x: None, dtype: torch.dtype) -> None: ...

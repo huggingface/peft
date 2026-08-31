@@ -42,7 +42,9 @@ from peft import (
     PsoftConfig,
     RandLoraConfig,
     RoadConfig,
+    ShadowConfig,
     ShiraConfig,
+    SupertuningConfig,
     TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -270,6 +272,23 @@ ALL_CONFIGS = [
         },
     ),
     (
+        ShadowConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "r": 2,
+            "shadow_num_hidden_layers": 1,
+        },
+    ),
+    (
+        SupertuningConfig,
+        {
+            "sparsity": 0.9,
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "init_weights": False,
+        },
+    ),
+    (
         VBLoRAConfig,
         {
             "task_type": "SEQ_CLS",
@@ -326,6 +345,12 @@ ALL_CONFIGS = [
 ]
 
 
+def _skip_encoder_models(model_id, config_cls):
+    # ShadowPEFT rides a contiguous decoder stack; encoder-only classifiers (BERT/RoBERTa) are unsupported.
+    if config_cls is ShadowConfig and ("Bert" in model_id or "Roberta" in model_id):
+        pytest.skip("ShadowPEFT requires a decoder-only backbone")
+
+
 class TestSequenceClassificationModels(PeftCommonTester):
     r"""
     Tests for basic coverage of AutoModelForSequenceClassification and classification-specific cases. Most of the
@@ -342,16 +367,19 @@ class TestSequenceClassificationModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_attributes_parametrized(self, model_id, config_cls, config_kwargs):
+        _skip_encoder_models(model_id, config_cls)
         self._test_model_attr(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_adapter_name(self, model_id, config_cls, config_kwargs):
+        _skip_encoder_models(model_id, config_cls)
         self._test_adapter_name(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_prepare_for_training_parametrized(self, model_id, config_cls, config_kwargs):
+        _skip_encoder_models(model_id, config_cls)
         self._test_prepare_for_training(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
@@ -368,24 +396,28 @@ class TestSequenceClassificationModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained(self, model_id, config_cls, config_kwargs):
+        _skip_encoder_models(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_pickle(self, model_id, config_cls, config_kwargs):
+        _skip_encoder_models(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs.copy(), safe_serialization=False)
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
+        _skip_encoder_models(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters_pickle(self, model_id, config_cls, config_kwargs):
+        _skip_encoder_models(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained_selected_adapters(
             model_id, config_cls, config_kwargs.copy(), safe_serialization=False
@@ -394,12 +426,14 @@ class TestSequenceClassificationModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_from_pretrained_config_construction(self, model_id, config_cls, config_kwargs):
+        _skip_encoder_models(model_id, config_cls)
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_modules_to_save_correctly_set(self, model_id, config_cls, config_kwargs):
         # tests for a regression, introduced via #2220, where modules_to_save was not applied to prompt learning methods
+        _skip_encoder_models(model_id, config_cls)
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
             config = config_cls(
@@ -420,6 +454,7 @@ class TestSequenceClassificationModels(PeftCommonTester):
         # Check the full forward pass including the loss computation. This is especially relevant for prompt learning
         # methods, whose sequence classification forward (including the _prefix_tuning_forward fallback for models whose
         # forward does not accept past_key_values) is implemented in PeftModelForSequenceClassification itself.
+        _skip_encoder_models(model_id, config_cls)
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
 
@@ -461,6 +496,9 @@ class TestSequenceClassificationModels(PeftCommonTester):
             if config_cls == AdaLoraConfig:
                 # AdaLora adds an orthogonal regularization term to the loss, so it does not equal the plain task loss
                 assert output.loss > expected_loss
+            elif config_cls == ShadowConfig:
+                expected_loss = expected_loss + config.auxiliary_loss_weight * output.shadow_loss
+                assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)
             else:
                 assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)
 

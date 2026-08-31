@@ -51,6 +51,7 @@ from peft import (
     PromptTuningConfig,
     PveraConfig,
     RoadConfig,
+    ShadowConfig,
     UniLoraConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -90,6 +91,8 @@ def _skip_if_merging_not_supported(model_id, config_cls, config_kwargs):
         pytest.skip("Merging conv layers with groups>1 and LoRA is not supported.")
     if issubclass(config_cls, LilyConfig):
         pytest.skip("Lily does not support merging adapters, skipping this test.")
+    if issubclass(config_cls, ShadowConfig):
+        pytest.skip("ShadowPEFT does not support merging adapters, skipping this test.")
 
 
 def _skip_if_adding_weighted_adapters_not_supported(config):
@@ -360,6 +363,8 @@ class PeftCommonTester:
         if issubclass(config_cls, AdaLoraConfig):
             # AdaLora does not support adding more than 1 adapter
             pytest.skip(f"Test not applicable for {config_cls}")
+        if issubclass(config_cls, ShadowConfig) and config_kwargs.get("task_type") == "SEQ_CLS":
+            pytest.skip("ShadowPEFT explicitly rejects multiple adapters when sequence classification is present")
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
@@ -1073,6 +1078,13 @@ class PeftCommonTester:
             if issubclass(config_cls, PromptLearningConfig):
                 # we cannot reliably identify the trainable part of the prompt learning method, thus skipping this check
                 return
+            if issubclass(config_cls, ShadowConfig):
+                # The exit block's `shadow_update_*` MLPs are unused by the task loss (the post-exit shadow state is
+                # discarded), so only require that some adapter parameters receive gradients.
+                assert any(
+                    (model.prefix in n) and p.requires_grad and p.grad is not None for n, p in model.named_parameters()
+                )
+                return
 
             for n, param in model.named_parameters():
                 if (model.prefix in n) or ("modules_to_save" in n) or ("token_adapter.trainable_tokens" in n):
@@ -1160,6 +1172,13 @@ class PeftCommonTester:
 
             has_trainable_tokens = config_kwargs.get("trainable_token_indices", None) is not None
             nb_trainable = 0
+
+            if issubclass(config_cls, ShadowConfig):
+                # Same as `_test_training`: the exit block's update MLPs are unused by the task loss.
+                assert any(
+                    (model.prefix in n) and p.requires_grad and p.grad is not None for n, p in model.named_parameters()
+                )
+                return
 
             for n, param in model.named_parameters():
                 if model.prefix in n or (has_trainable_tokens and "trainable_tokens" in n):
@@ -1255,7 +1274,7 @@ class PeftCommonTester:
                 output = model(**inputs)[0] ** 2
                 loss = output.sum()
                 loss.backward()
-                return {n: param.grad.abs().sum().item() for n, param in params}
+                return {n: 0.0 if p.grad is None else p.grad.abs().sum().item() for n, p in params}
 
             # reference grads without gradient checkpointing
             grads_normal = get_grads()
@@ -1266,15 +1285,13 @@ class PeftCommonTester:
 
             grads_checkpointing = get_grads()
 
-            # What is being checked is that the gradient reaches the parameter at all, not that its value is correct.
-            # If gradient checkpointing were broken, backward would not reach the parameter and the gradient would be
-            # exactly 0. A tiny value is instead the rounding residue of terms that cancelled, i.e. evidence that
-            # backward did reach the parameter, hence `> 0` is the right check. Whether such a residue ends up as 0 or
-            # as, say, 1e-9 depends on the reduction order inside the kernels and is not deterministic on all devices.
-            # The threshold therefore only decides whether a parameter is checked at all, keeping the range where noise
-            # and real gradients overlap out of the assertion. Using the threshold on both sides would put that
-            # ambiguous range back in, and no single value for it separates noise from signal for all parameters.
-            threshold = max([*grads_normal.values(), *grads_checkpointing.values()], default=0.0) * 1e-6
+            # A gradient of 0 does not prove that the gradient was never computed: a sum of terms that cancel may come
+            # out as exactly 0 or as a tiny residue, depending on non-deterministic properties of the accelerator
+            # (observed on XPU). Therefore, only check parameters whose gradient is substantially different from 0 on
+            # at least one side, and on the other side only require that it is non-zero, since any non-zero value
+            # proves that backward reached the parameter.
+            all_grads = [*grads_normal.values(), *grads_checkpointing.values()]
+            threshold = sum(all_grads) / len(all_grads) * 1e-6
             for n in grads_normal:
                 if grads_normal[n] > threshold:
                     assert grads_checkpointing[n] > 0, n
@@ -1292,6 +1309,11 @@ class PeftCommonTester:
                 elif (
                     hasattr(model, "prefix") and (model.prefix in n) or "trainable_tokens_" in n
                 ):  # non-prompt tuning methods
+                    if issubclass(config_cls, ShadowConfig):
+                        # The exit block's update MLPs are intentionally unused because the post-exit shadow state is
+                        # discarded. Rely on the gradient comparison above instead of requiring every Shadow parameter
+                        # to receive a gradient.
+                        continue
                     assert param.grad is not None
                 else:
                     assert param.grad is None

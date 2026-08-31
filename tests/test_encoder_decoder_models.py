@@ -46,6 +46,7 @@ from peft import (
     RandLoraConfig,
     RoadConfig,
     ShiraConfig,
+    SupertuningConfig,
     TaskType,
     TinyLoraConfig,
     UniLoraConfig,
@@ -65,7 +66,8 @@ PEFT_ENCODER_DECODER_MODELS_TO_TEST = [
     "peft-internal-testing/tiny-random-BartForConditionalGeneration",
 ]
 
-# TODO Missing from this list are LoKr, LoHa, LN Tuning, add them
+# TODO Missing from this list are LoKr, LoHa, LN Tuning, add them.
+# ShadowPEFT is intentionally omitted: it only supports decoder-only models.
 ALL_CONFIGS = [
     (
         AdaLoraConfig,
@@ -255,6 +257,15 @@ ALL_CONFIGS = [
         ShiraConfig,
         {
             "r": 1,
+            "task_type": "SEQ_2_SEQ_LM",
+            "target_modules": None,
+            "init_weights": False,
+        },
+    ),
+    (
+        SupertuningConfig,
+        {
+            "sparsity": 0.9,
             "task_type": "SEQ_2_SEQ_LM",
             "target_modules": None,
             "init_weights": False,

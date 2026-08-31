@@ -27,7 +27,7 @@ from huggingface_hub import snapshot_download
 from safetensors.torch import load_file, save_file
 from scipy import stats
 from torch import nn
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, LlamaConfig, LlamaForSequenceClassification
 
 from peft import (
     AdaLoraConfig,
@@ -59,6 +59,8 @@ from peft import (
     PromptTuningConfig,
     PsoftConfig,
     RoadConfig,
+    ShadowConfig,
+    SupertuningConfig,
     TinyLoraConfig,
     VBLoRAConfig,
     VeloraConfig,
@@ -1792,6 +1794,29 @@ class TestLoraInitialization:
         model.add_adapter("other", config2)  # does not raise
 
 
+class TestShadowInitialization:
+    @pytest.mark.parametrize("other_task_type", ["SEQ_CLS", "CAUSAL_LM"])
+    def test_adding_an_adapter_when_sequence_classification_is_present_raises(self, other_task_type):
+        base_config = LlamaConfig(
+            vocab_size=32,
+            hidden_size=16,
+            intermediate_size=32,
+            num_hidden_layers=2,
+            num_attention_heads=2,
+            num_key_value_heads=2,
+        )
+        model = get_peft_model(
+            LlamaForSequenceClassification(base_config),
+            ShadowConfig(task_type="SEQ_CLS"),
+        )
+
+        msg = "does not support multiple adapters when any adapter uses sequence classification"
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", ShadowConfig(task_type=other_task_type))
+
+        assert "other" not in model.peft_config
+
+
 class TestLokrInitialization:
     torch_device = infer_device()
 
@@ -2957,6 +2982,23 @@ class TestBeftInitialization:
 
         with pytest.raises(ValueError, match="Base layer has no bias, cannot merge bias adapter"):
             model.merge_and_unload()
+
+
+class TestSupertuningInitialization:
+    """Test class to check the initialization of Super-Tuning / Supra adapters."""
+
+    def test_supertuning_config_validation(self):
+        # Invalid sparsity
+        with pytest.raises(ValueError, match="sparsity must be"):
+            SupertuningConfig(sparsity=1.5)
+
+        # Invalid Supra rank
+        with pytest.raises(ValueError, match="r must be a positive integer"):
+            SupertuningConfig(r=0)
+
+        # lora_alpha set without r
+        with pytest.raises(ValueError, match="lora_alpha is set but r is None"):
+            SupertuningConfig(lora_alpha=16.0)
 
 
 class TestHiraInitialization:
