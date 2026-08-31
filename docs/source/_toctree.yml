@@ -129,6 +129,8 @@
         title: RandLora
       - local: package_reference/road
         title: RoAd
+      - local: package_reference/shadow
+        title: ShadowPEFT
       - local: package_reference/shira
         title: SHiRA
       - local: package_reference/supertuning
@@ -258,6 +260,8 @@
       title: Super-Tuning
     - local: package_reference/tinylora
       title: TinyLoRA
+    - local: package_reference/shadow
+      title: ShadowPEFT
     - local: package_reference/unilora
       title: UniLoRA
     - local: package_reference/trainable_tokens

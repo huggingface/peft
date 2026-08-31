@@ -1,0 +1,24 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "inference_mode": false,
+  "init_weights": true,
+  "modules_to_save": null,
+  "peft_type": "BEFT",
+  "peft_version": "0.20.1.dev0@UNKNOWN",
+  "revision": null,
+  "target_modules": [
+    "to_add_out",
+    "linear_in",
+    "to_qkv_mlp_proj",
+    "to_out.0",
+    "to_v",
+    "to_k",
+    "to_q",
+    "add_v_proj",
+    "linear_out",
+    "add_k_proj",
+    "add_q_proj"
+  ],
+  "task_type": null
+}
