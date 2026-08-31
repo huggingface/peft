@@ -6410,5 +6410,3 @@ class TestTinyLoraInitialization:
         model_control = get_peft_model(mlp_control, config_b2, adapter_name="b")
 
         assert len(model.tinylora_v["b"]) == len(model_control.tinylora_v["b"]) == 1
-
-
