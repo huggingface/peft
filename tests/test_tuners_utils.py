@@ -150,7 +150,6 @@ REGEX_TEST_CASES = [
     ("model.layers.1.layers.0.up_proj", ["up_proj"], [0], [r"\d+\.layers"], True),
     ("layers.1.layers.0.up_proj", ["up_proj"], [1], [r"\d+\.layers"], False),
     ("layers.1.layers.0.up_proj", ["up_proj"], [0], [r"\d+\.layers"], True),
-
 ]
 
 MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES = [
