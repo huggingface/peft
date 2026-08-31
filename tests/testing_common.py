@@ -873,6 +873,18 @@ class PeftCommonTester:
         dummy_input = self.prepare_inputs_for_testing()
         # ensure that we have at least 3 samples for this test
         dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
+
+        # Run with mixed adapter batches first: layers that don't support the feature raise immediately, sparing us the
+        # reference outputs below whose results would never be used.
+        # Alternate between base model, adapter0, and adapter1
+        adapters = ["__base__", "adapter0", "adapter1"]
+        adapter_names = [adapters[i % 3] for i in (range(len(dummy_input["input_ids"])))]
+        with torch.inference_mode():
+            output_mixed = model(**dummy_input, adapter_names=adapter_names)[0]
+            logits_mixed = model.generate(
+                **dummy_input, adapter_names=adapter_names, return_dict_in_generate=True, output_scores=True
+            ).scores[0]
+
         with torch.inference_mode(), model.disable_adapter():
             output_base = model(**dummy_input)[0]
             logits_base = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
@@ -897,13 +909,6 @@ class PeftCommonTester:
         assert not torch.allclose(logits_base, logits_adapter0, atol=atol, rtol=rtol)
         assert not torch.allclose(logits_base, logits_adapter1, atol=atol, rtol=rtol)
         assert not torch.allclose(logits_adapter0, logits_adapter1, atol=atol, rtol=rtol)
-
-        # alternate between base model, adapter0, and adapter1
-        adapters = ["__base__", "adapter0", "adapter1"]
-        dummy_input["adapter_names"] = [adapters[i % 3] for i in (range(len(dummy_input["input_ids"])))]
-        with torch.inference_mode():
-            output_mixed = model(**dummy_input)[0]
-            logits_mixed = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
 
         assert torch.allclose(output_base[::3], output_mixed[::3], atol=atol, rtol=rtol)
         assert torch.allclose(output_adapter0[1::3], output_mixed[1::3], atol=atol, rtol=rtol)
@@ -948,7 +953,18 @@ class PeftCommonTester:
             dummy_input = self.prepare_inputs_for_testing()
             # ensure that we have at least 3 samples for this test
             dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
-            gen_kwargs = {**dummy_input, "max_length": 20, "num_beams": 10, "early_stopping": True}
+            # note: don't lower num_beams and max_length too much, or else the generations of different adapters could
+            # coincidentally be identical, tripping up the sanity checks below
+            gen_kwargs = {**dummy_input, "max_length": 15, "num_beams": 4, "early_stopping": True}
+
+            # Generate with mixed adapter batches first: layers that don't support the feature raise immediately,
+            # sparing us the expensive reference generations below whose results would never be used.
+            # Alternate between base model, adapter0, and adapter1
+            adapters = ["__base__", "adapter0", "adapter1"]
+            adapter_names = [adapters[i % 3] for i in (range(len(dummy_input["input_ids"])))]
+            with torch.inference_mode():
+                gen_mixed = model.generate(**gen_kwargs, adapter_names=adapter_names)
+
             with torch.inference_mode(), model.disable_adapter():
                 gen_base = model.generate(**gen_kwargs)
 
@@ -987,13 +1003,6 @@ class PeftCommonTester:
         assert not gens_are_same(gen_base, gen_adapter0)
         assert not gens_are_same(gen_base, gen_adapter1)
         assert not gens_are_same(gen_adapter0, gen_adapter1)
-
-        # alternate between base model, adapter0, and adapter1
-        adapters = ["__base__", "adapter0", "adapter1"]
-        gen_kwargs["adapter_names"] = [adapters[i % 3] for i in (range(len(dummy_input["input_ids"])))]
-
-        with torch.inference_mode():
-            gen_mixed = model.generate(**gen_kwargs)
 
         assert gens_are_same(gen_base[::3], gen_mixed[::3])
         assert gens_are_same(gen_adapter0[1::3], gen_mixed[1::3])
