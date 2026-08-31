@@ -4774,41 +4774,27 @@ class TestHotSwapping:
         torch.manual_seed(0)
         model0 = get_peft_model(self.get_model(), config)
         model0.save_pretrained(tmp_path / "adapter0")
-        del model0
 
-        torch.manual_seed(1)
-        model1 = get_peft_model(self.get_model(), config)
-        model1.save_pretrained(tmp_path / "adapter1")
-        del model1
-
-        model = PeftModel.from_pretrained(self.get_model(), tmp_path / "adapter0")
-        model.merge_adapter()
+        model0.merge_adapter()
 
         with pytest.raises(ValueError, match="merged"):
-            hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+            hotswap_adapter(model0, tmp_path / "adapter0", adapter_name="default")
 
     def test_hotswap_allowed_when_other_adapter_merged(self, tmp_path):
-        # If the adapter that is being merged is NOT the one being swapped out, the swap is still safe because
-        # the merged adapter does not interact with the swapped-out adapter's weights. We should not raise.
+        # Similar to test_hotswap_raises_when_target_adapter_merged, but the merged adapter ("other") is not
+        # the one being swapped out ("default"), so the swap should be allowed.
         config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
 
         torch.manual_seed(0)
         model0 = get_peft_model(self.get_model(), config)
         model0.save_pretrained(tmp_path / "adapter0")
-        del model0
 
-        torch.manual_seed(1)
-        model1 = get_peft_model(self.get_model(), config)
-        model1.save_pretrained(tmp_path / "adapter1")
-        del model1
-
-        model = PeftModel.from_pretrained(self.get_model(), tmp_path / "adapter0")
         # add a second adapter and merge IT, then hotswap the unrelated "default" adapter
-        model.add_adapter("other", config)
-        model.merge_adapter(adapter_names=["other"])
+        model0.add_adapter("other", config)
+        model0.merge_adapter(adapter_names=["other"])
 
         # must not raise: the adapter being swapped out ("default") is not merged
-        hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
+        hotswap_adapter(model0, tmp_path / "adapter0", adapter_name="default")
 
     def test_prepare_model_for_compiled_hotswap_scalings_are_tensors(self):
         config = LoraConfig(target_modules=["lin0", "lin1"])

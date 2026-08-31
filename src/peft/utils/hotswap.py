@@ -23,6 +23,7 @@ import torch
 from peft.config import PeftConfig
 from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.tuners.lora import Conv2d, Linear, LoraConfig, LoraLayer
+from peft.tuners.tuners_utils import BaseTunerLayer
 
 from .other import get_pattern_key, infer_device
 from .peft_types import PeftType
@@ -451,17 +452,8 @@ def hotswap_adapter_from_state_dict(
             If the old and the new adapter are not compatible, a RuntimeError is raised.
 
     """
-    # Hot-swapping only manipulates the adapter weights, but a merged adapter has its delta already folded into the
-    # base weights. In that case the swap would have no visible effect (merged forward ignores adapter weights) and a
-    # subsequent unmerge would subtract the NEW delta from a base containing the OLD delta, corrupting the weights
-    # (see #3581). Refuse to run instead. Note: a different adapter being merged is fine because it does not
-    # interact with the adapter being swapped out.
-    from peft.tuners.tuners_utils import BaseTunerLayer
-
     target_merged = any(
-        adapter_name in module.merged_adapters
-        for module in model.modules()
-        if isinstance(module, BaseTunerLayer)
+        adapter_name in module.merged_adapters for module in model.modules() if isinstance(module, BaseTunerLayer)
     )
     if target_merged:
         raise ValueError(
