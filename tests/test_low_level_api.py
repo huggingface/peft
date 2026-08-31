@@ -789,6 +789,22 @@ class TestPeftStateDict:
         weight = target.base_model.model.lora_head.modules_to_save["default"].weight
         assert torch.allclose(weight, torch.full_like(weight, 123.0))
 
+    def test_set_peft_model_state_dict_preserves_input(self):
+        def create_model():
+            config = LoraConfig(target_modules=["linear"], modules_to_save=["linear2"])
+            return get_peft_model(DummyModel(), config)
+
+        # Regression test for #3592: loading must not consume caller-owned checkpoints.
+        state_dict = get_peft_model_state_dict(create_model())
+        keys_before = tuple(state_dict)
+        values_before = state_dict.copy()
+
+        for _ in range(2):
+            set_peft_model_state_dict(create_model(), state_dict)
+
+        assert tuple(state_dict) == keys_before
+        assert all(state_dict[key] is value for key, value in values_before.items())
+
 
 class TestGetBaseModelStateDict:
     # Tests for get_base_model_state_dict / set_base_model_state_dict. The per-method and per-model coverage lives in
