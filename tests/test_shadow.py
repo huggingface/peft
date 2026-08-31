@@ -307,6 +307,31 @@ class TestShadowCausalLM:
         assert any("lm_head" in key for key in keys)
         assert not any(".shadow_head." in key for key in keys)
 
+    def test_hook_leak_no_growth(self):
+        # Regression for #3625: per-forward state must not leak across disable_adapter toggles (GPU growth)
+        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
+        ids = torch.randint(0, 128, (2, 6))
+        model(ids)
+        assert model.base_model._seed_shadow_state is None
+        for _ in range(10):
+            with model.disable_adapter():
+                model(ids)
+            assert model.base_model._seed_shadow_state is None
+
+    def test_unload_then_delete_isolated(self):
+        # Regression for #3625: unload_shadow(copy=False) then delete_adapter must not UAF the detached model
+        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
+        ids = torch.randint(0, 128, (2, 6))
+        detached = model.base_model.unload_shadow(copy=False)
+        assert detached.backbone is model.base_model.shadow_backbone["default"]
+        model.delete_adapter("default")
+        assert model.base_model._seed_shadow_state is None
+        with torch.no_grad():
+            out = detached(ids)
+        # detached should still produce valid logits (shared module still alive via detached ref)
+        logits = out.logits if hasattr(out, "logits") else out
+        assert logits.shape[0] == 2
+
     def test_requires_two_layers(self):
         # A single decoder block means the shadow carrier has no loop to ride; injection needs >= 2 blocks.
         # Target only one block of the tiny 2-layer model so entry == exit.
