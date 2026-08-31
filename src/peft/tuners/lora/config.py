@@ -1017,14 +1017,12 @@ class LoraConfig(PeftConfig):
             self.modules_to_tie = None
             self.target_modules_to_tie = None
 
-        if isinstance(self.velora_config, dict):
-            self.velora_config = VeloraConfig(**self.velora_config)
-        elif self.velora_config is not None and not isinstance(self.velora_config, VeloraConfig):
+        self.velora_config = _nested_config_from_dict(self.velora_config, VeloraConfig)
+        if self.velora_config is not None and not isinstance(self.velora_config, VeloraConfig):
             raise TypeError("`velora_config` must be a `VeloraConfig`, a dict, or None.")
 
-        if isinstance(self.kasa_config, dict):
-            self.kasa_config = KasaConfig(**self.kasa_config)
-        elif self.kasa_config is not None and not isinstance(self.kasa_config, KasaConfig):
+        self.kasa_config = _nested_config_from_dict(self.kasa_config, KasaConfig)
+        if self.kasa_config is not None and not isinstance(self.kasa_config, KasaConfig):
             raise TypeError("`kasa_config` must be a `KasaConfig`, a dict, or None.")
 
         # Same treatment for the remaining nested sub-configs: save_pretrained serializes them via asdict, so after

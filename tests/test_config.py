@@ -677,14 +677,13 @@ class TestLoraNestedConfigRoundTrip:
         ],
     )
     def test_nested_config_survives_save_load_roundtrip(
-        self, attribute_name, nested_config_cls, dummy_field, dummy_value
+        self, tmp_path, attribute_name, nested_config_cls, dummy_field, dummy_value
     ):
         config = LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0)
         setattr(config, attribute_name, nested_config_cls(**{dummy_field: dummy_value}))
 
-        with tempfile.TemporaryDirectory() as tmp_dirname:
-            config.save_pretrained(tmp_dirname)
-            loaded = LoraConfig.from_pretrained(tmp_dirname)
+        config.save_pretrained(tmp_path)
+        loaded = LoraConfig.from_pretrained(tmp_path)
 
         nested = getattr(loaded, attribute_name)
         assert isinstance(nested, nested_config_cls)
