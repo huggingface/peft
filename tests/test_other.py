@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import copy
+import json
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -882,3 +883,67 @@ class TestTaskTypeAddAdapterAutocastDtype:
             model.load_adapter(tmp_path, adapter_name="loaded", autocast_adapter_dtype=autocast)
 
         assert self.adapter_dtypes(model, "loaded") == {expected_dtype}
+
+
+class TestTaskTypeModulesToSaveConfigMutation:
+    """The task-type PeftModel subclasses inject their head names into peft_config.modules_to_save.
+
+    They used to do so with list.extend, which mutated the caller's list in place and was not idempotent. Since PEFT
+    stores the config by reference, reusing a single config (e.g. across cross-validation folds or a hyperparameter
+    sweep) accumulated duplicate head names and retroactively corrupted the configs of models that had already been
+    created, which is what save_pretrained writes to adapter_config.json.
+    """
+
+    def get_model(self, auto_cls):
+        with hub_online_once(TASK_TYPE_MODEL_ID):
+            return auto_cls.from_pretrained(TASK_TYPE_MODEL_ID)
+
+    @pytest.mark.parametrize("task_type, auto_cls, head_names", TASK_TYPE_CASES)
+    def test_reusing_config_does_not_accumulate_head_names(self, task_type, auto_cls, head_names):
+        # a single config reused across several models, as in a cross-validation loop
+        user_list = ["my_head"]
+        config = LoraConfig(task_type=task_type, target_modules=["query", "value"], modules_to_save=user_list)
+        expected = ["my_head"] + head_names
+
+        models = []
+        for _ in range(3):
+            models.append(get_peft_model(self.get_model(auto_cls), config))
+            assert config.modules_to_save == expected
+
+        # the caller's own list object must not be mutated
+        assert user_list == ["my_head"]
+        # and the configs of the models created earlier must not have been corrupted retroactively
+        for model in models:
+            assert model.peft_config["default"].modules_to_save == expected
+
+    @pytest.mark.parametrize("task_type, auto_cls, head_names", TASK_TYPE_CASES)
+    def test_add_adapter_does_not_accumulate_head_names(self, task_type, auto_cls, head_names):
+        user_list = ["my_head"]
+        config = LoraConfig(task_type=task_type, target_modules=["query", "value"], modules_to_save=user_list)
+        model = get_peft_model(self.get_model(auto_cls), config)
+        model.add_adapter("other", config)
+
+        assert config.modules_to_save == ["my_head"] + head_names
+        assert user_list == ["my_head"]
+
+    @pytest.mark.parametrize("task_type, auto_cls, head_names", TASK_TYPE_CASES)
+    def test_modules_to_save_none_adds_head_names_once(self, task_type, auto_cls, head_names):
+        config = LoraConfig(task_type=task_type, target_modules=["query", "value"])
+        assert config.modules_to_save is None
+
+        model = get_peft_model(self.get_model(auto_cls), config)
+        model.add_adapter("other", config)
+
+        assert config.modules_to_save == head_names
+
+    @pytest.mark.parametrize("task_type, auto_cls, head_names", TASK_TYPE_CASES)
+    def test_saved_adapter_config_has_no_duplicates(self, task_type, auto_cls, head_names, tmp_path):
+        config = LoraConfig(task_type=task_type, target_modules=["query", "value"], modules_to_save=["my_head"])
+        for _ in range(3):
+            model = get_peft_model(self.get_model(auto_cls), config)
+        model.save_pretrained(tmp_path)
+
+        with open(tmp_path / "adapter_config.json") as f:
+            saved = json.load(f)["modules_to_save"]
+
+        assert saved == ["my_head"] + head_names

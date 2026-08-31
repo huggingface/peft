@@ -1799,7 +1799,12 @@ class PeftModelForSequenceClassification(PeftModel):
             if peft_config.modules_to_save is None:
                 peft_config.modules_to_save = classifier_module_names[:]
             else:
-                peft_config.modules_to_save.extend(classifier_module_names)
+                # Rebind instead of extending in place: the config object belongs to the caller and is
+                # stored by reference, so mutating it would also corrupt the configs of models that were
+                # already created from it. Skipping names that are already present keeps this idempotent
+                # when the same config is reused, e.g. across cross-validation folds.
+                existing = list(peft_config.modules_to_save)
+                peft_config.modules_to_save = existing + [n for n in classifier_module_names if n not in existing]
 
         # The modification of peft_config must happen before the init call as the `modules_to_save` information
         # will be used to guard the target layer matching against matching `modules_to_save` layers. Only the
@@ -1857,7 +1862,12 @@ class PeftModelForSequenceClassification(PeftModel):
             if peft_config.modules_to_save is None:
                 peft_config.modules_to_save = classifier_module_names[:]
             else:
-                peft_config.modules_to_save.extend(classifier_module_names)
+                # Rebind instead of extending in place: the config object belongs to the caller and is
+                # stored by reference, so mutating it would also corrupt the configs of models that were
+                # already created from it. Skipping names that are already present keeps this idempotent
+                # when the same config is reused, e.g. across cross-validation folds.
+                existing = list(peft_config.modules_to_save)
+                peft_config.modules_to_save = existing + [n for n in classifier_module_names if n not in existing]
 
         return super().add_adapter(
             adapter_name,
@@ -2663,7 +2673,12 @@ class PeftModelForTokenClassification(PeftModel):
             if peft_config.modules_to_save is None:
                 peft_config.modules_to_save = classifier_module_names[:]
             else:
-                peft_config.modules_to_save.extend(classifier_module_names)
+                # Rebind instead of extending in place: the config object belongs to the caller and is
+                # stored by reference, so mutating it would also corrupt the configs of models that were
+                # already created from it. Skipping names that are already present keeps this idempotent
+                # when the same config is reused, e.g. across cross-validation folds.
+                existing = list(peft_config.modules_to_save)
+                peft_config.modules_to_save = existing + [n for n in classifier_module_names if n not in existing]
 
         for name, _ in self.base_model.named_children():
             if any(module_name in name for module_name in self.modules_to_save):
@@ -2716,7 +2731,12 @@ class PeftModelForTokenClassification(PeftModel):
             if peft_config.modules_to_save is None:
                 peft_config.modules_to_save = classifier_module_names[:]
             else:
-                peft_config.modules_to_save.extend(classifier_module_names)
+                # Rebind instead of extending in place: the config object belongs to the caller and is
+                # stored by reference, so mutating it would also corrupt the configs of models that were
+                # already created from it. Skipping names that are already present keeps this idempotent
+                # when the same config is reused, e.g. across cross-validation folds.
+                existing = list(peft_config.modules_to_save)
+                peft_config.modules_to_save = existing + [n for n in classifier_module_names if n not in existing]
 
         return super().add_adapter(
             adapter_name,
@@ -2898,7 +2918,12 @@ class PeftModelForQuestionAnswering(PeftModel):
             if peft_config.modules_to_save is None:
                 peft_config.modules_to_save = qa_module_names[:]
             else:
-                peft_config.modules_to_save.extend(qa_module_names)
+                # Rebind instead of extending in place: the config object belongs to the caller and is
+                # stored by reference, so mutating it would also corrupt the configs of models that were
+                # already created from it. Skipping names that are already present keeps this idempotent
+                # when the same config is reused, e.g. across cross-validation folds.
+                existing = list(peft_config.modules_to_save)
+                peft_config.modules_to_save = existing + [n for n in qa_module_names if n not in existing]
 
         for name, _ in self.base_model.named_children():
             if any(module_name in name for module_name in self.modules_to_save):
@@ -2951,7 +2976,12 @@ class PeftModelForQuestionAnswering(PeftModel):
             if peft_config.modules_to_save is None:
                 peft_config.modules_to_save = qa_module_names[:]
             else:
-                peft_config.modules_to_save.extend(qa_module_names)
+                # Rebind instead of extending in place: the config object belongs to the caller and is
+                # stored by reference, so mutating it would also corrupt the configs of models that were
+                # already created from it. Skipping names that are already present keeps this idempotent
+                # when the same config is reused, e.g. across cross-validation folds.
+                existing = list(peft_config.modules_to_save)
+                peft_config.modules_to_save = existing + [n for n in qa_module_names if n not in existing]
 
         return super().add_adapter(
             adapter_name,
