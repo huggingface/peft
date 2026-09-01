@@ -466,6 +466,11 @@ class LoraConfig(PeftConfig):
             When set to True, uses [Rank-Stabilized LoRA](https://huggingface.co/papers/2312.03732) which sets the
             adapter scaling factor to `lora_alpha/math.sqrt(r)`, since it was proven to work better. Otherwise, it will
             use the original default value of `lora_alpha/r`.
+        use_nora (`bool` | `Literal["init"]`):
+            When set to True, normalizes the columns of `lora_A.weight` along the rank (r) dimension on every
+            forward pass (and when merging the adapter into the base weights). When set to "init", the
+            normalization is applied only once, right after adapter initialization; afterwards `A` is an
+            ordinary parameter and merging is the standard `B @ A`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
         init_lora_weights (`bool` | `Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "corda", "loftq", "orthogonal", "mica"]`):
@@ -650,6 +655,16 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    use_nora: Union[bool, Literal["init"]] = field(
+        default=False,
+        metadata={
+            "help": (
+                "When set to True, normalizes the columns of lora_A.weight along the rank (r) dimension"
+                " on every forward pass (and when merging). When set to 'init', the normalization is"
+                " applied only once, right after adapter initialization."
+            )
+        },
+    )
     modules_to_save: Optional[list[str]] = field(
         default=None,
         metadata={
@@ -670,6 +685,7 @@ class LoraConfig(PeftConfig):
             "loftq",
             "orthogonal",
             "mica",
+            "bimi",
         ]
     ) = field(
         default=True,
