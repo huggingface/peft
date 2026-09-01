@@ -1213,14 +1213,20 @@ class Embedding(nn.Module, LoraLayer):
 
         # If there is tensor parallelism, we register the hooks for `self._embed`.
         if self.tp_layer is not None:
-            mod = LoraEmbeddingATPHolder(self.lora_embedding_A[adapter_name])
+            holder = LoraEmbeddingATPHolder(self.lora_embedding_A[adapter_name])
 
             if is_transformers_dtensor_tp:
-                # The new DTensor-based TP API has no `_prepare_input_fn`/`_prepare_output_fn`
-                # on `self.tp_layer`; shard `lora_embedding_A` and build equivalent callables.
-                sharded_weight, input_fn, output_fn = make_embedding_lora_tp_fns(
-                    self.tp_layer, mod, self.device_mesh
-                )
+                self.tp_layer.shard_param(holder, "weight", self.device_mesh)
+                sharded_weight = nn.Parameter(holder.weight.T, requires_grad=holder.weight.requires_grad)
+
+                def input_fn(inputs):
+                    (x,), _ = self.tp_layer.transform_inputs_pre_forward(holder, inputs, {}, self.device_mesh)
+                    return x
+
+                def output_fn(outputs):
+                    (x,), _ = self.tp_layer.transform_output_post_forward(holder, outputs, {}, self.device_mesh)
+                    return x
+                
                 self.lora_embedding_A[adapter_name] = sharded_weight
             else:
 
