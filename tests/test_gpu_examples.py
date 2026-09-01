@@ -6716,7 +6716,7 @@ def _setup_dist(rank, world_size, port):
     os.environ["MASTER_PORT"] = str(port)
     os.environ["LOCAL_RANK"] = str(rank)
     os.environ["RANK"] = str(rank)
-    os.environ["WORLD_SIZE"] = str(rank)
+    os.environ["WORLD_SIZE"] = str(world_size)
     dist.init_process_group(backend="gloo", rank=rank, world_size=world_size)
 
 

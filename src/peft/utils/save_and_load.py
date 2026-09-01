@@ -370,22 +370,6 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
         from torch.distributed.tensor import DTensor
         from transformers.distributed.sharding_utils import DtensorShardOperation
 
-        def _shard_tensor_as_dtensor(ref: DTensor, source: torch.Tensor) -> DTensor:
-            # `DtensorShardOperation.shard_tensor` only returns this rank's plain local shard.
-            # `nn.Module.load_state_dict` compares `input_param.shape` against the live (DTensor,
-            # globally-shaped) parameter and raises "size mismatch" if we hand it that local shard
-            # directly, so we re-wrap it as a DTensor mirroring `ref`'s mesh/placements/global shape
-            # first, mirroring what `transformers.core_model_loading._dtensor_from_local_like` does.
-            local_shard = DtensorShardOperation(ref).shard_tensor(source)
-            return DTensor.from_local(
-                local_shard.contiguous(),
-                ref.device_mesh,
-                ref.placements,
-                run_check=False,
-                shape=ref.shape,
-                stride=tuple(ref.stride()),
-            )
-
     should_check = True
     prefix_to_remove = None
     prefix_to_add = None
@@ -437,13 +421,15 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
             elif tp_plan == "embedding_rowwise":
                 embedding_key = f"{name}.base_layer.weight"
                 if embedding_key in state_dict:
-                    state_dict[embedding_key] = _shard_tensor_as_dtensor(base_layer.weight, state_dict[embedding_key])
+                    state_dict[embedding_key]  = DtensorShardOperation(base_layer.weight).shard_tensor(
+                        state_dict[embedding_key]
+                    )
                 key = f"{name}.lora_embedding_A{adapter_name_in_key}"
                 ref = module.lora_embedding_A[adapter_name]
             else:
                 raise TypeError(f"Unknown tensor parallel plan {tp_plan} for {module.__class__.__name__}.")
 
-            state_dict[key] = _shard_tensor_as_dtensor(ref, state_dict[key])
+            state_dict[key] = DtensorShardOperation(ref).shard_tensor(state_dict[key])
         else:
             # We create and initialize the TensorParallelLayer on the fly,
             # and we set the `empty_param` attribute depending on the proper
