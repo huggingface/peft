@@ -349,6 +349,82 @@ class TestXlora:
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
         assert not torch.equal(outputs, outputs_disabled)
 
+    def test_disable_adapter_matches_base_model(self, tokenizer, model):
+        # The X-LoRA layers replace the forward method of the LoRA layers and used to ignore the disabled state of the
+        # X-LoRA adapter. Inside a disable_adapter context, no scalings are computed, so all experts were applied at
+        # full strength instead of not being applied at all.
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt").to(self.torch_device)
+
+        with hub_online_once(self.model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(self.model_id).to(self.torch_device)
+        base_model.config.use_cache = False
+        base_model.eval()
+        model.eval()
+
+        with torch.no_grad():
+            expected = base_model(input_ids=inputs).logits
+            with model.disable_adapter():
+                outputs_disabled = model(input_ids=inputs).logits
+            outputs = model(input_ids=inputs).logits
+
+        assert torch.allclose(outputs_disabled, expected, atol=1e-5, rtol=1e-5)
+        # sanity check: with the adapter enabled, the output differs from the base model
+        assert not torch.allclose(outputs, expected, atol=1e-5, rtol=1e-5)
+
+    def test_disable_adapter_matches_base_model_embedding(self, tokenizer, embedding_model):
+        # same as test_disable_adapter_matches_base_model but for XLoraEmbeddingLayer
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt").to(self.torch_device)
+
+        with hub_online_once(self.model_id):
+            base_model = AutoModelForCausalLM.from_pretrained(self.model_id).to(self.torch_device)
+        base_model.config.use_cache = False
+        base_model.eval()
+        embedding_model.eval()
+
+        with torch.no_grad():
+            expected = base_model(input_ids=inputs).logits
+            with embedding_model.disable_adapter():
+                outputs_disabled = embedding_model(input_ids=inputs).logits
+            outputs = embedding_model(input_ids=inputs).logits
+
+        assert torch.allclose(outputs_disabled, expected, atol=1e-5, rtol=1e-5)
+        assert not torch.allclose(outputs, expected, atol=1e-5, rtol=1e-5)
+
+    def test_generate_preserves_training_mode(self, tokenizer, model):
+        # generate used to put the whole model into eval mode as a side effect, which silently disables dropout for
+        # the rest of the training run
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        model.train()
+
+        model.generate(input_ids=inputs.to(self.torch_device), max_new_tokens=4)
+
+        assert model.base_model.training
+        assert model.base_model.lora_model.model.training
+
+    def test_classifier_stays_trainable_after_generate(self, tokenizer, model):
+        # The names of the classifier parameters contain "internal_xlora_classifier", which matches the "lora_"
+        # substring that is used to identify the frozen experts. The classifier is the only trainable part of X-LoRA
+        # when use_trainable_adapters=False, so freezing it makes training a silent no-op.
+        classifier_params = [param for name, param in model.named_parameters() if "internal_xlora_classifier" in name]
+        assert classifier_params
+        assert all(param.requires_grad for param in classifier_params)
+
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        model.generate(input_ids=inputs.to(self.torch_device), max_new_tokens=4)
+
+        assert all(param.requires_grad for param in classifier_params)
+
+    def test_experts_stay_frozen_after_forward(self, tokenizer, model):
+        # The scalings pass disables and re-enables the LoRA layers, and enabling them marks them as trainable again.
+        expert_params = [param for name, param in model.named_parameters() if "lora_A" in name or "lora_B" in name]
+        assert expert_params
+        assert not any(param.requires_grad for param in expert_params)
+
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        model(input_ids=inputs.to(self.torch_device))
+
+        assert not any(param.requires_grad for param in expert_params)
+
     def test_functional_embedding(self, tokenizer, embedding_model):
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = embedding_model.generate(
