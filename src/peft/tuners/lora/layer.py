@@ -1087,9 +1087,9 @@ class Linear(nn.Module, LoraLayer):
 
 
 class LoraEmbeddingATPHolder(nn.Embedding):
-    """ 
+    """
     In LoRA, the embedding A weight is a learnable parameter that is added to the original embedding weight, but the TP
-    API acts on modules rather than individual parameters. This class wraps the LoRA embedding A weight in an 
+    API acts on modules rather than individual parameters. This class wraps the LoRA embedding A weight in an
     `nn.Embedding` module, allowing it to be treated as a module by the TP API.
     """
     def __init__(self, lora_embedding_A_weight: nn.Parameter):
