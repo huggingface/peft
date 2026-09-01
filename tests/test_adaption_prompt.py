@@ -319,6 +319,77 @@ class TestAdaptionPrompt:
         assert not torch.allclose(adapter_1_after.logits, default_after_set.logits)
 
     @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    def test_save_pretrained_multiple_adapters_keeps_weights_apart(self, model_id):
+        # The modules of the inactive adapters are swapped out of the model, so they used to be missing from the
+        # state dict and every adapter was saved with the weights of the adapter that happened to be active.
+        input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+        attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
+
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        model = get_peft_model(model, config)
+        model.add_adapter("other", AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM"))
+
+        # give both adapters distinct, non-zero weights
+        for adapter_name, scale in [("default", 0.5), ("other", 1.5)]:
+            model.set_adapter(adapter_name)
+            with torch.no_grad():
+                for _, param in model.named_parameters():
+                    if param.requires_grad:
+                        param.add_(scale * torch.randn_like(param))
+
+        model.eval()
+        outputs = {}
+        for adapter_name in ["default", "other"]:
+            model.set_adapter(adapter_name)
+            with torch.no_grad():
+                outputs[adapter_name] = model(input_ids=input_ids, attention_mask=attention_mask).logits.clone()
+        # sanity check: the two adapters produce different outputs
+        assert not torch.allclose(outputs["default"], outputs["other"])
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+
+            for adapter_name in ["default", "other"]:
+                # save_pretrained stores the "default" adapter at the root and the others in subfolders
+                path = tmp_dirname if adapter_name == "default" else os.path.join(tmp_dirname, adapter_name)
+                base = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+                loaded = PeftModel.from_pretrained(base, path).eval()
+                with torch.no_grad():
+                    logits = loaded(input_ids=input_ids, attention_mask=attention_mask).logits
+                assert_close(logits, outputs[adapter_name], rtol=1e-5, atol=1e-5)
+
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
+    def test_delete_adapter(self, model_id):
+        input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+        attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
+
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        model = get_peft_model(model, config)
+        model.add_adapter("other", AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM"))
+        model.set_adapter("default")
+        model.eval()
+        with torch.no_grad():
+            expected = model(input_ids=input_ids, attention_mask=attention_mask).logits.clone()
+
+        # deleting an inactive adapter leaves the active one untouched
+        model.delete_adapter("other")
+        assert "other" not in model.peft_config
+        assert model.active_adapters == ["default"]
+        with torch.no_grad():
+            logits = model(input_ids=input_ids, attention_mask=attention_mask).logits
+        assert_close(logits, expected, rtol=0, atol=0)
+
+        with pytest.raises(ValueError, match="Adapter other does not exist"):
+            model.delete_adapter("other")
+
+        # deleting the last, active adapter also works
+        model.delete_adapter("default")
+        assert model.peft_config == {}
+        assert model.active_adapters == []
+
+    @pytest.mark.parametrize("model_id", MODELS_TO_TEST)
     def test_add_and_set_while_disabled(self, model_id):
         """Test that adding and setting adapters while disabled works as intended."""
         # Test input data.
