@@ -354,8 +354,9 @@ def save_as_lora(
     Convert a non-LoRA model with PEFT layers to a LoRA, then save the checkpoint file and PEFT config.
 
     This is only supported for some specific PEFT methods that allow an equivalent conversion. Essentially, this comes
-    down to PEFT methods that work by updating the base weight with a delta weight. Also, right now, only linear layers
-    are supported.
+    down to PEFT methods for which we can compute the additive delta weight W' - W, either directly (additive methods
+    like LoKr) or by constructing the effective weight W' first (multiplicative methods like OFT). Also, right now,
+    only linear layers are supported.
 
     The LoRA adapter will try to approximate the initial adapter as close as possible. The higher the rank, the better
     the approximation. It is expected that the approximation will never reach the full performance of the original
