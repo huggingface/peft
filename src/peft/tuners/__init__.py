@@ -37,6 +37,7 @@ from .lora import (
     ArrowConfig,
     BdLoraConfig,
     EvaConfig,
+    KasaConfig,
     LoftQConfig,
     LoraConfig,
     LoraGAConfig,
@@ -65,7 +66,9 @@ from .psoft import PsoftConfig, PsoftModel
 from .pvera import PveraConfig, PveraModel
 from .randlora import RandLoraConfig, RandLoraModel
 from .road import RoadConfig, RoadModel
+from .shadow import ShadowConfig, ShadowModel
 from .shira import ShiraConfig, ShiraModel
+from .supertuning import SupertuningConfig, SupertuningModel
 from .tinylora import TinyLoraConfig, TinyLoraModel
 from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
 from .unilora import UniLoraConfig, UniLoraModel
@@ -113,6 +116,7 @@ __all__ = [
     "HiraModel",
     "IA3Config",
     "IA3Model",
+    "KasaConfig",
     "LNTuningConfig",
     "LNTuningModel",
     "LilyConfig",
@@ -157,8 +161,12 @@ __all__ = [
     "RandLoraModel",
     "RoadConfig",
     "RoadModel",
+    "ShadowConfig",
+    "ShadowModel",
     "ShiraConfig",
     "ShiraModel",
+    "SupertuningConfig",
+    "SupertuningModel",
     "TinyLoraConfig",
     "TinyLoraModel",
     "TrainableTokensConfig",

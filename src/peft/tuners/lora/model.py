@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import operator
+import os
 import re
 import warnings
 from contextlib import contextmanager
@@ -47,6 +48,7 @@ from peft.utils import (
 from peft.utils.integrations import TpInfo
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 from peft.utils.other import get_pattern_key
+from peft.utils.save_and_load import _maybe_shard_state_dict_for_tp
 
 from .aqlm import dispatch_aqlm
 from .awq import dispatch_awq
@@ -177,6 +179,21 @@ class LoraModel(BaseTuner):
 
     def _check_new_adapter_config(self, config: LoraConfig) -> None:
         super()._check_new_adapter_config(config)
+
+        # KaSA destructively truncates the base weight when the adapter is initialized, so the base weight that any
+        # other adapter sees depends on whether a KaSA adapter was added before it. To avoid silently inconsistent
+        # results, mixing KaSA and non-KaSA adapters on the same model is not supported.
+        new_uses_kasa = getattr(config, "kasa_config", None) is not None
+        for adapter_name, other_conf in self.peft_config.items():
+            if other_conf is config:
+                continue
+            other_uses_kasa = getattr(other_conf, "kasa_config", None) is not None
+            if new_uses_kasa is not other_uses_kasa:
+                raise ValueError(
+                    "KaSA cannot be combined with adapters that don't use KaSA, since KaSA modifies the base "
+                    f"weights: the new adapter {'uses' if new_uses_kasa else 'does not use'} KaSA but adapter "
+                    f"'{adapter_name}' {'does not' if new_uses_kasa else 'does'}."
+                )
 
         # Multiple adapters that use `target_parameters` are supported, but they must all target the same set of
         # parameters. The reason is that the targeted parameters are wrapped with (possibly nested) lora.ParamWrapper
@@ -967,6 +984,87 @@ class LoraModel(BaseTuner):
 
         return tensors_lora
 
+    @classmethod
+    def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
+        to_return = super()._get_adapter_state_dict(model, config, adapter_name, state_dict, unwanted_adapter_names)
+
+        if config.use_dora:
+            # Here we take care of a refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a
+            # ModuleDict with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. Since
+            # we want the state_dict format not to change, we remove the "weight" part.
+            new_dora_suffix = f"lora_magnitude_vector.{adapter_name}.weight"
+
+            def renamed_dora_weights(k):
+                if k.endswith(new_dora_suffix):
+                    k = k[:-7]  # remove ".weight"
+                return k
+
+            to_return = {renamed_dora_weights(k): v for k, v in to_return.items()}
+        return to_return
+
+    @classmethod
+    def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
+        # Here we take care of a refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a
+        # ModuleDict with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. As the
+        # checkpoint format did not change (the keys still end with lora_magnitude_vector, without ".weight"), the
+        # suffix needs to be appended before the keys are remapped to the model format.
+        def renamed_dora_weights(k):
+            if k.endswith("lora_magnitude_vector"):
+                k = k + ".weight"
+            return k
+
+        state_dict = {renamed_dora_weights(k): v for k, v in state_dict.items()}
+        peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
+
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            _maybe_shard_state_dict_for_tp(model, peft_model_state_dict, adapter_name)
+
+        return peft_model_state_dict
+
+    @classmethod
+    def _convert_state_dict_for_initial_model(
+        cls, peft_model, peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
+    ):
+        if peft_config.use_rslora and (peft_config.rank_pattern or peft_config.alpha_pattern):
+            msg = (
+                "Passing `path_initial_model_for_weight_conversion` to `save_pretrained` is not supported when "
+                "using `rank_pattern` or `alpha_pattern` at the same time as `use_rslora=True`."
+            )
+            raise ValueError(msg)
+
+        if not any(
+            str(peft_config.init_lora_weights).lower().startswith(prefix)
+            for prefix in ["pissa", "corda", "olora", "lora_ga", "true"]
+        ):
+            warnings.warn(
+                "`path_initial_model_for_weight_conversion` only works for converting a PiSSA/CorDA/OLoRA/LoRA-GA adapter to "
+                "a LoRA adapter"
+            )
+
+        initial_adapter_name = os.path.basename(path_initial_model_for_weight_conversion)
+        try:
+            peft_model.load_adapter(
+                os.path.dirname(path_initial_model_for_weight_conversion),
+                subfolder=initial_adapter_name,
+                adapter_name=initial_adapter_name,
+            )
+            is_pissa = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower().startswith("pissa")
+            is_corda = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "corda"
+            is_olora = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "olora"
+            is_lora_ga = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "lora_ga"
+            if is_pissa or is_corda or is_olora or is_lora_ga:
+                raise ValueError(
+                    "The `init_lora_weights` parameter of the initial adapter should be set to `True`. "
+                    "Otherwise, `self.load_adapter` will subtract the decomposed values again based on the "
+                    "residual model."
+                )
+            output_state_dict = peft_model.base_model.subtract_mutated_init(
+                output_state_dict, initial_adapter_name, kwargs
+            )
+        finally:
+            peft_model.delete_adapter(initial_adapter_name)
+        return output_state_dict
+
     def _get_monteclora_loss(self, adapter_names: Optional[Union[str, list[str]]] = None) -> torch.Tensor | float:
         """
         Compute the MonteCLoRA variational regularization loss.
@@ -1019,6 +1117,58 @@ class LoraModel(BaseTuner):
         if num_monte_layers == 0:
             return 0.0
         return var_loss_sum / num_monte_layers
+
+    def _get_kasa_loss(self, adapter_names: Optional[Union[str, list[str]]] = None) -> torch.Tensor | float:
+        """
+        Compute the KaSA auxiliary regularization loss summed over all KaSA-adapted layers.
+
+        The KaSA paper (https://huggingface.co/papers/2412.06071) optimizes the task loss together with two auxiliary
+        terms (Eq. 9-12): an L2 penalty on the learnable singular values `sum(lora_diag ** 2)` (weighted by `beta`) and
+        an orthogonal regularization `||B^T B - I||_F + ||A A^T - I||_F` on the adapter factors (weighted by `gamma`),
+        which softly enforces the semi-orthogonality assumed by the SVD parametrization. The coefficients are taken
+        from the `KasaConfig` of each adapter. Returns `0.0` if no matching KaSA layers are present (e.g. KaSA is not
+        used, or none of the requested adapters use KaSA).
+
+        Typical usage during training (after computing the task loss):
+
+        ```py
+        task_loss = ...  # standard loss from the model
+        kasa_loss = model._get_kasa_loss()
+        total_loss = task_loss + kasa_loss
+        ```
+
+        Args:
+            adapter_names (`str` or `list[str]`, *optional*):
+                Name(s) of the adapter(s) to include in the loss computation. If `None` (the default), the model's
+                currently active adapters (`self.active_adapters`) are used.
+
+        Returns:
+            The summed regularization loss as a tensor (or `0.0` if no KaSA layers match).
+        """
+        from .variants import _kasa_layer_regularization_loss
+
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+        elif isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+
+        total: torch.Tensor | float = 0.0
+        for module in self.modules():
+            if not isinstance(module, LoraLayer):
+                continue
+            lora_diag = getattr(module, "lora_diag", None)
+            if lora_diag is None:
+                continue
+            for adapter_name in adapter_names:
+                if adapter_name not in lora_diag:
+                    continue
+                kasa_config = self.peft_config[adapter_name].kasa_config
+                layer_loss = _kasa_layer_regularization_loss(
+                    module, adapter_name=adapter_name, beta=kasa_config.beta, gamma=kasa_config.gamma
+                )
+                total = total + layer_loss
+
+        return total
 
     def _add_modules_to_save_to_tie(self, peft_config: LoraConfig, tied_weight_keys: list[str]):
         """

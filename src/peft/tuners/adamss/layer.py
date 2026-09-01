@@ -201,9 +201,6 @@ class AdamssLayer(BaseTunerLayer):
         # Store projection matrix in BufferDict (frozen, device-aware)
         self.adamss_newB[adapter_name] = VVT[0, 0, :, :].detach().to(dtype)
 
-        # Use user-specified subspace_rank
-        rank_per_subspace = subspace_rank
-
         # Initialize trainable subspace parameters
         # Collect parameters in lists, then create ParameterList for proper state_dict keys
         A_params = []

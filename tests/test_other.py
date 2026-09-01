@@ -330,6 +330,61 @@ class TestModulesToSaveKwargsOnlyForward:
         assert out.shape == (2, 8)
 
 
+class TestModulesToSaveUnloadNoActiveAdapter:
+    """Regression test for unloading when a ModulesToSaveWrapper has no active adapter.
+
+    When the model's active adapter does not use modules_to_save on a given module (e.g. adapter "other" below), the
+    wrapper's list of active adapters is empty. Unloading used to crash with `TypeError: unhashable type: 'list'`
+    because the empty list was used to index the ModuleDict of saved modules. Instead, unloading should restore the
+    original module, which is also what forward uses when no adapter is active on the wrapper.
+    """
+
+    @pytest.fixture
+    def mlp(self):
+        class MLP(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(8, 8)
+                self.lin1 = nn.Linear(8, 8)
+
+            def forward(self, x):
+                return self.lin1(self.lin0(x))
+
+        torch.manual_seed(0)
+        return MLP()
+
+    @pytest.mark.parametrize("unload_method", ["unload", "merge_and_unload"])
+    def test_unload_with_inactive_modules_to_save(self, mlp, unload_method):
+        x = torch.randn(4, 8)
+        out_base = mlp(x)
+        lin1_weight_before = mlp.lin1.weight.data.clone()
+
+        # adapter "default" uses modules_to_save for lin1 but adapter "other", which is active, does not
+        config_default = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        model = get_peft_model(mlp, config_default)
+        config_other = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+        model.add_adapter("other", config_other)
+        model.set_adapter("other")
+
+        # modify the modules_to_save copy of adapter "default" to ensure that unloading does not use it
+        model.base_model.model.lin1.modules_to_save["default"].weight.data.fill_(42.0)
+        out_peft = model(x)
+
+        unloaded = getattr(model, unload_method)()
+
+        assert isinstance(unloaded.lin1, nn.Linear)
+        # the original module is restored, not the modules_to_save copy of the inactive adapter "default"
+        assert torch.equal(unloaded.lin1.weight.data, lin1_weight_before)
+
+        out_unloaded = unloaded(x)
+        if unload_method == "merge_and_unload":
+            # merging must reproduce the output of the model with adapter "other" active
+            assert torch.allclose(out_unloaded, out_peft, atol=1e-6, rtol=1e-6)
+        else:
+            # unloading without merging must restore the base model output
+            assert torch.allclose(out_unloaded, out_base, atol=1e-6, rtol=1e-6)
+
+
 class TestModulesToSaveNameSubstringBug:
     """Test a bug that could occur with multiple modules to save where one adapter's name is a substring of another
     adapter's name.
