@@ -374,20 +374,19 @@ class MissLinear(nn.Module, MissLayer):
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         return True
 
-    def get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
         """Return the additive delta weight W' - W for the given adapter.
 
         For `bat` mode, `get_delta_weight` already computes the additive delta (used in forward as `orig_weight +
-        delta_weight`), so we delegate to it. For `standard` and `mini` modes, the conversion is handled by the
-        special-cased `_convert_miss_module_to_lora` and does not go through this method.
+        delta_weight`), so we delegate to it. For `standard` and `mini` modes, `get_delta_weight_miss` returns the
+        full merged weight, so we subtract the base weight from it.
         """
-        if self.miss_fn != "bat":
-            raise NotImplementedError(
-                "get_additive_delta is only implemented for MiSS 'bat' mode. For 'standard' and 'mini' "
-                "modes, the conversion is handled by _convert_miss_module_to_lora."
-            )
-        base_weight = self.get_base_weight().clone()
-        return self.get_delta_weight(adapter_name, base_weight)
+        if self.miss_fn == "bat":
+            return self.get_delta_weight(adapter_name, self.get_base_weight())
+        # `get_delta_weight_miss` returns the full merged weight and may modify the tensor passed to it in-place,
+        # hence the clone
+        base_weight = self.get_base_weight()
+        return self.get_delta_weight_miss(adapter_name, base_weight.clone()) - base_weight
 
     def __repr__(self) -> str:
         rep = super().__repr__()

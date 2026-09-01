@@ -1081,7 +1081,7 @@ class Linear(nn.Module, LoraLayer):
             return variant.supports_lora_conversion()
         return True
 
-    def get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
         return self.get_delta_weight(adapter_name)
 
     def __repr__(self) -> str:

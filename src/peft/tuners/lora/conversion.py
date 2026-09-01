@@ -188,7 +188,8 @@ def convert_to_lora(
         TypeError:
             If the provided model does not have any layers that can be converted to LoRA, a `TypeError` is raised.
         ValueError:
-            If an invalid rank was chosen (too high or too low).
+            If an invalid rank was chosen (too high or too low), or if the adapters are currently merged into the
+            base weights (in which case they must be unmerged first).
     """
     from peft import PeftType  # local to avoid circular import
 
@@ -410,7 +411,8 @@ def save_as_lora(
         TypeError:
             If the provided model does not have any layers that can be converted to LoRA, a `TypeError` is raised.
         ValueError:
-            If an invalid rank was chosen (too high or too low).
+            If an invalid rank was chosen (too high or too low), or if the adapters are currently merged into the
+            base weights (in which case they must be unmerged first).
     """
     path = pathlib.Path(path)
     if not path.exists():

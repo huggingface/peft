@@ -422,7 +422,7 @@ class Linear(nn.Module, PsoftLayer):
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         return True
 
-    def get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
         return self.get_delta_weight(adapter_name)
 
     def unmerge(self) -> None:

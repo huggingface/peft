@@ -167,7 +167,7 @@ class Linear(nn.Linear, UniLoraLayer):
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         return True
 
-    def get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
         return self.get_delta_weight(adapter_name)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
