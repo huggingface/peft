@@ -104,6 +104,18 @@ def _get_layer_kv_target_shape(base_config, layer_idx: int) -> tuple[int, int] |
     return num_kv_heads, head_dim
 
 
+def _get_return_dict_transformers_v4(config) -> bool:
+    """Default value of `return_dict` from the model config.
+
+    Transformers v5 deprecated the `config.use_return_dict` property in favor of `config.return_dict`, so read the
+    attribute directly. The `torchscript` check replicates the old property's behavior on transformers v4 of never
+    returning dicts in torchscript mode (v5 removed the attribute), see:
+    https://github.com/huggingface/transformers/blob/753d61104116eefc8ffc977327b441ee0c8d599f/src/transformers/configuration_utils.py#L384-L390
+    """
+    # TODO: remove this function once Transformers v4 is no longer supported
+    return getattr(config, "return_dict", True) and not getattr(config, "torchscript", False)
+
+
 class PeftModel(PushToHubMixin, torch.nn.Module):
     """
     Base model encompassing various Peft methods.
@@ -153,7 +165,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         self._is_prompt_learning = peft_config.is_prompt_learning
         if self._is_prompt_learning:
-            self._peft_config = {adapter_name: peft_config}
+            self._peft_config = {}
             self.base_model = model
             self.add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
         else:
@@ -1017,6 +1029,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         ...     model(inputs)
         ```
         """
+        was_disabled = self._adapters_disabled
         if self.peft_config[self.active_adapter].is_prompt_learning:
             try:
                 # TODO: consider replacing this patching of methods with a more robust mechanism: setting a flag and
@@ -1030,16 +1043,18 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             finally:
                 self.forward = old_forward
                 self.prepare_inputs_for_generation = old_prepare_inputs_for_generation
-                self._adapters_disabled = False
+                self._adapters_disabled = was_disabled
 
         elif self.peft_config[self.active_adapter].is_adaption_prompt:
             try:
-                self.base_model.disable_adapter_layers()
+                if not was_disabled:
+                    self.base_model.disable_adapter_layers()
                 self._adapters_disabled = True
                 yield
             finally:
-                self.base_model.enable_adapter_layers()
-                self._adapters_disabled = False
+                if not was_disabled:
+                    self.base_model.enable_adapter_layers()
+                self._adapters_disabled = was_disabled
 
         else:  # LoRA, LoHa, etc.
             model_status = self.get_model_status()
@@ -1057,7 +1072,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 if model_status.enabled is not False:
                     # model_status.enabled is `True` or `"irregular"`
                     self.base_model.enable_adapter_layers()
-                self._adapters_disabled = False
+                self._adapters_disabled = was_disabled
 
     def get_base_model(self) -> torch.nn.Module:
         """
@@ -1096,6 +1111,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 only affect select PEFT tuners. If set to `False`, the dtypes will stay the same as those of the
                 corresponding layer.
         """
+        if adapter_name in self.peft_config:
+            raise ValueError(f"Adapter with name '{adapter_name}' already exists.")
+
         prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(peft_config.peft_type)
         if prefix and adapter_name in prefix:
             warnings.warn(
@@ -1855,7 +1873,7 @@ class PeftModelForSequenceClassification(PeftModel):
         task_ids=None,
         **kwargs,
     ):
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = return_dict if return_dict is not None else _get_return_dict_transformers_v4(self.config)
         peft_config = self.active_peft_config
         if not peft_config.is_prompt_learning:
             with self._enable_peft_forward_hooks(**kwargs):
@@ -1890,7 +1908,7 @@ class PeftModelForSequenceClassification(PeftModel):
         )
 
         if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
-            return self._prefix_tuning_forward(input_ids=input_ids, **kwargs)
+            return self._prefix_tuning_forward(input_ids=input_ids, inputs_embeds=inputs_embeds, **kwargs)
         else:
             if kwargs.get("token_type_ids", None) is not None:
                 kwargs["token_type_ids"] = torch.cat(
@@ -2435,6 +2453,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
             kwargs["past_key_values"] = self.get_prompt(batch_size)
             return self.base_model(
                 input_ids=input_ids,
+                inputs_embeds=inputs_embeds,
                 decoder_input_ids=decoder_input_ids,
                 decoder_inputs_embeds=decoder_inputs_embeds,
                 **kwargs,
@@ -2567,7 +2586,6 @@ class PeftModelForSeq2SeqLM(PeftModel):
             model_kwargs["task_ids"] = task_ids
         elif peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
             past_key_values = model_kwargs.get("past_key_values", None)
-            cache_position = model_kwargs.get("cache_position", [None])
             # check prefill stage
             is_prefill_stage = kwargs.get("is_first_iteration")
             if is_prefill_stage is None:  # transformers < v5
@@ -2710,7 +2728,7 @@ class PeftModelForTokenClassification(PeftModel):
         **kwargs,
     ):
         peft_config = self.active_peft_config
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = return_dict if return_dict is not None else _get_return_dict_transformers_v4(self.config)
 
         if not peft_config.is_prompt_learning:
             with self._enable_peft_forward_hooks(**kwargs):
@@ -2745,7 +2763,7 @@ class PeftModelForTokenClassification(PeftModel):
         )
 
         if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
-            return self._prefix_tuning_forward(input_ids=input_ids, **kwargs)
+            return self._prefix_tuning_forward(input_ids=input_ids, inputs_embeds=inputs_embeds, **kwargs)
         else:
             if kwargs.get("token_type_ids", None) is not None:
                 kwargs["token_type_ids"] = torch.cat(
@@ -2943,7 +2961,7 @@ class PeftModelForQuestionAnswering(PeftModel):
         **kwargs,
     ):
         peft_config = self.active_peft_config
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = return_dict if return_dict is not None else _get_return_dict_transformers_v4(self.config)
 
         if not peft_config.is_prompt_learning:
             if peft_config.peft_type == PeftType.POLY:
@@ -2981,7 +2999,7 @@ class PeftModelForQuestionAnswering(PeftModel):
         )
 
         if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
-            return self._prefix_tuning_forward(input_ids=input_ids, **kwargs)
+            return self._prefix_tuning_forward(input_ids=input_ids, inputs_embeds=inputs_embeds, **kwargs)
         else:
             if kwargs.get("token_type_ids", None) is not None:
                 kwargs["token_type_ids"] = torch.cat(
@@ -3162,7 +3180,7 @@ class PeftModelForFeatureExtraction(PeftModel):
         if peft_config.peft_type in (PeftType.PREFIX_TUNING, PeftType.CARTRIDGE):
             # overwrite past_kv in kwargs
             kwargs["past_key_values"] = self.get_prompt(batch_size)
-            return self.base_model(input_ids=input_ids, **kwargs)
+            return self.base_model(input_ids=input_ids, inputs_embeds=inputs_embeds, **kwargs)
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
