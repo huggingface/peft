@@ -124,14 +124,13 @@ REGEX_TEST_CASES = [
     # other corner cases. For ex, below is a case where layers_pattern
     # is one of the target nn.modules
     ("foo.bar.1.baz", ["baz"], [1], ["baz"], False),
-    # here, layers_pattern is 'bar', but only keys that contain '.bar' are valid.
-    ("bar.1.baz", ["baz"], [1], ["bar"], False),
+    # here, layers_pattern is 'bar', matching both root-level and prefixed patterns
+    ("bar.1.baz", ["baz"], [1], ["bar"], True),
     ("foo.bar.001.baz", ["baz"], [1], ["bar"], True),
     ("foo.bar.1.spam.2.baz", ["baz"], [1], ["bar"], True),
     ("foo.bar.2.spam.1.baz", ["baz"], [1], ["bar"], False),
-    # some realistic examples: module using nn.Sequential
-    # for the below test case, key should contain '.blocks' to be valid, because of how layers_pattern is matched
-    ("blocks.1.weight", ["weight"], [1], ["blocks"], False),
+    # some realistic examples: module using nn.Sequential or root-level ModuleList
+    ("blocks.1.weight", ["weight"], [1], ["blocks"], True),
     ("blocks.1.bias", ["weight"], [1], ["blocks"], False),
     ("mlp.blocks.1.weight", ["weight"], [1], ["blocks"], True),
     ("mlp.blocks.1.bias", ["weight"], [1], ["blocks"], False),
