@@ -107,6 +107,19 @@ def get_tp_plan_and_mesh(model, current_key: str):
     return plan_name, device_mesh
 
 
+def add_lora_tp_hooks_dtensor(tp_module: nn.Module, tp_plan_name: str, device_mesh, *, module_name: str) -> None:
+    from transformers.distributed.tensor_parallel import ALL_PARALLEL_STYLES
+
+    style = ALL_PARALLEL_STYLES[tp_plan_name]
+    # Shard every parameter of the module (weight, and bias when lora_bias=True), matching
+    # transformers' own `apply_tensor_parallelism`, which shards all of a module's parameters
+    # before installing the forward transform.
+    for p_name, _ in list(tp_module.named_parameters(recurse=False)):
+        style.validate_param(tp_module, p_name, device_mesh, parameter_name=f"{module_name}.{p_name}")
+        style.shard_param(tp_module, p_name, device_mesh)
+    style.install_forward(tp_module, device_mesh)
+
+
 class LoraModel(BaseTuner):
     """
     Creates Low Rank Adapter (LoRA) model from a pretrained transformers model.
@@ -351,19 +364,7 @@ class LoraModel(BaseTuner):
                     "support LoRA with Tensor Parallelism. Please upgrade to transformers >= 5.4.0."
                 )
 
-            if is_transformers_dtensor_tp:
-                def add_lora_tp_hooks_dtensor(tp_module: nn.Module, tp_plan_name: str, device_mesh, *, module_name: str) -> None:
-                    from transformers.distributed.tensor_parallel import ALL_PARALLEL_STYLES
-                
-                    style = ALL_PARALLEL_STYLES[tp_plan_name]
-                    # Shard every parameter of the module (weight, and bias when lora_bias=True), matching
-                    # transformers' own `apply_tensor_parallelism`, which shards all of a module's parameters
-                    # before installing the forward transform.
-                    for p_name, _ in list(tp_module.named_parameters(recurse=False)):
-                        style.validate_param(tp_module, p_name, device_mesh, parameter_name=f"{module_name}.{p_name}")
-                        style.shard_param(tp_module, p_name, device_mesh)
-                    style.install_forward(tp_module, device_mesh)
-            else:
+            if not is_transformers_dtensor_tp:
                 from transformers.integrations.tensor_parallel import (
                     add_tensor_parallel_hooks_to_module,
                 )
