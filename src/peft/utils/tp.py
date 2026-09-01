@@ -47,27 +47,25 @@ def get_tp_plan_and_mesh(model, current_key: str):
     return plan_name, device_mesh
 
 
-def stamp_tp_shim_attrs(base_layer, model, current_key: str) -> None:
-    if getattr(base_layer, "_hf_tp_plan", None) is not None:
-        return  # already set, e.g. when adding a 2nd adapter to an already-processed layer
-    tp_plan, device_mesh = get_tp_plan_and_mesh(model, current_key)
-    if tp_plan is None:
-        return
-    base_layer._hf_tp_plan = tp_plan
-    base_layer._hf_device_mesh = device_mesh
-
-
-def add_lora_tp_hooks_dtensor(tp_module: nn.Module, tp_plan_name: str, device_mesh, *, parameter_name: str) -> None:
+def add_lora_tp_hooks_dtensor(tp_module: nn.Module, tp_plan_name: str, device_mesh, *, module_name: str) -> None:
     from transformers.distributed.tensor_parallel import ALL_PARALLEL_STYLES
 
     style = ALL_PARALLEL_STYLES[tp_plan_name]
-    style.validate_param(tp_module, "weight", device_mesh, parameter_name=parameter_name)
-    style.shard_param(tp_module, "weight", device_mesh)
+    # Shard every parameter of the module (weight, and bias when lora_bias=True), matching
+    # transformers' own `apply_tensor_parallelism`, which shards all of a module's parameters
+    # before installing the forward transform.
+    for p_name, _ in list(tp_module.named_parameters(recurse=False)):
+        style.validate_param(tp_module, p_name, device_mesh, parameter_name=f"{module_name}.{p_name}")
+        style.shard_param(tp_module, p_name, device_mesh)
     style.install_forward(tp_module, device_mesh)
 
 
 class LoraEmbeddingATPHolder(nn.Embedding):
-
+    """ 
+    In LoRA, the embedding A weight is a learnable parameter that is added to the original embedding weight, but the TP
+    API acts on modules rather than individual parameters. This class wraps the LoRA embedding A weight in an 
+    `nn.Embedding` module, allowing it to be treated as a module by the TP API.
+    """
     def __init__(self, lora_embedding_A_weight: nn.Parameter):
         nn.Module.__init__(self)
         num_embeddings, embedding_dim = lora_embedding_A_weight.T.shape
@@ -82,20 +80,3 @@ class LoraEmbeddingATPHolder(nn.Embedding):
             lora_embedding_A_weight.T.contiguous(), requires_grad=lora_embedding_A_weight.requires_grad
         )
 
-
-def make_embedding_lora_tp_fns(style, holder: LoraEmbeddingATPHolder, device_mesh):
-    """New-path replacement for `EmbeddingParallel._prepare_input_fn`/`_prepare_output_fn`.
-    `holder` is the same `LoraEmbeddingATPHolder` instance the old path also builds in
-    `Embedding.update_layer`, so construction stays symmetric between the two branches.
-    """
-    style.shard_param(holder, "weight", device_mesh)
-    sharded_weight = nn.Parameter(holder.weight.T, requires_grad=holder.weight.requires_grad)
-
-    def input_fn(inputs):
-        (x,), _ = style.transform_inputs_pre_forward(holder, inputs, {}, device_mesh)
-        return x
-
-    def output_fn(output):
-        return style.transform_output_post_forward(holder, output, device_mesh)
-
-    return sharded_weight, input_fn, output_fn

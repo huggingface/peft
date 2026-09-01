@@ -43,7 +43,6 @@ from peft.utils.integrations import (
 )
 from peft.utils.loftq_utils import loftq_init
 from peft.utils.other import transpose
-from peft.utils.tp import LoraEmbeddingATPHolder, make_embedding_lora_tp_fns
 from peft.utils.warning import PeftWarning
 
 from .config import LoraConfig
@@ -1087,6 +1086,27 @@ class Linear(nn.Module, LoraLayer):
         return "lora." + rep
 
 
+class LoraEmbeddingATPHolder(nn.Embedding):
+    """ 
+    In LoRA, the embedding A weight is a learnable parameter that is added to the original embedding weight, but the TP
+    API acts on modules rather than individual parameters. This class wraps the LoRA embedding A weight in an 
+    `nn.Embedding` module, allowing it to be treated as a module by the TP API.
+    """
+    def __init__(self, lora_embedding_A_weight: nn.Parameter):
+        nn.Module.__init__(self)
+        num_embeddings, embedding_dim = lora_embedding_A_weight.T.shape
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.padding_idx = None
+        self.max_norm = None
+        self.norm_type = 2.0
+        self.scale_grad_by_freq = False
+        self.sparse = False
+        self._parameters["weight"] = nn.Parameter(
+            lora_embedding_A_weight.T.contiguous(), requires_grad=lora_embedding_A_weight.requires_grad
+        )
+
+
 class Embedding(nn.Module, LoraLayer):
     # LoRA implemented in a Embedding layer
     def __init__(
@@ -1224,17 +1244,16 @@ class Embedding(nn.Module, LoraLayer):
                     return x
 
                 def output_fn(outputs):
-                    (x,), _ = self.tp_layer.transform_output_post_forward(holder, outputs, {}, self.device_mesh)
-                    return x
-                
+                    return self.tp_layer.transform_output_post_forward(holder, outputs, self.device_mesh)
+
                 self.lora_embedding_A[adapter_name] = sharded_weight
             else:
 
                 def input_fn(inputs):
-                    return self.tp_layer._prepare_input_fn(mod, inputs, self.device_mesh)
+                    return self.tp_layer._prepare_input_fn(holder, inputs, self.device_mesh)
 
                 def output_fn(outputs):
-                    return self.tp_layer._prepare_output_fn(mod, outputs, self.device_mesh)
+                    return self.tp_layer._prepare_output_fn(holder, outputs, self.device_mesh)
 
             self.input_fns[adapter_name] = input_fn
             self.output_fns[adapter_name] = output_fn

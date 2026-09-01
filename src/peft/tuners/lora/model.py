@@ -54,7 +54,6 @@ from peft.utils.integrations import TpInfo
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 from peft.utils.other import get_pattern_key
 from peft.utils.save_and_load import _maybe_shard_state_dict_for_tp
-from peft.utils.tp import add_lora_tp_hooks_dtensor, stamp_tp_shim_attrs
 
 from .aqlm import dispatch_aqlm
 from .awq import dispatch_awq
@@ -91,6 +90,21 @@ def _get_encoder(model: nn.Module) -> nn.Module | None:
     if encoder is model:
         return None
     return encoder
+
+
+def _replace_layer_number_by_wildcard(name: str) -> str:
+    return re.sub(r"\.\d+(\.|$)", lambda m: ".*" + m.group(1), name)
+
+
+def get_tp_plan_and_mesh(model, current_key: str):
+    tp_plan = getattr(model, "tp_plan", None)
+    device_mesh = getattr(model, "_device_mesh", None)
+    if not tp_plan or device_mesh is None:
+        return None, None
+    plan_name = tp_plan.get(_replace_layer_number_by_wildcard(current_key))
+    if plan_name is None:
+        return None, None
+    return plan_name, device_mesh
 
 
 class LoraModel(BaseTuner):
@@ -283,16 +297,21 @@ class LoraModel(BaseTuner):
 
         # if the target is a ParamWrapper, we nest it to allow targeting multiple nn.Parameter on the same module
         wrap_target_param = isinstance(target, ParamWrapper) and (adapter_name in target.lora_A)
-        is_existing_lora_layer = isinstance(target, LoraLayer) and not isinstance(target, AdaLoraLayer) and not wrap_target_param
+        is_existing_lora_layer = (
+            isinstance(target, LoraLayer) and not isinstance(target, AdaLoraLayer) and not wrap_target_param
+        )
 
         if is_transformers_dtensor_tp:
             # Transformers' newer DTensor-based TP API stores the plan/mesh on the top-level
             # model (`model.tp_plan`/`model._device_mesh`) instead of per-module attributes. Stamp
             # the old per-module attribute names onto the base layer before `update_layer`/
-            # `_create_new_module` run below.
-            stamp_tp_shim_attrs(
-                target.get_base_layer() if is_existing_lora_layer else target, self.model, current_key
-            )
+            # `_create_new_module` run below. This way it preserves the existing logic.
+            base_layer = target.get_base_layer() if is_existing_lora_layer else target
+            if getattr(base_layer, "_hf_tp_plan", None) is None:
+                tp_plan, device_mesh = get_tp_plan_and_mesh(self.model, current_key)
+                if tp_plan is not None:
+                    base_layer._hf_tp_plan = tp_plan
+                    base_layer._hf_device_mesh = device_mesh
 
         if is_existing_lora_layer:
             target.update_layer(
@@ -331,7 +350,20 @@ class LoraModel(BaseTuner):
                     "The base model is tensor-parallel sharded but the installed version of Transformers does not "
                     "support LoRA with Tensor Parallelism. Please upgrade to transformers >= 5.4.0."
                 )
-            if not is_transformers_dtensor_tp:
+
+            if is_transformers_dtensor_tp:
+                def add_lora_tp_hooks_dtensor(tp_module: nn.Module, tp_plan_name: str, device_mesh, *, module_name: str) -> None:
+                    from transformers.distributed.tensor_parallel import ALL_PARALLEL_STYLES
+                
+                    style = ALL_PARALLEL_STYLES[tp_plan_name]
+                    # Shard every parameter of the module (weight, and bias when lora_bias=True), matching
+                    # transformers' own `apply_tensor_parallelism`, which shards all of a module's parameters
+                    # before installing the forward transform.
+                    for p_name, _ in list(tp_module.named_parameters(recurse=False)):
+                        style.validate_param(tp_module, p_name, device_mesh, parameter_name=f"{module_name}.{p_name}")
+                        style.shard_param(tp_module, p_name, device_mesh)
+                    style.install_forward(tp_module, device_mesh)
+            else:
                 from transformers.integrations.tensor_parallel import (
                     add_tensor_parallel_hooks_to_module,
                 )
@@ -362,7 +394,7 @@ class LoraModel(BaseTuner):
                             tp_module,
                             tp_plan,
                             device_mesh,
-                            parameter_name=f"{tp_layer_name[0]}.weight",
+                            module_name=tp_layer_name[0],
                         )
                     else:
                         add_tensor_parallel_hooks_to_module(
