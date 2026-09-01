@@ -71,7 +71,15 @@ from peft import (
     WaveFTConfig,
     XLoraConfig,
 )
-from peft.tuners.lora.config import ArrowConfig, BdLoraConfig, CordaConfig, EvaConfig, LoraGAConfig
+from peft.tuners.lora.config import (
+    ArrowConfig,
+    BdLoraConfig,
+    CordaConfig,
+    EvaConfig,
+    KasaConfig,
+    LoraGAConfig,
+    VeloraConfig,
+)
 
 
 class TestingCommitHashError(Exception):
@@ -676,6 +684,8 @@ class TestLoraNestedConfigRoundTrip:
             ("arrow_config", ArrowConfig, "top_k", 4),
             ("lora_ga_config", LoraGAConfig, "direction", "ArBr"),
             ("use_bdlora", BdLoraConfig, "nblocks", 4),
+            ("velora_config", VeloraConfig, "num_groups", 32),
+            ("kasa_config", KasaConfig, "beta", 2e-4),
         ],
     )
     def test_nested_config_survives_save_load_roundtrip(
