@@ -33,12 +33,11 @@ class GraloraConfig(PeftConfig):
             Hybrid GraLoRA, a combination of GraLoRA and vanilla LoRA, becomes available when hybrid_r > 0. The
             parameter count of the GraLoRA adapter is r + hybrid_r.
         target_modules (`Union[List[str], str]`):
-            List of module names or regex expression of the module names to replace with GraLoRA. " For example, ['q',
-            'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. " This can also be a wildcard 'all-linear'
-            which matches all linear/Conv1D " "(if the model is a PreTrainedModel, the output layer excluded). " If not
-            specified, modules will be chosen according to the model architecture, If the architecture is " not known,
-            an error will be raised -- in this case, you should specify the target modules manually. " To avoid
-            targeting any modules (because you want to apply `target_parameters`), set " `target_modules=[]`.
+            List of module names or regex expression of the module names to replace with GraLoRA. For example, ['q',
+            'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. This can also be a wildcard 'all-linear'
+            which matches all linear/Conv1D (if the model is a PreTrainedModel, the output layer excluded). If not
+            specified, modules will be chosen according to the model architecture. If the architecture is not known, an
+            error will be raised -- in this case, you should specify the target modules manually.
         alpha (`int`): GraLoRA alpha.
             GraLoRA alpha is the scaling factor for the GraLoRA adapter. Scale becomes alpha / (r + hybrid_r).
         gralora_dropout (`float`):
@@ -46,7 +45,7 @@ class GraloraConfig(PeftConfig):
             improve the generalization of the GraLoRA adapter.
         gralora_k (`int`):
             GraLoRA k determines the number of subblocks in the GraLoRA adapter. The rank r must be divisible by
-            gralora_k for the GraLoRA adapter to be valid. The total parameter count is preserved regardles of
+            gralora_k for the GraLoRA adapter to be valid. The total parameter count is preserved regardless of
             gralora_k. The entire rank of the GraLoRA adapter is increased by gralora_k, while the rank of each
             subblock is reduced by gralora_k. gralora_k=2 is recommended for rank 32 or lower, and gralora_k=4 is
             recommended for rank 64 or higher.
@@ -57,6 +56,10 @@ class GraloraConfig(PeftConfig):
             Bias type for gralora. Can be 'none', 'all' or 'gralora_only'. If 'all' or 'gralora_only', the
             corresponding biases will be updated during training. Be aware that this means that, even when disabling
             the adapters, the model will not produce the same output as the base model would have without adaptation.
+        modules_to_save (`Optional[list[str]]`):
+            List of modules apart from gralora layers to be set as trainable and saved in the final checkpoint. For
+            example, in Sequence Classification or Token Classification tasks, the final layer `classifier/score` are
+            randomly initialized and as such need to be trainable and saved.
         init_weights (`bool`):
             Whether to initialize the weights of the GraLoRA layers with their default initialization. Don't change
             this setting, except if you know exactly what you're doing.
@@ -93,14 +96,12 @@ class GraloraConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "List of module names or regex expression of the module names to replace with LoRA. "
+                "List of module names or regex expression of the module names to replace with GraLoRA. "
                 "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. "
                 "This can also be a wildcard 'all-linear' which matches all linear/Conv1D "
                 "(if the model is a PreTrainedModel, the output layer excluded). "
-                "If not specified, modules will be chosen according to the model architecture, If the architecture is "
-                "not known, an error will be raised -- in this case, you should specify the target modules manually. "
-                "To avoid targeting any modules (because you want to apply `target_parameters`), set "
-                "`target_modules=[]`."
+                "If not specified, modules will be chosen according to the model architecture. If the architecture is "
+                "not known, an error will be raised -- in this case, you should specify the target modules manually."
             )
         },
     )
@@ -119,7 +120,7 @@ class GraloraConfig(PeftConfig):
             "help": (
                 "gralora_k determines the number of subblocks in the GraLoRA adapter. "
                 "The rank r must be divisible by gralora_k for the GraLoRA adapter to be valid. "
-                "The total parameter count is preserved regardles of gralora_k. "
+                "The total parameter count is preserved regardless of gralora_k. "
                 "The entire rank of the GraLoRA adapter is increased by gralora_k, while the rank of each subblock is reduced by gralora_k. "
                 "gralora_k=2 is recommended for rank 32 or lower, and gralora_k=4 is recommended for rank 64 or higher. "
             )
@@ -178,5 +179,9 @@ class GraloraConfig(PeftConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
+        if self.gralora_k <= 0:
+            raise ValueError(
+                f"`gralora_k` should be a positive integer value but the value passed is {self.gralora_k}"
+            )
         if self.r % self.gralora_k != 0:
             raise ValueError(f"r should be divisible by gralora_k, but got {self.r} and {self.gralora_k}")

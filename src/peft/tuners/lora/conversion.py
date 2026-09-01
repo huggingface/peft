@@ -60,7 +60,6 @@ def _convert_miss_module_to_lora(
     miss_block = module.miss_block[adapter_name]
     in_features = module.in_features
     out_features = module.out_features
-    r_miss = module.miss_r[adapter_name]
     orig_dtype = miss_block.dtype
     device = miss_block.device
 
@@ -107,7 +106,7 @@ def _convert_miss_module_to_lora(
 
 @torch.no_grad()
 def _convert_module_to_lora(
-    module: BaseTunerLayer, rank: int | float, adapter_name: str = "default"
+    module: BaseTunerLayer, rank: float, adapter_name: str = "default"
 ) -> tuple[torch.Tensor, torch.Tensor, int]:
     """Convert a single BaseTunerLayer's adapter weight to a LoRA weight, return A, B, and the effective rank."""
     from peft.tuners.miss.layer import MissLinear
@@ -145,7 +144,7 @@ def _convert_module_to_lora(
 
 def convert_to_lora(
     model: torch.nn.Module,
-    rank: int | float,
+    rank: float,
     adapter_name: str = "default",
     progressbar: bool = False,
     compile_kwargs=None,
@@ -363,7 +362,7 @@ def convert_to_lora(
 def save_as_lora(
     path: str | os.PathLike,
     model: torch.nn.Module,
-    rank: int | float,
+    rank: float,
     adapter_name: str = "default",
     progressbar: bool = False,
     compile_kwargs=None,

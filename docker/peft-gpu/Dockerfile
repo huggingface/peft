@@ -46,7 +46,8 @@ RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum
 # to have compute hardware available we use the information from the CI runner (which hosts
 # a NVIDIA L4). So we fix the compute capability to 8.9. In the future we might extend this
 # to a list of compute capabilities (separated by ;).
-RUN CUDA_ARCH_LIST=8.9 conda run -n peft pip install "gptqmodel>=7.0.0"
+# TODO pcre, which is used by gptqmodel, is resulting in a core dump, remove once it's resolved
+# RUN CUDA_ARCH_LIST=8.9 conda run -n peft pip install "gptqmodel>=7.0.0"
 
 RUN \
     # Add eetq for quantization testing; needs to run without build isolation since the setup
@@ -54,9 +55,11 @@ RUN \
     # Ninja should speed up build time.
     conda run -n peft pip install ninja && conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
 
-RUN NVTE_BUILD_USE_NVIDIA_WHEELS=1 \
-    CPATH="/usr/local/cuda/include:${CPATH}" \
-    conda run -n peft pip install --no-build-isolation "transformer_engine[pytorch]"
+# TODO: Importing TE results in: undefined symbol: cublasLtGroupedMatrixLayoutInit_internal, version libcublasLt.so.13
+# Reinstate TE when the issue is resolved (probably this one: https://github.com/NVIDIA/TransformerEngine/issues/2504)
+# RUN NVTE_BUILD_USE_NVIDIA_WHEELS=1 \
+#     CPATH="/usr/local/cuda/include:${CPATH}" \
+#     conda run -n peft pip install --no-build-isolation "transformer_engine[pytorch]"
 
 # Activate the conda env and install transformers + accelerate from source
 RUN conda run -n peft pip install -U --no-cache-dir \
@@ -72,7 +75,9 @@ RUN conda run -n peft pip install -U --no-cache-dir \
         aqlm[gpu]>=1.0.2 \
         # Add HQQ for quantization testing
         hqq \
-        deepspeed
+        deepspeed \
+        "kernels<0.16" \
+        && conda run -n peft pip install -U --no-cache-dir mslk --index-url https://download.pytorch.org/whl/cu132
 
 RUN conda run -n peft pip freeze | grep transformers
 

@@ -18,8 +18,8 @@ import warnings
 from typing import Optional
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from peft.tuners.tuners_utils import BaseTunerLayer, _get_in_out_features, check_adapters_to_merge
 from peft.utils.other import transpose
@@ -151,6 +151,10 @@ class TinyLoraLayer(BaseTunerLayer):
         projection_seed = config.projection_seed
         inference_mode = config.inference_mode
         fan_in_fan_out = config.fan_in_fan_out
+
+        # The projection tensors P are only part of the checkpoint if save_projection is set, otherwise they are
+        # regenerated from the projection seed when loading.
+        self.tinylora_P.persistent = config.save_projection
 
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")

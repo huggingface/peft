@@ -109,7 +109,7 @@ class TestXlora:
 
     @pytest.fixture(scope="class")
     def tokenizer(self):
-        tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True, device_map=self.torch_device)
+        tokenizer = AutoTokenizer.from_pretrained(self.model_id, device_map=self.torch_device)
         return tokenizer
 
     @pytest.fixture(scope="function")
@@ -191,7 +191,7 @@ class TestXlora:
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
 
         _ = model.get_latest_scalings()
-        # 32 is the numeber of max scalings. 3 is the number of prompt tokens.
+        # 32 is the number of max scalings. 3 is the number of prompt tokens.
         assert 32 + 3 >= len(model.get_scalings_log()) > 0
 
         model.disable_scalings_logging()
@@ -358,7 +358,7 @@ class TestXlora:
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
 
     def test_xlora_loading_valid(self):
-        # This test also simulatenously tests the loading-from-hub functionality!
+        # This test also simultaneously tests the loading-from-hub functionality!
         torch.manual_seed(123)
 
         model_id = "peft-internal-testing/opt-125m"

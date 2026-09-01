@@ -91,6 +91,60 @@ Disadvantages of half precision adapter:
 
 Note that for most use cases, overall runtime and memory cost will be determined by the size of the base model and by the dataset, while the dtype of the PEFT adapter will only have a small impact.
 
+## Training runs but the model does not improve
+
+If training appears healthy (the loss goes down, checkpoints are saved without errors) but the resulting model performs no better than the base model, check whether the trainable parameters actually changed during training:
+
+```python
+# before training
+sample_param = next(p for p in model.parameters() if p.requires_grad)
+before = sample_param.detach().clone()
+
+# ... train for at least three optimizer steps ...
+
+after = next(p for p in model.parameters() if p.requires_grad)
+print("weights updated:", not torch.allclose(before, after.detach().cpu()))
+```
+
+### Missing forward or backward hooks
+
+If the weights did not move, a likely cause is that parameter references were captured before the parameters were materialized on their target device. This can happen when the base model is wrapped with [`get_peft_model`] while its parameters have not yet been moved to the target device, and a third-party library then registers forward/backward hooks (for example, per-sample gradient hooks from a differential privacy framework) or an optimizer is created before the first forward call. When the parameters are materialized later, those hooks and optimizer references point at stale tensors and every update becomes a silent no-op.
+
+To avoid this, use the following order:
+
+1. Load the base model and move it to the target device (e.g. `model.to(device)`).
+2. Wrap it with [`get_peft_model`].
+3. Only then register hooks or create the optimizer.
+
+### Target modules don't match the model
+
+If training runs without errors but the loss barely moves — or the model shows no improvement after fine-tuning — the configured `target_modules` (or the default `target_modules` if not specified otherwise by the user) may not match the actual module names in the model. This is common with hybrid architectures such as Mamba, Jamba, or NemotronH, which use different layer names than standard Transformer models.
+
+PEFT raises an error only when *none* of the configured `target_modules` match any module in the model. If *some* match and *some* do not, the non-matching entries are silently skipped — there is no warning. A large fraction of the model can remain frozen without any indication.
+
+The first diagnostic is to check the trainable parameter count:
+
+```python
+from peft import LoraConfig, get_peft_model
+
+config = LoraConfig(target_modules=["q_proj", "v_proj", "gate_proj"])
+model = get_peft_model(base_model, config)
+model.print_trainable_parameters()
+```
+
+If the reported number is much lower than expected, inspect the adapter layers in the model:
+
+```python
+print(model.get_layer_status())
+```
+
+This returns a list of `TunerLayerStatus` entries showing each adapter layer's name, module type, enabled state, and active adapters. Alternatively, printing the model repr (`print(model)`) gives an overview of the full module hierarchy, which is useful for identifying the correct layer names on unfamiliar architectures.
+
+Any `target_modules` entry that does not correspond to a module in the model is silently skipped. Update `target_modules` to match the actual module names.
+
+> [!TIP]
+> This issue affects all PEFT methods that use `target_modules` (LoRA, LoHa, IA³, etc.), not just LoRA. The diagnostic steps are the same regardless of the method. If you are unsure which module names a given architecture uses, check the model's documentation or inspect `model.named_modules()` before configuring the adapter.
+
 ## Bad results from a loaded PEFT model
 
 There can be several reasons for getting a poor result from a loaded PEFT model which are listed below. If you're still unable to troubleshoot the problem, see if anyone else had a similar [issue](https://github.com/huggingface/peft/issues) on GitHub, and if you can't find any, open a new issue.
@@ -119,7 +173,7 @@ peft_model = PeftModel.from_pretrained(base_model, peft_model_id)
 
 ### Randomly initialized layers
 
-For some tasks, it is important to correctly configure `modules_to_save` in the config to account for randomly initialized layers. 
+For some tasks, it is important to correctly configure `modules_to_save` in the config to account for randomly initialized layers.
 
 As an example, this is necessary if you use LoRA to fine-tune a language model for sequence classification because 🤗 Transformers adds a randomly initialized classification head on top of the model. If you do not add this layer to `modules_to_save`, the classification head won't be saved. The next time you load the model, you'll get a _different_ randomly initialized classification head, resulting in completely different results.
 
@@ -147,7 +201,7 @@ For many language fine-tuning tasks, extending the model's vocabulary is necessa
 
 #### Using trainable tokens
 
-Let's start with trainable tokens, in this case its [LoRA integration](../developer_guides/lora#efficiently-train-tokens-alongside-lora).  If you're interested in only training the new embeddings and nothing else, refer to the [standalone documentation](../package_reference/trainable_tokens).
+Let's start with trainable tokens, in this case its [LoRA integration](../package_reference/lora#efficiently-train-tokens-alongside-lora).  If you're interested in only training the new embeddings and nothing else, refer to the [standalone documentation](../package_reference/trainable_tokens).
 
 To enable selective token training of the embedding layer, you'll need to supply the token ids of your newly added tokens via the `trainable_token_indices` parameter.  Optionally you can specify which layer to target if there is more than one embedding layer. For a Mistral model this could look like this:
 
@@ -227,7 +281,7 @@ As always, it is best practice to ensure the model works correctly for inference
 
 ### Check layer and model status
 
-Sometimes a PEFT model can end up in a bad state, especially when handling multiple adapters. There can be some confusion around what adapters exist, which one is active, which one is merged, etc. To help investigate this issue, call the [`~peft.PeftModel.get_layer_status`] and the [`~peft.PeftModel.get_model_status`] methods. 
+Sometimes a PEFT model can end up in a bad state, especially when handling multiple adapters. There can be some confusion around what adapters exist, which one is active, which one is merged, etc. To help investigate this issue, call the [`~peft.PeftModel.get_layer_status`] and the [`~peft.PeftModel.get_model_status`] methods.
 
 The [`~peft.PeftModel.get_layer_status`] method gives you a detailed overview of each targeted layer's active, merged, and available adapters.
 

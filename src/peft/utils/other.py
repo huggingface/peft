@@ -36,7 +36,12 @@ from packaging import version
 from safetensors.torch import storage_ptr, storage_size
 from transformers import PreTrainedModel
 
-from ..import_utils import is_gptqmodel_available, is_torch_tpu_available, is_transformers_ge_v5_1_0
+from ..import_utils import (
+    is_gptqmodel_available,
+    is_torch_tpu_available,
+    is_transformers_ge_v5,
+    is_transformers_ge_v5_1_0,
+)
 from .constants import (
     CONFIG_NAME,
     EMBEDDING_LAYER_NAMES,
@@ -47,8 +52,11 @@ from .constants import (
     TRANSFORMERS_MODELS_TO_BEFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_DEFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_FROD_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_GLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_GRALORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
@@ -68,7 +76,9 @@ from .constants import (
     TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_SUPERTUNING_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_TINYLORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_UNILORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING,
@@ -94,8 +104,11 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_BEFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_BOFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_C3A_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_DEFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_DELORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_FROD_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_GLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_GRALORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_HRA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING",
@@ -115,7 +128,9 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_SUPERTUNING_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_TINYLORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_UNILORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_WAVEFT_TARGET_MODULES_MAPPING",
@@ -140,7 +155,9 @@ def infer_device() -> str:
     return "cpu"
 
 
-def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs=None):
+def prepare_model_for_kbit_training(
+    model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs=None, auto_clear_cache=True
+):
     r"""
     Note this method only works for `transformers` models.
 
@@ -158,6 +175,10 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
             Keyword arguments to pass to the gradient checkpointing function, please refer to the documentation of
             `torch.utils.checkpoint.checkpoint` for more details about the arguments that you can pass to that method.
             Note this is only available in the latest transformers versions (> 4.34.1).
+        auto_clear_cache (`bool`, *optional*, defaults to `True`):
+            Whether to empty the accelerator cache after upcasting parameters to fp32. This releases memory held by the
+            caching allocator, which is especially helpful on devices that share host and accelerator memory. Set to
+            `False` to skip this step.
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
     is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
@@ -186,6 +207,16 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
                 (param.dtype == torch.float16) or (param.dtype == torch.bfloat16)
             ) and param.__class__.__name__ != "Params4bit":
                 param.data = param.data.to(torch.float32)
+
+        # Release CUDA allocator cache after bulk fp16→fp32 casts to reduce
+        # reserved-but-unused memory to free up system memory in devices
+        # that share host and accelerator memory (issue #3265)
+        if auto_clear_cache:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            if is_xpu_available():
+                torch.xpu.empty_cache()
 
     if (
         loaded_in_kbit
@@ -229,7 +260,7 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
 
 
 # copied from transformers.models.bart.modeling_bart
-def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start_token_id: int):
+def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start_token_id: int) -> torch.Tensor:
     """
     Shift input ids one token to the right.
 
@@ -525,7 +556,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         Enable or disable gradients on the given adapter(s).
 
         Args:
-            adapter_name (`str` or `Sequence[str]`):
+            adapter_names (`str` or `Sequence[str]`):
                 The name of the adapter(s) whose gradients should be enabled/disabled.
             requires_grad (`bool`, *optional*)
                 Whether to enable (`True`, default) or disable (`False`).
@@ -773,6 +804,11 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
 
         However, if the wrapped module is itself a tuner, we'll call merge on it before.
         """
+        if not self.active_adapters:
+            # none of the modules_to_save adapters of this module are active, e.g. because the model's active adapter
+            # does not use modules_to_save on this module; like in forward, the original module is used in this case
+            return self.original_module
+
         new_module = self.modules_to_save[self.active_adapter]
 
         # TODO: not sure if this is still a sensible thing to do. We would basically have to
@@ -969,7 +1005,7 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
         return set(self.token_adapter.trainable_tokens_delta.keys())
 
 
-def _get_input_embeddings_name(model, default=None):
+def _get_input_embeddings_name(model: torch.nn.Module, default: Optional[str] = None) -> Optional[str]:
     if not hasattr(model, "get_input_embeddings"):
         return default
 
@@ -981,14 +1017,16 @@ def _get_input_embeddings_name(model, default=None):
     return default
 
 
-def _get_submodules(model, key):
+def _get_submodules(model: torch.nn.Module, key: str) -> tuple[torch.nn.Module, torch.nn.Module, str]:
     parent = model.get_submodule(".".join(key.split(".")[:-1]))
     target_name = key.split(".")[-1]
     target = model.get_submodule(key)
     return parent, target, target_name
 
 
-def _get_submodules_with_grandparent(model, key):
+def _get_submodules_with_grandparent(
+    model: torch.nn.Module, key: str
+) -> tuple[torch.nn.Module, Optional[torch.nn.Module], torch.nn.Module, str]:
     parent = model.get_submodule(".".join(key.split(".")[:-1]))
     try:
         grandparent = model.get_submodule(".".join(key.split(".")[:-2]))
@@ -1000,7 +1038,7 @@ def _get_submodules_with_grandparent(model, key):
     return parent, grandparent, target, target_name
 
 
-def _freeze_adapter(model, adapter_name):
+def _freeze_adapter(model: torch.nn.Module, adapter_name: str) -> None:
     for n, p in model.named_parameters():
         if adapter_name in n:
             p.requires_grad = False
@@ -1114,9 +1152,6 @@ def _prepare_prompt_learning_config(peft_config, model_config):
     orig_model_config = model_config
     if hasattr(model_config, "to_dict"):
         model_config = model_config.to_dict()
-    else:
-        model_config = model_config
-
     # In case of VLM we focus on the language model portion of the model.
     if "text_config" in model_config:
         model_config = model_config["text_config"]
@@ -1161,13 +1196,32 @@ def _prepare_prompt_learning_config(peft_config, model_config):
 
     # For grouped-query attention, see #1901.
     if (peft_config.peft_type in {"PREFIX_TUNING", "CARTRIDGE"}) and ("num_key_value_heads" in model_config):
-        # Models with heterogeneous attention (e.g. Gemma4) expose distinct shapes for global vs. sliding layers via
-        # `global_head_dim` / `num_global_key_value_heads`. Provision the prefix for the global-layer footprint; sliding
-        # layers whose KV shape doesn't match are skipped per-layer at injection time. Matches the default in
-        # google-deepmind/gemma#631.
+        # Models with heterogeneous attention (e.g. Gemma4) expose distinct shapes for global vs. sliding layers.
+        # New transformers (>= 5.15) use `per_layer_config` instead of `global_head_dim` / `num_global_key_value_heads`.
+        # Provision the prefix for the largest KV footprint; sliding layers whose KV shape doesn't match are skipped
+        # per-layer at injection time. Matches the default in google-deepmind/gemma#631.
         if model_config.get("global_head_dim") is not None:
             head_dim = model_config["global_head_dim"]
             num_key_value_heads = model_config.get("num_global_key_value_heads") or model_config["num_key_value_heads"]
+        elif model_config.get("per_layer_config") is not None:
+            # New transformers (>= 5.15): global_head_dim / num_global_key_value_heads were replaced by
+            # per_layer_config. Here model_config is a plain dict (from config.to_dict()), so
+            # per_layer_config contains only the *overrides*; the base head_dim and num_key_value_heads
+            # come from the top-level config. (The per_layer_config property on the config object
+            # returns the full config with overrides applied, but that's not available here.)
+            # Resolve the effective per-layer values and provision the prefix for the largest KV
+            # footprint (typically the full-attention layers).
+            per_layer = model_config["per_layer_config"]
+            base_head_dim = model_config.get("head_dim", peft_config.token_dim // peft_config.num_attention_heads)
+            base_num_kv_heads = model_config["num_key_value_heads"]
+            head_dim = base_head_dim
+            num_key_value_heads = base_num_kv_heads
+            for layer_cfg in per_layer.values():
+                layer_head_dim = layer_cfg.get("head_dim", base_head_dim)
+                layer_num_kv = layer_cfg.get("num_key_value_heads", base_num_kv_heads)
+                if layer_head_dim > head_dim:
+                    head_dim = layer_head_dim
+                    num_key_value_heads = layer_num_kv
         elif model_config.get("head_dim", None) is not None:
             head_dim = model_config["head_dim"]
             num_key_value_heads = model_config["num_key_value_heads"]
@@ -1233,18 +1287,16 @@ def fsdp_auto_wrap_policy(model):
             continue
         transformer_cls = get_module_class_from_name(model, layer_class)
         if transformer_cls is None:
-            raise Exception("Could not find the transformer layer class to wrap in the model.")
+            raise TypeError("Could not find the transformer layer class to wrap in the model.")
         else:
             transformer_cls_to_wrap.add(transformer_cls)
 
     def lambda_policy_fn(module):
-        if (
+        return (
             len(list(module.named_children())) == 0
             and getattr(module, "weight", None) is not None
             and module.weight.requires_grad
-        ):
-            return True
-        return False
+        )
 
     lambda_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=lambda_policy_fn)
     transformer_wrap_policy = functools.partial(
@@ -1256,7 +1308,7 @@ def fsdp_auto_wrap_policy(model):
     return auto_wrap_policy
 
 
-def transpose(weight, fan_in_fan_out):
+def transpose(weight: torch.Tensor, fan_in_fan_out: bool) -> torch.Tensor:
     if not fan_in_fan_out:
         return weight
 
@@ -1265,7 +1317,7 @@ def transpose(weight, fan_in_fan_out):
     return weight.T
 
 
-def _is_valid_match(key: str, target_key: str):
+def _is_valid_match(key: str, target_key: str) -> bool:
     """
     Helper function to match module names target_key and key. Makes sure that either the key is exactly the target_key
     or the target_key is a submodule of key
@@ -1398,7 +1450,7 @@ def id_tensor_storage(tensor: torch.Tensor) -> tuple[torch.device, int, int]:
     return tensor.device, unique_id, storage_size(tensor)
 
 
-def cast_mixed_precision_params(model, dtype):
+def cast_mixed_precision_params(model: torch.nn.Module, dtype: torch.dtype) -> None:
     """
     Cast all non-trainable parameters of the model to the given `dtype`. The `dtype` can be `torch.float16` or
     `torch.bfloat16` as per the mixed-precision training you are performing. The trainable parameters are cast to full
@@ -1461,7 +1513,7 @@ def check_file_exists_on_hf_hub(repo_id: str, filename: str, **kwargs) -> Option
     return exists
 
 
-def match_target_against_key(target_pattern: str, key: str):
+def match_target_against_key(target_pattern: str, key: str) -> Optional[re.Match[str]]:
     """Backing function for `target_modules` config parameter.
 
     Having this as its own function ensures that target key matching can be implemented in the same way everywhere.
@@ -1647,6 +1699,9 @@ def create_attention_mask(
     # the 4D causal mask exists, it should be present in the base model (XXXModel class) or in its decoder.
     base_model = getattr(model, model.base_model_prefix, model)
     decoder = base_model.get_decoder() if hasattr(base_model, "get_decoder") else None
+    # TODO: remove check for _prepare_4d_causal_attention_mask_with_cache_position once Transformers <= v5.2 is
+    # dropped. Note that for <= v5.2, the function may or may not exist, so the fallback in the
+    # `causal_mask_creation_function is None` case is still needed.
     causal_mask_creation_function = getattr(base_model, "_prepare_4d_causal_attention_mask_with_cache_position", None)
     if causal_mask_creation_function is None and decoder is not None:  # it may be in the decoder
         causal_mask_creation_function = getattr(decoder, "_prepare_4d_causal_attention_mask_with_cache_position", None)
@@ -1656,16 +1711,29 @@ def create_attention_mask(
         token_type_ids = getattr(model_input, "token_type_ids", None)
         # Some models may overwrite the general one
         causal_mask_creation_function = getattr(model, "create_masks_for_generate", create_masks_for_generate)
-        attention_mask = causal_mask_creation_function(
-            config=model.config,
-            # we only need batch size, seq_length and dtype here - we don't care about the values of the embeddings
-            input_embeds=torch.empty((batch_size, sequence_length), dtype=model.dtype),
-            attention_mask=attention_mask,
-            cache_position=cache_position,
-            past_key_values=past_key_values,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-        )
+        # Transforrmers only uses batch size, seq_length, and dtype of inputs_embeds to create the mask, so it's safe to
+        # create a dummy tensor here.
+        dummy_embeds = torch.empty((batch_size, sequence_length), dtype=model.dtype)
+        if is_transformers_ge_v5:
+            # transformers v5 renamed the input_embeds argument to inputs_embeds and removed cache_position
+            attention_mask = causal_mask_creation_function(
+                config=model.config,
+                inputs_embeds=dummy_embeds,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values,
+                token_type_ids=token_type_ids,
+                position_ids=position_ids,
+            )
+        else:
+            attention_mask = causal_mask_creation_function(
+                config=model.config,
+                input_embeds=dummy_embeds,
+                attention_mask=attention_mask,
+                cache_position=cache_position,
+                past_key_values=past_key_values,
+                token_type_ids=token_type_ids,
+                position_ids=position_ids,
+            )
     else:
         attention_mask = causal_mask_creation_function(
             attention_mask,
@@ -1713,7 +1781,7 @@ def _get_module_names_tied_with_embedding(model) -> list[str]:
     if (
         model_config is not None
         and hasattr(model_config, "tie_word_embeddings")
-        and getattr(model_config, "tie_word_embeddings") is False
+        and model_config.tie_word_embeddings is False
     ):
         return []
 

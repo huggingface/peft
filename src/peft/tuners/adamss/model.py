@@ -64,7 +64,7 @@ class AdamssModel(BaseTuner):
     """
 
     prefix: str = "adamss_"
-    tuner_layer_cls = (AdamssLayer,)
+    tuner_layer_cls = AdamssLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_ADAMSS_TARGET_MODULES_MAPPING
 
     def __init__(

@@ -171,9 +171,7 @@ class ArrowLoraLinearLayer(nn.Module):
             lora_A : Matrices A in LoRA layer.
             lora_B : Matrices A in LoRA layer.
         """
-        if not self.use_gks:
-            return
-        elif self.gks_done and not self.gks_added_adapter_names:
+        if not self.use_gks or self.gks_done and not self.gks_added_adapter_names:
             return
         else:
             # 1) compute average A/B over gks_adapter_names
@@ -206,7 +204,7 @@ class ArrowLoraLinearLayer(nn.Module):
         Usually, we want to enable this to align the input dtype with the dtype of the weight, but by setting
         layer.cast_input_dtype=False, this can be disabled if necessary.
 
-        Enabling or disabling can be managed via the peft.helpers.disable_lora_input_dtype_casting context manager.
+        Enabling or disabling can be managed via the peft.helpers.disable_input_dtype_casting context manager.
         """
         if x is None:  # useful e.g. if x is the bias, which can be None
             return None
@@ -330,7 +328,7 @@ def ensure_adapters_target_linear_layers_only(model, adapter_names: list[str]):
     Validate that every module holding LoRA weights for any of `adapter_names` is Linear-like: nn.Linear,
     bitsandbytes.nn.Linear4bit, nn.Conv1d, or transformers.models.gpt2.modeling_gpt2.Conv1D. If not, raise.
     """
-    import torch.nn as nn
+    from torch import nn
 
     Linear4bit = None
     try:
@@ -366,8 +364,10 @@ def ensure_adapters_target_linear_layers_only(model, adapter_names: list[str]):
 
     if offenders:
         lines = [
-            "LoRA adapters must only target Linear-like layers "
-            "(nn.Linear, nn.Conv1d, HF Conv1D, or bitsandbytes.nn.Linear4bit). Found:"
+            (
+                "LoRA adapters must only target Linear-like layers "
+                "(nn.Linear, nn.Conv1d, HF Conv1D, or bitsandbytes.nn.Linear4bit). Found:"
+            )
         ]
         for name, full_name, tname in offenders:
             lines.append(f"  - adapter '{name}' on module '{full_name}' of type {tname}")

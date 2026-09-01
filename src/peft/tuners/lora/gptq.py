@@ -38,6 +38,8 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
 
         if config.use_dora:
             raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
+        if config.velora_config is not None:
+            raise ValueError(f"{self.__class__.__name__} does not support VeLoRA yet, please set it to False")
 
         # self.base_layer and self.quant_linear_module are the same; we need the former for consistency and the latter
         # for backwards compatibility
@@ -51,6 +53,8 @@ class GPTQLoraLinear(torch.nn.Module, LoraLayer):
         )
 
     def resolve_lora_variant(self, *, config: LoraConfig, **kwargs) -> Optional[LoraVariant]:
+        if config.velora_config is not None:
+            raise ValueError(f"{self.__class__.__name__} does not support VeLoRA.")
         if config.use_dora and config.use_qalora:
             raise NotImplementedError(
                 f"DoRA and QA-LoRA at the same time is not supported for {self.__class__.__name__} (yet)."

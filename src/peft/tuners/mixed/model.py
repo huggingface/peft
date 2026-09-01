@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import warnings
+from itertools import pairwise
 from typing import Any, Optional, Union
 
 import torch
@@ -21,7 +22,12 @@ from torch import nn
 from tqdm import tqdm
 
 from peft.tuners import adalora, loha, lokr, lora, oft, shira
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, _delete_auxiliary_adapter
+from peft.tuners.tuners_utils import (
+    BaseTuner,
+    BaseTunerLayer,
+    _check_adapters_not_merged,
+    _delete_auxiliary_adapter,
+)
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
@@ -80,7 +86,7 @@ class MixedModel(BaseTuner):
 
         """
         if not isinstance(config, Configs.__args__):
-            raise ValueError(
+            raise TypeError(
                 f"{self.__class__.__name__} only supports {COMPATIBLE_TUNER_TYPES} configs, but got {type(config)}."
             )
 
@@ -105,7 +111,7 @@ class MixedModel(BaseTuner):
         elif isinstance(config, shira.ShiraConfig):
             shira.ShiraModel._create_and_replace(self, config, *args, **kwargs)
         else:
-            raise ValueError(f"Unsupported config type {type(config)}, should be one of {COMPATIBLE_TUNER_TYPES}.")
+            raise TypeError(f"Unsupported config type {type(config)}, should be one of {COMPATIBLE_TUNER_TYPES}.")
 
     def _replace_module(self, parent, child_name, new_module, child) -> None:
         setattr(parent, child_name, new_module)
@@ -163,8 +169,7 @@ class MixedModel(BaseTuner):
                 for n, p in model.named_parameters():
                     if "bias" in n:
                         p.requires_grad = True
-            elif bias == "lora_only":
-                # TODO: check if this is needed for other supported types
+            elif bias.endswith("_only"):  # e.g. "lora_only" or "oft_only"
                 for m in model.modules():
                     if isinstance(m, Layers) and hasattr(m, "bias") and m.bias is not None:
                         m.bias.requires_grad = True
@@ -195,7 +200,7 @@ class MixedModel(BaseTuner):
         elif isinstance(config, shira.ShiraConfig):
             new_module = shira.ShiraModel._create_new_module(config, adapter_name, target, **kwargs)
         else:
-            raise ValueError(f"Unknown config type {type(config)}, should be one of {COMPATIBLE_TUNER_TYPES}.")
+            raise TypeError(f"Unknown config type {type(config)}, should be one of {COMPATIBLE_TUNER_TYPES}.")
         return new_module
 
     def set_adapter(self, adapter_name: Union[str, list[str]], inference_mode: bool = False) -> None:
@@ -237,7 +242,7 @@ class MixedModel(BaseTuner):
             while hasattr(layer, "base_layer"):
                 path.append(layer)
                 layer = layer.base_layer
-            for layer_before, layer_after in zip(path[:-1], path[1:]):
+            for layer_before, layer_after in pairwise(path):
                 layer_after.merge(safe_merge=safe_merge, adapter_names=adapter_names)
                 layer_before.base_layer = layer_after.base_layer
             module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
@@ -257,12 +262,9 @@ class MixedModel(BaseTuner):
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
             elif isinstance(target, ModulesToSaveWrapper):
                 # save any additional trainable modules part of `modules_to_save`
-                new_module = target.modules_to_save[target.active_adapter]
-                if hasattr(new_module, "base_layer"):
-                    # check if the module is itself a tuner layer
-                    if merge:
-                        new_module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-                    new_module = new_module.get_base_layer()
+                new_module = target.unload_and_optionally_merge_module(
+                    merge=merge, safe_merge=safe_merge, adapter_names=adapter_names
+                )
                 setattr(parent, target_name, new_module)
 
         # Clean up peft_config from the model since all PEFT modules have been removed.
@@ -293,20 +295,23 @@ class MixedModel(BaseTuner):
                 f"Adapter(s) {sorted(mismatched)} not found, available adapters: {sorted(self.peft_config.keys())}"
             )
 
-        for adapter_name in adapter_names:
-            del self.peft_config[adapter_name]
+        _check_adapters_not_merged(self.model, adapter_names)
+
+        for adapter_to_delete in adapter_names:
+            del self.peft_config[adapter_to_delete]
 
             key_list = [key for key, _ in self.model.named_modules() if not any(prefix in key for prefix in PREFIXES)]
             new_adapter = None
             for key in key_list:
                 _, target, _ = _get_submodules(self.model, key)
                 if isinstance(target, BaseTunerLayer):
-                    target.delete_adapter(adapter_name)
+                    target.delete_adapter(adapter_to_delete)
                     if new_adapter is None:
                         new_adapter = target.active_adapters[:]
 
         self.active_adapter = new_adapter or []
-        _delete_auxiliary_adapter(self.model, adapter_name, new_active_adapters=new_adapter)
+        if adapter_to_delete in adapter_names:
+            _delete_auxiliary_adapter(self.model, adapter_to_delete, new_active_adapters=new_adapter)
 
     def generate(self, *args: Any, **kwargs: Any):
         return self.model.generate(*args, **kwargs)

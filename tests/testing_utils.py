@@ -27,6 +27,7 @@ from peft import (
     IA3Config,
     LNTuningConfig,
     LoraConfig,
+    MissConfig,
     PromptLearningConfig,
     TinyLoraConfig,
     VBLoRAConfig,
@@ -289,7 +290,7 @@ def load_dataset_english_quotes():
 @lru_cache
 def load_cat_image():
     # can't use pytest fixtures for now because of unittest style tests
-    dataset = load_dataset("huggingface/cats-image", trust_remote_code=True)
+    dataset = load_dataset("huggingface/cats-image")
     image = dataset["test"]["image"][0]
     return image
 
@@ -301,6 +302,9 @@ def set_init_weights_false(config_cls, kwargs):
     if issubclass(config_cls, PromptLearningConfig):
         return kwargs
     if config_cls in (LNTuningConfig, VBLoRAConfig):
+        return kwargs
+    if (config_cls == MissConfig) and (kwargs.get("init_weights") == "bat"):
+        # don't override 'bat' init or else it's not being properly tested
         return kwargs
 
     if config_cls in (LoraConfig, AdaLoraConfig):
@@ -344,7 +348,6 @@ def hub_online_once(model_id: str):
     to wrapping the whole test in the context manager without explicitly writing it out, leading to unexpected
     `HF_HUB_OFFLINE` behavior in the test body.
     """
-    global _HUB_MODEL_ACCESSES
     override = {}
 
     try:

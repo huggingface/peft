@@ -43,6 +43,7 @@ from peft.utils.constants import (
     MIN_TARGET_MODULES_FOR_OPTIMIZATION,
     SEQ_CLS_HEAD_NAMES,
 )
+from peft.utils.error import NoMatchingPeftModuleError
 from peft.utils.integrations import init_empty_weights
 from peft.utils.other import (
     AuxiliaryTrainingWrapper,
@@ -54,6 +55,7 @@ from peft.utils.other import (
     set_additional_trainable_modules,
 )
 from peft.utils.peft_types import PeftType, TaskType
+from peft.utils.quantization_utils import QuantizationBackend
 from peft.utils.warning import PeftWarning
 
 from ..config import PeftConfig
@@ -107,7 +109,7 @@ def onload_layer(layer):
         ):
             # find the disk-offload index (maps modules to safetensors) from the `dataset` (OffloadedWeightsLoader object)
             index = layer.base_layer._hf_hook.weights_map.dataset.index
-            module_name = list(dict(layer.base_layer._hf_hook.weights_map.dataset).keys())[0]  # any module will do
+            module_name = next(iter(dict(layer.base_layer._hf_hook.weights_map.dataset).keys()))  # any module will do
             file_name = index[module_name]["safetensors_file"]
             base_name_arr = []
             # get effective dir name
@@ -147,7 +149,7 @@ def _check_lora_target_modules_mamba(peft_config: PeftConfig, model: nn.Module, 
 
     lora_like_types = {"LORA", "ADALORA", "XLORA", "RANDLORA"}
     incompatible_modules = {"out_proj", "conv1d"}
-    mamba_model_types = {"falcon_h1", "mamba", "mamba2", "falcon_mamba"}
+    mamba_model_types = {"falcon_h1", "mamba", "mamba2", "falcon_mamba", "nemotron_h"}
 
     if (
         peft_config.peft_type in lora_like_types
@@ -172,15 +174,19 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
     """
     if isinstance(module, nn.Linear):
         if _torch_supports_distributed and isinstance(module.weight, torch.distributed.tensor.DTensor):
-            # If Tensor Parallel is used, the weight is sharded, so we need to get the local shape
-            out_features, in_features = module.weight.to_local().shape
+            # Sharded weight. Under Tensor Parallel the module computes on its local shard, so the LoRA
+            # layers must match the local shape. Under FSDP2 (a mesh dimension named "fsdp") the storage is
+            # sharded but the module still computes the full projection, so the full shape is the right one.
+            # A mesh with no dimension names comes from plain `fully_shard(model)`, which builds its default
+            # mesh unnamed, so it is FSDP-sharded as well.
+            mesh_dim_names = module.weight.device_mesh.mesh_dim_names or ()
+            if set(mesh_dim_names) <= {"fsdp"}:
+                in_features, out_features = module.in_features, module.out_features
+            else:
+                out_features, in_features = module.weight.to_local().shape
         else:
             in_features, out_features = module.in_features, module.out_features
-    elif isinstance(module, nn.Conv1d):
-        in_features, out_features = module.in_channels, module.out_channels
-    elif isinstance(module, nn.Conv2d):
-        in_features, out_features = module.in_channels, module.out_channels
-    elif isinstance(module, nn.Conv3d):
+    elif isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
         in_features, out_features = module.in_channels, module.out_channels
     elif isinstance(module, nn.Embedding):
         in_features, out_features = module.num_embeddings, module.embedding_dim
@@ -213,8 +219,13 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
         # GPT-QModel quantized linears
         in_features, out_features = module.in_features, module.out_features
     elif module.__class__.__name__ == "EetqLinear":
-        # Eetq layers
-        in_features, out_features = module.in_features, module.out_features
+        if hasattr(module, "in_features"):
+            # Eetq layers
+            in_features, out_features = module.in_features, module.out_features
+        else:
+            # Transformers Eetq layers
+            # https://github.com/huggingface/transformers/blob/c220ea9ecee9231927a47d97a63d5604a09d4c63/src/transformers/integrations/eetq.py#L74
+            in_features, out_features = module.weight.shape
     elif hasattr(module, "W_q") and module.__class__.__name__ == "HQQLinear":
         # HQQ layers
         in_features, out_features = module.in_features, module.out_features
@@ -229,6 +240,19 @@ def _get_in_out_features(module: nn.Module) -> tuple[int, int] | tuple[None, Non
             in_features, out_features = None, None
         warnings.warn(f"Unsupported layer type '{type(module)}' encountered, proceed at your own risk.", UserWarning)
     return in_features, out_features
+
+
+def _extend_unique(existing: list[str], new_names: list[str]) -> None:
+    """
+    Append the entries of new_names that are missing from existing, preserving order.
+
+    The membership check uses a set, as repeated `in` checks on a list could become expensive for large models.
+    """
+    seen = set(existing)
+    for name in new_names:
+        if name not in seen:
+            existing.append(name)
+            seen.add(name)
 
 
 class BaseTuner(nn.Module, ABC):
@@ -328,7 +352,7 @@ class BaseTuner(nn.Module, ABC):
         return self.active_adapter
 
     def forward(self, *args: Any, **kwargs: Any):
-        return self.model.forward(*args, **kwargs)
+        return self.model(*args, **kwargs)
 
     def _pre_injection_hook(self, model: nn.Module, config: PeftConfig, adapter_name: str) -> None:
         r"""
@@ -343,7 +367,6 @@ class BaseTuner(nn.Module, ABC):
             adapter_name (`str`):
                 The adapter name.
         """
-        pass
 
     def _post_injection_hook(self, model: nn.Module, config: PeftConfig, adapter_name: str) -> None:
         r"""
@@ -358,7 +381,6 @@ class BaseTuner(nn.Module, ABC):
             adapter_name (`str`):
                 The adapter name.
         """
-        pass
 
     def _prepare_adapter_config(self, peft_config: PeftConfig, model_config: dict) -> PeftConfig:
         r"""
@@ -403,7 +425,6 @@ class BaseTuner(nn.Module, ABC):
             model (`nn.Module`):
                 The model that is going to be adapted.
         """
-        pass
 
     @staticmethod
     def _check_tied_module_exists(peft_config: PeftConfig, key: str) -> bool | re.Match[str] | None:
@@ -482,9 +503,20 @@ class BaseTuner(nn.Module, ABC):
         """
         A helper method to mark only the adapter layers as trainable (i.e. module.requires_grad = False).
         """
+        # The adapter parameters are determined structurally by visiting the tuner layers instead of matching the
+        # parameter names against self.prefix, so that a base model module whose name happens to contain the prefix is
+        # not treated as an adapter module.
+        adapter_prefixes = _get_tuner_state_dict_key_prefixes(model)
+        adapter_param_names = set(_filter_state_dict_by_key_prefixes(dict(model.named_parameters()), adapter_prefixes))
+        aux_module_names = {n for n, m in model.named_modules() if isinstance(m, AuxiliaryTrainingWrapper)}
         for n, p in model.named_parameters():
-            if self.prefix not in n:
-                p.requires_grad = False
+            if n in adapter_param_names:
+                continue
+            if _is_key_under_prefixes(n, aux_module_names):
+                # auxiliary modules like ModulesToSaveWrapper manage the requires_grad state of their parameters
+                # themselves
+                continue
+            p.requires_grad = False
 
         for active_adapter in self.active_adapters:
             bias = getattr(self.peft_config[active_adapter], "bias", "none")
@@ -493,7 +525,7 @@ class BaseTuner(nn.Module, ABC):
 
             if bias == "all":
                 for n, p in model.named_parameters():
-                    if "bias" in n:
+                    if (n == "bias") or n.endswith(".bias"):
                         p.requires_grad = True
             elif bias.endswith("_only"):  # e.g. "lora_only" or "boft_only"
                 for m in model.modules():
@@ -501,6 +533,10 @@ class BaseTuner(nn.Module, ABC):
                         m.bias.requires_grad = True
             else:
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
+
+        for module in model.modules():
+            if isinstance(module, self.tuner_layer_cls):
+                module._freeze_non_trainable_peft_weights()
 
     def _enable_adapter_layers(self, enabled: bool = True) -> None:
         for module in self.model.modules():
@@ -540,6 +576,7 @@ class BaseTuner(nn.Module, ABC):
         """
         if adapter_name not in list(self.peft_config.keys()):
             raise ValueError(f"Adapter {adapter_name} does not exist")
+        _check_adapters_not_merged(self.model, adapter_name)
         del self.peft_config[adapter_name]
 
         new_adapter = delete_adapter(
@@ -552,7 +589,7 @@ class BaseTuner(nn.Module, ABC):
         Enable or disable gradients on the given adapter(s).
 
         Args:
-            adapter_name (`str` or `Sequence[str]`):
+            adapter_names (`str` or `Sequence[str]`):
                 The name of the adapter(s) whose gradients should be enabled/disabled.
             requires_grad (`bool`, *optional*)
                 Whether to enable (`True`, default) or disable (`False`).
@@ -645,7 +682,15 @@ class BaseTuner(nn.Module, ABC):
         if merge:
             self._check_merge_allowed()
 
-        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
+        # visit all modules except those inside tuner layers (e.g. lora_A), note that the tuner layers themselves must
+        # be part of the list, as they are the ones being unloaded; a module lies inside a tuner layer if its parent
+        # module or any ancestor thereof is a tuner layer
+        tuner_layer_names = {key for key, module in self.model.named_modules() if isinstance(module, BaseTunerLayer)}
+        key_list = [
+            key
+            for key, _ in self.model.named_modules()
+            if not _is_key_under_prefixes(key.rpartition(".")[0], tuner_layer_names)
+        ]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
             try:
@@ -804,6 +849,10 @@ class BaseTuner(nn.Module, ABC):
         unmatched_modules = []
         targeted_modules_from_peft_config: list[str] = []  # only relevant if state_dict is passed
         targets_to_tie: list[str] = []
+        # Modules/parameters targeted by *this* adapter are collected locally and only merged into
+        # self.targeted_module_names / self.targeted_parameter_names (deduplicated) after the checks below passed.
+        targeted_module_names: list[str] = []
+        targeted_parameter_names: list[str] = []
         # Note: If possible, all checks should be performed *at the start of this method*.
         # This way, we can raise early if something goes wrong, without leaving the model
         # in a bad (half-initialized) state.
@@ -882,13 +931,9 @@ class BaseTuner(nn.Module, ABC):
                 continue
 
             # It is possible that we're adding an additional adapter, so if we encounter a key that clearly belongs to a
-            # previous adapter we can skip here since we don't want to interfere with adapter internals.
-            for adapter_key in existing_adapter_prefixes:
-                if key.startswith(adapter_key):
-                    excluded_modules.append(key)
-                    break
-
-            if excluded_modules and excluded_modules[-1] == key:
+            # previous adapter we can skip here since we don't want to interfere with adapter internals. These are
+            # adapter internals rather than user-excluded modules, so they are not added to excluded_modules.
+            if any(key.startswith(adapter_key) for adapter_key in existing_adapter_prefixes):
                 continue
 
             if state_dict is None:
@@ -906,7 +951,7 @@ class BaseTuner(nn.Module, ABC):
                 elif not result:
                     unmatched_modules.append(key)
                 else:
-                    self.targeted_module_names.append(key)
+                    targeted_module_names.append(key)
                     parent, target, target_name = _get_submodules(model, key)
                     self._check_target_module_compatiblity(peft_config, model, target_name)
                     ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
@@ -928,7 +973,7 @@ class BaseTuner(nn.Module, ABC):
                     if self._check_tied_module_exists(peft_config, key):
                         targets_to_tie.append(key)
                         continue
-                    self.targeted_module_names.append(key)
+                    targeted_module_names.append(key)
                     parent, target, target_name = _get_submodules(model, key)
                     self._check_target_module_compatiblity(peft_config, model, target_name)
                     ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
@@ -943,14 +988,14 @@ class BaseTuner(nn.Module, ABC):
 
         if getattr(peft_config, "target_parameters", []):
             # Note: We don't need to check for no state_dict being passed, since we already checked this earlier.
-            self._inject_parameters(
+            targeted_parameter_names = self._inject_parameters(
                 peft_config=peft_config, model=model, adapter_name=adapter_name, low_cpu_mem_usage=low_cpu_mem_usage
             )
 
         # Here we inject tied adapters for all the layers which were tied
         # Only applicable if `ensure_weight_tying = True` for LoraConfig
         for key in targets_to_tie:
-            self.targeted_module_names.append(key)
+            targeted_module_names.append(key)
             parent, target, target_name = _get_submodules(model, key)
             self._check_target_module_compatiblity(peft_config, model, target_name)
             ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
@@ -965,7 +1010,7 @@ class BaseTuner(nn.Module, ABC):
             # in case that the state_dict was used as source of truth and it resulted in different outcomes than what
             # would have been matched with the PEFT config, warn the user about that.
             targeted_set_from_peft_config = set(targeted_modules_from_peft_config)
-            targeted_set_from_state_dict = set(self.targeted_module_names)
+            targeted_set_from_state_dict = set(targeted_module_names)
             diff_peft_config = targeted_set_from_peft_config - targeted_set_from_state_dict
             diff_state_dict = targeted_set_from_state_dict - targeted_set_from_peft_config
             warning_msg = ""
@@ -984,15 +1029,15 @@ class BaseTuner(nn.Module, ABC):
             if warning_msg:
                 warnings.warn(warning_msg, RuntimeWarning)
 
-        if not self.targeted_module_names and not self.targeted_parameter_names and not uses_dummy_target_modules:
+        if not targeted_module_names and not targeted_parameter_names and not uses_dummy_target_modules:
             if excluded_modules and not unmatched_modules:
                 # All targeted modules were excluded
-                raise ValueError(
+                raise NoMatchingPeftModuleError(
                     "All modules were excluded. This is likely unintended. "
                     "Check your `target_modules`, `exclude_modules` and `modules_to_save` configuration."
                 )
             elif not excluded_modules and unmatched_modules and not peft_config.target_modules:
-                raise ValueError(
+                raise NoMatchingPeftModuleError(
                     "No `target_modules` passed but also no `target_parameters` found. Please check the values for "
                     "these arguments."
                 )
@@ -1006,7 +1051,7 @@ class BaseTuner(nn.Module, ABC):
                     error_msg += f" Note: You specified 'layers_to_transform': {peft_config.layers_to_transform}."
                 if getattr(peft_config, "layers_pattern", None) is not None:
                     error_msg += f" You also specified 'layers_pattern': {peft_config.layers_pattern}."
-                raise ValueError(error_msg)
+                raise NoMatchingPeftModuleError(error_msg)
             else:
                 # Some modules did not match and some matched but were excluded
                 error_msg = (
@@ -1019,7 +1064,7 @@ class BaseTuner(nn.Module, ABC):
                     error_msg += f" Note: You specified 'layers_to_transform': {peft_config.layers_to_transform}."
                 if getattr(peft_config, "layers_pattern", None) is not None:
                     error_msg += f" You also specified 'layers_pattern': {peft_config.layers_pattern}."
-                raise ValueError(error_msg)
+                raise NoMatchingPeftModuleError(error_msg)
 
         elif hasattr(peft_config, "exclude_modules") and peft_config.exclude_modules and not excluded_modules:
             # exclude_modules was passed but was not used
@@ -1033,15 +1078,20 @@ class BaseTuner(nn.Module, ABC):
             # error. However, let's warn the user if it seems like
             # - they wanted to match a module but there was no match
             # - they wanted to match a parameter but there was no match
-            if peft_config.target_modules and not self.targeted_module_names:
+            if peft_config.target_modules and not targeted_module_names:
                 warnings.warn(
                     f"target_modules={peft_config.target_modules} were set but no module was matched.", RuntimeWarning
                 )
-            elif getattr(peft_config, "target_parameters", []) and not self.targeted_parameter_names:
+            elif getattr(peft_config, "target_parameters", []) and not targeted_parameter_names:
                 warnings.warn(
                     f"target_parameters={peft_config.target_parameters} were set but no parameter was matched.",
                     RuntimeWarning,
                 )
+
+        # Now that the checks passed, merge this adapter's matches into the tuner-level bookkeeping. Duplicates
+        # are skipped so that names stay unique when several adapters target the same modules.
+        _extend_unique(self.targeted_module_names, targeted_module_names)
+        _extend_unique(self.targeted_parameter_names, targeted_parameter_names)
 
         ################
         # HOUSEKEEPING #
@@ -1068,8 +1118,9 @@ class BaseTuner(nn.Module, ABC):
 
     def _inject_parameters(
         self, peft_config: PeftConfig, model: nn.Module, adapter_name: str, low_cpu_mem_usage: bool
-    ) -> None:
+    ) -> list[str]:
         """Inject layers based on peft_config.target_modules"""
+        targeted_parameter_names: list[str] = []
 
         def strip_base_layer_from_name(module_name):
             # It is possible that the layer is already a PEFT layer and needs updating with a new adapter. In this case,
@@ -1082,8 +1133,27 @@ class BaseTuner(nn.Module, ABC):
                 module_name = prefix + suffix
             return module_name
 
+        def find_existing_param_wrapper(module, parameter_name):
+            # When adding a further adapter, the parameter may already be wrapped by a (possibly nested) ParamWrapper
+            # that was created for a previous adapter. In that case, return that wrapper so the new adapter can be added
+            # to it (via update_layer) instead of nesting yet another wrapper.
+            while isinstance(module, BaseTunerLayer) and (module.__class__.__name__ == "ParamWrapper"):
+                if module.parameter_name == parameter_name:
+                    return module
+                module = module.base_layer
+            return None
+
         def create_and_replace_param(module_name, key, param_name):
             # helper function to avoid duplication
+            if module_name == "":
+                # nn.Parameters that are registered directly on the top-level module (i.e. the module passed to
+                # get_peft_model) cannot be targeted. Wrapping the parameter would require replacing the module that
+                # holds it with lora.ParamWrapper, but that module is its own parent, so the wrapper ends up registered
+                # as a submodule of the very module it wraps. This creates a cyclic module graph, resulting in an error.
+                raise ValueError(
+                    f"Targeting an nn.Parameter on the top-level module is not supported (parameter '{param_name}'). "
+                )
+
             parent, target, target_name = _get_submodules(model, module_name)
             unwrapped_module_name = strip_base_layer_from_name(module_name)
             unwrapped_module = model.get_submodule(unwrapped_module_name)
@@ -1096,6 +1166,12 @@ class BaseTuner(nn.Module, ABC):
                     "try setting `target_modules=[]` to prevent it."
                 )
 
+            short_param_name = param_name.rpartition(".")[-1]  # "foo.bar.gate_up_proj" -> "gate_up_proj"
+            # If a previous adapter already wraps this parameter, reuse that wrapper instead of nesting a new one.
+            existing_wrapper = find_existing_param_wrapper(unwrapped_module, short_param_name)
+            if existing_wrapper is not None:
+                target = existing_wrapper
+
             self._check_target_module_compatiblity(peft_config, model, target_name)
             ctx = init_empty_weights if low_cpu_mem_usage else nullcontext
             with ctx():
@@ -1106,7 +1182,7 @@ class BaseTuner(nn.Module, ABC):
                     target_name,
                     parent,
                     current_key=key,
-                    parameter_name=param_name.rpartition(".")[-1],
+                    parameter_name=short_param_name,
                 )
 
         # TODO very simple matching, might not cover all use cases
@@ -1126,7 +1202,7 @@ class BaseTuner(nn.Module, ABC):
                     if getattr(module, param_name, None) is None:
                         continue
                     create_and_replace_param(module_name, key, param_name)
-                    self.targeted_parameter_names.append(key)
+                    targeted_parameter_names.append(key)
             else:
                 # Standard case: the parameter is not already parametrized. Note, however, that the model could already
                 # be nested with lora.ParamWrapper, as this is how we allow targeting multiple Parameters on the same
@@ -1139,11 +1215,13 @@ class BaseTuner(nn.Module, ABC):
                         # Note: We use the unwrapped_module_name to check if the key matches, but we use the module_name for
                         # replacement, since we want to replace the wrapped module.
                         create_and_replace_param(module_name, key, param_name)
-                        self.targeted_parameter_names.append(key)
+                        targeted_parameter_names.append(key)
+
+        return targeted_parameter_names
 
     def _replace_module(self, parent, child_name, new_module, child) -> None:
         """
-        Replace the sub-module of a given moduel with a new PEFT module.
+        Replace the sub-module of a given module with a new PEFT module.
 
         This also deals with device placement of the new module to be in line with the child module.
 
@@ -1302,7 +1380,7 @@ class BaseTuner(nn.Module, ABC):
 
     def _check_tied_modules(self, model: nn.Module, peft_config):
         """
-        Checks if any of the tied layers are targetted via `modules_to_save` or `target_modules`. Updates the
+        Checks if any of the tied layers are targeted via `modules_to_save` or `target_modules`. Updates the
         `peft_config` in place with any layers/adapters that needs to be tied
         """
         modules_to_save = set(getattr(peft_config, "modules_to_save", []) or [])
@@ -1367,7 +1445,161 @@ class BaseTuner(nn.Module, ABC):
             module.supports_lora_conversion() for module in self.modules() if isinstance(module, BaseTunerLayer)
         )
 
-    def __getattr__(self, name: str):
+    ############################
+    # State dict serialization #
+    ############################
+
+    # These classmethods define how the state_dict of this PEFT method is converted between the format of the model
+    # (which includes the adapter name in the keys) and the format of the checkpoint (which is independent of the
+    # adapter name). The conversion is split into two concerns that can be overridden independently:
+    #
+    # - selection: which entries belong to the given adapter and with which values they are saved
+    #   (`_get_adapter_state_dict`; `_get_learnable_bias_state_dict` deals with cases like bias="all" or
+    #   bias="<peft-method>_only" if the PEFT method supports that)
+    # - key translation: how a single model state_dict key maps to the adapter-name-independent checkpoint key
+    #   (`_remove_adapter_name_from_key`; overridden e.g. by VB-LoRA and PEANuT due to their special key formats)
+    #
+    # Loading (`_remap_adapter_state_dict_for_load`) builds the inverse key mapping from the very same
+    # `_remove_adapter_name_from_key`, so saving and loading are symmetric by construction: a method that overrides
+    # the key translation automatically loads what it saves, without having to keep two separate pieces of remapping
+    # logic in sync.
+    #
+    # They are classmethods since they must also work with models that only have the PEFT layers injected but are not
+    # themselves BaseTuner instances (see `inject_adapter_in_model`); dispatch happens via
+    # `PEFT_TYPE_TO_TUNER_MAPPING` based on the PEFT type of the config. These hooks are internal API and are called
+    # by `get_peft_model_state_dict` and `set_peft_model_state_dict`, which take care of the method-agnostic parts
+    # (auxiliary modules, embeddings, prefix handling, etc.).
+
+    @classmethod
+    def _get_adapter_state_dict(
+        cls,
+        model: nn.Module,
+        config: PeftConfig,
+        adapter_name: str,
+        state_dict: dict[str, torch.Tensor],
+        unwanted_adapter_names: list[str],
+    ) -> dict[str, torch.Tensor]:
+        """
+        Select the entries belonging to this PEFT method from the model state_dict.
+
+        The entries are determined structurally by visiting the tuner layers of the model instead of only matching the
+        key names against `cls.prefix`, so that a base model module whose name happens to contain the prefix is not
+        included. The passed state_dict is already filtered to exclude the other adapters and the returned state_dict
+        still contains the adapter name in its keys, it is removed later via `_remove_adapter_name_from_key`.
+
+        Note that the returned keys still contain the adapter name. They must round-trip through
+        `_remove_adapter_name_from_key`, as loading relies on that correspondence to remap the checkpoint keys back to
+        the model keys. If an override renames keys beyond what `_remove_adapter_name_from_key` does (see the DoRA
+        handling in LoRA, which additionally strips a ".weight" suffix), the inverse rename must be applied in
+        `_remap_adapter_state_dict_for_load` before calling super().
+
+        As an example, the returned keys could look like this:
+
+        `['base_model.model.lin0.<peft_method_param_name>.<adapter_name>', ...]`
+        """
+        prefixes = _get_tuner_state_dict_key_prefixes(model)
+        to_return = _filter_state_dict_by_key_prefixes(state_dict, prefixes)
+        to_return.update(cls._get_learnable_bias_state_dict(model, state_dict, config))
+        return to_return
+
+    @classmethod
+    def _get_learnable_bias_state_dict(
+        cls, model: nn.Module, state_dict: dict[str, torch.Tensor], config: PeftConfig
+    ) -> dict[str, torch.Tensor]:
+        bias = getattr(config, "bias", "none")
+        if bias == "none":
+            return {}
+
+        if bias == "all":
+            # note: the state_dict of an FSDP model already removes the _fsdp_wrapped_module prefix, so no extra
+            # handling is needed
+            return {k: v for k, v in state_dict.items() if (k == "bias") or k.endswith(".bias")}
+
+        bias_state_dict = {}
+        if bias.endswith("_only"):  # e.g. 'lora_only'
+            for module_name, module in model.named_modules():
+                if module_name.startswith("_fsdp_wrapped_module."):
+                    module_name = module_name.removeprefix("_fsdp_wrapped_module.")
+                if not isinstance(module, BaseTunerLayer):
+                    continue
+                # the bias of the targeted module is located on the base layer of the tuner layer
+                bias_name = f"{module_name}.base_layer.bias" if module_name else "base_layer.bias"
+                if bias_name in state_dict:
+                    bias_state_dict[bias_name] = state_dict[bias_name]
+        return bias_state_dict
+
+    @classmethod
+    def _remove_adapter_name_from_key(cls, key: str, adapter_name: str) -> str:
+        """Map a key of the model state_dict to the corresponding key of the checkpoint state_dict, i.e. with the
+        adapter name removed.
+
+        This per-key mapping defines the correspondence between model keys and checkpoint keys and is used in both
+        directions: on saving it is applied to the selected keys, on loading it is applied to the model keys to build
+        the inverse mapping (see `_remap_adapter_state_dict_for_load`). It should therefore be a pure function of the
+        passed key and adapter name.
+
+        As an example, the returned keys could look like this:
+
+        - before: `'base_model.model.lin0.<peft_method_param_name>.<adapter_name>'`
+        -  after: `'base_model.model.lin0.<peft_method_param_name>'`
+        """
+        return _remove_adapter_name_from_state_dict_key(key, adapter_name)
+
+    @classmethod
+    def _remap_adapter_state_dict_for_load(
+        cls,
+        model: nn.Module,
+        config: PeftConfig,
+        adapter_name: str,
+        state_dict: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """
+        Remap the keys of a checkpoint state_dict (which is independent of the adapter name) to fit the model (whose
+        keys contain the adapter name) and apply method-specific conversions.
+
+        The mapping is built structurally by enumerating the adapter parameters of the model and computing the
+        corresponding checkpoint key for each of them via `_remove_adapter_name_from_key`, guaranteeing that saving and
+        loading are symmetric. Checkpoint entries with no corresponding adapter parameter (e.g. saved biases or
+        embedding weights) are passed through unchanged.
+
+        As an example, the returned keys could look like this:
+        - before: `['base_model.model.lin0.<peft_method_param_name>', ...]`
+        -  after: `['base_model.model.lin0.<peft_method_param_name>.<adapter_name>', ...]`
+        """
+        prefixes = _get_tuner_state_dict_key_prefixes(model, adapter_name=adapter_name)
+        checkpoint_key_to_model_key = {}
+        peft_prefix = "base_model.model."
+        for model_key in _filter_state_dict_by_key_prefixes(model.state_dict(), prefixes):
+            # create the reverse mapping
+            checkpoint_key = cls._remove_adapter_name_from_key(model_key, adapter_name)
+            checkpoint_key_to_model_key[checkpoint_key] = model_key
+            if not model_key.startswith(peft_prefix):
+                # The model keys only contain the prefix if the model is wrapped in a PeftModel. When the PEFT layers
+                # were injected directly into the model via {get,set}_peft_model_state_dict (e.g. Transformers and
+                # Diffusers integration), there is no prefix in the model. Since the checkpoint still contains it, we
+                # need to add the key with the prefix present.
+                checkpoint_key_to_model_key[peft_prefix + checkpoint_key] = model_key
+        return {checkpoint_key_to_model_key.get(k, k): v for k, v in state_dict.items()}
+
+    @classmethod
+    def _convert_state_dict_for_initial_model(
+        cls,
+        peft_model,
+        peft_config: PeftConfig,
+        path_initial_model_for_weight_conversion: str,
+        output_state_dict,
+        kwargs,
+    ) -> dict[str, torch.Tensor]:
+        """
+        Convert the state_dict of a PEFT method that mutates the base weights (like PiSSA) into an equivalent LoRA
+        state_dict that can be loaded onto the unmutated base model. Only supported by PEFT methods that implement it.
+        """
+        raise ValueError(
+            f"Passing `path_initial_model_for_weight_conversion` to `save_pretrained` is not supported for "
+            f"{cls.__name__}."
+        )
+
+    def __getattr__(self, name: str) -> Any:
         """Forward missing attributes to the wrapped module."""
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
@@ -1375,6 +1607,202 @@ class BaseTuner(nn.Module, ABC):
             if name == "model":  # see #1892: prevent infinite recursion if class is not initialized
                 raise
             return getattr(self.model, name)
+
+
+class BasePromptEncoder(torch.nn.Module):
+    """
+    Base class for the encoders of prompt learning methods (e.g. prompt tuning, prefix tuning).
+
+    Besides being a plain torch module that computes the prompt embeddings, this class defines the state dict
+    serialization hooks of the prompt learning method, mirroring the corresponding hooks on `BaseTuner`. The main
+    difference is that the state of prompt learning methods lives on the prompt encoder itself instead of on layers
+    injected into the base model, which is also why loading is handled by the instance method
+    `_load_adapter_state_dict` instead of relying on `model.load_state_dict`.
+    """
+
+    @classmethod
+    def _get_adapter_state_dict(
+        cls,
+        model,
+        config: PeftConfig,
+        adapter_name: str,
+        state_dict: dict[str, torch.Tensor],
+        unwanted_adapter_names: list[str],
+    ) -> dict[str, torch.Tensor]:
+        """Return the entries belonging to this prompt learning method, note that they are not taken from the model
+        state_dict but from the prompt encoder directly."""
+        if config.inference_mode:
+            prompt_embeddings = model.prompt_encoder[adapter_name].embedding.weight
+        else:
+            prompt_embeddings = model.get_prompt_embedding_to_save(adapter_name)
+        return {"prompt_embeddings": prompt_embeddings}
+
+    @classmethod
+    def _remove_adapter_name_from_key(cls, key: str, adapter_name: str) -> str:
+        return _remove_adapter_name_from_state_dict_key(key, adapter_name)
+
+    @classmethod
+    def _remap_adapter_state_dict_for_load(
+        cls,
+        model,
+        config: PeftConfig,
+        adapter_name: str,
+        state_dict: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        # prompt learning state dict keys are stored without the adapter name, so there is nothing to remap
+        return state_dict
+
+    def _load_adapter_state_dict(self, state_dict: dict[str, torch.Tensor]) -> None:
+        """Load the checkpoint state_dict (as returned by `_get_adapter_state_dict`) into this prompt encoder."""
+        self.embedding.load_state_dict({"weight": state_dict["prompt_embeddings"]}, strict=True)
+
+
+def _remove_adapter_name_from_state_dict_key(key: str, adapter_name: str) -> str:
+    """Remove the adapter name from a model state_dict key to get the corresponding checkpoint state_dict key.
+
+    E.g. for the key 'model.q_proj.lora_A.default.weight' and the adapter name 'default', return
+    'model.q_proj.lora_A.weight'. Ensure not to replace in the middle of the key because a module happens to have the
+    same name as the adapter.
+    """
+    if "." not in key:
+        # nothing to do
+        return key
+
+    if key.endswith(f".{adapter_name}"):
+        # comes from an nn.Parameter, so no .weight suffix, the adapter name is directly at the end
+        return key.removesuffix(f".{adapter_name}")
+
+    # comes from an nn.Module, i.e. the adapter name is the 2nd to last element, e.g. v_proj.lora_A.default.weight
+    key, _, suffix = key.rpartition(".")  # split, e.g. v_proj.lora_A.default + weight
+    key = re.sub(re.escape(f".{adapter_name}") + r"$", "", key)  # remove adapter name, e.g. v_proj.lora_A
+    return f"{key}.{suffix}"  # stitch the suffix back, e.g, v_proj.lora_A.weight
+
+
+def _get_tuner_state_dict_key_prefixes(model: nn.Module, adapter_name: Optional[str] = None) -> set[str]:
+    """Collect the state dict key prefixes of all parameters and buffers that belong to the PEFT method.
+
+    The prefixes are derived structurally from the model by visiting all tuner layers (everything on a tuner layer
+    belongs to the PEFT method except the wrapped `base_layer`) as well as the `BaseTuner` instance itself, which can
+    hold model-level containers that are shared between the layers (e.g. `vera_A`/`vera_B` of VeRA). This is more
+    robust than matching key names against the method prefix, since a base model module whose name happens to contain
+    the prefix does not belong to the PEFT method. Auxiliary modules like `ModulesToSaveWrapper` are not included, as
+    they are handled separately (this also applies to tuner layers inside auxiliary modules, e.g. the `token_adapter`
+    of a `TrainableTokensWrapper`).
+
+    If `adapter_name` is passed, attributes that are containers keyed by the adapter name (`ModuleDict`,
+    `ParameterDict`, `BufferDict`) are restricted to the entry of the given adapter.
+
+    Example:
+
+    ```py
+    >>> model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+    >>> model = get_peft_model(model, LoraConfig(target_modules=["all-linear"]))
+    >>> sorted(_get_tuner_state_dict_key_prefixes(model))
+    ['base_model.model.model.decoder.layers.0.fc1.lora_A',
+     'base_model.model.model.decoder.layers.0.fc1.lora_B',
+     'base_model.model.model.decoder.layers.0.fc1.lora_dropout',
+     ...
+     'base_model.model.model.decoder.layers.9.self_attn.v_proj.lora_embedding_A',
+     'base_model.model.model.decoder.layers.9.self_attn.v_proj.lora_embedding_B',
+     'base_model.model.model.decoder.layers.9.self_attn.v_proj.lora_magnitude_vector']
+    ```
+    """
+    from ._buffer_dict import BufferDict
+
+    def get_adapter_attr_prefixes(module: nn.Module, module_name: str) -> set[str]:
+        prefixes = set()
+        attr_names = (
+            [n for n, _ in module.named_children()]
+            + [n for n, _ in module.named_parameters(recurse=False)]
+            + [n for n, _ in module.named_buffers(recurse=False)]
+        )
+        for attr_name in attr_names:
+            if attr_name in ("base_layer", "model"):
+                # skip the wrapped module, i.e. the base_layer of a tuner layer or the model of a BaseTuner
+                continue
+            prefix = f"{module_name}.{attr_name}" if module_name else attr_name
+            child = getattr(module, attr_name)
+            if (adapter_name is not None) and isinstance(child, (nn.ModuleDict, nn.ParameterDict, BufferDict)):
+                if adapter_name in child:
+                    prefixes.add(f"{prefix}.{adapter_name}")
+            else:
+                prefixes.add(prefix)
+        return prefixes
+
+    prefixes = set()
+    # note: named_modules yields parents before children, so an auxiliary module is always visited before the tuner
+    # layers nested inside of it
+    aux_module_names = set()
+    for module_name, module in model.named_modules():
+        if module_name.startswith("_fsdp_wrapped_module."):
+            # If FSDP is used, the state_dict is from the unwrapped model, which would result in a key mismatch if we
+            # didn't remove the FSDP-specific prefix
+            module_name = module_name.removeprefix("_fsdp_wrapped_module.")
+
+        if isinstance(module, AuxiliaryTrainingWrapper):
+            aux_module_names.add(module_name)
+        elif isinstance(module, BaseTuner) or (
+            isinstance(module, BaseTunerLayer) and not _is_key_under_prefixes(module_name, aux_module_names)
+        ):
+            prefixes.update(get_adapter_attr_prefixes(module, module_name))
+    return prefixes
+
+
+def _is_key_under_prefixes(key: str, prefixes: set[str]) -> bool:
+    """Check whether the key equals, or lies under, one of the given key prefixes.
+
+    Matching respects "." boundaries, i.e. the prefix "a.b" matches the keys "a.b" and "a.b.c" but not "a.bc". The
+    check runs in O(depth of the key) instead of O(number of prefixes), which matters because the number of keys and
+    the number of prefixes can both scale with the model size.
+
+    Example:
+
+    ```py
+    >>> key = "lin0.road_theta.default"
+    >>> prefixes = {"lin0.road_alpha", "lin0.road_theta"}
+    >>> _is_key_under_prefixes(key, prefixes)
+    True
+
+    >>> key = "lin0.base_layer.weight"
+    >>> prefixes = {"lin0.road_alpha", "lin0.road_theta"}
+    >>> _is_key_under_prefixes(key, prefixes)
+    False
+    ```
+    """
+    if not prefixes:
+        return False
+
+    # check the key itself and each of its ancestors, e.g. for "a.b.c" check "a.b.c", then "a.b", then "a"
+    subkey = key
+    while True:
+        if subkey in prefixes:
+            return True
+        subkey, dot, _ = subkey.rpartition(".")
+        if not dot:  # must be reached eventually
+            return False
+
+
+def _filter_state_dict_by_key_prefixes(state_dict: dict[str, Any], prefixes: set[str]) -> dict[str, Any]:
+    """
+    Return the entries of the general model state_dict whose entries belongs to the PEFT method, as identified by the
+    prefixes.
+
+    Example:
+
+    ```py
+    >>> prefixes
+    {'lin0.road_alpha', 'lin0.road_theta'}
+
+    >>> list(state_dict.keys())
+    ['lin0.base_layer.weight', 'lin0.base_layer.bias',
+     'lin0.road_theta.default', 'lin0.road_alpha.default',
+     'lin1.weight', 'lin1.bias']
+
+    >>> list(_filter_state_dict_by_key_prefixes(state_dict, prefixes))
+    ['lin0.road_theta.default', 'lin0.road_alpha.default']
+    ```
+    """
+    return {key: value for key, value in state_dict.items() if _is_key_under_prefixes(key, prefixes)}
 
 
 class BaseTunerLayer(ABC):
@@ -1392,6 +1820,8 @@ class BaseTunerLayer(ABC):
     adapter_layer_names: tuple[str, ...] = ()
     # All names of other parameters that may contain adapter-related parameters
     other_param_names: tuple[str, ...] = ()
+    # This dict maps from the adapter name to the layer(s) whose weights should stay frozen
+    frozen_peft_weight_names: dict[str, tuple[str, ...]] = {}
 
     # indicates whether all adapters should be disabled
     _disable_adapters: bool = False
@@ -1401,6 +1831,9 @@ class BaseTunerLayer(ABC):
 
     # List all merged adapters
     merged_adapters: list[str] = []
+
+    # the quantization backend used within this class, e.g. Bnb8bitBackend or None if no quantization
+    quantization_backend: QuantizationBackend | None = None
 
     def get_base_layer(self) -> nn.Module:
         """
@@ -1413,6 +1846,25 @@ class BaseTunerLayer(ABC):
         while hasattr(base_layer, "base_layer"):
             base_layer = base_layer.base_layer
         return base_layer
+
+    def get_base_weight(self) -> torch.Tensor:
+        """Return the weight of the base layer.
+
+        This takes care of potentially dequantizing the weight if it is quantized.
+        """
+        if self.quantization_backend is not None:
+            return self.quantization_backend.get_base_weight(self.get_base_layer())
+        return self.get_base_layer().weight.data
+
+    def set_base_weight(self, weight_data: torch.Tensor) -> None:
+        """Sets the base weight of the base layer to the new tensor
+
+        This works also with quantized weights.
+        """
+        if self.quantization_backend is not None:
+            self.quantization_backend.set_base_weight(self, weight_data)
+        else:
+            self.get_base_layer().weight.data = weight_data
 
     def _get_embed_scale(self):
         """
@@ -1528,6 +1980,32 @@ class BaseTunerLayer(ABC):
                     _set_layer_requires_grad(layer, False)
             self._disable_adapters = True
 
+    def _freeze_non_trainable_peft_weights(self, adapter_names: str | Sequence[str] | None = None) -> None:
+        """Freeze PEFT weights that adapter variants declare as non-trainable.
+
+        Some variants intentionally train only a subset of their adapter weights. This method reapplies those
+        declarations after code paths that may otherwise mark adapter weights as trainable, such as adapter setup or
+        adapter switching.
+        """
+        if not self.frozen_peft_weight_names:
+            return
+
+        if adapter_names is None:
+            adapter_names = self.frozen_peft_weight_names.keys()
+        elif isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+
+        for adapter_name in adapter_names:
+            for layer_name in self.frozen_peft_weight_names.get(adapter_name, ()):
+                if layer_name not in self.adapter_layer_names:
+                    continue
+
+                module_dict = getattr(self, layer_name)
+                if adapter_name not in module_dict:
+                    continue
+
+                _set_layer_requires_grad(module_dict[adapter_name], False)
+
     def set_adapter(self, adapter_names: str | list[str], inference_mode: bool = False) -> None:
         """Set the active adapter(s).
 
@@ -1535,7 +2013,7 @@ class BaseTunerLayer(ABC):
         inference_mode is True.
 
         Args:
-            adapter_name (`str` or `list[str]`):
+            adapter_names (`str` or `list[str]`):
                  The name(s) of the adapter(s) to set as active.
             inference_mode (bool, optional):
                  Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
@@ -1550,6 +2028,7 @@ class BaseTunerLayer(ABC):
                 should_require_grad = (key in adapter_names) and (not inference_mode)
                 _set_layer_requires_grad(layer, should_require_grad)
 
+        self._freeze_non_trainable_peft_weights(adapter_names)
         self._active_adapter = adapter_names
 
     def _all_available_adapter_names(self) -> list[str]:
@@ -1580,6 +2059,13 @@ class BaseTunerLayer(ABC):
             if adapter_name in getattr(self, attr):
                 del getattr(self, attr)[adapter_name]
 
+        if adapter_name in self.frozen_peft_weight_names:
+            # Delete in place (like the containers above) rather than copy-and-rebind: once an adapter
+            # has been registered the instance already owns its own dict (see
+            # `_register_frozen_peft_weight`), so this can't mutate the class-level default, and it keeps
+            # the deletion visible to any already-held reference to the dict.
+            del self.frozen_peft_weight_names[adapter_name]
+
         if adapter_name in self.active_adapters:
             # choose a new active adapter
             active_adapters = self.active_adapters[:]
@@ -1605,7 +2091,7 @@ class BaseTunerLayer(ABC):
         Enable or disable gradients on the given adapter(s).
 
         Args:
-            adapter_name (`str` or `Sequence[str]`):
+            adapter_names (`str` or `Sequence[str]`):
                 The name of the adapter(s) whose gradients should be enabled/disabled.
             requires_grad (`bool`, *optional*)
                 Whether to enable (`True`, default) or disable (`False`).
@@ -1620,6 +2106,9 @@ class BaseTunerLayer(ABC):
             for key, layer in module_dict.items():
                 if key in adapter_names_set:
                     _set_layer_requires_grad(layer, requires_grad)
+
+        if requires_grad:
+            self._freeze_non_trainable_peft_weights(adapter_names_set)
 
     def _get_base_layer_device_and_dtype(self, base_layer):
         """
@@ -1674,10 +2163,17 @@ class BaseTunerLayer(ABC):
             if any(p.device == meta for p in adapter_layer.parameters()):
                 continue
 
-            if target_dtype is not None:
-                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(target_device, dtype=target_dtype)
+            # Don't cast the dtype of integer parameters/buffers (e.g. index buffers) to the base layer's
+            # float dtype, even when the base layer is float — that would corrupt the integer data. Modules
+            # (nn.ModuleDict entries) have no single dtype; their own `.to(dtype=...)` already skips integer
+            # sub-buffers, so they take the regular cast path.
+            item = adapter_layer[adapter_name]
+            item_dtype = getattr(item, "dtype", None)
+            cast_dtype = item_dtype is None or item_dtype.is_floating_point or item_dtype.is_complex
+            if target_dtype is not None and cast_dtype:
+                adapter_layer[adapter_name] = item.to(target_device, dtype=target_dtype)
             else:
-                adapter_layer[adapter_name] = adapter_layer[adapter_name].to(target_device)
+                adapter_layer[adapter_name] = item.to(target_device)
 
     @overload
     def _cast_input_dtype(self, x: None, dtype: torch.dtype) -> None: ...
@@ -1692,7 +2188,7 @@ class BaseTunerLayer(ABC):
         Usually, we want to enable this to align the input dtype with the dtype of the weight, but by setting
         layer.cast_input_dtype=False, this can be disabled if necessary.
 
-        Enabling or disabling can be managed via the peft.helpers.disable_lora_input_dtype_casting context manager.
+        Enabling or disabling can be managed via the peft.helpers.disable_input_dtype_casting context manager.
         """
         if x is None:  # useful e.g. if x is the bias, which can be None
             return None
@@ -1819,9 +2315,9 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
         if isinstance(config.exclude_modules, str):
             if re.fullmatch(config.exclude_modules, key):
                 return _ExcludedModule()
-        elif key in config.exclude_modules:
-            return _ExcludedModule()
-        elif any(key.endswith(f".{exclude_key}") for exclude_key in config.exclude_modules):
+        elif key in config.exclude_modules or any(
+            key.endswith(f".{exclude_key}") for exclude_key in config.exclude_modules
+        ):
             return _ExcludedModule()
 
     # Adapters should never match on modules to save modules as it is a guarantee for conflicts of behavior
@@ -1854,11 +2350,13 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
             # TODO: It's still unclear how empty layers_pattern (None, [], or "") should behave
             # For now, empty layers_pattern means any layer pattern is ok
             if layers_pattern is None or len(layers_pattern) == 0:
-                layer_index = re.match(r".*\.[^.]*\.(\d+)\.", key)
+                # Lazy .*? matches the first numbered segment (the layer index), not the last one; a greedy .* would
+                # wrongly pick up nested indices such as the expert index in MoE models ("...layers.1.experts.0...").
+                layer_index = re.match(r".*?\.[^.]*\.(\d+)\.", key)
             else:
                 layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
                 for pattern in layers_pattern:
-                    layer_index = re.match(rf".*\.{pattern}\.(\d+)\.", key)
+                    layer_index = re.match(rf".*?\.{pattern}\.(\d+)\.", key)
                     if layer_index is not None:
                         break
 
@@ -1927,7 +2425,7 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
         output_emb = model.get_output_embeddings()
         if output_emb is not None:
             # ignore the last classification head for text generation models
-            last_module_name = [name for name, module in model.named_modules() if module is output_emb][0]
+            last_module_name = next(name for name, module in model.named_modules() if module is output_emb)
             module_names_to_exclude.add(last_module_name)
         elif peft_config.task_type == TaskType.SEQ_CLS:
             # ignore classifier head for classification models (issue 2027)
@@ -1935,7 +2433,7 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
             for name in SEQ_CLS_HEAD_NAMES:
                 cls_head = getattr(model, name, None)
                 if cls_head is not None:
-                    last_module_name = [name for name, module in model.named_modules() if module is cls_head][0]
+                    last_module_name = next(name for name, module in model.named_modules() if module is cls_head)
                     module_names_to_exclude.add(last_module_name)
                     break
 
@@ -1963,7 +2461,7 @@ def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list
     if adapter_names is None:
         adapter_names = module.active_adapters
     if isinstance(adapter_names, str):
-        raise ValueError(f"adapter_names should be a list of strings, got {adapter_names!r}.")
+        raise TypeError(f"adapter_names should be a list of strings, got {adapter_names!r}.")
 
     if module.merged:
         merged_adapters = set(module.merged_adapters)
@@ -2000,7 +2498,7 @@ def clone_module(module: nn.Module, share_weights=False):
 
 
 def replicate_layers(model: nn.Module, layer_map: list[tuple[int, int]]):
-    """Replicate layers in a transfomer model with weight sharing.
+    """Replicate layers in a transformer model with weight sharing.
 
     This function looks for a module list attribute at model[(.model)*].layers and replicates the layers in the module
     list according to the layer map. For example the map `[[0, 4], [2, 5]]` will take the set of layers `[0, 1, 2, 3,
@@ -2110,6 +2608,21 @@ def _delete_auxiliary_adapter(model, adapter_name: str, new_active_adapters: Opt
             module.delete_adapter(adapter_name, new_active_adapters=new_active_adapters)
 
 
+def _check_adapters_not_merged(model: nn.Module, adapter_names: str | Sequence[str]) -> None:
+    if isinstance(adapter_names, str):
+        adapter_names = [adapter_names]
+
+    merged_adapters = {
+        adapter_name
+        for module in model.modules()
+        if isinstance(module, BaseTunerLayer)
+        for adapter_name in module.merged_adapters
+    }
+    still_merged = sorted(set(adapter_names) & merged_adapters)
+    if still_merged:
+        raise ValueError(f"Cannot delete adapter(s) {still_merged} while they are merged. Please unmerge them first.")
+
+
 def delete_adapter(
     model: nn.Module, adapter_name: str, prefix: str, layer_cls: type[BaseTunerLayer] = BaseTunerLayer
 ) -> list[str] | None:
@@ -2135,11 +2648,11 @@ def delete_adapter(
             The name of remaining adapter(s) after deletion, or `None` if there are no active adapters left. Use this
             to set the new active adapter of the model if necessary.
     """
-    key_list = [key for key, _ in model.named_modules() if prefix not in key]
     new_adapter = None
 
-    for key in key_list:
-        _, target, _ = _get_submodules(model, key)
+    for key, target in model.named_modules():
+        if prefix in key:
+            continue
         if isinstance(target, layer_cls):
             target.delete_adapter(adapter_name)
             if new_adapter is None:
@@ -2203,8 +2716,8 @@ def set_requires_grad(model, adapter_names: str | Sequence[str], requires_grad: 
 
     Args:
         model (`nn.Module`):
-            The model from which the adapter should be deleted.
-        adapter_name (`str` or `Sequence[str]`):
+            The model whose adapter gradient requirements should be updated.
+        adapter_names (`str` or `Sequence[str]`):
             The name of the adapter(s) whose gradients should be enabled/disabled.
         requires_grad (`bool`, *optional*)
             Whether to enable (`True`, default) or disable (`False`).

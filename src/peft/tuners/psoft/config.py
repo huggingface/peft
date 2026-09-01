@@ -159,6 +159,16 @@ class PsoftConfig(PeftConfig):
             "help": "Number of power iterations used by torch.svd_lowrank when psoft_svd='lowrank'. Only used when psoft_svd='lowrank'. "
         },
     )
+    random_seed: int = field(
+        default=0,
+        metadata={
+            "help": (
+                "Seed used to deterministically create and rebuild the adapter weights when psoft_svd='lowrank', so "
+                "that a saved adapter reproduces its outputs after loading. Only used when psoft_svd='lowrank'. "
+                "Default: 0."
+            )
+        },
+    )
     psoft_orth: bool = field(
         default=True,
         metadata={
@@ -267,7 +277,7 @@ class PsoftConfig(PeftConfig):
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
 
         # check for layers_to_transform and layers_pattern
-        if self.layers_pattern and not self.layers_to_transform:
+        if self.layers_pattern and self.layers_to_transform is None:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
 
         if self.r <= 0:

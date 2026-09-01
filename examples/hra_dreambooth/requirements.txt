@@ -3,7 +3,7 @@ accelerate==1.9.0
 evaluate
 tqdm
 datasets==4.0.0
-diffusers==0.34.0
+diffusers==0.38.0
 Pillow
 huggingface_hub
 safetensors

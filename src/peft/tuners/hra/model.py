@@ -114,7 +114,7 @@ class HRAModel(BaseTuner):
         elif isinstance(target_base_layer, torch.nn.Conv2d):
             new_module = HRAConv2d(target, adapter_name, config=hra_config, **kwargs)
         else:
-            raise ValueError(
+            raise TypeError(
                 f"Target module {target} is not supported. "
                 "Currently, only `torch.nn.Linear` and `torch.nn.Conv2d` are supported."
             )

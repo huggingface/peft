@@ -17,7 +17,7 @@ from __future__ import annotations
 import warnings
 
 import torch
-import torch.nn as nn
+from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
@@ -180,7 +180,7 @@ class PveraModel(BaseTuner):
             )
         else:
             new_module = self._create_new_module(
-                pvera_config, self.pvera_A, self.pvera_B, adapter_name, target, current_key, **kwargs
+                pvera_config, self.pvera_A, self.pvera_B, adapter_name, target, **kwargs
             )
             if adapter_name not in self.active_adapter:
                 # adding an additional adapter: it is not automatically trainable
@@ -188,7 +188,7 @@ class PveraModel(BaseTuner):
             self._replace_module(parent, target_name, new_module, target)
 
     @staticmethod
-    def _create_new_module(pvera_config, pvera_A, pvera_B, adapter_name, target, current_key, **kwargs):
+    def _create_new_module(pvera_config, pvera_A, pvera_B, adapter_name, target, **kwargs):
         # avoid eager bnb import
         if is_bnb_available():
             import bitsandbytes as bnb
@@ -198,7 +198,7 @@ class PveraModel(BaseTuner):
         if is_bnb_4bit_available():
             from .bnb import Linear4bit
 
-        bias = kwargs.pop("bias", False)
+        _ = kwargs.pop("bias", False)
         loaded_in_8bit = kwargs.get("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.get("loaded_in_4bit", False)
 
@@ -246,11 +246,6 @@ class PveraModel(BaseTuner):
                 "`torch.nn.Linear`, `transformers.pytorch_utils.Conv1D`."
             )
 
-        if isinstance(pvera_config.sample_at_inference, bool):
-            module_sample_at_inference = pvera_config.sample_at_inference
-        else:
-            module_sample_at_inference = pvera_config.sample_at_inference.get(current_key, False)
-
         new_module = Linear(
             target,
             pvera_A,
@@ -261,3 +256,47 @@ class PveraModel(BaseTuner):
         )
 
         return new_module
+
+    @classmethod
+    def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
+        to_return = super()._get_adapter_state_dict(model, config, adapter_name, state_dict, unwanted_adapter_names)
+        # Each layer holds a reference to the shared projections, so the state dict contains a duplicate of them for
+        # every layer. Remove all of them here; the canonical model-level entries ("base_model.pvera_A.<adapter>" etc.)
+        # are only added back after the explicit save_projection check below.
+        to_return = {k: v for k, v in to_return.items() if (".pvera_A." not in k) and (".pvera_B." not in k)}
+        if config.save_projection:
+            # TODO: adding pvera_A and pvera_B to `self.get_base_layer` would
+            # make name to match here difficult to predict.
+            if f"base_model.pvera_A.{adapter_name}" not in state_dict:
+                raise ValueError(
+                    "Model was initialised to not save pvera_A and pvera_B but config now specifies to save projection!"
+                    + " Set `config.save_projection` to `False`."
+                )
+            to_return["base_model.pvera_A." + adapter_name] = state_dict["base_model.pvera_A." + adapter_name]
+            to_return["base_model.pvera_B." + adapter_name] = state_dict["base_model.pvera_B." + adapter_name]
+        return to_return
+
+    @classmethod
+    def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
+        # note that the remapping renames the projection keys from e.g. "base_model.pvera_A" (checkpoint format) to
+        # "base_model.pvera_A.{adapter_name}" (model format)
+        peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
+        if config.save_projection and f"base_model.pvera_A.{adapter_name}" not in peft_model_state_dict:
+            raise ValueError(
+                "Specified to load pvera_A and pvera_B from state dictionary however they were not present!"
+            )
+        elif not config.save_projection and "base_model.pvera_A" in peft_model_state_dict:
+            # note: with save_projection=False, the projection buffers are non-persistent and thus have no model state
+            # dict entry to be remapped to, so the checkpoint key is still in its unsuffixed form here
+            warnings.warn(
+                "Specified to not load pvera_A and pvera_B from state dictionary however they are present in state"
+                " dictionary! Consider using them to ensure checkpoint loading is correct on all platforms using"
+                " `peft_config.save_projection = True`"
+            )
+        elif not config.save_projection:  # and no vera_A in state dictionary
+            warnings.warn(
+                "Specified to not load pvera_A and pvera_B from state dictionary. This means we will be relying on"
+                " PRNG initialisation to restore these projections using `config.projection_prng_key`, which may"
+                " not be accurate on all system configurations."
+            )
+        return peft_model_state_dict

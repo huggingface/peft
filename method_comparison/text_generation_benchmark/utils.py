@@ -21,9 +21,10 @@ import json
 import os
 import platform
 import subprocess
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import psutil
 import torch
@@ -146,7 +147,7 @@ class BenchmarkResult:
             }
         )
 
-    def add_metrics_for_category(self, category: str, metrics: dict, individual_samples: list = None):
+    def add_metrics_for_category(self, category: str, metrics: dict, individual_samples: Optional[list] = None):
         """Add metrics for a specific prompt category under generation_info."""
         category_data = {"metrics": metrics, "samples": individual_samples if individual_samples is not None else []}
         self.generation_info["by_category"][category] = category_data
@@ -246,7 +247,7 @@ class BenchmarkConfig:
     def __post_init__(self) -> None:
         """Validate configuration."""
         if not isinstance(self.model_id, str):
-            raise ValueError(f"Invalid model_id: {self.model_id}")
+            raise TypeError(f"Invalid model_id: {self.model_id}")
 
         if self.seed < 0:
             raise ValueError(f"Invalid seed: {self.seed}")
@@ -380,7 +381,7 @@ def get_model_size_mb(model: torch.nn.Module, dtype_bytes: int = 4) -> float:
 
 def get_peft_branch() -> str:
     repo_root = os.path.dirname(__file__)
-    return subprocess.check_output("git rev-parse --abbrev-ref HEAD".split(), cwd=repo_root).decode().strip()
+    return subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_root).decode().strip()
 
 
 def log_results(

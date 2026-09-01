@@ -20,9 +20,13 @@ from .boft import BOFTConfig, BOFTModel
 from .c3a import C3AConfig, C3AModel
 from .cartridge import CartridgeConfig, CartridgeEncoder
 from .cpt import CPTConfig, CPTEmbedding
+from .deft import DeftConfig, DeftModel
 from .delora import DeloraConfig, DeloraModel
 from .fourierft import FourierFTConfig, FourierFTModel
+from .frod import FrodConfig, FrodModel
+from .glora import GloraConfig, GloraModel
 from .gralora import GraloraConfig, GraloraModel
+from .hira import HiraConfig, HiraModel
 from .hra import HRAConfig, HRAModel
 from .ia3 import IA3Config, IA3Model
 from .lily import LilyConfig, LilyModel
@@ -33,11 +37,14 @@ from .lora import (
     ArrowConfig,
     BdLoraConfig,
     EvaConfig,
+    KasaConfig,
     LoftQConfig,
     LoraConfig,
     LoraGAConfig,
     LoraModel,
     LoraRuntimeConfig,
+    MontecloraConfig,
+    VeloraConfig,
     convert_to_lora,
     create_arrow_model,
     get_eva_state_dict,
@@ -59,9 +66,12 @@ from .psoft import PsoftConfig, PsoftModel
 from .pvera import PveraConfig, PveraModel
 from .randlora import RandLoraConfig, RandLoraModel
 from .road import RoadConfig, RoadModel
+from .shadow import ShadowConfig, ShadowModel
 from .shira import ShiraConfig, ShiraModel
+from .supertuning import SupertuningConfig, SupertuningModel
 from .tinylora import TinyLoraConfig, TinyLoraModel
 from .trainable_tokens import TrainableTokensConfig, TrainableTokensModel
+from .unilora import UniLoraConfig, UniLoraModel
 from .vblora import VBLoRAConfig, VBLoRAModel
 from .vera import VeraConfig, VeraModel
 from .waveft import WaveFTConfig, WaveFTModel
@@ -87,17 +97,26 @@ __all__ = [
     "CPTEmbedding",
     "CartridgeConfig",
     "CartridgeEncoder",
+    "DeftConfig",
+    "DeftModel",
     "DeloraConfig",
     "DeloraModel",
     "EvaConfig",
     "FourierFTConfig",
     "FourierFTModel",
+    "FrodConfig",
+    "FrodModel",
+    "GloraConfig",
+    "GloraModel",
     "GraloraConfig",
     "GraloraModel",
     "HRAConfig",
     "HRAModel",
+    "HiraConfig",
+    "HiraModel",
     "IA3Config",
     "IA3Model",
+    "KasaConfig",
     "LNTuningConfig",
     "LNTuningModel",
     "LilyConfig",
@@ -114,6 +133,7 @@ __all__ = [
     "MissConfig",
     "MissModel",
     "MixedModel",
+    "MontecloraConfig",
     "MultitaskPromptEmbedding",
     "MultitaskPromptTuningConfig",
     "MultitaskPromptTuningInit",
@@ -141,14 +161,21 @@ __all__ = [
     "RandLoraModel",
     "RoadConfig",
     "RoadModel",
+    "ShadowConfig",
+    "ShadowModel",
     "ShiraConfig",
     "ShiraModel",
+    "SupertuningConfig",
+    "SupertuningModel",
     "TinyLoraConfig",
     "TinyLoraModel",
     "TrainableTokensConfig",
     "TrainableTokensModel",
+    "UniLoraConfig",
+    "UniLoraModel",
     "VBLoRAConfig",
     "VBLoRAModel",
+    "VeloraConfig",
     "VeraConfig",
     "VeraModel",
     "WaveFTConfig",

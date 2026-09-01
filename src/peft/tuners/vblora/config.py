@@ -24,7 +24,7 @@ from peft.utils import PeftType
 @dataclass
 class VBLoRAConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a [`VBLoRAConfig`].
+    This is the configuration class to store the configuration of a [`VBLoRAModel`].
 
     Paper: https://huggingface.co/papers/2405.15179
 
@@ -192,5 +192,5 @@ class VBLoRAConfig(PeftConfig):
             set(self.exclude_modules) if isinstance(self.exclude_modules, list) else self.exclude_modules
         )
         # check for layers_to_transform and layers_pattern
-        if self.layers_pattern and not self.layers_to_transform:
+        if self.layers_pattern and self.layers_to_transform is None:
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")

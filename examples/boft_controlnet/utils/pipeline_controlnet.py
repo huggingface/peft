@@ -165,7 +165,7 @@ class LightControlNetPipeline(StableDiffusionControlNetPipeline):
     @torch.no_grad()
     def __call__(
         self,
-        prompt: Union[str, list[str]] = None,
+        prompt: Optional[Union[str, list[str]]] = None,
         image: Union[
             torch.FloatTensor,
             PIL.Image.Image,
@@ -432,7 +432,7 @@ class LightControlNetPipeline(StableDiffusionControlNetPipeline):
             elif torch.xpu.is_available():
                 torch.xpu.empty_cache()
 
-        if not output_type == "latent":
+        if output_type != "latent":
             image = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False)[0]
             image, has_nsfw_concept = self.run_safety_checker(image, device, prompt_embeds.dtype)
         else:

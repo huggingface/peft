@@ -43,6 +43,17 @@ The abstract from the paper is:
 
 > Fine-tuning large pre-trained foundation models often yields excellent downstream performance but is prohibitively expensive when updating all parameters. Parameter-efficient fine-tuning (PEFT) methods such as LoRA alleviate this by introducing lightweight update modules, yet they commonly rely on weight-agnostic linear approximations, limiting their expressiveness. In this work, we propose PEANuT, a novel PEFT framework that introduces weight-aware neural tweakers, compact neural modules that generate task-adaptive updates conditioned on frozen pre-trained weights. PEANuT provides a flexible yet efficient way to capture complex update patterns without full model tuning. We theoretically show that PEANuT achieves equivalent or greater expressivity than existing linear PEFT methods with comparable or fewer parameters. Extensive experiments across four benchmarks with over twenty datasets demonstrate that PEANuT consistently outperforms strong baselines in both NLP and vision tasks, while maintaining low computational overhead.
 
+## Benchmark overview
+
+<iframe
+	src="https://peft-internal-testing-peft-method-comparison-embed.hf.space/?highlight[type]=PEANUT"
+	frameborder="0"
+	width="850"
+	height="1000"
+></iframe>
+
+# API
+
 ## PeanutConfig
 
 [[autodoc]] tuners.peanut.config.PeanutConfig

@@ -21,9 +21,13 @@ from peft import (
     BeftConfig,
     BOFTConfig,
     C3AConfig,
+    DeftConfig,
     DeloraConfig,
     FourierFTConfig,
+    FrodConfig,
+    GloraConfig,
     GraloraConfig,
+    HiraConfig,
     HRAConfig,
     IA3Config,
     LilyConfig,
@@ -36,8 +40,10 @@ from peft import (
     PromptLearningConfig,
     PromptTuningConfig,
     PsoftConfig,
+    RandLoraConfig,
     RoadConfig,
     ShiraConfig,
+    SupertuningConfig,
     TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -89,6 +95,13 @@ ALL_CONFIGS = [
         },
     ),
     (
+        DeftConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+        },
+    ),
+    (
         DeloraConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
@@ -105,7 +118,29 @@ ALL_CONFIGS = [
         },
     ),
     (
+        FrodConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "sparse_rate": 0.01,
+        },
+    ),
+    (
+        GloraConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+        },
+    ),
+    (
         GraloraConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+        },
+    ),
+    (
+        HiraConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
@@ -201,6 +236,15 @@ ALL_CONFIGS = [
         },
     ),
     (
+        RandLoraConfig,
+        {
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "r": 8,
+            "randlora_alpha": 1,
+        },
+    ),
+    (
         RoadConfig,
         {
             "task_type": "FEATURE_EXTRACTION",
@@ -212,6 +256,15 @@ ALL_CONFIGS = [
         ShiraConfig,
         {
             "r": 1,
+            "task_type": "FEATURE_EXTRACTION",
+            "target_modules": None,
+            "init_weights": False,
+        },
+    ),
+    (
+        SupertuningConfig,
+        {
+            "sparsity": 0.9,
             "task_type": "FEATURE_EXTRACTION",
             "target_modules": None,
             "init_weights": False,
@@ -284,15 +337,15 @@ ALL_CONFIGS = [
 
 
 def skip_non_prompt_learning(config_cls):
-    if not issubclass(config_cls, PromptLearningConfig) or (config_cls == PrefixTuningConfig):
-        pytest.skip("Skip tests that are not prompt learning or that are prefix tuning")
+    if not issubclass(config_cls, PromptLearningConfig):
+        pytest.skip("Skip tests that are not prompt learning")
 
 
 def skip_deberta_lora_tests(config_cls, model_id):
     if "deberta" not in model_id.lower():
         return
 
-    to_skip = ["lora", "ia3", "boft", "vera", "fourierft", "hra", "randlora"]
+    to_skip = ["lora", "ia3", "boft", "vera", "fourierft", "hira", "hra", "randlora"]
     config_name = config_cls.__name__.lower()
     if any(k in config_name for k in to_skip):
         pytest.skip(f"Skip tests that use {config_name} for Deberta models")

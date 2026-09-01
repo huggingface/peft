@@ -28,19 +28,21 @@ import torch
 import yaml
 from diffusers import StableDiffusionPipeline
 from packaging import version
-from safetensors.torch import save_file
+from safetensors.torch import load_file, save_file
 
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
     CPTConfig,
     GraloraConfig,
+    HiraConfig,
     IA3Config,
     LilyConfig,
     LNTuningConfig,
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    MissConfig,
     OSFConfig,
     PeftModel,
     PrefixTuningConfig,
@@ -49,13 +51,17 @@ from peft import (
     PromptTuningConfig,
     PveraConfig,
     RoadConfig,
+    ShadowConfig,
+    UniLoraConfig,
     VBLoRAConfig,
     VeraConfig,
     convert_to_lora,
+    get_base_model_state_dict,
     get_peft_model,
     get_peft_model_state_dict,
     inject_adapter_in_model,
     prepare_model_for_kbit_training,
+    set_base_model_state_dict,
     set_peft_model_state_dict,
 )
 from peft.import_utils import is_transformers_ge_v5
@@ -85,6 +91,8 @@ def _skip_if_merging_not_supported(model_id, config_cls, config_kwargs):
         pytest.skip("Merging conv layers with groups>1 and LoRA is not supported.")
     if issubclass(config_cls, LilyConfig):
         pytest.skip("Lily does not support merging adapters, skipping this test.")
+    if issubclass(config_cls, ShadowConfig):
+        pytest.skip("ShadowPEFT does not support merging adapters, skipping this test.")
 
 
 def _skip_if_adding_weighted_adapters_not_supported(config):
@@ -355,6 +363,8 @@ class PeftCommonTester:
         if issubclass(config_cls, AdaLoraConfig):
             # AdaLora does not support adding more than 1 adapter
             pytest.skip(f"Test not applicable for {config_cls}")
+        if issubclass(config_cls, ShadowConfig) and config_kwargs.get("task_type") == "SEQ_CLS":
+            pytest.skip("ShadowPEFT explicitly rejects multiple adapters when sequence classification is present")
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
@@ -433,6 +443,30 @@ class PeftCommonTester:
 
                 assert "default" in model_from_pretrained.peft_config.keys()
                 assert "new_adapter" not in model_from_pretrained.peft_config.keys()
+
+    def _test_save_pretrained_adapter_name_substring(self, model_id, config_cls, config_kwargs):
+        # Test that if we have multiple adapters, only the specified adapter is saved, even if adapter names match
+        # substrings of other adapter names.
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(
+                base_model_name_or_path=model_id,
+                **config_kwargs,
+            )
+            model = get_peft_model(model, config)  # adapter name will be "default"
+            # to calculate the expected number of weights, use get_peft_model_state_dict, since some methods like VeRA
+            # will add shared weights there, which we wouldn't count correctly when using model.state_dict()
+            expected_number_of_weights = len(get_peft_model_state_dict(model))
+
+            model.add_adapter("default2", config)  # prefix
+            model.add_adapter("other_default", config)  # suffix
+            model.add_adapter("foodefault_bar", config)  # infix
+            model.add_adapter("efaul", config)  # substring
+
+            with tempfile.TemporaryDirectory() as tmp_dirname:
+                model.save_pretrained(tmp_dirname, selected_adapters=["default"])
+                state_dict = load_file(os.path.join(tmp_dirname, "adapter_model.safetensors"))
+                assert len(state_dict) == expected_number_of_weights
 
     def _test_from_pretrained_config_construction(self, model_id, config_cls, config_kwargs):
         with hub_online_once(model_id):
@@ -597,7 +631,7 @@ class PeftCommonTester:
             if self.torch_device in ["mlu"]:
                 atol, rtol = 1e-3, 1e-3  # MLU
             if model_id == "trl-internal-testing/tiny-GptOssForCausalLM":
-                # this tolerance issue with the target_parameters test only occurrs on CI with transformers v5
+                # this tolerance issue with the target_parameters test only occurs on CI with transformers v5
                 atol, rtol = 1e-3, 1e-3
             if config.peft_type in ("ADALORA", "OFT"):
                 # these methods require a bit higher tolerance
@@ -692,14 +726,18 @@ class PeftCommonTester:
             with torch.inference_mode():
                 logits_adapter_2 = model(**dummy_input)[0]
 
-            assert not torch.allclose(logits_adapter_1, logits_adapter_2, atol=1e-3, rtol=1e-3)
+            atol, rtol = 1e-3, 1e-3
+            if config_kwargs.get("target_parameters"):
+                # for the MoE test with target parameters, we need tighter tolerances because the adapter influence is smaller
+                atol, rtol = 1e-4, 1e-4
+            assert not torch.allclose(logits_adapter_1, logits_adapter_2, atol=atol, rtol=rtol)
 
             model.set_adapter("default")
 
             with torch.inference_mode():
                 logits_adapter_1_after_set = model(**dummy_input)[0]
 
-            assert torch.allclose(logits_adapter_1_after_set, logits_adapter_1, atol=1e-3, rtol=1e-3)
+            assert torch.allclose(logits_adapter_1_after_set, logits_adapter_1, atol=atol, rtol=rtol)
 
             model_copy = copy.deepcopy(model)
             model_copy_2 = copy.deepcopy(model)
@@ -708,22 +746,22 @@ class PeftCommonTester:
             with torch.inference_mode():
                 logits_merged_all = model_merged_all(**dummy_input)[0]
 
-            assert not torch.allclose(logits_merged_all, logits_adapter_2, atol=1e-3, rtol=1e-3)
-            assert not torch.allclose(logits_merged_all, logits_adapter_1, atol=1e-3, rtol=1e-3)
+            assert not torch.allclose(logits_merged_all, logits_adapter_2, atol=atol, rtol=rtol)
+            assert not torch.allclose(logits_merged_all, logits_adapter_1, atol=atol, rtol=rtol)
 
             model_merged_adapter_2 = model_copy.merge_and_unload(adapter_names=["adapter-2"])
 
             with torch.inference_mode():
                 logits_merged_adapter_2 = model_merged_adapter_2(**dummy_input)[0]
 
-            assert torch.allclose(logits_merged_adapter_2, logits_adapter_2, atol=1e-3, rtol=1e-3)
+            assert torch.allclose(logits_merged_adapter_2, logits_adapter_2, atol=atol, rtol=rtol)
 
             model_merged_adapter_default = model_copy_2.merge_and_unload(adapter_names=["default"])
 
             with torch.inference_mode():
                 logits_merged_adapter_default = model_merged_adapter_default(**dummy_input)[0]
 
-            assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3)
+            assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=atol, rtol=rtol)
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
@@ -752,6 +790,8 @@ class PeftCommonTester:
 
     def _test_safe_merge(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        if (config_cls == MissConfig) and (config_kwargs.get("init_weights") == "bat"):
+            pytest.skip(reason="Test requires non-zero init but MiSS is using 'bat' init")
         torch.manual_seed(0)
 
         with hub_online_once(model_id):
@@ -781,10 +821,18 @@ class PeftCommonTester:
                 atol, rtol = 1e-3, 1e-3  # MLU
 
             conv_ids = ["Conv2d", "Conv3d", "Conv2d2"]
-            if issubclass(config_cls, (IA3Config, LoraConfig)) and model_id in conv_ids:  # more instability with Conv
+            if (
+                issubclass(config_cls, (IA3Config, LoraConfig, HiraConfig)) and model_id in conv_ids
+            ):  # more instability with Conv
                 atol, rtol = 1e-3, 1e-3
             elif issubclass(config_cls, PveraConfig):
                 atol, rtol = 1e-5, 1e-5
+            elif issubclass(config_cls, (LoHaConfig, LoKrConfig)) and model_id in (
+                "Conv1dGroups",
+                "Conv2dGroups",
+                "Conv2dGroups2",
+            ):
+                atol, rtol = 1e-3, 1e-3
 
             if config.peft_type == "ADAMSS":
                 # AdaMSS merges via B @ A @ newB (triple matmul), which accumulates more FP32
@@ -1030,10 +1078,21 @@ class PeftCommonTester:
             if issubclass(config_cls, PromptLearningConfig):
                 # we cannot reliably identify the trainable part of the prompt learning method, thus skipping this check
                 return
+            if issubclass(config_cls, ShadowConfig):
+                # The exit block's `shadow_update_*` MLPs are unused by the task loss (the post-exit shadow state is
+                # discarded), so only require that some adapter parameters receive gradients.
+                assert any(
+                    (model.prefix in n) and p.requires_grad and p.grad is not None for n, p in model.named_parameters()
+                )
+                return
 
             for n, param in model.named_parameters():
                 if (model.prefix in n) or ("modules_to_save" in n) or ("token_adapter.trainable_tokens" in n):
-                    assert param.grad is not None
+                    # variants like MiCA intentionally freeze a subset of adapter params, which won't have a grad
+                    if param.requires_grad:
+                        assert param.grad is not None
+                    else:
+                        assert param.grad is None
                 else:
                     assert param.grad is None
 
@@ -1079,11 +1138,15 @@ class PeftCommonTester:
                 assert torch.allclose(logits, logits_from_pretrained, atol=1e-4, rtol=1e-4)
 
     def _test_training_layer_indexing(self, model_id, config_cls, config_kwargs):
-        if config_cls in (VBLoRAConfig, VeraConfig):
-            # TODO investigate why these two are flaky
+        if config_cls in (VBLoRAConfig, VeraConfig, UniLoraConfig):
+            # TODO investigate why these methods are flaky
             # pytest tests/test_decoder_models.py tests/test_feature_extraction_models.py -k "layer_indexing and (vera
             # or vblora)"
-            pytest.skip("VBLoRA and VeRA are flaky with layer indexing, possibly because of shared weights.")
+            # UniLora uses one shared trainable theta_d parameter, so the generic trainable-parameter count assertion
+            # does not decrease when fewer layers are targeted.
+            pytest.skip(
+                "VBLoRA, VeRA, and UniLora use shared weights, so this generic layer-indexing count check is skipped."
+            )
         try:
             config = config_cls(
                 base_model_name_or_path=model_id,
@@ -1109,6 +1172,13 @@ class PeftCommonTester:
 
             has_trainable_tokens = config_kwargs.get("trainable_token_indices", None) is not None
             nb_trainable = 0
+
+            if issubclass(config_cls, ShadowConfig):
+                # Same as `_test_training`: the exit block's update MLPs are unused by the task loss.
+                assert any(
+                    (model.prefix in n) and p.requires_grad and p.grad is not None for n, p in model.named_parameters()
+                )
+                return
 
             for n, param in model.named_parameters():
                 if model.prefix in n or (has_trainable_tokens and "trainable_tokens" in n):
@@ -1204,7 +1274,7 @@ class PeftCommonTester:
             loss = output.sum()
             loss.backward()
 
-            non_zero_grad_params_normal = {n for n, p in params if p.grad.abs().sum() > 0}
+            non_zero_grad_params_normal = {n for n, p in params if p.grad is not None and p.grad.abs().sum() > 0}
 
             for name, param in params:
                 param.grad = None
@@ -1218,7 +1288,9 @@ class PeftCommonTester:
             loss = output.sum()
             loss.backward()
 
-            non_zero_grad_params_checkpointing = {n for n, p in params if p.grad.abs().sum() > 0}
+            non_zero_grad_params_checkpointing = {
+                n for n, p in params if p.grad is not None and p.grad.abs().sum() > 0
+            }
             assert non_zero_grad_params_normal == non_zero_grad_params_checkpointing
 
             for n, param in model.named_parameters():
@@ -1229,9 +1301,14 @@ class PeftCommonTester:
                         "delta_embedding" in n
                     ):  # delta_embedding is the embedding that should be updated with grads in CPT
                         assert param.grad is not None
-                elif hasattr(model, "prefix") and (model.prefix in n):  # non-prompt tuning methods
-                    assert param.grad is not None
-                elif "trainable_tokens_" in n:  # trainable tokens layer
+                elif (
+                    hasattr(model, "prefix") and (model.prefix in n) or "trainable_tokens_" in n
+                ):  # non-prompt tuning methods
+                    if issubclass(config_cls, ShadowConfig):
+                        # The exit block's update MLPs are intentionally unused because the post-exit shadow state is
+                        # discarded. Compare the non-zero gradient sets above instead of requiring every Shadow
+                        # parameter to receive a gradient.
+                        continue
                     assert param.grad is not None
                 else:
                     assert param.grad is None
@@ -1625,9 +1702,8 @@ class PeftCommonTester:
                 for adapter_name in new_adapters:
                     if "single" in adapter_name:
                         new_delta_weight = target.get_delta_weight(adapter_name)
+                        # A negative merge weight must also negate the resulting delta weight.
                         weighted_original_delta_weights = target.get_delta_weight(adapter_list[0]) * weight_list[0]
-                        sign = 1 if weight_list[0] > 0 else -1
-                        weighted_original_delta_weights = sign * weighted_original_delta_weights
                         assert torch.allclose(new_delta_weight, weighted_original_delta_weights, atol=1e-4, rtol=1e-4)
                     elif "svd" in adapter_name:
                         assert target.r[adapter_name] == 20
@@ -1696,15 +1772,22 @@ class PeftCommonTester:
             return pytest.skip(f"Test not applicable for {config}")
 
         with hub_online_once(model_id):
-            model = self.transformers_class.from_pretrained(model_id)
-            model = get_peft_model(model, config, adapter_list[0])
+
+            def create_model():
+                # Positive and negative scenarios reuse adapter names, so they need isolated registries.
+                model = self.transformers_class.from_pretrained(model_id)
+                return get_peft_model(model, copy.deepcopy(config), adapter_list[0])
 
             if isinstance(config, LoraConfig):
-                self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, weight_list)
-                self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, negative_weight_list)
+                self._test_weighted_combination_of_adapters_lora(create_model(), config, adapter_list, weight_list)
+                self._test_weighted_combination_of_adapters_lora(
+                    create_model(), config, adapter_list, negative_weight_list
+                )
             elif isinstance(config, IA3Config):
-                self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, weight_list)
-                self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, negative_weight_list)
+                self._test_weighted_combination_of_adapters_ia3(create_model(), config, adapter_list, weight_list)
+                self._test_weighted_combination_of_adapters_ia3(
+                    create_model(), config, adapter_list, negative_weight_list
+                )
             else:
                 pytest.skip(f"Test not applicable for {config}")
 
@@ -1883,3 +1966,39 @@ class PeftCommonTester:
             diff2 = output_after.hidden_states[-1] - output_base.hidden_states[-1]
             mse = torch.nn.functional.mse_loss(diff1, diff2).item()
             assert mse < max_mse, f"LoRA conversion MSE too high, {mse:.4f}, only {max_mse:.1f} allowed"
+
+    def _test_get_base_model_state_dict(self, model_id, config_cls, config_kwargs):
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+
+        base_model_keys = set(model.state_dict().keys())
+        original_state_dict = {k: v.clone() for k, v in model.state_dict().items()}
+
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        peft_model = get_peft_model(model, config)
+
+        extracted_state_dict = get_base_model_state_dict(peft_model)
+        assert set(extracted_state_dict.keys()) == base_model_keys
+
+        for key in original_state_dict:
+            assert torch.allclose(original_state_dict[key], extracted_state_dict[key]), f"Value mismatch for key {key}"
+
+        # set_base_model_state_dict is the inverse of get_base_model_state_dict, so we check the roundtrip here as
+        # well: perturb the base weights, load the original state dict back and expect the original weights again.
+        # Doing it in the same test gives the setter the same method/model coverage as the getter without paying for a
+        # second parametrization over the whole matrix.
+        with torch.no_grad():
+            for param in peft_model.get_base_model().parameters():
+                if param.is_floating_point():
+                    param.add_(torch.randn_like(param) * 0.1)
+
+        result = set_base_model_state_dict(peft_model, original_state_dict, strict=False)
+        assert not result.missing_keys, f"Missing keys: {result.missing_keys}"
+        assert not result.unexpected_keys, f"Unexpected keys: {result.unexpected_keys}"
+
+        restored_state_dict = get_base_model_state_dict(peft_model)
+        for key in original_state_dict:
+            assert torch.allclose(original_state_dict[key], restored_state_dict[key]), f"Roundtrip failed for {key}"

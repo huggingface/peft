@@ -20,8 +20,8 @@ from collections.abc import Callable, Iterable
 from typing import Any, Optional
 
 import torch
-import torch.nn as nn
 from attr import dataclass
+from torch import nn
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
 

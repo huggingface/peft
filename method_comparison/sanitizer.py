@@ -10,7 +10,7 @@ def _evaluate_node(df, node):
     # Base Case: A simple comparison like 'price > 100'
     if isinstance(node, ast.Compare):
         if not isinstance(node.left, ast.Name):
-            raise ValueError("Left side of comparison must be a column name.")
+            raise TypeError("Left side of comparison must be a column name.")
         col = node.left.id
         if col not in df.columns:
             raise ValueError(f"Column '{col}' not found in DataFrame.")
@@ -62,12 +62,12 @@ def _evaluate_node(df, node):
 
     elif isinstance(node, ast.UnaryOp):
         if not isinstance(node.op, ast.Not):
-            raise ValueError("Only supported unary op is negation.")
+            raise TypeError("Only supported unary op is negation.")
         return ~_evaluate_node(df, node.operand)
 
     # If the node is not a comparison or boolean op, it's an unsupported expression type
     else:
-        raise ValueError(f"Unsupported expression type: {type(node).__name__}")
+        raise TypeError(f"Unsupported expression type: {type(node).__name__}")
 
 
 def parse_and_filter(df, filter_str):

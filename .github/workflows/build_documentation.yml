@@ -11,12 +11,11 @@ permissions: {}
 
 jobs:
    build:
-    uses: huggingface/doc-builder/.github/workflows/build_main_documentation.yml@899185857f31747d2e8a3b5c6139920971997bd8  # main
+    uses: huggingface/doc-builder/.github/workflows/build_main_documentation.yml@7ccf6c02dc2e3aea1b07f6668f783b20c3bf407c  # main
     with:
       commit_sha: ${{ github.sha }}
       package: peft
       notebook_folder: peft_docs
-      custom_container: huggingface/transformers-doc-builder
     secrets:
       token: ${{ secrets.HUGGINGFACE_PUSH }}
       hf_token: ${{ secrets.HF_DOC_BUILD_PUSH }}
