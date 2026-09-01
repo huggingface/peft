@@ -875,6 +875,26 @@ class BaseTuner(nn.Module, ABC):
         named_modules = list(model.named_modules())
         key_list = [key for key, _ in named_modules]
 
+        # Adding an adapter must not change the trainability of parameters that were already present. Some tuners
+        # create their new adapter parameters before calling this method, so exclude those from the snapshot.
+        existing_adapter_prefixes = []
+        mapping_existing_parameter_requires_grad = []
+        seen_parameters = set()
+        for key, module in named_modules:
+            if isinstance(module, BaseTunerLayer):
+                existing_adapter_prefixes.append(key + ".")
+            for parameter_name, parameter in module.named_parameters(recurse=False):
+                full_name = f"{key}.{parameter_name}" if key else parameter_name
+                if id(parameter) in seen_parameters:
+                    continue
+                seen_parameters.add(id(parameter))
+                if f".{adapter_name}." not in full_name and not full_name.endswith(f".{adapter_name}"):
+                    mapping_existing_parameter_requires_grad.append((parameter, parameter.requires_grad))
+
+        if not existing_adapter_prefixes:
+            # The first injection should freeze the base model instead of restoring its default trainability.
+            mapping_existing_parameter_requires_grad = []
+
         uses_dummy_target_modules = getattr(peft_config, "target_modules", None) == DUMMY_TARGET_MODULES
         if uses_dummy_target_modules:
             # dummy adapter, we allow not matching any module
@@ -912,11 +932,6 @@ class BaseTuner(nn.Module, ABC):
         ###############################
         # MATCHING & CREATING MODULES #
         ###############################
-
-        existing_adapter_prefixes = []
-        for key, module in named_modules:
-            if isinstance(module, BaseTunerLayer):
-                existing_adapter_prefixes.append(key + ".")
 
         # TODO: check if this the most robust way
         module_names: set[str] = set()
@@ -1103,11 +1118,6 @@ class BaseTuner(nn.Module, ABC):
         self.set_adapter(self.active_adapters, inference_mode=peft_config.inference_mode)
         self._mark_only_adapters_as_trainable(model)
 
-        if self.peft_config[adapter_name].inference_mode:
-            for n, p in model.named_parameters():
-                if adapter_name in n:
-                    p.requires_grad = False
-
         set_additional_trainable_modules(
             model=model,
             peft_config=peft_config,
@@ -1115,6 +1125,9 @@ class BaseTuner(nn.Module, ABC):
             adapter_name=adapter_name,
             activate_adapter=adapter_name in self.active_adapters,
         )
+
+        for parameter, requires_grad in mapping_existing_parameter_requires_grad:
+            parameter.requires_grad = requires_grad
 
     def _inject_parameters(
         self, peft_config: PeftConfig, model: nn.Module, adapter_name: str, low_cpu_mem_usage: bool
