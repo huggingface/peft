@@ -111,8 +111,6 @@ class OFTRotationModule(nn.Module):
         return matrix
 
     def _pytorch_skew_symmetric_inv(self, matrix, block_size):
-        batch_size = matrix.shape[0]
-
         # Extract the upper triangular elements
         vec = matrix[:, self.rows, self.cols]
         return vec

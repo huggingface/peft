@@ -42,7 +42,9 @@ from peft import (
     PsoftConfig,
     RandLoraConfig,
     RoadConfig,
+    ShadowConfig,
     ShiraConfig,
+    SupertuningConfig,
     TinyLoraConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -228,8 +230,8 @@ ALL_CONFIGS = [
         PsoftConfig,
         {
             "task_type": "SEQ_CLS",
-            "r": 32,
-            "psoft_alpha": 32,
+            "r": 16,  # tiny llama has hidden size 16, so don't choose a greater value
+            "psoft_alpha": 16,
             "target_modules": None,
         },
     ),
@@ -264,6 +266,23 @@ ALL_CONFIGS = [
         ShiraConfig,
         {
             "r": 1,
+            "task_type": "SEQ_CLS",
+            "target_modules": None,
+            "init_weights": False,
+        },
+    ),
+    (
+        ShadowConfig,
+        {
+            "task_type": "SEQ_CLS",
+            "r": 2,
+            "shadow_num_hidden_layers": 1,
+        },
+    ),
+    (
+        SupertuningConfig,
+        {
+            "sparsity": 0.9,
             "task_type": "SEQ_CLS",
             "target_modules": None,
             "init_weights": False,
@@ -326,6 +345,12 @@ ALL_CONFIGS = [
 ]
 
 
+def _skip_encoder_models(model_id, config_cls):
+    # ShadowPEFT rides a contiguous decoder stack; encoder-only classifiers (BERT/RoBERTa) are unsupported.
+    if config_cls is ShadowConfig and ("Bert" in model_id or "Roberta" in model_id):
+        pytest.skip("ShadowPEFT requires a decoder-only backbone")
+
+
 class TestSequenceClassificationModels(PeftCommonTester):
     r"""
     Tests for basic coverage of AutoModelForSequenceClassification and classification-specific cases. Most of the
@@ -342,16 +367,19 @@ class TestSequenceClassificationModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_attributes_parametrized(self, model_id, config_cls, config_kwargs):
+        _skip_encoder_models(model_id, config_cls)
         self._test_model_attr(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_adapter_name(self, model_id, config_cls, config_kwargs):
+        _skip_encoder_models(model_id, config_cls)
         self._test_adapter_name(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_prepare_for_training_parametrized(self, model_id, config_cls, config_kwargs):
+        _skip_encoder_models(model_id, config_cls)
         self._test_prepare_for_training(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
@@ -368,24 +396,28 @@ class TestSequenceClassificationModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained(self, model_id, config_cls, config_kwargs):
+        _skip_encoder_models(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_pickle(self, model_id, config_cls, config_kwargs):
+        _skip_encoder_models(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs.copy(), safe_serialization=False)
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
+        _skip_encoder_models(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_save_pretrained_selected_adapters_pickle(self, model_id, config_cls, config_kwargs):
+        _skip_encoder_models(model_id, config_cls)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained_selected_adapters(
             model_id, config_cls, config_kwargs.copy(), safe_serialization=False
@@ -394,12 +426,14 @@ class TestSequenceClassificationModels(PeftCommonTester):
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_from_pretrained_config_construction(self, model_id, config_cls, config_kwargs):
+        _skip_encoder_models(model_id, config_cls)
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs.copy())
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_modules_to_save_correctly_set(self, model_id, config_cls, config_kwargs):
         # tests for a regression, introduced via #2220, where modules_to_save was not applied to prompt learning methods
+        _skip_encoder_models(model_id, config_cls)
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
             config = config_cls(
@@ -413,3 +447,81 @@ class TestSequenceClassificationModels(PeftCommonTester):
             if classifier is None:
                 raise ValueError(f"Could not determine classifier layer name for {model_id}, please fix the test")
             assert isinstance(classifier, ModulesToSaveWrapper)
+
+    @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_forward_with_labels(self, model_id, config_cls, config_kwargs):
+        # Check the full forward pass including the loss computation. This is especially relevant for prompt learning
+        # methods, whose sequence classification forward (including the _prefix_tuning_forward fallback for models whose
+        # forward does not accept past_key_values) is implemented in PeftModelForSequenceClassification itself.
+        _skip_encoder_models(model_id, config_cls)
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+
+            if getattr(model.config, "pad_token_id", None) is None:
+                # needed for a batched forward pass with sequence classification models like Llama
+                model.config.pad_token_id = 0
+
+            config = config_cls(
+                base_model_name_or_path=model_id,
+                **config_kwargs,
+            )
+            model = get_peft_model(model, config).to(self.torch_device)
+            model.eval()
+
+            inputs = self.prepare_inputs_for_testing()
+            num_labels = model.config.num_labels
+            if num_labels == 1:
+                # a single label means that transformers infers regression as the problem type and uses an MSE loss on
+                # float labels; this is the case for the tiny Llama model, whose head has a single output
+                labels = torch.tensor([0.5, -0.5]).to(self.torch_device)
+            else:
+                labels = torch.tensor([0, num_labels - 1]).to(self.torch_device)
+
+            with torch.no_grad():
+                output = model(**inputs, labels=labels)
+
+            assert output.loss is not None
+            assert torch.isfinite(output.loss)
+            assert output.logits.shape == (2, num_labels)
+
+            if num_labels == 1:
+                expected_loss = torch.nn.functional.mse_loss(output.logits.squeeze().float(), labels)
+            else:
+                # int labels and num_labels > 1 result in single label classification, i.e. plain cross entropy
+                expected_loss = torch.nn.functional.cross_entropy(output.logits.float(), labels)
+            # ensure same dtype for allclose call
+            expected_loss = expected_loss.to(dtype=output.loss.dtype)
+
+            if config_cls == AdaLoraConfig:
+                # AdaLora adds an orthogonal regularization term to the loss, so it does not equal the plain task loss
+                assert output.loss > expected_loss
+            elif config_cls == ShadowConfig:
+                expected_loss = expected_loss + config.auxiliary_loss_weight * output.shadow_loss
+                assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)
+            else:
+                assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)
+
+    @pytest.mark.parametrize(
+        "config_cls,config_kwargs",
+        [
+            (PrefixTuningConfig, {"task_type": "SEQ_CLS", "num_virtual_tokens": 4}),
+            (PromptEncoderConfig, {"task_type": "SEQ_CLS", "num_virtual_tokens": 4, "encoder_hidden_size": 32}),
+            (PromptTuningConfig, {"task_type": "SEQ_CLS", "num_virtual_tokens": 4}),
+        ],
+    )
+    def test_prompt_learning_forward_with_inputs_embeds(self, config_cls, config_kwargs):
+        # Passing inputs_embeds instead of input_ids should be equivalent.
+        model_id = PEFT_SEQ_CLS_MODELS_TO_TEST[0]
+        with hub_online_once(model_id):
+            base_model = AutoModelForSequenceClassification.from_pretrained(model_id).to(self.torch_device)
+            model = get_peft_model(base_model, config_cls(base_model_name_or_path=model_id, **config_kwargs))
+            model.eval()
+
+            input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
+            attention_mask = torch.ones_like(input_ids)
+            with torch.no_grad():
+                output_ids = model(input_ids=input_ids, attention_mask=attention_mask)
+                inputs_embeds = model.get_input_embeddings()(input_ids)
+                output_embeds = model(inputs_embeds=inputs_embeds, attention_mask=attention_mask)
+            assert torch.allclose(output_ids.logits, output_embeds.logits, atol=1e-5, rtol=1e-5)

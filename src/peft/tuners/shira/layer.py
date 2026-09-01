@@ -176,7 +176,6 @@ class Linear(nn.Module, ShiraLayer):
 
         for active_adapter in adapter_names:
             if active_adapter in self.shira_weight.keys():
-                base_layer = self.get_base_layer()
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.

@@ -29,6 +29,12 @@ is_transformers_ge_v5_4_0 = packaging.version.parse(transformers.__version__) >=
 
 is_transformers_ge_v5_6_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.6.0.dev0")
 
+# transformers 5.13.0 introduced the `distributed_config` kwarg for `from_pretrained`,
+# replacing the `tp_plan` and `tp_size` kwargs (removed in 5.15.0).
+is_transformers_ge_v5_13_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse(
+    "5.13.0.dev0"
+)
+
 is_transformers_le_4_53 = packaging.version.parse(transformers.__version__) < packaging.version.parse("4.54.0.dev0")
 
 

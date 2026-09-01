@@ -477,13 +477,9 @@ class _ConvNd(nn.Module, HiraLayer):
             hira_dropout_layer = nn.Identity()
 
         self.hira_dropout[adapter_name] = hira_dropout_layer
-        conv_cls = type(base)
         in_channels = base.in_channels
         out_channels = base.out_channels
         kernel_size = base.kernel_size
-        stride = base.stride
-        padding = base.padding
-        dilation = getattr(base, "dilation", (1,) * (base.weight.dim() - 2))
         # Spatial dims for B: 1 in each spatial dimension
         spatial_ones = (1,) * (base.weight.dim() - 2)
 

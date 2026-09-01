@@ -326,8 +326,13 @@ class PsoftLayer(BaseTunerLayer):
             # torch.svd_lowrank uses a random projection, so the A/B initialization it produces depends on the
             # RNG state. Seed a forked RNG with the configurable random_seed to make it deterministic
             # (torch.svd_lowrank does not accept a generator argument); fork_rng leaves the global RNG untouched.
-            fork_devices = [weight.device] if weight.device.type == "cuda" else []
-            with torch.random.fork_rng(devices=fork_devices):
+            # Note that torch.manual_seed re-seeds all accelerators, so the fork must cover the device the SVD
+            # runs on, not just cuda.
+            if weight.device.type == "cpu":
+                fork_kwargs = {"devices": []}
+            else:
+                fork_kwargs = {"devices": [weight.device], "device_type": weight.device.type}
+            with torch.random.fork_rng(**fork_kwargs):
                 torch.manual_seed(random_seed)
                 U, S, V = svd_lowrank(weight.data, q=r, niter=niter)  # V: (in, r)
             Vr = U[:, :r]

@@ -28,9 +28,9 @@ To install 🤗 PEFT from PyPI:
 pip install peft
 ```
 
-## NVIDIA Spark (ARM64)
+## CUDA Windows Arm64
 
-To install PEFT with PyTorch on NVIDIA Spark devices (such as an RTX Spark laptop) running ARM64, install PyTorch from the NVIDIA PyPI index. These devices require NVIDIA's ARM64 builds of PyTorch, which are not available on the default PyPI index or the standard PyTorch wheel index.
+To install PEFT with PyTorch CUDA on Windows Arm64, such as for NVIDIA RTX Spark laptops, install PyTorch from the NVIDIA PyPI index. These devices require NVIDIA's Windows Arm64 builds of PyTorch, which are not available on the default PyPI index or the standard PyTorch wheel index.
 
 Run the command below to check if your system detects an NVIDIA GPU.
 
@@ -41,7 +41,7 @@ nvidia-smi
 Install PyTorch from the NVIDIA PyPI index, then install PEFT.
 
 ```bash
-pip install torch --index-url https://pypi.nvidia.com
+pip install torch --index-url https://pypi.nvidia.com/nvtorch_oot_nightly
 pip install peft
 ```
 

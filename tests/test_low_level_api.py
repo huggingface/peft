@@ -731,6 +731,80 @@ class TestPeftStateDict:
         )
         self.check_peft_model_weights_loaded_correctly(MyModel, config, nested=nested, adapter_name="foo")
 
+    @pytest.mark.parametrize("config_cls", [LoraConfig, LoKrConfig])
+    def test_base_model_module_named_like_peft_prefix(self, config_cls):
+        # Here the base model contains a module whose name contains the PEFT prefix of the method (e.g. "lora_"). Such
+        # a module must be treated like any other base model module: it must not be included in the PEFT state_dict
+        # (it would needlessly blow up the checkpoint size) and it must not be trainable.
+        prefix = {LoraConfig: "lora_", LoKrConfig: "lokr_"}[config_cls]
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(5, 5)
+                # module whose name contains the PEFT prefix, e.g. "lora_foobar"
+                setattr(self, f"{prefix}foobar", nn.Linear(5, 5))
+
+            def forward(self, x):
+                return getattr(self, f"{prefix}foobar")(self.lin0(x))
+
+        torch.manual_seed(0)
+        model = get_peft_model(MyModel(), config_cls(target_modules=["lin0"]))
+        imposter = getattr(model.base_model.model, f"{prefix}foobar")
+        assert not imposter.weight.requires_grad
+        assert not imposter.bias.requires_grad
+
+        sd = get_peft_model_state_dict(model)
+        assert len(sd) > 0  # sanity check
+        assert not any(f"{prefix}foobar" in key for key in sd)
+        # sanity check: the keys of the actual adapter are present
+        assert any("lin0" in key for key in sd)
+
+    def test_trained_modules_to_save_module_named_like_peft_prefix_round_trip(self):
+        # Similar to test_base_model_module_named_like_peft_prefix but with modules_to_save: the colliding module is
+        # trained via modules_to_save and must survive a save/load round trip.
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(5, 5)
+                self.lora_head = nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.lora_head(self.lin0(x))
+
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lora_head"])
+        torch.manual_seed(0)
+        source = get_peft_model(MyModel(), config)
+        with torch.no_grad():
+            source.base_model.model.lora_head.modules_to_save["default"].weight.fill_(123.0)
+
+        state_dict = get_peft_model_state_dict(source)
+
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lora_head"])
+        torch.manual_seed(0)
+        target = get_peft_model(MyModel(), config)
+        result = set_peft_model_state_dict(target, state_dict)
+
+        assert not [key for key in result.unexpected_keys if "lora_head" in key]
+        weight = target.base_model.model.lora_head.modules_to_save["default"].weight
+        assert torch.allclose(weight, torch.full_like(weight, 123.0))
+
+    def test_set_peft_model_state_dict_preserves_input(self):
+        def create_model():
+            config = LoraConfig(target_modules=["linear"], modules_to_save=["linear2"])
+            return get_peft_model(DummyModel(), config)
+
+        # Regression test for #3592: loading must not consume caller-owned checkpoints.
+        state_dict = get_peft_model_state_dict(create_model())
+        keys_before = tuple(state_dict)
+        values_before = state_dict.copy()
+
+        for _ in range(2):
+            set_peft_model_state_dict(create_model(), state_dict)
+
+        assert tuple(state_dict) == keys_before
+        assert all(state_dict[key] is value for key, value in values_before.items())
+
 
 class TestGetBaseModelStateDict:
     # Tests for get_base_model_state_dict / set_base_model_state_dict. The per-method and per-model coverage lives in

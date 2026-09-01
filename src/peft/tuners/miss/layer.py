@@ -179,7 +179,6 @@ class MissLinear(nn.Module, MissLayer):
 
         for active_adapter in adapter_names:
             if active_adapter in self.miss_block.keys():
-                base_layer = self.get_base_layer()
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
@@ -216,7 +215,6 @@ class MissLinear(nn.Module, MissLayer):
 
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
-            base_layer = self.get_base_layer()
             if active_adapter in self.miss_block.keys():
                 weight = self.get_base_weight()
                 orig_dtype = weight.dtype

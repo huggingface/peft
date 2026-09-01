@@ -51,6 +51,7 @@ from peft import (
     PromptTuningConfig,
     PveraConfig,
     RoadConfig,
+    ShadowConfig,
     UniLoraConfig,
     VBLoRAConfig,
     VeraConfig,
@@ -90,6 +91,8 @@ def _skip_if_merging_not_supported(model_id, config_cls, config_kwargs):
         pytest.skip("Merging conv layers with groups>1 and LoRA is not supported.")
     if issubclass(config_cls, LilyConfig):
         pytest.skip("Lily does not support merging adapters, skipping this test.")
+    if issubclass(config_cls, ShadowConfig):
+        pytest.skip("ShadowPEFT does not support merging adapters, skipping this test.")
 
 
 def _skip_if_adding_weighted_adapters_not_supported(config):
@@ -360,6 +363,8 @@ class PeftCommonTester:
         if issubclass(config_cls, AdaLoraConfig):
             # AdaLora does not support adding more than 1 adapter
             pytest.skip(f"Test not applicable for {config_cls}")
+        if issubclass(config_cls, ShadowConfig) and config_kwargs.get("task_type") == "SEQ_CLS":
+            pytest.skip("ShadowPEFT explicitly rejects multiple adapters when sequence classification is present")
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
@@ -1073,6 +1078,13 @@ class PeftCommonTester:
             if issubclass(config_cls, PromptLearningConfig):
                 # we cannot reliably identify the trainable part of the prompt learning method, thus skipping this check
                 return
+            if issubclass(config_cls, ShadowConfig):
+                # The exit block's `shadow_update_*` MLPs are unused by the task loss (the post-exit shadow state is
+                # discarded), so only require that some adapter parameters receive gradients.
+                assert any(
+                    (model.prefix in n) and p.requires_grad and p.grad is not None for n, p in model.named_parameters()
+                )
+                return
 
             for n, param in model.named_parameters():
                 if (model.prefix in n) or ("modules_to_save" in n) or ("token_adapter.trainable_tokens" in n):
@@ -1161,6 +1173,13 @@ class PeftCommonTester:
             has_trainable_tokens = config_kwargs.get("trainable_token_indices", None) is not None
             nb_trainable = 0
 
+            if issubclass(config_cls, ShadowConfig):
+                # Same as `_test_training`: the exit block's update MLPs are unused by the task loss.
+                assert any(
+                    (model.prefix in n) and p.requires_grad and p.grad is not None for n, p in model.named_parameters()
+                )
+                return
+
             for n, param in model.named_parameters():
                 if model.prefix in n or (has_trainable_tokens and "trainable_tokens" in n):
                     assert param.grad is not None
@@ -1248,29 +1267,36 @@ class PeftCommonTester:
 
             inputs = self.prepare_inputs_for_testing()
 
-            # invocation to get the reference non-zero grads that are supposed to exist without gradient checkpointing;
-            # note we're squaring the output for bigger gradients
-            output = model(**inputs)[0] ** 2
+            def get_grads():
+                for _, param in params:
+                    param.grad = None
+                # note we're squaring the output for bigger gradients
+                output = model(**inputs)[0] ** 2
+                loss = output.sum()
+                loss.backward()
+                return {n: 0.0 if p.grad is None else p.grad.abs().sum().item() for n, p in params}
 
-            loss = output.sum()
-            loss.backward()
+            # reference grads without gradient checkpointing
+            grads_normal = get_grads()
 
-            non_zero_grad_params_normal = {n for n, p in params if p.grad.abs().sum() > 0}
-
-            for name, param in params:
-                param.grad = None
-
-            # invocation with gradient checkpointing for comparison
+            # grads with gradient checkpointing
             model.prepare_model_for_gradient_checkpointing(model)
             model.gradient_checkpointing_enable({"use_reentrant": use_reentrant})
 
-            output = model(**inputs)[0] ** 2
+            grads_checkpointing = get_grads()
 
-            loss = output.sum()
-            loss.backward()
-
-            non_zero_grad_params_checkpointing = {n for n, p in params if p.grad.abs().sum() > 0}
-            assert non_zero_grad_params_normal == non_zero_grad_params_checkpointing
+            # A gradient of 0 does not prove that the gradient was never computed: a sum of terms that cancel may come
+            # out as exactly 0 or as a tiny residue, depending on non-deterministic properties of the accelerator
+            # (observed on XPU). Therefore, only check parameters whose gradient is substantially different from 0 on
+            # at least one side, and on the other side only require that it is non-zero, since any non-zero value
+            # proves that backward reached the parameter.
+            all_grads = [*grads_normal.values(), *grads_checkpointing.values()]
+            threshold = sum(all_grads) / len(all_grads) * 1e-6
+            for n in grads_normal:
+                if grads_normal[n] > threshold:
+                    assert grads_checkpointing[n] > 0, n
+                if grads_checkpointing[n] > threshold:
+                    assert grads_normal[n] > 0, n
 
             for n, param in model.named_parameters():
                 if "prompt_encoder." in n:  # prompt tuning methods
@@ -1283,6 +1309,11 @@ class PeftCommonTester:
                 elif (
                     hasattr(model, "prefix") and (model.prefix in n) or "trainable_tokens_" in n
                 ):  # non-prompt tuning methods
+                    if issubclass(config_cls, ShadowConfig):
+                        # The exit block's update MLPs are intentionally unused because the post-exit shadow state is
+                        # discarded. Rely on the gradient comparison above instead of requiring every Shadow parameter
+                        # to receive a gradient.
+                        continue
                     assert param.grad is not None
                 else:
                     assert param.grad is None
@@ -1676,9 +1707,8 @@ class PeftCommonTester:
                 for adapter_name in new_adapters:
                     if "single" in adapter_name:
                         new_delta_weight = target.get_delta_weight(adapter_name)
+                        # A negative merge weight must also negate the resulting delta weight.
                         weighted_original_delta_weights = target.get_delta_weight(adapter_list[0]) * weight_list[0]
-                        sign = 1 if weight_list[0] > 0 else -1
-                        weighted_original_delta_weights = sign * weighted_original_delta_weights
                         assert torch.allclose(new_delta_weight, weighted_original_delta_weights, atol=1e-4, rtol=1e-4)
                     elif "svd" in adapter_name:
                         assert target.r[adapter_name] == 20
@@ -1747,15 +1777,22 @@ class PeftCommonTester:
             return pytest.skip(f"Test not applicable for {config}")
 
         with hub_online_once(model_id):
-            model = self.transformers_class.from_pretrained(model_id)
-            model = get_peft_model(model, config, adapter_list[0])
+
+            def create_model():
+                # Positive and negative scenarios reuse adapter names, so they need isolated registries.
+                model = self.transformers_class.from_pretrained(model_id)
+                return get_peft_model(model, copy.deepcopy(config), adapter_list[0])
 
             if isinstance(config, LoraConfig):
-                self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, weight_list)
-                self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, negative_weight_list)
+                self._test_weighted_combination_of_adapters_lora(create_model(), config, adapter_list, weight_list)
+                self._test_weighted_combination_of_adapters_lora(
+                    create_model(), config, adapter_list, negative_weight_list
+                )
             elif isinstance(config, IA3Config):
-                self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, weight_list)
-                self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, negative_weight_list)
+                self._test_weighted_combination_of_adapters_ia3(create_model(), config, adapter_list, weight_list)
+                self._test_weighted_combination_of_adapters_ia3(
+                    create_model(), config, adapter_list, negative_weight_list
+                )
             else:
                 pytest.skip(f"Test not applicable for {config}")
 
