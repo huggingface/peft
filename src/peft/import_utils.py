@@ -165,6 +165,18 @@ def is_torchao_available() -> bool:
 
 
 @lru_cache
+def is_torchao_ge_v0_18_0() -> bool:
+    """Return True if torchao is installed and its version is >= 0.18.0.
+
+    torchao 0.18.0 removed the v1 tensor subclass system (AffineQuantizedTensor, LinearActivationQuantizedTensor) in
+    favor of v2 tensor subclasses (Int8Tensor, Int4Tensor, etc.) that inherit from TorchAOBaseTensor.
+    """
+    if not is_torchao_available():
+        return False
+    return packaging.version.parse(importlib_metadata.version("torchao")) >= packaging.version.parse("0.18.0")
+
+
+@lru_cache
 def is_xpu_available(check_device=False) -> bool:
     """
     Checks if XPU acceleration is available and potentially if a XPU is in the environment

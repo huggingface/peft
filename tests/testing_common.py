@@ -1267,31 +1267,36 @@ class PeftCommonTester:
 
             inputs = self.prepare_inputs_for_testing()
 
-            # invocation to get the reference non-zero grads that are supposed to exist without gradient checkpointing;
-            # note we're squaring the output for bigger gradients
-            output = model(**inputs)[0] ** 2
+            def get_grads():
+                for _, param in params:
+                    param.grad = None
+                # note we're squaring the output for bigger gradients
+                output = model(**inputs)[0] ** 2
+                loss = output.sum()
+                loss.backward()
+                return {n: 0.0 if p.grad is None else p.grad.abs().sum().item() for n, p in params}
 
-            loss = output.sum()
-            loss.backward()
+            # reference grads without gradient checkpointing
+            grads_normal = get_grads()
 
-            non_zero_grad_params_normal = {n for n, p in params if p.grad is not None and p.grad.abs().sum() > 0}
-
-            for name, param in params:
-                param.grad = None
-
-            # invocation with gradient checkpointing for comparison
+            # grads with gradient checkpointing
             model.prepare_model_for_gradient_checkpointing(model)
             model.gradient_checkpointing_enable({"use_reentrant": use_reentrant})
 
-            output = model(**inputs)[0] ** 2
+            grads_checkpointing = get_grads()
 
-            loss = output.sum()
-            loss.backward()
-
-            non_zero_grad_params_checkpointing = {
-                n for n, p in params if p.grad is not None and p.grad.abs().sum() > 0
-            }
-            assert non_zero_grad_params_normal == non_zero_grad_params_checkpointing
+            # A gradient of 0 does not prove that the gradient was never computed: a sum of terms that cancel may come
+            # out as exactly 0 or as a tiny residue, depending on non-deterministic properties of the accelerator
+            # (observed on XPU). Therefore, only check parameters whose gradient is substantially different from 0 on
+            # at least one side, and on the other side only require that it is non-zero, since any non-zero value
+            # proves that backward reached the parameter.
+            all_grads = [*grads_normal.values(), *grads_checkpointing.values()]
+            threshold = sum(all_grads) / len(all_grads) * 1e-6
+            for n in grads_normal:
+                if grads_normal[n] > threshold:
+                    assert grads_checkpointing[n] > 0, n
+                if grads_checkpointing[n] > threshold:
+                    assert grads_normal[n] > 0, n
 
             for n, param in model.named_parameters():
                 if "prompt_encoder." in n:  # prompt tuning methods
@@ -1306,8 +1311,8 @@ class PeftCommonTester:
                 ):  # non-prompt tuning methods
                     if issubclass(config_cls, ShadowConfig):
                         # The exit block's update MLPs are intentionally unused because the post-exit shadow state is
-                        # discarded. Compare the non-zero gradient sets above instead of requiring every Shadow
-                        # parameter to receive a gradient.
+                        # discarded. Rely on the gradient comparison above instead of requiring every Shadow parameter
+                        # to receive a gradient.
                         continue
                     assert param.grad is not None
                 else:
