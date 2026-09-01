@@ -12,8 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import pytest
 import torch
 from safetensors.torch import load_file
+from torch import nn
 from transformers import AutoModelForCausalLM
 
 from peft import BOFTConfig, PeftModel, get_peft_model
@@ -82,3 +84,20 @@ class TestBoft:
 
         atol, rtol = 1e-5, 1e-8
         assert torch.allclose(output_peft, output_old, atol=atol, rtol=rtol)
+
+    def test_boft_conv2d_groups_greater_than_one_raises(self):
+        # BOFT's rotation is built over the full in_channels * kernel_size**2, which does not match a grouped
+        # conv's weight shape (in_channels // groups). Constructing the adapter must fail immediately and
+        # clearly instead of crashing with a shape mismatch on the first forward call.
+        class ModelConvGroups(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(8, 8, kernel_size=3, groups=2)
+
+            def forward(self, X):
+                return self.conv(X)
+
+        model = ModelConvGroups().eval()
+        config = BOFTConfig(target_modules=["conv"], boft_block_size=4)
+        with pytest.raises(NotImplementedError, match="BOFT does not support .* layers with groups > 1"):
+            get_peft_model(model, config)
