@@ -5163,11 +5163,8 @@ class TestMultipleActiveAdapters:
         "model_cls, module_name",
         [(MLP, "lin0"), (ModelEmbConv1D, "emb"), (ModelConv2D, "conv2d")],
     )
-    @pytest.mark.parametrize("num_adapters", [2, 3])
     @pytest.mark.parametrize("safe_merge", [False, True])
-    def test_multiple_active_dora_adapters_merge_matches_forward(
-        self, model_cls, module_name, num_adapters, safe_merge
-    ):
+    def test_multiple_active_dora_adapters_merge_matches_forward(self, model_cls, module_name, safe_merge):
         # DoRA normalizes by the norm of the unmerged base weight. Adapters are merged one after another, so from the
         # second adapter on, the weight being merged into already holds the previously merged ones; taking the norm
         # from it makes the merged model differ from the unmerged forward pass. The adapters have to share a target
@@ -5183,7 +5180,7 @@ class TestMultipleActiveAdapters:
 
         peft_model = get_peft_model(model, config(), adapter_name="adapter_0").eval()
         adapters = ["adapter_0"]
-        for i in range(1, num_adapters):
+        for i in range(1, 3):
             peft_model.add_adapter(f"adapter_{i}", config())
             adapters.append(f"adapter_{i}")
 
@@ -5199,18 +5196,22 @@ class TestMultipleActiveAdapters:
         with peft_model.disable_adapter():
             assert torch.allclose(peft_model(**X), base_output, atol=1e-4)
 
+    @pytest.mark.parametrize(
+        "model_cls, module_name",
+        [(MLP, "lin0"), (ModelEmbConv1D, "emb"), (ModelConv2D, "conv2d")],
+    )
     @pytest.mark.parametrize("safe_merge", [False, True])
-    def test_plain_lora_and_dora_adapters_merge_matches_forward(self, safe_merge):
+    def test_plain_lora_and_dora_adapters_merge_matches_forward(self, model_cls, module_name, safe_merge):
         # A plain LoRA adapter merges into the base weight in place, so the DoRA adapters that follow have to work on
         # a copy of the unmerged weight, not on the weight itself.
         torch.manual_seed(0)
 
-        model = MLP().to(self.torch_device).eval()
+        model = model_cls().to(self.torch_device).eval()
         X = self.prepare_inputs_for_testing()
         base_output = model(**X)
 
         def config(use_dora):
-            return LoraConfig(target_modules=["lin0"], init_lora_weights=False, use_dora=use_dora)
+            return LoraConfig(target_modules=[module_name], init_lora_weights=False, use_dora=use_dora)
 
         peft_model = get_peft_model(model, config(use_dora=False), adapter_name="adapter_0").eval()
         peft_model.add_adapter("adapter_1", config(use_dora=True))
@@ -5229,16 +5230,20 @@ class TestMultipleActiveAdapters:
         with peft_model.disable_adapter():
             assert torch.allclose(peft_model(**X), base_output, atol=1e-4)
 
-    def test_multiple_active_dora_adapters_safe_and_unsafe_merge_agree(self):
+    @pytest.mark.parametrize(
+        "model_cls, module_name",
+        [(MLP, "lin0"), (ModelEmbConv1D, "emb"), (ModelConv2D, "conv2d")],
+    )
+    def test_multiple_active_dora_adapters_safe_and_unsafe_merge_agree(self, model_cls, module_name):
         # Taking the already merged adapters out of the base weight and putting them back rebuilds that weight, and it
         # is the rebuilt one that ends up in the layer. The safe path has to carry on from it as well, otherwise the
         # two paths merge into different weights.
         def merged_weight(safe_merge):
             torch.manual_seed(0)
-            model = MLP().to(self.torch_device).eval()
+            model = model_cls().to(self.torch_device).eval()
 
             def config():
-                return LoraConfig(target_modules=["lin0"], init_lora_weights=False, use_dora=True)
+                return LoraConfig(target_modules=[module_name], init_lora_weights=False, use_dora=True)
 
             peft_model = get_peft_model(model, config(), adapter_name="adapter_0").eval()
             adapters = ["adapter_0"]
@@ -5248,7 +5253,7 @@ class TestMultipleActiveAdapters:
 
             self.set_multiple_active_adapters(peft_model, adapters)
             peft_model.merge_adapter(safe_merge=safe_merge)
-            return peft_model.base_model.model.lin0.get_base_layer().weight.data.clone()
+            return peft_model.base_model.model.get_submodule(module_name).get_base_layer().weight.data.clone()
 
         assert torch.equal(merged_weight(safe_merge=True), merged_weight(safe_merge=False))
 
@@ -5630,16 +5635,10 @@ class TestRequiresGrad:
             "base_model.model.lin0.ia3_l.adapter1",
         )
 
-    @pytest.mark.xfail(strict=True)
     def test_requires_grad_adalora_different_targets(self):
         # test two different AdaLora adapters that target different modules
+        # adding an inference-only adapter must not freeze the active adapter, see #3487
 
-        # Note: This test is expected to fail because first loading one adapter, then the next adapter with
-        # inference_mode=True incorrectly leads to the requires_grad of the first adapter being turned to False. This is
-        # of course not desired but has yet to be fixed. In practice, it's unlikely that a user would pass
-        # inference_mode=True for add_adapter, this flag is mostly being used when calling PeftModel.from_pretrained, so
-        # we accept this issue for now. Note that only for AdaLoRA do we even need to pass inference_mode=True here,
-        # other PEFT methods don't require this.
         config0 = AdaLoraConfig(target_modules=["lin0"], total_step=1)
         peft_model = get_peft_model(MLP(), config0)
 
@@ -5685,16 +5684,9 @@ class TestRequiresGrad:
             "base_model.model.lin1.lora_E.adapter1",
         )
 
-    @pytest.mark.xfail(strict=True)
     def test_requires_grad_adalora_same_targets(self):
         # same as previous test, except that AdaLora adapters target the same layer
 
-        # Note: This test is expected to fail because first loading one adapter, then the next adapter with
-        # inference_mode=True incorrectly leads to the requires_grad of the first adapter being turned to False. This is
-        # of course not desired but has yet to be fixed. In practice, it's unlikely that a user would pass
-        # inference_mode=True for add_adapter, this flag is mostly being used when calling PeftModel.from_pretrained, so
-        # we accept this issue for now. Note that only for AdaLoRA do we even need to pass inference_mode=True here,
-        # other PEFT methods don't require this.
         config0 = AdaLoraConfig(target_modules=["lin0"], total_step=1)
         peft_model = get_peft_model(MLP(), config0)
 
@@ -6998,15 +6990,58 @@ class TestRequiresGrad:
             return
         model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
         if is_trainable:
+            expected_trainable_adapters = ("default", "other")
             for name, param in model.named_parameters():
                 if skip_ranknum and "ranknum" in name:
                     continue
-                if ".default" in name:
+                if any(f".{adapter_name}" in name for adapter_name in expected_trainable_adapters):
                     assert param.requires_grad
                 else:
                     assert not param.requires_grad
         else:
             assert all(not p.requires_grad for p in model.parameters())
+
+        # load a third adapter with the opposite trainability; it is not automatically activated
+        model.load_adapter(tmp_path, adapter_name="opposite", is_trainable=not is_trainable)
+        expected_trainable_adapters = ("default", "other") if is_trainable else ("opposite",)
+        for name, param in model.named_parameters():
+            if skip_ranknum and "ranknum" in name:
+                continue
+            if any(f".{adapter_name}" in name for adapter_name in expected_trainable_adapters):
+                assert param.requires_grad
+            else:
+                assert not param.requires_grad
+
+        if config_cls is AdaLoraConfig:
+            # AdaLoRA structurally rejects adding another training-mode config.
+            return
+
+        # add_adapter does not request trainability; the new adapter stays frozen and existing state is unchanged
+        model.add_adapter(adapter_name="added", peft_config=config)
+        for name, param in model.named_parameters():
+            if skip_ranknum and "ranknum" in name:
+                continue
+            if any(f".{adapter_name}" in name for adapter_name in expected_trainable_adapters):
+                assert param.requires_grad
+            else:
+                assert not param.requires_grad
+
+    def test_loading_adapter_preserves_custom_requires_grad(self, tmp_path):
+        config = LoraConfig(target_modules=["layers.0.lin0"])
+        source_model = get_peft_model(DeepMLP(size=256), config)
+        source_model.save_pretrained(tmp_path)
+
+        model = get_peft_model(DeepMLP(size=256), config)
+        # Emulate a user fine-tuning one base-model weight while intentionally freezing one adapter parameter.
+        model.base_model.model.layers[0].lin0.base_layer.weight.requires_grad = True
+        model.base_model.model.layers[0].lin0.lora_A["default"].weight.requires_grad = False
+        existing_requires_grad = {name: param.requires_grad for name, param in model.named_parameters()}
+
+        model.load_adapter(tmp_path, adapter_name="other", is_trainable=False)
+
+        for name, requires_grad in existing_requires_grad.items():
+            assert model.get_parameter(name).requires_grad is requires_grad
+        assert all(not param.requires_grad for name, param in model.named_parameters() if ".other" in name)
 
     @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
     @pytest.mark.parametrize("is_trainable", [False, True])  # note: default is False
@@ -7051,10 +7086,11 @@ class TestRequiresGrad:
             return
         model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
         if is_trainable:
+            expected_trainable_adapters = ("default", "other")
             for name, param in model.named_parameters():
                 if skip_ranknum and "ranknum" in name:
                     continue
-                if ".default" in name:
+                if any(f".{adapter_name}" in name for adapter_name in expected_trainable_adapters):
                     assert param.requires_grad
                 else:
                     assert not param.requires_grad
@@ -7085,67 +7121,14 @@ class TestRequiresGrad:
         # load one more adapter
         model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
         if is_trainable:
+            expected_trainable_adapters = ("default", "other")
             for name, param in model.named_parameters():
-                if ".default" in name:
+                if any(f".{adapter_name}" in name for adapter_name in expected_trainable_adapters):
                     assert param.requires_grad
                 else:
                     assert not param.requires_grad
         else:
             assert all(not p.requires_grad for p in model.parameters())
-
-    @pytest.mark.xfail(strict=True)
-    @pytest.mark.parametrize("config_cls", [LoraConfig])  # no need to check each method, they all fail
-    def test_loading_model_requires_grad_set_correctly_switch_inference_mode(self, config_cls, tmp_path):
-        # Same as test_loading_model_requires_grad_set_correctly but this time we first load with is_trainable=False and
-        # then with is_trainable=True. Loading the second adapter should not affect the requires_grad of the first
-        # adapter, but it does. The reason is that is_training/inference_mode is taken from the current PEFT config, but
-        # that config does not necessarily belong to the active adapter, creating a mismatch.
-        # When/If this is fixed, the check can be integrated into test_loading_model_requires_grad_set_correctly and
-        # this test can be deleted.
-        model = DeepMLP(size=256)  # a size that works with all adapters
-        extra_kwargs = {}
-        config = config_cls(target_modules=["layers.0.lin0"])
-        model = get_peft_model(model, config)
-        model.save_pretrained(tmp_path)
-        del model
-
-        model = DeepMLP(size=256)
-        model = PeftModel.from_pretrained(model, tmp_path, is_trainable=False)
-        assert all(not p.requires_grad for p in model.parameters())
-
-        # load one more adapter; this adapter is not automatically activated
-        model.load_adapter(tmp_path, adapter_name="other", is_trainable=True)
-        params_with_grad = [n for n, p in model.named_parameters() if p.requires_grad]
-        expected = [
-            "base_model.model.layers.0.lin0.lora_A.other.weight",
-            "base_model.model.layers.0.lin0.lora_B.other.weight",
-        ]
-        # this fails, instead with get ...lora_A.default.weight and ...lora_B.default.weight
-        assert params_with_grad == expected
-
-    @pytest.mark.xfail(strict=True)
-    @pytest.mark.parametrize("config_cls", [LoraConfig])  # no need to check each method, they all fail
-    def test_loading_model_requires_grad_load_adapter_then_add_adapter(self, config_cls, tmp_path):
-        # When adding a new adapter with model.add_adapter, through the set_adapter call in update_layer, we activate
-        # the gradients of the first adapter, even if it's not desired. Since there is no is_trainable argument on
-        # add_adapter, there is no way to disable that at the moment.
-        # When/If this is fixed, the check can be integrated into test_loading_model_requires_grad_set_correctly and
-        # this test can be deleted.
-        model = DeepMLP(size=256)  # a size that works with all adapters
-        extra_kwargs = {}
-        config = config_cls(target_modules=["layers.0.lin0"])
-        model = get_peft_model(model, config)
-        model.save_pretrained(tmp_path)
-        del model
-
-        model = DeepMLP(size=256)
-        model = PeftModel.from_pretrained(model, tmp_path, is_trainable=False)
-        assert all(not p.requires_grad for p in model.parameters())
-
-        # add a new adapter
-        model.add_adapter(adapter_name="other", peft_config=config)
-        params_with_grad = [n for n, p in model.named_parameters() if p.requires_grad]
-        assert all(not p.requires_grad for p in model.parameters())
 
 
 # this is for PEFT methods that support mixed adapter batches.

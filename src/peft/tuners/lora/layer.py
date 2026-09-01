@@ -740,12 +740,12 @@ class LoraLayer(BaseTunerLayer):
 
         `merge` applies the adapters one after another, so from the second adapter on, the weight already contains the
         previously merged ones. Variants whose delta depends on the base weight need it unmerged, the same way
-        `forward` sees it, so the merged adapters are unmerged here and merged again afterwards. Nothing is kept
-        between calls to `merge`.
+        `forward` sees it, so the merged adapters are unmerged here and merged again afterwards. The weight is dropped
+        again when the context exits.
 
-        Merging the adapters again re-enters this method for each of them. They are given the weight recovered by the
-        outermost call, both because it is the weight they have to normalize against anyway and because unmerging per
-        adapter would make merging grow exponentially with their number.
+        Merging the adapters again re-enters this method for each of them. They get the weight the outermost call
+        recovered, which is the one they need anyway. Unmerging again for each of them would make the number of merge
+        calls grow exponentially.
         """
         key = "unmerged_base_weight"
         if key in self._caches:
@@ -756,7 +756,8 @@ class LoraLayer(BaseTunerLayer):
         try:
             if merged_adapters:
                 self.unmerge()
-            # a copy, because merging a plain LoRA adapter below writes into the base weight in place
+            # copy it, because the `finally` block replays a plain LoRA adapter by adding its delta to the
+            # base weight in place, which would change this tensor too
             weight = dequantize_module_weight(self.get_base_layer()).detach().clone()
             self._cache_store(key, weight)
             yield weight

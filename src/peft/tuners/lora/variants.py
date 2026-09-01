@@ -180,8 +180,8 @@ class DoraLinearVariant(LoraVariant):
                 .get_weight_norm(base_weight, transpose(delta_weight, module.fan_in_fan_out), scaling=1)
                 .detach()
             )
-        # `merge` copied the weight before the replay above rebuilt it, and rebuilding is not bit exact in
-        # lower precisions, so continue from the weight the replay produced rather than from that copy.
+        # `merge` copied the weight before the replay rebuilt it, and in lower precisions the copy and the
+        # rebuilt weight differ, so carry on from the rebuilt one.
         orig_weight = dequantize_module_weight(module.get_base_layer())
         # We need to cache weight_norm because it has to be based on the original weights. We
         # cannot calculate it on the fly based on the merged weights when unmerging because its a
@@ -287,8 +287,8 @@ class DoraEmbeddingVariant(DoraLinearVariant):
                 .get_weight_norm(base_weight, delta_weight.T, scaling=1)
                 .detach()
             )
-        # `merge` copied the weight before the replay above rebuilt it, and rebuilding is not bit exact in
-        # lower precisions, so continue from the weight the replay produced rather than from that copy.
+        # `merge` copied the weight before the replay rebuilt it, and in lower precisions the copy and the
+        # rebuilt weight differ, so carry on from the rebuilt one.
         orig_weight = dequantize_module_weight(module.get_base_layer())
         # We need to cache weight_norm because it has to be based on the original weights. We
         # cannot calculate it on the fly based on the merged weights when unmerging because its a
@@ -392,8 +392,8 @@ class _DoraConvNdVariant(LoraVariant):
                 .get_weight_norm(base_weight, delta_weight, scaling=1)
                 .detach()
             )
-        # `merge` copied the weight before the replay above rebuilt it, and rebuilding is not bit exact in
-        # lower precisions, so continue from the weight the replay produced rather than from that copy.
+        # `merge` copied the weight before the replay rebuilt it, and in lower precisions the copy and the
+        # rebuilt weight differ, so carry on from the rebuilt one.
         orig_weight = dequantize_module_weight(module.get_base_layer())
         # We need to cache weight_norm because it has to be based on the original weights. We
         # cannot calculate it on the fly based on the merged weights when unmerging because its a
