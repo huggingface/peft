@@ -74,6 +74,8 @@ def inject_adapter_in_model(
             checkpoint was created without meta data. Note that the values from the `state_dict` are not used, only the
             keys are used to determine the correct layers that should be adapted.
     """
+    from .tuners.tuners_utils import _register_injected_tuner  # lazy import to avoid a circular import
+
     if (
         peft_config.is_prompt_learning
         or peft_config.is_adaption_prompt
@@ -92,5 +94,9 @@ def inject_adapter_in_model(
     peft_model = tuner_cls(
         model, peft_config, adapter_name=adapter_name, low_cpu_mem_usage=low_cpu_mem_usage, state_dict=state_dict
     )
+    # Only the wrapped model is returned here, but some PEFT methods keep model-level adapter state that is shared
+    # between the injected layers on the tuner (e.g. vera_A/vera_B of VeRA). Remember the tuner on the model, as this
+    # state could otherwise not be found anymore when saving and loading the adapter, see #3631.
+    _register_injected_tuner(peft_model.model, adapter_name, peft_model)
 
     return peft_model.model

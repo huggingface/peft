@@ -1582,7 +1582,10 @@ class BaseTuner(nn.Module, ABC):
         prefixes = _get_tuner_state_dict_key_prefixes(model, adapter_name=adapter_name)
         checkpoint_key_to_model_key = {}
         peft_prefix = "base_model.model."
-        for model_key in _filter_state_dict_by_key_prefixes(model.state_dict(), prefixes):
+        model_state_dict = _filter_state_dict_by_key_prefixes(model.state_dict(), prefixes)
+        # the model-level adapter state of a directly injected adapter is not part of model.state_dict()
+        model_state_dict.update(_get_injected_tuner_state_dict(model, adapter_name))
+        for model_key in model_state_dict:
             # create the reverse mapping
             checkpoint_key = cls._remove_adapter_name_from_key(model_key, adapter_name)
             checkpoint_key_to_model_key[checkpoint_key] = model_key
@@ -1668,6 +1671,83 @@ class BasePromptEncoder(torch.nn.Module):
     def _load_adapter_state_dict(self, state_dict: dict[str, torch.Tensor]) -> None:
         """Load the checkpoint state_dict (as returned by `_get_adapter_state_dict`) into this prompt encoder."""
         self.embedding.load_state_dict({"weight": state_dict["prompt_embeddings"]}, strict=True)
+
+
+# Attribute under which `inject_adapter_in_model` stores the tuners it created, mapping the adapter name to the tuner.
+# It is set on the instance dict directly so that the tuners are not registered as submodules of the model, which would
+# result in the model containing itself (the tuner wraps the model in turn).
+_INJECTED_TUNERS_ATTR = "_peft_injected_tuners"
+
+
+def _register_injected_tuner(model: nn.Module, adapter_name: str, tuner: BaseTuner) -> None:
+    """Remember the tuner that injected the adapter of the given name into the model.
+
+    PEFT methods can keep model-level adapter state that is shared between the injected layers on the tuner itself
+    (e.g. `vera_A`/`vera_B` of VeRA). `inject_adapter_in_model` only returns the wrapped model, so without this
+    reference that state could no longer be found when saving and loading the adapter, see
+    `_get_injected_tuner_state_dict`.
+    """
+    tuners = model.__dict__.setdefault(_INJECTED_TUNERS_ATTR, {})
+    tuners[adapter_name] = tuner
+
+
+def _get_injected_tuner(model: nn.Module, adapter_name: str) -> Optional[BaseTuner]:
+    """Return the tuner that injected the adapter of the given name, or `None` if the adapter was not injected
+    directly, e.g. because the model is a `PeftModel`.
+
+    The lookup is performed on the instance dict instead of using `getattr`, since both `PeftModel` and `BaseTuner`
+    forward unknown attributes to the model they wrap, which would return the tuners of that model instead.
+    """
+    return model.__dict__.get(_INJECTED_TUNERS_ATTR, {}).get(adapter_name)
+
+
+def _get_injected_tuner_state_dict(model: nn.Module, adapter_name: str) -> dict[str, torch.Tensor]:
+    """Return the model-level adapter state of a directly injected adapter, keyed like a `PeftModel` state dict.
+
+    The model-level containers of a PEFT method are registered on the `BaseTuner` (e.g. `vera_A`/`vera_B` of VeRA),
+    which is `PeftModel.base_model` for a wrapped model but is not part of the module tree of a directly injected
+    model. Their entries are thus missing from `model.state_dict()` in the latter case, even though the state dict
+    hooks of the PEFT methods expect them under the `"base_model."` prefix. Returning them here allows those hooks to
+    work the same way for both, see `_load_injected_tuner_state_dict` for the counterpart used when loading.
+
+    Returns an empty dict if the adapter was not injected directly, as the entries are already part of
+    `model.state_dict()` then.
+    """
+    tuner = _get_injected_tuner(model, adapter_name)
+    if tuner is None:
+        return {}
+
+    to_return = {}
+    for name, module in tuner.named_children():
+        if name == "model":
+            # skip the wrapped model, whose state dict the caller already has
+            continue
+        to_return.update({f"base_model.{name}.{key}": value for key, value in module.state_dict().items()})
+    return to_return
+
+
+def _load_injected_tuner_state_dict(
+    model: nn.Module, adapter_name: str, state_dict: dict[str, torch.Tensor], assign: bool = False
+) -> tuple[list[str], list[str]]:
+    """Load the model-level adapter state of a directly injected adapter, the counterpart of
+    `_get_injected_tuner_state_dict`.
+
+    These entries cannot be loaded via `model.load_state_dict`, as they belong to the tuner and not to the model.
+    Returns the missing and unexpected keys so that they can be reported together with those of the model.
+    """
+    tuner = _get_injected_tuner(model, adapter_name)
+    if tuner is None:
+        return [], list(state_dict)
+
+    prefix = "base_model."
+    load_result = tuner.load_state_dict(
+        {k.removeprefix(prefix): v for k, v in state_dict.items()}, strict=False, assign=assign
+    )
+    # the tuner wraps the model, so all base model keys are reported as missing here; they are irrelevant, as they are
+    # covered by loading the state dict into the model itself
+    missing_keys = [f"{prefix}{k}" for k in load_result.missing_keys if not k.startswith("model.")]
+    unexpected_keys = [f"{prefix}{k}" for k in load_result.unexpected_keys]
+    return missing_keys, unexpected_keys
 
 
 def _remove_adapter_name_from_state_dict_key(key: str, adapter_name: str) -> str:

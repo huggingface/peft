@@ -30,10 +30,16 @@ from transformers import (
 
 from peft import (
     AdaLoraConfig,
+    FrodConfig,
     IA3Config,
     LoKrConfig,
     LoraConfig,
+    PveraConfig,
     RandLoraConfig,
+    TinyLoraConfig,
+    UniLoraConfig,
+    VBLoRAConfig,
+    VeraConfig,
     get_base_model_state_dict,
     get_peft_model,
     get_peft_model_state_dict,
@@ -804,6 +810,218 @@ class TestPeftStateDict:
 
         assert tuple(state_dict) == keys_before
         assert all(state_dict[key] is value for key, value in values_before.items())
+
+
+class TestInjectedSharedTunerStateDict:
+    # Some PEFT methods keep model-level adapter state that is shared between the adapted layers on the tuner (e.g.
+    # vera_A/vera_B of VeRA) instead of on the layers themselves. For a model wrapped in a PeftModel, the tuner is
+    # PeftModel.base_model and this state is part of the model state_dict, but inject_adapter_in_model only returns the
+    # wrapped model. See #3631, where saving such an adapter either dropped this state silently or raised.
+    #
+    # The keys below are the model-level keys that the checkpoint must contain, i.e. those that used to be missing.
+    shared_tuner_configs = {
+        "tinylora": (
+            {"r": 2, "u": 16},
+            TinyLoraConfig,
+            ["base_model.tinylora_v.0"],
+        ),
+        "unilora": (
+            {"theta_d_length": 101},
+            UniLoraConfig,
+            ["base_model.unilora_theta_d"],
+        ),
+        "vera": ({}, VeraConfig, ["base_model.vera_A", "base_model.vera_B"]),
+        "pvera": ({}, PveraConfig, ["base_model.pvera_A", "base_model.pvera_B"]),
+        "vblora": (
+            {"vector_length": 2, "num_vectors": 5},
+            VBLoRAConfig,
+            ["base_model.vblora_vector_bank"],
+        ),
+        "frod": (
+            {"init_weights": False, "progressbar": False},
+            FrodConfig,
+            ["base_model.frod_V.lin0", "base_model.frod_s_indices.lin0", "base_model.frod_s_size.lin0"],
+        ),
+    }
+
+    @pytest.fixture
+    def x(self):
+        return torch.randn(3, 8)
+
+    def get_config(self, method, **kwargs):
+        config_kwargs, config_cls, _ = self.shared_tuner_configs[method]
+        return config_cls(target_modules=["lin0", "lin1"], **{**config_kwargs, **kwargs})
+
+    def get_model(self):
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(8, 8)
+                self.lin1 = nn.Linear(8, 8)
+
+            def forward(self, x):
+                return self.lin1(self.lin0(x))
+
+        return MyModel()
+
+    def inject(self, method, seed=0, adapter_name="default", **kwargs):
+        # Returns a model with the adapter injected directly, with the adapter weights initialized from the given seed
+        # so that two models with different seeds are guaranteed to produce different outputs.
+        torch.manual_seed(0)
+        model = self.get_model()
+        torch.manual_seed(seed)
+        model = inject_adapter_in_model(self.get_config(method, **kwargs), model, adapter_name=adapter_name)
+        with torch.no_grad():
+            for param in model.parameters():
+                if param.requires_grad:
+                    param.add_(seed + 1)
+        return model.eval()
+
+    @pytest.mark.parametrize("method", list(shared_tuner_configs))
+    def test_injected_shared_tuner_state_dict_round_trip(self, method, x):
+        # The main regression test for #3631: saving must include the model-level adapter state and loading it into
+        # another injected model must restore the outputs.
+        source = self.inject(method, seed=0)
+        with torch.inference_mode():
+            source_out = source(x)
+
+        state_dict = get_peft_model_state_dict(source)
+        _, _, expected_keys = self.shared_tuner_configs[method]
+        assert set(expected_keys).issubset(state_dict)
+
+        target = self.inject(method, seed=1)
+        with torch.inference_mode():
+            # sanity check: without loading, the two models disagree
+            assert not torch.allclose(source_out, target(x))
+
+        result = set_peft_model_state_dict(target, state_dict)
+        assert not result.unexpected_keys
+        assert not [key for key in result.missing_keys if key in state_dict]
+
+        with torch.inference_mode():
+            assert torch.allclose(source_out, target(x))
+
+    @pytest.mark.parametrize("method", list(shared_tuner_configs))
+    def test_injected_shared_tuner_state_dict_matches_wrapper(self, method):
+        # The model-level keys of a directly injected adapter must be the same as those of the PeftModel wrapper, which
+        # is what makes the checkpoints of the two compatible.
+        injected_sd = get_peft_model_state_dict(self.inject(method))
+        torch.manual_seed(0)
+        wrapped_sd = get_peft_model_state_dict(get_peft_model(self.get_model(), self.get_config(method)))
+
+        # only the model-level keys can be compared: the keys of the adapted layers carry the "base_model.model."
+        # prefix of the PeftModel wrapper, which a directly injected model does not have
+        def model_level_keys(state_dict):
+            return {key for key in state_dict if key.startswith("base_model.") and "base_model.model." not in key}
+
+        assert model_level_keys(injected_sd) == model_level_keys(wrapped_sd)
+        assert model_level_keys(injected_sd)  # sanity check
+
+    @pytest.mark.parametrize("method", list(shared_tuner_configs))
+    def test_injected_shared_tuner_state_dict_round_trip_non_default_adapter_name(self, method, x):
+        # Same as the round trip above but with an adapter name other than "default", as the model-level keys contain
+        # the adapter name and it must be removed from and added back to the checkpoint keys correctly.
+        adapter_name = "other"
+        source = self.inject(method, seed=0, adapter_name=adapter_name)
+        with torch.inference_mode():
+            source_out = source(x)
+
+        state_dict = get_peft_model_state_dict(source, adapter_name=adapter_name)
+        assert not any(adapter_name in key for key in state_dict)
+
+        target = self.inject(method, seed=1, adapter_name=adapter_name)
+        result = set_peft_model_state_dict(target, state_dict, adapter_name=adapter_name)
+        assert not result.unexpected_keys
+
+        with torch.inference_mode():
+            assert torch.allclose(source_out, target(x))
+
+    # the methods whose model-level state are the projections that save_projection=False makes non-persistent
+    @pytest.mark.parametrize("method", ["vera", "pvera", "frod"])
+    def test_injected_shared_tuner_save_projection_false(self, method, recwarn):
+        # With save_projection=False, the projections are registered as non-persistent buffers and are regenerated
+        # instead of being loaded, so they must not end up in the checkpoint of a directly injected adapter either.
+        source = self.inject(method, seed=0, save_projection=False)
+        state_dict = get_peft_model_state_dict(source)
+
+        _, _, projection_keys = self.shared_tuner_configs[method]
+        assert not set(projection_keys) & set(state_dict)
+
+        target = self.inject(method, seed=1, save_projection=False)
+        result = set_peft_model_state_dict(target, state_dict)
+        assert not result.unexpected_keys
+
+    @pytest.mark.parametrize("method", list(shared_tuner_configs))
+    def test_injected_shared_tuner_missing_model_level_key_is_reported(self, method, recwarn):
+        # A checkpoint that lacks the model-level adapter state must not be loaded silently: either the entry is
+        # reported as missing or the PEFT method rejects the checkpoint outright.
+        source = self.inject(method, seed=0)
+        state_dict = get_peft_model_state_dict(source)
+        _, _, expected_keys = self.shared_tuner_configs[method]
+        for key in expected_keys:
+            del state_dict[key]
+
+        target = self.inject(method, seed=1)
+        try:
+            result = set_peft_model_state_dict(target, state_dict)
+        except ValueError as exc:  # VeRA, PVeRA and FRoD reject a checkpoint without projections
+            assert "not present" in str(exc)
+        else:
+            # the shared containers are registered on the adapted layers too, so they are reported as missing there
+            attr_name = expected_keys[0].split(".")[1]
+            assert any(f".{attr_name}." in key for key in result.missing_keys)
+
+    @pytest.mark.parametrize("method", list(shared_tuner_configs))
+    def test_injected_shared_tuner_unknown_model_level_key_is_reported(self, method):
+        # An entry that does not correspond to any model-level adapter state must be reported as unexpected instead of
+        # being routed to the tuner silently.
+        source = self.inject(method, seed=0)
+        state_dict = get_peft_model_state_dict(source)
+        state_dict["base_model.does_not_exist"] = torch.zeros(3)
+
+        result = set_peft_model_state_dict(self.inject(method, seed=1), state_dict)
+        assert "base_model.does_not_exist" in result.unexpected_keys
+
+    @pytest.mark.parametrize("method", list(shared_tuner_configs))
+    def test_injected_shared_tuner_ignore_mismatched_sizes(self, method):
+        # With ignore_mismatched_sizes=True, a model-level entry whose shape does not fit the model must be skipped
+        # with a warning instead of making the load fail, same as for the entries of the adapted layers.
+        source = self.inject(method, seed=0)
+        state_dict = get_peft_model_state_dict(source)
+        _, _, expected_keys = self.shared_tuner_configs[method]
+        for key in expected_keys:
+            state_dict[key] = torch.zeros(2, 3)
+
+        target = self.inject(method, seed=1)
+        with pytest.warns(UserWarning, match="ignored because you passed `ignore_mismatched_sizes=True`"):
+            result = set_peft_model_state_dict(target, state_dict, ignore_mismatched_sizes=True)
+        assert not result.unexpected_keys
+
+    def test_injected_adapter_without_model_level_state_unchanged(self, x):
+        # Control group: a PEFT method that keeps all of its state on the layers must not gain any model-level keys.
+        config = LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False)
+
+        def inject_lora(seed):
+            torch.manual_seed(0)
+            model = self.get_model()
+            torch.manual_seed(seed)
+            return inject_adapter_in_model(config, model).eval()
+
+        source = inject_lora(seed=0)
+        with torch.inference_mode():
+            source_out = source(x)
+
+        state_dict = get_peft_model_state_dict(source)
+        assert not any(key.startswith("base_model.") for key in state_dict)
+
+        target = inject_lora(seed=1)
+        with torch.inference_mode():
+            assert not torch.allclose(source_out, target(x))  # sanity check
+
+        result = set_peft_model_state_dict(target, state_dict)
+        assert not result.unexpected_keys
+        with torch.inference_mode():
+            assert torch.allclose(source_out, target(x))
 
 
 class TestGetBaseModelStateDict:

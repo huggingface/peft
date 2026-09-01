@@ -123,12 +123,19 @@ def get_peft_model_state_dict(
             sets the boolean flag. This only works for 🤗 transformers models.
 
     """
+    from peft.tuners.tuners_utils import _get_injected_tuner_state_dict  # lazy import to avoid a circular import
+
     if unwrap_compiled:
         model = getattr(model, "_orig_mod", model)
 
     config = model.peft_config[adapter_name]
     if state_dict is None:
         state_dict = model.state_dict()
+
+    # ADD THE MODEL-LEVEL ADAPTER STATE OF A DIRECTLY INJECTED ADAPTER
+    # It lives on the tuner and is thus not part of the state dict of the model. Add it here so that the tuner specific
+    # code below sees the same keys as it does for a PeftModel.
+    state_dict = {**_get_injected_tuner_state_dict(model, adapter_name), **state_dict}
 
     # FILTER FOR ADAPTER NAME
     unwanted_adapter_names = [name for name in model.peft_config if name != adapter_name]
@@ -284,13 +291,18 @@ def get_peft_model_state_dict(
 
 
 def _find_mismatched_keys(
-    model: torch.nn.Module, peft_model_state_dict: dict[str, torch.Tensor], ignore_mismatched_sizes: bool = False
+    model: torch.nn.Module,
+    peft_model_state_dict: dict[str, torch.Tensor],
+    ignore_mismatched_sizes: bool = False,
+    reference_state_dict: Optional[dict[str, torch.Tensor]] = None,
 ) -> tuple[dict[str, torch.Tensor], list[tuple[str, tuple[int, ...], tuple[int, ...]]]]:
     if not ignore_mismatched_sizes:
         return peft_model_state_dict, []
 
     mismatched = []
-    state_dict = model.state_dict()
+    # the entries to compare against are taken from the model, unless they are not part of its state dict, as is the
+    # case for the model-level adapter state of a directly injected adapter
+    state_dict = model.state_dict() if reference_state_dict is None else reference_state_dict
     for key, tensor in peft_model_state_dict.items():
         if key not in state_dict:
             continue
@@ -485,6 +497,9 @@ def set_peft_model_state_dict(
             A named tuple with `missing_keys` and `unexpected_keys` fields.
 
     """
+    # lazy imports to avoid a circular import
+    from peft.tuners.tuners_utils import _get_injected_tuner_state_dict, _load_injected_tuner_state_dict
+
     config = model.peft_config[adapter_name]
     state_dict = peft_model_state_dict.copy()
     if config.peft_type not in PEFT_TYPE_TO_TUNER_MAPPING:
@@ -539,9 +554,23 @@ def set_peft_model_state_dict(
     if not requires_prefix:
         peft_model_state_dict = {k.removeprefix(prefix): v for k, v in peft_model_state_dict.items()}
 
+    # The model-level adapter state of a directly injected adapter belongs to the tuner and not to the model, so it
+    # cannot be loaded via model.load_state_dict below and is loaded separately further down.
+    injected_tuner_state_dict = _get_injected_tuner_state_dict(model, adapter_name)
+    tuner_state_dict = {k: v for k, v in peft_model_state_dict.items() if k in injected_tuner_state_dict}
+    if tuner_state_dict:
+        peft_model_state_dict = {k: v for k, v in peft_model_state_dict.items() if k not in tuner_state_dict}
+
     peft_model_state_dict, mismatched_keys = _find_mismatched_keys(
         model, peft_model_state_dict, ignore_mismatched_sizes=ignore_mismatched_sizes
     )
+    tuner_state_dict, tuner_mismatched_keys = _find_mismatched_keys(
+        model,
+        tuner_state_dict,
+        ignore_mismatched_sizes=ignore_mismatched_sizes,
+        reference_state_dict=injected_tuner_state_dict,
+    )
+    mismatched_keys.extend(tuner_mismatched_keys)
     if low_cpu_mem_usage:
         load_result = model.load_state_dict(peft_model_state_dict, strict=False, assign=True)
         # ensure that the correct device is set
@@ -550,6 +579,13 @@ def set_peft_model_state_dict(
                 module._move_adapter_to_device_of_base_layer(adapter_name)
     else:
         load_result = model.load_state_dict(peft_model_state_dict, strict=False)
+
+    if tuner_state_dict:
+        missing_keys, unexpected_keys = _load_injected_tuner_state_dict(
+            model, adapter_name, tuner_state_dict, assign=low_cpu_mem_usage
+        )
+        load_result.missing_keys.extend(missing_keys)
+        load_result.unexpected_keys.extend(unexpected_keys)
 
     if config.is_prompt_learning:
         # The state of prompt learning methods lives on the prompt encoder, so it is not covered by
