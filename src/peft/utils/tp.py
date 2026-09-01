@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import re
 
-import torch
 from torch import nn
 
 
@@ -65,23 +64,6 @@ def add_lora_tp_hooks_dtensor(tp_module: nn.Module, tp_plan_name: str, device_me
     style.validate_param(tp_module, "weight", device_mesh, parameter_name=parameter_name)
     style.shard_param(tp_module, "weight", device_mesh)
     style.install_forward(tp_module, device_mesh)
-
-
-def shard_lora_tensor_for_load(full_tensor: torch.Tensor, tp_plan_name: str, device_mesh, *, is_embedding_weight: bool = False):
-    from torch.distributed.tensor import Shard, distribute_tensor
-
-    if tp_plan_name == "colwise":
-        placement = Shard(0)  # lora_B.weight: (out_features, r)
-    elif tp_plan_name == "rowwise":
-        placement = Shard(-1)  # lora_A.weight: (r, in_features)
-    elif tp_plan_name == "embedding_rowwise":
-        # base embedding weight: (vocab_size, embedding_dim) -> shard the vocab dim (dim 0).
-        # lora_embedding_A: (r, vocab_size) -> same vocab dim, but it sits at dim 1 here.
-        placement = Shard(0) if is_embedding_weight else Shard(1)
-    else:
-        raise ValueError(f"Unsupported tensor parallel plan {tp_plan_name!r} for LoRA state dict sharding.")
-
-    return distribute_tensor(full_tensor, device_mesh, [placement], src_data_rank=None)
 
 
 class LoraEmbeddingATPHolder(nn.Embedding):
