@@ -1080,11 +1080,13 @@ class LoraModel(BaseTuner):
             if is_transformers_dtensor_tp:
                 from torch.distributed.tensor import DTensor
                 for name, param in model.named_parameters():
+                    if name not in peft_model_state_dict:
+                        continue
                     if isinstance(param.data, DTensor):
                         data = peft_model_state_dict[name]
                         d_data = DTensor.from_local(
-                            data, 
-                            device_mesh=param.data.device_mesh, 
+                            data,
+                            device_mesh=param.data.device_mesh,
                             placements=param.data.placements,
                             run_check=False,
                             shape=param.shape,

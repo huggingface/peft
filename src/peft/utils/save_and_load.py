@@ -367,7 +367,6 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
             RowwiseParallel,
         )
     else:
-        from torch.distributed.tensor import DTensor
         from transformers.distributed.sharding_utils import DtensorShardOperation
 
     should_check = True
@@ -423,13 +422,13 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
                 if embedding_key in state_dict:
                     state_dict[embedding_key]  = DtensorShardOperation(base_layer.weight).shard_tensor(
                         state_dict[embedding_key]
-                    )
+                    ).contiguous()
                 key = f"{name}.lora_embedding_A{adapter_name_in_key}"
                 ref = module.lora_embedding_A[adapter_name]
             else:
                 raise TypeError(f"Unknown tensor parallel plan {tp_plan} for {module.__class__.__name__}.")
 
-            state_dict[key] = DtensorShardOperation(ref).shard_tensor(state_dict[key])
+            state_dict[key] = DtensorShardOperation(ref).shard_tensor(state_dict[key]).contiguous()
         else:
             # We create and initialize the TensorParallelLayer on the fly,
             # and we set the `empty_param` attribute depending on the proper
