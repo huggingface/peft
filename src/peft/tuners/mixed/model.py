@@ -297,25 +297,23 @@ class MixedModel(BaseTuner):
 
         _check_adapters_not_merged(self.model, adapter_names)
 
-        new_adapter: list[str] = []
+        new_adapter: set[str] = set()
         for adapter_to_delete in adapter_names:
             del self.peft_config[adapter_to_delete]
 
             key_list = [key for key, _ in self.model.named_modules() if not any(prefix in key for prefix in PREFIXES)]
-            new_adapter = []
+            new_adapter = set()
             for key in key_list:
                 _, target, _ = _get_submodules(self.model, key)
                 if isinstance(target, BaseTunerLayer):
                     target.delete_adapter(adapter_to_delete)
                     # Mixed adapters usually target different layers, so a single layer only sees the adapters it
                     # hosts itself. The remaining active adapters have to be collected over all of them.
-                    for name in target.active_adapters:
-                        if name not in new_adapter:
-                            new_adapter.append(name)
+                    new_adapter.update(target.active_adapters)
 
-            _delete_auxiliary_adapter(self.model, adapter_to_delete, new_active_adapters=new_adapter)
+            _delete_auxiliary_adapter(self.model, adapter_to_delete, new_active_adapters=list(new_adapter))
 
-        self.active_adapter = new_adapter
+        self.active_adapter = list(new_adapter)
 
     def generate(self, *args: Any, **kwargs: Any):
         return self.model.generate(*args, **kwargs)
