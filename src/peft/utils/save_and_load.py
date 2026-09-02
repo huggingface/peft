@@ -145,6 +145,8 @@ def get_peft_model_state_dict(
     # If model was sharded with TP, gather full tensors for saving
     tp_info = _get_tp_info(model)
     if tp_info is not None:
+        # Legacy, pre-DTensor TP integration: `gather_state_dict_for_save` needs the tp_plan/device_mesh/tp_size
+        # collected from the `_tp_info` markers to know how each adapter weight was sharded.
         from transformers.integrations.tensor_parallel import gather_state_dict_for_save
 
         from peft.peft_model import PeftModel
@@ -161,6 +163,12 @@ def get_peft_model_state_dict(
         if keys_starting_with_prefix:
             tp_plan = {f"{prefix}{k}": v for k, v in tp_plan.items()}
         state_dict = gather_state_dict_for_save(state_dict, tp_plan, tp_info.device_mesh, tp_info.tp_size)
+    elif is_transformers_dtensor_tp and getattr(model, "_tp_plan", None):
+        # DTensor TP integration: the adapter weights are already `DTensor` instances, so they carry their own
+        # device_mesh/placements and can be gathered without needing any `_tp_info`.
+        from transformers.integrations.tensor_parallel import gather_state_dict_for_save
+
+        state_dict = gather_state_dict_for_save(state_dict, {}, None, None)
 
     # TUNER SPECIFIC CODE
     if config.peft_type not in PEFT_TYPE_TO_TUNER_MAPPING:
