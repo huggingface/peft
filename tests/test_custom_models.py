@@ -2514,11 +2514,9 @@ class TestPeftCustomModel(PeftCommonTester):
             # to the merged weight
             pytest.xfail("BD-LoRA delta weight computation does not handle block-diagonal factors")
         if (config_cls in (LoHaConfig, LoKrConfig)) and config_kwargs.get("rank_dropout"):
-            # rank_dropout randomly masks the delta in get_delta_weight as long as the module is in training mode,
-            # which makes get_delta_weight differ from the actual merged weight; being addressed in #3589
-            pytest.xfail(
-                "LoHa/LoKr merge is not deterministic while rank_dropout is active and module is in train mode"
-            )
+            # rank_dropout masks the delta at random, which makes get_delta_weight non-deterministic (see #3589).
+            # Having rank_dropout is not essential for this test, so disable it.
+            config_kwargs["rank_dropout"] = 0.0
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_get_additive_delta_corresponds_to_merged_weight(model_id, config_cls, config_kwargs, dtype=dtype)
