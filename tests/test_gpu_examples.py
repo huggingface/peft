@@ -6947,7 +6947,7 @@ def _test_load_adapter_forward(rank, world_size, port, tmp_dir_reference):
         f"Losses differ across ranks: {[loss.item() for loss in all_losses]}"
     )
 
-    # assert torch.isfinite(outputs.loss), f"Loss is not finite: {outputs.loss}"
+    assert torch.isfinite(outputs.loss), f"Loss is not finite: {outputs.loss}"
 
 
 def _test_load_adapter_save(rank, world_size, port, tmp_dir_reference, tmp_dir_tp):
