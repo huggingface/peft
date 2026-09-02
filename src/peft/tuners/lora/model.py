@@ -1079,6 +1079,7 @@ class LoraModel(BaseTuner):
             _maybe_shard_state_dict_for_tp(model, peft_model_state_dict, adapter_name)
             if is_transformers_dtensor_tp:
                 from torch.distributed.tensor import DTensor
+
                 for name, param in model.named_parameters():
                     if name not in peft_model_state_dict:
                         continue

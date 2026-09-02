@@ -420,9 +420,9 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
             elif tp_plan == "embedding_rowwise":
                 embedding_key = f"{name}.base_layer.weight"
                 if embedding_key in state_dict:
-                    state_dict[embedding_key]  = DtensorShardOperation(base_layer.weight).shard_tensor(
-                        state_dict[embedding_key]
-                    ).contiguous()
+                    state_dict[embedding_key] = (
+                        DtensorShardOperation(base_layer.weight).shard_tensor(state_dict[embedding_key]).contiguous()
+                    )
                 key = f"{name}.lora_embedding_A{adapter_name_in_key}"
                 ref = module.lora_embedding_A[adapter_name]
             else:

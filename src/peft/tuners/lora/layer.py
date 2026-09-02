@@ -1092,6 +1092,7 @@ class LoraEmbeddingATPHolder(nn.Embedding):
     API acts on modules rather than individual parameters. This class wraps the LoRA embedding A weight in an
     `nn.Embedding` module, allowing it to be treated as a module by the TP API.
     """
+
     def __init__(self, lora_embedding_A_weight: nn.Parameter):
         nn.Module.__init__(self)
         num_embeddings, embedding_dim = lora_embedding_A_weight.T.shape
