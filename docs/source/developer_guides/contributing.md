@@ -64,6 +64,9 @@ If you are new to creating a pull request, follow the [Creating a pull request](
 
 Regardless of the contribution type (unless it’s only about the docs), you should run tests and code quality checks before creating a PR to ensure your contribution doesn’t break anything and follows the project standards.
 
+
+### Running test and checks
+
 We provide a Makefile to execute the necessary tests. Run the code below for the unit test:
 
 ```sh
@@ -95,7 +98,13 @@ pytest tests/<test-file-name> -k <name-of-test>
 
 This should finish much quicker and allow for faster iteration.
 
+### Adding tests
+
+For a general guide on adding new tests, check `tests/README.md`.
+
 If your change is specific to a hardware setting (e.g., it requires CUDA), take a look at [`tests/test_gpu_examples.py`](https://github.com/huggingface/peft/blob/1c1c7fdaa6e6abaa53939b865dee1eded82ad032/tests/test_gpu_examples.py) and [`tests/test_common_gpu.py`](https://github.com/huggingface/peft/blob/1c1c7fdaa6e6abaa53939b865dee1eded82ad032/tests/test_common_gpu.py) to see if it makes sense to add tests there. If your change could have an effect on saving and loading models, please run the tests with the `--regression` flag to trigger regression tests.
+
+## Stale PRs
 
 It can happen that while you’re working on your PR, the underlying code base changes due to other changes being merged. If that happens – especially when there is a merge conflict – please update your branch with the latest changes. This can be a merge or a rebase, and we'll squash and merge the PR once it’s ready. If possible, **avoid force pushes** to make reviews easier.
 

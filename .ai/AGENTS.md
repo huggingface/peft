@@ -76,7 +76,7 @@ When you add a bug fix, start by implementing the test and ensure it fails. Then
 
 #### Test location
 
-PEFT follows a rigorous structure for the test location. Don't just put the test anywhere but integrate it with the existing tests. If the test requires GPUs to run, place it into `test_gpu_examples.py`.
+PEFT follows a rigorous structure for the test location. Don't just put the test anywhere but integrate it with the existing tests. If the test requires GPUs to run, place it into `test_gpu_examples.py`. `tests/README.md` explains the test suite organization and shared test infrastructure.
 
 ### Coding style
 
