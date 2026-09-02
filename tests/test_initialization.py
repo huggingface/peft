@@ -1334,14 +1334,10 @@ class TestLoraInitialization:
             LoraConfig(target_modules=["linear"], use_dora=True, megatron_config=megatron_config)
 
     def test_bdlora_both_patterns_raises(self):
-        model = self.get_model()
-
         bdlora_config = {"target_modules_bd_a": ["linear"], "target_modules_bd_b": ["linear"], "nblocks": 2}
 
-        config = LoraConfig(target_modules=["linear"], use_bdlora=bdlora_config)
-
         with pytest.raises(ValueError, match="Found overlapping modules in target_modules_bd lists"):
-            get_peft_model(model, config)
+            LoraConfig(target_modules=["linear"], use_bdlora=bdlora_config)
 
     def test_bdlora_strict_matching_raises(self):
         model = self.get_model()
