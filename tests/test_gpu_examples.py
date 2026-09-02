@@ -6910,9 +6910,11 @@ def _test_load_adapter_forward(rank, world_size, port, tmp_dir_reference):
     Test that load_adapter (with a peft_config) works with a TP base model and the forward pass produces the same loss
     on every rank and that it is finite.
 
-    This exercises the low-level API path where no PeftModel/tuner is created, so TP info must be stored on the lora
-    modules themselves (via _tp_info) rather than on the tuner.
+    This exercises the low-level API path where no PeftModel/tuner is created, so the LoRA modules must be TP-sharded
+    directly (their parameters become `DTensor` instances) rather than relying on the tuner.
     """
+    from torch.distributed.tensor import DTensor
+
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
 
@@ -6930,7 +6932,9 @@ def _test_load_adapter_forward(rank, world_size, port, tmp_dir_reference):
 
     for mod in model.modules():
         if isinstance(mod, LoraLayer):
-            assert hasattr(mod, "_tp_info"), "load_adapter did not store TP info on the LoRA module"
+            assert any(isinstance(p, DTensor) for p in mod.parameters()), (
+                "load_adapter did not TP-shard the LoRA module's parameters"
+            )
 
     tokenizer = AutoTokenizer.from_pretrained(TINY_MODEL_ID)
     inputs = tokenizer("Paris is the capital of France.", return_tensors="pt")
