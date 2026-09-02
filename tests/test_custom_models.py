@@ -5159,6 +5159,104 @@ class TestMultipleActiveAdapters:
 
         assert torch.allclose(unmerged_output, base_output, atol=1e-3, rtol=1e-3)
 
+    @pytest.mark.parametrize(
+        "model_cls, module_name",
+        [(MLP, "lin0"), (ModelEmbConv1D, "emb"), (ModelConv2D, "conv2d")],
+    )
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    def test_multiple_active_dora_adapters_merge_matches_forward(self, model_cls, module_name, safe_merge):
+        # DoRA normalizes by the norm of the unmerged base weight. Adapters are merged one after another, so from the
+        # second adapter on, the weight being merged into already holds the previously merged ones; taking the norm
+        # from it makes the merged model differ from the unmerged forward pass. The adapters have to share a target
+        # module for this to show up.
+        torch.manual_seed(0)
+
+        model = model_cls().to(self.torch_device).eval()
+        X = self.prepare_inputs_for_testing()
+        base_output = model(**X)
+
+        def config():
+            return LoraConfig(target_modules=[module_name], init_lora_weights=False, use_dora=True)
+
+        peft_model = get_peft_model(model, config(), adapter_name="adapter_0").eval()
+        adapters = ["adapter_0"]
+        for i in range(1, 3):
+            peft_model.add_adapter(f"adapter_{i}", config())
+            adapters.append(f"adapter_{i}")
+
+        self.set_multiple_active_adapters(peft_model, adapters)
+        combined_output = peft_model(**X)
+
+        peft_model.merge_adapter(safe_merge=safe_merge)
+        assert torch.allclose(peft_model(**X), combined_output, atol=1e-4)
+
+        peft_model.unmerge_adapter()
+        assert torch.allclose(peft_model(**X), combined_output, atol=1e-4)
+
+        with peft_model.disable_adapter():
+            assert torch.allclose(peft_model(**X), base_output, atol=1e-4)
+
+    @pytest.mark.parametrize(
+        "model_cls, module_name",
+        [(MLP, "lin0"), (ModelEmbConv1D, "emb"), (ModelConv2D, "conv2d")],
+    )
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    def test_plain_lora_and_dora_adapters_merge_matches_forward(self, model_cls, module_name, safe_merge):
+        # A plain LoRA adapter merges into the base weight in place, so the DoRA adapters that follow have to work on
+        # a copy of the unmerged weight, not on the weight itself.
+        torch.manual_seed(0)
+
+        model = model_cls().to(self.torch_device).eval()
+        X = self.prepare_inputs_for_testing()
+        base_output = model(**X)
+
+        def config(use_dora):
+            return LoraConfig(target_modules=[module_name], init_lora_weights=False, use_dora=use_dora)
+
+        peft_model = get_peft_model(model, config(use_dora=False), adapter_name="adapter_0").eval()
+        peft_model.add_adapter("adapter_1", config(use_dora=True))
+        peft_model.add_adapter("adapter_2", config(use_dora=True))
+        adapters = ["adapter_0", "adapter_1", "adapter_2"]
+
+        self.set_multiple_active_adapters(peft_model, adapters)
+        combined_output = peft_model(**X)
+
+        peft_model.merge_adapter(safe_merge=safe_merge)
+        assert torch.allclose(peft_model(**X), combined_output, atol=1e-4)
+
+        peft_model.unmerge_adapter()
+        assert torch.allclose(peft_model(**X), combined_output, atol=1e-4)
+
+        with peft_model.disable_adapter():
+            assert torch.allclose(peft_model(**X), base_output, atol=1e-4)
+
+    @pytest.mark.parametrize(
+        "model_cls, module_name",
+        [(MLP, "lin0"), (ModelEmbConv1D, "emb"), (ModelConv2D, "conv2d")],
+    )
+    def test_multiple_active_dora_adapters_safe_and_unsafe_merge_agree(self, model_cls, module_name):
+        # Taking the already merged adapters out of the base weight and putting them back rebuilds that weight, and it
+        # is the rebuilt one that ends up in the layer. The safe path has to carry on from it as well, otherwise the
+        # two paths merge into different weights.
+        def merged_weight(safe_merge):
+            torch.manual_seed(0)
+            model = model_cls().to(self.torch_device).eval()
+
+            def config():
+                return LoraConfig(target_modules=[module_name], init_lora_weights=False, use_dora=True)
+
+            peft_model = get_peft_model(model, config(), adapter_name="adapter_0").eval()
+            adapters = ["adapter_0"]
+            for i in range(1, 3):
+                peft_model.add_adapter(f"adapter_{i}", config())
+                adapters.append(f"adapter_{i}")
+
+            self.set_multiple_active_adapters(peft_model, adapters)
+            peft_model.merge_adapter(safe_merge=safe_merge)
+            return peft_model.base_model.model.get_submodule(module_name).get_base_layer().weight.data.clone()
+
+        assert torch.equal(merged_weight(safe_merge=True), merged_weight(safe_merge=False))
+
 
 class MLP_2x_same_shape(nn.Module):
     """Simple MLP with two layers of the same shape to test multiple adapters targeting same shape layers."""
