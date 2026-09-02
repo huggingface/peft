@@ -238,7 +238,8 @@ def get_peft_model_state_dict(
         has_base_config = False
 
         # ensure that this check is not performed in HF offline mode, see #1452
-        if model_id is not None:
+        # empty name_or_path (from-config models) is not a Hub repo id
+        if model_id:
             local_config_exists = os.path.exists(os.path.join(model_id, "config.json"))
             exists = local_config_exists or check_file_exists_on_hf_hub(model_id, "config.json")
             if exists is None:
