@@ -458,8 +458,9 @@ def hotswap_adapter_from_state_dict(
     if target_merged:
         raise ValueError(
             f"Cannot hot-swap adapter '{adapter_name}' because it is currently merged into the base weights. "
-            "Call `model.unmerge_adapter()` first; note that unmerging after a swap of merged weights would "
-            "otherwise corrupt them."
+            "Please unmerge the adapter first by calling `peft_model.unmerge_adapter()` (or, for diffusers "
+            "models, `diffusers_model.unfuse_lora()`); unmerging after a swap of merged weights would otherwise "
+            "corrupt them."
         )
 
     # Ensure that all the keys of the new adapter correspond exactly to the keys of the old adapter, otherwise
