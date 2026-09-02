@@ -2502,6 +2502,8 @@ class TestPeftCustomModel(PeftCommonTester):
         # use rank_dropout), but the contract is general and we parametrize over all mergeable configs for
         # consistency with the other merge tests.
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        if config_kwargs.get("target_parameters") is not None:
+            pytest.skip("Merging with target_parameters is not supported for all PEFT methods.")
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
 
         with hub_online_once(model_id):
