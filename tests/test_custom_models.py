@@ -88,7 +88,7 @@ from .testing_common import (
     _skip_if_deleting_adapter_not_supported,
     _skip_if_merging_not_supported,
 )
-from .testing_utils import get_state_dict, require_non_cpu, set_init_weights_false
+from .testing_utils import get_state_dict, hub_online_once, require_non_cpu, set_init_weights_false
 
 
 def _zero_unilora_theta_d(model, adapter_name="default"):
@@ -2503,14 +2503,20 @@ class TestPeftCustomModel(PeftCommonTester):
         # consistency with the other merge tests.
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
-        # LoHa/LoKr need a non-zero rank_dropout for the determinism contract to be meaningfully exercised;
-        # for other methods the param has no effect.
-        if config_cls in (LoHaConfig, LoKrConfig):
-            config_kwargs = {**config_kwargs, "rank_dropout": 0.5}
 
         with hub_online_once(model_id):
             base = self.transformers_class.from_pretrained(model_id)
             config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+            # Best-effort enable dropout for the various PEFT methods to check for deterministic merging.
+            # The dropout argument names are not uniform across PEFT methods (e.g. `lora_dropout`,
+            # `rank_dropout`, `module_dropout`, `miss_dropout`), so we introspect every config attr ending
+            # in `dropout` and set it to 0.5.
+            for attr in dir(config):
+                if attr.endswith("dropout"):
+                    try:
+                        setattr(config, attr, 0.5)
+                    except (AttributeError, TypeError, ValueError):
+                        pass
             model = get_peft_model(base, config).to(self.torch_device)
             model.train()  # the bug only manifests in train mode
 
