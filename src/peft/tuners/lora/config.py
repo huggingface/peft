@@ -31,8 +31,8 @@ def _get_lora_subconfig(value, config_cls):
 
     `save_pretrained` serializes nested sub-configs recursively (via `asdict`), so after loading from
     `adapter_config.json` they arrive as plain dicts. Fields declared with `init=False` are serialized but not accepted
-    by `__init__`, so they are filtered out here. The value for a sub-config should always be `None` or an instance
-    of the class (or a dict when loading), otherwise a `TypeError` is raised.
+    by `__init__`, so they are filtered out here. The value for a sub-config should always be `None` or an instance of
+    the class (or a dict when loading), otherwise a `TypeError` is raised.
     """
     if value is None:
         return None
