@@ -4629,10 +4629,6 @@ class TestPeftTorchao:
             get_peft_model(model, config)
 
     @pytest.mark.single_gpu_tests
-    @pytest.mark.xfail(
-        reason="int4_weight_only still has issues",
-        raises=(RuntimeError, ValueError),
-    )
     def test_causal_lm_training_single_gpu_torchao_int4_raises(self):
         # TODO: Once proper torchao support for int4 is added, remove this test and add int4 to supported_quant_types
         from transformers import TorchAoConfig
@@ -4654,12 +4650,17 @@ class TestPeftTorchao:
             task_type="CAUSAL_LM",
         )
 
-        model = get_peft_model(model, config)
         inputs = torch.arange(10).view(1, -1).to(device)
-        # this raises:
+        with pytest.raises(TypeError, match="only supports int8 weights for now"):
+            model = get_peft_model(model, config)
+
+        # Without PEFT catching the error above, the following would happen:
+        # >>> model(inputs)
+        # raises:
+        # > RuntimeError: X must be BF16 and contiguous on GPU.
+        # with a bfloat16 base model, it raises:
         # > RuntimeError: cutlass cannot initialize
         # tested in multiple matchines
-        model(inputs)
 
     @pytest.mark.parametrize("quant_type", supported_quant_types)
     @pytest.mark.multi_gpu_tests

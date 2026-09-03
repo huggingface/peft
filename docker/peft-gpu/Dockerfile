@@ -76,7 +76,7 @@ RUN conda run -n peft pip install -U --no-cache-dir \
         # Add HQQ for quantization testing
         hqq \
         deepspeed \
-        "kernels<0.16" \
+        "kernels>=0.16" \
         && conda run -n peft pip install -U --no-cache-dir mslk --index-url https://download.pytorch.org/whl/cu132
 
 RUN conda run -n peft pip freeze | grep transformers
