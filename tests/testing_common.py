@@ -1218,10 +1218,14 @@ class PeftCommonTester:
             # TODO: no gradients on the "dense" layer, other layers work, not sure why
             pytest.skip("AdaLora with RoBERTa does not work correctly")
         if config_cls == EworaConfig:
-            # EWoRA works with gradient checkpointing, but this test is flaky for it: the ReLU gating in EWoRA's
-            # routing can produce exactly-zero grads for some routing params, and since the base model's dropout
-            # draws different masks for the normal vs the checkpointed pass, the two non-zero-grad sets can differ.
-            pytest.skip("The non-zero-grad set comparison is flaky for EWoRA due to its ReLU-gated routing.")
+            # Gradient checkpointing itself works correctly for EWoRA: with identical RNG seeding, the grads with
+            # and without GC are bit-identical (the recorded RNG state makes the recomputed forward, incl. the
+            # router scores, exact). This test is nevertheless flaky for EWoRA because it compares the non-zero-grad
+            # sets of two *independent* forward passes, which draw different base-model dropout masks (train mode).
+            # If a module's ReLU-gated routing goes all-dead in only one of the two passes, that module's EWoRA
+            # params have exactly-zero grads in that pass only, so the two sets differ. The same mismatch occurs at
+            # the same rate between two plain passes without any GC.
+            pytest.skip("The non-zero-grad set comparison across independent forward passes is flaky for EWoRA.")
 
         if not is_transformers_ge_v5:
             # TODO: remove once transformers < 5.0 no longer supported
