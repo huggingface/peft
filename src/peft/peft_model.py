@@ -1783,7 +1783,6 @@ class PeftModelForSequenceClassification(PeftModel):
         ...     "num_layers": 12,
         ...     "encoder_hidden_size": 768,
         ...     "prefix_projection": False,
-        ...     "postprocess_past_key_value_function": None,
         ... }
 
         >>> peft_config = get_peft_config(config)
@@ -2031,7 +2030,6 @@ class PeftModelForCausalLM(PeftModel):
         ...     "num_layers": 36,
         ...     "encoder_hidden_size": 1280,
         ...     "prefix_projection": False,
-        ...     "postprocess_past_key_value_function": None,
         ... }
 
         >>> peft_config = get_peft_config(config)
@@ -2371,7 +2369,6 @@ class PeftModelForSeq2SeqLM(PeftModel):
         ...     "lora_alpha": 32,
         ...     "lora_dropout": 0.1,
         ...     "fan_in_fan_out": False,
-        ...     "enable_lora": None,
         ...     "bias": "none",
         ... }
 
@@ -2627,7 +2624,7 @@ class PeftModelForTokenClassification(PeftModel):
     Example:
 
         ```py
-        >>> from transformers import AutoModelForSequenceClassification
+        >>> from transformers import AutoModelForTokenClassification
         >>> from peft import PeftModelForTokenClassification, get_peft_config
 
         >>> config = {
@@ -2641,7 +2638,6 @@ class PeftModelForTokenClassification(PeftModel):
         ...     "num_layers": 12,
         ...     "encoder_hidden_size": 768,
         ...     "prefix_projection": False,
-        ...     "postprocess_past_key_value_function": None,
         ... }
 
         >>> peft_config = get_peft_config(config)
