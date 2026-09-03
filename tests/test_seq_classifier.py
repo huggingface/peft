@@ -374,6 +374,13 @@ def _skip_if_no_default_target_modules(model_id, config_cls):
         pytest.skip("Skipping LN Tuning because this model type has no default target modules")
 
 
+def _skip_encoder_models(model_id, config_cls):
+    # ShadowPEFT rides a contiguous decoder stack; encoder-only classifiers (BERT/RoBERTa) are unsupported.
+    if config_cls is ShadowConfig and ("Bert" in model_id or "Roberta" in model_id):
+        pytest.skip("ShadowPEFT requires a decoder-only backbone")
+
+    _skip_if_no_default_target_modules(model_id, config_cls)
+
 class TestSequenceClassificationModels(PeftCommonTester):
     r"""
     Tests for basic coverage of AutoModelForSequenceClassification and classification-specific cases. Most of the
