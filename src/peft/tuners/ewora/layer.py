@@ -53,10 +53,6 @@ class EworaLayer(BaseTunerLayer):
         self.out_features = out_features
         self.kwargs = kwargs
 
-    @property
-    def merged(self) -> bool:
-        return bool(self.merged_adapters)
-
     def update_layer(self, adapter_name, r, config: EworaConfig):
         if r <= 0:
             raise ValueError("`r` should be a positive integer")
@@ -71,7 +67,8 @@ class EworaLayer(BaseTunerLayer):
             ewora_dropout_layer = nn.Identity()
         self.ewora_dropout[adapter_name] = ewora_dropout_layer
 
-        # Actual trainable parameters
+        # Actual trainable parameters. Note that the routing layer uses a bias term: while not mentioned in the
+        # paper, it is part of the reference implementation that produced the published results.
         self.ewora_As[adapter_name] = nn.Parameter(torch.Tensor(num_experts, self.in_features, r), requires_grad=True)
         self.ewora_Bs[adapter_name] = nn.Parameter(torch.Tensor(num_experts, r, self.out_features), requires_grad=True)
         self.ewora_weighting[adapter_name] = nn.Linear(r * num_experts, num_experts, bias=True)
@@ -86,13 +83,16 @@ class EworaLayer(BaseTunerLayer):
             # https://github.com/microsoft/LoRA/blob/a0a92e0f26c067cf94747bdbf1ce73793fa44d19/loralib/layers.py#L124
             nn.init.kaiming_uniform_(self.ewora_As[adapter_name], a=math.sqrt(5))
             nn.init.uniform_(self.ewora_weighting[adapter_name].weight, a=-1e-2, b=1e-2)
+            nn.init.zeros_(self.ewora_weighting[adapter_name].bias)
             if init_weights:
                 # B is zero, so a freshly-created adapter is an identity transform
                 nn.init.zeros_(self.ewora_Bs[adapter_name])
             else:
-                # small non-identity initialization, mainly used for testing (EWoRA applies no scaling and
-                # sums over experts, so a large B would be unstable)
-                nn.init.normal_(self.ewora_Bs[adapter_name], std=0.02)
+                # non-identity initialization, mainly used for testing: large enough for the adapter to have a
+                # clearly measurable effect on the output, small enough to keep training stable (EWoRA applies
+                # no scaling and sums over experts, so a large B would diverge)
+                nn.init.normal_(self.ewora_Bs[adapter_name], std=0.1)
+                nn.init.uniform_(self.ewora_weighting[adapter_name].weight, a=-0.1, b=0.1)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         raise NotImplementedError(
@@ -144,13 +144,18 @@ class Linear(nn.Linear, EworaLayer):
                 weighting = self.ewora_weighting[active_adapter]
                 num_experts = self.num_experts[active_adapter]
 
-                x = x.to(ewora_As.dtype)
-                # broadcast the input over the experts: (..., in_features) -> (..., num_experts, in_features)
-                x = x.unsqueeze(-2).expand(*x.shape[:-1], num_experts, x.shape[-1])
+                # broadcast the input over the experts: (..., in_features) -> (..., num_experts, in_features);
+                # don't modify x itself, as it is shared between the active adapters
+                expert_inputs = x.to(ewora_As.dtype)
+                expert_inputs = expert_inputs.unsqueeze(-2).expand(
+                    *expert_inputs.shape[:-1], num_experts, expert_inputs.shape[-1]
+                )
 
                 # einsum indices: ... = leading dims (batch, sequence, ...), i = expert,
                 # d = in_features, j = rank, k = out_features
-                intermediate = torch.einsum("...id, idj -> ...ij", dropout(x), ewora_As)
+                intermediate = torch.einsum("...id, idj -> ...ij", dropout(expert_inputs), ewora_As)
+                # while not mentioned in the paper, the ReLU non-linearity before the routing layer is part of the
+                # reference implementation that produced the published results
                 scores = weighting(F.relu(intermediate.reshape(*intermediate.shape[:-2], -1)))
                 final = torch.einsum("...ij, ijk -> ...ik", intermediate, ewora_Bs)
 

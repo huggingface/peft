@@ -1549,6 +1549,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"r": 1, "target_modules": ["lin0"], "init_weights": False},
         {"r": 1, "target_modules": ["lin1"], "init_weights": False},
     ),
+    (
+        "EWoRA Same",
+        "ewora",
+        EworaConfig,
+        {"r": 2, "num_experts": 2, "target_modules": ["lin0"], "init_weights": False},
+        {"r": 2, "num_experts": 2, "target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "EWoRA Different",
+        "ewora",
+        EworaConfig,
+        {"r": 2, "num_experts": 2, "target_modules": ["lin0"], "init_weights": False},
+        {"r": 2, "num_experts": 2, "target_modules": ["lin1"], "init_weights": False},
+    ),
     # Check Supra (r set) here: if the hybrid works with multiple adapters, pure Super does too.
     (
         "Supertuning Same",

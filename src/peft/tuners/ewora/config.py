@@ -132,3 +132,6 @@ class EworaConfig(PeftConfig):
         # if target_modules is a regex expression, then layers_pattern should be None
         if isinstance(self.target_modules, str) and self.layers_pattern is not None:
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
+
+        if self.num_experts < 1:
+            raise ValueError(f"`num_experts` must be at least 1, got {self.num_experts}.")

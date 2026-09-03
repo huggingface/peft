@@ -27,6 +27,8 @@ def create_prompt(sample):
         instruction = sample["ctx"]
     elif "sentence" in sample and sample["sentence"] is not None:
         instruction = sample["sentence"]
+    else:
+        raise ValueError(f"Could not determine the instruction from the sample fields: {sorted(sample.keys())}")
 
     if "response" in sample and sample["response"] is not None:
         response = sample["response"]
@@ -34,6 +36,8 @@ def create_prompt(sample):
         response = sample["endings"][int(sample["label"])]
     elif "answer" in sample and sample["answer"] is not None:
         response = sample["option" + sample["answer"]]
+    else:
+        raise ValueError(f"Could not determine the response from the sample fields: {sorted(sample.keys())}")
 
     full_prompt = ""
     full_prompt += bos_token
