@@ -1335,14 +1335,10 @@ class TestLoraInitialization:
             LoraConfig(target_modules=["linear"], use_dora=True, megatron_config=megatron_config)
 
     def test_bdlora_both_patterns_raises(self):
-        model = self.get_model()
-
         bdlora_config = {"target_modules_bd_a": ["linear"], "target_modules_bd_b": ["linear"], "nblocks": 2}
 
-        config = LoraConfig(target_modules=["linear"], use_bdlora=bdlora_config)
-
         with pytest.raises(ValueError, match="Found overlapping modules in target_modules_bd lists"):
-            get_peft_model(model, config)
+            LoraConfig(target_modules=["linear"], use_bdlora=bdlora_config)
 
     def test_bdlora_strict_matching_raises(self):
         model = self.get_model()
@@ -2193,7 +2189,7 @@ class TestKasaInitialization:
         )
 
     def test_kasa_config_invalid_type_raises(self):
-        with pytest.raises(TypeError, match="`kasa_config` must be a `KasaConfig`"):
+        with pytest.raises(TypeError, match="`KasaConfig` must be a `KasaConfig`, a dict, or None."):
             LoraConfig(target_modules=["lin0"], kasa_config=123)
 
     def test_kasa_config_negative_coeffs_raise(self):
@@ -4809,6 +4805,39 @@ class TestHotSwapping:
 
         # real check: model now behaves again like adapter 0
         assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
+
+    def test_hotswap_raises_when_target_adapter_merged(self, tmp_path):
+        # Regression test for https://github.com/huggingface/peft/issues/3581 (case 1):
+        # hot-swapping an adapter that is currently merged into the base weights would silently keep the old
+        # adapter active (merged forward ignores adapter weights) and a subsequent unmerge would subtract the NEW
+        # delta from a base containing the OLD delta, corrupting the weights. Hot-swapping must refuse to run in
+        # this case.
+        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+
+        torch.manual_seed(0)
+        model0 = get_peft_model(self.get_model(), config)
+        model0.save_pretrained(tmp_path / "adapter0")
+
+        model0.merge_adapter()
+
+        with pytest.raises(ValueError, match="merged"):
+            hotswap_adapter(model0, tmp_path / "adapter0", adapter_name="default")
+
+    def test_hotswap_allowed_when_other_adapter_merged(self, tmp_path):
+        # Similar to test_hotswap_raises_when_target_adapter_merged, but the merged adapter ("other") is not
+        # the one being swapped out ("default"), so the swap should be allowed.
+        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+
+        torch.manual_seed(0)
+        model0 = get_peft_model(self.get_model(), config)
+        model0.save_pretrained(tmp_path / "adapter0")
+
+        # add a second adapter and merge IT, then hotswap the unrelated "default" adapter
+        model0.add_adapter("other", config)
+        model0.merge_adapter(adapter_names=["other"])
+
+        # must not raise: the adapter being swapped out ("default") is not merged
+        hotswap_adapter(model0, tmp_path / "adapter0", adapter_name="default")
 
     def test_prepare_model_for_compiled_hotswap_scalings_are_tensors(self):
         config = LoraConfig(target_modules=["lin0", "lin1"])

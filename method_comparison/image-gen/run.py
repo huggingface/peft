@@ -281,6 +281,7 @@ def train(
     train_config: TrainConfig,
     accelerator_memory_init: int,
     is_adalora: bool,
+    is_adamss: bool,
     print_verbose: Callable[..., None],
     device_type: str,
 ) -> tuple[TrainResult, dict[str, torch.Tensor]]:
@@ -442,7 +443,7 @@ def train(
             grad_scaler.update()
             lr_scheduler.step()
 
-            if is_adalora:
+            if is_adalora or is_adamss:
                 transformer.base_model.update_and_allocate(step)
 
             loss = loss.detach()
@@ -661,6 +662,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool, bucket_name
         train_config=train_config,
         accelerator_memory_init=accelerator_memory_init,
         is_adalora=peft_config is not None and peft_config.peft_type == "ADALORA",
+        is_adamss=peft_config is not None and peft_config.peft_type == "ADAMSS",
         print_verbose=print_verbose,
         device_type=device_type,
     )
