@@ -102,6 +102,8 @@
           title: "Variant: BD-LoRA"
         - local: package_reference/lora_variant_dora
           title: "Variant: DoRA"
+        - local: package_reference/lora_variant_kasa
+          title: "Variant: KaSA"
         - local: package_reference/lora_variant_monteclora
           title: "Variant: MonteCLoRA"
         - local: package_reference/lora_variant_velora
@@ -125,8 +127,12 @@
         title: RandLora
       - local: package_reference/road
         title: RoAd
+      - local: package_reference/shadow
+        title: ShadowPEFT
       - local: package_reference/shira
         title: SHiRA
+      - local: package_reference/supertuning
+        title: Super-Tuning
       - local: package_reference/tinylora
         title: TinyLoRA
       - local: package_reference/unilora
@@ -246,8 +252,12 @@
       title: RoAd
     - local: package_reference/shira
       title: SHiRA
+    - local: package_reference/supertuning
+      title: Super-Tuning
     - local: package_reference/tinylora
       title: TinyLoRA
+    - local: package_reference/shadow
+      title: ShadowPEFT
     - local: package_reference/unilora
       title: UniLoRA
     - local: package_reference/trainable_tokens
@@ -272,5 +282,9 @@
       title: Functions for PEFT integration
     - local: package_reference/lora_conversion
       title: Converting non-LoRA adapters to LoRA
+    - local: package_reference/warnings
+      title: Warnings emitted by PEFT
+    - local: package_reference/errors
+      title: Errors raised by PEFT
     title: Utilities
   title: API reference

@@ -29,6 +29,7 @@ from peft.import_utils import (
     is_bnb_available,
     is_gptqmodel_available,
     is_torchao_available,
+    is_torchao_ge_v0_18_0,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import infer_device
@@ -109,7 +110,9 @@ class TorchAoInt8WeightOnlyLoader:
 class TorchAoInt8DynamicActivationInt8WeightLoader:
     name = "torchao_int8_dynamic_activation_int8"
     backend_cls = TorchaoBackend
-    supports_merge = False
+    # On torchao < 0.18.0, LinearActivationQuantizedTensor does not support dequantize, so merging
+    # is not available. On torchao >= 0.18.0, Int8Tensor supports dequantize, so merging works.
+    supports_merge = is_torchao_ge_v0_18_0()
     supports_non_quantized_comparison = True
     model_id = "peft-internal-testing/opt-125m"
     expected_layer_count = 24  # (q_proj, v_proj) x 12 layers
@@ -272,7 +275,7 @@ class TestQuantization:
         model = get_peft_model(model, config)
 
         if not _config_supports_forward(config, quant):
-            with pytest.raises(ValueError, match="is not supported for quantization with"), torch.inference_mode():
+            with pytest.raises(ValueError, match="is not supported"), torch.inference_mode():
                 model(dummy_input).logits
             return
 
@@ -302,7 +305,7 @@ class TestQuantization:
         model = get_peft_model(model, config).eval()
 
         if not _config_supports_forward(config, quant):
-            with pytest.raises(ValueError, match="is not supported for quantization with"), torch.inference_mode():
+            with pytest.raises(ValueError, match="is not supported"), torch.inference_mode():
                 model(dummy_input).logits
             return
 

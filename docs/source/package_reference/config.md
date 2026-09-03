@@ -20,3 +20,7 @@ rendered properly in your Markdown viewer.
 
 [[autodoc]] PromptLearningConfig
     - all
+
+## get_peft_config
+
+[[autodoc]] mapping.get_peft_config

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import copy
+import inspect
 import json
 import os
 import pickle
@@ -59,7 +60,9 @@ from peft import (
     PveraConfig,
     RandLoraConfig,
     RoadConfig,
+    ShadowConfig,
     ShiraConfig,
+    SupertuningConfig,
     TaskType,
     TinyLoraConfig,
     TrainableTokensConfig,
@@ -67,6 +70,15 @@ from peft import (
     VeraConfig,
     WaveFTConfig,
     XLoraConfig,
+)
+from peft.tuners.lora.config import (
+    ArrowConfig,
+    BdLoraConfig,
+    CordaConfig,
+    EvaConfig,
+    KasaConfig,
+    LoraGAConfig,
+    VeloraConfig,
 )
 
 
@@ -108,7 +120,9 @@ ALL_CONFIG_CLASSES = (
     (PsoftConfig, {}),
     (PeanutConfig, {}),
     (RoadConfig, {}),
+    (ShadowConfig, {}),
     (ShiraConfig, {}),
+    (SupertuningConfig, {}),
     (TinyLoraConfig, {}),
     (TrainableTokensConfig, {}),
     (VeraConfig, {}),
@@ -121,6 +135,14 @@ ALL_CONFIG_CLASSES = (
     (PveraConfig, {}),
     (WaveFTConfig, {}),
 )
+
+# Config classes that support selecting layers by index (`layers_to_transform`) together
+# with a custom `layers_pattern`.
+LAYER_INDEXING_CONFIG_CLASSES = [
+    (config_class, mandatory_kwargs)
+    for config_class, mandatory_kwargs in ALL_CONFIG_CLASSES
+    if {"layers_to_transform", "layers_pattern"} <= set(inspect.signature(config_class).parameters)
+]
 
 
 class TestPeftConfig:
@@ -543,6 +565,19 @@ class TestPeftConfig:
         assert config.layers_to_transform is None
         assert config.layers_pattern is None
 
+    @pytest.mark.parametrize("config_class, mandatory_kwargs", LAYER_INDEXING_CONFIG_CLASSES)
+    def test_config_layers_to_transform_index_zero(self, config_class, mandatory_kwargs):
+        # `layers_to_transform=0` selects the first layer and is a valid index. Because 0
+        # is falsy, a truthiness check on `layers_to_transform` wrongly rejected it when
+        # combined with `layers_pattern`; the guard must compare against None instead.
+        config = config_class(
+            layers_to_transform=0,
+            layers_pattern="model.layers",
+            **mandatory_kwargs,
+        )
+        assert config.layers_to_transform == 0
+        assert config.layers_pattern == "model.layers"
+
     @pytest.mark.parametrize("version", ["0.10", "0.17.0", "1"])
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
     def test_peft_version_is_stored(self, version, config_class, mandatory_kwargs, monkeypatch, tmp_path):
@@ -635,3 +670,33 @@ class TestPeftConfig:
         with pytest.warns(UserWarning, match=msg):
             peft_config = config_class(**mandatory_kwargs)
         assert peft_config.peft_version == version + "@UNKNOWN"
+
+
+class TestLoraNestedConfigRoundTrip:
+    # Regression tests for https://github.com/huggingface/peft/issues/3583:
+    # nested LoRA sub-configs used to come back as plain dicts after
+    # save_pretrained → from_pretrained, crashing consumers with AttributeError.
+    @pytest.mark.parametrize(
+        "attribute_name, nested_config_cls, dummy_field, dummy_value",
+        [
+            ("eva_config", EvaConfig, "rho", 7.5),
+            ("corda_config", CordaConfig, "corda_method", "kpm"),
+            ("arrow_config", ArrowConfig, "top_k", 4),
+            ("lora_ga_config", LoraGAConfig, "direction", "ArBr"),
+            ("use_bdlora", BdLoraConfig, "nblocks", 4),
+            ("velora_config", VeloraConfig, "num_groups", 32),
+            ("kasa_config", KasaConfig, "beta", 2e-4),
+        ],
+    )
+    def test_nested_config_survives_save_load_roundtrip(
+        self, tmp_path, attribute_name, nested_config_cls, dummy_field, dummy_value
+    ):
+        config = LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0)
+        setattr(config, attribute_name, nested_config_cls(**{dummy_field: dummy_value}))
+
+        config.save_pretrained(tmp_path)
+        loaded = LoraConfig.from_pretrained(tmp_path)
+
+        nested = getattr(loaded, attribute_name)
+        assert isinstance(nested, nested_config_cls)
+        assert getattr(nested, dummy_field) == dummy_value

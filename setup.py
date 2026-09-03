@@ -15,14 +15,15 @@
 from setuptools import find_packages, setup
 
 
-VERSION = "0.20.0"
+VERSION = "0.20.1.dev0"
 
 extras = {}
 extras["quality"] = [
     "black",  # doc-builder has an implicit dependency on Black, see huggingface/doc-builder#434
     "hf-doc-builder",
     # when upgrading this, also upgrade required version in pyproject.toml and pre-commit-config.yaml
-    "ruff~=0.15.12",
+    "ruff==0.16.4",
+    "griffe",  # for ./scripts/check_doc_coverage.py
 ]
 extras["docs_specific"] = [
     "black",  # doc-builder has an implicit dependency on Black, see huggingface/doc-builder#434

@@ -23,6 +23,7 @@ import torch
 from peft.config import PeftConfig
 from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.tuners.lora import Conv2d, Linear, LoraConfig, LoraLayer
+from peft.tuners.tuners_utils import BaseTunerLayer
 
 from .other import get_pattern_key, infer_device
 from .peft_types import PeftType
@@ -33,7 +34,7 @@ from .save_and_load import _insert_adapter_name_into_state_dict, load_peft_weigh
 CONFIG_KEYS_TO_CHECK = {PeftType.LORA: ["use_rslora", "lora_dropout", "alpha_pattern", "use_dora"]}
 
 
-def _update_scaling(lora_module, adapter_name, scaling=None):
+def _update_scaling(lora_module: LoraLayer, adapter_name: str, scaling: float) -> None:
     """
     Update the value of the scalings of the LoRA module.
 
@@ -422,7 +423,7 @@ def hotswap_adapter_from_state_dict(
     adapter_name: str,
     config: LoraConfig,
     parameter_prefix: str = "lora_",
-):
+) -> None:
     """
     Swap out the adapter weights from the model with the weights from state_dict.
 
@@ -451,6 +452,17 @@ def hotswap_adapter_from_state_dict(
             If the old and the new adapter are not compatible, a RuntimeError is raised.
 
     """
+    target_merged = any(
+        adapter_name in module.merged_adapters for module in model.modules() if isinstance(module, BaseTunerLayer)
+    )
+    if target_merged:
+        raise ValueError(
+            f"Cannot hot-swap adapter '{adapter_name}' because it is currently merged into the base weights. "
+            "Please unmerge the adapter first by calling `peft_model.unmerge_adapter()` (or, for diffusers "
+            "models, `diffusers_model.unfuse_lora()`); unmerging after a swap of merged weights would otherwise "
+            "corrupt them."
+        )
+
     # Ensure that all the keys of the new adapter correspond exactly to the keys of the old adapter, otherwise
     # hot-swapping is not possible
 
@@ -610,7 +622,13 @@ def check_hotswap_configs_compatible(config0: PeftConfig, config1: PeftConfig) -
             raise ValueError(f"Configs are incompatible: for {key}, {val0} != {val1}")
 
 
-def hotswap_adapter(model, model_name_or_path, adapter_name, torch_device=None, **kwargs):
+def hotswap_adapter(
+    model: torch.nn.Module,
+    model_name_or_path: str,
+    adapter_name: str,
+    torch_device: Optional[str] = None,
+    **kwargs,
+) -> None:
     """Substitute old adapter data with new adapter data, keeping the rest the same.
 
     As of now, only LoRA is supported.

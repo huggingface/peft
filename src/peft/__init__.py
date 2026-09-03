@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.20.0"
+__version__ = "0.20.1.dev0"
 
 from .auto import (
     MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
@@ -84,6 +84,7 @@ from .tuners import (
     HRAModel,
     IA3Config,
     IA3Model,
+    KasaConfig,
     LilyConfig,
     LilyModel,
     LNTuningConfig,
@@ -126,8 +127,12 @@ from .tuners import (
     RandLoraModel,
     RoadConfig,
     RoadModel,
+    ShadowConfig,
+    ShadowModel,
     ShiraConfig,
     ShiraModel,
+    SupertuningConfig,
+    SupertuningModel,
     TinyLoraConfig,
     TinyLoraModel,
     TrainableTokensConfig,
@@ -158,6 +163,8 @@ from .tuners.cartridge.utils import (
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
+    NoMatchingPeftModuleError,
+    PeftError,
     PeftType,
     PeftWarning,
     TaskType,
@@ -224,6 +231,7 @@ __all__ = [
     "HiraModel",
     "IA3Config",
     "IA3Model",
+    "KasaConfig",
     "LNTuningConfig",
     "LNTuningModel",
     "LilyConfig",
@@ -242,6 +250,7 @@ __all__ = [
     "MontecloraConfig",
     "MultitaskPromptTuningConfig",
     "MultitaskPromptTuningInit",
+    "NoMatchingPeftModuleError",
     "OFTConfig",
     "OFTModel",
     "OSFConfig",
@@ -249,6 +258,7 @@ __all__ = [
     "PeanutConfig",
     "PeanutModel",
     "PeftConfig",
+    "PeftError",
     "PeftMixedModel",
     "PeftModel",
     "PeftModelForCausalLM",
@@ -278,8 +288,12 @@ __all__ = [
     "RandLoraModel",
     "RoadConfig",
     "RoadModel",
+    "ShadowConfig",
+    "ShadowModel",
     "ShiraConfig",
     "ShiraModel",
+    "SupertuningConfig",
+    "SupertuningModel",
     "TaskType",
     "TinyLoraConfig",
     "TinyLoraModel",

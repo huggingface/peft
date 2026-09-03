@@ -71,12 +71,11 @@ from peft.utils import CONFIG_NAME, infer_device
 os.environ["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
 
 
-def get_sigmas(timesteps, noise_scheduler, n_dim, dtype):
+def get_sigmas(timesteps, noise_scheduler, *, step_indices, n_dim, dtype):
     device = "cpu"
     sigmas = noise_scheduler.sigmas.to(device=device, dtype=dtype)
     schedule_timesteps = noise_scheduler.timesteps.to(device)
     timesteps = timesteps.to(device)
-    step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
 
     sigma = sigmas[step_indices].flatten()
     while len(sigma.shape) < n_dim:
@@ -99,12 +98,25 @@ class DummyGradScaler:
 
 
 def precompute_prompt_caches(
-    pipeline, prompts: list[str], device_type: str, train_config: TrainConfig
-) -> tuple[torch.Tensor, torch.Tensor]:
+    pipeline, train_prompts: list[str], eval_prompts: list[str], device_type: str, train_config: TrainConfig
+) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
+    """Precompute all prompt embeds needed during the run in a single pass over the text encoder.
+
+    This is mainly to save memory so that we don't need to either unload the text encoder during evaluation, which
+    requires extra VRAM, or compute the embeddings on CPU, which is slow. Once this is done, we can completely remove
+    the text encoder.
+
+    The training prompts are returned as concatenated tensors on the accelerator. The eval prompts are returned as a
+    dict mapping each prompt to its embedding on the CPU. The eval cache always includes the empty prompt: when the
+    pipeline applies classifier-free guidance (guidance_scale > 1 on a non-distilled checkpoint), it requires embeddings
+    for the empty negative prompt, which it would otherwise compute with the text encoder at generation time.
+
+    """
     prompt_embeds_cache = []
     text_ids_cache = []
+    eval_prompt_cache: dict[str, torch.Tensor] = {}
     with torch.no_grad(), offload_models(pipeline.text_encoder, device=device_type, offload=True):
-        for prompt in prompts:
+        for prompt in train_prompts:
             prompt_embeds, text_ids = pipeline.encode_prompt(
                 prompt=prompt,
                 max_sequence_length=train_config.max_sequence_length,
@@ -112,7 +124,19 @@ def precompute_prompt_caches(
             )
             prompt_embeds_cache.append(prompt_embeds)
             text_ids_cache.append(text_ids)
-    return torch.cat(prompt_embeds_cache, dim=0).to(device_type), torch.cat(text_ids_cache, dim=0).to(device_type)
+        empty_prompt = [""]  # e.g. for negative prompt
+        for prompt in eval_prompts + empty_prompt:
+            prompt_embeds, _ = pipeline.encode_prompt(
+                prompt=prompt,
+                max_sequence_length=train_config.max_sequence_length,
+                text_encoder_out_layers=train_config.text_encoder_out_layers,
+            )
+            eval_prompt_cache[prompt] = prompt_embeds.to("cpu")
+    return (
+        (torch.cat(prompt_embeds_cache, dim=0) if prompt_embeds_cache else torch.tensor([])).to(device_type),
+        (torch.cat(text_ids_cache, dim=0) if text_ids_cache else torch.tensor([])).to(device_type),
+        eval_prompt_cache,
+    )
 
 
 def precompute_latent_cache(
@@ -140,15 +164,19 @@ def precompute_latent_cache(
     return torch.cat(latents_cache, dim=0)
 
 
-def _generate_images(pipeline, *, generator, prompts: list[str], config: TrainConfig):
+def _generate_images(
+    pipeline, *, generator, prompts: list[str], prompt_cache: dict[str, torch.Tensor], config: TrainConfig
+):
+    device = pipeline.transformer.device
+    prompt_embeds = torch.cat([prompt_cache[prompt] for prompt in prompts], dim=0).to(device)
+    negative_prompt_embeds = prompt_cache[""].to(device).expand(len(prompts), -1, -1)
     outputs = pipeline(
-        prompt=prompts,
+        prompt_embeds=prompt_embeds,
+        negative_prompt_embeds=negative_prompt_embeds,
         num_inference_steps=config.num_inference_steps,
         guidance_scale=config.guidance_scale,
         height=config.resolution,  # hard-code square
         width=config.resolution,
-        max_sequence_length=config.max_sequence_length,
-        text_encoder_out_layers=config.text_encoder_out_layers,
         generator=generator,
         output_type="pil",
     )
@@ -162,10 +190,11 @@ def evaluate(
     ds_eval,
     processor,
     dino_model,
+    prompt_cache: dict[str, torch.Tensor],
     config: TrainConfig,
     num_repeats: int = 1,
 ) -> float:
-    with offload_models(pipeline.text_encoder, pipeline.vae, device=pipeline.transformer.device, offload=True):
+    with offload_models(pipeline.vae, device=pipeline.transformer.device, offload=True):
         # avoid reusing same seed as in training, which would bias samples toward memorized results
         seed = config.seed + 100_000
         generator = torch.Generator(device=pipeline.transformer.device).manual_seed(seed)
@@ -179,7 +208,9 @@ def evaluate(
             for i in range(0, len(ds_eval), batch_size):
                 sliced = [ds_eval[j] for j in range(i, min(i + batch_size, len(ds_eval)))]
                 prompts = [sample["prompt"] for sample in sliced]
-                outputs = _generate_images(pipeline, generator=generator, prompts=prompts, config=config)
+                outputs = _generate_images(
+                    pipeline, generator=generator, prompts=prompts, prompt_cache=prompt_cache, config=config
+                )
                 generated_images.extend(outputs.images)
                 reference_images.extend([sample["raw_image"] for sample in sliced])
                 if i + batch_size >= len(ds_eval):
@@ -194,7 +225,9 @@ def evaluate(
 
 
 @torch.inference_mode()
-def measure_drift(*, pipeline, processor, dino_model, config: TrainConfig) -> float:
+def measure_drift(
+    *, pipeline, processor, dino_model, prompt_cache: dict[str, torch.Tensor], config: TrainConfig
+) -> float:
     # Measure the drift as 1 - the cosine similarity of the images generated by the base model vs the model with the
     # trained adapter. The prompts are unrelated to the concept, so we expect the similarity to be high, hence the drift
     # to be low.
@@ -206,7 +239,7 @@ def measure_drift(*, pipeline, processor, dino_model, config: TrainConfig) -> fl
     batch_size = config.batch_size_eval
     prompts = config.drift_image_prompts
     pbar = tqdm(total=len(prompts) * 2)
-    with offload_models(pipeline.text_encoder, pipeline.vae, device=pipeline.transformer.device, offload=True):
+    with offload_models(pipeline.vae, device=pipeline.transformer.device, offload=True):
         # without adapter
         # avoid reusing same seed as in training, which would bias samples toward memorized results
         seed = config.seed + 100_000_000
@@ -215,7 +248,9 @@ def measure_drift(*, pipeline, processor, dino_model, config: TrainConfig) -> fl
         with pipeline.transformer.disable_adapter():
             for i in range(0, len(prompts), batch_size):
                 prompt_batch = prompts[i : i + batch_size]
-                outputs = _generate_images(pipeline, generator=generator, prompts=prompt_batch, config=config)
+                outputs = _generate_images(
+                    pipeline, generator=generator, prompts=prompt_batch, prompt_cache=prompt_cache, config=config
+                )
                 generated_base.extend(outputs.images)
                 pbar.update(1)
 
@@ -226,7 +261,9 @@ def measure_drift(*, pipeline, processor, dino_model, config: TrainConfig) -> fl
         generated_adapter = []
         for i in range(0, len(prompts), batch_size):
             prompt_batch = prompts[i : i + batch_size]
-            outputs = _generate_images(pipeline, generator=generator, prompts=prompt_batch, config=config)
+            outputs = _generate_images(
+                pipeline, generator=generator, prompts=prompt_batch, prompt_cache=prompt_cache, config=config
+            )
             generated_adapter.extend(outputs.images)
             pbar.update(1)
 
@@ -244,8 +281,10 @@ def train(
     train_config: TrainConfig,
     accelerator_memory_init: int,
     is_adalora: bool,
+    is_adamss: bool,
     print_verbose: Callable[..., None],
-) -> TrainResult:
+    device_type: str,
+) -> tuple[TrainResult, dict[str, torch.Tensor]]:
     accelerator_memory_allocated_log = []
     accelerator_memory_reserved_log = []
     losses = []
@@ -253,7 +292,6 @@ def train(
     metrics = []
     total_samples = 0
 
-    device_type = infer_device()
     train_dataset, valid_dataset, test_dataset = get_train_valid_test_datasets(
         train_config=train_config, print_fn=print_verbose
     )
@@ -278,7 +316,7 @@ def train(
         autocast_ctx = nullcontext
 
     vae = pipeline.vae  # CPU
-    transformer = pipeline.transformer.to(device_type)
+    transformer = pipeline.transformer
     noise_scheduler_copy = copy.deepcopy(pipeline.scheduler)  # prevent mutating it
     optimizer, lr_scheduler = get_optimizer_and_scheduler(
         transformer,
@@ -303,9 +341,20 @@ def train(
     eval_time = 0.0
     error_msg = ""
 
-    # pre-compute, since they don't change during training and we can keep the text encoder and VAE offloaded
-    prompt_embeds_cache, text_ids_cache = precompute_prompt_caches(
-        pipeline, train_dataset["prompts"], device_type, train_config=train_config
+    # pre-compute, since they don't change during training and we can keep the text encoder and VAE offloaded; the
+    # eval prompts are also encoded now, so that the text encoder is not needed anymore afterwards
+    eval_prompts = (
+        [sample["prompt"] for sample in valid_dataset]
+        + [sample["prompt"] for sample in test_dataset]
+        + list(train_config.drift_image_prompts)
+        + list(train_config.sample_image_prompts)
+    )
+    prompt_embeds_cache, text_ids_cache, prompt_cache = precompute_prompt_caches(
+        pipeline,
+        train_prompts=train_dataset["prompts"],
+        eval_prompts=eval_prompts,
+        device_type=device_type,
+        train_config=train_config,
     )
     latents_cache = precompute_latent_cache(
         pipeline=pipeline,
@@ -314,6 +363,11 @@ def train(
         train_config=train_config,
         device_type=device_type,
     )
+
+    # All prompts used in this run are cached now, so the text encoder is no longer needed. Drop it from the pipeline to
+    # free memory
+    pipeline.text_encoder = None
+    transformer.to(device_type)
 
     torch_accelerator_module.empty_cache()
     torch_accelerator_module.reset_peak_memory_stats()
@@ -346,9 +400,9 @@ def train(
             indices = (u * noise_scheduler_copy.config.num_train_timesteps).long()
             timesteps = noise_scheduler_copy.timesteps[indices].to(device=latents.device)
             # Add noise according to flow matching. zt = (1 - texp) * x + texp * z1
-            sigmas = get_sigmas(timesteps, noise_scheduler_copy, n_dim=latents.ndim, dtype=latents.dtype).to(
-                device_type
-            )
+            sigmas = get_sigmas(
+                timesteps, noise_scheduler_copy, step_indices=indices, n_dim=latents.ndim, dtype=latents.dtype
+            ).to(device_type)
             noisy_latents = (1.0 - sigmas) * latents + sigmas * noise
             # [B, C, H, W] -> [B, H*W, C]
             packed_noisy_latents = pipeline._pack_latents(noisy_latents)
@@ -389,9 +443,10 @@ def train(
             grad_scaler.update()
             lr_scheduler.step()
 
-            if is_adalora:
+            if is_adalora or is_adamss:
                 transformer.base_model.update_and_allocate(step)
 
+            loss = loss.detach()
             losses.append(loss)
             pbar.set_postfix({"loss": loss.item()})
 
@@ -431,6 +486,7 @@ def train(
                     ds_eval=valid_dataset,
                     processor=processor,
                     dino_model=dino_model,
+                    prompt_cache=prompt_cache,
                     config=train_config,
                 )
                 transformer.train()
@@ -482,11 +538,18 @@ def train(
             ds_eval=test_dataset,
             processor=processor,
             dino_model=dino_model,
+            prompt_cache=prompt_cache,
             config=train_config,
             num_repeats=3,
         )
         print_verbose("Calculating drift.")
-        test_drift = measure_drift(pipeline=pipeline, processor=processor, dino_model=dino_model, config=train_config)
+        test_drift = measure_drift(
+            pipeline=pipeline,
+            processor=processor,
+            dino_model=dino_model,
+            prompt_cache=prompt_cache,
+            config=train_config,
+        )
         metrics.append(
             {
                 "step": step,
@@ -528,7 +591,8 @@ def train(
         num_trainable_params=num_trainable_params,
         num_total_params=num_params,
     )
-    return train_result
+    # the prompt cache is returned so that generate_sample_images can reuse it, the text encoder is gone by now
+    return train_result, prompt_cache
 
 
 @torch.inference_mode()
@@ -536,11 +600,12 @@ def generate_sample_images(
     *,
     pipeline,
     train_config,
+    prompt_cache: dict[str, torch.Tensor],
     sample_image_dir: str,
     file_stem: str,
 ) -> None:
     target_device = pipeline.transformer.device
-    with offload_models(pipeline.text_encoder, pipeline.vae, device=target_device, offload=True):
+    with offload_models(pipeline.vae, device=target_device, offload=True):
         # avoid reusing same seed as in training, which would bias samples toward memorized results
         seed = train_config.seed + 100_000
         generator = torch.Generator(device=target_device).manual_seed(seed)
@@ -549,7 +614,9 @@ def generate_sample_images(
         )
         for idx, prompt in pbar:
             image_path = os.path.join(sample_image_dir, f"{file_stem}_{idx:02d}.png")
-            outputs = _generate_images(pipeline, generator=generator, prompts=[prompt], config=train_config)
+            outputs = _generate_images(
+                pipeline, generator=generator, prompts=[prompt], prompt_cache=prompt_cache, config=train_config
+            )
             outputs.images[0].save(image_path)
 
 
@@ -576,6 +643,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool, bucket_name
     accelerator_memory_init = init_accelerator()
     set_seed(train_config.seed)
 
+    device_type = infer_device()
     model_info = get_base_model_info(train_config.model_id)
     dataset_info = get_dataset_info(train_config.dataset_id)
     pipeline = get_pipeline(
@@ -585,15 +653,18 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool, bucket_name
         peft_config=peft_config,
         autocast_adapter_dtype=train_config.autocast_adapter_dtype,
         use_gc=train_config.use_gc,
+        device_type=device_type,
     )
     print_verbose(pipeline.transformer)
 
-    train_result = train(
+    train_result, prompt_cache = train(
         pipeline=pipeline,
         train_config=train_config,
         accelerator_memory_init=accelerator_memory_init,
         is_adalora=peft_config is not None and peft_config.peft_type == "ADALORA",
+        is_adamss=peft_config is not None and peft_config.peft_type == "ADAMSS",
         print_verbose=print_verbose,
+        device_type=device_type,
     )
 
     if train_result.status == TrainStatus.FAILED:
@@ -624,6 +695,7 @@ def main(*, path_experiment: str, experiment_name: str, clean: bool, bucket_name
             generate_sample_images(
                 pipeline=pipeline,
                 train_config=train_config,
+                prompt_cache=prompt_cache,
                 sample_image_dir=sample_image_dir,
                 file_stem=file_stem,
             )

@@ -24,10 +24,10 @@ from unittest.mock import patch
 import pytest
 import torch
 from huggingface_hub import snapshot_download
-from safetensors.torch import load_file
+from safetensors.torch import load_file, save_file
 from scipy import stats
 from torch import nn
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, LlamaConfig, LlamaForSequenceClassification
 
 from peft import (
     AdaLoraConfig,
@@ -39,7 +39,9 @@ from peft import (
     FrodConfig,
     GraloraConfig,
     HiraConfig,
+    HRAConfig,
     IA3Config,
+    KasaConfig,
     LilyConfig,
     LoftQConfig,
     LoKrConfig,
@@ -58,6 +60,8 @@ from peft import (
     PromptTuningConfig,
     PsoftConfig,
     RoadConfig,
+    ShadowConfig,
+    SupertuningConfig,
     TinyLoraConfig,
     VBLoRAConfig,
     VeloraConfig,
@@ -1331,14 +1335,10 @@ class TestLoraInitialization:
             LoraConfig(target_modules=["linear"], use_dora=True, megatron_config=megatron_config)
 
     def test_bdlora_both_patterns_raises(self):
-        model = self.get_model()
-
         bdlora_config = {"target_modules_bd_a": ["linear"], "target_modules_bd_b": ["linear"], "nblocks": 2}
 
-        config = LoraConfig(target_modules=["linear"], use_bdlora=bdlora_config)
-
         with pytest.raises(ValueError, match="Found overlapping modules in target_modules_bd lists"):
-            get_peft_model(model, config)
+            LoraConfig(target_modules=["linear"], use_bdlora=bdlora_config)
 
     def test_bdlora_strict_matching_raises(self):
         model = self.get_model()
@@ -1791,6 +1791,29 @@ class TestLoraInitialization:
         model.add_adapter("other", config2)  # does not raise
 
 
+class TestShadowInitialization:
+    @pytest.mark.parametrize("other_task_type", ["SEQ_CLS", "CAUSAL_LM"])
+    def test_adding_an_adapter_when_sequence_classification_is_present_raises(self, other_task_type):
+        base_config = LlamaConfig(
+            vocab_size=32,
+            hidden_size=16,
+            intermediate_size=32,
+            num_hidden_layers=2,
+            num_attention_heads=2,
+            num_key_value_heads=2,
+        )
+        model = get_peft_model(
+            LlamaForSequenceClassification(base_config),
+            ShadowConfig(task_type="SEQ_CLS"),
+        )
+
+        msg = "does not support multiple adapters when any adapter uses sequence classification"
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", ShadowConfig(task_type=other_task_type))
+
+        assert "other" not in model.peft_config
+
+
 class TestLokrInitialization:
     torch_device = infer_device()
 
@@ -1940,8 +1963,10 @@ class TestAdamssInitialization:
             ),
             (
                 {"init_warmup": 10, "final_warmup": 10},
-                "`init_warmup` must be smaller than `final_warmup` when `use_asa=True` so that ASA has a "
-                "non-empty pruning ramp, got init_warmup=10 and final_warmup=10.",
+                (
+                    "`init_warmup` must be smaller than `final_warmup` when `use_asa=True` so that ASA has a "
+                    "non-empty pruning ramp, got init_warmup=10 and final_warmup=10."
+                ),
             ),
             (
                 {"asa_target_subspaces": 0},
@@ -2139,6 +2164,211 @@ class TestVeloraInitialization:
     def test_velora_config_invalid_values_raise(self, config_kwargs, msg):
         with pytest.raises(ValueError, match=re.escape(msg)):
             VeloraConfig(**config_kwargs)
+
+
+class TestKasaInitialization:
+    class MLP(nn.Module):
+        def __init__(self, in_features=16, hidden=12, out_features=10, bias=False):
+            super().__init__()
+            # in_features >= hidden >= out so min(in, out) - r stays positive at small r for both layers.
+            self.lin0 = nn.Linear(in_features, hidden, bias=bias)
+            self.lin1 = nn.Linear(hidden, out_features, bias=bias)
+
+        def forward(self, x):
+            return self.lin1(torch.relu(self.lin0(x)))
+
+    def get_config(self, r=4, init_lora_weights=True, **kasa_kwargs):
+        # Tests that need a non-trivial adapter contribution pass init_lora_weights=False, which makes lora_B non-zero
+        # (lora_diag is already randomly initialized).
+        return LoraConfig(
+            target_modules=["lin0", "lin1"],
+            r=r,
+            lora_alpha=8,
+            init_lora_weights=init_lora_weights,
+            kasa_config=KasaConfig(**kasa_kwargs),
+        )
+
+    def test_kasa_config_invalid_type_raises(self):
+        with pytest.raises(TypeError, match="`KasaConfig` must be a `KasaConfig`, a dict, or None."):
+            LoraConfig(target_modules=["lin0"], kasa_config=123)
+
+    def test_kasa_config_negative_coeffs_raise(self):
+        with pytest.raises(ValueError, match="`beta` must be non-negative"):
+            KasaConfig(beta=-1.0)
+        with pytest.raises(ValueError, match="`gamma` must be non-negative"):
+            KasaConfig(gamma=-1.0)
+
+    def test_kasa_rejects_too_large_rank(self):
+        # r must be < min(in, out) for at least one base singular component to survive truncation.
+        # lin1 is (out=10, in=12) so min=10; r=10 must raise.
+        with pytest.raises(ValueError, match="KaSA requires `r`"):
+            get_peft_model(self.MLP(), self.get_config(r=10))
+
+    def test_kasa_truncation_changes_base_forward(self):
+        # Adding a KaSA adapter destructively edits the base weight, so the clean (adapter-disabled) forward differs
+        # from the original model. This documents the (intentional) departure from the usual "disable == base"
+        # contract.
+        torch.manual_seed(0)
+        base = self.MLP()
+        x = torch.randn(5, 16)
+        with torch.no_grad():
+            orig_out = base(x)
+
+        model = get_peft_model(deepcopy(base), self.get_config())
+        model.eval()
+        with torch.no_grad():
+            with model.disable_adapter():
+                disabled_out = model(x)
+
+        # Because B == 0 at init, the *active* adapter output equals the truncated base output...
+        with torch.no_grad():
+            active_out = model(x)
+        assert torch.allclose(active_out, disabled_out, atol=1e-6)
+        # ...but the truncated base is NOT the original weight, so the output differs from the original model.
+        assert not torch.allclose(disabled_out, orig_out, atol=1e-4)
+
+    @pytest.mark.parametrize("low_cpu_mem_usage", [False, True])
+    def test_kasa_reload_onto_original_base_retruncates(self, tmp_path, low_cpu_mem_usage):
+        # Reloading the adapter onto the *original* (un-truncated) base must reproduce the trained output, because the
+        # deterministic SVD truncation is re-applied at load time. With low_cpu_mem_usage=True the truncation is
+        # deferred to the first forward; this guards against it being silently skipped on that path.
+        torch.manual_seed(0)
+        base = self.MLP()
+        original_state = deepcopy(base.state_dict())
+        model = get_peft_model(deepcopy(base), self.get_config(init_lora_weights=False))
+        model.eval()
+        x = torch.randn(3, 16)
+        with torch.no_grad():
+            out_before = model(x)
+
+        model.save_pretrained(tmp_path / "kasa_adapter")
+
+        # Fresh base carrying the ORIGINAL (un-truncated) weights - the realistic reload scenario.
+        fresh_base = self.MLP()
+        fresh_base.load_state_dict(original_state)
+        reloaded = PeftModel.from_pretrained(
+            fresh_base, tmp_path / "kasa_adapter", low_cpu_mem_usage=low_cpu_mem_usage
+        )
+        reloaded.eval()
+        with torch.no_grad():
+            out_after = reloaded(x)
+            # A second forward must be stable (truncation applied exactly once, no double-truncation).
+            out_after2 = reloaded(x)
+        assert torch.allclose(out_before, out_after, atol=1e-5)
+        assert torch.allclose(out_after, out_after2, atol=1e-6)
+
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    def test_kasa_merge_before_forward_applies_deferred_truncation(self, tmp_path, safe_merge):
+        # Merging right after a low_cpu_mem_usage=True load (a standard deployment flow, e.g. merge_and_unload) must
+        # apply the deferred base-weight truncation first. Otherwise the delta is merged into the un-truncated weight
+        # and, because merged layers never call the variant forward, the truncation would never run at all.
+        torch.manual_seed(0)
+        base = self.MLP()
+        original_state = deepcopy(base.state_dict())
+        model = get_peft_model(deepcopy(base), self.get_config(init_lora_weights=False))
+        model.eval()
+        x = torch.randn(3, 16)
+        with torch.no_grad():
+            out_trained = model(x)
+
+        model.save_pretrained(tmp_path / "kasa_adapter")
+
+        fresh_base = self.MLP()
+        fresh_base.load_state_dict(original_state)
+        reloaded = PeftModel.from_pretrained(fresh_base, tmp_path / "kasa_adapter", low_cpu_mem_usage=True)
+        reloaded.eval()
+        # Merge BEFORE any forward pass has had a chance to apply the deferred truncation.
+        reloaded.base_model.merge_adapter(safe_merge=safe_merge)
+        with torch.no_grad():
+            out_merged = reloaded(x)
+        assert torch.allclose(out_trained, out_merged, atol=1e-5)
+
+        # merge_and_unload goes through the same merge path and must also apply the deferred truncation first.
+        fresh_base = self.MLP()
+        fresh_base.load_state_dict(original_state)
+        reloaded = PeftModel.from_pretrained(fresh_base, tmp_path / "kasa_adapter", low_cpu_mem_usage=True)
+        reloaded.eval()
+        unloaded = reloaded.merge_and_unload(safe_merge=safe_merge)
+        with torch.no_grad():
+            out_unloaded = unloaded(x)
+        assert torch.allclose(out_trained, out_unloaded, atol=1e-5)
+
+    def test_kasa_deferred_truncation_with_bf16_base_and_fp32_adapter(self, tmp_path):
+        # With a bf16 base model, the adapter weights are upcast to fp32 by default (autocast_adapter_dtype=True). The
+        # first forward after a low_cpu_mem_usage=True load must handle the dtype mismatch between the cast input and
+        # the base weight, and must match the output of a non-deferred load.
+        torch.manual_seed(0)
+        base = self.MLP().to(torch.bfloat16)
+        original_state = deepcopy(base.state_dict())
+        model = get_peft_model(deepcopy(base), self.get_config(init_lora_weights=False))
+        model.eval()
+        x = torch.randn(3, 16, dtype=torch.bfloat16)
+
+        model.save_pretrained(tmp_path / "kasa_adapter")
+
+        outputs = {}
+        for low_cpu_mem_usage in (False, True):
+            fresh_base = self.MLP().to(torch.bfloat16)
+            fresh_base.load_state_dict(original_state)
+            reloaded = PeftModel.from_pretrained(
+                fresh_base, tmp_path / "kasa_adapter", low_cpu_mem_usage=low_cpu_mem_usage
+            )
+            reloaded.eval()
+            with torch.no_grad():
+                out = reloaded(x)
+                out2 = reloaded(x)
+            assert out.dtype == torch.bfloat16
+            # The first forward on the deferred path computes the un-truncated bf16 base output plus an fp32
+            # correction, while subsequent forwards use the truncated bf16 base directly, so they only agree up to
+            # bf16 rounding.
+            assert torch.allclose(out, out2, atol=1e-2)
+            outputs[low_cpu_mem_usage] = out2
+        # The steady state of both loading paths must match (same truncated weight, up to bf16 rounding of the SVD).
+        assert torch.allclose(outputs[False], outputs[True], atol=1e-2)
+
+    def test_kasa_deferred_truncation_preserves_other_adapter_contributions(self, tmp_path):
+        # On the first forward after a low_cpu_mem_usage=True load, applying the deferred truncation must not discard
+        # the contributions that other active adapters already added to the layer output.
+        torch.manual_seed(0)
+        base = self.MLP()
+        original_state = deepcopy(base.state_dict())
+        model = get_peft_model(deepcopy(base), self.get_config(init_lora_weights=False))
+        model.eval()
+
+        model.save_pretrained(tmp_path / "kasa_adapter")
+
+        fresh_base = self.MLP()
+        fresh_base.load_state_dict(original_state)
+        reloaded = PeftModel.from_pretrained(fresh_base, tmp_path / "kasa_adapter", low_cpu_mem_usage=True)
+
+        # Add a second KaSA adapter with a non-trivial contribution and activate it FIRST, so it is processed before
+        # the deferred adapter in the same forward pass.
+        reloaded.add_adapter("other", self.get_config(init_lora_weights=False))
+        reloaded.base_model.set_adapter(["other", "default"])
+        reloaded.eval()
+
+        x = torch.randn(5, 16)
+        with torch.no_grad():
+            out1 = reloaded(x)  # first forward: the deferred truncation fires mid-loop
+            out2 = reloaded(x)  # subsequent forwards: steady state
+        assert torch.allclose(out1, out2, atol=1e-6)
+
+    @pytest.mark.parametrize("kasa_first", [True, False])
+    def test_kasa_mixing_with_non_kasa_adapter_raises(self, kasa_first):
+        msg = "KaSA cannot be combined with adapters that don't use KaSA"
+        vanilla_config = LoraConfig(target_modules=["lin0"], r=4)
+        if kasa_first:
+            first_config, second_config = self.get_config(), vanilla_config
+        else:
+            first_config, second_config = vanilla_config, self.get_config()
+        model = get_peft_model(self.MLP(), first_config)
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("second", second_config)
+
+    def test_kasa_multiple_kasa_adapters_allowed(self):
+        model = get_peft_model(self.MLP(), self.get_config())
+        model.add_adapter("second", self.get_config())
+        assert "second" in model.peft_config
 
 
 class TestVBLoraInitialization:
@@ -2751,6 +2981,23 @@ class TestBeftInitialization:
             model.merge_and_unload()
 
 
+class TestSupertuningInitialization:
+    """Test class to check the initialization of Super-Tuning / Supra adapters."""
+
+    def test_supertuning_config_validation(self):
+        # Invalid sparsity
+        with pytest.raises(ValueError, match="sparsity must be"):
+            SupertuningConfig(sparsity=1.5)
+
+        # Invalid Supra rank
+        with pytest.raises(ValueError, match="r must be a positive integer"):
+            SupertuningConfig(r=0)
+
+        # lora_alpha set without r
+        with pytest.raises(ValueError, match="lora_alpha is set but r is None"):
+            SupertuningConfig(lora_alpha=16.0)
+
+
 class TestHiraInitialization:
     """Test class to check the initialization of HiRA adapters."""
 
@@ -2783,6 +3030,28 @@ class TestHiraInitialization:
         base_model = self.get_model_conv_groups(conv_cls, groups=2)
         config = HiraConfig(target_modules=["conv"], r=4)
         with pytest.raises(NotImplementedError, match="HiRA does not support .* layers with groups > 1"):
+            get_peft_model(base_model, config)
+
+
+class TestHraInitialization:
+    """Test class to check the initialization of HRA adapters."""
+
+    torch_device = infer_device()
+
+    def test_error_raised_for_conv2d_groups_greater_than_one(self):
+        # HRA does not support grouped convolutions, so constructing an adapter for a Conv2d layer with
+        # `groups > 1` must fail immediately and clearly.
+        class ModelConvGroups(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(4, 8, kernel_size=3, groups=2)
+
+            def forward(self, X):
+                return self.conv(X)
+
+        base_model = ModelConvGroups().eval().to(self.torch_device)
+        config = HRAConfig(target_modules=["conv"], r=4)
+        with pytest.raises(NotImplementedError, match="HRA does not support .* layers with groups > 1"):
             get_peft_model(base_model, config)
 
 
@@ -4342,19 +4611,20 @@ class TestHotSwapping:
 
         model = self.get_model()
         model = get_peft_model(model, config)
-
-        # add an unexpected key
-        state_dict = model.state_dict()
-        new_key = "base_model.model.lin1.lora_A.default.weight"
-        state_dict[new_key] = torch.zeros(8, 20)
-        model.state_dict = lambda: state_dict
         model.save_pretrained(tmp_path / "adapter1")
         del model
+
+        # add an unexpected key to the checkpoint of adapter 1
+        file_name = tmp_path / "adapter1" / "adapter_model.safetensors"
+        state_dict = load_file(file_name)
+        state_dict["base_model.model.lin1.lora_A.weight"] = torch.zeros(8, 20)
+        save_file(state_dict, file_name, metadata={"format": "pt"})
 
         # load adapter 0
         model = self.get_model()
         model = PeftModel.from_pretrained(model, tmp_path / "adapter0")
 
+        new_key = "base_model.model.lin1.lora_A.default.weight"  # the adapter name is inserted when loading
         msg = f"Hot swapping the adapter did not succeed, unexpected keys found: {new_key}"
         with pytest.raises(RuntimeError, match=msg):
             hotswap_adapter(model, tmp_path / "adapter1", adapter_name="default")
@@ -4535,6 +4805,39 @@ class TestHotSwapping:
 
         # real check: model now behaves again like adapter 0
         assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
+
+    def test_hotswap_raises_when_target_adapter_merged(self, tmp_path):
+        # Regression test for https://github.com/huggingface/peft/issues/3581 (case 1):
+        # hot-swapping an adapter that is currently merged into the base weights would silently keep the old
+        # adapter active (merged forward ignores adapter weights) and a subsequent unmerge would subtract the NEW
+        # delta from a base containing the OLD delta, corrupting the weights. Hot-swapping must refuse to run in
+        # this case.
+        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+
+        torch.manual_seed(0)
+        model0 = get_peft_model(self.get_model(), config)
+        model0.save_pretrained(tmp_path / "adapter0")
+
+        model0.merge_adapter()
+
+        with pytest.raises(ValueError, match="merged"):
+            hotswap_adapter(model0, tmp_path / "adapter0", adapter_name="default")
+
+    def test_hotswap_allowed_when_other_adapter_merged(self, tmp_path):
+        # Similar to test_hotswap_raises_when_target_adapter_merged, but the merged adapter ("other") is not
+        # the one being swapped out ("default"), so the swap should be allowed.
+        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+
+        torch.manual_seed(0)
+        model0 = get_peft_model(self.get_model(), config)
+        model0.save_pretrained(tmp_path / "adapter0")
+
+        # add a second adapter and merge IT, then hotswap the unrelated "default" adapter
+        model0.add_adapter("other", config)
+        model0.merge_adapter(adapter_names=["other"])
+
+        # must not raise: the adapter being swapped out ("default") is not merged
+        hotswap_adapter(model0, tmp_path / "adapter0", adapter_name="default")
 
     def test_prepare_model_for_compiled_hotswap_scalings_are_tensors(self):
         config = LoraConfig(target_modules=["lin0", "lin1"])

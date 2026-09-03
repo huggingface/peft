@@ -24,8 +24,10 @@ from unittest.mock import MagicMock
 
 import pytest
 import torch
+import torch.distributed as dist
 from safetensors.torch import load_file as safe_load_file
 from torch import nn
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
 from transformers.pytorch_utils import Conv1D
 
@@ -44,6 +46,7 @@ from peft import (
     HiraConfig,
     HRAConfig,
     IA3Config,
+    KasaConfig,
     LilyConfig,
     LNTuningConfig,
     LoHaConfig,
@@ -61,6 +64,7 @@ from peft import (
     RandLoraConfig,
     RoadConfig,
     ShiraConfig,
+    SupertuningConfig,
     TaskType,
     TinyLoraConfig,
     TrainableTokensConfig,
@@ -70,6 +74,8 @@ from peft import (
     VeraConfig,
     WaveFTConfig,
     get_peft_model,
+    get_peft_model_state_dict,
+    set_peft_model_state_dict,
 )
 from peft.tuners import lora
 from peft.tuners.lora.config import BdLoraConfig
@@ -77,8 +83,12 @@ from peft.tuners.lora.monteclora import MontecloraSampler
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
-from .testing_common import PeftCommonTester, _skip_if_merging_not_supported
-from .testing_utils import get_state_dict, require_non_cpu, set_init_weights_false
+from .testing_common import (
+    PeftCommonTester,
+    _skip_if_deleting_adapter_not_supported,
+    _skip_if_merging_not_supported,
+)
+from .testing_utils import get_state_dict, hub_online_once, require_non_cpu, set_init_weights_false
 
 
 def _zero_unilora_theta_d(model, adapter_name="default"):
@@ -97,6 +107,10 @@ def _reset_unilora_theta_d(model, config, adapter_name="default"):
 # EmbConv1D has an embedding and a Conv1D layer
 # Conv2D has a Conv2D layer
 TEST_CASES = [
+    # ShadowPEFT is not tested here: it needs a real decoder stack (not MLP/Conv custom
+    # models), and wiring a dedicated TinyDecoder into this suite clashes with the shared
+    # custom-model assumptions. Coverage lives in test_shadow.py, test_decoder_models.py,
+    # and test_seq_classifier.py instead.
     ########
     # GLoRA #
     ########
@@ -136,6 +150,13 @@ TEST_CASES = [
     ),
     ("Vanilla MLP 7 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": ["lin0"], "use_dora": True}),
     ("Vanilla MLP 8 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"], "use_dora": True}),
+    (
+        "Vanilla MLP 1 LoRA with KaSA",
+        "MLP",
+        LoraConfig,
+        # lin1 is (20, 2), so with r=4 only lin0 can be targeted (KaSA requires r < min(in_features, out_features)).
+        {"target_modules": ["lin0"], "kasa_config": KasaConfig(), "r": 4},
+    ),
     (
         "Vanilla MLP 1 LoRA with MiCA",
         "MLP",
@@ -738,6 +759,24 @@ TEST_CASES = [
         "MLP",
         ShiraConfig,
         {"r": 1, "target_modules": ["lin0"]},
+    ),
+    ###############
+    # Supertuning #
+    ###############
+    ("Vanilla MLP 1 Supertuning", "MLP", SupertuningConfig, {"sparsity": 0.5, "target_modules": "lin0"}),
+    ("Vanilla MLP 2 Supertuning", "MLP", SupertuningConfig, {"sparsity": 0.5, "target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 Supertuning", "MLP", SupertuningConfig, {"sparsity": 0.5, "target_modules": ["lin1"]}),
+    (
+        "Vanilla MLP 4 Supertuning bottom-k",
+        "MLP",
+        SupertuningConfig,
+        {"sparsity": 0.5, "target_modules": ["lin0", "lin1"], "select_top": False},
+    ),
+    (
+        "Vanilla MLP 5 Supertuning Supra (r=2)",
+        "MLP",
+        SupertuningConfig,
+        {"sparsity": 0.5, "target_modules": ["lin0"], "r": 2},
     ),
     ########
     # VeRA #
@@ -1364,7 +1403,7 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         "lora+trainable_tokens",
         LoraConfig,
         {"target_modules": ["lin0"], "init_lora_weights": False, "trainable_token_indices": {"emb": [0, 1, 2]}},
-        {"target_modules": ["lin1"], "init_lora_weights": False, "trainable_token_indices": {"emb": [3, 4, 5, 6]}},
+        {"target_modules": ["conv1d"], "init_lora_weights": False, "trainable_token_indices": {"emb": [3, 4, 5, 6]}},
     ),
     (
         "LoRA targeting nn.Parameter Same",
@@ -1505,6 +1544,21 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         ShiraConfig,
         {"r": 1, "target_modules": ["lin0"], "init_weights": False},
         {"r": 1, "target_modules": ["lin1"], "init_weights": False},
+    ),
+    # Check Supra (r set) here: if the hybrid works with multiple adapters, pure Super does too.
+    (
+        "Supertuning Same",
+        "supertuning",
+        SupertuningConfig,
+        {"sparsity": 0.5, "target_modules": ["lin0"], "r": 2, "init_weights": False},
+        {"sparsity": 0.5, "target_modules": ["lin0"], "r": 2, "init_weights": False},
+    ),
+    (
+        "Supertuning Different",
+        "supertuning",
+        SupertuningConfig,
+        {"sparsity": 0.5, "target_modules": ["lin0"], "r": 2, "init_weights": False},
+        {"sparsity": 0.5, "target_modules": ["lin1"], "r": 2, "init_weights": False},
     ),
     # Note: Currently, we cannot target lin0 and lin1 with different adapters when using VeRA. The reason is that the
     # first adapter being created will result in a vera_A or vera_B shape that is too small for the next adapter
@@ -2004,6 +2058,26 @@ class ModelEmbWithEmbeddingUtils(nn.Module):
         return None
 
 
+class ModelEmbWithSibling(nn.Module):
+    # Like ModelEmbWithEmbeddingUtils, but with a frozen module whose name has the embedding module name as a prefix,
+    # i.e. "embed_tokens_extra" next to "embed_tokens".
+    def __init__(self):
+        super().__init__()
+        self.embed_tokens = nn.Embedding(100, 5)
+        # same shape, same prefix
+        self.embed_tokens_extra = nn.Embedding(100, 5)
+        self.lin0 = nn.Linear(5, 2)
+
+    def forward(self, X):
+        return self.lin0(self.embed_tokens(X) + self.embed_tokens_extra(X))
+
+    def get_input_embeddings(self):
+        return self.embed_tokens
+
+    def get_output_embeddings(self):
+        return None
+
+
 class ModelConv1D(nn.Module):
     def __init__(self):
         super().__init__()
@@ -2422,12 +2496,85 @@ class TestPeftCustomModel(PeftCommonTester):
         self._test_merge_layers_is_idempotent(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_merge_layers_is_deterministic_in_train_mode(self, test_name, model_id, config_cls, config_kwargs):
+        # Regression test for https://github.com/huggingface/peft/issues/3586: merging the same model twice in
+        # train mode must produce identical weights. The bug only matters for LoHa/LoKr (the only methods that
+        # use rank_dropout), but the contract is general and we parametrize over all mergeable configs for
+        # consistency with the other merge tests.
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        if config_kwargs.get("target_parameters") is not None:
+            pytest.skip("Merging with target_parameters is not supported for all PEFT methods.")
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+
+        with hub_online_once(model_id):
+            base = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+            # Best-effort enable dropout for the various PEFT methods to check for deterministic merging.
+            # The dropout argument names are not uniform across PEFT methods (e.g. `lora_dropout`,
+            # `rank_dropout`, `module_dropout`, `miss_dropout`), so we introspect every config attr ending
+            # in `dropout` and set it to 0.5.
+            for attr in dir(config):
+                if attr.endswith("dropout"):
+                    try:
+                        setattr(config, attr, 0.5)
+                    except (AttributeError, TypeError, ValueError):
+                        pass
+            model = get_peft_model(base, config).to(self.torch_device)
+            model.train()  # the bug only manifests in train mode
+
+            model_a = copy.deepcopy(model)
+            model_b = copy.deepcopy(model)
+            model_a.merge_adapter()
+            model_b.merge_adapter()
+
+            merged_a = {n: p.detach().clone() for n, p in model_a.base_model.named_parameters()}
+            merged_b = {n: p.detach().clone() for n, p in model_b.base_model.named_parameters()}
+            assert merged_a.keys() == merged_b.keys()
+            for name in merged_a:
+                if not merged_a[name].is_floating_point():
+                    continue
+                assert torch.equal(merged_a[name], merged_b[name]), (
+                    f"Two merges in train mode diverged at {name} for {test_name} -- rank_dropout leaked into merge"
+                )
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_safe_merge(self, test_name, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         # calling merge twice with the same arguments should not change the output
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_safe_merge(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("conv_cls", [nn.Conv2d, nn.Conv3d])
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    def test_ia3_grouped_conv_feedforward_merge(self, conv_cls, safe_merge):
+        # Regression test for #3511: feedforward IA3 scales all input channels, while grouped
+        # convolution weights store only the input channels belonging to each group.
+        class GroupedConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = conv_cls(4, 6, kernel_size=3, groups=2)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        torch.manual_seed(0)
+        input_shape = (2, 4, 5, 5) if conv_cls is nn.Conv2d else (2, 4, 5, 5, 5)
+        inputs = torch.randn(input_shape)
+        config = IA3Config(target_modules=["conv"], feedforward_modules=["conv"], init_ia3_weights=False)
+        model = get_peft_model(GroupedConvModel(), config).eval()
+        original_weight = model.base_model.model.conv.base_layer.weight.data.clone()
+
+        with torch.inference_mode():
+            output_unmerged = model(inputs)
+            model.merge_adapter(safe_merge=safe_merge)
+            output_merged = model(inputs)
+            model.unmerge_adapter()
+            output_unmerged_again = model(inputs)
+
+        assert torch.allclose(output_unmerged, output_merged, atol=1e-6, rtol=1e-6)
+        assert torch.allclose(output_unmerged, output_unmerged_again, atol=1e-6, rtol=1e-6)
+        assert torch.allclose(model.base_model.model.conv.base_layer.weight.data, original_weight)
 
     def test_glora_safe_merge_does_not_corrupt_base_layer_on_non_finite_adapter(self):
         # Regression test: GLoRA's merge() used to accumulate the merged weights directly onto
@@ -2938,6 +3085,11 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_disable_adapters(self, test_name, model_id, config_cls, config_kwargs):
         # Test that it's possible to disable the adapter, in which case the model output should be identical to that of
         # the base model.
+        if config_kwargs.get("kasa_config", None) is not None:
+            pytest.skip(
+                "KaSA destructively truncates the base weight at adapter init, so the output with disabled adapters "
+                "intentionally differs from the base model"
+            )
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device).eval()
         outputs_base = model(**X)
@@ -3243,6 +3395,26 @@ class TestPeftCustomModel(PeftCommonTester):
         # model.active_adapter would not work, thus we have to check the base_model directly
         assert model.base_model.active_adapter == ["default", "other"]
 
+    @pytest.mark.parametrize("mixed", [False, True])
+    def test_add_adapter_rejects_duplicate_name_without_mutation(self, mixed):
+        # A duplicate name must fail before replacing the existing config or reinitializing its weights.
+        # LoRA is sufficient here because all PEFT methods go through the same add_adapter code path.
+        config = LoraConfig(target_modules=["lin0"], r=2, init_lora_weights=False)
+        model = get_peft_model(MLP(), config, adapter_name="existing", mixed=mixed)
+
+        config_before = model.peft_config["existing"]
+        state_dict_before = copy.deepcopy(model.state_dict())
+        replacement_config = LoraConfig(target_modules=["lin0"], r=4, init_lora_weights=False)
+
+        with pytest.raises(ValueError, match="Adapter with name 'existing' already exists"):
+            model.add_adapter("existing", replacement_config)
+
+        assert model.peft_config["existing"] is config_before
+        state_dict_after = model.state_dict()
+        assert state_dict_after.keys() == state_dict_before.keys()
+        for key, value in state_dict_before.items():
+            assert torch.equal(state_dict_after[key], value)
+
     @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
     def test_set_adapter_non_overlapping_modules(self, config_cls):
         # Ensure that when setting multiple adapters, the active adapters are correctly being set, even if
@@ -3438,7 +3610,7 @@ class TestPeftCustomModel(PeftCommonTester):
             target_modules=["layers.0.lin0"], modules_to_save=["layers.0.lin1", "layers.1.lin1"], **extra_kwargs
         )
         config1 = config_cls(
-            target_modules=["0layers..lin0"], modules_to_save=["layers.2.lin1", "layers.1.lin1"], **extra_kwargs
+            target_modules=["layers.0.lin0"], modules_to_save=["layers.2.lin1", "layers.1.lin1"], **extra_kwargs
         )
         model = get_peft_model(model, config0, adapter_name="default")
         # adding the adapter is fine
@@ -3532,6 +3704,31 @@ class TestPeftCustomModel(PeftCommonTester):
         assert all(module.disable_adapters for module in tuner_modules)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_disable_adapter_is_reentrant(self, test_name, model_id, config_cls, config_kwargs):
+        # Nested disable_adapter() contexts should keep adapters disabled until the outer context exits.
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        tuner_modules = [module for module in model.modules() if isinstance(module, BaseTunerLayer)]
+
+        assert all(not module.disable_adapters for module in tuner_modules)
+        assert model.has_active_enabled_adapter
+        with model.disable_adapter():
+            assert all(module.disable_adapters for module in tuner_modules)
+            assert not model.has_active_enabled_adapter
+            with model.disable_adapter():
+                assert all(module.disable_adapters for module in tuner_modules)
+                assert not model.has_active_enabled_adapter
+            # exiting the inner context must not re-enable adapters
+            assert all(module.disable_adapters for module in tuner_modules)
+            assert not model.has_active_enabled_adapter
+        assert all(not module.disable_adapters for module in tuner_modules)
+        assert model.has_active_enabled_adapter
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_disable_adapters_exiting_context_irregular_state(self, test_name, model_id, config_cls, config_kwargs):
         # When we have a model where some adapters are enabled and others are disabled, we should get a warning when
         # entering the disable_adapter context because we cannot correctly restore the state of the adapters from
@@ -3566,6 +3763,66 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_delete_adapter(self, test_name, model_id, config_cls, config_kwargs):
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_delete_merged_adapter_raises_without_mutation(self, test_name, model_id, config_cls, config_kwargs):
+        _skip_if_deleting_adapter_not_supported(config_cls, config_kwargs)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config_cls(**config_kwargs))
+        tuner_layers = [module for module in model.modules() if isinstance(module, BaseTunerLayer)]
+        model.merge_adapter()
+
+        merged_before = [layer.merged_adapters[:] for layer in tuner_layers]
+        available_before = [set(layer._all_available_adapter_names()) for layer in tuner_layers]
+
+        msg = "Cannot delete adapter(s) ['default'] while they are merged. Please unmerge them first."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            model.delete_adapter("default")
+
+        # the rejected deletion must leave the adapter and the merged state untouched
+        assert "default" in model.peft_config
+        assert [layer.merged_adapters[:] for layer in tuner_layers] == merged_before
+        assert [set(layer._all_available_adapter_names()) for layer in tuner_layers] == available_before
+
+        # after unmerging, the same deletion goes through
+        model.unmerge_adapter()
+        assert not any(layer.merged for layer in tuner_layers)
+        model.delete_adapter("default")
+        assert "default" not in model.peft_config
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_delete_merged_adapter_only_rejects_the_merged_one(self, test_name, model_id, config_cls, config_kwargs):
+        # with two adapters and only one of them merged, the merged one cannot be deleted while the other still can
+        _skip_if_deleting_adapter_not_supported(config_cls, config_kwargs)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
+
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        config = config_cls(**config_kwargs)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config, adapter_name="adapter0")
+        model.add_adapter("adapter1", config)
+        model.set_adapter("adapter1")
+        tuner_layers = [module for module in model.modules() if isinstance(module, BaseTunerLayer)]
+        model.merge_adapter()
+        merged_after_merge = [layer.merged_adapters[:] for layer in tuner_layers]
+
+        msg = "Cannot delete adapter(s) ['adapter1'] while they are merged. Please unmerge them first."
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            model.delete_adapter("adapter1")
+        assert set(model.peft_config) == {"adapter0", "adapter1"}
+
+        # deleting the unmerged adapter is allowed and keeps the merge in place
+        model.delete_adapter("adapter0")
+        assert set(model.peft_config) == {"adapter1"}
+        assert [layer.merged_adapters[:] for layer in tuner_layers] == merged_after_merge
+
+        model.unmerge_adapter()
+        model.delete_adapter("adapter1")
+        assert not model.peft_config
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_adapter_properly_cleans_up_after_itself(self, test_name, model_id, config_cls, config_kwargs):
@@ -3734,6 +3991,11 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_get_base_model_state_dict(self, test_name, model_id, config_cls, config_kwargs):
+        if config_kwargs.get("kasa_config", None) is not None:
+            pytest.skip(
+                "KaSA destructively truncates the base weight at adapter init, so the extracted base state dict "
+                "intentionally differs from the original base model"
+            )
         self._test_get_base_model_state_dict(model_id, config_cls, config_kwargs.copy())
 
     @staticmethod
@@ -3857,7 +4119,18 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize(
         "config_cls",
-        [IA3Config, BeftConfig, FrodConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig, MissConfig],
+        [
+            IA3Config,
+            BeftConfig,
+            FrodConfig,
+            LoHaConfig,
+            LoKrConfig,
+            LoraConfig,
+            HRAConfig,
+            ShiraConfig,
+            SupertuningConfig,
+            MissConfig,
+        ],
     )
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
@@ -3870,6 +4143,8 @@ class TestPeftCustomModel(PeftCommonTester):
             config_cls = partial(config_cls, r=2)
         if config_cls == ShiraConfig:
             config_cls = partial(config_cls, r=1)
+        if config_cls == SupertuningConfig:
+            config_cls = partial(config_cls, sparsity=0.5)
 
         config0 = config_cls(target_modules=["lin0"], modules_to_save=["lin1"])
         config1 = config_cls(target_modules=["lin0"])
@@ -3890,7 +4165,17 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize(
         "config_cls",
-        [IA3Config, BeftConfig, FrodConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, ShiraConfig],
+        [
+            IA3Config,
+            BeftConfig,
+            FrodConfig,
+            LoHaConfig,
+            LoKrConfig,
+            LoraConfig,
+            HRAConfig,
+            ShiraConfig,
+            SupertuningConfig,
+        ],
     )
     def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
         # See issue 1574
@@ -3902,6 +4187,8 @@ class TestPeftCustomModel(PeftCommonTester):
             config_cls = partial(config_cls, r=2)
         if config_cls == ShiraConfig:
             config_cls = partial(config_cls, r=1)
+        if config_cls == SupertuningConfig:
+            config_cls = partial(config_cls, sparsity=0.5)
 
         config0 = config_cls(target_modules=["lin0"])
         config1 = config_cls(target_modules=["lin0"], modules_to_save=["lin1"])
@@ -4224,6 +4511,32 @@ class TestPeftCustomModel(PeftCommonTester):
                 # windows error
                 pass
 
+    def test_save_embedding_layers_excludes_similarly_named_sibling(self, tmp_path):
+        # A module whose name merely starts with the embedding module name is not an embedding layer and must not be
+        # swept into the checkpoint by the key selection.
+        model = ModelEmbWithSibling()
+        model = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
+        model.save_pretrained(tmp_path, save_embedding_layers=True)
+
+        state_dict = safe_load_file(tmp_path / "adapter_model.safetensors")
+        assert "base_model.model.embed_tokens.weight" in state_dict  # sanity check
+        assert not any("embed_tokens_extra" in key for key in state_dict)
+
+    def test_load_does_not_overwrite_similarly_named_sibling(self, tmp_path):
+        # The leaked key is not reported in unexpected_keys, so loading such a checkpoint would silently overwrite a
+        # frozen base model weight of the target model.
+        model = ModelEmbWithSibling()
+        model = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
+        model.save_pretrained(tmp_path, save_embedding_layers=True)
+        del model
+
+        model = ModelEmbWithSibling()
+        with torch.no_grad():
+            model.embed_tokens_extra.weight.fill_(123.0)
+        target = PeftModel.from_pretrained(model, tmp_path)
+        extra_weight = target.base_model.model.embed_tokens_extra.weight
+        assert torch.allclose(extra_weight, torch.full_like(extra_weight, 123.0))
+
     @pytest.mark.parametrize(
         "config0",
         [
@@ -4463,6 +4776,34 @@ class TestPeftCustomModel(PeftCommonTester):
         output2 = model(**inputs).logits
 
         assert (output1 == output2).all()
+
+    def test_pvera_generator_is_per_adapter(self):
+        # Each adapter gets its own generator, otherwise adding a second adapter would reset the sampling stream of
+        # the first one.
+        def get_config():
+            return PveraConfig(
+                r=8, init_weights=False, target_modules=["lin0"], sample_at_inference=True, generator_seed=0
+            )
+
+        model = get_peft_model(MLP(), get_config()).to(self.torch_device)
+        model.eval()
+        X = torch.randn(9, 10).to(self.torch_device)
+        with torch.no_grad():
+            model(X)  # ticks the state of the "default" generator forward
+
+        state = model.base_model.model.lin0.pvera_generator["default"].get_state()
+        model.add_adapter("other", get_config())
+
+        generators = model.base_model.model.lin0.pvera_generator
+        assert set(generators) == {"default", "other"}
+        assert (generators["default"].get_state() == state).all()
+        assert not (generators["other"].get_state() == state).all()
+
+    def test_pvera_no_generator_seed_means_no_generator(self):
+        config = PveraConfig(r=8, init_weights=False, target_modules=["lin0"], sample_at_inference=True)
+        model = get_peft_model(MLP(), config).to(self.torch_device)
+
+        assert model.base_model.model.lin0.pvera_generator["default"] is None
 
 
 class TestMultiRankAdapter:
@@ -4799,6 +5140,164 @@ class TestMultipleActiveAdapters:
             outputs_merged_adapter_default = model_merged_adapter_default(**dummy_input)
 
         assert torch.allclose(outputs_merged_adapter_default, outputs_adapter_1, atol=1e-3, rtol=1e-3)
+
+    @pytest.mark.parametrize(
+        "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
+    )
+    def test_sequential_merge_matches_batch_merge(
+        self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
+    ):
+        _skip_if_merging_not_supported(test_name, config_cls, config_kwargs_1)
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
+        if tuner_method == "deft":
+            config_kwargs_1 = {**config_kwargs_1, "decomposition_method": "relu"}
+            config_kwargs_2 = {**config_kwargs_2, "decomposition_method": "relu"}
+
+        torch.manual_seed(0)
+        model = self.resolve_model_cls(tuner_method).to(self.torch_device).eval()
+        config_1 = config_cls(**config_kwargs_1)
+        config_2 = config_cls(**config_kwargs_2)
+        model = get_peft_model(model, config_1, adapter_name="adapter_1").eval()
+        model.add_adapter("adapter_2", config_2)
+        sequential_model = copy.deepcopy(model)
+        X = self.prepare_inputs_for_testing()
+
+        model.merge_adapter(["adapter_1", "adapter_2"])
+        batch_output = model(**X)
+
+        sequential_model.merge_adapter(["adapter_1"])
+        sequential_model.merge_adapter(["adapter_2"])
+        sequential_output = sequential_model(**X)
+
+        assert torch.allclose(sequential_output, batch_output, atol=1e-3, rtol=1e-3)
+
+    @pytest.mark.parametrize(
+        "test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2", MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES
+    )
+    def test_unmerge_after_sequential_merge_restores_base(
+        self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
+    ):
+        _skip_if_merging_not_supported(test_name, config_cls, config_kwargs_1)
+        _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs_2)
+        if tuner_method == "deft":
+            config_kwargs_1 = {**config_kwargs_1, "decomposition_method": "relu"}
+            config_kwargs_2 = {**config_kwargs_2, "decomposition_method": "relu"}
+
+        torch.manual_seed(0)
+        model = self.resolve_model_cls(tuner_method).to(self.torch_device).eval()
+        X = self.prepare_inputs_for_testing()
+        base_output = model(**X)
+        config_1 = config_cls(**config_kwargs_1)
+        config_2 = config_cls(**config_kwargs_2)
+        model = get_peft_model(model, config_1, adapter_name="adapter_1").eval()
+        model.add_adapter("adapter_2", config_2)
+
+        model.merge_adapter(["adapter_1"])
+        model.merge_adapter(["adapter_2"])
+        model.unmerge_adapter()
+
+        with model.disable_adapter():
+            unmerged_output = model(**X)
+
+        assert torch.allclose(unmerged_output, base_output, atol=1e-3, rtol=1e-3)
+
+    @pytest.mark.parametrize(
+        "model_cls, module_name",
+        [(MLP, "lin0"), (ModelEmbConv1D, "emb"), (ModelConv2D, "conv2d")],
+    )
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    def test_multiple_active_dora_adapters_merge_matches_forward(self, model_cls, module_name, safe_merge):
+        # DoRA normalizes by the norm of the unmerged base weight. Adapters are merged one after another, so from the
+        # second adapter on, the weight being merged into already holds the previously merged ones; taking the norm
+        # from it makes the merged model differ from the unmerged forward pass. The adapters have to share a target
+        # module for this to show up.
+        torch.manual_seed(0)
+
+        model = model_cls().to(self.torch_device).eval()
+        X = self.prepare_inputs_for_testing()
+        base_output = model(**X)
+
+        def config():
+            return LoraConfig(target_modules=[module_name], init_lora_weights=False, use_dora=True)
+
+        peft_model = get_peft_model(model, config(), adapter_name="adapter_0").eval()
+        adapters = ["adapter_0"]
+        for i in range(1, 3):
+            peft_model.add_adapter(f"adapter_{i}", config())
+            adapters.append(f"adapter_{i}")
+
+        self.set_multiple_active_adapters(peft_model, adapters)
+        combined_output = peft_model(**X)
+
+        peft_model.merge_adapter(safe_merge=safe_merge)
+        assert torch.allclose(peft_model(**X), combined_output, atol=1e-4)
+
+        peft_model.unmerge_adapter()
+        assert torch.allclose(peft_model(**X), combined_output, atol=1e-4)
+
+        with peft_model.disable_adapter():
+            assert torch.allclose(peft_model(**X), base_output, atol=1e-4)
+
+    @pytest.mark.parametrize(
+        "model_cls, module_name",
+        [(MLP, "lin0"), (ModelEmbConv1D, "emb"), (ModelConv2D, "conv2d")],
+    )
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    def test_plain_lora_and_dora_adapters_merge_matches_forward(self, model_cls, module_name, safe_merge):
+        # A plain LoRA adapter merges into the base weight in place, so the DoRA adapters that follow have to work on
+        # a copy of the unmerged weight, not on the weight itself.
+        torch.manual_seed(0)
+
+        model = model_cls().to(self.torch_device).eval()
+        X = self.prepare_inputs_for_testing()
+        base_output = model(**X)
+
+        def config(use_dora):
+            return LoraConfig(target_modules=[module_name], init_lora_weights=False, use_dora=use_dora)
+
+        peft_model = get_peft_model(model, config(use_dora=False), adapter_name="adapter_0").eval()
+        peft_model.add_adapter("adapter_1", config(use_dora=True))
+        peft_model.add_adapter("adapter_2", config(use_dora=True))
+        adapters = ["adapter_0", "adapter_1", "adapter_2"]
+
+        self.set_multiple_active_adapters(peft_model, adapters)
+        combined_output = peft_model(**X)
+
+        peft_model.merge_adapter(safe_merge=safe_merge)
+        assert torch.allclose(peft_model(**X), combined_output, atol=1e-4)
+
+        peft_model.unmerge_adapter()
+        assert torch.allclose(peft_model(**X), combined_output, atol=1e-4)
+
+        with peft_model.disable_adapter():
+            assert torch.allclose(peft_model(**X), base_output, atol=1e-4)
+
+    @pytest.mark.parametrize(
+        "model_cls, module_name",
+        [(MLP, "lin0"), (ModelEmbConv1D, "emb"), (ModelConv2D, "conv2d")],
+    )
+    def test_multiple_active_dora_adapters_safe_and_unsafe_merge_agree(self, model_cls, module_name):
+        # Taking the already merged adapters out of the base weight and putting them back rebuilds that weight, and it
+        # is the rebuilt one that ends up in the layer. The safe path has to carry on from it as well, otherwise the
+        # two paths merge into different weights.
+        def merged_weight(safe_merge):
+            torch.manual_seed(0)
+            model = model_cls().to(self.torch_device).eval()
+
+            def config():
+                return LoraConfig(target_modules=[module_name], init_lora_weights=False, use_dora=True)
+
+            peft_model = get_peft_model(model, config(), adapter_name="adapter_0").eval()
+            adapters = ["adapter_0"]
+            for i in range(1, 3):
+                peft_model.add_adapter(f"adapter_{i}", config())
+                adapters.append(f"adapter_{i}")
+
+            self.set_multiple_active_adapters(peft_model, adapters)
+            peft_model.merge_adapter(safe_merge=safe_merge)
+            return peft_model.base_model.model.get_submodule(module_name).get_base_layer().weight.data.clone()
+
+        assert torch.equal(merged_weight(safe_merge=True), merged_weight(safe_merge=False))
 
 
 class MLP_2x_same_shape(nn.Module):
@@ -5178,16 +5677,10 @@ class TestRequiresGrad:
             "base_model.model.lin0.ia3_l.adapter1",
         )
 
-    @pytest.mark.xfail(strict=True)
     def test_requires_grad_adalora_different_targets(self):
         # test two different AdaLora adapters that target different modules
+        # adding an inference-only adapter must not freeze the active adapter, see #3487
 
-        # Note: This test is expected to fail because first loading one adapter, then the next adapter with
-        # inference_mode=True incorrectly leads to the requires_grad of the first adapter being turned to False. This is
-        # of course not desired but has yet to be fixed. In practice, it's unlikely that a user would pass
-        # inference_mode=True for add_adapter, this flag is mostly being used when calling PeftModel.from_pretrained, so
-        # we accept this issue for now. Note that only for AdaLoRA do we even need to pass inference_mode=True here,
-        # other PEFT methods don't require this.
         config0 = AdaLoraConfig(target_modules=["lin0"], total_step=1)
         peft_model = get_peft_model(MLP(), config0)
 
@@ -5233,16 +5726,9 @@ class TestRequiresGrad:
             "base_model.model.lin1.lora_E.adapter1",
         )
 
-    @pytest.mark.xfail(strict=True)
     def test_requires_grad_adalora_same_targets(self):
         # same as previous test, except that AdaLora adapters target the same layer
 
-        # Note: This test is expected to fail because first loading one adapter, then the next adapter with
-        # inference_mode=True incorrectly leads to the requires_grad of the first adapter being turned to False. This is
-        # of course not desired but has yet to be fixed. In practice, it's unlikely that a user would pass
-        # inference_mode=True for add_adapter, this flag is mostly being used when calling PeftModel.from_pretrained, so
-        # we accept this issue for now. Note that only for AdaLoRA do we even need to pass inference_mode=True here,
-        # other PEFT methods don't require this.
         config0 = AdaLoraConfig(target_modules=["lin0"], total_step=1)
         peft_model = get_peft_model(MLP(), config0)
 
@@ -6546,15 +7032,58 @@ class TestRequiresGrad:
             return
         model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
         if is_trainable:
+            expected_trainable_adapters = ("default", "other")
             for name, param in model.named_parameters():
                 if skip_ranknum and "ranknum" in name:
                     continue
-                if ".default" in name:
+                if any(f".{adapter_name}" in name for adapter_name in expected_trainable_adapters):
                     assert param.requires_grad
                 else:
                     assert not param.requires_grad
         else:
             assert all(not p.requires_grad for p in model.parameters())
+
+        # load a third adapter with the opposite trainability; it is not automatically activated
+        model.load_adapter(tmp_path, adapter_name="opposite", is_trainable=not is_trainable)
+        expected_trainable_adapters = ("default", "other") if is_trainable else ("opposite",)
+        for name, param in model.named_parameters():
+            if skip_ranknum and "ranknum" in name:
+                continue
+            if any(f".{adapter_name}" in name for adapter_name in expected_trainable_adapters):
+                assert param.requires_grad
+            else:
+                assert not param.requires_grad
+
+        if config_cls is AdaLoraConfig:
+            # AdaLoRA structurally rejects adding another training-mode config.
+            return
+
+        # add_adapter does not request trainability; the new adapter stays frozen and existing state is unchanged
+        model.add_adapter(adapter_name="added", peft_config=config)
+        for name, param in model.named_parameters():
+            if skip_ranknum and "ranknum" in name:
+                continue
+            if any(f".{adapter_name}" in name for adapter_name in expected_trainable_adapters):
+                assert param.requires_grad
+            else:
+                assert not param.requires_grad
+
+    def test_loading_adapter_preserves_custom_requires_grad(self, tmp_path):
+        config = LoraConfig(target_modules=["layers.0.lin0"])
+        source_model = get_peft_model(DeepMLP(size=256), config)
+        source_model.save_pretrained(tmp_path)
+
+        model = get_peft_model(DeepMLP(size=256), config)
+        # Emulate a user fine-tuning one base-model weight while intentionally freezing one adapter parameter.
+        model.base_model.model.layers[0].lin0.base_layer.weight.requires_grad = True
+        model.base_model.model.layers[0].lin0.lora_A["default"].weight.requires_grad = False
+        existing_requires_grad = {name: param.requires_grad for name, param in model.named_parameters()}
+
+        model.load_adapter(tmp_path, adapter_name="other", is_trainable=False)
+
+        for name, requires_grad in existing_requires_grad.items():
+            assert model.get_parameter(name).requires_grad is requires_grad
+        assert all(not param.requires_grad for name, param in model.named_parameters() if ".other" in name)
 
     @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
     @pytest.mark.parametrize("is_trainable", [False, True])  # note: default is False
@@ -6599,10 +7128,11 @@ class TestRequiresGrad:
             return
         model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
         if is_trainable:
+            expected_trainable_adapters = ("default", "other")
             for name, param in model.named_parameters():
                 if skip_ranknum and "ranknum" in name:
                     continue
-                if ".default" in name:
+                if any(f".{adapter_name}" in name for adapter_name in expected_trainable_adapters):
                     assert param.requires_grad
                 else:
                     assert not param.requires_grad
@@ -6633,67 +7163,14 @@ class TestRequiresGrad:
         # load one more adapter
         model.load_adapter(tmp_path, adapter_name="other", is_trainable=is_trainable)
         if is_trainable:
+            expected_trainable_adapters = ("default", "other")
             for name, param in model.named_parameters():
-                if ".default" in name:
+                if any(f".{adapter_name}" in name for adapter_name in expected_trainable_adapters):
                     assert param.requires_grad
                 else:
                     assert not param.requires_grad
         else:
             assert all(not p.requires_grad for p in model.parameters())
-
-    @pytest.mark.xfail(strict=True)
-    @pytest.mark.parametrize("config_cls", [LoraConfig])  # no need to check each method, they all fail
-    def test_loading_model_requires_grad_set_correctly_switch_inference_mode(self, config_cls, tmp_path):
-        # Same as test_loading_model_requires_grad_set_correctly but this time we first load with is_trainable=False and
-        # then with is_trainable=True. Loading the second adapter should not affect the requires_grad of the first
-        # adapter, but it does. The reason is that is_training/inference_mode is taken from the current PEFT config, but
-        # that config does not necessarily belong to the active adapter, creating a mismatch.
-        # When/If this is fixed, the check can be integrated into test_loading_model_requires_grad_set_correctly and
-        # this test can be deleted.
-        model = DeepMLP(size=256)  # a size that works with all adapters
-        extra_kwargs = {}
-        config = config_cls(target_modules=["layers.0.lin0"])
-        model = get_peft_model(model, config)
-        model.save_pretrained(tmp_path)
-        del model
-
-        model = DeepMLP(size=256)
-        model = PeftModel.from_pretrained(model, tmp_path, is_trainable=False)
-        assert all(not p.requires_grad for p in model.parameters())
-
-        # load one more adapter; this adapter is not automatically activated
-        model.load_adapter(tmp_path, adapter_name="other", is_trainable=True)
-        params_with_grad = [n for n, p in model.named_parameters() if p.requires_grad]
-        expected = [
-            "base_model.model.layers.0.lin0.lora_A.other.weight",
-            "base_model.model.layers.0.lin0.lora_B.other.weight",
-        ]
-        # this fails, instead with get ...lora_A.default.weight and ...lora_B.default.weight
-        assert params_with_grad == expected
-
-    @pytest.mark.xfail(strict=True)
-    @pytest.mark.parametrize("config_cls", [LoraConfig])  # no need to check each method, they all fail
-    def test_loading_model_requires_grad_load_adapter_then_add_adapter(self, config_cls, tmp_path):
-        # When adding a new adapter with model.add_adapter, through the set_adapter call in update_layer, we activate
-        # the gradients of the first adapter, even if it's not desired. Since there is no is_trainable argument on
-        # add_adapter, there is no way to disable that at the moment.
-        # When/If this is fixed, the check can be integrated into test_loading_model_requires_grad_set_correctly and
-        # this test can be deleted.
-        model = DeepMLP(size=256)  # a size that works with all adapters
-        extra_kwargs = {}
-        config = config_cls(target_modules=["layers.0.lin0"])
-        model = get_peft_model(model, config)
-        model.save_pretrained(tmp_path)
-        del model
-
-        model = DeepMLP(size=256)
-        model = PeftModel.from_pretrained(model, tmp_path, is_trainable=False)
-        assert all(not p.requires_grad for p in model.parameters())
-
-        # add a new adapter
-        model.add_adapter(adapter_name="other", peft_config=config)
-        params_with_grad = [n for n, p in model.named_parameters() if p.requires_grad]
-        assert all(not p.requires_grad for p in model.parameters())
 
 
 # this is for PEFT methods that support mixed adapter batches.
@@ -7436,3 +7913,132 @@ class TestDefaultTargetModules:
         model = get_peft_model(model, config)
         assert model.targeted_module_names == ["lin0", "lin1"]
         assert model.peft_config["default"].target_modules == {"lin0", "lin1"}
+
+
+@pytest.mark.skipif(platform.system() != "Linux", reason="Run FSDP tests only on Linux")
+@pytest.mark.skipif(not dist.is_available(), reason="These tests require torch.distributed")
+class TestPeftFsdpStateDict:
+    """
+    Tests with FSDP-wrapped models.
+
+    FSDP is a special case because it wraps the whole module, thus modifying the module structure and state dict.
+
+    This test would be better suited to `test_low_level_api.py` but it's put here because we already have all the
+    machinery ready to check each PEFT method.
+    """
+
+    transformers_class = MockTransformerWrapper
+    torch_device = infer_device()
+
+    def prepare_inputs_for_testing(self):
+        X = torch.arange(90).view(9, 10).to(self.torch_device)
+        return {"X": X}
+
+    @pytest.fixture(autouse=True, scope="class")
+    def fsdp_process_group(self):
+        # robust and minimal FSDP setup
+        dist.init_process_group(
+            backend="gloo",
+            store=dist.HashStore(),
+            rank=0,
+            world_size=1,
+        )
+        try:
+            yield
+        finally:
+            dist.destroy_process_group()
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_save_load_roundtrip_fsdp_wrapped(self, test_name, model_id, config_cls, config_kwargs):
+        # using get_peft_model_state_dict & set_peft_model_state_dict because instead of save_pretrained &
+        # from_pretrained because:
+        #   1. avoid disk, do everything in memory
+        #   2. ensures that this works with PEFT integrations like Transformers, Diffusers
+        if config_kwargs.get("target_parameters"):
+            pytest.skip("Skipping FSDP + target_paramters because of clash with nn.utils.parametrize on sharded model")
+        if (config_cls == DeftConfig) and config_kwargs.get("para"):
+            pytest.skip(reason="DEFT with PaRa does not change the base output")
+
+        config_kwargs_init_false = set_init_weights_false(config_cls, config_kwargs)
+        config = config_cls(**config_kwargs_init_false)
+        torch.manual_seed(0)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config).eval()
+        model = FSDP(model, use_orig_params=True, device_id=self.torch_device)
+
+        X = self.prepare_inputs_for_testing()
+        with torch.no_grad():
+            output_before = model(**X)
+
+        state_dict = get_peft_model_state_dict(model)
+        del model
+
+        torch.manual_seed(0)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config_cls(**config_kwargs)).eval()
+        # note: we don't make a sanity check that without setting the state dict, the results differ; this is on
+        # purpose, because otherwise we can't check PEFT methods that don't have non-identity inits
+        set_peft_model_state_dict(model, state_dict)
+
+        with torch.no_grad():
+            output_after = model(**X)
+        assert torch.allclose(output_after, output_before)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    @pytest.mark.parametrize("bias_arg", ["bias_all", "bias_peft_method_only"])
+    def test_save_load_roundtrip_fsdp_wrapped_learnable_bias(
+        self, test_name, model_id, config_cls, config_kwargs, bias_arg
+    ):
+        # Same test as test_save_load_roundtrip_fsdp_wrapped, but for the specific case that the bias is
+        # learnable. Regarding the `bias` argument, there are normally 3 possibilities:
+        # 1. It's not supported: test is skipped
+        # 2. `bias="all"`: all bias parameters on the model are made learnable
+        # 3. `bias="<peft-method-name>_only", e.g. "lora_only": only the biases on targeted modules are learnable
+        if config_kwargs.get("target_parameters"):
+            pytest.skip("Skipping FSDP + target_paramters")
+        if (config_cls == DeftConfig) and config_kwargs.get("para"):
+            pytest.skip(reason="DEFT with PaRa does not change the base output")
+
+        config_kwargs_init_false = set_init_weights_false(config_cls, config_kwargs)
+        config = config_cls(**config_kwargs_init_false)
+        if not hasattr(config, "bias"):
+            pytest.skip(reason="This test requires the PEFT method to support training the bias directly")
+
+        # Manually enable bias learning, don't rely on the test matrix to include an example with bias learning
+        # enabled.
+        if bias_arg == "bias_peft_method_only":
+            # e.g. "lora_only" or "boft_only"
+            config.bias = f"{config.peft_type.value.lower()}_only"
+        else:
+            config.bias = "all"
+
+        torch.manual_seed(0)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config).eval()
+
+        # modify the bias
+        for name, module in model.named_modules():
+            if (bias_arg == "bias_peft_method_only") and not isinstance(module, BaseTunerLayer):
+                continue
+            if getattr(module, "bias", None) is not None:
+                with torch.no_grad():
+                    module.bias.data.fill_(1.23)
+
+        model = FSDP(model, use_orig_params=True, device_id=self.torch_device)
+        X = self.prepare_inputs_for_testing()
+        with torch.no_grad():
+            output_before = model(**X)
+
+        state_dict = get_peft_model_state_dict(model)
+        del model
+
+        torch.manual_seed(0)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = get_peft_model(model, config_cls(**config_kwargs)).eval()
+        # note: we don't make a sanity check that without setting the state dict, the results differ; this is on
+        # purpose, because otherwise we can't check PEFT methods that don't have non-identity inits
+        set_peft_model_state_dict(model, state_dict)
+
+        with torch.no_grad():
+            output_after = model(**X)
+        assert torch.allclose(output_after, output_before)

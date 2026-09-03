@@ -80,6 +80,13 @@ class HRALayer(BaseTunerLayer):
         if isinstance(base_layer, nn.Linear):
             self.hra_u[adapter_name] = nn.Parameter(torch.empty(self.in_features, r), requires_grad=True)
         elif isinstance(base_layer, nn.Conv2d):
+            if base_layer.groups > 1:
+                # hra_u is sized for the full in_channels * kernel_size**2, but a grouped conv's weight only
+                # holds in_channels // groups there, so forward and merge both crash on shape mismatch.
+                raise NotImplementedError(
+                    f"HRA does not support {type(base_layer).__name__} layers with groups > 1 "
+                    f"(got groups={base_layer.groups})."
+                )
             self.hra_u[adapter_name] = nn.Parameter(
                 torch.empty(self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0], r),
                 requires_grad=True,
