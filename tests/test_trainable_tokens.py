@@ -1439,3 +1439,20 @@ class TestTrainableTokens:
 
         # Second adapter should also maintain tying
         assert embed_layer.trainable_tokens_delta["adapter2"] is lm_head_layer.trainable_tokens_delta["adapter2"]
+
+
+def test_linear_tied_head_preserves_bias():
+    """Unmerged Linear (tied LM head) must keep the pretrained bias (issue #3649)."""
+    torch.manual_seed(0)
+    linear = torch.nn.Linear(8, 10, bias=True)
+    x = torch.randn(3, 8)
+    with torch.no_grad():
+        expected = linear(x)
+
+    layer = TrainableTokensLayer(linear, "default")
+    layer.update_layer("default", TrainableTokensConfig(token_indices=[0], target_modules=["lin"]))
+    with torch.no_grad():
+        active = layer(x)
+
+    torch.testing.assert_close(active, expected)
+    assert (active - (expected - linear.bias)).abs().max().item() > 1.0

@@ -261,10 +261,13 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
                 if embed_scale is not None:
                     result = result * embed_scale.to(result.dtype)
             elif isinstance(self.base_layer, torch.nn.Linear):
-                # Probably a tied adapter that wraps an LM head.
+                # Probably a tied adapter that wraps an LM head. Preserve the
+                # pretrained bias — omitting it shifts logits even with a
+                # no-op adapter (see huggingface/peft#3649).
                 result = F.linear(
                     input=x,
                     weight=W,
+                    bias=self.base_layer.bias,
                 )
             else:
                 raise ValueError(
