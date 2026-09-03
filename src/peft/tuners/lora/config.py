@@ -26,7 +26,7 @@ from peft.config import PeftConfig
 from peft.utils import PeftType
 
 
-def _get_lora_subconfig(value, config_cls, field_name=None):
+def _get_lora_subconfig(value, config_cls):
     """Convert a nested sub-config that was loaded as a plain dict back into its dataclass type.
 
     `save_pretrained` serializes nested sub-configs recursively (via `asdict`), so after loading from
@@ -41,8 +41,7 @@ def _get_lora_subconfig(value, config_cls, field_name=None):
     if isinstance(value, dict):
         init_keys = {f.name for f in dataclasses.fields(config_cls) if f.init}
         return config_cls(**{k: v for k, v in value.items() if k in init_keys})
-    type_name = field_name if field_name is not None else config_cls.__name__
-    raise TypeError(f"`{type_name}` must be a `{config_cls.__name__}`, a dict, or None.")
+    raise TypeError(f"`{config_cls.__name__}` must be a `{config_cls.__name__}`, a dict, or None.")
 
 
 @dataclass
@@ -1025,16 +1024,14 @@ class LoraConfig(PeftConfig):
 
         # Nested sub-configs: save_pretrained serializes them via asdict, so after loading from a checkpoint they
         # arrive as plain dicts and must be converted back (see issue #3583). Unified handling for all variants
-        # via _get_lora_subconfig — it also validates that the value is None, an instance, or a dict. We pass the
-        # field name so the error message points at the caller-facing attribute (e.g. `kasa_config`) rather than
-        # the class name, preserving the contract that existing tests assert.
-        self.velora_config = _get_lora_subconfig(self.velora_config, VeloraConfig, field_name="velora_config")
-        self.kasa_config = _get_lora_subconfig(self.kasa_config, KasaConfig, field_name="kasa_config")
-        self.eva_config = _get_lora_subconfig(self.eva_config, EvaConfig, field_name="eva_config")
-        self.corda_config = _get_lora_subconfig(self.corda_config, CordaConfig, field_name="corda_config")
-        self.lora_ga_config = _get_lora_subconfig(self.lora_ga_config, LoraGAConfig, field_name="lora_ga_config")
-        self.arrow_config = _get_lora_subconfig(self.arrow_config, ArrowConfig, field_name="arrow_config")
-        self.use_bdlora = _get_lora_subconfig(self.use_bdlora, BdLoraConfig, field_name="use_bdlora")
+        # via _get_lora_subconfig — it also validates that the value is None, an instance, or a dict.
+        self.velora_config = _get_lora_subconfig(self.velora_config, VeloraConfig)
+        self.kasa_config = _get_lora_subconfig(self.kasa_config, KasaConfig)
+        self.eva_config = _get_lora_subconfig(self.eva_config, EvaConfig)
+        self.corda_config = _get_lora_subconfig(self.corda_config, CordaConfig)
+        self.lora_ga_config = _get_lora_subconfig(self.lora_ga_config, LoraGAConfig)
+        self.arrow_config = _get_lora_subconfig(self.arrow_config, ArrowConfig)
+        self.use_bdlora = _get_lora_subconfig(self.use_bdlora, BdLoraConfig)
 
         if isinstance(self.target_parameters, str):
             raise TypeError("`target_parameters` must be a list of strings or None.")

@@ -2188,7 +2188,7 @@ class TestKasaInitialization:
         )
 
     def test_kasa_config_invalid_type_raises(self):
-        with pytest.raises(TypeError, match="`kasa_config` must be a `KasaConfig`"):
+        with pytest.raises(TypeError, match="`KasaConfig` must be a `KasaConfig`, a dict, or None."):
             LoraConfig(target_modules=["lin0"], kasa_config=123)
 
     def test_kasa_config_negative_coeffs_raise(self):
