@@ -2545,6 +2545,26 @@ class TestPeftCustomModel(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_safe_merge(model_id, config_cls, config_kwargs)
 
+    @pytest.mark.parametrize(("target_module", "token_indices"), [("emb", [0, 1, 3]), ("lin0", [0, 1])])
+    def test_trainable_tokens_random_init_unmerge_restores_base_weights(self, target_module, token_indices):
+        # A merge/unmerge cycle must preserve the base weights even when the adapter starts with random weights; see #3650.
+        torch.manual_seed(0)
+        model = ModelEmbConv1D()
+        X = torch.arange(90).view(9, 10)
+        output_base = model(X).detach().clone()
+        config = TrainableTokensConfig(target_modules=[target_module], token_indices=token_indices, init_weights=False)
+        model = get_peft_model(model, config)
+
+        with model.disable_adapter():
+            output_disabled_before = model(X)
+        model.merge_adapter()
+        model.unmerge_adapter()
+        with model.disable_adapter():
+            output_disabled_after = model(X)
+
+        assert torch.allclose(output_disabled_before, output_base)
+        assert torch.allclose(output_disabled_after, output_base)
+
     @pytest.mark.parametrize("conv_cls", [nn.Conv2d, nn.Conv3d])
     @pytest.mark.parametrize("safe_merge", [False, True])
     def test_ia3_grouped_conv_feedforward_merge(self, conv_cls, safe_merge):
@@ -3220,6 +3240,9 @@ class TestPeftCustomModel(PeftCommonTester):
             _zero_unilora_theta_d(model)
         model.eval()
         outputs_before = model(**X)
+        if issubclass(config_cls, TrainableTokensConfig):
+            with model.disable_adapter():
+                outputs_base = model(**X)
 
         if issubclass(config_cls, VBLoRAConfig):
             # initialize `vblora_vector_bank` so it can be trained
@@ -3298,7 +3321,8 @@ class TestPeftCustomModel(PeftCommonTester):
         # (skipped for PaRa: DEFT with para=True is not identity-at-init, so `outputs_before` already differs from the
         # disabled/base output; the disable -> base behavior is covered by test_disable_adapters)
         if not (isinstance(config, DeftConfig) and config.para):
-            assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol)
+            expected_disabled = outputs_base if issubclass(config_cls, TrainableTokensConfig) else outputs_before
+            assert torch.allclose(expected_disabled, outputs_disabled, atol=atol, rtol=rtol)
 
         # check that enabling + disabling adapters does not change the results
         assert torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol)
