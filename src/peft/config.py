@@ -194,7 +194,13 @@ class PeftConfigMixin(PushToHubMixin):
 
         if "peft_type" in kwargs:
             peft_type = kwargs["peft_type"]
-            config_cls = PEFT_TYPE_TO_CONFIG_MAPPING[peft_type]
+            try:
+                config_cls = PEFT_TYPE_TO_CONFIG_MAPPING[peft_type]
+            except KeyError:
+                # A missing `peft_type` is reported further down, but an invalid one would
+                # otherwise surface as a bare KeyError that does not name the offending field.
+                valid_peft_types = sorted(known.value for known in PEFT_TYPE_TO_CONFIG_MAPPING)
+                raise ValueError(f"`peft_type` must be one of {valid_peft_types}; got {peft_type!r}.") from None
         else:
             config_cls = cls
 

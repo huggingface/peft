@@ -205,6 +205,15 @@ class TestPeftConfig:
             config = PeftConfig.from_peft_type(peft_type=peft_type, **mandatory_config_kwargs)
             assert type(config) is expected_cls
 
+    @pytest.mark.parametrize("invalid_peft_type", [None, "LORAA", "lora"])
+    def test_from_peft_type_invalid(self, invalid_peft_type):
+        r"""
+        Test that an invalid `peft_type` names the offending field instead of raising a
+        bare KeyError from the config mapping lookup.
+        """
+        with pytest.raises(ValueError, match=r"`peft_type` must be one of .+; got "):
+            PeftConfig.from_peft_type(peft_type=invalid_peft_type)
+
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
     def test_from_pretrained(self, config_class, mandatory_kwargs):
         r"""
