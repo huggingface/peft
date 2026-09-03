@@ -2214,6 +2214,7 @@ class TestPrepareModelForKbitTraining:
         model.is_loaded_in_8bit = True
         return model
 
+    # Keep this skip limited to CUDA/XPU because prepare_model_for_kbit_training only clears those caches today.
     @pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
     def test_prepare_model_for_kbit_training_no_memory_leak(self):
         """CUDA/XPU: empty_cache() after bulk fp16→fp32 casts keeps reserved memory under 200 MB (issue #3265)."""
