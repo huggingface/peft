@@ -742,6 +742,20 @@ class ShadowModel(BaseTuner):
         for container in (self.shadow_backbone, self.shadow_projection, self.shadow_head):
             for adapter_name, module in container.items():
                 module.requires_grad_(adapter_name in self.active_adapters and not inference_mode)
+        # Base lm_head handling for CAUSAL_LM where shadow_head is None and the base head is reused via
+        # modules_to_save. The head lives on self.model, not in shadow_* containers, so sync it here.
+        manages_head = False
+        should_train_head = False
+        for adapter_name, cfg in self.peft_config.items():
+            if "lm_head" in (cfg.modules_to_save or []) and str(cfg.task_type) == str(TaskType.CAUSAL_LM):
+                manages_head = True
+                if not inference_mode and adapter_name in (self.active_adapters or []):
+                    should_train_head = True
+                    break
+        if manages_head:
+            head = self.model.get_output_embeddings()
+            if isinstance(head, torch.nn.Module):
+                head.requires_grad_(should_train_head)
         for adapter_name, backbone in self.shadow_backbone.items():
             # For a pretrained shadow backbone, keep its embeddings frozen. (A "mirror" backbone either shares the
             # frozen base embeddings -- absent here -- or has randomly-initialized ones that must stay trainable.)
