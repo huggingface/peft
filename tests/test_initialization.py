@@ -27,7 +27,7 @@ from huggingface_hub import snapshot_download
 from safetensors.torch import load_file, save_file
 from scipy import stats
 from torch import nn
-from transformers import AutoModelForCausalLM, LlamaConfig, LlamaForSequenceClassification
+from transformers import AutoModelForCausalLM, LlamaConfig, LlamaForCausalLM, LlamaForSequenceClassification
 
 from peft import (
     AdaLoraConfig,
@@ -46,6 +46,7 @@ from peft import (
     LoftQConfig,
     LoKrConfig,
     LoraConfig,
+    MoeToDenseConfig,
     PeanutConfig,
     PeftMixedModel,
     PeftModel,
@@ -76,10 +77,13 @@ from peft.tuners.lokr.layer import LoKrLayer
 from peft.tuners.lora.config import CordaConfig
 from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
+from peft.tuners.moe_to_dense.arch import ARCH_SPECS, MoeArchSpec
+from peft.tuners.moe_to_dense.layer import forward_kl_divergence
 from peft.utils import infer_device
 from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
 from peft.utils.other import ModulesToSaveWrapper
 
+from .test_moe_to_dense import NUM_EXPERTS, VOCAB_SIZE, build_model, calibrate, get_inputs, get_layers
 from .testing_utils import hub_online_once, require_deterministic_for_xpu
 
 
@@ -6429,3 +6433,110 @@ class TestTinyLoraInitialization:
         model_control = get_peft_model(mlp_control, config_b2, adapter_name="b")
 
         assert len(model.tinylora_v["b"]) == len(model_control.tinylora_v["b"]) == 1
+
+
+class TestMoeToDenseErrors:
+    """Expected failure cases of the MoE-to-dense method at its transformers integration boundary.
+
+    The happy paths, and failure cases that require the full workflow, are covered in test_moe_to_dense.py.
+    """
+
+    def test_invalid_scoring_raises(self):
+        with pytest.raises(ValueError, match="Unknown scoring method 'nope'"):
+            MoeToDenseConfig(scoring="nope")
+
+    @pytest.mark.parametrize("num_experts_to_keep", [0, -1])
+    def test_invalid_num_experts_to_keep_raises(self, num_experts_to_keep):
+        with pytest.raises(ValueError, match="must be a positive integer"):
+            MoeToDenseConfig(num_experts_to_keep=num_experts_to_keep)
+
+    def test_non_moe_model_raises(self):
+        config = LlamaConfig(
+            vocab_size=VOCAB_SIZE,
+            hidden_size=16,
+            intermediate_size=32,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            num_key_value_heads=1,
+        )
+        model = LlamaForCausalLM(config)
+        with pytest.raises(ValueError, match="Could not find any MoE experts modules"):
+            get_peft_model(model, MoeToDenseConfig())
+
+    def test_targeting_module_without_router_sibling_raises(self):
+        # targeting a module that is not an experts module: no router can be found next to it
+        model = build_model("qwen3_moe")
+        with pytest.raises(ValueError, match="Could not find the router module"):
+            get_peft_model(model, MoeToDenseConfig(target_modules=["q_proj"]))
+
+    def test_targeting_moe_block_instead_of_experts_raises(self):
+        # the whole MoE block must not be targeted, only the experts module inside it
+        model = build_model("qwen3_moe")
+        with pytest.raises(ValueError, match="router"):
+            get_peft_model(model, MoeToDenseConfig(target_modules=["mlp"]))
+
+    def test_targeting_router_instead_of_experts_raises(self):
+        model = build_model("qwen3_moe")
+        with pytest.raises(ValueError, match="does not look like a transformers MoE experts module"):
+            get_peft_model(model, MoeToDenseConfig(target_modules=["gate"]))
+
+    def test_unexpected_expert_parameters_raise(self):
+        # an experts module whose parameters deviate from the expected layout (e.g. extra parameters) is rejected
+        model = build_model("qwen3_moe")
+        experts = model.model.layers[0].mlp.experts
+        experts.extra = nn.Parameter(torch.zeros(3))
+        with pytest.raises(ValueError, match="has unexpected parameters"):
+            get_peft_model(model, MoeToDenseConfig())
+
+    def test_num_experts_config_mismatch_raises(self):
+        # guards against silently mis-detecting an architecture whose config does not describe the experts module
+        model = build_model("qwen3_moe")
+        model.config.num_experts = NUM_EXPERTS + 1
+        msg = f"config reports {NUM_EXPERTS + 1} experts but the experts module holds {NUM_EXPERTS}"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, MoeToDenseConfig())
+
+    def test_dense_mlp_class_name_not_from_transformers_raises(self):
+        with pytest.raises(ValueError, match="is not a Transformers class"):
+            MoeArchSpec(export="dense_mlp", dense_mlp_class_name="my_module.MyMLP")
+
+    def test_missing_dense_mlp_class_raises(self, monkeypatch):
+        monkeypatch.setattr(
+            ARCH_SPECS["qwen3_moe"],
+            "dense_mlp_class_name",
+            "transformers.models.qwen3_moe.modeling_qwen3_moe.DoesNotExist",
+        )
+        model = build_model("qwen3_moe")
+        with pytest.raises(AttributeError, match="would prevent correct export"):
+            get_peft_model(model, MoeToDenseConfig())
+
+    def test_allocate_with_meta_experts_raises(self):
+        # experts that were deliberately left on the meta device only support loading an already-allocated adapter
+        # checkpoint, not `update_and_allocate()`
+        peft_model = get_peft_model(build_model("qwen3_moe"), MoeToDenseConfig())
+        calibrate(peft_model)
+        for layer in get_layers(peft_model):
+            layer.base_layer.to("meta")
+        with pytest.raises(RuntimeError, match="experts are on the meta device"):
+            peft_model.update_and_allocate()
+
+    def test_quantized_experts_raise(self):
+        peft_model = get_peft_model(build_model("qwen3_moe"), MoeToDenseConfig())
+        calibrate(peft_model)
+        experts = get_layers(peft_model)[0].base_layer
+        experts.down_proj = nn.Parameter(experts.down_proj.data.to(torch.int8), requires_grad=False)
+        with pytest.raises(NotImplementedError, match="quantized experts are not supported"):
+            peft_model.update_and_allocate()
+
+    def test_wrong_teacher_logits_shape_raises(self):
+        peft_model = get_peft_model(build_model("qwen3_moe"), MoeToDenseConfig())
+        calibrate(peft_model)
+        peft_model.update_and_allocate()
+        teacher_logits = torch.zeros(2, 3, VOCAB_SIZE)  # wrong sequence length
+        with pytest.raises(ValueError, match="If you passed the teacher logits explicitly"):
+            peft_model.get_distillation_loss(**get_inputs(), teacher_logits=teacher_logits)
+
+    def test_forward_kl_divergence_wrong_mask_shape_raises(self):
+        logits = torch.randn(2, 5, 11)
+        with pytest.raises(ValueError, match="mask has 8 entries but there are 10 tokens"):
+            forward_kl_divergence(logits, logits.clone(), mask=torch.ones(2, 4, dtype=torch.bool))
