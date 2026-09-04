@@ -81,15 +81,25 @@ class AdaptionPromptModel(nn.Module):
         parents = parents[-config.adapter_layers :]
         self._parents[adapter_name] = parents
 
-        # It is only None during initialization.
-        # If it is disabled, we don't have to remove the modules.
-        if self._active_adapter is not None and self._enabled:
-            self._remove_adapted_attentions(self._active_adapter)
-        self._active_adapter = adapter_name
+        # The new modules are created in place, so the currently active adapter has to be swapped out first.
+        # `_active_adapter` is only None during initialization; if the adapter is disabled, nothing is swapped in.
+        previous_adapter = self._active_adapter
+        if previous_adapter is not None and self._enabled:
+            self._remove_adapted_attentions(previous_adapter)
         self.peft_config[adapter_name] = config
+        self._active_adapter = adapter_name
         self._create_adapted_attentions(config, parents)
-        if not self._enabled:
-            self._remove_adapted_attentions(self._active_adapter)
+
+        if previous_adapter is None:
+            # the first adapter becomes the active one
+            if not self._enabled:
+                self._remove_adapted_attentions(adapter_name)
+        else:
+            # adding an adapter must not change which adapter is active
+            self._remove_adapted_attentions(adapter_name)
+            self._active_adapter = previous_adapter
+            if self._enabled:
+                self._set_adapted_attentions(previous_adapter)
 
         if config.inference_mode:
             _freeze_adapter(self.model, adapter_name)

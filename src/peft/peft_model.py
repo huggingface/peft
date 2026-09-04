@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import collections
+import contextlib
 import copy
 import inspect
 import os
@@ -1500,13 +1501,20 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         # load the weights into the model
         ignore_mismatched_sizes = kwargs.get("ignore_mismatched_sizes", False)
-        load_result = set_peft_model_state_dict(
-            self,
-            adapters_weights,
-            adapter_name=adapter_name,
-            ignore_mismatched_sizes=ignore_mismatched_sizes,
-            low_cpu_mem_usage=low_cpu_mem_usage,
-        )
+        if self.peft_config[adapter_name].is_adaption_prompt:
+            # the modules of an inactive adaption prompt adapter are cached outside of the model, so they have to be
+            # swapped in before their weights can be loaded
+            load_context = self.base_model._temporarily_active(adapter_name)
+        else:
+            load_context = contextlib.nullcontext()
+        with load_context:
+            load_result = set_peft_model_state_dict(
+                self,
+                adapters_weights,
+                adapter_name=adapter_name,
+                ignore_mismatched_sizes=ignore_mismatched_sizes,
+                low_cpu_mem_usage=low_cpu_mem_usage,
+            )
 
         tuner = self.peft_config[adapter_name].peft_type
         tuner_prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(tuner, "")
