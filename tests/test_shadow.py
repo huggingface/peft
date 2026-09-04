@@ -307,6 +307,39 @@ class TestShadowCausalLM:
         assert any("lm_head" in key for key in keys)
         assert not any(".shadow_head." in key for key in keys)
 
+    def test_hook_leak_no_growth(self):
+        # Regression for #3625: per-forward state must not leak across disable_adapter toggles (GPU growth).
+        # The first assert fails on main (state survives the forward); the loop asserts the disabled path --
+        # which never seeds -- cannot observe stale state either.
+        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
+        ids = torch.randint(0, 128, (2, 6))
+        model(ids)
+        assert model.base_model._seed_shadow_state is None
+        assert model.base_model._shadow_past_out is None
+        assert model.base_model._should_pack_shadow_cache is False
+        for _ in range(10):
+            with model.disable_adapter():
+                model(ids)
+            assert model.base_model._seed_shadow_state is None
+            assert model.base_model._shadow_past_out is None
+
+    def test_unload_then_delete_isolated(self):
+        # Regression for #3625: unload_shadow(copy=False) then delete_adapter must clear the tuner's
+        # per-forward state (which references the shared backbone) while the detached model keeps working.
+        # The forward before unload seeds the state, so the `is None` assert fails on main.
+        model = get_peft_model(make_llama_causal(), ShadowConfig(task_type="CAUSAL_LM"))
+        ids = torch.randint(0, 128, (2, 6))
+        model(ids)
+        detached = model.base_model.unload_shadow(copy=False)
+        assert detached.backbone is model.base_model.shadow_backbone["default"]
+        model.delete_adapter("default")
+        assert model.base_model._seed_shadow_state is None
+        assert model.base_model._shadow_past_out is None
+        with torch.no_grad():
+            out = detached(ids)
+        # detached should still produce valid logits (shared module still alive via detached ref)
+        assert out.logits.shape == (2, 6, model.config.vocab_size)
+
     def test_requires_two_layers(self):
         # A single decoder block means the shadow carrier has no loop to ride; injection needs >= 2 blocks.
         # Target only one block of the tiny 2-layer model so entry == exit.
