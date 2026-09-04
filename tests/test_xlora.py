@@ -143,6 +143,21 @@ class TestXlora:
         return model
 
     @pytest.fixture(scope="function")
+    def model_named_adapters(self, base_model, saved_lora_adapters):
+        base_model.config.use_cache = False
+        adapters = {f"adapter_{i}": file_name for i, file_name in enumerate(saved_lora_adapters, start=1)}
+
+        peft_config = XLoraConfig(
+            task_type=TaskType.CAUSAL_LM,
+            peft_type=PeftType.XLORA,
+            hidden_size=base_model.config.hidden_size,
+            xlora_depth=8,
+            adapters=adapters,
+        )
+        model = get_peft_model(base_model, peft_config).to(self.torch_device)
+        return model
+
+    @pytest.fixture(scope="function")
     def model_layerwise(self, base_model, saved_lora_adapters):
         base_model.config.use_cache = False
         adapters = {str(i): file_name for i, file_name in enumerate(saved_lora_adapters)}
@@ -478,3 +493,55 @@ class TestXlora:
             orig_embedding.embed_scale.fill_(0)
             embedding_output = xlora_embedding(x)
             assert (embedding_output == 0.0).all()
+
+    def test_non_numeric_adapter_names_forward(self, tokenizer, model_named_adapters):
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        outputs = model_named_adapters.generate(
+            input_ids=inputs.to(self.torch_device),
+            max_new_tokens=8,
+        )
+        assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
+
+    def test_delete_adapter(self, tokenizer, model):
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        outputs_before = model.generate(input_ids=inputs.to(self.torch_device), max_new_tokens=8)
+        assert torch.isfinite(outputs_before[: inputs.shape[1] :]).all()
+
+        with pytest.raises(TypeError, match="does not support `delete_adapter`"):
+            model.delete_adapter("1")
+
+        assert model.active_adapters == ["0", "1", "2", "3"]
+        outputs_after = model.generate(input_ids=inputs.to(self.torch_device), max_new_tokens=8)
+        assert torch.isfinite(outputs_after[: inputs.shape[1] :]).all()
+
+    def test_expert_name_collides_with_adapter_name(self, base_model, saved_lora_adapters):
+        base_model.config.use_cache = False
+        adapters = {str(i): file_name for i, file_name in enumerate(saved_lora_adapters)}
+        adapters["default"] = saved_lora_adapters[0]
+
+        peft_config = XLoraConfig(
+            task_type=TaskType.CAUSAL_LM,
+            peft_type=PeftType.XLORA,
+            hidden_size=base_model.config.hidden_size,
+            xlora_depth=8,
+            adapters=adapters,
+        )
+        with pytest.raises(ValueError, match="conflicts with the outer adapter name"):
+            get_peft_model(base_model, peft_config)
+
+    def test_set_adapter_rejects_subset_or_reorder(self, tokenizer, model):
+        with pytest.raises(ValueError, match="only supports the original expert order"):
+            model.base_model.set_adapter(["0", "2"])
+
+        with pytest.raises(ValueError, match="only supports the original expert order"):
+            model.base_model.set_adapter(["1", "0", "2", "3"])
+
+        with pytest.raises(ValueError, match="only supports the original expert order"):
+            model.base_model.set_adapter("0")
+
+        model.base_model.set_adapter(["0", "1", "2", "3"])
+        assert model.active_adapters == ["0", "1", "2", "3"]
+
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        outputs = model.generate(input_ids=inputs.to(self.torch_device), max_new_tokens=8)
+        assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
