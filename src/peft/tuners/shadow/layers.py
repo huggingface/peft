@@ -39,13 +39,13 @@ def _sequence_classification_loss(logits: torch.Tensor, labels: torch.Tensor) ->
 
 
 def _pool_last_token(hidden: torch.Tensor, attention_mask: Optional[torch.Tensor]) -> torch.Tensor:
-    """Pool the last non-padding token representation for sequence classification."""
+    """Return the hidden state of the last non-padding token for both left- and right-padded sequences."""
     if attention_mask is None:
         return hidden[:, -1, :]
     token_positions = torch.arange(attention_mask.shape[-1], device=attention_mask.device)
-    last_non_padding_token = (attention_mask.ne(0) * token_positions).argmax(dim=-1)
+    last_non_padding_token_indices = (attention_mask.ne(0) * token_positions).argmax(dim=-1)
     batch_idx = torch.arange(hidden.shape[0], device=hidden.device)
-    return hidden[batch_idx, last_non_padding_token]
+    return hidden[batch_idx, last_non_padding_token_indices]
 
 
 class ShadowCarrier:
