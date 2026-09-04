@@ -22,6 +22,7 @@ Common use-cases:
   use the PEFT code from the myuser/peft bucket instead of cloning a git repo
 
 """
+
 import os
 import argparse
 import subprocess
@@ -42,8 +43,7 @@ parser.add_argument("--debug", action="store_true", default=False)
 args = parser.parse_args()
 
 token = subprocess.run(
-    ["hf", "auth", "token"],
-    capture_output=True, text=True, check=True
+    ["hf", "auth", "token"], capture_output=True, text=True, check=True
 ).stdout.strip() or os.environ.get("HF_TOKEN", "")
 
 if not token:
@@ -82,19 +82,27 @@ if args.upload:
             training_params = f.read()
 
 cmd = (
-    f"export HF_TOKEN={token} && " +
-    "source activate peft && " +
-    "pip uninstall mslk torchao -y -q 2>/dev/null; " +  # TODO remove once this issue is resolved
-    (f"git clone {args.repo} /tmp/peft && " if not args.code_bucket else "") +
-    "cd /tmp/peft && " +
-    (f"git checkout {args.branch} && " if not args.code_bucket else "") +
-    f"mkdir -p /tmp/peft/method_comparison/MetaMathQA/experiments/jobs/{experiment_name} && " +
-    (f"echo '{b64encode(adapter_config)}' | base64 -d > /tmp/peft/method_comparison/MetaMathQA/experiments/{experiment_name}/adapter_config.json &&" if args.upload else "") +
-    (f"echo '{b64encode(training_params)}' | base64 -d > /tmp/peft/method_comparison/MetaMathQA/experiments/{experiment_name}/training_params.json &&" if args.upload and training_params else "") +
-    "pip install -e . --no-deps && " +
-    "cd method_comparison/MetaMathQA && " +
-    f"python run.py -v experiments/jobs/{experiment_name} --clean &&" +
-    "cat temporary_results/*.json"
+    f"export HF_TOKEN={token} && "
+    + "source activate peft && "
+    + "pip uninstall mslk torchao -y -q 2>/dev/null; "  # TODO remove once this issue is resolved
+    + (f"git clone {args.repo} /tmp/peft && " if not args.code_bucket else "")
+    + "cd /tmp/peft && "
+    + (f"git checkout {args.branch} && " if not args.code_bucket else "")
+    + f"mkdir -p /tmp/peft/method_comparison/MetaMathQA/experiments/jobs/{experiment_name} && "
+    + (
+        f"echo '{b64encode(adapter_config)}' | base64 -d > /tmp/peft/method_comparison/MetaMathQA/experiments/{experiment_name}/adapter_config.json &&"
+        if args.upload
+        else ""
+    )
+    + (
+        f"echo '{b64encode(training_params)}' | base64 -d > /tmp/peft/method_comparison/MetaMathQA/experiments/{experiment_name}/training_params.json &&"
+        if args.upload and training_params
+        else ""
+    )
+    + "pip install -e . --no-deps && "
+    + "cd method_comparison/MetaMathQA && "
+    + f"python run.py -v experiments/jobs/{experiment_name} --clean &&"
+    + "cat temporary_results/*.json"
 )
 
 if args.debug:
@@ -115,4 +123,3 @@ for log in fetch_job_logs(job_id=job.id, follow=True):
 
 print(f"stopping job {job.id}...")
 cancel_job(job_id=job.id)
-
