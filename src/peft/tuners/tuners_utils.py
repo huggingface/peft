@@ -2714,7 +2714,10 @@ def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dty
 
             if isinstance(submodule[adapter_name], nn.Parameter):
                 if submodule[adapter_name].dtype in dtypes_to_convert_to_fp32:
-                    submodule[adapter_name].data = submodule[adapter_name].data.to(torch.float32)
+                    # Reassign through the ParameterDict rather than mutating `.data` in place: for a
+                    # DTensor-backed parameter (TP), `.data = ...` only updates the outer dtype metadata
+                    # while leaving the local shard's actual dtype unchanged.
+                    submodule[adapter_name] = submodule[adapter_name].to(torch.float32)
                 continue
 
             if isinstance(submodule[adapter_name], torch.Tensor):  # e.g. from a BufferDict
@@ -2722,9 +2725,17 @@ def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dty
                     submodule[adapter_name] = submodule[adapter_name].to(torch.float32)
                 continue
 
-            for param in submodule[adapter_name].parameters():
-                if param.dtype in dtypes_to_convert_to_fp32:
-                    param.data = param.data.to(torch.float32)
+            for owner in submodule[adapter_name].modules():
+                for param_name, param in list(owner.named_parameters(recurse=False)):
+                    if param.dtype in dtypes_to_convert_to_fp32:
+                        # Reassign via setattr rather than mutating `.data` in place: for a DTensor-backed
+                        # parameter (TP), `.data = ...` only updates the outer dtype metadata while leaving
+                        # the local shard's actual dtype unchanged.
+                        setattr(
+                            owner,
+                            param_name,
+                            nn.Parameter(param.data.to(torch.float32), requires_grad=param.requires_grad),
+                        )
 
 
 def set_requires_grad(model, adapter_names: str | Sequence[str], requires_grad: bool = True) -> None:
