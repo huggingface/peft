@@ -107,7 +107,7 @@ class LoraModel(BaseTuner):
 
         ```py
         >>> from transformers import AutoModelForSeq2SeqLM
-        >>> from peft import LoraModel, LoraConfig
+        >>> from peft import LoraConfig, get_peft_model
 
         >>> config = LoraConfig(
         ...     task_type="SEQ_2_SEQ_LM",
@@ -118,13 +118,13 @@ class LoraModel(BaseTuner):
         ... )
 
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> lora_model = LoraModel(model, config, "default")
+        >>> lora_model = get_peft_model(model, config)
         ```
 
         ```py
         >>> import torch
         >>> import transformers
-        >>> from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
+        >>> from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
         >>> rank = ...
         >>> target_modules = ["q_proj", "k_proj", "v_proj", "out_proj", "fc_in", "fc_out", "wte"]
