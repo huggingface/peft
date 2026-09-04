@@ -307,11 +307,15 @@ class XLoraModel(BaseTuner):
         # Controlled by enable_adapter_layers or disable_adapter_layers
         self.disabled = False
 
-    def _maybe_freeze_all_adapters(self):
         self.eval()
+
+    def _maybe_freeze_all_adapters(self):
         if not self.xlora_config.use_trainable_adapters:
+            # Only the LoRA experts are frozen. The match is on ".lora_" and not on "lora_", as the latter also matches
+            # the X-LoRA classifier ("internal_xlora_classifier"), which is the only trainable part of X-LoRA when the
+            # experts are frozen.
             for name, param in self.named_parameters():
-                if "lora_" in name:
+                if ".lora_" in name:
                     param.requires_grad = False
 
     def generate(self, *args, **kwargs):
@@ -367,6 +371,9 @@ class XLoraModel(BaseTuner):
                             handle.remove()
                 finally:
                     self.lora_model.enable_adapter_layers()
+                    # enable_adapter_layers marks the LoRA experts as trainable again, undo this if the experts
+                    # are meant to stay frozen
+                    self._maybe_freeze_all_adapters()
 
             xlora_scalings = self.internal_xlora_classifier(*args_real, result=base_output, **kwargs_real)
             # Store computed scalings to fix get_latest_scalings() returning None
