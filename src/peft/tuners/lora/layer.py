@@ -141,6 +141,7 @@ class LoraLayer(BaseTunerLayer):
         self.merged_adapters = []
         self.use_dora: dict[str, bool] = {}  # not actively used anymore after #2443, keep it for BC
         self.use_rslora: dict[str, bool] = {}
+        self.use_nora: dict[str, Union[bool, str]] = {}
         self.lora_bias: dict[str, bool] = {}
         self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA
         self._caches: dict[str, Any] = {}  # small ad hoc cache; values are not part of the state_dict
@@ -282,6 +283,8 @@ class LoraLayer(BaseTunerLayer):
 
         self.use_rslora[adapter_name] = use_rslora
 
+        self.use_nora[adapter_name] = config.use_nora
+
         self.use_dora[adapter_name] = config.use_dora
 
         # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
@@ -308,8 +311,15 @@ class LoraLayer(BaseTunerLayer):
         elif init_lora_weights == "lora_ga":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.lora_ga_init(adapter_name, config.lora_ga_config)
+        elif init_lora_weights == "bimi":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.bimi_init(adapter_name, config.lora_ga_config)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
+
+        if config.use_nora == "init":
+            # nora: normalize lora_A columns (over the r dimension) once, right after initialization
+            self.normalize_lora_A_(adapter_name)
         # call this before init of the lora variants
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
@@ -328,6 +338,29 @@ class LoraLayer(BaseTunerLayer):
             for adapter in self.lora_variant:
                 if adapter in self.lora_arrow:
                     self.lora_arrow[adapter].on_adapter_change(self.lora_A, self.lora_B)
+
+    def normalize_lora_A_(self, adapter_name):
+        """In-place L2 normalization of lora_A.weight columns along the rank (r) dimension."""
+        with torch.no_grad():
+            weight_A = self.lora_A[adapter_name].weight  # (r, in_features)
+            weight_A.div_(weight_A.norm(dim=0, keepdim=True) + 1e-6)
+
+    def bimi_init(self, adapter_name, init_lora_weights):
+        """Block Identity Matrix Initialization: tile r x r identity blocks along the diagonal of lora_A."""
+        weight = self.get_base_layer().weight
+        dtype = weight.dtype
+        lora_A = self.lora_A[adapter_name].weight  # [r, in_features]
+        r, in_features = lora_A.shape
+
+        with torch.no_grad():
+            lora_A.zero_()
+            for start in range(0, in_features, r):
+                end = min(start + r, in_features)
+                size = end - start
+                lora_A[:size, start:end] = torch.eye(size, dtype=dtype, device=lora_A.device)
+
+        lora_B = torch.zeros_like(self.lora_B[adapter_name].weight)
+        self.lora_B[adapter_name].weight = nn.Parameter(lora_B.contiguous().to(dtype))
 
     def reset_lora_parameters(self, adapter_name, init_lora_weights):
         if init_lora_weights is not False:
@@ -1058,6 +1091,9 @@ class Linear(nn.Module, LoraLayer):
         weight_A = self.lora_A[adapter].weight
         weight_B = self.lora_B[adapter].weight
 
+        if self.use_nora.get(adapter) is True:
+            weight_A = weight_A / (weight_A.norm(dim=0, keepdim=True) + 1e-6)  # norm over r, same as forward
+
         if cast_to_fp32:
             weight_A = weight_A.float()
             weight_B = weight_B.float()
@@ -1097,7 +1133,12 @@ class Linear(nn.Module, LoraLayer):
                 scaling = self.scaling[active_adapter]
                 x = self._cast_input_dtype(x, lora_A.weight.dtype)
                 if active_adapter not in self.lora_variant:  # vanilla LoRA
-                    result = result + lora_B(lora_A(dropout(x))) * scaling
+                    if self.use_nora.get(active_adapter) is True:
+                        weight_A = lora_A.weight  # (r, in_features)
+                        weight_A = weight_A / (weight_A.norm(dim=0, keepdim=True) + 1e-6)  # norm over r
+                        result = result + lora_B(nn.functional.linear(dropout(x), weight_A, lora_A.bias)) * scaling
+                    else:
+                        result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
                     result = self.lora_variant[active_adapter].forward(
                         self,
@@ -2432,6 +2473,8 @@ class ParamWrapper(nn.Module, LoraLayer):
 
         self.use_rslora[adapter_name] = use_rslora
 
+        self.use_nora[adapter_name] = config.use_nora
+
         self.use_dora[adapter_name] = config.use_dora
 
         # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
@@ -2455,8 +2498,15 @@ class ParamWrapper(nn.Module, LoraLayer):
         elif init_lora_weights == "lora_ga":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.lora_ga_init(adapter_name, config.lora_ga_config)
+        elif init_lora_weights == "bimi":
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.bimi_init(adapter_name, config.lora_ga_config)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
+
+        if config.use_nora == "init":
+            # nora: normalize lora_A columns (over the r dimension) once, right after initialization
+            self.normalize_lora_A_(adapter_name)
         # call this before init of the lora variants
         self._move_adapter_to_device_of_base_layer(adapter_name)
 

@@ -135,6 +135,24 @@ class ArrowLinearVariant(LoraVariant):
         raise RuntimeError("Cannot unmerge an active Arrow router adapter. Remove it first.")
 
 
+class _NoraLoraA:
+    """Callable shim around a lora_A nn.Linear that applies it with its weight columns
+    L2-normalized along the rank (r) dimension (dim=0). Used for use_nora=True so that
+    the normalization also applies inside DoRA's forward/get_lora_weight, with gradients
+    flowing through the normalization."""
+
+    def __init__(self, lora_A: nn.Linear):
+        self._lora_A = lora_A
+
+    @property
+    def weight(self) -> torch.Tensor:
+        weight = self._lora_A.weight  # (r, in_features)
+        return weight / (weight.norm(dim=0, keepdim=True) + 1e-6)
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        return nn.functional.linear(x, self.weight, self._lora_A.bias)
+
+
 class DoraLinearVariant(LoraVariant):
     @staticmethod
     def init(module: Linear, adapter_name: str, **kwargs: Any) -> None:
@@ -238,6 +256,9 @@ class DoraLinearVariant(LoraVariant):
         lora_B = module.lora_B[active_adapter]
         dropout = module.lora_dropout[active_adapter]
         scaling = module.scaling[active_adapter]
+
+        if module.use_nora.get(active_adapter) is True:
+            lora_A = _NoraLoraA(lora_A)  # normalize columns of lora_A.weight over r
 
         if isinstance(dropout, nn.Identity) or not module.training:
             base_result = result
