@@ -80,6 +80,18 @@ class ModelEmbedInNoGet(torch.nn.Module):
         return self.lin0(self.embed_in(x))
 
 
+class ModelWithOutputHead(torch.nn.Module):
+    """Small local model used to exercise TrainableTokens on a biased output head."""
+
+    def __init__(self):
+        super().__init__()
+        self.query = torch.nn.Linear(4, 4, bias=True)
+        self.lm_head = torch.nn.Linear(4, 7, bias=True)
+
+    def forward(self, x):
+        return self.lm_head(self.query(x))
+
+
 class TestTrainableTokens:
     @pytest.fixture
     def model_id(self):
@@ -122,6 +134,28 @@ class TestTrainableTokens:
         trainable_tokens_layer.trainable_tokens_delta[adapter_name].data = torch.rand_like(
             trainable_tokens_layer.trainable_tokens_delta[adapter_name].data
         )
+
+    @pytest.mark.parametrize("standalone", [True, False])
+    def test_linear_output_preserves_bias(self, standalone):
+        """A freshly initialized adapter must be a no-op for biased Linear output heads."""
+        torch.manual_seed(0)
+        base = ModelWithOutputHead().eval()
+        inputs = torch.randn(3, 4)
+        expected = base(inputs)
+
+        if standalone:
+            config = TrainableTokensConfig(target_modules=["lm_head"], token_indices=[1, 4])
+        else:
+            config = LoraConfig(
+                r=2,
+                target_modules=["query"],
+                trainable_token_indices={"lm_head": [1, 4]},
+            )
+
+        peft_model = get_peft_model(copy.deepcopy(base), config).eval()
+        actual = peft_model(inputs)
+
+        assert torch.allclose(actual, expected)
 
     def test_stand_alone_usage(self, model, tokenizer, tmp_path):
         original_model = copy.deepcopy(model)
