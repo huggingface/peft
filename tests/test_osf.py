@@ -23,24 +23,25 @@ class DummyConfig(dict):
 
 
 class DummyModel(torch.nn.Module):
-    def __init__(self, config=None):
+    def __init__(self, config=None, in_features=8, out_features=4):
         super().__init__()
         self.config = config
-        self.linear = torch.nn.Linear(8, 4)
+        self.linear = torch.nn.Linear(in_features, out_features)
 
     def forward(self, x):
         return self.linear(x)
 
 
-def test_osf_gradient_projection_hook():
+@pytest.mark.parametrize("in_features,out_features", [(8, 4), (4, 8)])
+def test_osf_gradient_projection_hook(in_features, out_features):
     torch.manual_seed(0)
-    model = DummyModel(DummyConfig())
-    # Specify target module explicitly for DummyModel
-    # DummyModel.linear is nn.Linear(8, 4): weight shape is [4, 8], so out=4 < in=8.
-    # U is square (recoverable from U_low_init), V is not square (V_high is stored).
+    model = DummyModel(DummyConfig(), in_features=in_features, out_features=out_features)
+    # DummyModel.linear weight shape is [out_features, in_features].
+    # (8, 4): out=4 < in=8, so U is square (recoverable from U_low_init), V is not square (V_high is stored).
+    # (4, 8): out=8 > in=4, so U is not square (U_high is stored), V is square (recoverable from V_low_init).
     cfg = OSFConfig(target_modules=["linear"], effective_rank=2)
     wrapped = get_peft_model(model, cfg)
-    x = torch.randn(3, 8)
+    x = torch.randn(3, in_features)
     wrapped(x).sum().backward()
     # Access the injected OSF layer
     osf_linear = wrapped.base_model.model.linear

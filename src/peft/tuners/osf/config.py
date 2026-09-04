@@ -53,7 +53,7 @@ class OSFConfig(PeftConfig):
 
     # Additional optional fields for compatibility with generic test harnesses
     init_weights: Optional[bool] = field(
-        default=None,
+        default=True,
         metadata={
             "help": (
                 "If True (default), the trainable low-rank SVD components are initialized from the base weight "

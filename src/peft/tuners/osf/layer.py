@@ -36,6 +36,7 @@ class OSFLayer(BaseTunerLayer):
     # All names of other parameters that may contain adapter-related parameters
     other_param_names: tuple[str, ...] = (
         "_osf_U_low_init",
+        "_osf_S_low_init",
         "_osf_V_low_init",
         "_osf_U_high",
         "_osf_V_high",
@@ -221,9 +222,6 @@ class OSFLayer(BaseTunerLayer):
         - Applying delta: W_new = W + (U_low*S_low*V_low - U_low_init*S_low_init*V_low_init)
         - Resulting update: W_new = U_high_init*S_high_init*V_high_init + U_low*S_low*V_low
         """
-        if adapter_name not in self.osf_svd_params:
-            return None
-
         svd_module = self.osf_svd_params[adapter_name]
         U_low = svd_module["U_low"]
         S_low = svd_module["S_low"]
@@ -272,7 +270,7 @@ class OSFLayer(BaseTunerLayer):
 
                     base_layer.weight.data = new_weight.to(orig_weight.dtype)
                 else:
-                    base_layer.weight.data = base_layer.weight.data + delta
+                    base_layer.weight.data = (base_layer.weight.data + delta).to(base_layer.weight.data.dtype)
 
                 self.merged_adapters.append(active_adapter)
 
@@ -329,14 +327,12 @@ class Linear(nn.Module, OSFLayer):
 
                 # Compute delta as a low-rank product
                 delta = self.get_delta_weight(active_adapter)
-                if delta is not None:
-                    # Apply delta as a low-rank update to the output
-                    # delta is [out_features, in_features], x is [batch, ..., in_features]
-                    # We compute x @ delta^T, which is [batch, ..., out_features]
-                    x_cast = self._cast_input_dtype(x, delta.dtype)
-                    delta_out = F.linear(x_cast, delta)
-                    result = result.to(delta_out.dtype) + delta_out
-                    result = result.to(orig_dtype)
+                # Apply delta as a low-rank update to the output
+                # delta is [out_features, in_features], x is [batch, ..., in_features]
+                # We compute x @ delta^T, which is [batch, ..., out_features]
+                x_cast = self._cast_input_dtype(x, delta.dtype)
+                delta_out = F.linear(x_cast, delta)
+                result = result + delta_out.to(orig_dtype)
             else:
                 result = self.base_layer(x, *args, **kwargs)
 
