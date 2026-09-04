@@ -850,6 +850,63 @@ class PeftCommonTester:
                 # serializing with safetensors works
                 save_file(model_unloaded.state_dict(), os.path.join(tmp_dirname, "model.safetensors"))
 
+    def _test_get_additive_delta_corresponds_to_merged_weight(self, model_id, config_cls, config_kwargs, dtype):
+        # This test checks that the get_additive_delta method really returns the weight delta between the base weight
+        # and the merged weight. For many PEFT methods, this is trivial, as _get_additive_delta ==
+        # get_delta_weight, but for some they differ, e.g. for multiplicative methods like OFT.
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        if (config_cls == MissConfig) and (config_kwargs.get("init_weights") == "bat"):
+            pytest.skip(reason="Test requires non-zero init but MiSS is using 'bat' init")
+        torch.manual_seed(0)
+        atol = rtol = {torch.float32: 1e-5, torch.bfloat16: 1e-2, torch.float16: 2e-3}[dtype]
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id, dtype=dtype)
+            config = config_cls(
+                base_model_name_or_path=model_id,
+                **config_kwargs,
+            )
+            model = model.to(self.torch_device)
+            state_dict_before = {k: v.clone() for k, v in model.state_dict().items()}
+
+            # don't autocast adapter dtype so that we can test lower precision floats
+            peft_model = get_peft_model(model, config, autocast_adapter_dtype=False)
+            if not peft_model.supports_lora_conversion():
+                pytest.skip(f"{config.peft_type} does not support LoRA conversion.")
+
+            # Collect the additive deltas BEFORE merging, as get_additive_delta raises an error while adapters are
+            # merged (the return value would depend on the currently merged weights). Iterating over model instead of
+            # peft_model means the module names are not prefixed with the PEFT prefix.
+            additive_deltas = {}
+            for name, module in model.named_modules():
+                if isinstance(module, BaseTunerLayer):
+                    additive_deltas[name] = module.get_additive_delta()
+
+            peft_model.merge_adapter()
+            # take the state_dict from model and not peft_model so that we don't have to strip the PEFT prefix
+            state_dict_after = model.state_dict()
+
+            no_tuner_layer_found = True
+            for name, module in model.named_modules():
+                if not isinstance(module, BaseTunerLayer):
+                    continue
+
+                key_before = f"{name}.weight"
+                key_after = f"{name}.base_layer.weight"
+                weight_before = state_dict_before.get(key_before)
+                weight_after = state_dict_after.get(key_after)
+                if (weight_before is None) or (weight_after is None):
+                    continue
+
+                no_tuner_layer_found = False
+                delta_weight_expected = weight_after - weight_before
+                additive_delta = additive_deltas[name].to(delta_weight_expected.dtype)
+                assert torch.allclose(additive_delta, delta_weight_expected, atol=atol, rtol=rtol)
+
+            # sanity check
+            if no_tuner_layer_found:
+                raise ValueError("This test could not identify any tuner layers")
+
     def _test_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
         # Test for mixing different adapters in a single batch by passing the adapter_names argument
         if config_cls not in (LoraConfig, RoadConfig):
@@ -1943,7 +2000,7 @@ class PeftCommonTester:
             model = get_peft_model(model, config).eval()
 
             if not model.supports_lora_conversion():
-                return
+                pytest.skip(f"{config_cls.__name__} does not support LoRA conversion")
             if ("OPT" in model_id) and ("fc1" in config.target_modules):
                 # the fc1 and fc2 layers in OPT have size (16, 4), thus choose smaller rank
                 rank = 4

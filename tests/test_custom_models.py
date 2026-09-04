@@ -2545,6 +2545,24 @@ class TestPeftCustomModel(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_safe_merge(model_id, config_cls, config_kwargs)
 
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16], ids=["fp32", "bf16", "fp16"])
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_get_additive_delta_corresponds_to_merged_weight(
+        self, test_name, model_id, config_cls, config_kwargs, dtype
+    ):
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        if (config_cls == LoraConfig) and config_kwargs.get("use_bdlora"):
+            # BD-LoRA: get_delta_weight does not unpack the block-diagonal factors, so the delta does not correspond
+            # to the merged weight
+            pytest.xfail("BD-LoRA delta weight computation does not handle block-diagonal factors")
+        if (config_cls in (LoHaConfig, LoKrConfig)) and config_kwargs.get("rank_dropout"):
+            # rank_dropout masks the delta at random, which makes get_delta_weight non-deterministic (see #3589).
+            # Having rank_dropout is not essential for this test, so disable it.
+            config_kwargs["rank_dropout"] = 0.0
+
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_get_additive_delta_corresponds_to_merged_weight(model_id, config_cls, config_kwargs, dtype=dtype)
+
     @pytest.mark.parametrize("conv_cls", [nn.Conv2d, nn.Conv3d])
     @pytest.mark.parametrize("safe_merge", [False, True])
     def test_ia3_grouped_conv_feedforward_merge(self, conv_cls, safe_merge):
