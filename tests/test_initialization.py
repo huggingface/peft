@@ -6429,3 +6429,142 @@ class TestTinyLoraInitialization:
         model_control = get_peft_model(mlp_control, config_b2, adapter_name="b")
 
         assert len(model.tinylora_v["b"]) == len(model_control.tinylora_v["b"]) == 1
+
+
+class TestAdapterNameCollisionFiltering:
+    # Regression test for https://github.com/huggingface/peft/issues/3584:
+    # the negative name filter used to match by raw string containment, so an adapter whose NAME equals a
+    # base-model module path segment (e.g. an adapter called "mlp" while a submodule is literally named "mlp")
+    # silently dropped the saved adapter's own tensors from the checkpoint. The filter now matches by
+    # tuner-slot position, so a colliding name is not treated as an adapter name when it isn't in one.
+
+    @pytest.fixture
+    def mlp_net(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(32, 32)
+                self.mlp = nn.Linear(32, 32)
+                self.act = nn.ReLU()
+
+            def forward(self, x):
+                return self.mlp(self.act(self.lin0(x)))
+
+        return Net()
+
+    def _save_and_load(self, model, save_dir, selected_adapters):
+        model.save_pretrained(str(save_dir), selected_adapters=selected_adapters)
+        from safetensors.torch import load_file
+        import json
+
+        with open(save_dir / "adapter_config.json") as f:
+            config = json.load(f)
+        weight_map_path = save_dir / "model.safetensors.index.json"
+        if weight_map_path.exists():
+            with open(weight_map_path) as f:
+                weight_map = json.load(f)["weight_map"]
+            tensors = {}
+            for fname in set(weight_map.values()):
+                tensors.update(load_file(str(save_dir / fname)))
+        else:
+            tensors = load_file(str(save_dir / "adapter_model.safetensors"))
+        return config, tensors
+
+    def test_partial_collision_saves_all_default_tensors(self, mlp_net, tmp_path, recwarn):
+        # The "default" adapter targets both `lin0` and `mlp`. A second adapter is named "mlp" -- the same
+        # string as the submodule. The negative filter used to drop every key containing ".mlp." and break
+        # the default adapter's weights for the `mlp` module. After the fix all default keys are kept.
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0", "mlp"], lora_dropout=0.0),
+        )
+        model.add_adapter("mlp", LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0))
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # any warning becomes a test failure
+            config, tensors = self._save_and_load(model, tmp_path, selected_adapters=["default"])
+
+        expected_keys = {
+            "base_model.model.lin0.lora_A.weight",
+            "base_model.model.lin0.lora_B.weight",
+            "base_model.model.mlp.lora_A.weight",
+            "base_model.model.mlp.lora_B.weight",
+        }
+        assert set(tensors.keys()) == expected_keys
+
+    def test_full_collision_keeps_default_tensors(self, mlp_net, tmp_path, recwarn):
+        # Here the "default" adapter targets ONLY `mlp` and the second adapter is named "mlp". With the
+        # buggy containment filter, every key for the default adapter matched and the file was written
+        # empty. After the fix the default adapter's keys survive.
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            LoraConfig(r=4, lora_alpha=8, target_modules=["mlp"], lora_dropout=0.0),
+        )
+        model.add_adapter("mlp", LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0))
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            config, tensors = self._save_and_load(model, tmp_path, selected_adapters=["default"])
+
+        expected_keys = {
+            "base_model.model.mlp.lora_A.weight",
+            "base_model.model.mlp.lora_B.weight",
+        }
+        assert set(tensors.keys()) == expected_keys
+
+    def test_save_load_round_trip_with_colliding_adapter_name(self, mlp_net, tmp_path, recwarn):
+        # End-to-end: save the default adapter, reload it on a fresh model, and assert the saved weights
+        # survive the round trip. With the bug the file was either truncated or empty.
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0", "mlp"], lora_dropout=0.0),
+        )
+        model.add_adapter("mlp", LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0))
+
+        # Capture the default adapter's weights before saving.
+        before = {
+            "lin0.A": model.base_model.model.lin0.lora_A["default"].weight.detach().clone(),
+            "lin0.B": model.base_model.model.lin0.lora_B["default"].weight.detach().clone(),
+            "mlp.A": model.base_model.model.mlp.lora_A["default"].weight.detach().clone(),
+            "mlp.B": model.base_model.model.mlp.lora_B["default"].weight.detach().clone(),
+        }
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            model.save_pretrained(str(tmp_path), selected_adapters=["default"])
+
+        # Reload on a fresh model.
+        reloaded = PeftModel.from_pretrained(mlp_net, str(tmp_path), adapter_name="default")
+        after = {
+            "lin0.A": reloaded.base_model.model.lin0.lora_A["default"].weight.detach().clone(),
+            "lin0.B": reloaded.base_model.model.lin0.lora_B["default"].weight.detach().clone(),
+            "mlp.A": reloaded.base_model.model.mlp.lora_A["default"].weight.detach().clone(),
+            "mlp.B": reloaded.base_model.model.mlp.lora_B["default"].weight.detach().clone(),
+        }
+        for k in before:
+            assert torch.equal(before[k], after[k]), f"weight for {k} changed across save/load"
+
+    def test_real_second_adapter_is_still_filtered(self, mlp_net, tmp_path):
+        # The fix must not regress the original behaviour: a real second adapter that shares no name with
+        # any module path segment must still be filtered out when saving only the default adapter.
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0", "mlp"], lora_dropout=0.0),
+        )
+        model.add_adapter("foo", LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0))
+
+        _, tensors = self._save_and_load(model, tmp_path, selected_adapters=["default"])
+
+        # All saved keys must be "default" -- none for "foo".
+        assert all("foo" not in k for k in tensors.keys())
+        expected_keys = {
+            "base_model.model.lin0.lora_A.weight",
+            "base_model.model.lin0.lora_B.weight",
+            "base_model.model.mlp.lora_A.weight",
+            "base_model.model.mlp.lora_B.weight",
+        }
+        assert set(tensors.keys()) == expected_keys
