@@ -13,9 +13,9 @@
 # limitations under the License.
 
 import contextlib
-import functools
 import inspect
 import json
+import weakref
 from copy import deepcopy
 from typing import Any, Optional
 
@@ -528,29 +528,47 @@ class ShadowModel(BaseTuner):
 
         entry, exit_ = wrapped[0], wrapped[-1]
         self._boundary_layers = [entry, exit_]
+        # The hooks below close over a weakref, not `self`: `functools.partial(fn, self)` -- like a bound
+        # method -- still holds a strong reference to the tuner, so the base-model -> hook -> tuner cycle
+        # keeps the tuner (and its per-forward GPU tensors) alive after unload/delete. A weakref breaks the
+        # cycle; the handles in `_boundary_hook_handles` still own the hook lifetime (see #3625).
+        self_ref = weakref.ref(self)
+
+        def _bind_pre(fn):
+            def _hook(module: nn.Module, args: tuple, kwargs: dict):
+                inst = self_ref()
+                if inst is None:
+                    return args, kwargs
+                return fn(inst, module, args, kwargs)
+
+            return _hook
+
+        def _bind_post(fn):
+            def _hook(module: nn.Module, args: tuple, kwargs: dict, output: Any):
+                inst = self_ref()
+                if inst is None:
+                    return output
+                return fn(inst, module, args, kwargs, output)
+
+            return _hook
+
         # Seed `s^(0)` from the *raw* model inputs (input_ids / 2D attention mask), which are only available at the top
         # of the base model's forward -- inside a decoder block the mask is already a 4D causal mask. Also unpack a
         # `ShadowCache` so the base model only sees its own past.
         self._boundary_hook_handles.append(
-            self.model.register_forward_pre_hook(
-                functools.partial(ShadowModel._seed_shadow_pre_hook, self), with_kwargs=True
-            )
+            self.model.register_forward_pre_hook(_bind_pre(ShadowModel._seed_shadow_pre_hook), with_kwargs=True)
         )
         # Re-pack base + shadow pasts into a `ShadowCache` on the way out (generation threads this object as
         # `past_key_values`).
         self._boundary_hook_handles.append(
-            self.model.register_forward_hook(
-                functools.partial(ShadowModel._pack_shadow_cache_hook, self), with_kwargs=True
-            )
+            self.model.register_forward_hook(_bind_post(ShadowModel._pack_shadow_cache_hook), with_kwargs=True)
         )
         # Wrap the first wrapped block's input into a carrier, and unwrap the last block's output back to a tensor.
         self._boundary_hook_handles.append(
-            entry.register_forward_pre_hook(
-                functools.partial(ShadowModel._wrap_entry_pre_hook, self), with_kwargs=True
-            )
+            entry.register_forward_pre_hook(_bind_pre(ShadowModel._wrap_entry_pre_hook), with_kwargs=True)
         )
         self._boundary_hook_handles.append(
-            exit_.register_forward_hook(functools.partial(ShadowModel._unwrap_exit_hook, self), with_kwargs=True)
+            exit_.register_forward_hook(_bind_post(ShadowModel._unwrap_exit_hook), with_kwargs=True)
         )
 
     def _shadow_path_active(self) -> bool:
@@ -624,13 +642,13 @@ class ShadowModel(BaseTuner):
 
     def _pack_shadow_cache_hook(self, module: nn.Module, args: tuple, kwargs: dict, output: Any):
         """Attach a [`ShadowCache`] so the next decode step can advance both paths incrementally."""
+        # NOTE: this must not clear `_seed_shadow_state`: `forward` reads it *after* the base forward to
+        # compute the auxiliary loss. Cleanup happens in `forward`'s `finally` once the loss is computed.
         if not self._should_pack_shadow_cache:
-            self._seed_shadow_state = None
             return output
         self._should_pack_shadow_cache = False
         shadow_past = self._shadow_past_out
         self._shadow_past_out = None
-        self._seed_shadow_state = None
 
         if hasattr(output, "past_key_values"):
             output.past_key_values = ShadowCache(base=output.past_key_values, shadow=shadow_past)
