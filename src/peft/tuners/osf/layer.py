@@ -317,21 +317,36 @@ class Linear(nn.Module, OSFLayer):
         if self.disable_adapters or self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            # Delta-based forward: output = base_layer(x) + x @ delta^T
-            # This avoids materializing the full reconstructed weight.
+            # LoRA-style factored forward: output = base_layer(x) + B(A(x)).
+            # The delta (U_low*S_low*V_low - U_low_init*S_low_init*V_low_init) is the
+            # difference of two rank-r products, factored as a single rank-2r product
+            # delta = A @ B with
+            #   A = [U_low*S_low, -U_low_init*S_low_init]  (out x 2r)
+            #   B = [V_low; V_low_init]                     (2r x in)
+            # so x @ delta^T = (x @ B^T) @ A^T. This avoids materializing the full
+            # [out, in] delta matrix.
             active_adapter = self.active_adapters[0] if self.active_adapters else None
             if active_adapter and active_adapter in self.osf_svd_params:
                 orig_dtype = x.dtype
                 # Base output (may run in different precision)
                 result = self.base_layer(x, *args, **kwargs)
 
-                # Compute delta as a low-rank product
-                delta = self.get_delta_weight(active_adapter)
-                # Apply delta as a low-rank update to the output
-                # delta is [out_features, in_features], x is [batch, ..., in_features]
-                # We compute x @ delta^T, which is [batch, ..., out_features]
-                x_cast = self._cast_input_dtype(x, delta.dtype)
-                delta_out = F.linear(x_cast, delta)
+                svd_module = self.osf_svd_params[active_adapter]
+                U_low = svd_module["U_low"]
+                S_low = svd_module["S_low"]
+                V_low = svd_module["V_low"]
+                U_low_init = self._osf_U_low_init[active_adapter]
+                S_low_init = self._osf_S_low_init[active_adapter]
+                V_low_init = self._osf_V_low_init[active_adapter]
+
+                # Factored low-rank factors (delta = A @ B)
+                A = torch.cat([U_low * S_low.unsqueeze(0), -(U_low_init * S_low_init.unsqueeze(0))], dim=1)
+                B = torch.cat([V_low, V_low_init], dim=0)
+
+                # Apply delta as a low-rank update: x @ delta^T = (x @ B^T) @ A^T
+                x_cast = self._cast_input_dtype(x, A.dtype)
+                h = F.linear(x_cast, B)  # x @ B^T, [batch, ..., 2r]
+                delta_out = F.linear(h, A)  # h @ A^T, [batch, ..., out]
                 result = result + delta_out.to(orig_dtype)
             else:
                 result = self.base_layer(x, *args, **kwargs)
