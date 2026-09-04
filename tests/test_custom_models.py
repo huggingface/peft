@@ -2545,6 +2545,26 @@ class TestPeftCustomModel(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_safe_merge(model_id, config_cls, config_kwargs)
 
+    @pytest.mark.parametrize("target_module,token_indices", [("emb", [0, 1, 3]), ("lin0", [0, 1])])
+    def test_trainable_tokens_random_init_unmerge_restores_base_weights(self, target_module, token_indices):
+        # A merge/unmerge cycle must preserve the base weights even when the adapter starts with random weights; see #3650.
+        torch.manual_seed(0)
+        model = ModelEmbConv1D()
+        X = torch.arange(90).view(9, 10)
+        output_base = model(X).detach().clone()
+        config = TrainableTokensConfig(target_modules=[target_module], token_indices=token_indices, init_weights=False)
+        model = get_peft_model(model, config)
+
+        with model.disable_adapter():
+            output_disabled_before = model(X)
+        model.merge_adapter()
+        model.unmerge_adapter()
+        with model.disable_adapter():
+            output_disabled_after = model(X)
+
+        assert torch.allclose(output_disabled_before, output_base)
+        assert torch.allclose(output_disabled_after, output_base)
+
     @pytest.mark.parametrize("conv_cls", [nn.Conv2d, nn.Conv3d])
     @pytest.mark.parametrize("safe_merge", [False, True])
     def test_ia3_grouped_conv_feedforward_merge(self, conv_cls, safe_merge):
@@ -3207,6 +3227,8 @@ class TestPeftCustomModel(PeftCommonTester):
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
+        if issubclass(config_cls, TrainableTokensConfig):
+            config.init_weights = True
         model = get_peft_model(model, config)
         if issubclass(config_cls, VBLoRAConfig):
             # Manually set the `vblora_vector_bank` to zero so that VB-LoRA functions as an identity operation.
