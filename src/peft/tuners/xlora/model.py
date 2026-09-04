@@ -311,11 +311,11 @@ class XLoraModel(BaseTuner):
 
     def _maybe_freeze_all_adapters(self):
         if not self.xlora_config.use_trainable_adapters:
-            # Only the LoRA experts are frozen. Iterating over the LoRA model instead of over self excludes the
-            # X-LoRA classifier, whose parameter names also contain "lora_" (via "internal_xlora_classifier") and
-            # which is the only trainable part of X-LoRA when the experts are frozen.
-            for name, param in self.lora_model.named_parameters():
-                if "lora_" in name:
+            # Only the LoRA experts are frozen. The match is on ".lora_" and not on "lora_", as the latter also matches
+            # the X-LoRA classifier ("internal_xlora_classifier"), which is the only trainable part of X-LoRA when the
+            # experts are frozen.
+            for name, param in self.named_parameters():
+                if ".lora_" in name:
                     param.requires_grad = False
 
     def generate(self, *args, **kwargs):

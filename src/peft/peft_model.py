@@ -572,7 +572,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     # Prepare a dict of adapter paths, which really just point to the hf id; we will use the subfolders
                     adapter_paths = {}
                     for loaded_adapter_name in adapter_names:
-                        adapter_paths[loaded_adapter_name] = model_id
+                        adapter_paths[loaded_adapter_name] = os.path.join(model_id, model_id)
                     config.adapters = adapter_paths
                     config._subfolders = adapter_names
                 else:

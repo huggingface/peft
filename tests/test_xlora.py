@@ -390,33 +390,43 @@ class TestXlora:
         assert torch.allclose(outputs_disabled, expected, atol=1e-5, rtol=1e-5)
         assert not torch.allclose(outputs, expected, atol=1e-5, rtol=1e-5)
 
-    def test_generate_preserves_training_mode(self, tokenizer, model):
+    @pytest.mark.parametrize("training", [True, False])
+    def test_generate_preserves_training_mode(self, tokenizer, model, training):
         # generate used to put the whole model into eval mode as a side effect, which silently disables dropout for
-        # the rest of the training run
+        # the rest of the training run. Whichever mode the user set must survive the call.
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
-        model.train()
+        model.train(training)
 
         model.generate(input_ids=inputs.to(self.torch_device), max_new_tokens=4)
 
-        assert model.base_model.training
-        assert model.base_model.lora_model.model.training
+        assert model.base_model.training is training
+        assert model.base_model.lora_model.model.training is training
 
     def test_classifier_stays_trainable_after_generate(self, tokenizer, model):
-        # The names of the classifier parameters contain "internal_xlora_classifier", which matches the "lora_"
-        # substring that is used to identify the frozen experts. The classifier is the only trainable part of X-LoRA
-        # when use_trainable_adapters=False, so freezing it makes training a silent no-op.
+        # With use_trainable_adapters=False (the default of the `model` fixture), the X-LoRA classifier is the only
+        # trainable part of the model and everything else, experts included, is frozen. The classifier parameters are
+        # called "internal_xlora_classifier.*", which contains the "lora_" substring that was used to identify the
+        # experts to freeze, so calling generate froze the classifier and made further training a silent no-op.
         classifier_params = [param for name, param in model.named_parameters() if "internal_xlora_classifier" in name]
+        other_params = [param for name, param in model.named_parameters() if "internal_xlora_classifier" not in name]
         assert classifier_params
+        assert other_params
         assert all(param.requires_grad for param in classifier_params)
+        assert not any(param.requires_grad for param in other_params)
 
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         model.generate(input_ids=inputs.to(self.torch_device), max_new_tokens=4)
 
+        # the classifier is still trainable and nothing else became trainable
         assert all(param.requires_grad for param in classifier_params)
+        assert not any(param.requires_grad for param in other_params)
 
     def test_experts_stay_frozen_after_forward(self, tokenizer, model):
-        # The scalings pass disables and re-enables the LoRA layers, and enabling them marks them as trainable again.
-        expert_params = [param for name, param in model.named_parameters() if "lora_A" in name or "lora_B" in name]
+        # With use_trainable_adapters=False (the default of the `model` fixture), the LoRA experts must never require
+        # grads, no matter how many forward passes were run. The scalings pass disables and then re-enables the LoRA
+        # layers on every forward, and re-enabling them goes through `set_adapter`, which marks them as trainable
+        # again; the experts were only frozen again after `generate`, so a plain forward left all of them trainable.
+        expert_params = [param for name, param in model.named_parameters() if ".lora_A." in name or ".lora_B." in name]
         assert expert_params
         assert not any(param.requires_grad for param in expert_params)
 
