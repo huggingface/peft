@@ -2602,6 +2602,36 @@ class TestPeftCustomModel(PeftCommonTester):
         assert torch.equal(model.base_model.model.lin0.base_layer.bias.data, orig_bias)
         assert model.base_model.model.lin0.merged_adapters == []
 
+    @pytest.mark.parametrize("module_type", ["linear", "conv2d"])
+    def test_lora_safe_merge_does_not_mutate_base_layer_on_non_finite_bias(self, module_type):
+        torch.manual_seed(0)
+        if module_type == "linear":
+            model = MLP()
+            config = LoraConfig(target_modules=["lin0"], r=1, lora_alpha=1, lora_bias=True)
+            target_name = "lin0"
+        elif module_type == "conv2d":
+            model = ModelConv2D()
+            config = LoraConfig(target_modules=["conv2d"], r=1, lora_alpha=1, lora_bias=True)
+            target_name = "conv2d"
+        else:
+            raise ValueError(f"Wrong module_type passed, expected 'linear' or 'conv2d', got {module_type}")
+
+        model = get_peft_model(model, config)
+        layer = getattr(model.base_model.model, target_name)
+        original_weight = layer.base_layer.weight.data.clone()
+        original_bias = layer.base_layer.bias.data.clone()
+
+        layer.lora_A["default"].weight.data.fill_(1)
+        layer.lora_B["default"].weight.data.fill_(1)
+        layer.lora_B["default"].bias.data.fill_(float("inf"))
+
+        with pytest.raises(ValueError, match="NaNs detected in the merged weights"):
+            layer.merge(safe_merge=True)
+
+        assert torch.equal(layer.base_layer.weight.data, original_weight)
+        assert torch.equal(layer.base_layer.bias.data, original_bias)
+        assert layer.merged_adapters == []
+
     @pytest.mark.parametrize("safe_merge", [False, True])
     @pytest.mark.parametrize("module_type", ["linear", "conv2d"])
     def test_merge_with_lora_bias_when_base_layer_has_no_bias_warns_and_raises(self, safe_merge, module_type):
@@ -2609,10 +2639,12 @@ class TestPeftCustomModel(PeftCommonTester):
         if module_type == "linear":
             model = MLP(bias=False)
             config = LoraConfig(target_modules=["lin0", "lin1"], lora_bias=True)
+            target_name = "lin0"
             warn_msg = re.escape("`lora_bias=True` was passed but the targeted layer of type Linear has no bias")
         elif module_type == "conv2d":
             model = ModelConv2D(bias=False)
             config = LoraConfig(target_modules=["conv2d"], lora_bias=True)
+            target_name = "conv2d"
             warn_msg = re.escape("`lora_bias=True` was passed but the targeted layer of type Conv2d has no bias")
         else:
             raise ValueError(f"Wrong module_type passed, expected 'linear' or 'conv2d', got {module_type}")
@@ -2620,9 +2652,18 @@ class TestPeftCustomModel(PeftCommonTester):
         with pytest.warns(PeftWarning, match=warn_msg):
             model = get_peft_model(model, config)
 
+        layer = getattr(model.base_model.model, target_name)
+        layer.lora_A["default"].weight.data.fill_(1)
+        layer.lora_B["default"].weight.data.fill_(1)
+        original_weight = layer.base_layer.weight.data.clone()
+
         err_msg = "Impossible to merge LoRA with `lora_bias=True` because the base layer has no bias"
         with pytest.raises(RuntimeError, match=err_msg):
             model.merge_adapter(safe_merge=safe_merge)
+
+        if safe_merge:
+            assert torch.equal(layer.base_layer.weight.data, original_weight)
+            assert layer.merged_adapters == []
 
     # Note: Skipping _test_generate, _test_generate_pos_args, _test_generate_half_prec, as the custom models don't have
     # a generate method
