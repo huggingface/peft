@@ -303,3 +303,55 @@ def test_model_batch_training_text(sst_data, global_tokenizer, collator, config_
     assert torch.all(norm_delta <= epsilon)
     # Ensure that label tokens remain unchanged
     assert torch.all((norm_delta == 0) == (~non_label_idx))
+
+
+def test_cpt_forward_loss_matches_reference():
+    """Pin the CPT loss computation: the virtual tokens are prefixed to the labels (using the configured
+    cpt_token_ids), then every position whose token type is not a positive multiple of 4 is ignored, and the loss is
+    the (unweighted, as opt_weighted_loss_type="none") shifted cross entropy over the remaining positions."""
+    config = CPTConfig(
+        cpt_token_ids=[0, 1, 2, 3, 4, 5, 6, 7],
+        cpt_mask=[1, 1, 1, 1, 1, 1, 1, 1],
+        cpt_tokens_type_mask=[1, 2, 2, 2, 3, 3, 4, 4],
+        opt_weighted_loss_type="none",
+        tokenizer_name_or_path=MODEL_NAME,
+        task_type=TaskType.CAUSAL_LM,
+    )
+    base_model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
+    model = get_peft_model(base_model, config)
+    model.eval()
+
+    torch.manual_seed(0)
+    input_ids = torch.randint(0, base_model.config.vocab_size, (2, 6))
+    attention_mask = torch.ones_like(input_ids)
+    labels = input_ids.clone()
+    input_type_mask = torch.full_like(input_ids, 4)
+
+    with torch.no_grad():
+        output = model(
+            input_ids=input_ids, attention_mask=attention_mask, labels=labels, input_type_mask=input_type_mask
+        )
+        # when input_type_mask is not passed, it defaults to all 4s, i.e. all input tokens are treated as labels
+        output_default_mask = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+        # without labels, no loss is computed
+        output_no_labels = model(input_ids=input_ids, attention_mask=attention_mask)
+
+    assert output_no_labels.loss is None
+    assert torch.isfinite(output.loss)
+    assert torch.allclose(output.loss, output_default_mask.loss, atol=1e-6, rtol=1e-6)
+
+    # reference computation
+    prefix_labels = torch.tensor(config.cpt_token_ids).view(1, -1).repeat(2, 1)
+    cpt_labels = torch.cat([prefix_labels, labels], dim=1)
+    prefix_type_mask = torch.tensor(config.cpt_tokens_type_mask).view(1, -1).repeat(2, 1)
+    # the input token types are shifted to avoid clashing with the prefix token types
+    shifted_input_type_mask = input_type_mask + prefix_type_mask.max()
+    cpt_type_mask = torch.cat([prefix_type_mask, shifted_input_type_mask], dim=1)
+    keep = (cpt_type_mask > 0) & (cpt_type_mask % 4 == 0)
+    cpt_labels[~keep] = -100
+
+    vocab_size = output.logits.shape[-1]
+    expected_loss = torch.nn.functional.cross_entropy(
+        output.logits[:, :-1].reshape(-1, vocab_size).float(), cpt_labels[:, 1:].reshape(-1), ignore_index=-100
+    )
+    assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)
