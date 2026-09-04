@@ -1,0 +1,53 @@
+{
+  "best_metric": 0.7107843137254902,
+  "best_model_checkpoint": "peft\\outputs\\peft_mrpc_40_rerun\\checkpoint-230",
+  "epoch": 2.0,
+  "eval_steps": 500,
+  "global_step": 460,
+  "is_hyper_param_search": false,
+  "is_local_process_zero": true,
+  "is_world_process_zero": true,
+  "log_history": [
+    {
+      "epoch": 1.0,
+      "eval_accuracy": 0.7107843137254902,
+      "eval_f1": 0.8244047619047619,
+      "eval_loss": 0.6011891961097717,
+      "eval_runtime": 3.1533,
+      "eval_samples_per_second": 129.387,
+      "eval_steps_per_second": 8.245,
+      "step": 230
+    },
+    {
+      "epoch": 2.0,
+      "eval_accuracy": 0.7034313725490197,
+      "eval_f1": 0.8191330343796711,
+      "eval_loss": 0.5803993344306946,
+      "eval_runtime": 2.9649,
+      "eval_samples_per_second": 137.608,
+      "eval_steps_per_second": 8.769,
+      "step": 460
+    }
+  ],
+  "logging_steps": 500,
+  "max_steps": 2300,
+  "num_input_tokens_seen": 0,
+  "num_train_epochs": 10,
+  "save_steps": 500,
+  "stateful_callbacks": {
+    "TrainerControl": {
+      "args": {
+        "should_epoch_stop": false,
+        "should_evaluate": false,
+        "should_log": false,
+        "should_save": true,
+        "should_training_stop": false
+      },
+      "attributes": {}
+    }
+  },
+  "total_flos": 289970046448608.0,
+  "train_batch_size": 16,
+  "trial_name": null,
+  "trial_params": null
+}

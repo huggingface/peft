@@ -348,6 +348,27 @@ class MontecloraTrainerMixin:
         return (total_loss, outputs) if return_outputs else total_loss
 
 
+class FineGatesTrainerMixin:
+    """
+    Mixin class for adding FineGates' auxiliary sparsity loss to a Trainer `compute_loss` implementation.
+    """
+
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        if return_outputs:
+            task_loss, outputs = super().compute_loss(model, inputs, return_outputs=True, **kwargs)
+        else:
+            task_loss = super().compute_loss(model, inputs, return_outputs=False, **kwargs)
+            outputs = None
+
+        finegates_loss = 0.0
+        base_model = getattr(model, "base_model", None)
+        if (base_model is not None) and hasattr(base_model, "_get_finegates_loss"):
+            finegates_loss = base_model._get_finegates_loss()
+
+        total_loss = task_loss + finegates_loss
+        return (total_loss, outputs) if return_outputs else total_loss
+
+
 class DoraCaching:
     """Context manager to enable DoRA caching, which improves speed of DoRA inference at the expense of memory.
 
