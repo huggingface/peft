@@ -2545,7 +2545,7 @@ class TestPeftCustomModel(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_safe_merge(model_id, config_cls, config_kwargs)
 
-    @pytest.mark.parametrize(("target_module", "token_indices"), [("emb", [0, 1, 3]), ("lin0", [0, 1])])
+    @pytest.mark.parametrize("target_module,token_indices", [("emb", [0, 1, 3]), ("lin0", [0, 1])])
     def test_trainable_tokens_random_init_unmerge_restores_base_weights(self, target_module, token_indices):
         # A merge/unmerge cycle must preserve the base weights even when the adapter starts with random weights; see #3650.
         torch.manual_seed(0)
@@ -3227,6 +3227,8 @@ class TestPeftCustomModel(PeftCommonTester):
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
+        if issubclass(config_cls, TrainableTokensConfig):
+            config.init_weights = True
         model = get_peft_model(model, config)
         if issubclass(config_cls, VBLoRAConfig):
             # Manually set the `vblora_vector_bank` to zero so that VB-LoRA functions as an identity operation.
@@ -3240,9 +3242,6 @@ class TestPeftCustomModel(PeftCommonTester):
             _zero_unilora_theta_d(model)
         model.eval()
         outputs_before = model(**X)
-        if issubclass(config_cls, TrainableTokensConfig):
-            with model.disable_adapter():
-                outputs_base = model(**X)
 
         if issubclass(config_cls, VBLoRAConfig):
             # initialize `vblora_vector_bank` so it can be trained
@@ -3321,8 +3320,7 @@ class TestPeftCustomModel(PeftCommonTester):
         # (skipped for PaRa: DEFT with para=True is not identity-at-init, so `outputs_before` already differs from the
         # disabled/base output; the disable -> base behavior is covered by test_disable_adapters)
         if not (isinstance(config, DeftConfig) and config.para):
-            expected_disabled = outputs_base if issubclass(config_cls, TrainableTokensConfig) else outputs_before
-            assert torch.allclose(expected_disabled, outputs_disabled, atol=atol, rtol=rtol)
+            assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol)
 
         # check that enabling + disabling adapters does not change the results
         assert torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol)
