@@ -65,6 +65,7 @@ from peft import (
     set_peft_model_state_dict,
 )
 from peft.import_utils import is_transformers_ge_v5
+from peft.mapping import PEFT_TYPE_TO_TUNER_MAPPING
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -296,6 +297,12 @@ class PeftCommonTester:
             # also test injecting directly
             del model
             model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            tuner_cls = PEFT_TYPE_TO_TUNER_MAPPING[config.peft_type]
+            if tuner_cls.uses_shared_state:
+                with pytest.raises(ValueError, match="shared state.*get_peft_model"):
+                    inject_adapter_in_model(config, model, low_cpu_mem_usage=True)
+                return
+
             inject_adapter_in_model(config, model, low_cpu_mem_usage=True)  # check that there is no error
 
             if not isinstance(config, LNTuningConfig):

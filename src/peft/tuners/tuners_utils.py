@@ -296,6 +296,10 @@ class BaseTuner(nn.Module, ABC):
 
     # Required attributes for child classes:
 
+    # Whether the tuner stores adapter state shared between multiple injected layers. Direct injection returns only the
+    # wrapped model, so tuners with shared state cannot be used through `inject_adapter_in_model`.
+    uses_shared_state: bool = False
+
     # The unique prefix for this PEFT method, e.g. 'lora_' for LoRA.
     prefix: str
     # The class of the tuner layer, e.g. `LoraLayer` for LoRA.

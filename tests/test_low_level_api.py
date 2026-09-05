@@ -30,10 +30,16 @@ from transformers import (
 
 from peft import (
     AdaLoraConfig,
+    FrodConfig,
     IA3Config,
     LoKrConfig,
     LoraConfig,
+    PveraConfig,
     RandLoraConfig,
+    TinyLoraConfig,
+    UniLoraConfig,
+    VBLoRAConfig,
+    VeraConfig,
     get_base_model_state_dict,
     get_peft_model,
     get_peft_model_state_dict,
@@ -60,6 +66,35 @@ class DummyModel(torch.nn.Module):
         x = self.linear(x)
         x = self.lm_head(x)
         return x
+
+
+SHARED_STATE_TUNER_CONFIGS = [
+    pytest.param(TinyLoraConfig, {"r": 2, "u": 4}, id="TinyLoRA"),
+    pytest.param(UniLoraConfig, {"r": 2, "theta_d_length": 16}, id="UniLoRA"),
+    pytest.param(VeraConfig, {"r": 2}, id="VeRA"),
+    pytest.param(PveraConfig, {"r": 2}, id="PVeRA"),
+    pytest.param(VBLoRAConfig, {"r": 2, "num_vectors": 8, "vector_length": 2}, id="VBLoRA"),
+    pytest.param(FrodConfig, {"progressbar": False}, id="FRoD"),
+]
+
+
+@pytest.mark.parametrize("config_cls, config_kwargs", SHARED_STATE_TUNER_CONFIGS)
+def test_inject_adapter_in_model_rejects_shared_state_tuners(config_cls, config_kwargs):
+    config = config_cls(target_modules=["linear"], **config_kwargs)
+    model = DummyModel()
+    original_module_names = [name for name, _ in model.named_modules()]
+
+    with pytest.raises(ValueError, match="shared state.*get_peft_model"):
+        inject_adapter_in_model(config, model)
+
+    assert [name for name, _ in model.named_modules()] == original_module_names
+
+
+@pytest.mark.parametrize("config_cls, config_kwargs", SHARED_STATE_TUNER_CONFIGS)
+def test_get_peft_model_supports_shared_state_tuners(config_cls, config_kwargs):
+    config = config_cls(target_modules=["linear"], **config_kwargs)
+
+    get_peft_model(DummyModel(), config)
 
 
 class TestLowLevelFunctional:
