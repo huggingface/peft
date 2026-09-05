@@ -199,6 +199,26 @@ class PermuteDims(ConversionOps):
         return f"{self.__class__.__name__}(dims={self.dims})"
 
 
+def _copy_runtime_attributes(src: WeightConverter | WeightRenaming, dst: WeightConverter | WeightRenaming) -> None:
+    """Copy runtime-only attributes from *src* to *dst*.
+
+    ``WeightConverter`` objects created by Transformers carry optional attributes
+    (e.g. ``quantization_operation`` and, on older versions, ``distributed_operation``)
+    that are set after construction during model loading. When PEFT builds new
+    converters from existing ones, those attributes must be propagated so the new
+    converters behave like the originals.
+
+    Because the set of attributes varies across Transformers versions —
+    ``distributed_operation`` was removed in the DTensor-based TP rework
+    (https://github.com/huggingface/transformers/pull/47579) — each attribute is
+    copied with ``getattr``/``setattr`` and silently skipped when it does not exist
+    on the source object.
+    """
+    for attr in ("distributed_operation", "quantization_operation"):
+        if hasattr(src, attr):
+            setattr(dst, attr, getattr(src, attr))
+
+
 def build_peft_weight_mapping(
     weight_conversions: list[WeightConverter | WeightRenaming] | None, adapter_name: str, peft_config=None
 ) -> list[WeightConverter | WeightRenaming]:
@@ -276,8 +296,7 @@ def build_peft_weight_mapping(
                     target_patterns=new_target_patterns,
                     operations=peft_weight_operations,
                 )
-                new_conversion.distributed_operation = orig_conversion.distributed_operation
-                new_conversion.quantization_operation = orig_conversion.quantization_operation
+                _copy_runtime_attributes(orig_conversion, new_conversion)
                 new_weight_conversions.append(new_conversion)
 
         elif len(orig_conversion.target_patterns) == 1 and orig_conversion.target_patterns[0].endswith("down_proj"):
@@ -318,8 +337,7 @@ def build_peft_weight_mapping(
                     target_patterns=new_target_patterns,
                     operations=peft_weight_operations,
                 )
-                new_conversion.distributed_operation = orig_conversion.distributed_operation
-                new_conversion.quantization_operation = orig_conversion.quantization_operation
+                _copy_runtime_attributes(orig_conversion, new_conversion)
                 new_weight_conversions.append(new_conversion)
 
     return new_weight_conversions
