@@ -40,7 +40,7 @@ from transformers.modeling_outputs import QuestionAnsweringModelOutput, Sequence
 from transformers.utils import PushToHubMixin
 
 from peft.tuners.lora.variants import get_alora_offsets_for_forward, get_alora_offsets_for_generate
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, _delete_auxiliary_adapter
 from peft.utils import AuxiliaryTrainingWrapper
 from peft.utils.constants import DUMMY_MODEL_CONFIG
 from peft.utils.integrations import init_empty_weights
@@ -1170,6 +1170,28 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         if adapter_name not in self.peft_config:
             raise ValueError(f"Adapter {adapter_name} does not exist")
+
+        if self.peft_config[adapter_name].is_prompt_learning:
+            # The state of prompt learning methods lives on the PeftModel itself, so deletion cannot be delegated to
+            # self.base_model, which is the base model and not a tuner.
+            del self.peft_config[adapter_name]
+            del self.prompt_encoder[adapter_name]
+            del self.prompt_tokens[adapter_name]
+            remaining_adapters = list(self.peft_config)
+            _delete_auxiliary_adapter(
+                self.base_model, adapter_name=adapter_name, new_active_adapters=remaining_adapters or None
+            )
+            if adapter_name in self.active_adapters:
+                if not remaining_adapters:
+                    self.active_adapter = []
+                else:
+                    new_active_adapter = remaining_adapters[0]
+                    warnings.warn(
+                        f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to "
+                        f"{new_active_adapter}."
+                    )
+                    self.active_adapter = new_active_adapter
+            return
 
         self.base_model.delete_adapter(adapter_name=adapter_name)
         new_active_adapters = self.active_adapters

@@ -85,7 +85,6 @@ from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
 from .testing_common import (
     PeftCommonTester,
-    _skip_if_deleting_adapter_not_supported,
     _skip_if_merging_not_supported,
 )
 from .testing_utils import get_state_dict, hub_online_once, require_non_cpu, set_init_weights_false
@@ -3766,7 +3765,6 @@ class TestPeftCustomModel(PeftCommonTester):
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_merged_adapter_raises_without_mutation(self, test_name, model_id, config_cls, config_kwargs):
-        _skip_if_deleting_adapter_not_supported(config_cls, config_kwargs)
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
@@ -3796,7 +3794,6 @@ class TestPeftCustomModel(PeftCommonTester):
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_delete_merged_adapter_only_rejects_the_merged_one(self, test_name, model_id, config_cls, config_kwargs):
         # with two adapters and only one of them merged, the merged one cannot be deleted while the other still can
-        _skip_if_deleting_adapter_not_supported(config_cls, config_kwargs)
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
         _skip_tests_with_multiple_adapters_with_target_parameters(config_cls, config_kwargs)
 

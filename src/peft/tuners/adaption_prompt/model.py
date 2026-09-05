@@ -13,6 +13,8 @@
 # limitations under the License.
 
 
+from contextlib import contextmanager
+
 from torch import nn
 
 from peft.utils import _freeze_adapter, _get_submodules
@@ -91,6 +93,50 @@ class AdaptionPromptModel(nn.Module):
 
         if config.inference_mode:
             _freeze_adapter(self.model, adapter_name)
+
+    def delete_adapter(self, adapter_name: str) -> None:
+        """Delete an adapter with the given name."""
+        if adapter_name not in self.peft_config:
+            raise ValueError(f"Adapter with name '{adapter_name}' does not exist.")
+
+        if adapter_name == self._active_adapter:
+            remaining_adapters = [name for name in self.peft_config if name != adapter_name]
+            if self._enabled:
+                self._remove_adapted_attentions(adapter_name)
+            self._active_adapter = remaining_adapters[0] if remaining_adapters else None
+            if self._active_adapter is not None and self._enabled:
+                self._set_adapted_attentions(self._active_adapter)
+
+        del self.peft_config[adapter_name]
+        del self._parents[adapter_name]
+        self._cached_adapters.pop(adapter_name, None)
+
+    @contextmanager
+    def _temporarily_active(self, adapter_name: str):
+        """Swap the modules of `adapter_name` into the model for the duration of the context.
+
+        The modules of the inactive adapters are stored in `_cached_adapters` and are thus not part of the model, so
+        they can neither be saved nor loaded while they are cached.
+        """
+        previous_adapter = self._active_adapter
+        was_enabled = self._enabled
+        if not was_enabled:
+            self.enable_adapter_layers()
+        try:
+            self.set_adapter(adapter_name)
+            yield
+        finally:
+            self.set_adapter(previous_adapter)
+            if not was_enabled:
+                self.disable_adapter_layers()
+
+    @property
+    def active_adapters(self) -> list[str]:
+        # without this, the lookup falls through to the wrapped transformers model, whose `active_adapters` refers to
+        # the adapters of the transformers PEFT integration
+        if self._active_adapter is None:
+            return []
+        return [self._active_adapter]
 
     def set_adapter(self, adapter_name: str, inference_mode: bool = False) -> None:
         """Set the model to use the adapter with the given name."""
@@ -175,6 +221,11 @@ class AdaptionPromptModel(nn.Module):
 
     @classmethod
     def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
+        adaption_prompt_model = getattr(model, "base_model", model)
+        if isinstance(adaption_prompt_model, cls) and adaption_prompt_model._active_adapter != adapter_name:
+            # the weights of an inactive adapter are not part of the passed state_dict, see _temporarily_active
+            with adaption_prompt_model._temporarily_active(adapter_name):
+                state_dict = model.state_dict()
         return {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
 
     @classmethod
