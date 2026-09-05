@@ -875,6 +875,26 @@ class BaseTuner(nn.Module, ABC):
         named_modules = list(model.named_modules())
         key_list = [key for key, _ in named_modules]
 
+        # Adding an adapter must not change the trainability of parameters that were already present. Some tuners
+        # create their new adapter parameters before calling this method, so exclude those from the snapshot.
+        existing_adapter_prefixes = []
+        mapping_existing_parameter_requires_grad = []
+        seen_parameters = set()
+        for key, module in named_modules:
+            if isinstance(module, BaseTunerLayer):
+                existing_adapter_prefixes.append(key + ".")
+            for parameter_name, parameter in module.named_parameters(recurse=False):
+                full_name = f"{key}.{parameter_name}" if key else parameter_name
+                if id(parameter) in seen_parameters:
+                    continue
+                seen_parameters.add(id(parameter))
+                if f".{adapter_name}." not in full_name and not full_name.endswith(f".{adapter_name}"):
+                    mapping_existing_parameter_requires_grad.append((parameter, parameter.requires_grad))
+
+        if not existing_adapter_prefixes:
+            # The first injection should freeze the base model instead of restoring its default trainability.
+            mapping_existing_parameter_requires_grad = []
+
         uses_dummy_target_modules = getattr(peft_config, "target_modules", None) == DUMMY_TARGET_MODULES
         if uses_dummy_target_modules:
             # dummy adapter, we allow not matching any module
@@ -912,11 +932,6 @@ class BaseTuner(nn.Module, ABC):
         ###############################
         # MATCHING & CREATING MODULES #
         ###############################
-
-        existing_adapter_prefixes = []
-        for key, module in named_modules:
-            if isinstance(module, BaseTunerLayer):
-                existing_adapter_prefixes.append(key + ".")
 
         # TODO: check if this the most robust way
         module_names: set[str] = set()
@@ -1103,11 +1118,6 @@ class BaseTuner(nn.Module, ABC):
         self.set_adapter(self.active_adapters, inference_mode=peft_config.inference_mode)
         self._mark_only_adapters_as_trainable(model)
 
-        if self.peft_config[adapter_name].inference_mode:
-            for n, p in model.named_parameters():
-                if adapter_name in n:
-                    p.requires_grad = False
-
         set_additional_trainable_modules(
             model=model,
             peft_config=peft_config,
@@ -1115,6 +1125,9 @@ class BaseTuner(nn.Module, ABC):
             adapter_name=adapter_name,
             activate_adapter=adapter_name in self.active_adapters,
         )
+
+        for parameter, requires_grad in mapping_existing_parameter_requires_grad:
+            parameter.requires_grad = requires_grad
 
     def _inject_parameters(
         self, peft_config: PeftConfig, model: nn.Module, adapter_name: str, low_cpu_mem_usage: bool
@@ -2352,18 +2365,22 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
             if layers_pattern is None or len(layers_pattern) == 0:
                 # Lazy .*? matches the first numbered segment (the layer index), not the last one; a greedy .* would
                 # wrongly pick up nested indices such as the expert index in MoE models ("...layers.1.experts.0...").
-                layer_index = re.match(r".*?\.[^.]*\.(\d+)\.", key)
+                match = re.match(r".*?\.[^.]*\.(?P<idx>\d+)\.", key)
             else:
                 layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
                 for pattern in layers_pattern:
-                    layer_index = re.match(rf".*?\.{pattern}\.(\d+)\.", key)
-                    if layer_index is not None:
+                    # Again, ensure to match the first index, not the last
+                    match = re.match(rf"(?:^|.*?\.){pattern}\.(?P<idx>\d+)\.", key)
+                    if match is not None:
                         break
+
+            if match:
+                layer_index = match.groupdict().get("idx")
 
             if layer_index is None:
                 target_module_found = False
             else:
-                layer_index = int(layer_index.group(1))
+                layer_index = int(layer_index)
                 if isinstance(layer_indexes, int):
                     target_module_found = layer_index == layer_indexes
                 else:

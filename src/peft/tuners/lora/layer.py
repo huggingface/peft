@@ -734,6 +734,43 @@ class LoraLayer(BaseTunerLayer):
         # Remove redundant fields
         del base_layer._peft_loraga_grad
 
+    @contextmanager
+    def _unmerged_base_weight(self, safe_merge: bool = False):
+        """Yield the base weight with the already merged adapters taken out of it.
+
+        `merge` applies the adapters one after another, so from the second adapter on, the weight already contains the
+        previously merged ones. Variants whose delta depends on the base weight need it unmerged, the same way
+        `forward` sees it, so the merged adapters are unmerged here and merged again afterwards. The weight is dropped
+        again when the context exits.
+
+        Merging the adapters again re-enters this method for each of them. They get the weight the outermost call
+        recovered, which is the one they need anyway. Unmerging again for each of them would make the number of merge
+        calls grow exponentially.
+        """
+        key = "unmerged_base_weight"
+        if key in self._caches:
+            yield self._caches[key]
+            return
+
+        merged_adapters = self.merged_adapters[:]
+        try:
+            if merged_adapters:
+                self.unmerge()
+            # copy it, because the `finally` block replays a plain LoRA adapter by adding its delta to the
+            # base weight in place, which would change this tensor too
+            weight = dequantize_module_weight(self.get_base_layer()).detach().clone()
+            self._cache_store(key, weight)
+            yield weight
+        finally:
+            try:
+                # only the adapters that were actually unmerged, so that an unmerge that failed halfway does not
+                # merge anything twice
+                to_merge = [name for name in merged_adapters if name not in self.merged_adapters]
+                if to_merge:
+                    self.merge(safe_merge=safe_merge, adapter_names=to_merge)
+            finally:
+                self._caches.pop(key, None)
+
     def _cache_store(self, key: str, value: Any) -> None:
         # cache intermediate values, e.g. weight norm of DoRA
         self._caches[key] = value

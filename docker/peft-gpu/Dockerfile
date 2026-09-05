@@ -49,11 +49,14 @@ RUN conda run -n peft pip install --no-cache-dir bitsandbytes optimum
 # TODO pcre, which is used by gptqmodel, is resulting in a core dump, remove once it's resolved
 # RUN CUDA_ARCH_LIST=8.9 conda run -n peft pip install "gptqmodel>=7.0.0"
 
-RUN \
+# TODO: EETQ uses `-std=c++17` but starting with PyTorch 2.14, the min C++ version is 20. Therefore, don't install
+# EETQ and let its tests skip. In the future, either EETQ gets updated and we can start testing it again, or
+# remove EETQ support from PEFT completely if it's abandoned.
+# RUN \
     # Add eetq for quantization testing; needs to run without build isolation since the setup
     # script directly imports torch from the environment which would fail with isolation.
     # Ninja should speed up build time.
-    conda run -n peft pip install ninja && conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
+    # conda run -n peft pip install ninja && conda run -n peft pip install --no-build-isolation git+https://github.com/NetEase-FuXi/EETQ.git
 
 # TODO: Importing TE results in: undefined symbol: cublasLtGroupedMatrixLayoutInit_internal, version libcublasLt.so.13
 # Reinstate TE when the issue is resolved (probably this one: https://github.com/NVIDIA/TransformerEngine/issues/2504)
@@ -76,7 +79,7 @@ RUN conda run -n peft pip install -U --no-cache-dir \
         # Add HQQ for quantization testing
         hqq \
         deepspeed \
-        "kernels<0.16" \
+        "kernels>=0.16" \
         && conda run -n peft pip install -U --no-cache-dir mslk --index-url https://download.pytorch.org/whl/cu132
 
 RUN conda run -n peft pip freeze | grep transformers

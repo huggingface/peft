@@ -71,6 +71,15 @@ from peft import (
     WaveFTConfig,
     XLoraConfig,
 )
+from peft.tuners.lora.config import (
+    ArrowConfig,
+    BdLoraConfig,
+    CordaConfig,
+    EvaConfig,
+    KasaConfig,
+    LoraGAConfig,
+    VeloraConfig,
+)
 
 
 class TestingCommitHashError(Exception):
@@ -661,3 +670,33 @@ class TestPeftConfig:
         with pytest.warns(UserWarning, match=msg):
             peft_config = config_class(**mandatory_kwargs)
         assert peft_config.peft_version == version + "@UNKNOWN"
+
+
+class TestLoraNestedConfigRoundTrip:
+    # Regression tests for https://github.com/huggingface/peft/issues/3583:
+    # nested LoRA sub-configs used to come back as plain dicts after
+    # save_pretrained → from_pretrained, crashing consumers with AttributeError.
+    @pytest.mark.parametrize(
+        "attribute_name, nested_config_cls, dummy_field, dummy_value",
+        [
+            ("eva_config", EvaConfig, "rho", 7.5),
+            ("corda_config", CordaConfig, "corda_method", "kpm"),
+            ("arrow_config", ArrowConfig, "top_k", 4),
+            ("lora_ga_config", LoraGAConfig, "direction", "ArBr"),
+            ("use_bdlora", BdLoraConfig, "nblocks", 4),
+            ("velora_config", VeloraConfig, "num_groups", 32),
+            ("kasa_config", KasaConfig, "beta", 2e-4),
+        ],
+    )
+    def test_nested_config_survives_save_load_roundtrip(
+        self, tmp_path, attribute_name, nested_config_cls, dummy_field, dummy_value
+    ):
+        config = LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0)
+        setattr(config, attribute_name, nested_config_cls(**{dummy_field: dummy_value}))
+
+        config.save_pretrained(tmp_path)
+        loaded = LoraConfig.from_pretrained(tmp_path)
+
+        nested = getattr(loaded, attribute_name)
+        assert isinstance(nested, nested_config_cls)
+        assert getattr(nested, dummy_field) == dummy_value

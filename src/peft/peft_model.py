@@ -376,7 +376,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     self.base_model.__dict__.get("name_or_path", None)
                     if peft_config.is_prompt_learning
                     else self.base_model.model.__dict__.get("name_or_path", None)
-                )
+                ) or None
             inference_mode = peft_config.inference_mode
             peft_config.inference_mode = True
 
@@ -1467,6 +1467,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 low_cpu_mem_usage=low_cpu_mem_usage,
                 autocast_adapter_dtype=autocast_adapter_dtype,
             )
+            # add_adapter preserves existing trainability and leaves the new inactive adapter frozen. Explicitly
+            # enable it only when load_adapter was called with is_trainable=True.
+            if is_trainable:
+                self.set_requires_grad(adapter_name)
 
         adapters_weights = load_peft_weights(
             model_id, device=torch_device, key_mapping=key_mapping, **hf_hub_download_kwargs
