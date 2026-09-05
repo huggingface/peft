@@ -13,6 +13,7 @@
 # limitations under the License.
 import dataclasses
 import re
+import warnings
 from copy import deepcopy
 
 import diffusers
@@ -495,6 +496,38 @@ class TestTargetedModuleNames:
         model = MLP()
         model = get_peft_model(model, LoraConfig(target_modules=["lin0", "lin1"]))
         assert model.targeted_module_names == ["lin0", "lin1"]
+
+    def test_uneven_target_module_coverage_warns(self):
+        # Gemma 4 (and similar) omit v_proj on some layers. Suffix matching still builds an adapter
+        # from the layers that do have it, with no signal that coverage is asymmetric.
+        # See https://github.com/huggingface/peft/issues/3658.
+
+        class Block(nn.Module):
+            def __init__(self, with_v: bool = True):
+                super().__init__()
+                self.q_proj = nn.Linear(4, 4)
+                self.k_proj = nn.Linear(4, 4)
+                if with_v:
+                    self.v_proj = nn.Linear(4, 4)
+                self.o_proj = nn.Linear(4, 4)
+
+        class TinyGemmaLike(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = nn.ModuleList([Block(with_v=(i != 1)) for i in range(3)])
+
+        with pytest.warns(UserWarning, match="target_modules coverage is uneven"):
+            get_peft_model(
+                TinyGemmaLike(),
+                LoraConfig(target_modules=["q_proj", "k_proj", "v_proj", "o_proj"]),
+            )
+
+    def test_even_target_module_coverage_does_not_warn(self):
+        model = MLP()
+        with warnings.catch_warnings(record=True) as recorded:
+            warnings.simplefilter("always")
+            get_peft_model(model, LoraConfig(target_modules=["lin0", "lin1"]))
+        assert not any("coverage is uneven" in str(w.message) for w in recorded)
 
     def test_ia3_targeted_module_regex(self):
         model = MLP()
