@@ -1102,8 +1102,8 @@ class BaseTuner(nn.Module, ABC):
                 warnings.warn(
                     f"The following {pattern_attr} keys did not match any targeted module and were ignored: "
                     f"{unmatched}. Note that pattern keys are only matched against the end of a full module path "
-                    "(optionally after a dot-separated prefix), therefore regex anchors like '^' or fully-qualified "
-                    "paths may never match.",
+                    "(optionally after a dot-separated prefix), so a misplaced '^' anchor such as '^q_proj' or a "
+                    "typo may never match (fully-qualified anchored keys such as '^model\\.layers\\.0\\.' do match).",
                     RuntimeWarning,
                 )
 
