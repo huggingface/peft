@@ -12,13 +12,13 @@
   "modules_to_save": null,
   "peft_type": "UNILORA",
   "proj_seed": 42,
-  "r": 32,
+  "r": 4,
   "revision": null,
   "target_modules": [
     "q_proj",
     "v_proj"
   ],
   "task_type": "CAUSAL_LM",
-  "theta_d_length": 256,
+  "theta_d_length": 131072,
   "unilora_dropout": 0.0
 }
