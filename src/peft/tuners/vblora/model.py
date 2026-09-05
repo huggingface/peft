@@ -65,6 +65,7 @@ class VBLoRAModel(BaseTuner):
         - **peft_config** ([`VBLoRAConfig`]): The configuration of the VBLoRAConfig model.
     """
 
+    uses_shared_state: bool = True
     prefix: str = "vblora_"
     tuner_layer_cls = VBLoRALayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING
