@@ -464,14 +464,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
                 Create empty adapter weights on meta device before loading the saved weights. Useful to speed up the
                 process.
-            torch_device (`str`, *optional*, defaults to None):
-                The device to load the adapter on. If `None`, the device will be inferred.
             key_mapping (dict, *optional*, defaults to None)
                 Extra mapping of PEFT `state_dict` keys applied before loading the `state_dict`. When this mapping is
                 applied, the PEFT-specific `"base_model.model"` prefix is removed beforehand and the adapter name (e.g.
                 `"default"`) is not inserted yet. Only pass this argument if you know what you're doing.
             kwargs: (`optional`):
-                Additional keyword arguments passed along to the specific PEFT configuration class.
+                Additional keyword arguments passed along to the specific PEFT configuration class. This includes
+                `torch_device` (`str`, *optional*): the device to load the adapter on (forwarded to
+                [`load_adapter`][PeftModel.load_adapter]); if `None`, the device will be inferred.
 
         """
         from .auto import MODEL_TYPE_TO_PEFT_MODEL_MAPPING
