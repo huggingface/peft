@@ -20,6 +20,7 @@ import re
 import textwrap
 import warnings
 from abc import ABC, abstractmethod
+from collections import Counter
 from collections.abc import Sequence
 from contextlib import contextmanager, nullcontext
 from typing import Any, Optional, Union, overload
@@ -1102,6 +1103,37 @@ class BaseTuner(nn.Module, ABC):
                     f"target_parameters={peft_config.target_parameters} were set but no parameter was matched.",
                     RuntimeWarning,
                 )
+            elif (
+                targeted_module_names
+                and isinstance(peft_config.target_modules, (list, set, tuple))
+                and len(peft_config.target_modules) > 1
+            ):
+                # Suffix matching can hit a name on some layers and miss it on others (Gemma 4
+                # omits v_proj on global-attention layers). Raise only when nothing matched; here
+                # at least one module did, so warn when coverage is uneven across the listed names.
+                # See https://github.com/huggingface/peft/issues/3658.
+                match_counts: Counter[str] = Counter()
+                unmatched_targets: list[str] = []
+                for target in peft_config.target_modules:
+                    n_matches = sum(
+                        1 for name in targeted_module_names if name == target or name.endswith(f".{target}")
+                    )
+                    if n_matches:
+                        match_counts[str(target)] = n_matches
+                    else:
+                        unmatched_targets.append(str(target))
+                matched_counts = list(match_counts.values())
+                uneven = bool(matched_counts) and (min(matched_counts) != max(matched_counts) or unmatched_targets)
+                if uneven:
+                    details = ", ".join(f"{name}: {count}" for name, count in sorted(match_counts.items()))
+                    if unmatched_targets:
+                        extra = f"unmatched: {unmatched_targets}"
+                        details = f"{details}; {extra}" if details else extra
+                    warnings.warn(
+                        f"target_modules coverage is uneven ({details}). Some listed modules exist "
+                        "on fewer layers than others. Inspect the adapted layers with get_layer_status().",
+                        UserWarning,
+                    )
 
         # Now that the checks passed, merge this adapter's matches into the tuner-level bookkeeping. Duplicates
         # are skipped so that names stay unique when several adapters target the same modules.
