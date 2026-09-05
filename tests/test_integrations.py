@@ -15,6 +15,7 @@
 import functools
 import inspect
 import re
+from types import SimpleNamespace
 
 import packaging.version
 import pytest
@@ -26,7 +27,7 @@ from transformers import AutoModelForCausalLM, AutoModelForImageTextToText
 from peft import LoraConfig, PeftModel, get_peft_model
 from peft.tuners import lora
 from peft.utils import infer_device
-from peft.utils.integrations import init_empty_weights, skip_init_on_device
+from peft.utils.integrations import get_layer_device_map, init_empty_weights, skip_init_on_device
 
 from .testing_utils import hub_online_once
 
@@ -490,3 +491,28 @@ class TestTransformersV5:
         assert reloaded_config.target_modules == {"q_proj", "k_proj", "v_proj"}
         assert {"gate_up_proj", "down_proj"} <= set(reloaded_config.target_parameters)
         assert reloaded_config.rank_pattern == {r".*\.gate_up_proj": reloaded_config.r * 2}
+
+
+class TestGetLayerDeviceMap:
+    # Regression tests for https://github.com/huggingface/peft/issues/3619
+
+    def test_cpu_only_single_root_map(self):
+        model = SimpleNamespace(
+            hf_device_map={"": "cpu"},
+            config=SimpleNamespace(num_hidden_layers=2),
+        )
+        assert get_layer_device_map(model) == {0: "cpu", 1: "cpu"}
+
+    def test_accelerator_map_still_uses_non_cpu_device(self):
+        model = SimpleNamespace(
+            hf_device_map={"model.layers.0": 0, "model.layers.1": 1},
+            config=SimpleNamespace(num_hidden_layers=2),
+        )
+        assert get_layer_device_map(model) == {0: 0, 1: 1}
+
+    def test_cpu_offload_with_gpu_uses_gpu_as_main_device(self):
+        model = SimpleNamespace(
+            hf_device_map={"model.embed_tokens": "cpu", "model.layers.0": 0, "model.layers.1": 0},
+            config=SimpleNamespace(num_hidden_layers=2),
+        )
+        assert get_layer_device_map(model) == {0: 0, 1: 0}
