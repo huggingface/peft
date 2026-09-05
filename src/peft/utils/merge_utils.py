@@ -67,7 +67,10 @@ def random_pruning(tensor: torch.Tensor, density: float, rescale: bool) -> torch
     """
     mask = torch.bernoulli(torch.full_like(input=tensor, fill_value=density))
     pruned_tensor = tensor * mask
-    if rescale:
+    if rescale and density > 0:
+        # `density == 0` prunes everything, so `pruned_tensor` is already all zeros and there is no
+        # expected value left to preserve. Dividing by it turns those zeros into NaN, which then
+        # propagates through the whole merged delta.
         pruned_tensor = pruned_tensor / density
     return pruned_tensor
 
