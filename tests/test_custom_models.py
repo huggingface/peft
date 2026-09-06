@@ -4511,6 +4511,22 @@ class TestPeftCustomModel(PeftCommonTester):
                 # windows error
                 pass
 
+    def test_ignore_mismatched_sizes_scalar_state_entry(self, tmp_path):
+        # issue #3676
+        # ignore_mismatched_sizes=True must not crash when the adapter state dict contains a scalar (0-dim) tensor.
+        # BatchNorm's num_batches_tracked buffer, preserved via modules_to_save, has torch.Size([]).
+        class ModelWithBN(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 3)
+                self.norm = nn.BatchNorm1d(3)
+
+        config = LoraConfig(target_modules=["linear"], modules_to_save=["norm"])
+        model = get_peft_model(ModelWithBN(), config)
+        model.save_pretrained(tmp_path)
+
+        PeftModel.from_pretrained(ModelWithBN(), tmp_path, ignore_mismatched_sizes=True)
+
     def test_save_embedding_layers_excludes_similarly_named_sibling(self, tmp_path):
         # A module whose name merely starts with the embedding module name is not an embedding layer and must not be
         # swept into the checkpoint by the key selection.
