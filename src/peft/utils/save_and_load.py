@@ -319,6 +319,22 @@ def _find_mismatched_keys(
     return peft_model_state_dict, mismatched
 
 
+def _reshard_dtensor_values_for_load(
+    model: torch.nn.Module, state_dict: dict[str, torch.Tensor]
+) -> dict[str, torch.Tensor]:
+    from transformers.distributed.sharding_utils import DtensorShardOperation, _dtensor_from_local_like
+    from transformers.distributed.utils import is_dtensor
+
+    named_params = dict(model.named_parameters())
+    for key, tensor in state_dict.items():
+        ref = named_params.get(key)
+        if ref is None or not is_dtensor(ref) or is_dtensor(tensor) or tensor.shape != ref.shape:
+            continue
+        local_tensor = DtensorShardOperation(ref).shard_tensor(tensor)
+        state_dict[key] = _dtensor_from_local_like(local_tensor, ref)
+    return state_dict
+
+
 def _insert_adapter_name_into_state_dict(
     state_dict: dict[str, torch.Tensor], adapter_name: str, parameter_prefix: str
 ) -> dict[str, torch.Tensor]:
@@ -573,6 +589,7 @@ def set_peft_model_state_dict(
     peft_model_state_dict, mismatched_keys = _find_mismatched_keys(
         model, peft_model_state_dict, ignore_mismatched_sizes=ignore_mismatched_sizes
     )
+    peft_model_state_dict = _reshard_dtensor_values_for_load(model, peft_model_state_dict)
     if low_cpu_mem_usage:
         load_result = model.load_state_dict(peft_model_state_dict, strict=False, assign=True)
         # ensure that the correct device is set
