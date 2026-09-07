@@ -18,6 +18,16 @@ rendered properly in your Markdown viewer.
 
 We are happy to accept contributions to PEFT. If you plan to contribute, please read this to make the process as smooth as possible.
 
+## Discuss and obtain approval before opening a PR
+
+Before opening a pull request (including a draft), open or find an issue in [huggingface/peft](https://github.com/huggingface/peft/issues) and discuss your proposed contribution. Check whether someone is already working on it, has declared their intent to work on it, or has an open PR. Wait for a PEFT maintainer or Hugging Face member to explicitly approve the proposal. If you open an issue, keep the length and complexity of the description in proportion with the complexity of the issue. Often, a short description with a reproducer is more valuable than a long description.
+
+Link the approved issue in your PR description using `#123`, `huggingface/peft#123`, or `https://github.com/huggingface/peft/issues/123`. For example, write `Fixes #123`. The reference must point to an issue in this repository, not another PR. If you reference several issues, approval on one is sufficient.
+
+An automated workflow checks PRs for corresponding issues with approvals. PRs without verified approval are automatically closed with an explanation. You can obtain approval, update the PR description, and reopen the same PR; please do not create a replacement. If you believe your PR was closed incorrectly, ping the maintainers on the PR.
+
+This workflow does not change issues or assignments. The independent stale bot can still close inactive items labeled `triaged`. The [workflow comments](https://github.com/huggingface/peft/blob/main/.github/workflows/triage_prs.yml) document setup and configuration.
+
 ## Installation
 
 Follow these steps to start contributing:
@@ -101,7 +111,7 @@ It can happen that while you’re working on your PR, the underlying code base c
 
 ## PR description
 
-When opening a PR, please provide a nice description of the change you're proposing. If it relates to other issues or PRs, please reference them. Providing a good description not only helps the reviewers review your code better and faster, it can also be used later (as a basis) for the commit message which helps with long term maintenance of the project.
+When opening a PR, please provide a nice description of the change you're proposing and reference the approved issue as described above. If it relates to other issues or PRs, please reference them as well. Providing a good description not only helps the reviewers review your code better and faster, it can also be used later (as a basis) for the commit message which helps with long term maintenance of the project.
 
 Keep the length and complexity of the PR description in line with the change. We don't need ten paragraphs of explanation for a trivial one-line change. Don't restate what is obvious from looking at the diff (e.g. "Fixed the typo in 'foobaar').
 
@@ -134,13 +144,13 @@ Please refrain from sending pull requests that *only* correct typing errors as t
 New parameter-efficient fine-tuning methods are developed all the time. If you would like to add a new and promising method to PEFT, please follow these steps.
 
 1. If you're _not_ an author of the original paper, check for existing implementations and double check with the authors that they don't plan to submit a PR themselves.
-2. Start with the core integration work listed below.
+2. Open a proposal issue and wait for explicit approval as described above, before starting the core integration work listed below.
 3. Check recent commits for new PEFT methods being added to take as inspiration.
-4. It can be useful to open a draft PR early once the method basically works and first tests pass, then ask for feedback.
+4. After the proposal is approved, it can be useful to open a draft PR early once the method basically works and first tests pass, then ask for feedback. Reference the approved issue in the draft PR description.
 
 ### Core integration of a new PEFT method
 
-- [ ] Open a proposal issue on `huggingface/peft` before investing too much work.
+- [ ] Open an issue on `huggingface/peft` and obtain explicit approval before investing too much work.
 - [ ] Link the source of the method, usually the final paper or another stable primary reference. We want to avoid work that is still under review, as the implementation should be stable.
 - [ ] Add a new `PeftType` entry in `src/peft/utils/peft_types.py`.
 - [ ] Create a new tuner package under `src/peft/tuners/` with the files your method needs (typically:  `config.py`, `model.py`, `layer.py`, and `__init__.py`).
@@ -163,9 +173,14 @@ New parameter-efficient fine-tuning methods are developed all the time. If you w
 - [ ] Check the benchmarks in `method_comparison/` and add experiment settings for your new method. This is a good place to sanity check that the PEFT method trains as expected. Include one or two reasonable benchmark configurations (one default, one optimized for the benchmark).
 - [ ] Recommended: Add generic quantization support. Instead of having to explicitly add quantization layer types for each quantization method, support generic quantization. As an example, check how it's implemented in [BOFT](https://github.com/huggingface/peft/tree/main/src/peft/tuners/boft). Extend https://github.com/huggingface/peft/blob/main/tests/test_quantization.py by adding your PEFT method there. Ask maintainers for help if needed.
 
+
+## Making changes to existing PEFT methods
+
+If you make a change to a PEFT method that could potentially change its outputs, thus invalidating already trained checkpoints, we need to take extra precautions. Please check the description at https://github.com/huggingface/peft/blob/main/.ai/skills/peft-method-changes/SKILL.md for details. The instructions there are meant for both humans and AI.
+
 ## Add other features
 
-It is best if you first open an issue on GitHub with a proposal to add the new feature. This way, you can discuss with the maintainers if it makes sense to add the feature before spending too much time on implementing it.
+First open an issue on GitHub with a proposal to add the new feature and wait for explicit approval as described above. This way, you can discuss with the maintainers if it makes sense to add the feature before spending too much time on implementing it.
 
 New features should generally be accompanied by tests and documentation or examples. Without the latter, users will have a hard time discovering your cool new feature.
 

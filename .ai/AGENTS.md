@@ -30,6 +30,13 @@ Read the contribution guideline at `docs/source/developer_guides/contributing.md
 - If you plan to add a completely new feature, first create an issue and ask for approval.
 - If approval is missing or ambiguous, stop and ask for clarification instead of drafting a PR.
 
+### Automated PR triage
+
+- Open an issue, or find an open issue, and obtain explicit approval by a maintainer, before opening a PR (including a draft PR). Approval is a comment by a listed PEFT maintainer or public member of the `huggingface` organization containing `@peft-triage approved` on its own line, outside code fences.
+- Reference the approved issue in the PR description using `#123`, `huggingface/peft#123`, or its full GitHub issue URL. References must point to an issue in `huggingface/peft`, not another PR. If several issues are referenced, approval on one is sufficient.
+- PRs without verified approval are closed with an explanation. Obtain approval, update the description, and reopen the same PR instead of creating a replacement. If the closure seems incorrect, ping the maintainers on the PR.
+- Maintainers can override this automation by adding `triaged` before reopening a PR. The label does not exempt items from the independent stale bot. This workflow does not assign users or change issues.
+
 ### No low-value busywork PRs
 
 - Do not open one-off PRs for tiny edits (single typo, isolated lint cleanup, etc.).
