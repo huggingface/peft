@@ -107,7 +107,7 @@ class AdaptionPromptModel(nn.Module):
     def delete_adapter(self, adapter_name: str) -> None:
         """Delete an adapter with the given name."""
         if adapter_name not in self.peft_config:
-            raise ValueError(f"Adapter with name '{adapter_name}' does not exist.")
+            raise ValueError(f"Adapter {adapter_name} does not exist")
 
         if adapter_name == self._active_adapter:
             remaining_adapters = [name for name in self.peft_config if name != adapter_name]
