@@ -30,7 +30,14 @@ from peft.utils import TaskType
 
 from .config import ShadowConfig
 from .diffusion_models import get_diffusion_shadow_backend
-from .layers import DetachedShadowModel, ShadowCache, ShadowCarrier, ShadowLayer, _sequence_classification_loss
+from .layers import (
+    DetachedShadowModel,
+    ShadowCache,
+    ShadowCarrier,
+    ShadowLayer,
+    _pool_last_token,
+    _sequence_classification_loss,
+)
 
 
 # --------------------------------------------------------------------------------------------------- backbone helpers
@@ -217,15 +224,6 @@ def _shifted_ce_loss(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor
     shift_logits = logits[..., :-1, :].contiguous()
     shift_labels = labels[..., 1:].contiguous()
     return F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1), ignore_index=-100)
-
-
-def _pool_last_token(hidden: torch.Tensor, attention_mask: Optional[torch.Tensor]) -> torch.Tensor:
-    """Pool the last non-padding token representation (used for sequence classification)."""
-    if attention_mask is None:
-        return hidden[:, -1, :]
-    token_counts = (attention_mask.long().sum(dim=1) - 1).clamp(min=0)
-    batch_idx = torch.arange(hidden.size(0), device=hidden.device)
-    return hidden[batch_idx, token_counts]
 
 
 # ------------------------------------------------------------------------------------------------------------- tuner
