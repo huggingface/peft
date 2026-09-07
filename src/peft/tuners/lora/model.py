@@ -1084,23 +1084,6 @@ class LoraModel(BaseTuner):
 
         if torch.distributed.is_available() and torch.distributed.is_initialized():
             _maybe_shard_state_dict_for_tp(model, peft_model_state_dict, adapter_name)
-            if is_transformers_dtensor_tp:
-                from torch.distributed.tensor import DTensor
-
-                for name, param in model.named_parameters():
-                    if name not in peft_model_state_dict:
-                        continue
-                    if isinstance(param.data, DTensor):
-                        data = peft_model_state_dict[name]
-                        d_data = DTensor.from_local(
-                            data,
-                            device_mesh=param.data.device_mesh,
-                            placements=param.data.placements,
-                            run_check=False,
-                            shape=param.shape,
-                            stride=tuple(param.stride()),
-                        )
-                        peft_model_state_dict[name] = d_data
 
         return peft_model_state_dict
 

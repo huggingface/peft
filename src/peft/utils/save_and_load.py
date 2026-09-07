@@ -328,10 +328,14 @@ def _reshard_dtensor_values_for_load(
     named_params = dict(model.named_parameters())
     for key, tensor in state_dict.items():
         ref = named_params.get(key)
-        if ref is None or not is_dtensor(ref) or is_dtensor(tensor) or tensor.shape != ref.shape:
+        if ref is None or not is_dtensor(ref) or is_dtensor(tensor):
             continue
-        local_tensor = DtensorShardOperation(ref).shard_tensor(tensor)
-        state_dict[key] = _dtensor_from_local_like(local_tensor, ref)
+        if tensor.shape == ref.shape:
+            tensor = DtensorShardOperation(ref).shard_tensor(tensor)
+        elif tensor.shape != ref._local_tensor.shape:
+            # Neither the global nor the local shape matches: leave it as-is for the normal mismatch handling.
+            continue
+        state_dict[key] = _dtensor_from_local_like(tensor, ref)
     return state_dict
 
 
