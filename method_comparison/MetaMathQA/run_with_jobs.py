@@ -82,8 +82,7 @@ if args.upload:
             training_params = f.read()
 
 cmd = (
-    f"export HF_TOKEN={token} && "
-    + "source activate peft && "
+    "source activate peft && "
     + "pip uninstall mslk torchao -y -q 2>/dev/null; "  # TODO remove once this issue is resolved
     + (f"git clone {args.repo} /tmp/peft && " if not args.code_bucket else "")
     + "cd /tmp/peft && "
@@ -114,6 +113,7 @@ job = run_job(
     flavor=args.flavor,
     timeout=7200,
     volumes=volumes,
+    secrets={"HF_TOKEN": token},
 )
 print(f"Job ID: {job.id}")
 print(f"Status: {job.status}")
