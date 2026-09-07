@@ -6788,6 +6788,70 @@ def _test_lora_weight_synchronization(rank, world_size, port):
                 assert torch.allclose(weight, g), f"{name}.lora_embedding_B differs between rank {rank} and rank {i}"
 
 
+def _test_lora_gradient_synchronization(rank, world_size, port):
+    """
+    Tests that the gradients of the LoRA weights are:
+        1. DTensor if the weight is a DTensor, and that placements match,
+        2. identical across ranks if the weight is replicated (not sharded)
+    """
+    from torch.distributed.tensor import DTensor
+
+    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, **_get_tp_kwargs(tp_plan=TP_PLAN))
+    lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
+    model = get_peft_model(model, lora_config)
+
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    model.to(device)
+
+    tokenizer = AutoTokenizer.from_pretrained(TINY_MODEL_ID)
+    inputs = tokenizer("Paris is the most beautiful city in the world.", return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    model.train()
+    outputs = model(**inputs, labels=inputs["input_ids"])
+    outputs.loss.backward()
+
+    checked_at_least_one = False
+    for name, module in model.named_modules():
+        if not isinstance(module, LoraLayer):
+            continue
+        base_layer = module.get_base_layer()
+        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+        if tp_plan == "colwise":
+            sharded_params = {f"{name}.lora_B": module.lora_B["default"].weight}
+            replicated_params = {f"{name}.lora_A": module.lora_A["default"].weight}
+        elif tp_plan == "rowwise":
+            sharded_params = {f"{name}.lora_A": module.lora_A["default"].weight}
+            replicated_params = {f"{name}.lora_B": module.lora_B["default"].weight}
+        elif tp_plan == "embedding_rowwise":
+            sharded_params = {f"{name}.lora_embedding_A": module.lora_embedding_A["default"]}
+            replicated_params = {f"{name}.lora_embedding_B": module.lora_embedding_B["default"]}
+        else:
+            continue
+
+        for param_name, param in {**sharded_params, **replicated_params}.items():
+            checked_at_least_one = True
+            assert param.grad is not None, f"{param_name} has no gradient"
+            assert isinstance(param, DTensor) == isinstance(param.grad, DTensor), (
+                f"{param_name}: parameter {'is' if isinstance(param, DTensor) else 'is not'} a DTensor but its "
+                f"gradient {'is' if isinstance(param.grad, DTensor) else 'is not'}, they must match"
+            )
+
+        # Only the replicated matrix is expected to hold the exact same value on every rank.
+        for param_name, param in replicated_params.items():
+            grad = param.grad.full_tensor() if isinstance(param.grad, DTensor) else param.grad
+            grad = grad.contiguous()
+            gathered = [torch.zeros_like(grad) for _ in range(world_size)]
+            dist.all_gather(gathered, grad)
+            for i, g in enumerate(gathered):
+                assert torch.allclose(grad, g, atol=1e-5), (
+                    f"{param_name} gradient differs between rank {rank} and rank {i}"
+                )
+
+    assert checked_at_least_one, "No LoRA parameter was found to check"
+
+
 def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
     """
     Test that loading from a checkpoint correctly handles the sharding of LoRA weights according to the TP plan.
@@ -7029,6 +7093,9 @@ class TestLoraTensorParallel:
 
     def test_lora_weight_synchronization(self):
         self._spawn(_test_lora_weight_synchronization, port_offset=0)
+
+    def test_lora_gradient_synchronization(self):
+        self._spawn(_test_lora_gradient_synchronization, port_offset=2)
 
     def test_from_checkpoint(self, tmp_path):
         self._spawn(_test_load_from_checkpoint, tmp_path, port_offset=1)
