@@ -50,16 +50,18 @@ class OFTModel(BaseTuner):
     Example:
         ```py
         >>> from diffusers import StableDiffusionPipeline
-        >>> from peft import OFTModel, OFTConfig
+        >>> from peft import OFTConfig, get_peft_model
 
         >>> config_te = OFTConfig(
         ...     r=8,
+        ...     oft_block_size=0,
         ...     target_modules=["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
         ...     module_dropout=0.0,
         ...     init_weights=True,
         ... )
         >>> config_unet = OFTConfig(
         ...     r=8,
+        ...     oft_block_size=0,
         ...     target_modules=[
         ...         "proj_in",
         ...         "proj_out",
@@ -75,8 +77,8 @@ class OFTModel(BaseTuner):
         ... )
 
         >>> model = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5")
-        >>> model.text_encoder = OFTModel(model.text_encoder, config_te, "default")
-        >>> model.unet = OFTModel(model.unet, config_unet, "default")
+        >>> model.text_encoder = get_peft_model(model.text_encoder, config_te)
+        >>> model.unet = get_peft_model(model.unet, config_unet)
         ```
 
     **Attributes**:
