@@ -321,10 +321,12 @@ class Linear(nn.Module, OSFLayer):
             # The delta (U_low*S_low*V_low - U_low_init*S_low_init*V_low_init) is the
             # difference of two rank-r products, factored as a single rank-2r product
             # delta = A @ B with
-            #   A = [U_low*S_low, -U_low_init*S_low_init]  (out x 2r)
-            #   B = [V_low; V_low_init]                     (2r x in)
+            #   A = [U_low*sign(S_low)*sqrt(|S_low|), -U_low_init*sign(S_low_init)*sqrt(|S_low_init|)]
+            #   B = [sqrt(|S_low|)*V_low; sqrt(|S_low_init|)*V_low_init]
             # so x @ delta^T = (x @ B^T) @ A^T. This avoids materializing the full
-            # [out, in] delta matrix.
+            # [out, in] delta matrix. sqrt(|S|) is split across U and V (with sign(S)
+            # recovered on U) so both factors have balanced norms, which reduces
+            # numerical noise in low precision; the product is exact for any sign of S.
             active_adapter = self.active_adapters[0] if self.active_adapters else None
             if active_adapter and active_adapter in self.osf_svd_params:
                 orig_dtype = x.dtype
@@ -339,9 +341,19 @@ class Linear(nn.Module, OSFLayer):
                 S_low_init = self._osf_S_low_init[active_adapter]
                 V_low_init = self._osf_V_low_init[active_adapter]
 
-                # Factored low-rank factors (delta = A @ B)
-                A = torch.cat([U_low * S_low.unsqueeze(0), -(U_low_init * S_low_init.unsqueeze(0))], dim=1)
-                B = torch.cat([V_low, V_low_init], dim=0)
+                # Factored low-rank factors (delta = A @ B), with sqrt(|S|) split across U and V
+                # and sign(S) recovered on U so the product is exact even for negative S:
+                #   A = U*sign(S)*sqrt(|S|), B = sqrt(|S|)*V  =>  A @ B = U*sign(S)*|S|*V = U*S*V
+                sqrt_S_low = S_low.abs().sqrt().unsqueeze(0)
+                sign_S_low = S_low.sign().unsqueeze(0)
+                sqrt_S_low_init = S_low_init.abs().sqrt().unsqueeze(0)
+                sign_S_low_init = S_low_init.sign().unsqueeze(0)
+                A = torch.cat(
+                    [U_low * sign_S_low * sqrt_S_low, -(U_low_init * sign_S_low_init * sqrt_S_low_init)], dim=1
+                )
+                B = torch.cat(
+                    [sqrt_S_low.transpose(0, 1) * V_low, sqrt_S_low_init.transpose(0, 1) * V_low_init], dim=0
+                )
 
                 # Apply delta as a low-rank update: x @ delta^T = (x @ B^T) @ A^T
                 x_cast = self._cast_input_dtype(x, A.dtype)
