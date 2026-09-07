@@ -99,14 +99,19 @@ def _replace_layer_number_by_wildcard(name: str) -> str:
 def get_tp_plan_and_mesh(model, current_key: str):
     tp_plan = getattr(model, "tp_plan", None)
     device_mesh = getattr(model, "_device_mesh", None)
-    if tp_plan is None or device_mesh is None or "tp" not in device_mesh.mesh_dim_names:
+    # `_tp_size` is only set by transformers' `maybe_distribute_model` when the TP path actually ran, so it's the
+    # authoritative signal that TP (as opposed to e.g. FSDP-only, which also sets `_device_mesh`) is active.
+    if tp_plan is None or device_mesh is None or not getattr(model, "_tp_size", None):
         return None, None
 
     plan_name = tp_plan.get(_replace_layer_number_by_wildcard(current_key))
     if plan_name is None:
         return None, None
 
-    tp_mesh = device_mesh["tp"]
+    # An unnamed mesh (`mesh_dim_names is None`) is the mesh transformers builds for TP-only setups (see
+    # `initialize_tensor_parallelism`); a named mesh is used when TP shares the mesh with FSDP/PP.
+    mesh_dim_names = device_mesh.mesh_dim_names
+    tp_mesh = device_mesh["tp"] if mesh_dim_names is not None else device_mesh
     return plan_name, tp_mesh
 
 
