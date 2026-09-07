@@ -136,3 +136,61 @@ class TestSupertuning:
                 assert mod.supertuning_lora_A["default"].weight.requires_grad
                 assert mod.supertuning_lora_B["default"].weight.requires_grad
                 break
+
+    def test_supertuning_rejects_mixed_save_precomputed_indices_false_then_true(self):
+        """A later adapter cannot opt into saved indices when the first adapter opted out."""
+        torch.manual_seed(0)
+        model = self._prepare_trainable_model(save_precomputed_indices=False)
+        with pytest.raises(ValueError, match="save_precomputed_indices must be the same"):
+            model.add_adapter(
+                "saved",
+                SupertuningConfig(
+                    target_modules=["q_proj", "v_proj"],
+                    sparsity=0.5,
+                    save_precomputed_indices=True,
+                ),
+            )
+
+    def test_supertuning_rejects_mixed_save_precomputed_indices_true_then_false(self):
+        """A later adapter cannot opt out of saved indices when the first adapter opted in."""
+        torch.manual_seed(0)
+        model = self._prepare_trainable_model(save_precomputed_indices=True)
+        with pytest.raises(ValueError, match="save_precomputed_indices must be the same"):
+            model.add_adapter(
+                "nosave",
+                SupertuningConfig(
+                    target_modules=["q_proj", "v_proj"],
+                    sparsity=0.5,
+                    save_precomputed_indices=False,
+                ),
+            )
+
+    def test_supertuning_same_save_precomputed_indices_across_adapters(self, tmp_path):
+        """Adapters with the same save_precomputed_indices value can coexist, and persistence matches it."""
+        torch.manual_seed(0)
+        model_true = self._prepare_trainable_model(save_precomputed_indices=True)
+        model_true.add_adapter(
+            "saved",
+            SupertuningConfig(
+                target_modules=["q_proj", "v_proj"],
+                sparsity=0.5,
+                save_precomputed_indices=True,
+            ),
+        )
+        model_true.save_pretrained(tmp_path / "true")
+        state_dict_true = load_file(tmp_path / "true" / "adapter_model.safetensors")
+        assert any("supertuning_indices" in key for key in state_dict_true)
+
+        torch.manual_seed(0)
+        model_false = self._prepare_trainable_model(save_precomputed_indices=False)
+        model_false.add_adapter(
+            "saved",
+            SupertuningConfig(
+                target_modules=["q_proj", "v_proj"],
+                sparsity=0.5,
+                save_precomputed_indices=False,
+            ),
+        )
+        model_false.save_pretrained(tmp_path / "false")
+        state_dict_false = load_file(tmp_path / "false" / "adapter_model.safetensors")
+        assert not any("supertuning_indices" in key for key in state_dict_false)

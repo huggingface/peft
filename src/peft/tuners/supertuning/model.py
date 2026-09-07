@@ -18,6 +18,7 @@ import torch
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import TRANSFORMERS_MODELS_TO_SUPERTUNING_TARGET_MODULES_MAPPING
 
+from .config import SupertuningConfig
 from .layer import Linear, SupertuningLayer
 
 
@@ -81,6 +82,17 @@ class SupertuningModel(BaseTuner):
                 f"Target module {target} is not supported. Currently, only `torch.nn.Linear` is supported."
             )
         return new_module
+
+    def _check_new_adapter_config(self, config: SupertuningConfig) -> None:
+        """Ensure per-adapter configs that must be layer-wide stay consistent across adapters."""
+        super()._check_new_adapter_config(config)
+
+        save_precomputed_indices_values = sorted({conf.save_precomputed_indices for conf in self.peft_config.values()})
+        if len(save_precomputed_indices_values) > 1:
+            raise ValueError(
+                "Supertuning save_precomputed_indices must be the same for all adapters, but got multiple different "
+                f"values: {save_precomputed_indices_values}"
+            )
 
     def _create_and_replace(
         self,

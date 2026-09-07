@@ -76,9 +76,9 @@ class SupertuningLayer(BaseTunerLayer):
         self.base_layer = base_layer
         # Trainable sparse quantities, one 1-D parameter per adapter.
         self.supertuning_values = nn.ParameterDict({})
-        # Flat positions of the sparse support inside the weight. Persistent iff the first-configured adapter
-        # requested save_precomputed_indices=True; when False, the indices are recomputed from base weight
-        # magnitudes at load time (deterministic given identical base weights).
+        # Flat positions of the sparse support inside the weight. Persistent iff save_precomputed_indices=True;
+        # when False, the indices are recomputed from base weight magnitudes at load time (deterministic given
+        # identical base weights). Mixed values across adapters are rejected by SupertuningModel._check_new_adapter_config.
         self.supertuning_indices = BufferDict(persistent=save_precomputed_indices)
         # Per-adapter Supra rank / scaling. Rank 0 (falsy) → pure Super for that adapter.
         self.supertuning_rank: dict[str, int] = {}
