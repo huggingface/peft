@@ -2602,6 +2602,30 @@ class TestPeftCustomModel(PeftCommonTester):
         assert torch.equal(model.base_model.model.lin0.base_layer.bias.data, orig_bias)
         assert model.base_model.model.lin0.merged_adapters == []
 
+    def test_boft_conv2d_safe_merge_does_not_corrupt_base_layer_on_non_finite_adapter(self):
+        # Regression test: BOFT's Conv2d.merge() had a safe_merge branch that was identical to the
+        # normal one -- the isfinite check that Linear.merge() does was missing -- so a broken
+        # (non-finite) adapter wrote non-finite weights straight into the base layer and recorded
+        # the merge as successful, instead of raising.
+        torch.manual_seed(0)
+        model = ModelConv2D()
+        orig_weight = model.conv2d.weight.data.clone()
+
+        config = BOFTConfig(target_modules=["conv2d"], boft_block_size=45, boft_block_num=0, boft_n_butterfly_factor=1)
+        model = get_peft_model(model, config)
+        conv2d = model.base_model.model.conv2d
+
+        # Deliberately break the adapter (e.g. a corrupted checkpoint or an fp16 overflow) so that
+        # the merged weights would contain non-finite values.
+        conv2d.boft_s["default"].data.fill_(float("inf"))
+
+        with pytest.raises(ValueError, match="NaNs detected in the merged weights"):
+            conv2d.merge(safe_merge=True)
+
+        # The base layer must be untouched after the failed safe_merge.
+        assert torch.equal(conv2d.base_layer.weight.data, orig_weight)
+        assert conv2d.merged_adapters == []
+
     @pytest.mark.parametrize("safe_merge", [False, True])
     @pytest.mark.parametrize("module_type", ["linear", "conv2d"])
     def test_merge_with_lora_bias_when_base_layer_has_no_bias_warns_and_raises(self, safe_merge, module_type):
