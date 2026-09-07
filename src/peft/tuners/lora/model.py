@@ -99,12 +99,13 @@ def _replace_layer_number_by_wildcard(name: str) -> str:
 def get_tp_plan_and_mesh(model, current_key: str):
     tp_plan = getattr(model, "tp_plan", None)
     device_mesh = getattr(model, "_device_mesh", None)
-    if not tp_plan or device_mesh is None:
+    if not tp_plan or device_mesh is None or not getattr(model, "_tp_size", None):
         return None, None
     plan_name = tp_plan.get(_replace_layer_number_by_wildcard(current_key))
     if plan_name is None:
         return None, None
-    return plan_name, device_mesh
+    tp_mesh = device_mesh["tp"] if device_mesh.ndim > 1 else device_mesh
+    return plan_name, tp_mesh
 
 
 def add_lora_tp_hooks_dtensor(tp_module: nn.Module, tp_plan_name: str, device_mesh, *, module_name: str) -> None:
