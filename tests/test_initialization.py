@@ -2984,6 +2984,32 @@ class TestBeftInitialization:
 class TestSupertuningInitialization:
     """Test class to check the initialization of Super-Tuning / Supra adapters."""
 
+    @pytest.mark.parametrize("save_precomputed_indices", [False, True])
+    def test_supertuning_multiple_adapters_same_save_precomputed_indices(self, save_precomputed_indices):
+        model = nn.Sequential(nn.Linear(10, 10))
+        config = SupertuningConfig(
+            target_modules=["0"], sparsity=0.5, save_precomputed_indices=save_precomputed_indices
+        )
+        model = get_peft_model(model, config)
+        model.add_adapter("other", config)
+
+        index_keys = [key for key in model.state_dict() if "supertuning_indices" in key]
+        assert bool(index_keys) is save_precomputed_indices
+
+    @pytest.mark.parametrize("first_value,second_value", [(False, True), (True, False)])
+    def test_supertuning_mixing_save_precomputed_indices_raises(self, first_value, second_value):
+        model = nn.Sequential(nn.Linear(10, 10))
+        config = SupertuningConfig(target_modules=["0"], sparsity=0.5, save_precomputed_indices=first_value)
+        model = get_peft_model(model, config)
+        config = SupertuningConfig(target_modules=["0"], sparsity=0.5, save_precomputed_indices=second_value)
+
+        msg = re.escape(
+            "Super-Tuning indices must be saved for all adapters or none, but got multiple different values: "
+            "[False, True]"
+        )
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config)
+
     def test_supertuning_config_validation(self):
         # Invalid sparsity
         with pytest.raises(ValueError, match="sparsity must be"):
