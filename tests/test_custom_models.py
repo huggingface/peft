@@ -4638,6 +4638,29 @@ class TestPeftCustomModel(PeftCommonTester):
         extra_weight = target.base_model.model.embed_tokens_extra.weight
         assert torch.allclose(extra_weight, torch.full_like(extra_weight, 123.0))
 
+    def test_ignore_mismatched_sizes_with_scalar_modules_to_save(self, tmp_path):
+        class ModelWithBatchNorm(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 3)
+                self.norm = nn.BatchNorm1d(3)
+
+            def forward(self, x):
+                return self.norm(self.linear(x))
+
+        config = LoraConfig(target_modules=["linear"], modules_to_save=["norm"])
+        model = get_peft_model(ModelWithBatchNorm(), config)
+        model.base_model.model.norm.modules_to_save["default"].num_batches_tracked.fill_(7)
+        model.save_pretrained(tmp_path)
+        state_dict = safe_load_file(tmp_path / "adapter_model.safetensors")
+        assert state_dict["base_model.model.norm.num_batches_tracked"].ndim == 0
+
+        loaded = PeftModel.from_pretrained(
+            ModelWithBatchNorm(), tmp_path, ignore_mismatched_sizes=True, torch_device="cpu"
+        )
+
+        assert loaded.base_model.model.norm.modules_to_save["default"].num_batches_tracked.item() == 7
+
     @pytest.mark.parametrize(
         "config0",
         [
