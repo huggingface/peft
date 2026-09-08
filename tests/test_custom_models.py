@@ -2464,8 +2464,7 @@ class TestPeftCustomModel(PeftCommonTester):
             model = inject_adapter_in_model(config, model)
         except ValueError as error:
             # Shared-state tuners must reject direct injection, so there is no round-trip to run for them. Match the
-            # specific error to avoid masking unrelated failures; if a future tuner forgets the marker, it will reach
-            # the round-trip below and expose the missing shared state.
+            # specific error to avoid masking unrelated failures.
             if "shared state" not in str(error) or "get_peft_model" not in str(error):
                 raise
             return
