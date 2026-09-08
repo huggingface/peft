@@ -341,6 +341,35 @@ class PeftGPUCommonTests(unittest.TestCase):
         whisper_8bit = get_peft_model(whisper_8bit, config)
         assert isinstance(whisper_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, RoadLinear8bitLt)
 
+    @parameterized.expand(["4bit", "8bit"])
+    @require_bitsandbytes
+    @pytest.mark.single_gpu_tests
+    def test_road_bnb_safe_merge_does_not_mutate_base_layer_on_non_finite_bias(self, quantization):
+        if quantization == "8bit":
+            base_layer = bnb.nn.Linear8bitLt(64, 64, bias=True, has_fp16_weights=False).to(self.device)
+            road_cls = RoadLinear8bitLt
+        else:
+            base_layer = bnb.nn.Linear4bit(64, 64, bias=True, compute_dtype=torch.float32, quant_type="nf4").to(
+                self.device
+            )
+            road_cls = RoadLinear4bit
+
+        base_layer(torch.randn(2, 64, device=self.device))
+        layer = road_cls(base_layer, "default", config=RoadConfig(group_size=2)).to(self.device)
+        layer.road_theta["default"].data.zero_()
+        layer.road_alpha["default"].data.fill_(2)
+        base_layer.bias.data.fill_(torch.finfo(base_layer.bias.dtype).max)
+
+        original_weight = base_layer.weight
+        original_bias = base_layer.bias.detach().clone()
+
+        with pytest.raises(ValueError, match="NaNs detected in the merged bias"):
+            layer.merge(safe_merge=True)
+
+        assert base_layer.weight is original_weight
+        assert torch.equal(base_layer.bias, original_bias)
+        assert layer.merged_adapters == []
+
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
     @pytest.mark.single_gpu_tests

@@ -2622,6 +2622,24 @@ class TestPeftCustomModel(PeftCommonTester):
         assert torch.equal(model.base_model.model.lin0.base_layer.bias.data, orig_bias)
         assert model.base_model.model.lin0.merged_adapters == []
 
+    def test_road_safe_merge_does_not_mutate_base_layer_on_non_finite_bias(self):
+        model = get_peft_model(MLP(), RoadConfig(target_modules=["lin0"], group_size=2))
+        layer = model.base_model.model.lin0
+        base_layer = layer.base_layer
+
+        base_layer.bias.data.fill_(torch.finfo(base_layer.bias.dtype).max)
+        layer.road_theta["default"].data.zero_()
+        layer.road_alpha["default"].data.fill_(2)
+        original_weight = base_layer.weight.data.clone()
+        original_bias = base_layer.bias.data.clone()
+
+        with pytest.raises(ValueError, match="NaNs detected in the merged bias"):
+            layer.merge(safe_merge=True)
+
+        assert torch.equal(base_layer.weight.data, original_weight)
+        assert torch.equal(base_layer.bias.data, original_bias)
+        assert layer.merged_adapters == []
+
     @pytest.mark.parametrize("module_type", ["linear", "conv2d"])
     def test_lora_safe_merge_does_not_mutate_base_layer_on_non_finite_bias(self, module_type):
         torch.manual_seed(0)

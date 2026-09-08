@@ -97,15 +97,20 @@ if is_bnb_available():
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
+                    bias = self.get_base_layer().bias
+                    new_bias = None
+                    if bias is not None:
+                        orig_dtype = bias.dtype
+                        new_bias = torch.matmul(road_R, bias.data.to(road_R.dtype))
+                        if safe_merge and not torch.isfinite(new_bias).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged bias. The adapter {active_adapter} seems to be broken"
+                            )
+
                     self.get_base_layer().weight = bnb.nn.Int8Params(
                         w_data.to("cpu"), requires_grad=False, has_fp16_weights=weight.has_fp16_weights
                     ).to(weight.device)
-
-                    if self.get_base_layer().bias is not None:
-                        bias = self.get_base_layer().bias
-                        orig_dtype = bias.dtype
-                        bias_data = bias.data
-                        new_bias = torch.matmul(road_R, bias_data.to(road_R.dtype))
+                    if new_bias is not None:
                         bias.data = new_bias.to(orig_dtype)
 
                     state.reset_grads()
@@ -281,6 +286,16 @@ if is_bnb_4bit_available():
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
+                    bias = self.get_base_layer().bias
+                    new_bias = None
+                    if bias is not None:
+                        orig_dtype = bias.dtype
+                        new_bias = torch.matmul(road_R, bias.data.to(road_R.dtype))
+                        if safe_merge and not torch.isfinite(new_bias).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged bias. The adapter {active_adapter} seems to be broken"
+                            )
+
                     if "bnb_quantized" in kwargs:
                         kwargs["bnb_quantized"] = False
                     kwargs["requires_grad"] = False
@@ -289,11 +304,7 @@ if is_bnb_4bit_available():
                     kwargs = {k: v for k, v in kwargs.items() if not k.startswith("_")}
                     self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
 
-                    if self.get_base_layer().bias is not None:
-                        bias = self.get_base_layer().bias
-                        orig_dtype = bias.dtype
-                        bias_data = bias.data
-                        new_bias = torch.matmul(road_R, bias_data.to(road_R.dtype))
+                    if new_bias is not None:
                         bias.data = new_bias.to(orig_dtype)
 
                     self.merged_adapters.append(active_adapter)

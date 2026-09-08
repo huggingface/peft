@@ -256,26 +256,27 @@ class Linear(nn.Module, RoadLayer):
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
-                    orig_weight = base_layer.weight.data.clone()
-                    orig_weight = torch.matmul(road_R.to(orig_dtype), orig_weight)
+                    new_weight = base_layer.weight.data.clone()
+                    new_weight = torch.matmul(road_R.to(orig_dtype), new_weight)
 
-                    if not torch.isfinite(orig_weight).all():
+                    if not torch.isfinite(new_weight).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weight.contiguous().to(orig_dtype)
-
+                    new_bias = None
                     if base_layer.bias is not None:
-                        orig_bias = base_layer.bias.clone()
-                        orig_bias = torch.matmul(road_R.to(orig_dtype), orig_bias)
+                        new_bias = base_layer.bias.data.clone()
+                        new_bias = torch.matmul(road_R.to(orig_dtype), new_bias)
 
-                        if not torch.isfinite(orig_bias).all():
+                        if not torch.isfinite(new_bias).all():
                             raise ValueError(
                                 f"NaNs detected in the merged bias. The adapter {active_adapter} seems to be broken"
                             )
 
-                        base_layer.bias.data = orig_bias.contiguous().to(orig_dtype)
+                    base_layer.weight.data = new_weight.contiguous().to(orig_dtype)
+                    if new_bias is not None:
+                        base_layer.bias.data = new_bias.contiguous().to(orig_dtype)
                 else:
                     orig_weight = base_layer.weight.data
                     orig_weight = torch.matmul(road_R.to(orig_dtype), orig_weight)
