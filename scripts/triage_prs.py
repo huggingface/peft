@@ -125,12 +125,20 @@ class GitHubClient:
         return {member["id"] for member in self.list_items(f"/orgs/{organization}/public_members", public=True)}
 
 
+def strip_html_comments(body):
+    """Remove HTML comments, including unclosed comments extending to the end of the body."""
+    # Keep surrounding text separated instead of joining tokens across a comment.
+    return re.sub(r"<!--.*?(?:-->|\Z)", " ", body or "", flags=re.DOTALL)
+
+
 def extract_issue_numbers(body, repository):
     """Extract local #123, owner/repo#123 and GitHub issue URLs in description order."""
     numbers = []
     # Consume whole URLs and qualified references so foreign references cannot be
     # mistaken for local issue numbers (including URL fragments).
-    references = re.finditer(r"https?://[^\s<>`]+|(?<![\w/.-])(?:[\w.-]+/[\w.-]+)?#[1-9][0-9]*", body or "")
+    references = re.finditer(
+        r"https?://[^\s<>`]+|(?<![\w/.-])(?:[\w.-]+/[\w.-]+)?#[1-9][0-9]*", strip_html_comments(body)
+    )
     for reference in references:
         text = reference.group().rstrip(".,;:)]}")
         if text.startswith(("https://", "http://")):
@@ -157,10 +165,10 @@ def extract_issue_numbers(body, repository):
     return numbers
 
 
-def contains_approval(body, bot_name):
-    """Require the command on its own line, outside Markdown code fences."""
+def iter_unfenced_lines(body):
+    """Yield lines outside HTML comments and Markdown code fences."""
     fence = None
-    for line in (body or "").splitlines():
+    for line in strip_html_comments(body).splitlines():
         if fence is not None:
             # A shorter fence or one with trailing text cannot close a code block.
             if re.fullmatch(rf" {{0,3}}{fence[0]}{{{len(fence)},}}[ \t]*", line):
@@ -170,10 +178,15 @@ def contains_approval(body, bot_name):
         opening = re.match(r" {0,3}(`{3,}|~{3,})", line)
         if opening:
             fence = opening[1]
-        elif re.fullmatch(rf" {{0,3}}@{re.escape(bot_name)} approved[ \t]*", line):
-            return True
+        else:
+            yield line
 
-    return False
+
+def contains_approval(body, bot_name):
+    """Require the command on its own line, outside HTML comments and Markdown code fences."""
+    return any(
+        re.fullmatch(rf" {{0,3}}@{re.escape(bot_name)} approved[ \t]*", line) for line in iter_unfenced_lines(body)
+    )
 
 
 def is_eligible_pr(pr, since):
@@ -225,8 +238,9 @@ class PullRequestTriage:
         return False
 
     def is_human_author(self, body):
-        body = body or ""
-        return HUMAN_MARKER.lower() in body.lower()
+        """Require a standalone declaration or checked checkbox outside comments and code fences."""
+        pattern = rf" {{0,3}}(?:[-*+] \[x\][ \t]+)?{re.escape(HUMAN_MARKER)}\.?[ \t]*"
+        return any(re.fullmatch(pattern, line, flags=re.IGNORECASE) for line in iter_unfenced_lines(body))
 
     def closure_message(self):
         return CLOSURE_MESSAGE.format(
@@ -244,9 +258,9 @@ class PullRequestTriage:
             return
 
         approved = (
-            self.is_exempt_author(pr["user"]["id"])
+            self.is_human_author(pr["body"])
+            or self.is_exempt_author(pr["user"]["id"])
             or self.has_approved_issue(pr["body"])
-            or self.is_human_author(pr["body"])
         )
         comments = [] if approved else self.client.list_items(f"{self.path}/issues/{number}/comments")
         current = self.client.get(f"{self.path}/pulls/{number}")
