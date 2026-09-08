@@ -75,6 +75,7 @@ from peft import (
     WaveFTConfig,
     get_peft_model,
     get_peft_model_state_dict,
+    inject_adapter_in_model,
     set_peft_model_state_dict,
 )
 from peft.tuners import lora
@@ -88,7 +89,7 @@ from .testing_common import (
     _skip_if_deleting_adapter_not_supported,
     _skip_if_merging_not_supported,
 )
-from .testing_utils import get_state_dict, require_non_cpu, set_init_weights_false
+from .testing_utils import get_state_dict, hub_online_once, require_non_cpu, set_init_weights_false
 
 
 def _zero_unilora_theta_d(model, adapter_name="default"):
@@ -2449,6 +2450,43 @@ class TestPeftCustomModel(PeftCommonTester):
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_save_load_roundtrip_direct_injection(self, test_name, model_id, config_cls, config_kwargs):
+        X = self.prepare_inputs_for_testing()
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        torch.manual_seed(0)
+        try:
+            model = inject_adapter_in_model(config, model)
+        except ValueError as error:
+            # Shared-state tuners must reject direct injection, so there is no round-trip to run for them. Match the
+            # specific error to avoid masking unrelated failures.
+            if "shared state" not in str(error) or "get_peft_model" not in str(error):
+                raise
+            return
+        model.eval()
+        with torch.inference_mode():
+            output_before = model(**X)
+
+        state_dict = get_peft_model_state_dict(model)
+        del model
+
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        torch.manual_seed(54321)
+        model = inject_adapter_in_model(config_cls(base_model_name_or_path=model_id, **config_kwargs), model)
+        model.eval()
+        load_result = set_peft_model_state_dict(model, state_dict)
+        assert not load_result.unexpected_keys
+
+        with torch.inference_mode():
+            output_after = model(**X)
+        assert torch.allclose(output_before, output_after)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_save_pretrained_pickle(self, test_name, model_id, config_cls, config_kwargs):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs, safe_serialization=False)
@@ -2496,6 +2534,48 @@ class TestPeftCustomModel(PeftCommonTester):
         self._test_merge_layers_is_idempotent(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_merge_layers_is_deterministic_in_train_mode(self, test_name, model_id, config_cls, config_kwargs):
+        # Regression test for https://github.com/huggingface/peft/issues/3586: merging the same model twice in
+        # train mode must produce identical weights. The bug only matters for LoHa/LoKr (the only methods that
+        # use rank_dropout), but the contract is general and we parametrize over all mergeable configs for
+        # consistency with the other merge tests.
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        if config_kwargs.get("target_parameters") is not None:
+            pytest.skip("Merging with target_parameters is not supported for all PEFT methods.")
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+
+        with hub_online_once(model_id):
+            base = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+            # Best-effort enable dropout for the various PEFT methods to check for deterministic merging.
+            # The dropout argument names are not uniform across PEFT methods (e.g. `lora_dropout`,
+            # `rank_dropout`, `module_dropout`, `miss_dropout`), so we introspect every config attr ending
+            # in `dropout` and set it to 0.5.
+            for attr in dir(config):
+                if attr.endswith("dropout"):
+                    try:
+                        setattr(config, attr, 0.5)
+                    except (AttributeError, TypeError, ValueError):
+                        pass
+            model = get_peft_model(base, config).to(self.torch_device)
+            model.train()  # the bug only manifests in train mode
+
+            model_a = copy.deepcopy(model)
+            model_b = copy.deepcopy(model)
+            model_a.merge_adapter()
+            model_b.merge_adapter()
+
+            merged_a = {n: p.detach().clone() for n, p in model_a.base_model.named_parameters()}
+            merged_b = {n: p.detach().clone() for n, p in model_b.base_model.named_parameters()}
+            assert merged_a.keys() == merged_b.keys()
+            for name in merged_a:
+                if not merged_a[name].is_floating_point():
+                    continue
+                assert torch.equal(merged_a[name], merged_b[name]), (
+                    f"Two merges in train mode diverged at {name} for {test_name} -- rank_dropout leaked into merge"
+                )
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_safe_merge(self, test_name, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
 
@@ -2513,13 +2593,29 @@ class TestPeftCustomModel(PeftCommonTester):
             # BD-LoRA: get_delta_weight does not unpack the block-diagonal factors, so the delta does not correspond
             # to the merged weight
             pytest.xfail("BD-LoRA delta weight computation does not handle block-diagonal factors")
-        if (config_cls in (LoHaConfig, LoKrConfig)) and config_kwargs.get("rank_dropout"):
-            # rank_dropout masks the delta at random, which makes get_delta_weight non-deterministic (see #3589).
-            # Having rank_dropout is not essential for this test, so disable it.
-            config_kwargs["rank_dropout"] = 0.0
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_get_additive_delta_corresponds_to_merged_weight(model_id, config_cls, config_kwargs, dtype=dtype)
+
+    @pytest.mark.parametrize("target_module,token_indices", [("emb", [0, 1, 3]), ("lin0", [0, 1])])
+    def test_trainable_tokens_random_init_unmerge_restores_base_weights(self, target_module, token_indices):
+        # A merge/unmerge cycle must preserve the base weights even when the adapter starts with random weights; see #3650.
+        torch.manual_seed(0)
+        model = ModelEmbConv1D()
+        X = torch.arange(90).view(9, 10)
+        output_base = model(X).detach().clone()
+        config = TrainableTokensConfig(target_modules=[target_module], token_indices=token_indices, init_weights=False)
+        model = get_peft_model(model, config)
+
+        with model.disable_adapter():
+            output_disabled_before = model(X)
+        model.merge_adapter()
+        model.unmerge_adapter()
+        with model.disable_adapter():
+            output_disabled_after = model(X)
+
+        assert torch.allclose(output_disabled_before, output_base)
+        assert torch.allclose(output_disabled_after, output_base)
 
     @pytest.mark.parametrize("conv_cls", [nn.Conv2d, nn.Conv3d])
     @pytest.mark.parametrize("safe_merge", [False, True])
@@ -2578,6 +2674,36 @@ class TestPeftCustomModel(PeftCommonTester):
         assert torch.equal(model.base_model.model.lin0.base_layer.bias.data, orig_bias)
         assert model.base_model.model.lin0.merged_adapters == []
 
+    @pytest.mark.parametrize("module_type", ["linear", "conv2d"])
+    def test_lora_safe_merge_does_not_mutate_base_layer_on_non_finite_bias(self, module_type):
+        torch.manual_seed(0)
+        if module_type == "linear":
+            model = MLP()
+            config = LoraConfig(target_modules=["lin0"], r=1, lora_alpha=1, lora_bias=True)
+            target_name = "lin0"
+        elif module_type == "conv2d":
+            model = ModelConv2D()
+            config = LoraConfig(target_modules=["conv2d"], r=1, lora_alpha=1, lora_bias=True)
+            target_name = "conv2d"
+        else:
+            raise ValueError(f"Wrong module_type passed, expected 'linear' or 'conv2d', got {module_type}")
+
+        model = get_peft_model(model, config)
+        layer = getattr(model.base_model.model, target_name)
+        original_weight = layer.base_layer.weight.data.clone()
+        original_bias = layer.base_layer.bias.data.clone()
+
+        layer.lora_A["default"].weight.data.fill_(1)
+        layer.lora_B["default"].weight.data.fill_(1)
+        layer.lora_B["default"].bias.data.fill_(float("inf"))
+
+        with pytest.raises(ValueError, match="NaNs detected in the merged weights"):
+            layer.merge(safe_merge=True)
+
+        assert torch.equal(layer.base_layer.weight.data, original_weight)
+        assert torch.equal(layer.base_layer.bias.data, original_bias)
+        assert layer.merged_adapters == []
+
     @pytest.mark.parametrize("safe_merge", [False, True])
     @pytest.mark.parametrize("module_type", ["linear", "conv2d"])
     def test_merge_with_lora_bias_when_base_layer_has_no_bias_warns_and_raises(self, safe_merge, module_type):
@@ -2585,10 +2711,12 @@ class TestPeftCustomModel(PeftCommonTester):
         if module_type == "linear":
             model = MLP(bias=False)
             config = LoraConfig(target_modules=["lin0", "lin1"], lora_bias=True)
+            target_name = "lin0"
             warn_msg = re.escape("`lora_bias=True` was passed but the targeted layer of type Linear has no bias")
         elif module_type == "conv2d":
             model = ModelConv2D(bias=False)
             config = LoraConfig(target_modules=["conv2d"], lora_bias=True)
+            target_name = "conv2d"
             warn_msg = re.escape("`lora_bias=True` was passed but the targeted layer of type Conv2d has no bias")
         else:
             raise ValueError(f"Wrong module_type passed, expected 'linear' or 'conv2d', got {module_type}")
@@ -2596,9 +2724,18 @@ class TestPeftCustomModel(PeftCommonTester):
         with pytest.warns(PeftWarning, match=warn_msg):
             model = get_peft_model(model, config)
 
+        layer = getattr(model.base_model.model, target_name)
+        layer.lora_A["default"].weight.data.fill_(1)
+        layer.lora_B["default"].weight.data.fill_(1)
+        original_weight = layer.base_layer.weight.data.clone()
+
         err_msg = "Impossible to merge LoRA with `lora_bias=True` because the base layer has no bias"
         with pytest.raises(RuntimeError, match=err_msg):
             model.merge_adapter(safe_merge=safe_merge)
+
+        if safe_merge:
+            assert torch.equal(layer.base_layer.weight.data, original_weight)
+            assert layer.merged_adapters == []
 
     # Note: Skipping _test_generate, _test_generate_pos_args, _test_generate_half_prec, as the custom models don't have
     # a generate method
@@ -3183,6 +3320,8 @@ class TestPeftCustomModel(PeftCommonTester):
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
+        if issubclass(config_cls, TrainableTokensConfig):
+            config.init_weights = True
         model = get_peft_model(model, config)
         if issubclass(config_cls, VBLoRAConfig):
             # Manually set the `vblora_vector_bank` to zero so that VB-LoRA functions as an identity operation.
@@ -5176,6 +5315,104 @@ class TestMultipleActiveAdapters:
             unmerged_output = model(**X)
 
         assert torch.allclose(unmerged_output, base_output, atol=1e-3, rtol=1e-3)
+
+    @pytest.mark.parametrize(
+        "model_cls, module_name",
+        [(MLP, "lin0"), (ModelEmbConv1D, "emb"), (ModelConv2D, "conv2d")],
+    )
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    def test_multiple_active_dora_adapters_merge_matches_forward(self, model_cls, module_name, safe_merge):
+        # DoRA normalizes by the norm of the unmerged base weight. Adapters are merged one after another, so from the
+        # second adapter on, the weight being merged into already holds the previously merged ones; taking the norm
+        # from it makes the merged model differ from the unmerged forward pass. The adapters have to share a target
+        # module for this to show up.
+        torch.manual_seed(0)
+
+        model = model_cls().to(self.torch_device).eval()
+        X = self.prepare_inputs_for_testing()
+        base_output = model(**X)
+
+        def config():
+            return LoraConfig(target_modules=[module_name], init_lora_weights=False, use_dora=True)
+
+        peft_model = get_peft_model(model, config(), adapter_name="adapter_0").eval()
+        adapters = ["adapter_0"]
+        for i in range(1, 3):
+            peft_model.add_adapter(f"adapter_{i}", config())
+            adapters.append(f"adapter_{i}")
+
+        self.set_multiple_active_adapters(peft_model, adapters)
+        combined_output = peft_model(**X)
+
+        peft_model.merge_adapter(safe_merge=safe_merge)
+        assert torch.allclose(peft_model(**X), combined_output, atol=1e-4)
+
+        peft_model.unmerge_adapter()
+        assert torch.allclose(peft_model(**X), combined_output, atol=1e-4)
+
+        with peft_model.disable_adapter():
+            assert torch.allclose(peft_model(**X), base_output, atol=1e-4)
+
+    @pytest.mark.parametrize(
+        "model_cls, module_name",
+        [(MLP, "lin0"), (ModelEmbConv1D, "emb"), (ModelConv2D, "conv2d")],
+    )
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    def test_plain_lora_and_dora_adapters_merge_matches_forward(self, model_cls, module_name, safe_merge):
+        # A plain LoRA adapter merges into the base weight in place, so the DoRA adapters that follow have to work on
+        # a copy of the unmerged weight, not on the weight itself.
+        torch.manual_seed(0)
+
+        model = model_cls().to(self.torch_device).eval()
+        X = self.prepare_inputs_for_testing()
+        base_output = model(**X)
+
+        def config(use_dora):
+            return LoraConfig(target_modules=[module_name], init_lora_weights=False, use_dora=use_dora)
+
+        peft_model = get_peft_model(model, config(use_dora=False), adapter_name="adapter_0").eval()
+        peft_model.add_adapter("adapter_1", config(use_dora=True))
+        peft_model.add_adapter("adapter_2", config(use_dora=True))
+        adapters = ["adapter_0", "adapter_1", "adapter_2"]
+
+        self.set_multiple_active_adapters(peft_model, adapters)
+        combined_output = peft_model(**X)
+
+        peft_model.merge_adapter(safe_merge=safe_merge)
+        assert torch.allclose(peft_model(**X), combined_output, atol=1e-4)
+
+        peft_model.unmerge_adapter()
+        assert torch.allclose(peft_model(**X), combined_output, atol=1e-4)
+
+        with peft_model.disable_adapter():
+            assert torch.allclose(peft_model(**X), base_output, atol=1e-4)
+
+    @pytest.mark.parametrize(
+        "model_cls, module_name",
+        [(MLP, "lin0"), (ModelEmbConv1D, "emb"), (ModelConv2D, "conv2d")],
+    )
+    def test_multiple_active_dora_adapters_safe_and_unsafe_merge_agree(self, model_cls, module_name):
+        # Taking the already merged adapters out of the base weight and putting them back rebuilds that weight, and it
+        # is the rebuilt one that ends up in the layer. The safe path has to carry on from it as well, otherwise the
+        # two paths merge into different weights.
+        def merged_weight(safe_merge):
+            torch.manual_seed(0)
+            model = model_cls().to(self.torch_device).eval()
+
+            def config():
+                return LoraConfig(target_modules=[module_name], init_lora_weights=False, use_dora=True)
+
+            peft_model = get_peft_model(model, config(), adapter_name="adapter_0").eval()
+            adapters = ["adapter_0"]
+            for i in range(1, 3):
+                peft_model.add_adapter(f"adapter_{i}", config())
+                adapters.append(f"adapter_{i}")
+
+            self.set_multiple_active_adapters(peft_model, adapters)
+            peft_model.merge_adapter(safe_merge=safe_merge)
+            return peft_model.base_model.model.get_submodule(module_name).get_base_layer().weight.data.clone()
+
+        assert torch.equal(merged_weight(safe_merge=True), merged_weight(safe_merge=False))
 
 
 class MLP_2x_same_shape(nn.Module):

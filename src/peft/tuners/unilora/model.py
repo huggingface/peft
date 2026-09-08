@@ -31,6 +31,7 @@ from .layer import Linear, UniLoraLayer
 class UniLoraModel(BaseTuner):
     """Creates a UniLora adapter around a pretrained model."""
 
+    uses_shared_state: bool = True
     prefix: str = "unilora_"
     tuner_layer_cls = UniLoraLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_UNILORA_TARGET_MODULES_MAPPING

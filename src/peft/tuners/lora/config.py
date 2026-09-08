@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import importlib
 import warnings
 from dataclasses import dataclass, field
@@ -23,6 +24,24 @@ from torch import nn
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
+
+
+def _get_lora_subconfig(value, config_cls):
+    """Convert a nested sub-config that was loaded as a plain dict back into its dataclass type.
+
+    `save_pretrained` serializes nested sub-configs recursively (via `asdict`), so after loading from
+    `adapter_config.json` they arrive as plain dicts. Fields declared with `init=False` are serialized but not accepted
+    by `__init__`, so they are filtered out here. The value for a sub-config should always be `None` or an instance of
+    the class (or a dict when loading), otherwise a `TypeError` is raised.
+    """
+    if value is None:
+        return None
+    if isinstance(value, config_cls):
+        return value
+    if isinstance(value, dict):
+        init_keys = {f.name for f in dataclasses.fields(config_cls) if f.init}
+        return config_cls(**{k: v for k, v in value.items() if k in init_keys})
+    raise TypeError(f"`{config_cls.__name__}` must be a `{config_cls.__name__}`, a dict, or None.")
 
 
 @dataclass
@@ -1003,15 +1022,16 @@ class LoraConfig(PeftConfig):
             self.modules_to_tie = None
             self.target_modules_to_tie = None
 
-        if isinstance(self.velora_config, dict):
-            self.velora_config = VeloraConfig(**self.velora_config)
-        elif self.velora_config is not None and not isinstance(self.velora_config, VeloraConfig):
-            raise TypeError("`velora_config` must be a `VeloraConfig`, a dict, or None.")
-
-        if isinstance(self.kasa_config, dict):
-            self.kasa_config = KasaConfig(**self.kasa_config)
-        elif self.kasa_config is not None and not isinstance(self.kasa_config, KasaConfig):
-            raise TypeError("`kasa_config` must be a `KasaConfig`, a dict, or None.")
+        # Nested sub-configs: save_pretrained serializes them via asdict, so after loading from a checkpoint they
+        # arrive as plain dicts and must be converted back (see issue #3583). Unified handling for all variants
+        # via _get_lora_subconfig — it also validates that the value is None, an instance, or a dict.
+        self.velora_config = _get_lora_subconfig(self.velora_config, VeloraConfig)
+        self.kasa_config = _get_lora_subconfig(self.kasa_config, KasaConfig)
+        self.eva_config = _get_lora_subconfig(self.eva_config, EvaConfig)
+        self.corda_config = _get_lora_subconfig(self.corda_config, CordaConfig)
+        self.lora_ga_config = _get_lora_subconfig(self.lora_ga_config, LoraGAConfig)
+        self.arrow_config = _get_lora_subconfig(self.arrow_config, ArrowConfig)
+        self.use_bdlora = _get_lora_subconfig(self.use_bdlora, BdLoraConfig)
 
         if isinstance(self.target_parameters, str):
             raise TypeError("`target_parameters` must be a list of strings or None.")

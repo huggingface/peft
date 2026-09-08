@@ -137,7 +137,8 @@ def get_peft_model(
             before training starts.
     """
     old_name = peft_config.base_model_name_or_path
-    new_name = model.__dict__.get("name_or_path", None)
+    # Transformers from-config models use name_or_path == ""; that is not a Hub id.
+    new_name = model.__dict__.get("name_or_path", None) or None
     peft_config.base_model_name_or_path = new_name
 
     # Especially in notebook environments there could be a case that a user wants to experiment with different
