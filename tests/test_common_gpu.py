@@ -1072,7 +1072,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         with torch.inference_mode():
             out_before_merge = F.softmax(model(random_input).logits, dim=-1)
 
-        model.merge_and_unload()
+        model.merge_and_unload(safe_merge=True)
         with torch.inference_mode():
             out_after_merge = F.softmax(model(random_input).logits, dim=-1)
 
@@ -1080,6 +1080,49 @@ class PeftGPUCommonTests(unittest.TestCase):
         rtol = 1
         assert not torch.allclose(out_base, out_before_merge, atol=atol, rtol=rtol)
         assert torch.allclose(out_before_merge, out_after_merge, atol=atol, rtol=rtol)
+
+    def _test_bnb_lora_safe_merge_does_not_mutate_base_layer_on_non_finite_bias(self, quantization):
+        if quantization == "4bit":
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_use_double_quant=False,
+                bnb_4bit_compute_dtype=torch.float32,
+            )
+            layer_type = LoraLinear4bit
+        else:
+            quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+            layer_type = LoraLinear8bitLt
+
+        model = AutoModelForCausalLM.from_pretrained(
+            "peft-internal-testing/opt-125m",
+            quantization_config=quantization_config,
+            dtype=torch.float32,
+        )
+        model = get_peft_model(model, LoraConfig(r=8, init_lora_weights=False, lora_bias=True))
+        layer = next(module for module in model.modules() if isinstance(module, layer_type))
+        base_layer = layer.get_base_layer()
+        original_weight = base_layer.weight
+        original_bias = base_layer.bias.data.clone()
+        layer.lora_B["default"].bias.data.fill_(float("inf"))
+
+        with pytest.raises(ValueError, match="NaNs detected in the merged bias"):
+            layer.merge(safe_merge=True)
+
+        assert base_layer.weight is original_weight
+        assert torch.equal(base_layer.bias.data, original_bias)
+        assert layer.merged_adapters == []
+
+    @require_non_cpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_4bit_lora_safe_merge_does_not_mutate_base_layer_on_non_finite_bias(self):
+        self._test_bnb_lora_safe_merge_does_not_mutate_base_layer_on_non_finite_bias("4bit")
+
+    @require_non_cpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_8bit_lora_safe_merge_does_not_mutate_base_layer_on_non_finite_bias(self):
+        self._test_bnb_lora_safe_merge_does_not_mutate_base_layer_on_non_finite_bias("8bit")
 
     @require_non_cpu
     @pytest.mark.single_gpu_tests
@@ -1196,7 +1239,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         with torch.inference_mode():
             out_before_merge = F.softmax(model(random_input).logits, dim=-1)
 
-        model.merge_and_unload()
+        model.merge_and_unload(safe_merge=True)
         with torch.inference_mode():
             out_after_merge = F.softmax(model(random_input).logits, dim=-1)
 

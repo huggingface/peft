@@ -119,16 +119,19 @@ if is_bnb_available():
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                     )
 
+                bias_data = None
+                if self.lora_bias[active_adapter]:
+                    bias_data = self.get_base_layer().bias.data + self.lora_B[active_adapter].bias
+                    if safe_merge and not torch.isfinite(bias_data).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged bias. The adapter {active_adapter} seems to be broken"
+                        )
+
                 self.get_base_layer().weight = bnb.nn.Int8Params(
                     w_data.to("cpu"), requires_grad=False, has_fp16_weights=weight.has_fp16_weights
                 ).to(weight.device)
 
-                if self.lora_bias[active_adapter]:
-                    bias_data = self.get_base_layer().bias.data + self.lora_B[active_adapter].bias
-                    if safe_merge and not torch.isfinite(bias_data):
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
+                if bias_data is not None:
                     self.get_base_layer().bias.data = bias_data
 
                 state.reset_grads()
@@ -393,6 +396,14 @@ if is_bnb_4bit_available():
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                     )
 
+                bias_data = None
+                if self.lora_bias[active_adapter]:
+                    bias_data = self.get_base_layer().bias.data + self.lora_B[active_adapter].bias
+                    if safe_merge and not torch.isfinite(bias_data).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged bias. The adapter {active_adapter} seems to be broken"
+                        )
+
                 if "bnb_quantized" in kwargs:
                     kwargs["bnb_quantized"] = False
                 kwargs["requires_grad"] = False
@@ -401,12 +412,7 @@ if is_bnb_4bit_available():
                 kwargs = {k: v for k, v in kwargs.items() if not k.startswith("_")}
                 self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
 
-                if self.lora_bias[active_adapter]:
-                    bias_data = self.get_base_layer().bias.data + self.lora_B[active_adapter].bias
-                    if safe_merge and not torch.isfinite(bias_data):
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
+                if bias_data is not None:
                     self.get_base_layer().bias.data = bias_data
 
                 self.merged_adapters.append(active_adapter)
