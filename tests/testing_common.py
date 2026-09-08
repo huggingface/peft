@@ -29,6 +29,7 @@ import yaml
 from diffusers import StableDiffusionPipeline
 from packaging import version
 from safetensors.torch import load_file, save_file
+from torch import nn
 
 from peft import (
     AdaLoraConfig,
@@ -112,6 +113,33 @@ def _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs):
 
     if config_cls not in (IA3Config, LoHaConfig, LoKrConfig, LoraConfig):
         pytest.skip("This PEFT method does not support Conv1D layers, skipping this test.")
+
+
+def _get_adapter_float_dtypes(model, adapter_name: str) -> set[torch.dtype]:
+    """Collect the dtypes of all floating point adapter weights of the given adapter.
+
+    This mirrors what `cast_adapter_dtype` visits, i.e. the parameters and buffers that autocasting would upcast.
+    """
+    dtypes = set()
+    for module in model.modules():
+        if not isinstance(module, BaseTunerLayer):
+            continue
+
+        for submodule in module.modules():
+            if not isinstance(submodule, (nn.ModuleDict, nn.ParameterDict, BufferDict)):
+                continue
+            if adapter_name not in submodule:
+                continue
+
+            entry = submodule[adapter_name]
+            if isinstance(entry, torch.Tensor):  # nn.Parameter or a plain tensor from a BufferDict
+                tensors = [entry]
+            else:
+                tensors = list(entry.parameters()) + list(entry.buffers())
+
+            dtypes.update(tensor.dtype for tensor in tensors if tensor.is_floating_point())
+
+    return dtypes
 
 
 class PeftCommonTester:
@@ -520,6 +548,39 @@ class PeftCommonTester:
                 if config.peft_type != "VBLORA":
                     assert load_result1.missing_keys == []
                     assert load_result2.missing_keys == []
+
+    def _test_add_adapter_no_autocast_adapter_dtype(self, model_id, config_cls, config_kwargs, dtype):
+        # With autocast_adapter_dtype=False, adapters that are added after the PeftModel was created must keep the
+        # dtype of the base model instead of being upcast to float32. This covers add_adapter, which some task types
+        # override, as well as load_adapter, which routes through add_adapter.
+        if issubclass(config_cls, PromptLearningConfig):
+            pytest.skip("Prompt learning does not create tuner layers whose dtype could be autocast.")
+        if config_cls == AdaLoraConfig:
+            pytest.skip("AdaLoRA does not support multiple adapters")
+        if issubclass(config_cls, ShadowConfig) and config_kwargs.get("task_type") == "SEQ_CLS":
+            pytest.skip("ShadowPEFT does not support multiple adapters for sequence classification")
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id, dtype=dtype)
+            config = config_cls(
+                base_model_name_or_path=model_id,
+                **config_kwargs,
+            )
+            model = get_peft_model(model, config, autocast_adapter_dtype=False)
+            # The adapter created by get_peft_model is the reference: adapters added afterwards must end up with the
+            # same dtypes. A few PEFT methods deliberately keep some weights in float32 regardless of the base model
+            # dtype, hence the comparison against the reference instead of against `dtype` directly.
+            expected_dtypes = _get_adapter_float_dtypes(model, "default")
+
+            with tempfile.TemporaryDirectory() as tmp_dirname:
+                model.save_pretrained(tmp_dirname)
+
+                model.add_adapter("added", config, autocast_adapter_dtype=False)
+                assert _get_adapter_float_dtypes(model, "added") == expected_dtypes
+
+                # load_adapter goes through the same add_adapter code path
+                model.load_adapter(tmp_dirname, adapter_name="loaded", autocast_adapter_dtype=False)
+                assert _get_adapter_float_dtypes(model, "loaded") == expected_dtypes
 
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
