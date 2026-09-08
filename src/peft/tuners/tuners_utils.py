@@ -2677,9 +2677,8 @@ def delete_adapter(
 
 def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
     """
-    A helper method to cast the adapter weights to the correct dtype.
-    It reassigns new parameters to the adapter layers, if some object references the old parameters, they will not be
-    updated.
+    A helper method to cast the adapter weights to the correct dtype. It reassigns new parameters to the adapter
+    layers, if some object references the old parameters, they will not be updated.
 
     Currently, this only upcasts float dtypes to float32.
 
