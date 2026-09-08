@@ -593,7 +593,8 @@ def set_peft_model_state_dict(
     peft_model_state_dict, mismatched_keys = _find_mismatched_keys(
         model, peft_model_state_dict, ignore_mismatched_sizes=ignore_mismatched_sizes
     )
-    peft_model_state_dict = _reshard_dtensor_values_for_load(model, peft_model_state_dict)
+    if is_transformers_dtensor_tp:
+        peft_model_state_dict = _reshard_dtensor_values_for_load(model, peft_model_state_dict)
     if low_cpu_mem_usage:
         load_result = model.load_state_dict(peft_model_state_dict, strict=False, assign=True)
         # ensure that the correct device is set
