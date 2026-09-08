@@ -734,6 +734,43 @@ class LoraLayer(BaseTunerLayer):
         # Remove redundant fields
         del base_layer._peft_loraga_grad
 
+    @contextmanager
+    def _unmerged_base_weight(self, safe_merge: bool = False):
+        """Yield the base weight with the already merged adapters taken out of it.
+
+        `merge` applies the adapters one after another, so from the second adapter on, the weight already contains the
+        previously merged ones. Variants whose delta depends on the base weight need it unmerged, the same way
+        `forward` sees it, so the merged adapters are unmerged here and merged again afterwards. The weight is dropped
+        again when the context exits.
+
+        Merging the adapters again re-enters this method for each of them. They get the weight the outermost call
+        recovered, which is the one they need anyway. Unmerging again for each of them would make the number of merge
+        calls grow exponentially.
+        """
+        key = "unmerged_base_weight"
+        if key in self._caches:
+            yield self._caches[key]
+            return
+
+        merged_adapters = self.merged_adapters[:]
+        try:
+            if merged_adapters:
+                self.unmerge()
+            # copy it, because the `finally` block replays a plain LoRA adapter by adding its delta to the
+            # base weight in place, which would change this tensor too
+            weight = dequantize_module_weight(self.get_base_layer()).detach().clone()
+            self._cache_store(key, weight)
+            yield weight
+        finally:
+            try:
+                # only the adapters that were actually unmerged, so that an unmerge that failed halfway does not
+                # merge anything twice
+                to_merge = [name for name in merged_adapters if name not in self.merged_adapters]
+                if to_merge:
+                    self.merge(safe_merge=safe_merge, adapter_names=to_merge)
+            finally:
+                self._caches.pop(key, None)
+
     def _cache_store(self, key: str, value: Any) -> None:
         # cache intermediate values, e.g. weight norm of DoRA
         self._caches[key] = value
@@ -949,8 +986,7 @@ class Linear(nn.Module, LoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weight
-
+                    new_bias = None
                     if self.lora_bias[active_adapter]:
                         if getattr(base_layer, "bias", None) is None:
                             raise RuntimeError(
@@ -961,6 +997,9 @@ class Linear(nn.Module, LoraLayer):
                             raise ValueError(
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
+
+                    base_layer.weight.data = orig_weight
+                    if new_bias is not None:
                         base_layer.bias.data = new_bias.to(orig_dtype)
 
                 else:
@@ -1108,10 +1147,6 @@ class Embedding(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         **kwargs,
     ) -> None:
-        if config.lora_bias:
-            # lora_bias=True is not supported (yet) for embedding layers, as they use nn.Parameter
-            raise ValueError(f"lora_bias={config.lora_bias} is not supported for {self.__class__.__name__}.")
-
         super().__init__()
         LoraLayer.__init__(self, base_layer)
         self.fan_in_fan_out = config.fan_in_fan_out
@@ -1169,6 +1204,10 @@ class Embedding(nn.Module, LoraLayer):
         use_rslora = config.use_rslora
         lora_bias = config.lora_bias
         inference_mode = config.inference_mode
+
+        if lora_bias:
+            # lora_bias=True is not supported (yet) for embedding layers, as they use nn.Parameter
+            raise ValueError(f"lora_bias={lora_bias} is not supported for {self.__class__.__name__}.")
 
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -1632,8 +1671,7 @@ class _ConvNd(nn.Module, LoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weight
-
+                    new_bias = None
                     if self.lora_bias[active_adapter]:
                         if getattr(base_layer, "bias", None) is None:
                             raise RuntimeError(
@@ -1644,6 +1682,9 @@ class _ConvNd(nn.Module, LoraLayer):
                             raise ValueError(
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
+
+                    base_layer.weight.data = orig_weight
+                    if new_bias is not None:
                         base_layer.bias.data = new_bias.to(orig_dtype)
 
                 else:
