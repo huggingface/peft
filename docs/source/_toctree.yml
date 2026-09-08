@@ -83,6 +83,10 @@
         title: EWoRA
       - local: package_reference/fourierft
         title: FourierFT
+      - local: package_reference/frod
+        title: FRoD
+      - local: package_reference/glora
+        title: GLoRA
       - local: package_reference/gralora
         title: GraLoRA
       - local: package_reference/hira
@@ -129,6 +133,8 @@
         title: RandLora
       - local: package_reference/road
         title: RoAd
+      - local: package_reference/shadow
+        title: ShadowPEFT
       - local: package_reference/shira
         title: SHiRA
       - local: package_reference/supertuning
@@ -184,6 +190,10 @@
       title: EWoRA
     - local: package_reference/fourierft
       title: FourierFT
+    - local: package_reference/frod
+      title: FRoD
+    - local: package_reference/glora
+      title: GLoRA
     - local: package_reference/gralora
       title: GraLoRA
     - local: package_reference/hira
@@ -228,26 +238,6 @@
       title: PSOFT
     - local: package_reference/pvera
       title: PVeRA
-    - local: package_reference/fourierft
-      title: FourierFT
-    - local: package_reference/frod
-      title: FRoD
-    - local: package_reference/glora
-      title: GLoRA
-    - local: package_reference/gralora
-      title: GraLoRA
-    - local: package_reference/vblora
-      title: VB-LoRA
-    - local: package_reference/hira
-      title: HiRA
-    - local: package_reference/hra
-      title: HRA
-    - local: package_reference/deft
-      title: DEFT
-    - local: package_reference/cpt
-      title: CPT
-    - local: package_reference/trainable_tokens
-      title: Trainable Tokens
     - local: package_reference/randlora
       title: RandLora
     - local: package_reference/road
@@ -258,6 +248,8 @@
       title: Super-Tuning
     - local: package_reference/tinylora
       title: TinyLoRA
+    - local: package_reference/shadow
+      title: ShadowPEFT
     - local: package_reference/unilora
       title: UniLoRA
     - local: package_reference/trainable_tokens

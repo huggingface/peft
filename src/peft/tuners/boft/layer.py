@@ -716,6 +716,13 @@ class Conv2d(nn.Module, BOFTLayer):
 
         # layer information from the base layer
         base_layer = self.get_base_layer()
+        if base_layer.groups > 1:
+            # The rotation below is built over the full in_channels * kernel_size**2, but a grouped conv's
+            # weight only holds in_channels // groups there, so forward and merge both crash on shape mismatch.
+            raise NotImplementedError(
+                f"BOFT does not support {type(base_layer).__name__} layers with groups > 1 "
+                f"(got groups={base_layer.groups})."
+            )
         conv_filter_dim = self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
 
         # Initialize the BOFT parameters.

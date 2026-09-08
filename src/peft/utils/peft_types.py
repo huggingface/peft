@@ -53,6 +53,7 @@ class PeftType(str, enum.Enum):
     - EWORA
     - GRALORA
     - ADAMSS
+    - SHADOW
     - DEFT
     """
 
@@ -99,6 +100,7 @@ class PeftType(str, enum.Enum):
     TINYLORA = "TINYLORA"
     PSOFT = "PSOFT"
     PEANUT = "PEANUT"
+    SHADOW = "SHADOW"
     SUPERTUNING = "SUPERTUNING"
     DEFT = "DEFT"
 

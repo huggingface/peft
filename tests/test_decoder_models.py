@@ -60,6 +60,7 @@ from peft import (
     PveraConfig,
     RandLoraConfig,
     RoadConfig,
+    ShadowConfig,
     ShiraConfig,
     SupertuningConfig,
     TaskType,
@@ -351,6 +352,14 @@ ALL_CONFIGS = [
             "task_type": "CAUSAL_LM",
             "target_modules": None,
             "init_weights": False,
+        },
+    ),
+    (
+        ShadowConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "r": 2,
+            "shadow_num_hidden_layers": 1,
         },
     ),
     (

@@ -7,7 +7,7 @@ target-version = ['py310']
 target-version = "py310"
 line-length = 119
 extend-exclude = ["*.ipynb", "docs/**/*.md", "examples/**/*.md"]
-required-version = "~=0.16.2"
+required-version = "==0.16.4"
 
 [tool.ruff.lint]
 preview = true

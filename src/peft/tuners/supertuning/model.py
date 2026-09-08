@@ -18,6 +18,7 @@ import torch
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import TRANSFORMERS_MODELS_TO_SUPERTUNING_TARGET_MODULES_MAPPING
 
+from .config import SupertuningConfig
 from .layer import Linear, SupertuningLayer
 
 
@@ -66,6 +67,16 @@ class SupertuningModel(BaseTuner):
     prefix: str = "supertuning_"
     tuner_layer_cls = SupertuningLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_SUPERTUNING_TARGET_MODULES_MAPPING
+
+    def _check_new_adapter_config(self, config: SupertuningConfig) -> None:
+        super()._check_new_adapter_config(config)
+
+        save_indices_values = sorted({config.save_precomputed_indices for config in self.peft_config.values()})
+        if len(save_indices_values) > 1:
+            raise ValueError(
+                "Super-Tuning indices must be saved for all adapters or none, but got multiple different values: "
+                f"{save_indices_values}"
+            )
 
     @staticmethod
     def _create_new_module(supertuning_config, adapter_name, target, **kwargs):
