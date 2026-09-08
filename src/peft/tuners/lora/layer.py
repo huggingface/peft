@@ -1133,6 +1133,7 @@ class Embedding(nn.Module, LoraLayer):
         self.device_mesh = getattr(base_layer, "_hf_device_mesh", None)
         self.tp_layer = None
 
+        self.other_param_names += ("input_fns", "output_fns")
         self.input_fns = {}
         self.output_fns = {}
 
