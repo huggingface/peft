@@ -2634,6 +2634,38 @@ class TestPeftCustomModel(PeftCommonTester):
         assert torch.allclose(output_unmerged, output_unmerged_again, atol=1e-6, rtol=1e-6)
         assert torch.allclose(model.base_model.model.conv.base_layer.weight.data, original_weight)
 
+    @pytest.mark.parametrize("conv_cls", [nn.Conv1d, nn.Conv2d])
+    def test_lora_conv_preserves_dilation_and_padding_mode(self, conv_cls):
+        # Regression test for #3697: the LoRA conv branch mirrors the spatial configuration of the
+        # base layer, but dilation and padding_mode were not carried over. A dilated base layer and
+        # the adapter then produce different spatial shapes (the forward pass fails outright), and a
+        # non-default padding_mode is silently applied as zero padding on the adapter branch.
+        # Conv3d goes through the same _ConvNd.update_layer, so it is covered by construction.
+        kernel_dim = {nn.Conv1d: 1, nn.Conv2d: 2}[conv_cls]
+
+        class DilatedConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = conv_cls(1, 1, kernel_size=3, padding=2, dilation=2, padding_mode="reflect")
+
+            def forward(self, X):
+                return self.conv(X)
+
+        torch.manual_seed(0)
+        model = DilatedConvModel()
+        inputs = torch.randn(1, 1, *([8] * kernel_dim))
+        output_base = model(inputs)
+
+        model = get_peft_model(model, LoraConfig(r=1, target_modules=["conv"]))
+        layer = model.base_model.model.conv
+
+        assert layer.lora_A["default"].dilation == layer.base_layer.dilation
+        assert layer.lora_A["default"].padding_mode == layer.base_layer.padding_mode
+
+        # Without the propagated dilation the adapter branch has a different spatial shape and
+        # adding it to the base output raises, so this also guards the forward pass itself.
+        assert model(inputs).shape == output_base.shape
+
     def test_glora_safe_merge_does_not_corrupt_base_layer_on_non_finite_adapter(self):
         # Regression test: GLoRA's merge() used to accumulate the merged weights directly onto
         # base_layer.weight.data/bias.data *before* the safe_merge isfinite check, so a broken
