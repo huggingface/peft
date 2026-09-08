@@ -31,7 +31,7 @@ from peft.import_utils import is_transformers_dtensor_tp, is_transformers_ge_v5
 from peft.mapping import PEFT_TYPE_TO_TUNER_MAPPING
 
 from .constants import INCLUDE_LINEAR_LAYERS_SHORTHAND
-from .integrations import TpInfo
+from .integrations import TpInfo, dtensor_from_local_like
 from .other import (
     EMBEDDING_LAYER_NAMES,
     SAFETENSORS_WEIGHTS_NAME,
@@ -322,7 +322,7 @@ def _find_mismatched_keys(
 def _reshard_dtensor_values_for_load(
     model: torch.nn.Module, state_dict: dict[str, torch.Tensor]
 ) -> dict[str, torch.Tensor]:
-    from transformers.distributed.sharding_utils import DtensorShardOperation, _dtensor_from_local_like
+    from transformers.distributed.sharding_utils import DtensorShardOperation
     from transformers.distributed.utils import is_dtensor
 
     named_params = dict(model.named_parameters())
@@ -335,7 +335,7 @@ def _reshard_dtensor_values_for_load(
         elif tensor.shape != ref._local_tensor.shape:
             # Neither the global nor the local shape matches: leave it as-is for the normal mismatch handling.
             continue
-        state_dict[key] = _dtensor_from_local_like(tensor, ref)
+        state_dict[key] = dtensor_from_local_like(tensor, ref)
     return state_dict
 
 
