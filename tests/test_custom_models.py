@@ -75,6 +75,7 @@ from peft import (
     WaveFTConfig,
     get_peft_model,
     get_peft_model_state_dict,
+    inject_adapter_in_model,
     set_peft_model_state_dict,
 )
 from peft.tuners import lora
@@ -2447,6 +2448,43 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_save_pretrained(self, test_name, model_id, config_cls, config_kwargs):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_save_load_roundtrip_direct_injection(self, test_name, model_id, config_cls, config_kwargs):
+        X = self.prepare_inputs_for_testing()
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        torch.manual_seed(0)
+        try:
+            model = inject_adapter_in_model(config, model)
+        except ValueError as error:
+            # Shared-state tuners must reject direct injection, so there is no round-trip to run for them. Match the
+            # specific error to avoid masking unrelated failures.
+            if "shared state" not in str(error) or "get_peft_model" not in str(error):
+                raise
+            return
+        model.eval()
+        with torch.inference_mode():
+            output_before = model(**X)
+
+        state_dict = get_peft_model_state_dict(model)
+        del model
+
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        torch.manual_seed(54321)
+        model = inject_adapter_in_model(config_cls(base_model_name_or_path=model_id, **config_kwargs), model)
+        model.eval()
+        load_result = set_peft_model_state_dict(model, state_dict)
+        assert not load_result.unexpected_keys
+
+        with torch.inference_mode():
+            output_after = model(**X)
+        assert torch.allclose(output_before, output_after)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_save_pretrained_pickle(self, test_name, model_id, config_cls, config_kwargs):

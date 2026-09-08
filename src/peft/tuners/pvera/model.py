@@ -62,6 +62,7 @@ class PveraModel(BaseTuner):
         - **peft_config** ([`PveraConfig`]): The configuration of the PVeRA model.
     """
 
+    uses_shared_state: bool = True
     prefix: str = "pvera_lambda_"
     tuner_layer_cls = PveraLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_PVERA_TARGET_MODULES_MAPPING
