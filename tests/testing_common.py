@@ -299,6 +299,8 @@ class PeftCommonTester:
             model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
             tuner_cls = PEFT_TYPE_TO_TUNER_MAPPING[config.peft_type]
             if tuner_cls.uses_shared_state:
+                # Direct injection is unsupported for shared-state tuners. The expected error completes this branch;
+                # the meta-device assertion below applies only to tuners that support direct injection.
                 with pytest.raises(ValueError, match="shared state.*get_peft_model"):
                     inject_adapter_in_model(config, model, low_cpu_mem_usage=True)
                 return
