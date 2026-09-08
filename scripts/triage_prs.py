@@ -24,6 +24,7 @@ import requests
 
 TRIAGED_LABEL = "triaged"
 CLOSURE_MARKER = "<!-- peft-pr-triage: approval-required -->"
+HUMAN_MARKER = "This PR was authored by a human"
 REPOSITORY = "huggingface/peft"
 START_DATE = "2026-09-09"  # Inclusive creation date in UTC.
 BOT_NAME = "peft-triage"
@@ -223,6 +224,10 @@ class PullRequestTriage:
 
         return False
 
+    def is_human_author(self, body):
+        body = body or ""
+        return HUMAN_MARKER.lower() in body.lower()
+
     def closure_message(self):
         return CLOSURE_MESSAGE.format(
             closure_marker=CLOSURE_MARKER, bot_name=self.bot_name, repository=self.repository
@@ -238,7 +243,7 @@ class PullRequestTriage:
         if not is_eligible_pr(pr, self.since):
             return
 
-        approved = self.is_exempt_author(pr["user"]["id"]) or self.has_approved_issue(pr["body"])
+        approved = self.is_exempt_author(pr["user"]["id"]) or self.has_approved_issue(pr["body"]) or self.is_human_author(pr["body"])
         comments = [] if approved else self.client.list_items(f"{self.path}/issues/{number}/comments")
         current = self.client.get(f"{self.path}/pulls/{number}")
         if not is_eligible_pr(current, self.since) or current["updated_at"] != pr["updated_at"]:
