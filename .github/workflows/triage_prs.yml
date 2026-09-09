@@ -1,0 +1,70 @@
+# Checks open PRs (including drafts) every four hours, starting with
+# PRs created on September 9, 2026, at 00:00 UTC. PRs labeled
+# "triaged" are skipped.
+#
+# Listed maintainers, public Hugging Face members, and allowlisted
+# contributors receive "triaged" automatically. Others must link a
+# PEFT issue in their PR description, approved by a listed maintainer
+# or public Hugging Face member with "@peft-triage approved" on its
+# own line outside a code block.  Accepted references: #123,
+# huggingface/peft#123, or the full GitHub issue URL.  Contributor
+# allowlists do not grant approval authority. Only public organization
+# membership is checked; private members need an individual allowlist
+# entry.
+#
+# PRs without approval are closed with an explanation. Contributors
+# can obtain approval and reopen the same PR, or ping maintainers
+# about an incorrect closure.  Maintainers can override by adding
+# "triaged" before reopening.  Issue assignments and the independent
+# stale bot are unaffected.
+#
+# First-time setup: Create the "triaged" label and review the cutoff,
+# maintainers, and allowlists in scripts/triage_prs.py.
+#
+# Use Actions > PR triage > Run workflow to preview decisions
+# (dry_run=true, the manual default), or set dry_run=false to apply
+# them. Previews use the same cutoff. Failed checks leave affected PRs
+# open; review the Actions logs and rerun.
+name: PR triage
+
+on:
+  # TODO: set up automatic cron job
+  # schedule:
+  #   - cron: "17 */4 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Log decisions without labeling, commenting, or closing PRs
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: peft-pr-triage
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    if: github.repository == 'huggingface/peft' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Install script dependency
+        run: python -m pip install requests
+      - name: Triage open PRs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+        run: python scripts/triage_prs.py
