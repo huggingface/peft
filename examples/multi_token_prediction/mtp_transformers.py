@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import time
+import warnings
 
 import packaging.version
 import safetensors
@@ -151,6 +152,23 @@ class AloraMTPCandidateGenerator:
         self._last_draft = draft[0]
         self._last_had_drafts = True
         cand = torch.cat([draft, masks], dim=-1)  # [B, 2K]
+
+        # Crop the draft after the first EOS token to avoid accidentally accepting the
+        # tokens after the EOS. If the EOS token is wrongly predicted we'll waste one step but
+        # that's better than generating potential garbage. We can crop the candidates (and therefore
+        # the mask tokens) because either EOS is correct and we stop here or EOS is incorrect, in
+        # which case _last_had_drafts == True and, by definition, n_last_matches < K since at least
+        # the EOS did not match which will trigger the case above where we return input_ids + masks.
+        eos_token_id = self.main_model.generation_config.eos_token_id
+        if eos_token_id is not None:
+            if draft.shape[0] > 1:
+                warnings.warn("EOS handling is not supported for ALoRAMTP, there may be garbage output.")
+            else:
+                eos_positions = torch.isin(draft[0], torch.tensor(eos_token_id).to(draft)).nonzero()
+                if eos_positions.numel() > 0:
+                    num_drafted = eos_positions[0].item() + 1
+                    cand = cand[0:1, :num_drafted]
+
         return torch.cat([input_ids, cand], dim=-1), None
 
     def update_candidate_strategy(self, input_ids=None, scores=None, num_matches=0, **kwargs):
