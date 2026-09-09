@@ -58,7 +58,7 @@ def parse_args():
     parser.add_argument("--dtype", choices=["bfloat16", "float32"], default="bfloat16")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--shard_size", type=int, default=2000)
-    parser.add_argument("--local_dir", type=str, default="data/selfgen")
+    parser.add_argument("--local_prefix", type=str, default="data/selfgen", help="base directory to store intermediate results in")
     parser.add_argument(
         "--hub_id",
         type=str,
@@ -83,7 +83,7 @@ def save_manifest(local_dir: Path, manifest: dict):
 
 def main():
     args = parse_args()
-    local_dir = Path(args.local_dir)
+    local_dir = Path(args.local_prefix) / Path(args.hub_id)
     local_dir.mkdir(parents=True, exist_ok=True)
     manifest = load_manifest(local_dir)
 
@@ -154,7 +154,7 @@ def main():
                 # too little context to be a meaningful prefix
                 manifest["short_docs"] = manifest.get("short_docs", 0) + 1
                 continue
-            prompts.append(([bos_id] + ids[:prefix_len], len(ids[:prefix_len])))
+            prompts.append((([bos_id] if bos_id is not None else []) + ids[:prefix_len], len(ids[:prefix_len])))
         if not prompts:
             print("Input stream exhausted before reaching --num_samples")
             break
