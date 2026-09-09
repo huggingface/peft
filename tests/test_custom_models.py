@@ -2690,6 +2690,81 @@ class TestPeftCustomModel(PeftCommonTester):
         assert torch.equal(layer.base_layer.bias.data, original_bias)
         assert layer.merged_adapters == []
 
+    def test_boft_conv2d_safe_merge_raises_on_non_finite_weights(self):
+        # BOFT's Conv2d.merge had a safe_merge branch that was a verbatim copy of the unsafe
+        # one: the isfinite check that Linear.merge performs was simply missing, so a broken
+        # adapter was merged into the base weight without complaint and the whole tensor
+        # silently became NaN.
+        torch.manual_seed(0)
+        model = ModelConv2D()
+        # 45 = in_channels * kernel_size**2, the divisibility BOFT requires for this conv.
+        config = BOFTConfig(target_modules=["conv2d"], boft_block_size=45, boft_n_butterfly_factor=1)
+        model = get_peft_model(model, config)
+        layer = model.base_model.model.conv2d
+        original_weight = layer.base_layer.weight.data.clone()
+
+        layer.boft_R["default"].data[0, 0, 0, 0] = float("nan")
+
+        with pytest.raises(ValueError, match="NaNs detected in the merged weights"):
+            layer.merge(safe_merge=True)
+
+        assert torch.isfinite(layer.base_layer.weight.data).all()
+        assert torch.equal(layer.base_layer.weight.data, original_weight)
+        assert layer.merged_adapters == []
+
+    def test_adamss_safe_merge_does_not_mutate_base_layer_on_non_finite_bias(self):
+        # AdaMSS committed the merged weight to the base layer and only then computed and
+        # validated the bias, so a non-finite bias raised with the weight already overwritten.
+        # merged_adapters is appended to after that block, so unmerge() could not undo it.
+        torch.manual_seed(0)
+        model = MLP()
+        config = AdamssConfig(target_modules=["lin0"], r=8)
+        model = get_peft_model(model, config)
+        layer = model.base_model.model.lin0
+        original_weight = layer.base_layer.weight.data.clone()
+        original_bias = layer.base_layer.bias.data.clone()
+
+        # adamss_B is zero-initialised, which makes the weight delta exactly zero and would hide
+        # a premature commit; give it a small non-zero value so the delta is real but finite.
+        for param in layer.adamss_B["default"]:
+            param.data.normal_(0.0, 0.02)
+        # get_delta_bias is the last column of the adapter path, so poisoning only that column
+        # leaves the weight delta finite while the bias delta is not.
+        layer.adamss_newB["default"][:, -1] = float("nan")
+
+        with pytest.raises(ValueError, match="NaNs detected in the merged bias"):
+            layer.merge(safe_merge=True)
+
+        assert torch.equal(layer.base_layer.weight.data, original_weight)
+        assert torch.equal(layer.base_layer.bias.data, original_bias)
+        assert layer.merged_adapters == []
+
+    def test_road_safe_merge_does_not_mutate_base_layer_on_non_finite_bias(self):
+        # Same ordering defect as AdaMSS above. RoAd applies the same rotation to the weight and
+        # the bias, so the trigger is a float16 overflow that the large bias reaches and the
+        # small weights do not, rather than an injected non-finite value.
+        torch.manual_seed(0)
+        model = MLP()
+        config = RoadConfig(target_modules=["lin0"], group_size=2)
+        model = get_peft_model(model, config)
+        layer = model.base_model.model.lin0
+        layer.base_layer.to(torch.float16)
+        layer.road_theta["default"].data = layer.road_theta["default"].data.to(torch.float16)
+        layer.road_alpha["default"].data = layer.road_alpha["default"].data.to(torch.float16)
+        with torch.no_grad():
+            layer.base_layer.weight.fill_(1e-3)
+            layer.base_layer.bias.fill_(6e4)  # just under float16 max; the merge tips it over
+            layer.road_alpha["default"].data.fill_(8.0)
+        original_weight = layer.base_layer.weight.data.clone()
+        original_bias = layer.base_layer.bias.data.clone()
+
+        with pytest.raises(ValueError, match="NaNs detected in the merged bias"):
+            layer.merge(safe_merge=True)
+
+        assert torch.equal(layer.base_layer.weight.data, original_weight)
+        assert torch.equal(layer.base_layer.bias.data, original_bias)
+        assert layer.merged_adapters == []
+
     @pytest.mark.parametrize("safe_merge", [False, True])
     @pytest.mark.parametrize("module_type", ["linear", "conv2d"])
     def test_merge_with_lora_bias_when_base_layer_has_no_bias_warns_and_raises(self, safe_merge, module_type):

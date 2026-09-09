@@ -487,9 +487,11 @@ class Linear(nn.Module, AdamssLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weight
-
-                    # Also update bias if present
+                    # Compute and validate the bias before committing anything. Assigning the
+                    # weight first would leave the base layer half-merged when the bias turns
+                    # out to be non-finite, and since `merged_adapters` is only appended to
+                    # after this block, `unmerge()` would not know to undo it.
+                    orig_bias = None
                     if base_layer.bias is not None:
                         orig_bias = base_layer.bias.data.clone()
                         delta_bias = self.get_delta_bias(active_adapter)
@@ -498,6 +500,9 @@ class Linear(nn.Module, AdamssLayer):
                             raise ValueError(
                                 f"NaNs detected in the merged bias. The adapter {active_adapter} seems to be broken"
                             )
+
+                    base_layer.weight.data = orig_weight
+                    if orig_bias is not None:
                         base_layer.bias.data = orig_bias
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
