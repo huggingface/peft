@@ -488,7 +488,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model_path", default="mtp_a3_seq384")
     ap.add_argument("--dataset", default="hubnemo/tulu3-sft-mini")
-    ap.add_argument("--max_new_tokens", type=int, default=100)
+    ap.add_argument("--max_new_tokens", type=int, default=200)
     ap.add_argument(
         "--prompt_len",
         type=int,
