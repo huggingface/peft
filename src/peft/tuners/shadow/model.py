@@ -15,7 +15,6 @@
 import contextlib
 import inspect
 import json
-import weakref
 from copy import deepcopy
 from typing import Any, Optional
 
@@ -528,48 +527,22 @@ class ShadowModel(BaseTuner):
 
         entry, exit_ = wrapped[0], wrapped[-1]
         self._boundary_layers = [entry, exit_]
-        # The hooks below close over a weakref, not `self`: `functools.partial(fn, self)` -- like a bound
-        # method -- still holds a strong reference to the tuner, so the base-model -> hook -> tuner cycle
-        # keeps the tuner (and its per-forward GPU tensors) alive after unload/delete. A weakref breaks the
-        # cycle; the handles in `_boundary_hook_handles` still own the hook lifetime (see #3625).
-        self_ref = weakref.ref(self)
-
-        def _bind_pre(fn):
-            def _hook(module: nn.Module, args: tuple, kwargs: dict):
-                inst = self_ref()
-                if inst is None:
-                    return args, kwargs
-                return fn(inst, module, args, kwargs)
-
-            return _hook
-
-        def _bind_post(fn):
-            def _hook(module: nn.Module, args: tuple, kwargs: dict, output: Any):
-                inst = self_ref()
-                if inst is None:
-                    return output
-                return fn(inst, module, args, kwargs, output)
-
-            return _hook
-
         # Seed `s^(0)` from the *raw* model inputs (input_ids / 2D attention mask), which are only available at the top
         # of the base model's forward -- inside a decoder block the mask is already a 4D causal mask. Also unpack a
         # `ShadowCache` so the base model only sees its own past.
         self._boundary_hook_handles.append(
-            self.model.register_forward_pre_hook(_bind_pre(ShadowModel._seed_shadow_pre_hook), with_kwargs=True)
+            self.model.register_forward_pre_hook(self._seed_shadow_pre_hook, with_kwargs=True)
         )
         # Re-pack base + shadow pasts into a `ShadowCache` on the way out (generation threads this object as
         # `past_key_values`).
         self._boundary_hook_handles.append(
-            self.model.register_forward_hook(_bind_post(ShadowModel._pack_shadow_cache_hook), with_kwargs=True)
+            self.model.register_forward_hook(self._pack_shadow_cache_hook, with_kwargs=True)
         )
         # Wrap the first wrapped block's input into a carrier, and unwrap the last block's output back to a tensor.
         self._boundary_hook_handles.append(
-            entry.register_forward_pre_hook(_bind_pre(ShadowModel._wrap_entry_pre_hook), with_kwargs=True)
+            entry.register_forward_pre_hook(self._wrap_entry_pre_hook, with_kwargs=True)
         )
-        self._boundary_hook_handles.append(
-            exit_.register_forward_hook(_bind_post(ShadowModel._unwrap_exit_hook), with_kwargs=True)
-        )
+        self._boundary_hook_handles.append(exit_.register_forward_hook(self._unwrap_exit_hook, with_kwargs=True))
 
     def _shadow_path_active(self) -> bool:
         if not self._boundary_layers:
@@ -642,8 +615,6 @@ class ShadowModel(BaseTuner):
 
     def _pack_shadow_cache_hook(self, module: nn.Module, args: tuple, kwargs: dict, output: Any):
         """Attach a [`ShadowCache`] so the next decode step can advance both paths incrementally."""
-        # NOTE: this must not clear `_seed_shadow_state`: `forward` reads it *after* the base forward to
-        # compute the auxiliary loss. Cleanup happens in `forward`'s `finally` once the loss is computed.
         if not self._should_pack_shadow_cache:
             return output
         self._should_pack_shadow_cache = False
@@ -786,39 +757,31 @@ class ShadowModel(BaseTuner):
     def forward(self, *args: Any, **kwargs: Any):
         labels = kwargs.get("labels")
         attention_mask = kwargs.get("attention_mask")
-        try:
-            output = self.model(*args, **kwargs)
+        output = self.model(*args, **kwargs)
 
-            # Compute the shadow path's own task loss (Eq. 8-9) on the standalone prediction head(s^(0)) -- `s^(0)` is
-            # `_seed_shadow_state`, set by the seed pre-hook during the forward above.
-            #
-            # Training uses the *live* `shadow_loss` tensor: it is scaled by `auxiliary_loss_weight` and added into
-            # `output.loss`, so autograd (and DDP/FSDP gradient sync on the shadow params) still see it.
-            #
-            # Separately, an unweighted *detached* copy is exposed for logging/inspection as `output.shadow_loss` and
-            # `self.last_shadow_loss`. Detach keeps logging from retaining the graph or accidentally driving a second
-            # backward. Storing it on the tuner matters because DDP/FSDP (and some Trainer paths) rebuild/replace the
-            # model output from registered `ModelOutput` fields and drop ad-hoc attributes like `shadow_loss`; the module
-            # attribute remains readable after the forward. This has been designed for that logging case -- there is no
-            # dedicated DDP/FSDP integration test for the aux loss beyond ordinary `output.loss.backward()`.
-            self.last_shadow_loss = None
-            if labels is not None and getattr(output, "loss", None) is not None and self._shadow_path_active():
-                shadow_loss = self.shadow_auxiliary_loss(labels, attention_mask=attention_mask)
-                if shadow_loss is not None:
-                    # Logging copy only (no grad). The live `shadow_loss` below is what trains.
-                    self.last_shadow_loss = shadow_loss.detach()
-                    output.shadow_loss = self.last_shadow_loss
-                    weight = self.peft_config[self.active_adapters[0]].auxiliary_loss_weight
-                    if weight > 0:
-                        output.loss = output.loss + weight * shadow_loss
-            return output
-        finally:
-            # Clear per-forward state to avoid GPU growth across disable_adapter toggles and to free
-            # shadow_backbone output [B, S, H] promptly (see #3625).
-            self._seed_shadow_state = None
-            self._shadow_past_out = None
-            self._should_pack_shadow_cache = False
-            self._deferred_shadow_seed = False
+        # Compute the shadow path's own task loss (Eq. 8-9) on the standalone prediction head(s^(0)) -- `s^(0)` is
+        # `_seed_shadow_state`, set by the seed pre-hook during the forward above.
+        #
+        # Training uses the *live* `shadow_loss` tensor: it is scaled by `auxiliary_loss_weight` and added into
+        # `output.loss`, so autograd (and DDP/FSDP gradient sync on the shadow params) still see it.
+        #
+        # Separately, an unweighted *detached* copy is exposed for logging/inspection as `output.shadow_loss` and
+        # `self.last_shadow_loss`. Detach keeps logging from retaining the graph or accidentally driving a second
+        # backward. Storing it on the tuner matters because DDP/FSDP (and some Trainer paths) rebuild/replace the
+        # model output from registered `ModelOutput` fields and drop ad-hoc attributes like `shadow_loss`; the module
+        # attribute remains readable after the forward. This has been designed for that logging case -- there is no
+        # dedicated DDP/FSDP integration test for the aux loss beyond ordinary `output.loss.backward()`.
+        self.last_shadow_loss = None
+        if labels is not None and getattr(output, "loss", None) is not None and self._shadow_path_active():
+            shadow_loss = self.shadow_auxiliary_loss(labels, attention_mask=attention_mask)
+            if shadow_loss is not None:
+                # Logging copy only (no grad). The live `shadow_loss` below is what trains.
+                self.last_shadow_loss = shadow_loss.detach()
+                output.shadow_loss = self.last_shadow_loss
+                weight = self.peft_config[self.active_adapters[0]].auxiliary_loss_weight
+                if weight > 0:
+                    output.loss = output.loss + weight * shadow_loss
+        return output
 
     def _resolve_shadow_head(self, adapter_name: str) -> Optional[nn.Module]:
         """The stored (trainable) shadow head, or the frozen base LM head for the default causal-LM case."""
@@ -890,16 +853,17 @@ class ShadowModel(BaseTuner):
         if hasattr(self, "_boundary_hook_handles"):
             self._boundary_hook_handles = []
             self._boundary_layers = []
-        # Clear per-forward state that would otherwise leak or be shared with a detached model (see #3625).
-        self._seed_shadow_state = None
-        self._shadow_past_out = None
-        self._should_pack_shadow_cache = False
-        self._deferred_shadow_seed = False
         return super()._unload_and_optionally_merge(
             merge=merge, progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
         )
 
     def delete_adapter(self, adapter_name: str) -> None:
+        # Capture the current trainability mode from the deleted adapter: the fallback adapter below
+        # must inherit it (train vs inference). LoRA re-trains its fallback this way; the tuner-level
+        # shadow modules need the same re-sync, otherwise the fallback stays frozen while active.
+        doomed_trains = adapter_name in self.shadow_backbone and any(
+            param.requires_grad for param in self.shadow_backbone[adapter_name].parameters()
+        )
         super().delete_adapter(adapter_name)
         for container in (self.shadow_backbone, self.shadow_projection, self.shadow_head):
             if adapter_name in container:
@@ -909,13 +873,9 @@ class ShadowModel(BaseTuner):
             self._shadow_head_is_lm,
         ):
             bookkeeping.pop(adapter_name, None)
-        # Clear per-forward state that would otherwise leak (see #3625).
-        self._seed_shadow_state = None
-        self._shadow_past_out = None
-        self._should_pack_shadow_cache = False
-        self._deferred_shadow_seed = False
         # Coverage may have changed (the deleted adapter's blocks could be unwrapped now); rebind the boundary hooks.
         self._register_boundary_hooks()
+        self._sync_shadow_module_trainability(inference_mode=not doomed_trains)
 
     def unload_shadow(self, adapter_name: Optional[str] = None, copy: bool = False) -> nn.Module:
         """Return the shadow backbone (+ head) as a standalone model, *without* the base model.
