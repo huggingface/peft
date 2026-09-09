@@ -241,6 +241,11 @@ class PsoftLayer(BaseTunerLayer):
         init_weights = config.init_weights
 
         r = int(config.r)
+        if r > min(self.in_features, self.out_features):
+            raise ValueError(
+                f"`r` ({r}) must be less than or equal to min(in_features, out_features) "
+                f"({self.in_features}, {self.out_features})"
+            )
 
         self.fan_in_fan_out = config.fan_in_fan_out
 
