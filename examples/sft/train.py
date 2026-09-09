@@ -7,6 +7,7 @@ from transformers import HfArgumentParser, set_seed
 from trl import SFTConfig, SFTTrainer
 from utils import create_and_prepare_model, create_datasets
 
+
 if os.environ.get("PERF_RUN_DIR"):
     from perf_harness import instrument
 
@@ -104,6 +105,12 @@ def main(model_args, data_args, training_args):
 
     # model
     model, peft_config, tokenizer = create_and_prepare_model(model_args, data_args, training_args)
+
+    if os.environ.get("PERF_CHUNK_VIEWS") == "1":
+        from qwen_chunk_views import enable_chunk_views
+
+        if not training_args.bf16 or not enable_chunk_views(model):
+            raise ValueError("Chunk views require BF16 Qwen text SFT with Transformers 5.16.1 and no hub kernels.")
 
     # gradient ckpt
     model.config.use_cache = not training_args.gradient_checkpointing
