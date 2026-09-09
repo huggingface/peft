@@ -46,6 +46,7 @@ from peft import (
     LoftQConfig,
     LoKrConfig,
     LoraConfig,
+    MissConfig,
     PeanutConfig,
     PeftMixedModel,
     PeftModel,
@@ -2891,6 +2892,57 @@ class TestPsoftInitialization:
                 use_cayley_neumann=True,
                 cayley_neumann_eps=bad_eps,
             )
+
+    def test_psoft_rejects_rank_above_min_in_out_features(self):
+        # SVD factors are at most rank min(in, out). A larger r builds an r×r R that cannot multiply the
+        # projected features, so fail at adapter init instead of on the first forward (#3702).
+        class Tiny(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(16, 32)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        msg = re.escape("PSOFT requires `r` <= min(in_features, out_features)")
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(Tiny(), PsoftConfig(target_modules=["lin"]))  # default r=32 > min(16, 32)
+
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(Tiny(), PsoftConfig(target_modules=["lin"], r=17))
+
+        model = get_peft_model(Tiny(), PsoftConfig(target_modules=["lin"], r=16))
+        x = torch.randn(2, 16)
+        model.eval()
+        with torch.no_grad():
+            model(x)  # does not raise
+
+
+class TestMissInitialization:
+    def test_miss_rejects_rank_above_in_features(self):
+        # Merge reshapes the base weight into blocks of size r along in_features. r > in_features yields
+        # n_blocks=0 and a 0-element reshape; fail at adapter init instead (#3701).
+        class Tiny(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(16, 32)
+                self.lin1 = nn.Linear(32, 16)
+
+            def forward(self, x):
+                return self.lin1(self.lin0(x))
+
+        msg = re.escape("MiSS requires `r` <= in_features")
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(Tiny(), MissConfig(target_modules=["lin0", "lin1"], init_weights=False))  # default r=64
+
+        model = get_peft_model(Tiny(), MissConfig(target_modules=["lin0", "lin1"], r=16, init_weights=False))
+        model.eval()
+        x = torch.randn(2, 16)
+        with torch.no_grad():
+            before = model(x)
+            model.merge_adapter()
+            after = model(x)
+        torch.testing.assert_close(before, after)
 
 
 class TestPeanutInitialization:

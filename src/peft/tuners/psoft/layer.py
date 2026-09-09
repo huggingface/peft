@@ -241,6 +241,12 @@ class PsoftLayer(BaseTunerLayer):
         init_weights = config.init_weights
 
         r = int(config.r)
+        max_r = min(self.in_features, self.out_features)
+        if r > max_r:
+            raise ValueError(
+                f"PSOFT requires `r` <= min(in_features, out_features) but got r={r} for a layer with "
+                f"in_features={self.in_features}, out_features={self.out_features} (max usable r is {max_r})."
+            )
 
         self.fan_in_fan_out = config.fan_in_fan_out
 
