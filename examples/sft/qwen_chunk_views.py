@@ -17,7 +17,8 @@
 The recurrence is adapted from Transformers' modeling_qwen3_5.py. Its arithmetic
 and dtype conversions are retained. Disjoint chunk gradients are assembled with
 unbind/stack, and triangular-row gradients are accumulated directly into their
-slices. Higher derivatives use the original differentiable row recurrence.
+slices. Independent local attention products are batched before the ordered
+state recurrence. Higher derivatives use the original differentiable row recurrence.
 """
 
 import torch

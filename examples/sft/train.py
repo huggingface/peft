@@ -106,11 +106,10 @@ def main(model_args, data_args, training_args):
     # model
     model, peft_config, tokenizer = create_and_prepare_model(model_args, data_args, training_args)
 
-    if os.environ.get("PERF_CHUNK_VIEWS") == "1":
+    if training_args.bf16:
         from qwen_chunk_views import enable_chunk_views
 
-        if not training_args.bf16 or not enable_chunk_views(model):
-            raise ValueError("Chunk views require BF16 Qwen text SFT with Transformers 5.16.1 and no hub kernels.")
+        enable_chunk_views(model)
 
     # gradient ckpt
     model.config.use_cache = not training_args.gradient_checkpointing
