@@ -7,6 +7,11 @@ from transformers import HfArgumentParser, set_seed
 from trl import SFTConfig, SFTTrainer
 from utils import create_and_prepare_model, create_datasets
 
+if os.environ.get("PERF_RUN_DIR"):
+    from perf_harness import instrument
+
+    instrument(SFTTrainer)
+
 
 # Define and parse arguments.
 @dataclass
