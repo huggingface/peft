@@ -126,16 +126,18 @@ def torch_chunk_gated_delta_rule(
     chunk_outputs = []
     mask = torch.triu(torch.ones(chunk_size, chunk_size, dtype=torch.bool, device=query.device), diagonal=1)
 
+    # Local attention products are independent of the recurrent state.
+    attention_chunks = (query @ key.transpose(-1, -2) * decay_mask).unbind(2)
+
     # for each chunk
     query_chunks = query.unbind(2)
     key_chunks = key.unbind(2)
     value_chunks = value.unbind(2)
     k_cumdecay_chunks = k_cumdecay.unbind(2)
-    decay_mask_chunks = decay_mask.unbind(2)
     g_chunks = g.unbind(2)
     for i in range(total_sequence_length // chunk_size):
         q_i, k_i, v_i = query_chunks[i], key_chunks[i], value_chunks[i]
-        attn = q_i @ k_i.transpose(-1, -2) * decay_mask_chunks[i]
+        attn = attention_chunks[i]
         v_prime = (k_cumdecay_chunks[i]) @ last_recurrent_state
         v_new = v_i - v_prime
         attn_inter = (q_i * g_chunks[i][:, :, :, None].exp()) @ last_recurrent_state
