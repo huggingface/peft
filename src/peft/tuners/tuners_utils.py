@@ -2235,8 +2235,8 @@ class BaseTunerLayer(ABC):
         Calling this method while any adapter is merged raises a `ValueError`, as merging modifies the base weight,
         which would make the return value depend on the currently merged adapters. Unmerge the adapters first.
 
-        The returned tensor always has the same dtype as the base layer weight, which is the dtype that `merge` uses
-        when adding the delta to the base weight.
+        The returned tensor has the dtype of the adapter layer weights (e.g. `lora_A` for LoRA), not the dtype of the
+        base layer weight. This is the dtype that the converted LoRA adapter will use.
 
         The result is used by `convert_to_lora` to perform an SVD-based approximation of the adapter as a LoRA adapter.
 
@@ -2252,10 +2252,7 @@ class BaseTunerLayer(ABC):
                 f"currently merged into the base weights: {', '.join(self.merged_adapters)}. This would make the "
                 "return value incorrect. Please unmerge the adapters first."
             )
-        delta_weight = self._get_additive_delta(adapter_name)
-        # Harmonize the output dtype: merge adds the delta to the base weight in the dtype of the base weight, so
-        # using the same dtype here ensures that base_weight + delta corresponds to the merged weight.
-        return delta_weight.to(self.get_base_weight().dtype)
+        return self._get_additive_delta(adapter_name)
 
     def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
         # Internal method that should be overridden instead of `get_additive_delta`, see the docstring there.

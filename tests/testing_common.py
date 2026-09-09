@@ -909,6 +909,10 @@ class PeftCommonTester:
 
                 no_tuner_layer_found = False
                 delta_weight_expected = weight_after - weight_before
+                # The additive delta should be a floating point tensor, not the dtype of the base weight. This matters
+                # e.g. for quantized base weights, whose dtype is not a floating point type and thus must not be used
+                # for the additive delta.
+                assert additive_deltas[name].dtype.is_floating_point
                 additive_delta = additive_deltas[name].to(delta_weight_expected.dtype)
                 assert torch.allclose(additive_delta, delta_weight_expected, atol=atol, rtol=rtol)
 

@@ -384,9 +384,10 @@ class MissLinear(nn.Module, MissLayer):
         if self.miss_fn == "bat":
             return self.get_delta_weight(adapter_name, self.get_base_weight())
         # `get_delta_weight_miss` returns the full merged weight and may modify the tensor passed to it in-place,
-        # hence the clone
+        # hence the clone. The result has the dtype of the base weight, so cast to the dtype of the adapter weights.
         base_weight = self.get_base_weight()
-        return self.get_delta_weight_miss(adapter_name, base_weight.clone()) - base_weight
+        delta = self.get_delta_weight_miss(adapter_name, base_weight.clone()) - base_weight
+        return delta.to(self.miss_block[adapter_name].dtype)
 
     def __repr__(self) -> str:
         rep = super().__repr__()

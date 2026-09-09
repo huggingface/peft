@@ -647,7 +647,8 @@ class Linear(nn.Module, OFTLayer):
         # compute in float32 for numerical stability
         effective_weight = torch.mm(base_weight.float(), oft_mat.float().t())
         delta = effective_weight - base_weight.float()
-        return delta
+        # return in the dtype of the adapter weights
+        return delta.to(self.oft_R[adapter_name].weight.dtype)
 
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         return True

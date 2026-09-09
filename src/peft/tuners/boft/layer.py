@@ -606,7 +606,8 @@ class Linear(nn.Module, BOFTLayer):
         # apply scaling: boft_s is (out_features, 1), broadcasts over in_features
         effective_weight = effective_weight * boft_s.float()
         delta = effective_weight - weight
-        return delta
+        # return in the dtype of the adapter weights
+        return delta.to(self.boft_s[adapter_name].dtype)
 
     def supports_lora_conversion(self, adapter_name: str = "default") -> bool:
         return True
