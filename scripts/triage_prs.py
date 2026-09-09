@@ -26,7 +26,7 @@ TRIAGED_LABEL = "triaged"
 CLOSURE_MARKER = "<!-- peft-pr-triage: approval-required -->"
 HUMAN_MARKER = "This PR was authored by a human"
 REPOSITORY = "huggingface/peft"
-START_DATE = "2026-09-09"  # Inclusive creation date in UTC.
+START_DATE = "2026-09-10"  # Apply triage only to PRs from this date, inclusive, or later (UTC)
 BOT_NAME = "peft-triage"
 
 # see: https://api.github.com/users/<user-id>
