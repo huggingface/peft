@@ -6583,6 +6583,21 @@ class TestRequiresGrad:
             "base_model.model.layernorm1.ln_tuning_layers.adapter1.bias",
         )
 
+    def test_forward_and_merge_lntuning_different_targets(self):
+        config0 = LNTuningConfig(target_modules=["layernorm0", "layernorm1"])
+        peft_model = get_peft_model(MLP_LayerNorm(), config0)
+
+        config1 = LNTuningConfig(target_modules=["layernorm0"])
+        peft_model.add_adapter("second", config1)
+        peft_model.set_adapter("second")
+
+        output = peft_model(torch.randn(4, 10))
+        assert output.shape == (4, 2)
+
+        peft_model.merge_adapter()
+        output = peft_model(torch.randn(4, 10))
+        assert output.shape == (4, 2)
+
     def test_requires_grad_lntuning_same_targets(self):
         config0 = LNTuningConfig(
             target_modules=["layernorm0"],
