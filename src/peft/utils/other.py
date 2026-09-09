@@ -747,6 +747,14 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         layers.
         """
         if adapter_name not in self.modules_to_save:
+            # The deleted adapter never managed this module, but the fallback adapter might: sync it to
+            # active, mirroring the path below. Otherwise the fallback's copy stays frozen while active.
+            if new_active_adapters:
+                new_active_adapter = new_active_adapters[0]
+                if new_active_adapter in self.modules_to_save and (
+                    not self.active_adapters or new_active_adapter != self.active_adapters[0]
+                ):
+                    self.set_adapter(new_active_adapter)
             return
 
         # set new active adapter, if necessary
