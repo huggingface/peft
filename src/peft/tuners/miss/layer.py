@@ -99,9 +99,9 @@ class MissLayer(BaseTunerLayer):
         elif init_weights == "mini":
             if self.out_features % mini_r != 0:
                 raise ValueError(
-                    "mini_r is divided along the out_features dimension. For optimal performance and implementation simplicity,"
-                    "it is recommended that out_features be divisible by mini_r."
-                    "Error: {self.out_features} % mini_r != 0"
+                    "mini_r is divided along the out_features dimension. For optimal performance and implementation simplicity, "
+                    "it is recommended that out_features be divisible by mini_r. "
+                    f"Error: {self.out_features} % mini_r != 0"
                 )
             self.reset_mini_parameters(adapter_name, r, mini_r)
         elif init_weights:

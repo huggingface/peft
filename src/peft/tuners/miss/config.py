@@ -97,8 +97,8 @@ class MissConfig(PeftConfig):
         metadata={
             "help": (
                 "True -> MiSS balance; `bat` -> Bat; `mini` -> smaller rank and efficiency"
-                "Whether to initialize the weights of the MiSS layers with their default initialization. Don't change "
-                "this setting, except if you know exactly what you're doing."
+                "Whether to initialize the weights of the MiSS layers with their default initialization. Setting this "
+                "value to False is mainly used for debugging purposes."
             ),
         },
     )

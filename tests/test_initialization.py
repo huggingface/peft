@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import copy
+import itertools
 import math
 import platform
 import re
@@ -6138,20 +6139,21 @@ class TestMissInitialization:
         class MLP(nn.Module):
             def __init__(self, bias=True):
                 super().__init__()
-                self.lin0 = nn.Linear(10, 10, bias=bias)
-                self.lin1 = nn.Linear(10, 2, bias=bias)
+                self.lin0 = nn.Linear(12, 12, bias=bias)
+                self.lin1 = nn.Linear(12, 6, bias=bias)
 
             def forward(self, X):
                 X = self.lin0(X)
                 X = self.lin1(X)
                 return X
 
+        torch.manual_seed(0)
         return MLP(bias=bias).to(self.torch_device).eval()
 
     @pytest.fixture
     def data(self):
         torch.manual_seed(0)
-        return torch.randn(4, 10, device=self.torch_device)
+        return torch.randn(4, 12, device=self.torch_device)
 
     def test_miss_fn_per_adapter(self):
         # Reproduces the bug where `miss_fn` (from `init_weights`) is not set on a
@@ -6169,25 +6171,6 @@ class TestMissInitialization:
         assert layer.miss_fn["default"] is True
         assert layer.miss_fn["adapter1"] == "bat"
 
-    def test_miss_fn_per_adapter_forward(self, data):
-        # Ensure forward pass works correctly with different `init_weights` per adapter.
-        model = self.get_model()
-        config0 = MissConfig(target_modules=["lin0"], r=2, init_weights=True)
-        model = get_peft_model(model, config0)
-
-        config1 = MissConfig(target_modules=["lin0"], r=2, init_weights="bat")
-        model.add_adapter("adapter1", config1)
-
-        # Forward with just bat adapter should work
-        model.set_adapter("adapter1")
-        out_bat = model(data)
-        assert out_bat.shape == (4, 2)
-
-        # Forward with just default adapter
-        model.set_adapter("default")
-        out_default = model(data)
-        assert out_default.shape == (4, 2)
-
     def test_miss_fn_per_adapter_three_variants(self):
         # Add three adapters with all three init_weights variants: True, "bat", "mini"
         model = self.get_model()
@@ -6204,3 +6187,60 @@ class TestMissInitialization:
         assert layer.miss_fn["default"] is True
         assert layer.miss_fn["adapter1"] == "bat"
         assert layer.miss_fn["adapter2"] == "mini"
+
+    def test_miss_fn_output_respects_init_weights(self, data):
+        init_options = [True, False, "bat", "mini"]
+
+        model = self.get_model()
+        with torch.inference_mode():
+            output_before = {"base": model(data)}
+
+        for init_weights in init_options:
+            model = self.get_model()
+            torch.manual_seed(0)
+            config = MissConfig(r=6, mini_r=2, target_modules=["lin0", "lin1"], init_weights=init_weights)
+            model = get_peft_model(model, config)
+            # perturb randomly (but with seed) to ensure that the init options differ
+            for layer in (model.lin0, model.lin1):
+                block = layer.miss_block["default"]
+                block.data.add_(torch.randn_like(block))
+            with torch.inference_mode():
+                output_before[init_weights] = model(data)
+
+        # sanity check: each option differs
+        atol, rtol = 1e-4, 1e-4
+        for init0, init1 in itertools.combinations(["base"] + init_options, r=2):
+            assert not torch.allclose(output_before[init0], output_before[init1], atol=atol, rtol=rtol), (
+                f"Expected outputs for {init0} and {init1} to differ, but they were equal."
+            )
+
+        # now check a single model with multiple adapters
+        model = self.get_model()
+        # initialize with first adapter
+        torch.manual_seed(0)
+        config = MissConfig(r=6, mini_r=2, target_modules=["lin0", "lin1"], init_weights=init_options[0])
+        model = get_peft_model(model, config, adapter_name=str(init_options[0]))
+        for layer in (model.lin0, model.lin1):
+            block = layer.miss_block[str(init_options[0])]
+            block.data.add_(torch.randn_like(block))
+        # add the other adapters
+        for init_weights in init_options[1:]:
+            torch.manual_seed(0)
+            config = MissConfig(r=6, mini_r=2, target_modules=["lin0", "lin1"], init_weights=init_weights)
+            model.add_adapter(str(init_weights), config)
+            # perturb randomly (but with seed) to ensure that the init options differ
+            for layer in (model.lin0, model.lin1):
+                block = layer.miss_block[str(init_weights)]
+                block.data.add_(torch.randn_like(block))
+
+        # collect the outputs
+        with model.disable_adapter(), torch.inference_mode():
+            output_after = {"base": model(data)}
+        for init_weights in init_options:
+            model.set_adapter(str(init_weights))
+            with torch.inference_mode():
+                output_after[init_weights] = model(data)
+
+        # compare the output: should be the same for multiple adapters or for a single adapter
+        for key in ["base"] + init_options:
+            assert torch.allclose(output_before[key], output_after[key], atol=atol, rtol=rtol)
