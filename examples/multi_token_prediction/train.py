@@ -886,7 +886,7 @@ def main():
     parser.add_argument("--alpha", type=int, default=32)
     parser.add_argument("-k", type=int, default=2)
     parser.add_argument("--text_file", type=str, default="train.txt")
-    parser.add_argument("--use_wiki", action="store_true", default=False, help="Use finewiki instead of --text_file")
+    parser.add_argument("--dataset", type=str, default=False, help="Use a HF dataset instead of --text_file")
     parser.add_argument("--seq_len", type=int, default=128)
     parser.add_argument("--model_id", type=str, default="meta-llama/Llama-3.2-3B")
     parser.add_argument("--lr", type=float)
@@ -968,9 +968,9 @@ def main():
     ).to(model.device, dtype=torch.bfloat16)
 
     # Create dataset
-    if args.use_wiki:
-        print("Loading text from finewiki")
-        ds = load_dataset("HuggingFaceFW/finewiki", split="train", streaming=True)
+    if args.dataset:
+        print("Loading text from {args.dataset}")
+        ds = load_dataset(args.dataset, split="train", streaming=True)
         num_valid_samples = args.num_valid
         dataset_train = ds.skip(num_valid_samples).map(
             partial(tokenize_wiki, tokenizer=tokenizer, chunk_size=args.seq_len),
