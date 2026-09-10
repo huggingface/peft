@@ -33,6 +33,8 @@ class TpInfo:
     tp_size: int
 
 
+# Vendored from:
+# https://github.com/huggingface/transformers/blob/4815a0a6a064214f2d8208c094464a5a6b76ca8d/src/transformers/distributed/sharding_utils.py#L321
 def dtensor_from_local_like(local_tensor: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
     """Wrap `local_tensor` as a DTensor mirroring `ref`'s mesh, placements, global shape and stride."""
     from torch.distributed.tensor import DTensor
