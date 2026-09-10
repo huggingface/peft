@@ -4638,6 +4638,7 @@ class TestPeftCustomModel(PeftCommonTester):
         extra_weight = target.base_model.model.embed_tokens_extra.weight
         assert torch.allclose(extra_weight, torch.full_like(extra_weight, 123.0))
 
+    # Regression test for #3676: modules_to_save can include scalar state entries.
     def test_ignore_mismatched_sizes_with_scalar_modules_to_save(self, tmp_path):
         class ModelWithBatchNorm(nn.Module):
             def __init__(self):
