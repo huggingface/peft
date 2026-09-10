@@ -2633,6 +2633,36 @@ class TestPeftCustomModel(PeftCommonTester):
         assert torch.allclose(output_unmerged, output_unmerged_again, atol=1e-6, rtol=1e-6)
         assert torch.allclose(model.base_model.model.conv.base_layer.weight.data, original_weight)
 
+    @pytest.mark.parametrize("module_type", ["linear", "conv2d"])
+    def test_ia3_safe_merge_does_not_mutate_base_layer_on_non_finite_bias(self, module_type):
+        torch.manual_seed(0)
+        if module_type == "linear":
+            model = MLP()
+            target_name = "lin0"
+        elif module_type == "conv2d":
+            model = ModelConv2D()
+            target_name = "conv2d"
+        else:
+            raise ValueError(f"Wrong module_type passed, expected 'linear' or 'conv2d', got {module_type}")
+
+        config = IA3Config(target_modules=[target_name], feedforward_modules=[])
+        model = get_peft_model(model, config)
+        layer = getattr(model.base_model.model, target_name)
+        base_layer = layer.get_base_layer()
+
+        base_layer.weight.data.fill_(1)
+        base_layer.bias.data.fill_(torch.finfo(base_layer.bias.dtype).max)
+        layer.ia3_l["default"].data.fill_(2)
+        original_weight = base_layer.weight.data.clone()
+        original_bias = base_layer.bias.data.clone()
+
+        with pytest.raises(ValueError, match="NaNs detected in the merged bias"):
+            layer.merge(safe_merge=True)
+
+        assert torch.equal(base_layer.weight.data, original_weight)
+        assert torch.equal(base_layer.bias.data, original_bias)
+        assert layer.merged_adapters == []
+
     def test_glora_safe_merge_does_not_corrupt_base_layer_on_non_finite_adapter(self):
         # Regression test: GLoRA's merge() used to accumulate the merged weights directly onto
         # base_layer.weight.data/bias.data *before* the safe_merge isfinite check, so a broken
