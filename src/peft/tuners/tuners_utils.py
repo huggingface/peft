@@ -1080,14 +1080,9 @@ class BaseTuner(nn.Module, ABC):
                     RuntimeWarning,
                 )
 
-        # Now that the checks passed, merge this adapter's matches into the tuner-level bookkeeping. Duplicates
-        # are skipped so that names stay unique when several adapters target the same modules.
-        #
-        # Before that, warn about rank_pattern / alpha_pattern entries that did not match any targeted module —
-        # without this check they would be silently ignored, which is easy to miss because the model trains fine
-        # with the default ranks/alphas (see #3582). The matching semantics are identical to `get_pattern_key`:
-        # user keys are treated as regexes matched against the end of the full module path, optionally preceded by
-        # a dot-separated prefix.
+        # Warn about rank_pattern / alpha_pattern entries that matched no targeted module. Without
+        # this check they would be silently ignored, which is easy to miss because the model trains fine
+        # with the default ranks/alphas. The matching semantics are identical to `get_pattern_key`.
         for pattern_attr in ("rank_pattern", "alpha_pattern"):
             patterns = getattr(peft_config, pattern_attr, None)
             if not patterns:
@@ -1101,12 +1096,12 @@ class BaseTuner(nn.Module, ABC):
             if unmatched:
                 warnings.warn(
                     f"The following {pattern_attr} keys did not match any targeted module and were ignored: "
-                    f"{unmatched}. Note that pattern keys are only matched against the end of a full module path "
-                    "(optionally after a dot-separated prefix), so a misplaced '^' anchor such as '^q_proj' or a "
-                    "typo may never match (fully-qualified anchored keys such as '^model\\.layers\\.0\\.' do match).",
+                    f"{unmatched}.",
                     RuntimeWarning,
                 )
 
+        # Now that the checks passed, merge this adapter's matches into the tuner-level bookkeeping. Duplicates
+        # are skipped so that names stay unique when several adapters target the same modules.
         _extend_unique(self.targeted_module_names, targeted_module_names)
         _extend_unique(self.targeted_parameter_names, targeted_parameter_names)
 
