@@ -101,11 +101,6 @@ def _skip_if_adding_weighted_adapters_not_supported(config):
         pytest.skip("This PEFT method does not support adding weighted adapters, skipping this test.")
 
 
-def _skip_if_deleting_adapter_not_supported(config_cls, config_kwargs):
-    if issubclass(config_cls, PromptLearningConfig):
-        pytest.skip("Prompt learning does not support deletion of adapters, skipping this test.")
-
-
 def _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs):
     if "gpt2" not in model_id.lower():
         return
@@ -1381,7 +1376,6 @@ class PeftCommonTester:
                 assert param.grad is not None
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
-        _skip_if_deleting_adapter_not_supported(config_cls, config_kwargs)
         if config_cls == AdaLoraConfig:
             pytest.skip("AdaLoRA does not support multiple adapters")
 
@@ -1443,7 +1437,6 @@ class PeftCommonTester:
     def _test_delete_inactive_adapter(self, model_id, config_cls, config_kwargs):
         if config_cls == AdaLoraConfig:
             pytest.skip("AdaLoRA does not support multiple adapters")
-        _skip_if_deleting_adapter_not_supported(config_cls, config_kwargs)
 
         config = config_cls(
             base_model_name_or_path=model_id,
