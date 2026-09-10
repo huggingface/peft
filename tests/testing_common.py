@@ -569,11 +569,12 @@ class PeftCommonTester:
             # Subset, not equality: get_adapter_dtype never returns an empty set, so when expected_dtype holds a
             # single dtype this is the same check as equality.
             assert get_adapter_dtype(model, "default") <= expected_dtype
+
+            model.add_adapter("added", config, autocast_adapter_dtype=False)
+            assert get_adapter_dtype(model, "added") <= expected_dtype
+
             with tempfile.TemporaryDirectory() as tmp_dirname:
                 model.save_pretrained(tmp_dirname)
-
-                model.add_adapter("added", config, autocast_adapter_dtype=False)
-                assert get_adapter_dtype(model, "added") <= expected_dtype
 
                 # load_adapter goes through the same add_adapter code path
                 model.load_adapter(tmp_dirname, adapter_name="loaded", autocast_adapter_dtype=False)
