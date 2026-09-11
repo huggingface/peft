@@ -879,7 +879,8 @@ class TextDataset(Dataset):
 
     def __getitem__(self, idx):
         return torch.tensor(
-            [self.tokenizer.bos_token_id] + self.full_tokens[idx * self.seq_len : (idx + 1) * self.seq_len],
+            ([self.tokenizer.bos_token_id] if self.tokenizer.bos_token else []) +
+            self.full_tokens[idx * self.seq_len : (idx + 1) * self.seq_len],
         )
 
 
@@ -889,7 +890,7 @@ def tokenize_wiki(examples, tokenizer, chunk_size):
         for i_split in range(0, len(tokens), chunk_size):
             chunk = tokens[i_split : i_split + chunk_size]
             if len(chunk) == chunk_size:
-                chunks.append([tokenizer.bos_token_id] + chunk)
+                chunks.append(([tokenizer.bos_token_id] if tokenizer.bos_token else []) + chunk)
 
     return {"input_ids": chunks}
 
