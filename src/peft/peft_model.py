@@ -1893,7 +1893,12 @@ class PeftModelForSequenceClassification(PeftModel):
             else:
                 peft_config.modules_to_save.extend(classifier_module_names)
 
-        return super().add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
+        return super().add_adapter(
+            adapter_name,
+            peft_config,
+            low_cpu_mem_usage=low_cpu_mem_usage,
+            autocast_adapter_dtype=autocast_adapter_dtype,
+        )
 
     def forward(
         self,
@@ -2744,7 +2749,12 @@ class PeftModelForTokenClassification(PeftModel):
             else:
                 peft_config.modules_to_save.extend(classifier_module_names)
 
-        return super().add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
+        return super().add_adapter(
+            adapter_name,
+            peft_config,
+            low_cpu_mem_usage=low_cpu_mem_usage,
+            autocast_adapter_dtype=autocast_adapter_dtype,
+        )
 
     def forward(
         self,
@@ -2974,7 +2984,12 @@ class PeftModelForQuestionAnswering(PeftModel):
             else:
                 peft_config.modules_to_save.extend(qa_module_names)
 
-        return super().add_adapter(adapter_name, peft_config, low_cpu_mem_usage=low_cpu_mem_usage)
+        return super().add_adapter(
+            adapter_name,
+            peft_config,
+            low_cpu_mem_usage=low_cpu_mem_usage,
+            autocast_adapter_dtype=autocast_adapter_dtype,
+        )
 
     def forward(
         self,

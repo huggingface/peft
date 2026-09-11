@@ -378,6 +378,13 @@ class TestSequenceClassificationModels(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_add_adapter_no_autocast_adapter_dtype(self, model_id, config_cls, config_kwargs, dtype):
+        _skip_encoder_models(model_id, config_cls)
+        self._test_add_adapter_no_autocast_adapter_dtype(model_id, config_cls, config_kwargs.copy(), dtype=dtype)
+
+    @pytest.mark.parametrize("model_id", PEFT_SEQ_CLS_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_prepare_for_training_parametrized(self, model_id, config_cls, config_kwargs):
         _skip_encoder_models(model_id, config_cls)
         self._test_prepare_for_training(model_id, config_cls, config_kwargs.copy())

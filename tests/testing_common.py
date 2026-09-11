@@ -516,6 +516,65 @@ class PeftCommonTester:
                     assert load_result1.missing_keys == []
                     assert load_result2.missing_keys == []
 
+    def _test_add_adapter_no_autocast_adapter_dtype(self, model_id, config_cls, config_kwargs, dtype):
+        # With autocast_adapter_dtype=False, adapters that are added after the PeftModel was created must keep the
+        # dtype of the base model instead of being upcast to float32. This covers add_adapter, which some task types
+        # override, as well as load_adapter, which routes through add_adapter.
+        if issubclass(config_cls, PromptLearningConfig):
+            pytest.skip("Prompt learning does not create tuner layers whose dtype could be autocast.")
+        if config_cls == AdaLoraConfig:
+            pytest.skip("AdaLoRA does not support multiple adapters")
+        if issubclass(config_cls, ShadowConfig):
+            # ShadowPEFT does not support multiple adapters for sequence classification. On top of that, its layer
+            # weights never follow the base model dtype: ShadowPEFT wraps whole decoder layers, so
+            # BaseTunerLayer.get_base_layer() returns a module without a `weight` attribute,
+            # _move_adapter_to_device_of_base_layer() cannot determine a dtype and returns early, and
+            # shadow_down/shadow_up/shadow_update_* keep the float32 that nn.Linear defaults to regardless of
+            # autocast_adapter_dtype. That is unrelated to the task-type add_adapter fix this test covers.
+            pytest.skip("ShadowPEFT layer weights do not follow the base model dtype")
+
+        def get_adapter_dtype(model, adapter_name):
+            dtypes = set()
+            for name, param in model.named_parameters():
+                if (model.prefix in name) and (adapter_name in name) and param.is_floating_point():
+                    dtypes.add(param.dtype)
+            if not dtypes:
+                raise ValueError("Could not determine the dtype of this adapter")
+            return dtypes
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id, dtype=dtype)
+
+            expected_dtype = {dtype}
+            if any(param.dtype == torch.float32 for param in model.parameters()):
+                # Some architectures pin individual modules to float32 through transformers'
+                # `_keep_in_fp32_modules`, even though the rest of the model is loaded in a lower precision. T5 does
+                # this for `wo` to avoid overflow:
+                # https://github.com/huggingface/transformers/blob/3283d5f78ed6836d39430c8190a6e0500be78698/src/transformers/models/t5/modeling_t5.py#L537
+                # An adapter on such a module correctly inherits the float32 dtype of its own base layer, so float32
+                # has to be allowed on top of `dtype` here. Of all models used by the tests, only T5 loaded in
+                # float16 hits this branch; every other model and dtype keeps the strict single-dtype expectation.
+                expected_dtype.add(torch.float32)
+
+            config = config_cls(
+                base_model_name_or_path=model_id,
+                **config_kwargs,
+            )
+            model = get_peft_model(model, config, autocast_adapter_dtype=False)
+            # Subset, not equality: get_adapter_dtype never returns an empty set, so when expected_dtype holds a
+            # single dtype this is the same check as equality.
+            assert get_adapter_dtype(model, "default") <= expected_dtype
+
+            model.add_adapter("added", config, autocast_adapter_dtype=False)
+            assert get_adapter_dtype(model, "added") <= expected_dtype
+
+            with tempfile.TemporaryDirectory() as tmp_dirname:
+                model.save_pretrained(tmp_dirname)
+
+                # load_adapter goes through the same add_adapter code path
+                model.load_adapter(tmp_dirname, adapter_name="loaded", autocast_adapter_dtype=False)
+                assert get_adapter_dtype(model, "loaded") <= expected_dtype
+
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
         _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs)

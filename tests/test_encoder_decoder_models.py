@@ -414,6 +414,12 @@ class TestEncoderDecoderModels(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_add_adapter_no_autocast_adapter_dtype(self, model_id, config_cls, config_kwargs, dtype):
+        self._test_add_adapter_no_autocast_adapter_dtype(model_id, config_cls, config_kwargs, dtype=dtype)
+
+    @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_prepare_for_training_parametrized(self, model_id, config_cls, config_kwargs):
         self._test_prepare_for_training(model_id, config_cls, config_kwargs)
 
