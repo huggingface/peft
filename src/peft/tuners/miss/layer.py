@@ -68,7 +68,8 @@ class MissLayer(BaseTunerLayer):
         Args:
             adapter_name (`str`): Name for the adapter to add.
             r (`int`): Rank for the added adapter.
-            init_weights (`bool`): Whether to initialize weights.
+            config (`MissConfig`): The MISS configuration object holding the layer hyperparameters.
+            inference_mode (`bool`, defaults to `False`): Whether to start the adapter in inference mode.
         """
         mini_r = config.mini_r
         miss_dropout = config.miss_dropout

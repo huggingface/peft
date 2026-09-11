@@ -103,6 +103,5 @@ model.merge_and_unload()
 - GLoRA supports all standard PEFT adapter management features (add, delete, switch, merge, etc).
 
 ## See Also
-- [Adapter methods overview](../methods/overview#adapter-methods)
 - [LoRA reference](./lora.md)
 - [Paper: https://huggingface.co/papers/2306.07967](https://huggingface.co/papers/2306.07967)
