@@ -139,7 +139,7 @@ outcome = set_peft_model_state_dict(model, peft_state_dict)
 print(outcome.unexpected_keys)
 ```
 
-If injecting the adapter is slow or you need to load a large number of adapters, you may use an optimization that allows to create an "empty" adapter on meta device and only fills the weights with real weights when the [`set_peft_model_state_dict`] is called. To do this, pass `low_cpu_mem_usage=True` to both [`inject_adapter_in_model`] and [`set_peft_model_state_dict`].
+If injecting the adapter is slow or you need to load a large number of adapters, you may use an optimization that allows creating an "empty" adapter on meta device and only fills the weights with real weights when the [`set_peft_model_state_dict`] is called. To do this, pass `low_cpu_mem_usage=True` to both [`inject_adapter_in_model`] and [`set_peft_model_state_dict`].
 
 ```python
 model = DummyModel()
