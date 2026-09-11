@@ -340,7 +340,7 @@ A more detailed investigation of this issue can be found on this [pull request o
 
 #### Caveats
 
-- At the moment, this argument allows to target 2-dim or 3-dim `nn.Parameter`s. It is assumed that in the case of a 3-dim parameter, the 0th dimension is the expert dimension.
+- At the moment, this argument allows targeting 2-dim or 3-dim `nn.Parameter`s. It is assumed that in the case of a 3-dim parameter, the 0th dimension is the expert dimension.
 - Multiple LoRA adapters (added via `model.add_adapter` or `model.load_adapter`) that use `target_parameters` are supported, but all of them must target the same set of parameters.
 
 #### MoE expert parameters and vLLM
