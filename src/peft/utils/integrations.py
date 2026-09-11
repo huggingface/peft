@@ -141,7 +141,13 @@ def get_layer_device_map(model: Any) -> dict[int, Union[int, str]] | None:
     """
     Derive the device map for the layers of the model.
     """
-    main_device = next(d for d in model.hf_device_map.values() if d not in ["cpu", "disk"])
+    # CPU-only maps (e.g. `{"": "cpu"}`) are valid; don't require a non-CPU/disk device.
+    # See https://github.com/huggingface/peft/issues/3619
+    accelerator_devices = [d for d in model.hf_device_map.values() if d not in ["cpu", "disk"]]
+    if accelerator_devices:
+        main_device = accelerator_devices[0]
+    else:
+        main_device = next((d for d in model.hf_device_map.values() if d != "disk"), "cpu")
 
     execution_device_map = {
         name: main_device if device in ["cpu", "disk"] else device for name, device in model.hf_device_map.items()
