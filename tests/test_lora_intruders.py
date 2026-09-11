@@ -53,7 +53,7 @@ class TestLoraIntruders:
         with hub_online_once(model_id):
             base_model = AutoModelForCausalLM.from_pretrained(model_id)
 
-        cfg = MissConfig(target_modules=["q_proj"])
+        cfg = MissConfig(target_modules=["q_proj"], r=8)
         peft_model = get_peft_model(base_model, cfg)
 
         return peft_model

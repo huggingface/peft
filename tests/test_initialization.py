@@ -46,6 +46,7 @@ from peft import (
     LoftQConfig,
     LoKrConfig,
     LoraConfig,
+    MissConfig,
     PeanutConfig,
     PeftMixedModel,
     PeftModel,
@@ -2891,6 +2892,51 @@ class TestPsoftInitialization:
                 use_cayley_neumann=True,
                 cayley_neumann_eps=bad_eps,
             )
+
+    @pytest.mark.parametrize("r", [11, 32])
+    def test_psoft_rank_exceeds_bound_raises(self, r):
+        # lin0 is Linear(10, 30), so the rank cannot exceed 10
+        model = self.get_model()
+        config = PsoftConfig(target_modules=["lin0"], r=r)
+        msg = f"`r` ({r}) must be less than or equal to min(in_features, out_features) (10, 30)"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
+
+        # a rank equal to the bound is allowed
+        get_peft_model(self.get_model(), PsoftConfig(target_modules=["lin0"], r=10))
+
+
+class TestMissInitialization:
+    """Basic sanity tests for the MiSS tuner."""
+
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MLP(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 30)
+                self.lin1 = nn.Linear(30, 2)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP().to(self.torch_device)
+
+    @pytest.mark.parametrize("init_weights", [True, False, "bat", "mini"])
+    @pytest.mark.parametrize("r", [11, 64])
+    def test_miss_rank_exceeds_bound_raises(self, init_weights, r):
+        # lin0 is Linear(10, 30), so the rank cannot exceed 10
+        model = self.get_model()
+        config = MissConfig(target_modules=["lin0"], r=r, init_weights=init_weights)
+        msg = f"`r` ({r}) must be less than or equal to in_features (10)"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            get_peft_model(model, config)
+
+        # a rank equal to the bound is allowed
+        get_peft_model(self.get_model(), MissConfig(target_modules=["lin0"], r=10, init_weights=init_weights))
 
 
 class TestPeanutInitialization:
