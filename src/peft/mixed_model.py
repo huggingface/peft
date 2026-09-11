@@ -194,11 +194,17 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         """
         Disables the adapter module.
         """
+        from peft.tuners.tuners_utils import BaseTunerLayer
+
+        was_enabled = any(
+            not module.disable_adapters for module in self.modules() if isinstance(module, BaseTunerLayer)
+        )
         try:
             self.base_model.disable_adapter_layers()
             yield
         finally:
-            self.base_model.enable_adapter_layers()
+            if was_enabled:
+                self.base_model.enable_adapter_layers()
 
     def add_adapter(
         self,
