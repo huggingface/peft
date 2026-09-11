@@ -15,6 +15,8 @@
 
 ## Using HF jobs
 
+### Llama 3.2 3B
+
     hf jobs uv run  \
         --flavor a10g-large  \
         --with transformers  \
@@ -36,6 +38,31 @@
             --lr_schedule cosine  \
             --seq_len 384  \
             --hub_id hubnemo/mtp-train-test
+
+### Qwen3.6 35B A3B
+
+    hf jobs uv run \
+        --flavor a100-large \
+        --with transformers \
+        --with peft \
+        --with datasets \
+        --with trackio -s HF_TOKEN="$(hf auth token)" \
+            train.py \
+            --use_lc_loss \
+            --num_steps 10000 \
+            --dataset hubnemo/mtp-selfdata-qwen3.6-35b-a3b-finewiki \
+            --model_id Qwen/Qwen3.6-35B-A3B \
+            --output_dir mtp_selfdata_qwen_20k \
+            --eval_step 1000 \
+            --num_valid=200 \
+            --batch_size 2 \
+            --max_grad_norm 2
+            -k 6 \
+            --warmup_steps 1000 \
+            --lc_loss_weight 3 \
+            --lr_schedule cosine \
+            --seq_len 384 \
+            --hub_id hubnemo/Qwen3.6-35B-A3B-ALoRA-MTP`
 
 # Evaluating the MTP adapter
 
