@@ -68,6 +68,7 @@ from peft import (
     VeraConfig,
     WaveFTConfig,
     get_peft_model,
+    get_peft_model_state_dict,
     inject_adapter_in_model,
     set_peft_model_state_dict,
 )
@@ -6455,3 +6456,122 @@ class TestTinyLoraInitialization:
         model_control = get_peft_model(mlp_control, config_b2, adapter_name="b")
 
         assert len(model.tinylora_v["b"]) == len(model_control.tinylora_v["b"]) == 1
+
+
+class TestAdapterNameCollisionFiltering:
+    # Bug-fix test for https://github.com/huggingface/peft/issues/3584: the adapter-name filter used to
+    # match by raw string containment, so an adapter whose NAME equals a base-model module path segment
+    # (e.g. an adapter called "mlp" while a submodule is literally named "mlp") silently dropped the
+    # saved adapter's own tensors. The filter now matches by tuner-slot position.
+
+    @pytest.fixture
+    def mlp_net(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(32, 32)
+                self.mlp = nn.Linear(32, 32)
+
+        return Net()
+
+    def test_partial_collision_saves_all_default_tensors(self, mlp_net):
+        # The "default" adapter targets both `lin0` and `mlp`. A second adapter is named "mlp" -- the same
+        # string as the submodule. The containment filter used to drop every key containing ".mlp."; after
+        # the fix all default keys are kept.
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0", "mlp"], lora_dropout=0.0),
+        )
+        model.add_adapter("mlp", LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0))
+
+        tensors = get_peft_model_state_dict(model, adapter_name="default")
+        assert set(tensors.keys()) == {
+            "base_model.model.lin0.lora_A.weight",
+            "base_model.model.lin0.lora_B.weight",
+            "base_model.model.mlp.lora_A.weight",
+            "base_model.model.mlp.lora_B.weight",
+        }
+
+    def test_full_collision_keeps_default_tensors(self, mlp_net):
+        # The "default" adapter targets ONLY `mlp` while the second adapter is named "mlp": every default
+        # key collided, so the checkpoint was written empty. After the fix the keys survive.
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            LoraConfig(r=4, lora_alpha=8, target_modules=["mlp"], lora_dropout=0.0),
+        )
+        model.add_adapter("mlp", LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0))
+
+        tensors = get_peft_model_state_dict(model, adapter_name="default")
+        assert set(tensors.keys()) == {
+            "base_model.model.mlp.lora_A.weight",
+            "base_model.model.mlp.lora_B.weight",
+        }
+
+    def test_colliding_name_first_adapter_selects_right_keys(self, mlp_net):
+        # Reversed order: the FIRST adapter is named "mlp", the second is "default". Selecting "mlp" must
+        # return the mlp adapter's own weights (not default's), and vice versa. Non-zero init makes the
+        # two adapters' weights distinct so a mix-up would fail.
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0", "mlp"], lora_dropout=0.0, init_lora_weights=False),
+            adapter_name="mlp",
+        )
+        model.add_adapter(
+            "default",
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0", "mlp"], lora_dropout=0.0, init_lora_weights=False),
+        )
+
+        for name in ("mlp", "default"):
+            tensors = get_peft_model_state_dict(model, adapter_name=name)
+            assert set(tensors.keys()) == {
+                "base_model.model.lin0.lora_A.weight",
+                "base_model.model.lin0.lora_B.weight",
+                "base_model.model.mlp.lora_A.weight",
+                "base_model.model.mlp.lora_B.weight",
+            }
+            live = model.base_model.model.mlp.lora_A[name].weight
+            assert torch.equal(tensors["base_model.model.mlp.lora_A.weight"], live)
+
+    def test_save_load_round_trip_with_colliding_adapter_name(self, mlp_net, tmp_path):
+        # End-to-end: save the default adapter, reload it on a fresh model, and assert the saved weights
+        # survive the round trip. Non-zero init keeps the check meaningful (B is not trivially zero).
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0", "mlp"], lora_dropout=0.0, init_lora_weights=False),
+        )
+        model.add_adapter(
+            "mlp",
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0, init_lora_weights=False),
+        )
+
+        before = {n: p.detach().clone() for n, p in get_peft_model_state_dict(model, adapter_name="default").items()}
+        model.save_pretrained(str(tmp_path), selected_adapters=["default"])
+
+        reloaded = PeftModel.from_pretrained(type(mlp_net)(), str(tmp_path), adapter_name="default")
+        after = {n: p.detach().clone() for n, p in get_peft_model_state_dict(reloaded, adapter_name="default").items()}
+        assert set(after) == set(before)
+        for k in before:
+            assert torch.equal(before[k], after[k]), f"weight for {k} changed across save/load"
+
+    def test_real_second_adapter_is_still_filtered(self, mlp_net):
+        # The fix must not regress the original behaviour: a real second adapter that shares no name with
+        # any module path segment must still be filtered out when saving only the default adapter.
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0", "mlp"], lora_dropout=0.0),
+        )
+        model.add_adapter("foo", LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0))
+
+        tensors = get_peft_model_state_dict(model, adapter_name="default")
+        assert all("foo" not in k for k in tensors.keys())
+        assert set(tensors.keys()) == {
+            "base_model.model.lin0.lora_A.weight",
+            "base_model.model.lin0.lora_B.weight",
+            "base_model.model.mlp.lora_A.weight",
+            "base_model.model.mlp.lora_B.weight",
+        }
