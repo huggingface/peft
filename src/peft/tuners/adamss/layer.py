@@ -487,9 +487,10 @@ class Linear(nn.Module, AdamssLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weight
-
-                    # Also update bias if present
+                    # Also compute the bias if present. Both the weight and the bias are
+                    # validated before either is written back, so that a failed check
+                    # leaves the base layer completely untouched.
+                    orig_bias = None
                     if base_layer.bias is not None:
                         orig_bias = base_layer.bias.data.clone()
                         delta_bias = self.get_delta_bias(active_adapter)
@@ -498,6 +499,9 @@ class Linear(nn.Module, AdamssLayer):
                             raise ValueError(
                                 f"NaNs detected in the merged bias. The adapter {active_adapter} seems to be broken"
                             )
+
+                    base_layer.weight.data = orig_weight
+                    if orig_bias is not None:
                         base_layer.bias.data = orig_bias
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
