@@ -16,7 +16,8 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer, get_cosine_schedule_with_warmup
 
-from peft import LoraConfig, TaskType, get_peft_model
+from huggingface_hub import HfApi
+from peft import EvaConfig, LoraConfig, TaskType, get_peft_model, initialize_lora_eva_weights
 
 
 @dataclass
@@ -39,6 +40,7 @@ class TrainConfig:
     checkpoint_dir: str
     checkpoint_step: int
     max_gradient_norm: float
+    hub_id: str
 
 
 MTP_MASK_TOKENS = None
@@ -491,6 +493,18 @@ def save_artifacts(model, sampler, tokenizer, train_config, is_checkpoint: bool 
     tokenizer.save_pretrained(directory)
     print(f"Saved the PEFT model and sampler at {directory}")
 
+    if train_config.hub_id:
+        model.push_to_hub(train_config.hub_id)
+        api = HfApi()
+        api.upload_folder(
+            folder_path=directory,
+            path_in_repo="checkpoint" if is_checkpoint else "",
+            repo_id=train_config.hub_id,
+            repo_type="model",
+            allow_patterns=["sampler_model.safetensors", "tokenizer*"],
+        )
+        print(f"Pushed model to {train_config.hub_id} ({is_checkpoint=})")
+
 
 def train_loop(
     model, tokenizer, sampler, optimizer, iterator_train, iterator_eval, lr_scheduler, train_config: TrainConfig
@@ -913,6 +927,9 @@ def main():
     parser.add_argument("--checkpoint_step", type=int, default=1000)
     parser.add_argument("--num_valid", type=int, default=200)
     parser.add_argument("--max_grad_norm", type=float, default=2)
+    parser.add_argument("--eva_init", action="store_true", default=False)
+    parser.add_argument("--eva_samples", type=int, default=128)
+    parser.add_argument("--hub_id", type=str, default=None)
 
     default_lr = 1e-4
 
@@ -951,6 +968,8 @@ def main():
         use_rslora=True,
         trainable_token_indices=mask_token_ids,
         ensure_weight_tying=True,
+        init_lora_weights="eva" if args.eva_init else True,
+        eva_config=EvaConfig(rho=2.0) if args.eva_init else None,
     )
 
     model = get_peft_model(model, lora_config)
@@ -1074,7 +1093,37 @@ def main():
         checkpoint_dir=args.checkpoint_dir,
         checkpoint_step=args.checkpoint_step,
         max_gradient_norm=args.max_grad_norm,
+        hub_id=args.hub_id,
     )
+
+    # If we use EVA init for LoRA we need to initialize that with data.
+    # Let's do that here.
+    if args.eva_init:
+        def build_eva_calibration_loader(dataset_train, tokenizer):
+            batches = []
+            for i, sample in enumerate(dataset_train):
+                if i >= args.eva_samples:
+                    break
+                sample = [n.item() for n in sample["input_ids"]] if isinstance(sample, dict) else sample[0].tolist()
+                input_ids, labels, _ = augment_mtp(
+                    sample,
+                    bs=args.batch_size,
+                    num_mtp=args.k,
+                    use_lc_loss=args.use_lc_loss,
+                    use_tv_loss=args.use_tv_loss,
+                )
+                batch = tokenizer.pad({"input_ids": input_ids}, return_tensors="pt")
+                # include labels so that EVA can ignore the non-MTP tokens
+                batch["labels"] = torch.tensor([l + [-100] * (batch["input_ids"].shape[1] - len(l)) for l in labels])
+            return batches
+
+        eva_loader = build_eva_calibration_loader(dataset_train, tokenizer)
+        initialize_lora_eva_weights(
+            model,
+            dataloader=eva_loader,
+            forward_fn=lambda m, inputs: m(input_ids=inputs['input_ids'],
+                                           attention_mask=inputs['attention_mask']),
+        )
 
     trackio.config.update({
         'r': args.r,
@@ -1107,13 +1156,6 @@ def main():
 
     trackio.finish()
     print("Training complete!")
-
-    # Save model
-    output_dir = args.output_dir
-    model.save_pretrained(output_dir, save_embedding_layers=False)
-    torch.save(sampler.state_dict(), f"{output_dir}/sampler.pt")
-    tokenizer.save_pretrained(output_dir)
-    print(f"Saved to {output_dir}")
 
 
 if __name__ == "__main__":
