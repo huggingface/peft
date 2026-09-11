@@ -16,14 +16,16 @@
 # These tests are copied from the test_vera.py file
 
 import os
+import warnings
 
 import pytest
 import torch
 from accelerate.utils.imports import is_bf16_available
 from safetensors import safe_open
+from safetensors.torch import save_file
 from torch import nn
 
-from peft import PeftModel, RandLoraConfig, get_peft_model
+from peft import PeftModel, RandLoraConfig, get_peft_model, get_peft_model_state_dict, set_peft_model_state_dict
 
 
 class MLP(nn.Module):
@@ -183,6 +185,83 @@ class TestRandLora:
         assert randlora_B.data_ptr() == mlp_same_prng.base_model.model.lin2.randlora_B["default"].data_ptr()
         # sanity check: these tensors shouldn't share the same data
         assert randlora_A.data_ptr() != randlora_B.data_ptr()
+
+    def test_save_projection_true_deduplicates_shared_projections(self, mlp, tmp_path):
+        # Regression test for #3709: shared RandLoRA projections must be written once so that direct safetensors
+        # serialization does not reject the state dict because of aliased tensors.
+        config = RandLoraConfig(target_modules=["lin0", "lin1", "lin2"], init_weights=False, save_projection=True)
+        peft_model = get_peft_model(mlp, config)
+
+        state_dict = get_peft_model_state_dict(peft_model)
+        save_file(state_dict, tmp_path / "adapter.safetensors")
+
+        projection_keys = {key for key in state_dict if "randlora_A" in key or "randlora_B" in key}
+
+        assert projection_keys == {"base_model.randlora_A", "base_model.randlora_B"}
+
+        # Compare with the old checkpoint layout, where every layer-level alias was serialized independently.
+        old_state_dict = {
+            key.removesuffix(".default"): value.clone()
+            for key, value in peft_model.state_dict().items()
+            if "randlora_" in key and key.endswith(".default")
+        }
+        old_path = tmp_path / "old_adapter.safetensors"
+        save_file(old_state_dict, old_path)
+        assert (tmp_path / "adapter.safetensors").stat().st_size < old_path.stat().st_size
+
+    def test_save_projection_true_roundtrip(self, mlp, tmp_path):
+        torch.manual_seed(1)
+        config = RandLoraConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=True)
+        peft_model = get_peft_model(mlp, config)
+        peft_model.eval()
+
+        with torch.no_grad():
+            peft_model.base_model.randlora_A["default"] += 1.0
+            peft_model.base_model.randlora_B["default"] += 1.0
+
+        inputs = torch.randn(5, 10)
+        output = peft_model(inputs)
+        peft_model.save_pretrained(tmp_path)
+
+        with safe_open(tmp_path / "adapter_model.safetensors", framework="pt", device="cpu") as file:
+            projection_keys = {key for key in file.keys() if "randlora_A" in key or "randlora_B" in key}
+
+        assert projection_keys == {"base_model.randlora_A", "base_model.randlora_B"}
+
+        torch.manual_seed(0)
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+            loaded_model = PeftModel.from_pretrained(MLP(), tmp_path)
+        assert not any("Found missing adapter keys" in str(warning.message) for warning in caught_warnings)
+        loaded_model.eval()
+        torch.testing.assert_close(loaded_model(inputs), output)
+
+    def test_load_projection_true_with_duplicated_aliases(self, mlp):
+        torch.manual_seed(1)
+        config = RandLoraConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=True)
+        source_model = get_peft_model(mlp, config)
+        source_model.eval()
+
+        with torch.no_grad():
+            source_model.base_model.randlora_A["default"] += 1.0
+            source_model.base_model.randlora_B["default"] += 1.0
+
+        inputs = torch.randn(5, 10)
+        expected_output = source_model(inputs)
+        old_state_dict = {
+            key.removesuffix(".default"): value.clone()
+            for key, value in source_model.state_dict().items()
+            if "randlora_" in key and key.endswith(".default")
+        }
+
+        torch.manual_seed(0)
+        loaded_model = get_peft_model(MLP(), config)
+        load_result = set_peft_model_state_dict(loaded_model, old_state_dict)
+
+        assert not [key for key in load_result.missing_keys if "randlora_" in key]
+        assert not load_result.unexpected_keys
+        loaded_model.eval()
+        torch.testing.assert_close(loaded_model(inputs), expected_output)
 
     def test_randlora_lambda_dont_share_memory(self, mlp_same_prng):
         # sanity check: these tensors shouldn't share the same data
