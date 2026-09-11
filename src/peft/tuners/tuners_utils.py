@@ -1080,9 +1080,8 @@ class BaseTuner(nn.Module, ABC):
                     RuntimeWarning,
                 )
 
-        # Warn about rank_pattern / alpha_pattern entries that matched no targeted module. Without
-        # this check they would be silently ignored, which is easy to miss because the model trains fine
-        # with the default ranks/alphas. The matching semantics are identical to `get_pattern_key`.
+        # Warn about rank_pattern / alpha_pattern entries that matched no targeted module. The
+        # matching semantics are identical to `get_pattern_key`.
         for pattern_attr in ("rank_pattern", "alpha_pattern"):
             patterns = getattr(peft_config, pattern_attr, None)
             if not patterns:
