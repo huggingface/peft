@@ -11,6 +11,32 @@
             --device cuda --dataset HuggingFaceFW/finewiki --base_model Qwen/Qwen3.6-35B-A3B \
             --hub_id hubnemo/mtp-selfdata-qwen3.6-35b-a3b-finewiki --num_samples 10000
 
+# Training
+
+## Using HF jobs
+
+    hf jobs uv run  \
+        --flavor a10g-large  \
+        --with transformers  \
+        --with peft  \
+        --with datasets  \
+        --with trackio -s HF_TOKEN="$(hf auth token)" \
+            train.py  \
+            --use_lc_loss  \
+            --num_steps 30000  \
+            --dataset hubnemo/mtp-selfdata-llama3.2-3b-finewiki  \
+            --output_dir mtp_selfdata_llama_40k  \
+            --eval_step 1000  \
+            --num_valid=200  \
+            --batch_size 8  \
+            --max_grad_norm 2 \
+            -k 6  \
+            --warmup_steps 1000  \
+            --lc_loss_weight 3  \
+            --lr_schedule cosine  \
+            --seq_len 384  \
+            --hub_id hubnemo/mtp-train-test
+
 # Evaluating the MTP adapter
 
 For evaluation we use `./eval_peft_mtp.py`, here are the corner stones of that evaluation:
