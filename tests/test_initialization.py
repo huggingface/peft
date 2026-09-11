@@ -1790,6 +1790,75 @@ class TestLoraInitialization:
         config2 = LoraConfig(target_modules=["linear"], bias="none")
         model.add_adapter("other", config2)  # does not raise
 
+    def test_unmatched_alpha_pattern_key_warns(self):
+        # Only LoRA is tested here, but the check lives in BaseTuner and therefore applies to every
+        # pattern-consuming tuner. A key that matches no targeted module used to be silently ignored.
+        with pytest.warns(RuntimeWarning, match="alpha_pattern.*did not match any targeted module"):
+            get_peft_model(
+                self.get_model(),
+                LoraConfig(target_modules=["linear"], alpha_pattern={"typo_key": 100}),
+            )
+
+    def test_unmatched_rank_pattern_key_warns(self):
+        with pytest.warns(RuntimeWarning, match="rank_pattern.*did not match any targeted module"):
+            get_peft_model(
+                self.get_model(),
+                LoraConfig(target_modules=["linear"], rank_pattern={"some.other.path": 2}),
+            )
+
+    def test_matched_pattern_keys_do_not_warn(self):
+        # Keys that genuinely suffix-match a targeted module must not trigger the warning.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            get_peft_model(
+                self.get_model(),
+                LoraConfig(
+                    target_modules=["linear"],
+                    alpha_pattern={"linear": 100},
+                    rank_pattern={"linear": 2},
+                ),
+            )
+
+        assert not [w for w in caught if "did not match any targeted module" in str(w.message)], (
+            "matching pattern key should not warn"
+        )
+
+    def test_partially_matched_pattern_warns_for_unmatched_keys_only(self):
+        # When some keys match and others don't, the warning names exactly the unmatched ones.
+        with pytest.warns(RuntimeWarning, match=r"\['typo_key'\]") as record:
+            get_peft_model(
+                self.get_model(),
+                LoraConfig(
+                    target_modules=["linear"],
+                    alpha_pattern={"linear": 100, "typo_key": 100},
+                    rank_pattern={"linear": 2, "other.typo": 2},
+                ),
+            )
+        messages = [str(w.message) for w in record]
+        assert any("alpha_pattern" in m and "typo_key" in m for m in messages)
+        assert any("rank_pattern" in m and "other.typo" in m for m in messages)
+        assert not any("linear" in m.split("ignored:")[1] for m in messages if "ignored:" in m)
+
+    def test_misconfigured_second_adapter_warns_on_add_adapter(self):
+        # A valid first adapter stays silent; adding a misconfigured second adapter warns.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            model = get_peft_model(
+                self.get_model(),
+                LoraConfig(
+                    target_modules=["linear"],
+                    alpha_pattern={"linear": 100},
+                    rank_pattern={"linear": 2},
+                ),
+            )
+        assert not [w for w in caught if "did not match any targeted module" in str(w.message)]
+
+        with pytest.warns(RuntimeWarning, match="alpha_pattern.*did not match any targeted module"):
+            model.add_adapter(
+                "other",
+                LoraConfig(target_modules=["linear"], alpha_pattern={"typo_key": 100}),
+            )
+
 
 class TestShadowInitialization:
     @pytest.mark.parametrize("other_task_type", ["SEQ_CLS", "CAUSAL_LM"])
