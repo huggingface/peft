@@ -2651,6 +2651,22 @@ class TestPeftCustomModel(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_safe_merge(model_id, config_cls, config_kwargs)
 
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_safe_merge_broken_adapter_leaves_base_layer_unchanged(
+        self, test_name, model_id, config_cls, config_kwargs
+    ):
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        self._test_safe_merge_broken_adapter_leaves_base_layer_unchanged(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_safe_merge_non_finite_bias_leaves_base_layer_unchanged(
+        self, test_name, model_id, config_cls, config_kwargs
+    ):
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        # a non-identity adapter, so that a bias merged without validation is visible as a changed bias
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_safe_merge_non_finite_bias_leaves_base_layer_unchanged(model_id, config_cls, config_kwargs)
+
     @pytest.mark.parametrize("target_module,token_indices", [("emb", [0, 1, 3]), ("lin0", [0, 1])])
     def test_trainable_tokens_random_init_unmerge_restores_base_weights(self, target_module, token_indices):
         # A merge/unmerge cycle must preserve the base weights even when the adapter starts with random weights; see #3650.

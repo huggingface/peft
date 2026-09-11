@@ -4895,6 +4895,31 @@ class TestPeftTorchao:
             model.merge_adapter()
 
     @pytest.mark.single_gpu_tests
+    def test_torchao_safe_merge_broken_adapter_leaves_base_layer_unchanged(self):
+        from transformers import TorchAoConfig
+
+        torch.manual_seed(0)
+        device = 0
+
+        quantization_config = TorchAoConfig(quant_type=self.get_quant_type("int8_weight_only"))
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
+        ).eval()
+        config = LoraConfig(target_modules=["q_proj", "v_proj"], init_lora_weights=False)
+        model = get_peft_model(model, config)
+
+        layer = model.base_model.model.model.decoder.layers[0].self_attn.q_proj
+        with torch.no_grad():
+            layer.lora_B["default"].weight.fill_(float("nan"))
+        weight_before = layer.get_base_layer().weight.dequantize()
+
+        with pytest.raises(ValueError, match="NaNs detected in the merged weights"):
+            layer.merge(safe_merge=True)
+
+        assert torch.equal(layer.get_base_layer().weight.dequantize(), weight_before)
+        assert not layer.merged
+
+    @pytest.mark.single_gpu_tests
     def test_torchao_lora_warns_when_base_not_quantized_via_transformers(self):
         # Manually quantizing the base model with torchao.quantize_ leaves PEFT without
         # `get_apply_tensor_subclass`, so the LoRA torchao linear emits a warning at init
