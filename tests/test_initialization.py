@@ -73,7 +73,8 @@ from peft import (
 )
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.tuners.lokr.layer import LoKrLayer
-from peft.tuners.lora.config import CordaConfig
+from peft.tuners.lora.astra import preprocess_astra
+from peft.tuners.lora.config import AstraConfig, CordaConfig
 from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
@@ -4166,6 +4167,225 @@ class TestCordaInitialization:
         with torch.no_grad():
             output_peft = peft_model(input_ids).logits
         assert torch.allclose(output_base, output_peft, atol=1e-5)
+
+
+class TestAstraInitialization:
+    """Test class to check the initialization of Astra adapters."""
+
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # choose a large weight so that averages are close to expected values
+                self.linear = nn.Linear(1000, 1000)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        return MyModule().eval().to(self.torch_device)
+
+    @pytest.fixture
+    def data(self):
+        torch.manual_seed(233)
+        return torch.rand(1000, 1000).to(self.torch_device)
+
+    def test_lora_astra_no_redundant_fields(self, data):
+        original_model = self.get_model()
+        model = deepcopy(original_model)
+
+        astra_config = AstraConfig()
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            astra_config=astra_config,
+        )
+        preprocess_astra(
+            model,
+            config,
+            run_model=lambda: model(data),
+            hooked_model=model,
+        )
+        peft_model = get_peft_model(model, config)
+
+        # check if the redundant fields are removed
+        assert not hasattr(peft_model.base_model.linear, "sample_count")
+        assert not hasattr(peft_model.base_model.linear, "covariance_matrix")
+        assert not hasattr(peft_model.base_model.linear, "rank")
+        assert not hasattr(peft_model.base_model.linear, "eigens")
+
+    def test_lora_astra_sample_count(self, data):
+        original_model = self.get_model()
+        model = deepcopy(original_model)
+
+        astra_config = AstraConfig(
+            prune_temporary_fields=False,
+        )
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            astra_config=astra_config,
+        )
+        preprocess_astra(
+            model,
+            config,
+            run_model=lambda: [model(data), model(data)],  # running model twice to test `sample_count`
+            hooked_model=model,
+        )
+
+        # covariance of linear should be normalized_output.T @ normalized_output, where output is the module output
+        layer = model.linear
+        assert hasattr(layer, "covariance_matrix")
+        output = original_model(data)
+        normalized_output = output / torch.max(output).abs()
+        assert torch.allclose(layer.covariance_matrix, normalized_output.t() @ normalized_output, atol=1e-05)
+
+        # sample count of linear should be 2
+        assert hasattr(layer, "sample_count")
+        assert layer.sample_count == 2
+
+    def test_lora_astra_hook_unregister(self, data):
+        original_model = self.get_model()
+        model = deepcopy(original_model)
+        hook_call_count = 0
+
+        def hook(*args):
+            nonlocal hook_call_count
+            hook_call_count += 1
+
+        model.linear.register_forward_hook(hook)
+
+        astra_config = AstraConfig(
+            prune_temporary_fields=False,
+        )
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            astra_config=astra_config,
+        )
+        preprocess_astra(
+            model,
+            config,
+            run_model=lambda: model(data),
+            hooked_model=model,
+        )
+
+        # after preprocessing, external and internal hook should be run once
+        assert hook_call_count == 1
+        assert model.linear.sample_count == 1
+
+        # run preprocessed model once
+        model(data)
+
+        # the external hook should be kept, but the internal hook should be gone
+        assert hook_call_count == 2
+        assert model.linear.sample_count == 1
+
+    def test_lora_astra_linear_init_default(self, data, tmp_path):
+        original_model = self.get_model()
+        model = deepcopy(original_model)
+        output_base = model(data)
+
+        astra_config = AstraConfig(
+            cache_file=tmp_path / "astra_cache.pt",
+            covariance_file=tmp_path / "covariance_cache.pt",
+        )
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            astra_config=astra_config,
+        )
+        preprocess_astra(
+            model,
+            config,
+            run_model=lambda: model(data),
+            hooked_model=model,
+        )
+        peft_model = get_peft_model(model, config)
+
+        # check if adapter performs an identity transformation; the tolerance accounts for the float32 rounding
+        # error of subtracting and re-adding the projected weight
+        assert torch.allclose(output_base, peft_model(data), atol=1e-05)
+
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_astra = peft_model(data)
+
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_base, output_astra, atol=tol, rtol=tol)
+
+        # if load eigendecomposition result from cache, the output should be the same
+        model = deepcopy(original_model)
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            astra_config=AstraConfig(cache_file=tmp_path / "astra_cache.pt"),
+        )
+        preprocess_astra(model, config)
+        peft_model = get_peft_model(model, config)
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        assert torch.allclose(output_astra, peft_model(data), atol=1e-06)
+
+    def test_lora_astra_conversion_same_output_after_loading(self, data, tmp_path):
+        model = self.get_model()
+        output_base = model(data)
+
+        astra_config = AstraConfig()
+        config = LoraConfig(init_lora_weights="astra", target_modules=["linear"], r=8, astra_config=astra_config)
+        preprocess_astra(model, config, run_model=lambda: model(data), hooked_model=model)
+        peft_model = get_peft_model(deepcopy(model), config)
+        # save the initial model
+        peft_model.peft_config["default"].init_lora_weights = True
+        peft_model.save_pretrained(tmp_path / "init-model")
+        peft_model.peft_config["default"].init_lora_weights = "astra"
+
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_astra = peft_model(data)
+
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_base, output_astra, atol=tol, rtol=tol)
+
+        # save the model normally
+        peft_model.save_pretrained(tmp_path / "astra-model")
+        model_loaded = PeftModel.from_pretrained(deepcopy(model), tmp_path / "astra-model")
+        output_loaded = model_loaded(data)
+
+        assert torch.allclose(output_astra, output_loaded, atol=tol, rtol=tol)
+        # sanity check: ranks should still be 8 as initially
+        assert model_loaded.peft_config["default"].r == 8
+        assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
+        # sanity check: the base model weights were indeed changed
+        assert not torch.allclose(
+            model.linear.weight, model_loaded.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+        # save the model with conversion
+        peft_config_keys_before = list(peft_model.peft_config.keys())
+        peft_config_dict_before = peft_model.peft_config["default"].to_dict()
+        peft_model.save_pretrained(
+            tmp_path / "astra-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
+        peft_config_keys_after = list(peft_model.peft_config.keys())
+        peft_config_dict_after = peft_model.peft_config["default"].to_dict()
+        assert peft_config_keys_before == peft_config_keys_after
+        assert peft_config_dict_before == peft_config_dict_after
+
+        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "astra-model-converted")
+        output_converted = model_converted(data)
+
+        # tolerance accounts for the float32 rounding error of subtracting and re-adding the projected weight
+        assert torch.allclose(output_astra, output_converted, atol=1e-05, rtol=tol)
+        # rank should be double of what it was initially
+        assert model_converted.peft_config["default"].r == 16
+        assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 16
+        # base model weights should be the same as the initial model
+        assert torch.allclose(
+            model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
 
 
 class TestEvaInitialization:

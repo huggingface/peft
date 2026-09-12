@@ -1406,6 +1406,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     "https://github.com/huggingface/peft/tree/main/examples/corda_finetuning#convert-corda-to-lora"
                 )
                 warnings.warn(msg)
+            elif any(getattr(config, "init_lora_weights", None) == "astra" for config in all_configs):
+                msg = (
+                    "Astra changes the base weights of the model and should thus not be used with other adapters. "
+                    "Consider converting the Astra adapter into a normal LoRA adapter: "
+                    "https://github.com/huggingface/peft/tree/main/examples/astra_finetuning#convert-astra-to-lora"
+                )
+                warnings.warn(msg)
             elif any(getattr(config, "init_lora_weights", None) == "olora" for config in all_configs):
                 msg = (
                     "OLoRA changes the base weights of the model and should thus not be used with other adapters. "
