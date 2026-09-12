@@ -54,6 +54,7 @@ class PeftType(str, enum.Enum):
     - ADAMSS
     - SHADOW
     - DEFT
+    - MOE_TO_DENSE
     """
 
     PROMPT_TUNING = "PROMPT_TUNING"
@@ -101,6 +102,7 @@ class PeftType(str, enum.Enum):
     SHADOW = "SHADOW"
     SUPERTUNING = "SUPERTUNING"
     DEFT = "DEFT"
+    MOE_TO_DENSE = "MOE_TO_DENSE"
 
 
 class TaskType(str, enum.Enum):

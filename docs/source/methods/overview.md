@@ -51,7 +51,7 @@ If you're interested in applying these methods to other tasks and use cases, tak
 
 ## Layer Tuning
 
-Layer Tuning categorizes methods that target one type of layer or one aspect of a layer specifically, for example [LayerNorm Tuning](../package_reference/layernorm_tuning) targets only [`LayerNorm`](https://docs.pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html) layers and [TrainableTokens](../package_reference/trainable_tokens) only targets specific tokens in the embedding matrix. This contrasts prompt-based methods which work with the model input or adapter methods which extend the existing weights and are generally more independent of the layer type, targeting linear or convolutional layers.
+Layer Tuning categorizes methods that target one type of layer or one aspect of a layer specifically, for example [LayerNorm Tuning](../package_reference/layernorm_tuning) targets only [`LayerNorm`](https://docs.pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html) layers and [TrainableTokens](../package_reference/trainable_tokens) only targets specific tokens in the embedding matrix, while [MoE-to-dense](../package_reference/moe_to_dense) targets the Mixture-of-Experts layers of a model to convert it into a dense model. This contrasts prompt-based methods which work with the model input or adapter methods which extend the existing weights and are generally more independent of the layer type, targeting linear or convolutional layers.
 
 ## Adapter methods
 
