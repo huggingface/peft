@@ -23,7 +23,7 @@ import torch
 from accelerate.utils.memory import clear_device_cache
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig, TorchAoConfig
 
-from peft import BOFTConfig, MissConfig, OFTConfig, ShiraConfig, VeraConfig, get_peft_model
+from peft import BOFTConfig, LoraConfig, MissConfig, OFTConfig, ShiraConfig, VeraConfig, get_peft_model
 from peft.import_utils import (
     is_bnb_4bit_available,
     is_bnb_available,
@@ -337,6 +337,42 @@ class TestQuantization:
             out_non_quant = model(dummy_input).logits
 
         check_outputs_similar(out_non_quant, out_quant)
+
+    @pytest.mark.skipif(not is_torchao_available(), reason="torchao is not installed")
+    def test_torchao_lora_merge_several_adapters_in_one_call(self, dummy_input):
+        """merge_adapter takes a list of adapter names, so two in one call must work.
+
+        TorchaoLoraLinear.merge read the weight once before the loop and deleted
+        the local at the end of every round, so the second adapter raised
+        UnboundLocalError (#3728). Not part of the parametrized matrix above:
+        the tuner is LoRA and the layer is torchao-specific.
+        """
+        from torchao.utils import TorchAOBaseTensor
+
+        model = TorchAoInt8WeightOnlyLoader().load_model()
+        torch.manual_seed(SEED)
+        model = get_peft_model(model, LoraConfig(init_lora_weights=False, target_modules=["q_proj", "v_proj"])).eval()
+        model.add_adapter("other", LoraConfig(init_lora_weights=False, target_modules=["q_proj", "v_proj"]))
+
+        with torch.inference_mode():
+            out_before = model(dummy_input).logits
+
+        model.base_model.merge_adapter(adapter_names=["default", "other"])
+
+        lora_layers = [m for m in model.modules() if hasattr(m, "lora_A") and hasattr(m, "merged_adapters")]
+        assert lora_layers
+        for layer in lora_layers:
+            assert layer.merged_adapters == ["default", "other"]
+            # Each round has to leave the base layer re-quantized for the next one.
+            assert isinstance(layer.get_base_layer().weight, TorchAOBaseTensor)
+
+        # Both deltas are in the weight now, so the output moved; unmerging both
+        # brings it back, which is what proves the second round merged for real.
+        model.unmerge_adapter()
+        with torch.inference_mode():
+            out_unmerged = model(dummy_input).logits
+
+        check_outputs_similar(out_before, out_unmerged)
 
     @pytest.mark.parametrize("quant", QUANTIZATION_BACKENDS, ids=_quant_id)
     @pytest.mark.parametrize("config_cls,config_kwargs", TEST_CASES, ids=_peft_id)
