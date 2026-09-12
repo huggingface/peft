@@ -6428,12 +6428,16 @@ class TestTinyLoraInitialization:
         assert sum(p.numel() for p in b_groups.values()) == sum(p.numel() for p in control_groups.values())
 
         # lin1 and lin2 must share the exact same trainable vector (full tying), matching the control model.
-        lin1_v = model.base_model.model.lin1._tinylora_v_ref["b"]
-        lin2_v = model.base_model.model.lin2._tinylora_v_ref["b"]
+        lin1 = model.base_model.model.lin1
+        lin2 = model.base_model.model.lin2
+        lin1_v = lin1.tinylora_v["b"][lin1._tinylora_v_key["b"]]
+        lin2_v = lin2.tinylora_v["b"][lin2._tinylora_v_key["b"]]
         assert lin1_v.data_ptr() == lin2_v.data_ptr()
 
-        control_lin1_v = model_control.base_model.model.lin1._tinylora_v_ref["b"]
-        control_lin2_v = model_control.base_model.model.lin2._tinylora_v_ref["b"]
+        control_lin1 = model_control.base_model.model.lin1
+        control_lin2 = model_control.base_model.model.lin2
+        control_lin1_v = control_lin1.tinylora_v["b"][control_lin1._tinylora_v_key["b"]]
+        control_lin2_v = control_lin2.tinylora_v["b"][control_lin2._tinylora_v_key["b"]]
         assert control_lin1_v.data_ptr() == control_lin2_v.data_ptr()
 
     def test_second_adapter_overlapping_target_modules_after_delete_and_readd(self):
