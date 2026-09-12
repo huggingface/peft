@@ -1,7 +1,7 @@
 # DeLoRA: Decoupled Low-Rank Adaptation 
 
 ## Introduction
-[DeLoRA](https://huggingface.co/papers/2503.18225) tackles finetuning in a Frobenius-norm bounded setup: this allows to prevent divergence from the pretrained model, effectively decoupling the learning of angles and magnitudes.
+[DeLoRA](https://huggingface.co/papers/2503.18225) tackles finetuning in a Frobenius-norm bounded setup: this allows preventing divergence from the pretrained model, effectively decoupling the learning of angles and magnitudes.
 
 This is done by (i) normalization of the BA low-rank matrices, which bound the updates' Frobenius norm, (ii) learnable scaling lambda, which controls the update's boundary/magnitude, (iii) layer-wise scaling of ||W||, to adapt each update's norm to the original weights' norm.
 
