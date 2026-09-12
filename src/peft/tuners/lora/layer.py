@@ -291,6 +291,9 @@ class LoraLayer(BaseTunerLayer):
         elif isinstance(init_lora_weights, str) and init_lora_weights.startswith("corda"):
             with gather_params_ctx(self.get_base_layer().weight):
                 self.corda_init(adapter_name, init_lora_weights)
+        elif isinstance(init_lora_weights, str) and init_lora_weights.startswith("astra"):
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.astra_init(adapter_name, init_lora_weights)
         elif isinstance(init_lora_weights, str) and init_lora_weights.lower() == "olora":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.olora_init(adapter_name)
@@ -566,6 +569,67 @@ class LoraLayer(BaseTunerLayer):
         # Init lora_A and lora_B weights
         lora_A = V.t().mul(S.sqrt().view(-1, 1)).contiguous()
         lora_B = U.mul(S.sqrt()).contiguous()
+        self.lora_A[adapter_name].weight.data = lora_A
+        self.lora_B[adapter_name].weight.data = lora_B
+
+        # For Conv1D, lora_B @ lora_A gives (out_dim, in_dim) but weight is (in_dim, out_dim)
+        # So we need to transpose before subtraction
+        delta = self.scaling[adapter_name] * lora_B @ lora_A
+        delta = transpose(delta, fan_in_fan_out=self.fan_in_fan_out)
+        weight = weight.data - delta
+        weight = weight.to(dtype)
+        self.get_base_layer().weight.data = weight
+
+        # Remove redundant fields
+        del linear.eigens
+
+    def astra_init(self, adapter_name, init_lora_weights):
+        linear = self.get_base_layer()
+        weight = linear.weight
+        dtype = weight.dtype
+        if dtype not in [torch.float32, torch.float16, torch.bfloat16]:
+            raise TypeError(
+                "Please initialize Astra under float32, float16, or bfloat16. "
+                "Subsequently, re-quantize the residual model to help minimize quantization errors."
+            )
+        weight = weight.to(torch.float32)
+        # For Conv1D, weight is stored as (in_features, out_features), transposed compared to Linear
+        if isinstance(linear, Conv1D):
+            out_dim = weight.data.size(1)
+            in_dim = weight.data.size(0)
+        else:
+            out_dim = weight.data.size(0)
+            in_dim = weight.data.size(1)
+
+        if not hasattr(linear, "eigens"):
+            raise ValueError(
+                "`eigens` attribute not found for layer, please run `preprocess_astra` first. "
+                "More information can be found at examples/astra_finetuning/README.md."
+            )
+        eigens = linear.eigens
+        V = eigens.V
+        r = self.r[adapter_name]
+
+        # nan or inf check
+        if torch.isnan(V).any() or torch.isinf(V).any():
+            raise ValueError(
+                "Invalid value found in matrix V. Please file an issue at https://github.com/huggingface/peft/issues."
+            )
+
+        # Sanity check
+        if V.size(0) != out_dim or V.size(1) != r:
+            raise ValueError(
+                f"Matrix V size mismatch: {V.size()} vs. ({out_dim}, {r}). Please make sure the `lora_config` and "
+                "`model` argument of `preprocess_astra` is consistent with `get_peft_model`. If you're using cache "
+                "in `preprocess_astra`, please make sure the cache is built with the same model and LoRA rank."
+            )
+
+        # Init lora_A and lora_B weights. V contains the eigenvectors of the output activations' covariance matrix,
+        # so the base weight (out_dim, in_dim) is projected onto the space spanned by them. For Conv1D, the stored
+        # weight is (in_dim, out_dim), so it is transposed first to match the Linear layout.
+        linear_weight = weight.data.t() if isinstance(linear, Conv1D) else weight.data
+        lora_A = (V.t() @ linear_weight).contiguous()
+        lora_B = V.contiguous()
         self.lora_A[adapter_name].weight.data = lora_A
         self.lora_B[adapter_name].weight.data = lora_B
 
@@ -2445,6 +2509,9 @@ class ParamWrapper(nn.Module, LoraLayer):
         elif isinstance(init_lora_weights, str) and init_lora_weights.startswith("corda"):
             with gather_params_ctx(self.get_base_layer().weight):
                 self.corda_init(adapter_name, init_lora_weights)
+        elif isinstance(init_lora_weights, str) and init_lora_weights.startswith("astra"):
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.astra_init(adapter_name, init_lora_weights)
         elif isinstance(init_lora_weights, str) and init_lora_weights.lower() == "olora":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.olora_init(adapter_name)

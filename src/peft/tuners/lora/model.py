@@ -1049,11 +1049,11 @@ class LoraModel(BaseTuner):
 
         if not any(
             str(peft_config.init_lora_weights).lower().startswith(prefix)
-            for prefix in ["pissa", "corda", "olora", "lora_ga", "true"]
+            for prefix in ["pissa", "corda", "astra", "olora", "lora_ga", "true"]
         ):
             warnings.warn(
-                "`path_initial_model_for_weight_conversion` only works for converting a PiSSA/CorDA/OLoRA/LoRA-GA adapter to "
-                "a LoRA adapter"
+                "`path_initial_model_for_weight_conversion` only works for converting a "
+                "PiSSA/CorDA/Astra/OLoRA/LoRA-GA adapter to a LoRA adapter"
             )
 
         initial_adapter_name = os.path.basename(path_initial_model_for_weight_conversion)
@@ -1065,9 +1065,10 @@ class LoraModel(BaseTuner):
             )
             is_pissa = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower().startswith("pissa")
             is_corda = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "corda"
+            is_astra = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "astra"
             is_olora = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "olora"
             is_lora_ga = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "lora_ga"
-            if is_pissa or is_corda or is_olora or is_lora_ga:
+            if is_pissa or is_corda or is_astra or is_olora or is_lora_ga:
                 raise ValueError(
                     "The `init_lora_weights` parameter of the initial adapter should be set to `True`. "
                     "Otherwise, `self.load_adapter` will subtract the decomposed values again based on the "
