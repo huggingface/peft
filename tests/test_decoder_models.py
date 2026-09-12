@@ -23,6 +23,7 @@ from safetensors.torch import load_file as safe_load_file
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
+    Cache,
     DataCollatorForLanguageModeling,
     DynamicCache,
     Trainer,
@@ -813,6 +814,52 @@ class TestDecoderModels(PeftCommonTester):
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_prompt_learning_forward_with_labels(self, model_id, config_cls, config_kwargs):
+        # Check that the loss returned when passing labels corresponds to the labels being extended correctly to account
+        # for the virtual tokens: methods that extend inputs_embeds prefix the labels with -100, prefix tuning extends
+        # the KV cache and passes the labels unchanged.
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        if not config.is_prompt_learning:
+            pytest.skip("This test is only for prompt learning methods.")
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            model = get_peft_model(model, config)
+            model.eval()
+
+            inputs = self.prepare_inputs_for_testing()
+            labels = inputs["input_ids"].clone()
+            with torch.no_grad():
+                output = model(**inputs, labels=labels)
+            assert output.loss is not None
+            assert torch.isfinite(output.loss)
+
+            num_virtual_tokens = model.active_peft_config.num_virtual_tokens
+            seq_len = inputs["input_ids"].shape[1]
+            if config_cls == PrefixTuningConfig:
+                # prefix tuning extends the KV cache, not the input sequence
+                assert output.logits.shape[1] == seq_len
+                extended_labels = labels
+            else:
+                assert output.logits.shape[1] == num_virtual_tokens + seq_len
+                prefix_labels = torch.full((labels.shape[0], num_virtual_tokens), -100).to(labels.device)
+                extended_labels = torch.cat([prefix_labels, labels], dim=1)
+
+            if config_cls == CPTConfig:
+                # CPT uses its own loss function, which is checked in test_cpt.py
+                return
+
+            # standard causal LM loss: shifted cross entropy, ignoring the -100 positions
+            shift_logits = output.logits[:, :-1].reshape(-1, output.logits.shape[-1])
+            shift_labels = extended_labels[:, 1:].reshape(-1)
+            expected_loss = torch.nn.functional.cross_entropy(shift_logits.float(), shift_labels, ignore_index=-100)
+            assert torch.allclose(output.loss, expected_loss, atol=1e-4, rtol=1e-4)
+
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_disable_adapter(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
         _skip_alora_no_activation(config_cls, config_kwargs)
@@ -924,6 +971,8 @@ class TestDecoderModels(PeftCommonTester):
             logits = torch.zeros((batch, seq_len, base.config.vocab_size), device=input_ids.device)
             return CausalLMOutputWithPast(logits=logits)
 
+        # patching the instance attribute base_model.forward works because for prompt learning, base_model is the
+        # unmodified transformers model that receives the transformed kwargs
         monkeypatch.setattr(model.base_model, "forward", fake_forward)
 
         input_ids = torch.randint(0, base.config.vocab_size, (1, 3))
@@ -932,6 +981,204 @@ class TestDecoderModels(PeftCommonTester):
 
         assert captured["position_ids"] is not None
         assert torch.equal(captured["position_ids"], position_ids + peft_config.num_virtual_tokens)
+
+    def test_prompt_learning_position_ids_warns_and_drops(self, monkeypatch):
+        # Counterpart to test_prefix_tuning_offsets_position_ids_in_forward for prompt learning methods that extend
+        # inputs_embeds instead of the KV cache: passing position_ids is not supported, PEFT warns and removes them.
+        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
+        with hub_online_once(model_id):
+            base = AutoModelForCausalLM.from_pretrained(model_id)
+        peft_config = PromptTuningConfig(num_virtual_tokens=4, task_type="CAUSAL_LM")
+        model = get_peft_model(base, peft_config)
+
+        captured = {}
+
+        def fake_forward(*args, **kwargs):
+            captured["position_ids"] = kwargs.get("position_ids")
+            inputs_embeds = kwargs["inputs_embeds"]
+            batch, seq_len = inputs_embeds.shape[:2]
+            logits = torch.zeros((batch, seq_len, base.config.vocab_size), device=inputs_embeds.device)
+            return CausalLMOutputWithPast(logits=logits)
+
+        monkeypatch.setattr(model.base_model, "forward", fake_forward)
+
+        input_ids = torch.randint(0, base.config.vocab_size, (1, 3))
+        position_ids = torch.arange(input_ids.shape[1]).unsqueeze(0)
+        with pytest.warns(UserWarning, match="Position ids are not supported"):
+            _ = model(input_ids=input_ids, position_ids=position_ids)
+        assert captured["position_ids"] is None
+
+    def test_prompt_learning_token_type_ids_warns_and_drops(self, monkeypatch):
+        # For causal LM, token_type_ids are not supported for prompt learning methods, PEFT warns and removes them.
+        model_id = "peft-internal-testing/tiny-random-GPT2LMHeadModel"
+        with hub_online_once(model_id):
+            base = AutoModelForCausalLM.from_pretrained(model_id)
+        peft_config = PromptTuningConfig(num_virtual_tokens=4, task_type="CAUSAL_LM")
+        model = get_peft_model(base, peft_config)
+
+        captured = {}
+
+        def fake_forward(*args, **kwargs):
+            captured["token_type_ids"] = kwargs.get("token_type_ids")
+            inputs_embeds = kwargs["inputs_embeds"]
+            batch, seq_len = inputs_embeds.shape[:2]
+            logits = torch.zeros((batch, seq_len, base.config.vocab_size), device=inputs_embeds.device)
+            return CausalLMOutputWithPast(logits=logits)
+
+        monkeypatch.setattr(model.base_model, "forward", fake_forward)
+
+        input_ids = torch.randint(0, base.config.vocab_size, (1, 3))
+        with pytest.warns(UserWarning, match="Token type ids are not supported"):
+            _ = model(input_ids=input_ids, token_type_ids=torch.zeros_like(input_ids))
+        assert captured["token_type_ids"] is None
+
+    def test_prompt_tuning_prepare_inputs_for_generation_prefill(self):
+        # Directly check the model_kwargs that prepare_inputs_for_generation produces during the prefill step for prompt
+        # learning methods that extend inputs_embeds. The base model's prepare_inputs_for_generation is replaced so that
+        # the test only pins PEFT's own post-processing of the model_kwargs.
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+        with hub_online_once(model_id):
+            base = AutoModelForCausalLM.from_pretrained(model_id)
+        num_virtual_tokens = 4
+        model = get_peft_model(base, PromptTuningConfig(num_virtual_tokens=num_virtual_tokens, task_type="CAUSAL_LM"))
+
+        input_ids = torch.tensor([[1, 2, 3], [4, 5, 6]])
+        attention_mask = torch.ones_like(input_ids)
+        cache_position = torch.arange(input_ids.shape[1])
+
+        def fake_prepare_inputs_for_generation(*args, **kwargs):
+            return {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask.clone(),
+                "cache_position": cache_position.clone(),
+                "past_key_values": None,
+            }
+
+        model.base_model_prepare_inputs_for_generation = fake_prepare_inputs_for_generation
+        model_kwargs = model.prepare_inputs_for_generation(input_ids)
+
+        # the prompt is injected as inputs_embeds, input_ids must not be used
+        assert model_kwargs["input_ids"] is None
+        embedding_dim = model.word_embeddings.embedding_dim
+        assert model_kwargs["inputs_embeds"].shape == (2, num_virtual_tokens + input_ids.shape[1], embedding_dim)
+        assert model_kwargs["attention_mask"].shape == (2, num_virtual_tokens + input_ids.shape[1])
+        # the virtual token positions must be attended to
+        assert (model_kwargs["attention_mask"][:, :num_virtual_tokens] == 1).all()
+        # cache_position is removed, the base model re-creates it based on inputs_embeds
+        assert "cache_position" not in model_kwargs
+
+    def test_prefix_tuning_prepare_inputs_for_generation_prefill(self):
+        # Same as test_prompt_tuning_prepare_inputs_for_generation_prefill, but for prefix tuning, which seeds the KV
+        # cache with the virtual tokens instead of extending inputs_embeds.
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+        with hub_online_once(model_id):
+            base = AutoModelForCausalLM.from_pretrained(model_id)
+        num_virtual_tokens = 4
+        model = get_peft_model(base, PrefixTuningConfig(num_virtual_tokens=num_virtual_tokens, task_type="CAUSAL_LM"))
+
+        input_ids = torch.tensor([[1, 2, 3], [4, 5, 6]])
+        attention_mask = torch.ones_like(input_ids)
+        cache_position = torch.arange(input_ids.shape[1])
+
+        def fake_prepare_inputs_for_generation(*args, **kwargs):
+            return {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask.clone(),
+                "cache_position": cache_position.clone(),
+                "past_key_values": None,
+            }
+
+        model.base_model_prepare_inputs_for_generation = fake_prepare_inputs_for_generation
+        model_kwargs = model.prepare_inputs_for_generation(input_ids)
+
+        assert torch.equal(model_kwargs["input_ids"], input_ids)
+        assert "inputs_embeds" not in model_kwargs
+        past_key_values = model_kwargs["past_key_values"]
+        assert isinstance(past_key_values, Cache)
+        assert past_key_values.get_seq_length() == num_virtual_tokens
+        assert model_kwargs["attention_mask"].shape == (2, num_virtual_tokens + input_ids.shape[1])
+        # the cache already contains the virtual tokens, so the cache position of the input starts after them
+        assert torch.equal(model_kwargs["cache_position"], cache_position + num_virtual_tokens)
+
+    def test_prompt_learning_prepare_inputs_for_generation_decode_step(self):
+        # After prefill, the KV cache is longer than input_ids because of the virtual tokens; only the last token must
+        # be kept as input for the next decoding step and no new prompt must be injected.
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+        with hub_online_once(model_id):
+            base = AutoModelForCausalLM.from_pretrained(model_id)
+        num_virtual_tokens = 4
+        model = get_peft_model(base, PromptTuningConfig(num_virtual_tokens=num_virtual_tokens, task_type="CAUSAL_LM"))
+        model.eval()
+
+        input_ids = torch.tensor([[1, 2, 3], [4, 5, 6]])
+        with torch.no_grad():
+            outputs = model(input_ids=input_ids, use_cache=True)
+        past_key_values = outputs.past_key_values
+        assert past_key_values.get_seq_length() == num_virtual_tokens + input_ids.shape[1]
+
+        # simulate the next decoding step: one new token, the 2d attention mask covers the tokens seen so far
+        next_input_ids = torch.cat([input_ids, torch.tensor([[7], [8]])], dim=1)
+        attention_mask = torch.ones_like(next_input_ids)
+        cache_position = torch.tensor([past_key_values.get_seq_length()])
+
+        def fake_prepare_inputs_for_generation(*args, **kwargs):
+            return {
+                "input_ids": next_input_ids,
+                "attention_mask": attention_mask,
+                "cache_position": cache_position,
+                "past_key_values": past_key_values,
+            }
+
+        model.base_model_prepare_inputs_for_generation = fake_prepare_inputs_for_generation
+        model_kwargs = model.prepare_inputs_for_generation(next_input_ids)
+
+        assert torch.equal(model_kwargs["input_ids"], next_input_ids[:, -1:])
+        assert "inputs_embeds" not in model_kwargs
+        assert model_kwargs["past_key_values"] is past_key_values
+        assert model_kwargs["attention_mask"].shape == (2, num_virtual_tokens + next_input_ids.shape[1])
+        assert "cache_position" not in model_kwargs
+
+    def test_prompt_learning_prepare_inputs_for_generation_dict_attention_mask(self):
+        # Newer transformers versions may pass the attention mask as a dict of masks
+        # (https://github.com/huggingface/transformers/pull/37866); a single entry is unpacked and treated like a
+        # regular mask, multiple entries are not supported.
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM"
+        with hub_online_once(model_id):
+            base = AutoModelForCausalLM.from_pretrained(model_id)
+        num_virtual_tokens = 4
+        model = get_peft_model(base, PromptTuningConfig(num_virtual_tokens=num_virtual_tokens, task_type="CAUSAL_LM"))
+
+        input_ids = torch.tensor([[1, 2, 3], [4, 5, 6]])
+        attention_mask = torch.ones_like(input_ids)
+        cache_position = torch.arange(input_ids.shape[1])
+
+        def fake_prepare_single_mask(*args, **kwargs):
+            return {
+                "input_ids": input_ids,
+                "attention_mask": {"full_attention": attention_mask.clone()},
+                "cache_position": cache_position.clone(),
+                "past_key_values": None,
+            }
+
+        model.base_model_prepare_inputs_for_generation = fake_prepare_single_mask
+        model_kwargs = model.prepare_inputs_for_generation(input_ids)
+        assert isinstance(model_kwargs["attention_mask"], torch.Tensor)
+        assert model_kwargs["attention_mask"].shape == (2, num_virtual_tokens + input_ids.shape[1])
+
+        def fake_prepare_multiple_masks(*args, **kwargs):
+            return {
+                "input_ids": input_ids,
+                "attention_mask": {
+                    "full_attention": attention_mask.clone(),
+                    "sliding_attention": attention_mask.clone(),
+                },
+                "cache_position": cache_position.clone(),
+                "past_key_values": None,
+            }
+
+        model.base_model_prepare_inputs_for_generation = fake_prepare_multiple_masks
+        with pytest.raises(ValueError, match="Expected a single attention mask"):
+            model.prepare_inputs_for_generation(input_ids)
 
     def test_prefix_tuning_mistral(self):
         # See issue 869, 1962
