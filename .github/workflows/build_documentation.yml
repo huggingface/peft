@@ -11,6 +11,8 @@ permissions: {}
 
 jobs:
    build:
+    # skip on forks, the secrets used below only exist in the main repo
+    if: github.repository == 'huggingface/peft'
     uses: huggingface/doc-builder/.github/workflows/build_main_documentation.yml@1b16dac5e33043af565fdf4c1b5b0fe81d0891c8  # main
     with:
       commit_sha: ${{ github.sha }}
