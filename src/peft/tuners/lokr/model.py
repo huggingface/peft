@@ -44,11 +44,11 @@ class LoKrModel(LycorisTuner):
     Example:
         ```py
         >>> from diffusers import StableDiffusionPipeline
-        >>> from peft import LoKrModel, LoKrConfig
+        >>> from peft import LoKrConfig, get_peft_model
 
         >>> config_te = LoKrConfig(
         ...     r=8,
-        ...     lora_alpha=32,
+        ...     alpha=32,
         ...     target_modules=["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
         ...     rank_dropout=0.0,
         ...     module_dropout=0.0,
@@ -56,7 +56,7 @@ class LoKrModel(LycorisTuner):
         ... )
         >>> config_unet = LoKrConfig(
         ...     r=8,
-        ...     lora_alpha=32,
+        ...     alpha=32,
         ...     target_modules=[
         ...         "proj_in",
         ...         "proj_out",
@@ -74,8 +74,8 @@ class LoKrModel(LycorisTuner):
         ... )
 
         >>> model = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5")
-        >>> model.text_encoder = LoKrModel(model.text_encoder, config_te, "default")
-        >>> model.unet = LoKrModel(model.unet, config_unet, "default")
+        >>> model.text_encoder = get_peft_model(model.text_encoder, config_te)
+        >>> model.unet = get_peft_model(model.unet, config_unet)
         ```
 
     **Attributes**:
