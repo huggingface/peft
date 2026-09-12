@@ -2582,6 +2582,33 @@ class TestPeftCustomModel(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_safe_merge(model_id, config_cls, config_kwargs)
 
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16], ids=["fp32", "bf16", "fp16"])
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_get_additive_delta_corresponds_to_merged_weight(
+        self, test_name, model_id, config_cls, config_kwargs, dtype
+    ):
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        if (config_cls == LoraConfig) and config_kwargs.get("use_bdlora"):
+            # BD-LoRA: get_delta_weight does not unpack the block-diagonal factors, so the delta does not correspond
+            # to the merged weight
+            pytest.xfail("BD-LoRA delta weight computation does not handle block-diagonal factors")
+
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        self._test_get_additive_delta_corresponds_to_merged_weight(model_id, config_cls, config_kwargs, dtype=dtype)
+
+    def test_get_additive_delta_uses_adapter_dtype(self):
+        # The additive delta should have the dtype of the adapter weights, not the dtype of the base weight. E.g. if
+        # the base model is in bf16 but the adapter is in fp32 (the default when autocasting the adapter dtype is
+        # enabled), the additive delta should be fp32. This is relevant e.g. for quantized base weights, whose dtype
+        # is not a floating point type.
+        model = MLP().to(torch.bfloat16)
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=8, lora_alpha=16)
+        model = get_peft_model(model, config)  # default autocast_adapter_dtype=True -> adapter in fp32
+        for name, module in model.named_modules():
+            if isinstance(module, BaseTunerLayer):
+                delta = module.get_additive_delta()
+                assert delta.dtype == torch.float32, f"{name}: expected fp32 additive delta, got {delta.dtype}"
+
     @pytest.mark.parametrize("target_module,token_indices", [("emb", [0, 1, 3]), ("lin0", [0, 1])])
     def test_trainable_tokens_random_init_unmerge_restores_base_weights(self, target_module, token_indices):
         # A merge/unmerge cycle must preserve the base weights even when the adapter starts with random weights; see #3650.

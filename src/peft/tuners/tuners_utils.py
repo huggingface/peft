@@ -2223,6 +2223,44 @@ class BaseTunerLayer(ABC):
         """
         return False
 
+    def get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        """
+        Return the additive delta weight W' - W for the given adapter, where W is the base weight and W' is the weight
+        after merging the adapter into the base weight. This means that the merged weight can be reconstructed via
+        `base_weight + module.get_additive_delta(adapter_name)`.
+
+        For additive PEFT methods (e.g. LoRA, LoKr, LoHa), this is equivalent to `get_delta_weight`. For multiplicative
+        methods (e.g. OFT, BOFT), this method constructs the effective weight W' and subtracts the base weight W.
+
+        Calling this method while any adapter is merged raises a `ValueError`, as merging modifies the base weight,
+        which would make the return value depend on the currently merged adapters. Unmerge the adapters first.
+
+        The returned tensor has the dtype of the adapter layer weights (e.g. `lora_A` for LoRA), not the dtype of the
+        base layer weight. This is the dtype that the converted LoRA adapter will use.
+
+        The result is used by `convert_to_lora` to perform an SVD-based approximation of the adapter as a LoRA adapter.
+
+        By default, this raises a `NotImplementedError`. PEFT methods that support this should override the
+        `_get_additive_delta` method to return the additive delta.
+
+        Args:
+            adapter_name (`str`): The name of the adapter. Defaults to `"default"`.
+        """
+        if self.merged_adapters:
+            raise ValueError(
+                f"Cannot get the additive delta for adapter '{adapter_name}' because the following adapters are "
+                f"currently merged into the base weights: {', '.join(self.merged_adapters)}. This would make the "
+                "return value incorrect. Please unmerge the adapters first."
+            )
+        return self._get_additive_delta(adapter_name)
+
+    def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
+        # Internal method that should be overridden instead of `get_additive_delta`, see the docstring there.
+        raise NotImplementedError(
+            f"{type(self)} does not support get_additive_delta. If this is an additive PEFT method, override this "
+            "method to return self.get_delta_weight(adapter_name)."
+        )
+
 
 def _find_minimal_target_modules(
     target_modules: list[str] | set[str], other_module_names: list[str] | set[str]
