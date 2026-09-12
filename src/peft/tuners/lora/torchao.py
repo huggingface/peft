@@ -70,10 +70,13 @@ class TorchaoLoraLinear(Linear):
 
         self._check_dtype_supported()
 
-        base_layer = self.get_base_layer()
-        weight = base_layer.weight
-
         for active_adapter in adapter_names:
+            # Re-read the weight each round: the loop deletes the local and
+            # re-quantizes the base layer, so the previous round's tensor is
+            # neither current nor still bound. unmerge below reads it inside the
+            # loop for the same reason.
+            base_layer = self.get_base_layer()
+            weight = base_layer.weight
             try:
                 weight = weight.dequantize()
             except NotImplementedError as exc:
