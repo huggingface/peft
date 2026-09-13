@@ -19,7 +19,6 @@ from typing import Any, Optional
 
 import torch
 import torch.nn.functional as F
-from accelerate.utils.imports import is_xpu_available
 from torch import nn
 
 from peft.tuners._buffer_dict import BufferDict
@@ -151,10 +150,9 @@ class DoraLinearVariant(LoraVariant):
                 lora_B = lora_B.to(lora_A.device)
             else:
                 if lora_B.device.type not in ["cuda", "xpu"]:
-                    if is_xpu_available():
-                        lora_B = lora_B.to("xpu")
-                    else:
-                        lora_B = lora_B.to("cuda")
+                    # Move offloaded LoRA weights to the base layer's device (device-agnostic)
+                    target_device = module.get_base_layer().weight.device
+                    lora_B = lora_B.to(target_device)
                 lora_A = lora_A.to(lora_B.device)
         scaling = module.scaling[adapter_name]
         dora_layer.update_layer(
