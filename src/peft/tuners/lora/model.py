@@ -1086,7 +1086,7 @@ class LoraModel(BaseTuner):
         state_dict = {renamed_dora_weights(k): v for k, v in state_dict.items()}
         peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
 
-        if torch.distributed.is_available() and torch.distributed.is_initialized():
+        if not is_transformers_dtensor_tp and torch.distributed.is_available() and torch.distributed.is_initialized():
             _maybe_shard_state_dict_for_tp(model, peft_model_state_dict, adapter_name)
 
         return peft_model_state_dict

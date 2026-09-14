@@ -362,7 +362,7 @@ def _insert_adapter_name_into_state_dict(
 
 def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
     """
-    Shard LoRA adapter weights in-place in `state_dict` according to the tensor-parallel plan of the model.
+    Shard LoRA adapter weights in-place in `state_dict` for the pre-DTensor tensor-parallel integration.
 
     Args:
         model (`nn.Module`): The TP base model (with `_hf_tp_plan` and `_hf_device_mesh` set on its layers).
@@ -387,15 +387,12 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
     if not tp_lora_modules:
         return
 
-    if not is_transformers_dtensor_tp:
-        from transformers.integrations.tensor_parallel import (
-            ALL_PARALLEL_STYLES,
-            ColwiseParallel,
-            EmbeddingParallel,
-            RowwiseParallel,
-        )
-    else:
-        from transformers.distributed.sharding_utils import DtensorShardOperation
+    from transformers.integrations.tensor_parallel import (
+        ALL_PARALLEL_STYLES,
+        ColwiseParallel,
+        EmbeddingParallel,
+        RowwiseParallel,
+    )
 
     should_check = True
     prefix_to_remove = None
@@ -438,68 +435,48 @@ def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
         if prefix_to_add:
             name = prefix_to_add + name
 
-        if is_transformers_dtensor_tp:
-            if tp_plan == "colwise":
-                key = f"{name}.lora_B{adapter_name_in_key}.weight"
-                ref = module.lora_B[adapter_name].weight
-            elif tp_plan == "rowwise":
-                key = f"{name}.lora_A{adapter_name_in_key}.weight"
-                ref = module.lora_A[adapter_name].weight
-            elif tp_plan == "embedding_rowwise":
-                embedding_key = f"{name}.base_layer.weight"
-                if embedding_key in state_dict:
-                    state_dict[embedding_key] = (
-                        DtensorShardOperation(base_layer.weight).shard_tensor(state_dict[embedding_key]).contiguous()
-                    )
-                key = f"{name}.lora_embedding_A{adapter_name_in_key}"
-                ref = module.lora_embedding_A[adapter_name]
-            else:
-                raise TypeError(f"Unknown tensor parallel plan {tp_plan} for {module.__class__.__name__}.")
+        # We create and initialize the TensorParallelLayer on the fly,
+        # and we set the `empty_param` attribute depending on the proper
+        # state dict key to shard.
+        # This attribute is used by the sharding logic for shape reference,
+        # it must be of the same shape as the parameter to shard.
+        tp_layer = copy.deepcopy(ALL_PARALLEL_STYLES[tp_plan])
+        tp_layer.device_mesh = device_mesh
+        tp_layer.rank = device_mesh.get_local_rank()
 
-            state_dict[key] = DtensorShardOperation(ref).shard_tensor(state_dict[key]).contiguous()
-        else:
-            # We create and initialize the TensorParallelLayer on the fly,
-            # and we set the `empty_param` attribute depending on the proper
-            # state dict key to shard.
-            # This attribute is used by the sharding logic for shape reference,
-            # it must be of the same shape as the parameter to shard.
-            tp_layer = copy.deepcopy(ALL_PARALLEL_STYLES[tp_plan])
-            tp_layer.device_mesh = device_mesh
-            tp_layer.rank = device_mesh.get_local_rank()
-
-            weight = None
-            sharded = None
-            if isinstance(tp_layer, ColwiseParallel):
-                key = f"{name}.lora_B{adapter_name_in_key}.weight"
-            elif isinstance(tp_layer, RowwiseParallel):
-                key = f"{name}.lora_A{adapter_name_in_key}.weight"
-            elif isinstance(tp_layer, EmbeddingParallel):
-                # The state dict can contain the original base embedding weights if `save_embedding_layers` is
-                # set to `True` and the embedding layer is targeted. In that case, we need to shard those
-                # weights as well.
-                embedding_key = f"{name}.base_layer.weight"
-                if embedding_key in state_dict:
-                    tp_layer.empty_param = state_dict[embedding_key]
-                    state_dict[embedding_key] = tp_layer.shard_tensor(state_dict[embedding_key], device=device)
-                key = f"{name}.lora_embedding_A{adapter_name_in_key}"
-                # We transpose the lora_embedding_A weights because they are of shape (rank, num_embeddings) in
-                # the state dict
-                weight = state_dict[key].T
-                tp_layer.empty_param = weight
-                sharded = tp_layer.shard_tensor(weight, device=device)
-                # We transpose back because LoraEmbedding expects the weights to be of shape (rank, num_embeddings)
-                sharded = sharded.T
-            else:
-                raise TypeError(f"Unknown tensor parallel plan {tp_plan} for {module.__class__.__name__}.")
-
-            if weight is None:
-                weight = state_dict[key]
-            if sharded is None:
-                tp_layer.empty_param = weight
-                sharded = tp_layer.shard_tensor(weight, device=device)
-
+        weight = None
+        sharded = None
+        if isinstance(tp_layer, ColwiseParallel):
+            key = f"{name}.lora_B{adapter_name_in_key}.weight"
+        elif isinstance(tp_layer, RowwiseParallel):
+            key = f"{name}.lora_A{adapter_name_in_key}.weight"
+        elif isinstance(tp_layer, EmbeddingParallel):
+            # The state dict can contain the original base embedding weights if `save_embedding_layers` is
+            # set to `True` and the embedding layer is targeted. In that case, we need to shard those
+            # weights as well.
+            embedding_key = f"{name}.base_layer.weight"
+            if embedding_key in state_dict:
+                tp_layer.empty_param = state_dict[embedding_key]
+                state_dict[embedding_key] = tp_layer.shard_tensor(state_dict[embedding_key], device=device)
+            key = f"{name}.lora_embedding_A{adapter_name_in_key}"
+            # We transpose the lora_embedding_A weights because they are of shape (rank, num_embeddings) in
+            # the state dict
+            weight = state_dict[key].T
             tp_layer.empty_param = weight
-            state_dict[key] = sharded
+            sharded = tp_layer.shard_tensor(weight, device=device)
+            # We transpose back because LoraEmbedding expects the weights to be of shape (rank, num_embeddings)
+            sharded = sharded.T
+        else:
+            raise TypeError(f"Unknown tensor parallel plan {tp_plan} for {module.__class__.__name__}.")
+
+        if weight is None:
+            weight = state_dict[key]
+        if sharded is None:
+            tp_layer.empty_param = weight
+            sharded = tp_layer.shard_tensor(weight, device=device)
+
+        tp_layer.empty_param = weight
+        state_dict[key] = sharded
 
 
 def set_peft_model_state_dict(
