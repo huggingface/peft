@@ -30,9 +30,11 @@ For example, load a base model and then load the [artificialguybr/3DRedmond-V1](
 import torch
 from diffusers import DiffusionPipeline
 
+device = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
+
 pipeline = DiffusionPipeline.from_pretrained(
     "stabilityai/stable-diffusion-xl-base-1.0", torch_dtype=torch.float16
-).to("cuda")
+).to(device)
 pipeline.load_lora_weights(
     "peft-internal-testing/artificialguybr__3DRedmond-V1", 
     weight_name="3DRedmond-3DRenderStyle-3DRenderAF.safetensors", 

@@ -139,11 +139,13 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             # lm_head doesn't have embedding_dim attribute
             embed_dim = self.get_base_layer().in_features
 
+        if check_deepspeed_zero3_enabled():
+            originals = self._collect_token_weights(weight, self.token_indices[adapter_name], embed_dim)
+        else:
+            originals = self.weight[self.token_indices[adapter_name]]
+
         if init_weights:
-            if check_deepspeed_zero3_enabled():
-                values = self._collect_token_weights(weight, self.token_indices[adapter_name], embed_dim)
-            else:
-                values = self.weight[self.token_indices[adapter_name]]
+            values = originals
         else:
             # random init with matching dtype/device
             values = torch.randn(
@@ -153,22 +155,25 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             )
 
         self.trainable_tokens_delta[adapter_name] = nn.Parameter(values.clone(), requires_grad=True)
-        self.trainable_tokens_original[adapter_name] = values.clone()
+        self.trainable_tokens_original[adapter_name] = originals.detach().clone()
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
-    def _check_overlapping_tokens(self, adapter_names):
+    def _check_overlapping_tokens(self, adapter_names: list[str]):
         """Raises an error if the token indices of the given adapter names are overlapping.
         This is currently not supported and can lead to undefined behavior of the model if no specific merging between
         the overlapping indices' values is applied.
         """
-        if len(adapter_names) <= 1:
+        # We take already merged adapters into account as well since they can be overridden by new adapters as well.
+        # Merged ones come first so that the adapter reported in the error is the one being added. Duplicates are
+        # dropped so that a name repeated within one call is not reported as overlapping with itself.
+        adapters_to_check = list(dict.fromkeys(self.merged_adapters + adapter_names))
+        if len(adapters_to_check) <= 1:
             return
 
         indices = set()
 
-        # we take already merged adapters into account as well since they can be overridden by new adapters as well.
-        for adapter_name in set(adapter_names + self.merged_adapters):
+        for adapter_name in adapters_to_check:
             index_set = set(self.token_indices[adapter_name])
             if len(indices.intersection(index_set)):
                 raise ValueError(

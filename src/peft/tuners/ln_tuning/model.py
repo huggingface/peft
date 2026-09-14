@@ -74,7 +74,10 @@ class LNTuningModel(BaseTuner):
         parent: Module,
         current_key: str,
     ) -> None:
-        # replace the original module with a same new module
+        if isinstance(target, LNTuningLayer):
+            target.update_layer(target.base_layer, adapter_name, config=peft_config)
+            return
+
         new_module = self._create_new_module(peft_config, target, adapter_name)
         if adapter_name != self.active_adapter:
             new_module.requires_grad_(False)
@@ -86,12 +89,7 @@ class LNTuningModel(BaseTuner):
         target: Module,
         adapter_name: str,
     ) -> Module:
-        if not isinstance(target, LNTuningLayer):
-            new_module = LNTuningLayer(target, adapter_name, config=peft_config)
-        else:
-            new_module = target
-            new_module.update_layer(target.base_layer, adapter_name, config=peft_config)
-        return new_module
+        return LNTuningLayer(target, adapter_name, config=peft_config)
 
     def _unloading_checks(self, adapter_names: Optional[list[str]]):
         adapters_to_consider = adapter_names or self.active_adapters

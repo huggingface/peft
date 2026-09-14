@@ -106,6 +106,36 @@ class TestPVeRA:
         with pytest.raises(ValueError, match=msg):
             peft_model.add_adapter("other", config2)
 
+    def test_save_projection_true_restores_saved_projections(self, mlp, tmp_path):
+        # With save_projection=True, the projections stored in the checkpoint must actually be restored when loading,
+        # instead of relying on the PRNG re-generated ones. To make a failure observable, the projections are modified
+        # before saving, as on the same system, the re-generated projections would be identical to the saved ones.
+        torch.manual_seed(1)
+        config = PveraConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=True)
+        peft_model = get_peft_model(mlp, config)
+        # eval mode, since in training mode, the forward pass samples from a distribution whose variance depends on
+        # the (here: perturbed) projections, which is neither deterministic nor numerically stable
+        peft_model.eval()
+        with torch.no_grad():
+            peft_model.base_model.pvera_A["default"] += 1.0
+            peft_model.base_model.pvera_B["default"] += 1.0
+        input = torch.randn(5, 10)
+        output = peft_model(input)
+
+        peft_model.save_pretrained(tmp_path)
+
+        torch.manual_seed(0)
+        peft_model_loaded = PeftModel.from_pretrained(MLP(), tmp_path)
+        peft_model_loaded.eval()
+        torch.testing.assert_close(
+            peft_model_loaded.base_model.pvera_A["default"], peft_model.base_model.pvera_A["default"]
+        )
+        torch.testing.assert_close(
+            peft_model_loaded.base_model.pvera_B["default"], peft_model.base_model.pvera_B["default"]
+        )
+        output_loaded = peft_model_loaded(input)
+        torch.testing.assert_close(output_loaded, output)
+
     def test_multiple_adapters_save_load_save_projection_false(self, mlp, tmp_path):
         # check saving and loading works with multiple adapters without saved projection weights
         torch.manual_seed(1)

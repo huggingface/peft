@@ -22,7 +22,12 @@ from torch import nn
 from tqdm import tqdm
 
 from peft.tuners import adalora, loha, lokr, lora, oft, shira
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, _delete_auxiliary_adapter
+from peft.tuners.tuners_utils import (
+    BaseTuner,
+    BaseTunerLayer,
+    _check_adapters_not_merged,
+    _delete_auxiliary_adapter,
+)
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
@@ -257,12 +262,9 @@ class MixedModel(BaseTuner):
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
             elif isinstance(target, ModulesToSaveWrapper):
                 # save any additional trainable modules part of `modules_to_save`
-                new_module = target.modules_to_save[target.active_adapter]
-                if hasattr(new_module, "base_layer"):
-                    # check if the module is itself a tuner layer
-                    if merge:
-                        new_module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-                    new_module = new_module.get_base_layer()
+                new_module = target.unload_and_optionally_merge_module(
+                    merge=merge, safe_merge=safe_merge, adapter_names=adapter_names
+                )
                 setattr(parent, target_name, new_module)
 
         # Clean up peft_config from the model since all PEFT modules have been removed.
@@ -292,6 +294,8 @@ class MixedModel(BaseTuner):
             raise ValueError(
                 f"Adapter(s) {sorted(mismatched)} not found, available adapters: {sorted(self.peft_config.keys())}"
             )
+
+        _check_adapters_not_merged(self.model, adapter_names)
 
         for adapter_to_delete in adapter_names:
             del self.peft_config[adapter_to_delete]

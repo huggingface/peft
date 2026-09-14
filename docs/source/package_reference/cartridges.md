@@ -91,3 +91,11 @@ To concatenate independently trained cartridges into a single adapter, use `comp
 ## CartridgeEncoder
 
 [[autodoc]] tuners.cartridge.model.CartridgeEncoder
+
+## initialize_kv_prefix_from_past_key_values
+
+[[autodoc]] tuners.cartridge.utils.initialize_kv_prefix_from_past_key_values
+
+## prompt_embeddings_from_past_key_values
+
+[[autodoc]] tuners.cartridge.utils.prompt_embeddings_from_past_key_values

@@ -24,6 +24,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     DataCollatorForLanguageModeling,
+    DynamicCache,
     Trainer,
     TrainingArguments,
 )
@@ -56,8 +57,11 @@ from peft import (
     PromptTuningInit,
     PsoftConfig,
     PveraConfig,
+    RandLoraConfig,
     RoadConfig,
+    ShadowConfig,
     ShiraConfig,
+    SupertuningConfig,
     TaskType,
     TinyLoraConfig,
     UniLoraConfig,
@@ -314,6 +318,15 @@ ALL_CONFIGS = [
         },
     ),
     (
+        RandLoraConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "r": 8,
+            "randlora_alpha": 1,
+        },
+    ),
+    (
         RoadConfig,
         {
             "task_type": "CAUSAL_LM",
@@ -325,6 +338,34 @@ ALL_CONFIGS = [
         ShiraConfig,
         {
             "r": 1,
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "init_weights": False,
+        },
+    ),
+    (
+        ShadowConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "r": 2,
+            "shadow_num_hidden_layers": 1,
+        },
+    ),
+    (
+        SupertuningConfig,
+        {
+            "sparsity": 0.9,
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "init_weights": False,
+        },
+    ),
+    (
+        SupertuningConfig,
+        {
+            "sparsity": 0.9,
+            "r": 2,
+            "select_top": False,
             "task_type": "CAUSAL_LM",
             "target_modules": None,
             "init_weights": False,
@@ -419,12 +460,15 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         OSFConfig,
         RoadConfig,
         ShiraConfig,
+        SupertuningConfig,
         C3AConfig,
         MissConfig,
         DeloraConfig,
         PsoftConfig,
     ]:
-        pytest.skip("Skipping Beft/BOFT/GLoRA/HRA/OFT/Road/SHiRA/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel")
+        pytest.skip(
+            "Skipping Beft/BOFT/GLoRA/HRA/OFT/Road/SHiRA/Supertuning/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel"
+        )
 
 
 def _skip_alora_no_activation(config_cls, config_kwargs):
@@ -923,6 +967,45 @@ class TestDecoderModels(PeftCommonTester):
                 data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
             )
             trainer.train()
+
+    def test_prompt_tuning_prepare_inputs_for_generation_4d_attention_mask(self):
+        # Some setups pass a 4d attention mask to prepare_inputs_for_generation. PEFT re-creates the mask to account
+        # for the inserted virtual tokens using create_attention_mask.
+        model_id = "hf-internal-testing/tiny-random-Gemma3ForCausalLM"
+        with hub_online_once(model_id):
+            base = AutoModelForCausalLM.from_pretrained(model_id)
+            num_virtual_tokens = 4
+            model = get_peft_model(
+                base, PromptTuningConfig(num_virtual_tokens=num_virtual_tokens, task_type="CAUSAL_LM")
+            )
+
+            input_ids = torch.tensor([[1, 2, 3]])
+            attention_mask_4d = torch.ones((1, 1, input_ids.shape[1], input_ids.shape[1]))
+            cache_position = torch.arange(input_ids.shape[1])
+
+            def fake_prepare_inputs_for_generation(*args, **kwargs):
+                # generate initializes an empty cache before the first call to prepare_inputs_for_generation
+                return {
+                    "input_ids": input_ids,
+                    "attention_mask": attention_mask_4d,
+                    "cache_position": cache_position.clone(),
+                    "past_key_values": DynamicCache(),
+                }
+
+            model.base_model_prepare_inputs_for_generation = fake_prepare_inputs_for_generation
+            model_kwargs = model.prepare_inputs_for_generation(input_ids)
+
+            total_seq_len = num_virtual_tokens + input_ids.shape[1]
+            assert model_kwargs["input_ids"] is None
+            assert model_kwargs["inputs_embeds"].shape[1] == total_seq_len
+            assert "attention_mask" in model_kwargs
+            # depending on the model and attention implementation, the re-created mask can be a 4d tensor, a dict of
+            # masks, or None (no masking needed)
+            new_mask = model_kwargs["attention_mask"]
+            if isinstance(new_mask, torch.Tensor):
+                assert new_mask.shape[-1] == total_seq_len
+            elif isinstance(new_mask, dict):
+                assert all(mask.shape[-1] == total_seq_len for mask in new_mask.values() if mask is not None)
 
     @pytest.mark.parametrize("model_id", SMALL_GRID_MODELS)
     @pytest.mark.parametrize(

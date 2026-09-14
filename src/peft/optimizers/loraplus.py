@@ -71,7 +71,11 @@ def create_loraplus_optimizer(
         if not param.requires_grad:
             continue
 
-        module = attrgetter(name)(model)
+        # The parameters of a tuner layer live in a `ModuleDict`/`ParameterDict` below it, e.g.
+        # `<...>.embedding.lora_embedding_A.default`, hence strip the last two parts to get the tuner layer. If nothing
+        # is left, the parameter is not held by such a dict and there is no tuner layer to look up.
+        module_name = ".".join(name.split(".")[:-2])
+        module = attrgetter(module_name)(model) if module_name else None
         if isinstance(module, Embedding):
             param_groups["embedding"][name] = param
         elif "lora_B" in name or param.ndim == 1:

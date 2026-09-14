@@ -29,6 +29,12 @@ is_transformers_ge_v5_4_0 = packaging.version.parse(transformers.__version__) >=
 
 is_transformers_ge_v5_6_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.6.0.dev0")
 
+# transformers 5.13.0 introduced the `distributed_config` kwarg for `from_pretrained`,
+# replacing the `tp_plan` and `tp_size` kwargs (removed in 5.15.0).
+is_transformers_ge_v5_13_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse(
+    "5.13.0.dev0"
+)
+
 is_transformers_le_4_53 = packaging.version.parse(transformers.__version__) < packaging.version.parse("4.54.0.dev0")
 
 
@@ -149,6 +155,18 @@ def is_torchao_available() -> bool:
             f"but only versions above {TORCHAO_MINIMUM_VERSION} are supported"
         )
     return True
+
+
+@lru_cache
+def is_torchao_ge_v0_18_0() -> bool:
+    """Return True if torchao is installed and its version is >= 0.18.0.
+
+    torchao 0.18.0 removed the v1 tensor subclass system (AffineQuantizedTensor, LinearActivationQuantizedTensor) in
+    favor of v2 tensor subclasses (Int8Tensor, Int4Tensor, etc.) that inherit from TorchAOBaseTensor.
+    """
+    if not is_torchao_available():
+        return False
+    return packaging.version.parse(importlib_metadata.version("torchao")) >= packaging.version.parse("0.18.0")
 
 
 @lru_cache

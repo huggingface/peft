@@ -24,6 +24,7 @@ from transformers import AutoModelForCausalLM
 from peft import (
     C3AConfig,
     IA3Config,
+    KasaConfig,
     LoKrConfig,
     LoraConfig,
     MissConfig,
@@ -691,3 +692,26 @@ class TestMissLoraConversion:
             output_after = loaded_model(inputs).logits
 
         assert torch.allclose(output_before, output_after, atol=atol, rtol=rtol)
+
+
+class TestKasaLoraConversion:
+    """KaSA cannot be converted to vanilla LoRA: the update depends on lora_diag and on the destructive truncation of
+    the base weight, neither of which is representable as scaling * B @ A on the unmodified base."""
+
+    class MLP(nn.Module):
+        def __init__(self, bias=False):
+            super().__init__()
+            self.lin0 = nn.Linear(16, 12, bias=bias)
+            self.lin1 = nn.Linear(12, 10, bias=bias)
+
+        def forward(self, x):
+            return self.lin1(torch.relu(self.lin0(x)))
+
+    def test_kasa_does_not_support_lora_conversion(self):
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=4, kasa_config=KasaConfig())
+        model = get_peft_model(self.MLP(), config)
+        assert model.supports_lora_conversion() is False
+
+        # Vanilla LoRA is unaffected by the variant-aware check.
+        vanilla = get_peft_model(self.MLP(), LoraConfig(target_modules=["lin0"], r=4))
+        assert vanilla.supports_lora_conversion() is True

@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # Adapter injection
 
-With PEFT, you can inject trainable adapters into any `torch` module which allows you to use adapter methods without relying on the modeling classes in PEFT. This works for all adapters except for those based on prompt learning (e.g. prefix tuning or p-tuning).
+With PEFT, you can inject trainable adapters into any `torch` module which allows you to use adapter methods without relying on the modeling classes in PEFT. This works for all adapters except for those based on prompt learning (e.g. prefix tuning or p-tuning) and adapters that keep state shared between multiple target layers.
 
 Check the table below to see when you should inject adapters.
 
@@ -24,6 +24,9 @@ Check the table below to see when you should inject adapters.
 |---|---|
 | the model is modified inplace, keeping all the original attributes and methods | manually write the `from_pretrained` and `save_pretrained` utility functions from Hugging Face to save and load adapters |
 | works for any `torch` module and modality | doesn't work with any of the utility methods provided by `PeftModel` such as disabling and merging adapters |
+
+> [!WARNING]
+> `inject_adapter_in_model` does not support PEFT methods that keep adapter state shared between multiple target layers. This currently includes TinyLoRA, UniLoRA, VeRA, PVeRA, VBLoRA, and FRoD. Use [`get_peft_model`] for these methods instead.
 
 ## Creating a new PEFT model
 
@@ -145,6 +148,12 @@ model = inject_adapter_in_model(lora_config, model, low_cpu_mem_usage=True)
 print(model.linear.lora_A["default"].weight.device.type == "meta")  # should be True
 set_peft_model_state_dict(model, peft_state_dict, low_cpu_mem_usage=True)
 print(model.linear.lora_A["default"].weight.device.type == "cpu")  # should be True
+```
+
+For loading weights from the hub there's the low-level [`load_peft_weights`] function:
+
+```python
+state_dict = load_peft_weights("my-account/my-adapter-repo")
 ```
 
 ## Setting and loading base weights

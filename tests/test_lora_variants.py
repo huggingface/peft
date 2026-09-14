@@ -19,8 +19,9 @@ import pytest
 import torch
 from torch import nn
 from transformers import AutoModelForCausalLM
+from transformers.pytorch_utils import Conv1D
 
-from peft import LoraConfig, TaskType, get_peft_model
+from peft import KasaConfig, LoraConfig, TaskType, get_peft_model
 from peft.tuners.lora.layer import Conv1d as LoraConv1d
 from peft.tuners.lora.layer import Conv2d as LoraConv2d
 from peft.tuners.lora.layer import Embedding as LoraEmbedding
@@ -32,6 +33,7 @@ from peft.tuners.lora.variants import (
     DoraConv2dVariant,
     DoraEmbeddingVariant,
     DoraLinearVariant,
+    KasaLinearVariant,
     calculate_alora_offsets,
     get_alora_offsets_for_forward,
     get_alora_offsets_for_generate,
@@ -71,6 +73,15 @@ class CustomModel(nn.Module):
         output = self.relu(self.linear1(torch.concat([x1_flat, x2_flat], dim=1)))
         output = self.linear2(output)
         return output
+
+
+# A single transformers Conv1D layer, i.e. a fan_in_fan_out linear layer as used by GPT-2. Tests must use
+# out_features > 1: with a single output feature the DoRA magnitude factor is a scalar, the fan_in_fan_out
+# transpose is a no-op, and the unmerge test would pass trivially even without the fix.
+class ModelWithConv1D(nn.Module):
+    def __init__(self, out_features, in_features):
+        super().__init__()
+        self.c = Conv1D(out_features, in_features)
 
 
 # Used for testing alora_offsets for aLoRA
@@ -116,6 +127,9 @@ VARIANT_MAP = {
     "alora": {
         LoraLinear: ALoraLinearVariant,
     },
+    "kasa": {
+        LoraLinear: KasaLinearVariant,
+    },
 }
 
 
@@ -129,6 +143,11 @@ TEST_CASES = [
         "alora",
         LoraConfig,
         {"target_modules": ["linear1", "linear2"], "alora_invocation_tokens": [1]},
+    ),
+    (
+        "kasa",
+        LoraConfig,
+        {"target_modules": ["linear1", "linear2"], "kasa_config": KasaConfig(), "r": 4},
     ),
 ]
 
@@ -177,6 +196,42 @@ class TestLoraVariants:
 
         for layer in layer_names:
             assert getattr(peft_model.base_model.model, layer).lora_magnitude_vector["default"].weight.grad is not None
+
+    @pytest.mark.parametrize("out_features, in_features", [(6, 6), (8, 4)])
+    def test_dora_unmerge_inverts_merge_for_fan_in_fan_out_layer(self, out_features, in_features):
+        # Regression test for DoraLinearVariant.unmerge on a fan_in_fan_out layer such as a transformers
+        # Conv1D. merge applies the fan_in_fan_out transpose to the DoRA magnitude factor, so unmerge has
+        # to apply it too; otherwise it divides along the wrong axis, which crashes on a non-square weight
+        # and silently corrupts a square one. The discrepancy only surfaces once the magnitude has moved
+        # away from its initial value, so it is perturbed here to emulate a trained adapter.
+        torch.manual_seed(0)
+        model = ModelWithConv1D(out_features, in_features)
+        peft_model = get_peft_model(model, LoraConfig(target_modules=["c"], use_dora=True, fan_in_fan_out=True))
+
+        magnitude = peft_model.base_model.model.c.lora_magnitude_vector["default"].weight
+        with torch.no_grad():
+            magnitude.add_(0.5)
+
+        base_layer = peft_model.base_model.model.c.base_layer
+        original_weight = base_layer.weight.detach().clone()
+
+        peft_model.merge_adapter()
+        peft_model.unmerge_adapter()
+
+        assert torch.allclose(base_layer.weight, original_weight, atol=1e-4, rtol=1e-4)
+
+    def test_kasa_params_have_gradients(self):
+        """Ensure that the lora_diag parameter added by the KaSA variant participates in the output computation."""
+        layer_names = ["linear1", "linear2"]
+        peft_config = LoraConfig(target_modules=layer_names, kasa_config=KasaConfig(), r=4)
+        _, peft_model = self.custom_model_with_loss_backpropagated(peft_config)
+
+        for layer in layer_names:
+            lora_diag = getattr(peft_model.base_model.model, layer).lora_diag["default"]
+            assert lora_diag.requires_grad
+            assert lora_diag.grad is not None
+            # lora_diag is the new KaSA parameter of shape (r,).
+            assert lora_diag.shape == (4,)
 
     def test_unregistered_variant_raises_error(self):
         # 1. Create a config and dummy linear layer
@@ -400,3 +455,87 @@ class TestActivatedLora:
                 lora_model.forward(**inputs)
 
             lora_model.forward(**inputs)
+
+
+class TestKasaRegularization:
+    """Tests for the KaSA auxiliary regularization loss (LoraModel._get_kasa_loss)."""
+
+    class MLP(nn.Module):
+        def __init__(self, in_features=16, hidden=12, out_features=10, bias=False):
+            super().__init__()
+            self.lin0 = nn.Linear(in_features, hidden, bias=bias)
+            self.lin1 = nn.Linear(hidden, out_features, bias=bias)
+
+        def forward(self, x):
+            return self.lin1(torch.relu(self.lin0(x)))
+
+    def get_config(self, r=4, **kasa_kwargs):
+        return LoraConfig(target_modules=["lin0", "lin1"], r=r, lora_alpha=8, kasa_config=KasaConfig(**kasa_kwargs))
+
+    def test_kasa_loss_zero_when_no_kasa_layers(self):
+        torch.manual_seed(0)
+        model = get_peft_model(self.MLP(), LoraConfig(target_modules=["lin0"], r=4))
+        assert model._get_kasa_loss() == 0.0
+
+    def test_kasa_loss_l2_matches_closed_form(self):
+        # With gamma=0 the loss reduces to beta * sum(lora_diag**2).
+        torch.manual_seed(0)
+        beta = 0.3
+        model = get_peft_model(self.MLP(), self.get_config(beta=beta, gamma=0.0))
+        with torch.no_grad():
+            for module in model.modules():
+                if isinstance(module, LoraLinear):
+                    module.lora_diag["default"].copy_(torch.arange(1.0, 5.0))  # [1,2,3,4]
+
+        expected_per_layer = beta * (1.0**2 + 2.0**2 + 3.0**2 + 4.0**2)  # = beta * 30
+        expected = 2 * expected_per_layer  # two layers
+        loss = model._get_kasa_loss()
+        assert pytest.approx(loss.item(), rel=1e-5) == expected
+
+    def test_kasa_orthogonal_reg_zero_for_orthonormal_factors(self):
+        # L3 = ||B^T B - I|| + ||A A^T - I|| must be ~0 when A and B have orthonormal rows/cols, and > 0 otherwise.
+        torch.manual_seed(0)
+        # Use square-ish factors so A (r x in) can have orthonormal rows and B (out x r) orthonormal columns.
+        model = get_peft_model(
+            self.MLP(in_features=16, hidden=12, out_features=12), self.get_config(beta=0.0, gamma=1.0)
+        )
+
+        with torch.no_grad():
+            for module in model.modules():
+                if isinstance(module, LoraLinear):
+                    A = module.lora_A["default"].weight  # (r, in)
+                    B = module.lora_B["default"].weight  # (out, r)
+                    # orthonormal rows of A
+                    qa, _ = torch.linalg.qr(A.T)  # (in, r) with orthonormal columns
+                    module.lora_A["default"].weight.copy_(qa[:, : A.shape[0]].T)
+                    # orthonormal columns of B
+                    qb, _ = torch.linalg.qr(B)  # (out, r) with orthonormal columns
+                    module.lora_B["default"].weight.copy_(qb)
+                    module.lora_diag["default"].zero_()  # kill L2 so we isolate L3
+
+        loss_ortho = model._get_kasa_loss()
+        assert loss_ortho.item() < 1e-4
+
+        # Now make B clearly non-orthonormal and confirm the penalty becomes strictly positive.
+        with torch.no_grad():
+            for module in model.modules():
+                if isinstance(module, LoraLinear):
+                    module.lora_B["default"].weight.mul_(3.0)
+        loss_non_ortho = model._get_kasa_loss()
+        assert loss_non_ortho.item() > 1e-3
+
+    def test_kasa_loss_has_gradients(self):
+        # The regularization loss must be differentiable w.r.t. the KaSA parameters. init_lora_weights=False makes
+        # lora_B non-zero (lora_diag is already randomly initialized).
+        torch.manual_seed(0)
+        config = LoraConfig(
+            target_modules=["lin0", "lin1"], r=4, lora_alpha=8, init_lora_weights=False, kasa_config=KasaConfig()
+        )
+        model = get_peft_model(self.MLP(), config)
+
+        loss = model._get_kasa_loss()
+        loss.backward()
+        for module in model.modules():
+            if isinstance(module, LoraLinear):
+                assert module.lora_diag["default"].grad is not None
+                assert module.lora_A["default"].weight.grad is not None

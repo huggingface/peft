@@ -18,10 +18,12 @@ import warnings
 
 import torch
 
+from peft.tuners.tuners_utils import BasePromptEncoder
+
 from .config import PromptEncoderConfig, PromptEncoderReparameterizationType
 
 
-class PromptEncoder(torch.nn.Module):
+class PromptEncoder(BasePromptEncoder):
     """
     The prompt encoder network that is used to generate the virtual token embeddings for p-tuning.
 
