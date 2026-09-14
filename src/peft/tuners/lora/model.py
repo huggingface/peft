@@ -755,13 +755,42 @@ class LoraModel(BaseTuner):
             svd_rank=svd_rank,
         )
 
+        # The element-wise combination types (linear / ties / dare_* / magnitude_prune) sum the
+        # adapters' A and B matrices, so the merged weight for a module keeps that module's source
+        # rank. When the source adapters used a `rank_pattern`, that rank can differ per module and
+        # from `new_rank`; without recording it on the merged config, `from_pretrained` would rebuild
+        # the module at `new_rank` and fail to load the (smaller) saved weights. We therefore recover
+        # each module's rank from the source adapters and store it as a `rank_pattern` (with a matching
+        # `alpha_pattern`, so `scaling = alpha / r` stays what the combined weights already bake in).
+        # `cat` and the `svd` variants allocate `new_rank` for every module, so they need none of this.
+        new_rank_pattern: dict[str, int] = {}
+        new_alpha_pattern: dict[str, int] = {}
+        if combination_type in ("linear", "ties", "dare_linear", "dare_ties", "magnitude_prune"):
+            for key, module in self.model.named_modules():
+                if self.prefix in key or not isinstance(module, LoraLayer):
+                    continue
+                module_ranks = {module.r[adapter] for adapter in adapters if adapter in module.r}
+                if not module_ranks:
+                    continue
+                if len(module_ranks) > 1:
+                    raise ValueError(
+                        f"The adapters {adapters} have different ranks for module '{key}' "
+                        f"({sorted(module_ranks)}). combination_type '{combination_type}' sums the adapter "
+                        "weights element-wise and requires the same rank per module; use combination_type "
+                        "'cat' or an 'svd' variant to combine adapters with different ranks."
+                    )
+                module_rank = module_ranks.pop()
+                if module_rank != new_rank:
+                    new_rank_pattern[key] = module_rank
+                    new_alpha_pattern[key] = module_rank
+
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],
             r=new_rank,
             lora_alpha=new_rank,
             target_modules=new_target_modules,
-            alpha_pattern={},
-            rank_pattern={},
+            alpha_pattern=new_alpha_pattern,
+            rank_pattern=new_rank_pattern,
         )
         self.inject_adapter(self.model, adapter_name)
 

@@ -4409,6 +4409,51 @@ class TestPeftCustomModel(PeftCommonTester):
             ["default", "other"], weights=[1.0, 1.0], adapter_name="merged", combination_type="cat"
         )
 
+    @pytest.mark.parametrize("combination_type", ["linear", "ties", "dare_linear", "dare_ties", "magnitude_prune"])
+    def test_add_weighted_adapter_elementwise_with_rank_pattern_reloads(self, combination_type, tmp_path):
+        # The element-wise combination types keep each module's source rank in the merged weights, so
+        # when the source adapters use a rank_pattern the merged adapter must record it too. Otherwise
+        # from_pretrained rebuilds the module at the (larger) default rank and fails to load, see #3737.
+        config0 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 2}, init_lora_weights=False)
+        config1 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 2}, init_lora_weights=False)
+        model = get_peft_model(MLP(), config0, adapter_name="a").to(self.torch_device)
+        model.add_adapter("b", config1)
+        density = None if combination_type == "linear" else 0.5
+        model.add_weighted_adapter(
+            ["a", "b"], weights=[0.5, 0.5], adapter_name="merged", combination_type=combination_type, density=density
+        )
+        model.set_adapter("merged")
+
+        # delta weights of the merged adapter, computed before the save/reload round-trip
+        deltas = {
+            name: module.get_delta_weight("merged")
+            for name, module in model.named_modules()
+            if isinstance(module, lora.LoraLayer)
+        }
+        model.save_pretrained(tmp_path, selected_adapters=["merged"])
+        del model
+
+        loaded = PeftModel.from_pretrained(MLP().to(self.torch_device), tmp_path / "merged", adapter_name="merged")
+        num_lora_layers = 0
+        for name, module in loaded.named_modules():
+            if isinstance(module, lora.LoraLayer):
+                num_lora_layers += 1
+                assert torch.allclose(deltas[name], module.get_delta_weight("merged"), atol=1e-6)
+        assert num_lora_layers == len(deltas)
+
+    def test_add_weighted_adapter_elementwise_different_rank_pattern_raises(self):
+        # For element-wise combination types the adapters must share the same rank per module. When they
+        # do not (even if their maximum ranks match), we should raise a clear error rather than crash deep
+        # inside a tensor stack, see #3737.
+        config0 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 2})
+        config1 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 4})
+        model = get_peft_model(MLP(), config0, adapter_name="a").to(self.torch_device)
+        model.add_adapter("b", config1)
+        with pytest.raises(ValueError, match="have different ranks for module"):
+            model.add_weighted_adapter(
+                ["a", "b"], weights=[0.5, 0.5], adapter_name="merged", combination_type="linear"
+            )
+
     def test_add_weighted_adapter_negative_weight_negates_adapter(self):
         # Test that weight=-1.0 properly negates an adapter
         torch.manual_seed(42)
