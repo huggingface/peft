@@ -163,7 +163,7 @@ def get_peft_model_state_dict(
         if keys_starting_with_prefix:
             tp_plan = {f"{prefix}{k}": v for k, v in tp_plan.items()}
         state_dict = gather_state_dict_for_save(state_dict, tp_plan, tp_info.device_mesh, tp_info.tp_size)
-    elif is_transformers_dtensor_tp and getattr(model, "_tp_plan", None):
+    elif is_transformers_dtensor_tp and getattr(model, "_tp_size", None):
         # DTensor TP integration: the adapter weights are already `DTensor` instances, so they carry their own
         # device_mesh/placements and can be gathered without needing any `_tp_info`.
         from transformers.integrations.tensor_parallel import gather_state_dict_for_save

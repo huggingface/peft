@@ -424,9 +424,8 @@ class LoraModel(BaseTuner):
                     tp_plans.append("embedding_colwise")
 
                 if not is_transformers_dtensor_tp:
-                    # On the DTensor API, TP-ness is already visible on the parameters themselves
-                    # (they are `DTensor` instances) and on the model (`model._tp_plan`), so this
-                    # legacy per-module marker is only needed for the pre-DTensor TP integration.
+                    # DTensor parameters carry their own sharding metadata, so this per-module marker
+                    # is only needed for the pre-DTensor TP integration.
                     lora_module._tp_info = TpInfo(
                         tp_plan=dict(zip(tp_plan_keys, tp_plans)),
                         device_mesh=device_mesh,
