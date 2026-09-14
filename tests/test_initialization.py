@@ -6501,9 +6501,7 @@ class TestAdapterNameCollisionFiltering:
         torch.manual_seed(0)
         model = get_peft_model(
             mlp_net,
-            LoraConfig(
-                r=4, lora_alpha=8, target_modules=["lin0", "mlp"], lora_dropout=0.0, init_lora_weights=False
-            ),
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0", "mlp"], lora_dropout=0.0, init_lora_weights=False),
         )
         model.add_adapter(
             "lora_A",
