@@ -6473,3 +6473,54 @@ class TestAdapterNameCollisionFiltering:
             "base_model.model.mlp.lora_A.weight",
             "base_model.model.mlp.lora_B.weight",
         }
+
+    def test_ia3_prefix_shape_with_colliding_adapter_name(self, mlp_net):
+        # Same "mlp" collision as above but through a different tuner prefix shape: IA³ stores
+        # a single `ia3_l` vector per module instead of LoRA's `lora_A`/`lora_B` matrices. Guards
+        # the positional match against future prefix-layout changes.
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            IA3Config(target_modules=["lin0", "mlp"], feedforward_modules=["mlp"]),
+        )
+        model.add_adapter("mlp", IA3Config(target_modules=["lin0"], feedforward_modules=[]))
+
+        assert set(get_peft_model_state_dict(model, adapter_name="default").keys()) == {
+            "base_model.model.lin0.ia3_l",
+            "base_model.model.mlp.ia3_l",
+        }
+        assert set(get_peft_model_state_dict(model, adapter_name="mlp").keys()) == {
+            "base_model.model.lin0.ia3_l",
+        }
+
+    def test_adapter_named_like_tuner_attribute(self, mlp_net):
+        # Adapter literally named "lora_A": the segment after the `lora_A` tuner prefix is the
+        # adapter name here, not a module path. Selecting "default" must keep default's keys and
+        # selecting "lora_A" must return only its own. Non-zero init keeps the value check below
+        # meaningful.
+        torch.manual_seed(0)
+        model = get_peft_model(
+            mlp_net,
+            LoraConfig(
+                r=4, lora_alpha=8, target_modules=["lin0", "mlp"], lora_dropout=0.0, init_lora_weights=False
+            ),
+        )
+        model.add_adapter(
+            "lora_A",
+            LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0, init_lora_weights=False),
+        )
+
+        default_tensors = get_peft_model_state_dict(model, adapter_name="default")
+        assert set(default_tensors.keys()) == {
+            "base_model.model.lin0.lora_A.weight",
+            "base_model.model.lin0.lora_B.weight",
+            "base_model.model.mlp.lora_A.weight",
+            "base_model.model.mlp.lora_B.weight",
+        }
+        lora_a_tensors = get_peft_model_state_dict(model, adapter_name="lora_A")
+        assert set(lora_a_tensors.keys()) == {
+            "base_model.model.lin0.lora_A.weight",
+            "base_model.model.lin0.lora_B.weight",
+        }
+        live = model.base_model.model.lin0.lora_A["lora_A"].weight
+        assert torch.equal(lora_a_tensors["base_model.model.lin0.lora_A.weight"], live)

@@ -76,7 +76,7 @@ def _get_tp_info(model) -> TpInfo | None:
 def _filter_state_dict_for_adapter_name(
     state_dict: dict[str, torch.Tensor],
     unwanted_adapter_names: list[str],
-    model,
+    model: torch.nn.Module,
 ) -> dict[str, torch.Tensor]:
     """Filter the state dict to remove keys that correspond to the unwanted adapter.
 
