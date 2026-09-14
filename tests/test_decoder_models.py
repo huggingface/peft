@@ -71,7 +71,7 @@ from peft import (
     get_peft_model,
 )
 
-from .testing_common import PeftCommonTester
+from .testing_common import PeftCommonTester, _skip_if_merging_not_supported
 from .testing_utils import device_count, hub_online_once, load_dataset_english_quotes, set_init_weights_false
 
 
@@ -701,6 +701,18 @@ class TestDecoderModels(PeftCommonTester):
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         check_beft_config(config_cls, model_id, config_kwargs)
         self._test_merge_layers_nan(model_id, config_cls, config_kwargs.copy())
+
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16], ids=["fp32", "bf16", "fp16"])
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    def test_get_additive_delta_corresponds_to_merged_weight(self, model_id, config_cls, config_kwargs, dtype):
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        _skip_if_not_conv1d_supported(model_id, config_cls)
+        config_kwargs = set_init_weights_false(config_cls, config_kwargs)
+        check_beft_config(config_cls, model_id, config_kwargs)
+        self._test_get_additive_delta_corresponds_to_merged_weight(
+            model_id, config_cls, config_kwargs.copy(), dtype=dtype
+        )
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
