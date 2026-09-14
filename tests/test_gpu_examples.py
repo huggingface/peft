@@ -7126,3 +7126,42 @@ def test_kappatune_with_4bit_model():
     assert "target_modules" in targets
     assert isinstance(targets["target_modules"], list)
     assert len(targets["target_modules"]) > 0, "Should return at least some target modules"
+
+
+@pytest.mark.single_gpu_tests
+@require_bitsandbytes
+def test_kappatune_with_8bit_model(tmp_path):
+    """Test that KappaTune dequantizes 8-bit quantized weights before computing condition numbers."""
+    import torch
+    from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+
+    from peft.helpers import KappaTuneSelector
+
+    model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-LlamaForCausalLM")
+    # Give the rows of each weight very different scales. 8-bit quantization stores one scale per row, so condition
+    # numbers computed on the int8 values without these scales would differ strongly from those of the actual weights.
+    with torch.no_grad():
+        for module in model.modules():
+            if isinstance(module, torch.nn.Linear):
+                module.weight.mul_(torch.logspace(-2, 1, module.out_features).unsqueeze(1))
+    model.save_pretrained(tmp_path)
+
+    model_fp = AutoModelForCausalLM.from_pretrained(tmp_path, device_map=torch_device, dtype=torch.float32)
+    model_8bit = AutoModelForCausalLM.from_pretrained(
+        tmp_path,
+        quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+        device_map=torch_device,
+    )
+
+    selector_fp = KappaTuneSelector(model_fp, show_progress=False)
+    selector_fp._compute_kappas()
+    selector_8bit = KappaTuneSelector(model_8bit, show_progress=False)
+    selector_8bit._compute_kappas()
+
+    kappas_fp = selector_fp._condition_numbers
+    kappas_8bit = selector_8bit._condition_numbers
+    assert kappas_8bit.keys() == kappas_fp.keys()
+    # Quantization noise can still noticeably change the condition number of nearly singular weights, hence the loose
+    # bound. Without dequantization, the condition numbers would be off by a much larger factor.
+    for name, kappa_fp in kappas_fp.items():
+        assert 0.5 < kappas_8bit[name] / kappa_fp < 2, name
