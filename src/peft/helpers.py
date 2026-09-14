@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import inspect
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
 from functools import update_wrapper
@@ -32,8 +32,10 @@ except ImportError:
 from tqdm.auto import tqdm
 
 from .peft_model import PeftConfig, PeftModel
-from .tuners.lora import LoraLayer, LoraModel, dora
+from .tuners.lora import LoraConfig, LoraLayer, LoraModel, dora
 from .tuners.tuners_utils import BaseTunerLayer
+from .utils.hotswap import check_hotswap_configs_compatible
+from .utils.peft_types import PeftType
 
 
 def update_forward_signature(model: PeftModel) -> None:
@@ -578,3 +580,114 @@ def find_kappa_target_modules(
         "target_modules": target_modules,
         "target_parameters": target_parameters,
     }
+
+
+def create_dummy_lora_config(configs: Sequence[LoraConfig]) -> LoraConfig:
+    """
+    Create a no-op LoRA configuration that reserves capacity for hotswapping.
+
+    The purpose of this helper function is to create a dummy LoRA config which can be used to initialze a LoRA model
+    before hotswapping different LoRA adapters (see
+    https://huggingface.co/docs/peft/main/en/package_reference/hotswap). One issue with hotswapping is that the first
+    LoRA adapter that is loaded needs to install LoRA weights on all layers that the later, hotswapped LoRAs will
+    target. If these LoRAs target disjunct layers, none of them can serve as the first LoRA. This helper function
+    creates a dummy LoRA that targets the union of the layers of all the individual LoRAs. It also pre-allocates LoRA
+    weights with a sufficiently large rank.
+
+    The generated LoRA config is not intended to be used for further training.
+
+    No base model or adapter weights are loaded. Layer filters and exclusions are removed to cover every adapter, which
+    can over-allocate LoRA weights on additional layers.
+
+    Instantiate the result with `get_peft_model`, then call `prepare_model_for_compiled_hotswap` before compiling. The
+    dummy adapter is initialized such that it is a no-op, i.e. it does not need to be disabled to run inference on the
+    base model.
+
+    Note that some `LoraConfig` arguments are not supported and will result in an error. This is because it would not
+    be possible to combine those configs into one dummy config.
+
+    There is a helper script in the PEFT repository to create the dummy LoRA config from the command line:
+
+    `python scripts/create-dummy-lora-for-hotswap.py adapter0 adapter1 [...] --output-dir dummy-lora`
+
+    Args:
+        configs (`Sequence[LoraConfig]`):
+            Nonempty sequence of compatible LoRA configurations for the same base model. Each must have explicit,
+            nonempty `target_modules`; strings (including regexes and `"all-linear"`) and inferred targets are not
+            supported. Standard LoRA and rsLoRA are supported, without extra saved modules, biases, or parameters.
+
+    Returns:
+        `LoraConfig`: A configuration with zero-output initialization and a uniform maximum rank.
+
+    Raises:
+        TypeError:
+            If any configuration is not a LoRA configuration.
+        ValueError:
+            If no configurations are supplied, or their settings are unsupported or incompatible.
+
+    """
+    if not configs:
+        raise ValueError("At least one LoRA configuration is required.")
+
+    unsupported_fields: tuple[str, ...] = (
+        "modules_to_save",
+        "lora_bias",
+        "target_parameters",
+        "trainable_token_indices",
+        "layer_replication",
+        "megatron_config",
+        "ensure_weight_tying",
+        "use_dora",
+        "use_qalora",
+        "alora_invocation_tokens",
+        "velora_config",
+        "monteclora_config",
+        "use_bdlora",
+        "arrow_config",
+        "kasa_config",
+        "_custom_modules",
+    )
+    target_modules: set[str] = set()
+    max_rank = 0
+    for index, config in enumerate(configs):
+        if not isinstance(config, LoraConfig) or config.peft_type != PeftType.LORA:
+            raise TypeError(f"Configuration {index} must be a LoRA configuration.")
+
+        if isinstance(config.target_modules, str) or not config.target_modules:
+            raise ValueError(f"Configuration {index} must specify nonempty target_modules as a list of strings.")
+
+        if config.bias != "none":
+            raise ValueError(f"Configuration {index} has unsupported bias={config.bias!r}; use bias='none'.")
+
+        for field in unsupported_fields:
+            if getattr(config, field):
+                raise ValueError(f"Configuration {index} has unsupported {field} for dummy LoRA hotswapping.")
+
+        if config.fan_in_fan_out != configs[0].fan_in_fan_out:
+            raise ValueError("Configurations have incompatible fan_in_fan_out settings.")
+
+        if index > 0:
+            check_hotswap_configs_compatible(configs[0], config)
+
+        target_modules.update(config.target_modules)
+        max_rank = max(max_rank, config.r, *config.rank_pattern.values())
+
+    dummy_config = deepcopy(configs[0])
+    for field in ("base_model_name_or_path", "revision", "task_type"):
+        values = {getattr(config, field) for config in configs if getattr(config, field) is not None}
+        if len(values) > 1:
+            raise ValueError(f"Configurations have incompatible {field} values: {sorted(values)}.")
+
+        if values:
+            setattr(dummy_config, field, values.pop())
+
+    dummy_config.target_modules = target_modules
+    dummy_config.r = max_rank
+    dummy_config.rank_pattern = {}
+    dummy_config.exclude_modules = None
+    dummy_config.layers_to_transform = None
+    dummy_config.layers_pattern = None
+    dummy_config.init_lora_weights = True
+    dummy_config.inference_mode = True
+
+    return dummy_config
