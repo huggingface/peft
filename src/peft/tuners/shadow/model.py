@@ -856,6 +856,9 @@ class ShadowModel(BaseTuner):
         )
 
     def delete_adapter(self, adapter_name: str) -> None:
+        doomed_trains = adapter_name in self.shadow_backbone and any(
+            param.requires_grad for param in self.shadow_backbone[adapter_name].parameters()
+        )
         super().delete_adapter(adapter_name)
         for container in (self.shadow_backbone, self.shadow_projection, self.shadow_head):
             if adapter_name in container:
@@ -867,6 +870,7 @@ class ShadowModel(BaseTuner):
             bookkeeping.pop(adapter_name, None)
         # Coverage may have changed (the deleted adapter's blocks could be unwrapped now); rebind the boundary hooks.
         self._register_boundary_hooks()
+        self._sync_shadow_module_trainability(inference_mode=not doomed_trains)
 
     def unload_shadow(self, adapter_name: Optional[str] = None, copy: bool = False) -> nn.Module:
         """Return the shadow backbone (+ head) as a standalone model, *without* the base model.
