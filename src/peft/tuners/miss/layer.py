@@ -76,6 +76,8 @@ class MissLayer(BaseTunerLayer):
 
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+        if r > self.in_features:
+            raise ValueError(f"`r` ({r}) must be less than or equal to in_features ({self.in_features})")
 
         self.miss_r[adapter_name] = r
         self.miss_mini_r[adapter_name] = mini_r
