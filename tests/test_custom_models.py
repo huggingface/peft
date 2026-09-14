@@ -2719,6 +2719,32 @@ class TestPeftCustomModel(PeftCommonTester):
         assert torch.equal(layer.base_layer.bias.data, original_bias)
         assert layer.merged_adapters == []
 
+    def test_adamss_safe_merge_does_not_mutate_base_layer_on_non_finite_bias(self):
+        # AdaMSS used to write the merged weight to the base layer before computing and
+        # validating the merged bias. A non-finite bias would then raise, but the base weight
+        # was already modified -- defeating the whole point of safe_merge.
+        torch.manual_seed(0)
+        model = MLP()
+        config = AdamssConfig(target_modules=["lin0"], r=2, num_subspaces=1)
+        model = get_peft_model(model, config)
+
+        layer = model.base_model.model.lin0
+        original_weight = layer.base_layer.weight.data.clone()
+        original_bias = layer.base_layer.bias.data.clone()
+
+        # newB has shape (r, in_features + 1); its last column feeds the bias delta only
+        # (get_delta_weight returns delta[:, :-1], get_delta_bias returns delta[:, -1]).
+        # Poisoning just that column makes the merged bias non-finite while the merged
+        # weight stays finite, which is exactly the case that used to corrupt the weight.
+        layer.adamss_newB["default"][:, -1] = float("inf")
+
+        with pytest.raises(ValueError, match="NaNs detected in the merged bias"):
+            layer.merge(safe_merge=True)
+
+        assert torch.equal(layer.base_layer.weight.data, original_weight)
+        assert torch.equal(layer.base_layer.bias.data, original_bias)
+        assert layer.merged_adapters == []
+
     @pytest.mark.parametrize("safe_merge", [False, True])
     @pytest.mark.parametrize("module_type", ["linear", "conv2d"])
     def test_merge_with_lora_bias_when_base_layer_has_no_bias_warns_and_raises(self, safe_merge, module_type):
