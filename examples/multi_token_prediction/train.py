@@ -767,9 +767,6 @@ def eval_step(model, tokenizer, sampler, train_config: TrainConfig, sample, step
 
     # compute how many tokens would have been accepted on average. this is rather expensive so we
     # limit it to a subset of the samples.
-    #
-    # we also report NTP accuracy as a baseline for MTP, if we are significantly better than that, we're
-    # probably overfitting the fine-tuning dataset. if we're way worse than that, we are not learning enough.
     if step % 50 == 0:
         mtp_match_rate = calculate_model_match(
             model,
