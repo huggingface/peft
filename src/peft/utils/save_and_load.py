@@ -354,7 +354,11 @@ def _find_mismatched_keys(
             continue
 
         # see https://github.com/huggingface/transformers/blob/09f9f566de83eef1f13ee83b5a1bbeebde5c80c1/src/transformers/modeling_utils.py#L3858-L3864
-        if (state_dict[key].shape[-1] == 1) and (state_dict[key].numel() * 2 == tensor.numel()):
+        if (
+            state_dict[key].ndim > 0
+            and (state_dict[key].shape[-1] == 1)
+            and (state_dict[key].numel() * 2 == tensor.numel())
+        ):
             # This skips size mismatches for 4-bit weights. Two 4-bit values share an 8-bit container, causing size
             # differences. Without matching with module type or parameter type it seems like a practical way to detect
             # valid 4bit weights.
