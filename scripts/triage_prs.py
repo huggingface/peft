@@ -26,7 +26,7 @@ TRIAGED_LABEL = "triaged"
 CLOSURE_MARKER = "<!-- peft-pr-triage: approval-required -->"
 HUMAN_MARKER = "This PR was authored by a human"
 REPOSITORY = "huggingface/peft"
-START_DATE = "2026-09-10"  # Apply triage only to PRs from this date, inclusive, or later (UTC)
+START_DATE = "2026-09-21"  # Apply triage only to PRs from this date, inclusive, or later (UTC)
 BOT_NAME = "peft-triage"
 
 # see: https://api.github.com/users/<user-id>
@@ -37,15 +37,20 @@ ALLOW_LIST_ORGANIZATIONS = {}  # Organization name -> immutable organization ID.
 HF_ORGANIZATION_ID = 25720743
 GITHUB_ACTIONS_BOT_ID = 41898282
 MAX_ISSUE_REFERENCES = 10
+# Discussion numbers listed here are accepted without an approval comment or API lookup.
+ALLOW_LIST_DISCUSSIONS: set[str] = {
+    3521,  # MetaMathQA benchmark discussion
+    3522,  # image-gen benchmark discussion
+}
 
 CLOSURE_MESSAGE = (
     "{closure_marker}\n\n"
     "Thank you for your interest in contributing to PEFT. This PR is being closed because its description "
-    "does not reference a PEFT issue with explicit approval from a maintainer or public Hugging Face "
-    "organization member.\n\n"
-    "Please open or find an issue, discuss the proposed contribution, and wait for an authorized person to "
-    "comment `@{bot_name} approved` on its own line before opening a PR. "
-    "Once approved, reference the issue in this PR's description (for example, `Fixes #123`) and reopen it; "
+    "does not reference an accepted PEFT discussion or an open PEFT issue with explicit approval from a "
+    "maintainer or public Hugging Face organization member.\n\n"
+    "Please open or find an issue, discuss the proposed contribution, and wait for an authorized "
+    "person to comment `/{bot_name} approved` before opening a PR. "
+    "Once approved, reference it in this PR's description (for example, `Fixes #123`) and reopen the PR; "
     "there is no need to create another PR.\n\n"
     "If you believe this PR was closed incorrectly, please ping the maintainers here.\n\n"
     "See the [contribution guidelines]"
@@ -165,6 +170,26 @@ def extract_issue_numbers(body, repository):
     return numbers
 
 
+def extract_discussion_numbers(body, repository):
+    """Extract full GitHub discussion URLs in description order."""
+    numbers = []
+    for reference in re.finditer(r"https?://[^\s<>`]+", strip_html_comments(body)):
+        url = urlsplit(reference.group().rstrip(".,;:)]}"))
+        match = re.fullmatch(r"/([^/]+/[^/]+)/discussions/([1-9][0-9]*)/?", url.path)
+        if url.netloc.lower() != "github.com" or not match or match[1].lower() != repository.lower():
+            continue
+
+        number = match[2]
+        if len(number) > 20:
+            raise ValueError("Discussion reference exceeds the supported number length.")
+
+        number = int(number)
+        if number not in numbers:
+            numbers.append(number)
+
+    return numbers
+
+
 def iter_unfenced_lines(body):
     """Yield lines outside HTML comments and Markdown code fences."""
     fence = None
@@ -185,7 +210,7 @@ def iter_unfenced_lines(body):
 def contains_approval(body, bot_name):
     """Require the command on its own line, outside HTML comments and Markdown code fences."""
     return any(
-        re.fullmatch(rf" {{0,3}}@{re.escape(bot_name)} approved[ \t]*", line) for line in iter_unfenced_lines(body)
+        re.fullmatch(rf" {{0,3}}/{re.escape(bot_name)} approved[ \t]*", line) for line in iter_unfenced_lines(body)
     )
 
 
@@ -198,7 +223,18 @@ def is_eligible_pr(pr, since):
 
 
 class PullRequestTriage:
-    def __init__(self, client, repository, since, bot_name, maintainers, allowed_users=(), allowed_organizations=()):
+    def __init__(
+        self,
+        *,
+        client,
+        repository,
+        since,
+        bot_name,
+        maintainers,
+        allowed_users,
+        allowed_organizations,
+        allowed_discussions,
+    ):
         self.client = client
         self.repository = repository
         self.path = f"/repos/{repository}"
@@ -207,6 +243,7 @@ class PullRequestTriage:
         self.maintainers = set(maintainers)
         self.allowed_users = set(allowed_users)
         self.allowed_organizations = dict(allowed_organizations)
+        self.allowed_discussions = allowed_discussions
 
     def can_approve(self, user_id):
         return user_id in self.maintainers or user_id in self.client.public_members("huggingface", HF_ORGANIZATION_ID)
@@ -225,7 +262,7 @@ class PullRequestTriage:
     def has_approved_issue(self, body):
         for number in extract_issue_numbers(body, self.repository):
             issue = self.client.get(f"{self.path}/issues/{number}")
-            if "pull_request" in issue:
+            if "pull_request" in issue or issue.get("state") != "open":
                 continue
 
             comments = self.client.list_items(f"{self.path}/issues/{number}/comments")
@@ -236,6 +273,9 @@ class PullRequestTriage:
                 return True
 
         return False
+
+    def has_allowed_discussion(self, body):
+        return any(number in self.allowed_discussions for number in extract_discussion_numbers(body, self.repository))
 
     def is_human_author(self, body):
         """Require a standalone declaration or checked checkbox outside comments and code fences."""
@@ -260,6 +300,7 @@ class PullRequestTriage:
         approved = (
             self.is_human_author(pr["body"])
             or self.is_exempt_author(pr["user"]["id"])
+            or self.has_allowed_discussion(pr["body"])
             or self.has_approved_issue(pr["body"])
         )
         comments = [] if approved else self.client.list_items(f"{self.path}/issues/{number}/comments")
@@ -268,7 +309,7 @@ class PullRequestTriage:
             print(f"Skipping PR #{number}: changed during triage; will reconsider next run.")
             return
 
-        action = "label triaged" if approved else "close: missing issue approval"
+        action = "label triaged" if approved else "close: missing issue or discussion approval"
         print(f"{'Would' if dry_run else 'Will'} {action} on PR #{number}")
         if dry_run:
             return
@@ -312,6 +353,7 @@ def main():
         maintainers=MAINTAINERS.values(),
         allowed_users=ALLOW_LIST_USERS.values(),
         allowed_organizations=ALLOW_LIST_ORGANIZATIONS,
+        allowed_discussions=ALLOW_LIST_DISCUSSIONS,
     )
     triage.run(dry_run=str_to_bool(os.environ.get("DRY_RUN", "false")))
 
