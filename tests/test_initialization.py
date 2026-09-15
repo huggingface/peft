@@ -6465,14 +6465,20 @@ class TestAdapterNameCollisionFiltering:
         )
         model.add_adapter("foo", LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], lora_dropout=0.0))
 
+        # The raw state contains both adapters — the filtered view for "default" must not leak "foo".
+        assert any("foo" in k for k in model.state_dict().keys())
         tensors = get_peft_model_state_dict(model, adapter_name="default")
-        assert all("foo" not in k for k in tensors.keys())
         assert set(tensors.keys()) == {
             "base_model.model.lin0.lora_A.weight",
             "base_model.model.lin0.lora_B.weight",
             "base_model.model.mlp.lora_A.weight",
             "base_model.model.mlp.lora_B.weight",
         }
+        # Value attribution: the returned tensor must be default's weight, not foo's.
+        assert torch.equal(
+            tensors["base_model.model.lin0.lora_A.weight"],
+            model.base_model.model.lin0.lora_A["default"].weight,
+        )
 
     def test_ia3_prefix_shape_with_colliding_adapter_name(self, mlp_net):
         # Same "mlp" collision as above but through a different tuner prefix shape: IA³ stores
