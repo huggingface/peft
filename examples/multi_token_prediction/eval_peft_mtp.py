@@ -28,7 +28,7 @@ import transformers
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from peft import PeftModel, PeftModelForCausalLM
+from peft import PeftConfig, PeftModel, PeftModelForCausalLM
 from peft.tuners.lora import LoraLayer
 from peft.tuners.lora.variants import calculate_alora_offsets
 
@@ -297,9 +297,8 @@ def load_model(model_path: str, dtype=torch.bfloat16):
     tokenizer = AutoTokenizer.from_pretrained(model_path)
 
     # Read adapter config to get base model name
-    with open(f"{model_path}/adapter_config.json") as f:
-        adapter_config = json.load(f)
-    base_model_name = adapter_config["base_model_name_or_path"]
+    adapter_config = PeftConfig.from_pretrained(model_path)
+    base_model_name = adapter_config.base_model_name_or_path
 
     # Load base model (original Llama without LoRA)
     print(f"Loading base model: {base_model_name}")
