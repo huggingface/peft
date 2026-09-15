@@ -406,6 +406,10 @@ def calculate_model_match(model, batch, labels, offsets, model_logits, num_mtp, 
     match_rates = []
     offsets = offsets[:-1] if (use_lc_loss or use_tv_loss) else offsets
 
+    # TODO pretty sure that we can alwyas take the last batch, generate bs * (num_mtp + 1) tokens once
+    # and then use a (num_mtp+1) window with (num_mtp+1) skip for each item in the batch, this way we
+    # could utilize the KV cache in generate().
+
     for idx_batch, (input_ids, offset) in enumerate(zip(batch["input_ids"], offsets)):
         # auto-regressively create the reference tokens from the base model.
         #
