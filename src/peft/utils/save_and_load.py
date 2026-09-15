@@ -58,7 +58,12 @@ def get_embedding_layer_name(model, layer, is_embedding_in_target_modules) -> st
 
 
 def _get_tp_info(model) -> TpInfo | None:
-    """Collect TP info from lora modules that have _tp_info set."""
+    """
+    Collect TP info from lora modules that have _tp_info set.
+
+    DEPRECATED: This is only used for the legacy, pre-DTensor TP integration.
+    It returns `None` under the DTensor TP integration.
+    """
     tp_plan, device_mesh, tp_size = {}, None, None
     # We check if there is a TP plan, otherwise it is not worth looping over the modules for nothing.
     if getattr(model, "_tp_plan", None) is None:
