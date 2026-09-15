@@ -22,9 +22,9 @@ We are happy to accept contributions to PEFT. If you plan to contribute, please 
 
 Before opening a pull request (including a draft), open or find an issue in [huggingface/peft](https://github.com/huggingface/peft/issues) and discuss your proposed contribution. If there is an existing issue and someone is already working on it, has declared their intent to work on it, or has an open PR, you should not submit a separate PR. Wait for a PEFT maintainer or Hugging Face member to explicitly approve the proposal. If you open an issue, keep the length and complexity of the description in proportion with the complexity of the issue. Often, a short description with a reproducer is more valuable than a long description.
 
-Link the approved issue in your PR description using `#123`, `huggingface/peft#123`, or `https://github.com/huggingface/peft/issues/123`. For example, write `Fixes #123`. The reference must point to an issue in the PEFT repository. If you reference several issues, approval on one is sufficient.
+Link the approved, open issue in your PR description using `#123`, `huggingface/peft#123`, or `https://github.com/huggingface/peft/issues/123`. As an exception, maintainers may designate specific long-running discussions that can be referenced by their full GitHub URL without a separate approval comment. If you reference several issues or discussions, one valid reference is sufficient.
 
-An automated workflow checks PRs for corresponding issues with approvals. PRs without verified approval are automatically closed with an explanation. You can obtain approval, update the PR description, and reopen the same PR; please do not create a replacement. If you believe your PR was closed incorrectly, ping the maintainers on the PR.
+An automated workflow checks PRs for approved open issues or discussions. PRs without a valid reference are automatically closed with an explanation. You can obtain issue approval, update the PR description, and reopen the same PR; please do not create a replacement. If you believe your PR was closed incorrectly, ping the maintainers on the PR.
 
 The independent stale bot can still close inactive items, even if labeled as `triaged`. If you feel like the maintainers have overlooked your contribution, you may ping them, but not earlier than before two weeks of inactivity.
 
