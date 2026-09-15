@@ -1,3 +1,8 @@
+"""
+
+TODO do not save the embedding matrix in the adapter checkpoint
+"""
+
 import argparse
 import math
 import os
