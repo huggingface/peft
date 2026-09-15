@@ -71,9 +71,9 @@ class TorchaoLoraLinear(Linear):
         self._check_dtype_supported()
 
         base_layer = self.get_base_layer()
-        weight = base_layer.weight
 
         for active_adapter in adapter_names:
+            weight = base_layer.weight
             try:
                 weight = weight.dequantize()
             except NotImplementedError as exc:
