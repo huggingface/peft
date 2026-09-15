@@ -936,6 +936,7 @@ def main():
     parser.add_argument("--eva_init", action="store_true", default=False)
     parser.add_argument("--eva_samples", type=int, default=128)
     parser.add_argument("--hub_id", type=str, default=None)
+    parser.add_argument("--trackio_space", type=str, default=None)
 
     default_lr = 1e-4
 
@@ -956,7 +957,7 @@ def main():
         raise ValueError("Sampler teacher forcing needs the full base model logit sequence. As of yet this "
                          "is only the case when tv or lcm loss are enabled. Sorry.")
 
-    trackio.init(project="mtp-training")
+    trackio.init(project="mtp-training", space_id=args.trackio_space)
 
     model, tokenizer, mask_token_ids = setup_model_with_masks(args.model_id, args.k)
 
