@@ -510,8 +510,8 @@ def hotswap_adapter_from_state_dict(
         module = model.get_submodule(module_name)
 
         # swap alpha/scaling
-        r_key = get_pattern_key(config.rank_pattern.keys(), key)
-        alpha_key = get_pattern_key(config.alpha_pattern.keys(), key)
+        r_key = get_pattern_key(config.rank_pattern.keys(), module_name)
+        alpha_key = get_pattern_key(config.alpha_pattern.keys(), module_name)
         rank = config.rank_pattern.get(r_key, config.r)
         alpha = config.alpha_pattern.get(alpha_key, config.lora_alpha)
         if config.use_rslora:

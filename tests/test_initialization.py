@@ -4596,6 +4596,60 @@ class TestHotSwapping:
         # real check: model now behaves again like adapter 0
         assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
 
+    @pytest.mark.parametrize("use_rslora", [False, True])
+    @pytest.mark.parametrize("do_compile", [False, True])
+    @pytest.mark.parametrize("pattern_key", ["lin1", "lin[1]"])
+    @pytest.mark.parametrize("pattern", ["rank", "alpha", "rank_and_alpha"])
+    def test_hotswap_rank_and_alpha_patterns(self, use_rslora, do_compile, pattern_key, pattern, tmp_path):
+        # Regression for #3738: hotswapping must use the same per-module scaling as normal loading.
+        from torch._dynamo.testing import CompileCounter
+
+        inputs = torch.rand(3, 10, device=self.torch_device)
+        base_model = self.get_model()
+        configs = [
+            LoraConfig(r=3, lora_alpha=9, target_modules=["lin0", "lin1"]),
+            LoraConfig(r=2, lora_alpha=4, target_modules=["lin0"]),
+            LoraConfig(r=1, lora_alpha=3, target_modules=["lin1"]),
+        ]
+        expected_outputs, expected_scalings = [], []
+        with torch.inference_mode():
+            for index, config in enumerate(configs):
+                config.init_lora_weights = False
+                config.use_rslora = use_rslora
+                if "rank" in pattern:
+                    config.rank_pattern = {pattern_key: 4 - index}
+                if "alpha" in pattern:
+                    # Hotswap requires identical alpha patterns across adapters.
+                    config.alpha_pattern = {pattern_key: 7}
+                adapter = get_peft_model(deepcopy(base_model), config).eval()
+                adapter.save_pretrained(tmp_path / str(index))
+                expected_outputs.append(adapter(inputs))
+                expected_scalings.append(
+                    {
+                        name: module.scaling["default"]
+                        for name, module in adapter.named_modules()
+                        if isinstance(module, LoraLayer)
+                    }
+                )
+
+        model = PeftModel.from_pretrained(deepcopy(base_model), tmp_path / "0").eval()
+        if do_compile:
+            prepare_model_for_compiled_hotswap(model, target_rank=4)
+            torch._dynamo.reset()
+        counter = CompileCounter()
+        model = torch.compile(model, backend=counter, fullgraph=True) if do_compile else model
+        with torch.inference_mode():
+            torch.testing.assert_close(model(inputs), expected_outputs[0])
+            # Re-swapping the first adapter pins the same-checkpoint case, then exercise missing targets and return.
+            for index in [0, 1, 2, 0]:
+                hotswap_adapter(model, tmp_path / str(index), adapter_name="default")
+                torch.testing.assert_close(model(inputs), expected_outputs[index], atol=1e-4, rtol=1e-4)
+                for name, scaling in expected_scalings[index].items():
+                    actual = model.get_submodule(name).scaling["default"]
+                    assert float(actual) == pytest.approx(scaling)
+        if do_compile:
+            assert counter.frame_count == 1
+
     def test_hotswap_different_peft_types_raises(self, tmp_path):
         # When the configs of the two adapters are different PEFT methods, raise
         config0 = LoraConfig(target_modules=["lin0"])
