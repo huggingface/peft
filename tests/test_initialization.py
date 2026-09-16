@@ -4428,6 +4428,34 @@ class TestLilyInitialization:
         assert lin0_B_ptrs.isdisjoint(lin1_B_ptrs), "B adapters should not be shared between lin0 and lin1 layers"
 
 
+def test_prepare_model_for_compiled_hotswap_preserves_conv2d_attributes():
+    # Regression test for https://github.com/huggingface/peft/issues/3697: rank padding reconstructs Conv2d LoRA
+    # modules, which must retain the spatial attributes copied from the base layer.
+    class ConvModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = nn.Conv2d(1, 2, kernel_size=3, padding=2, dilation=2, padding_mode="reflect")
+
+        def forward(self, X):
+            return self.conv(X)
+
+    torch.manual_seed(0)
+    inputs = torch.randn(2, 1, 8, 8)
+    model = get_peft_model(
+        ConvModel(),
+        LoraConfig(target_modules=["conv"], r=2, init_lora_weights=False),
+    )
+    layer = model.base_model.model.conv
+    output_before = model(inputs)
+
+    prepare_model_for_compiled_hotswap(model, target_rank=4)
+    output_after = model(inputs)
+
+    assert layer.lora_A["default"].dilation == layer.base_layer.dilation
+    assert layer.lora_A["default"].padding_mode == layer.base_layer.padding_mode
+    assert torch.allclose(output_before, output_after, atol=1e-6, rtol=1e-5)
+
+
 @pytest.mark.skipif(
     platform.system() != "Linux", reason="Out of the box, torch.compile does not work on Windows or MacOS"
 )
