@@ -10,7 +10,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import datetime
 import gc
 import importlib
 import itertools
@@ -6725,8 +6724,6 @@ WORLD_SIZE = 2
 TINY_MODEL_ID = "peft-internal-testing/zephyr-smol_llama-100m-sft-full"
 TARGET_MODULES = ["embed_tokens", "q_proj", "k_proj", "v_proj", "o_proj"]
 
-TIMEOUT_BARRIER = datetime.timedelta(seconds=30)
-
 TP_PLAN = {
     "model.embed_tokens": "embedding_rowwise",
     "model.layers.*.self_attn.q_proj": "colwise",
@@ -6766,8 +6763,11 @@ def _setup_dist(rank, world_size, port):
     os.environ["MASTER_PORT"] = str(port)
     os.environ["LOCAL_RANK"] = str(rank)
     os.environ["RANK"] = str(rank)
-    os.environ["WORLD_SIZE"] = str(rank)
-    dist.init_process_group(backend="gloo", rank=rank, world_size=world_size)
+    os.environ["WORLD_SIZE"] = str(world_size)
+    if torch.cuda.is_available():
+        dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+    else:
+        dist.init_process_group(backend="gloo", rank=rank, world_size=world_size)
 
 
 def _teardown_dist():
@@ -6799,7 +6799,9 @@ def _test_lora_weight_synchronization(rank, world_size, port):
     inputs = {k: v.to(device) for k, v in inputs.items()}
 
     model.train()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    # foreach=False: the model mixes plain `Tensor` and `DTensor` parameters (only some LoRA weights are
+    # TP-sharded), and foreach ops refuse to operate on a mix of the two within the same (device, dtype) group.
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, foreach=False)
 
     # Test that loss is finite and decreases over multiple steps
     for _ in range(3):
@@ -6836,6 +6838,70 @@ def _test_lora_weight_synchronization(rank, world_size, port):
                 assert torch.allclose(weight, g), f"{name}.lora_embedding_B differs between rank {rank} and rank {i}"
 
 
+def _test_lora_gradient_synchronization(rank, world_size, port):
+    """
+    Tests that the gradients of the LoRA weights are:
+        1. DTensor if the weight is a DTensor, and that placements match,
+        2. identical across ranks if the weight is replicated (not sharded)
+    """
+    from torch.distributed.tensor import DTensor
+
+    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, **_get_tp_kwargs(tp_plan=TP_PLAN))
+    lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
+    model = get_peft_model(model, lora_config)
+
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    model.to(device)
+
+    tokenizer = AutoTokenizer.from_pretrained(TINY_MODEL_ID)
+    inputs = tokenizer("Paris is the most beautiful city in the world.", return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    model.train()
+    outputs = model(**inputs, labels=inputs["input_ids"])
+    outputs.loss.backward()
+
+    checked_at_least_one = False
+    for name, module in model.named_modules():
+        if not isinstance(module, LoraLayer):
+            continue
+        base_layer = module.get_base_layer()
+        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+        if tp_plan == "colwise":
+            sharded_params = {f"{name}.lora_B": module.lora_B["default"].weight}
+            replicated_params = {f"{name}.lora_A": module.lora_A["default"].weight}
+        elif tp_plan == "rowwise":
+            sharded_params = {f"{name}.lora_A": module.lora_A["default"].weight}
+            replicated_params = {f"{name}.lora_B": module.lora_B["default"].weight}
+        elif tp_plan == "embedding_rowwise":
+            sharded_params = {f"{name}.lora_embedding_A": module.lora_embedding_A["default"]}
+            replicated_params = {f"{name}.lora_embedding_B": module.lora_embedding_B["default"]}
+        else:
+            continue
+
+        for param_name, param in {**sharded_params, **replicated_params}.items():
+            checked_at_least_one = True
+            assert param.grad is not None, f"{param_name} has no gradient"
+            assert isinstance(param, DTensor) == isinstance(param.grad, DTensor), (
+                f"{param_name}: parameter {'is' if isinstance(param, DTensor) else 'is not'} a DTensor but its "
+                f"gradient {'is' if isinstance(param.grad, DTensor) else 'is not'}, they must match"
+            )
+
+        # Only the replicated matrix is expected to hold the exact same value on every rank.
+        for param_name, param in replicated_params.items():
+            grad = param.grad.full_tensor() if isinstance(param.grad, DTensor) else param.grad
+            grad = grad.contiguous()
+            gathered = [torch.zeros_like(grad) for _ in range(world_size)]
+            dist.all_gather(gathered, grad)
+            for i, g in enumerate(gathered):
+                assert torch.allclose(grad, g, atol=1e-5), (
+                    f"{param_name} gradient differs between rank {rank} and rank {i}"
+                )
+
+    assert checked_at_least_one, "No LoRA parameter was found to check"
+
+
 def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
     """
     Test that loading from a checkpoint correctly handles the sharding of LoRA weights according to the TP plan.
@@ -6846,7 +6912,7 @@ def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
         plain_model = get_peft_model(plain_model, lora_config)
         plain_model.save_pretrained(tmp_dir)
 
-    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
+    dist.barrier()
 
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
@@ -6906,7 +6972,7 @@ def _test_save_unsharded_weights(rank, world_size, port, tmp_dir_reference, tmp_
         plain_model = get_peft_model(plain_model, lora_config)
         plain_model.save_pretrained(tmp_dir_reference)
 
-    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
+    dist.barrier()
 
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
@@ -6916,7 +6982,7 @@ def _test_save_unsharded_weights(rank, world_size, port, tmp_dir_reference, tmp_
     tp_model = PeftModel.from_pretrained(tp_base, tmp_dir_reference)
     tp_model.save_pretrained(tmp_dir_tp)
 
-    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
+    dist.barrier()
 
     if rank == 0:
         reference_sd = load_file(f"{tmp_dir_reference}/adapter_model.safetensors")
@@ -6958,9 +7024,11 @@ def _test_load_adapter_forward(rank, world_size, port, tmp_dir_reference):
     Test that load_adapter (with a peft_config) works with a TP base model and the forward pass produces the same loss
     on every rank and that it is finite.
 
-    This exercises the low-level API path where no PeftModel/tuner is created, so TP info must be stored on the lora
-    modules themselves (via _tp_info) rather than on the tuner.
+    This exercises the low-level API path where no PeftModel/tuner is created, so the LoRA modules must be TP-sharded
+    directly (their parameters become `DTensor` instances) rather than relying on the tuner.
     """
+    from torch.distributed.tensor import DTensor
+
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
 
@@ -6970,7 +7038,7 @@ def _test_load_adapter_forward(rank, world_size, port, tmp_dir_reference):
         plain_model = get_peft_model(plain_model, lora_config)
         plain_model.save_pretrained(tmp_dir_reference)
 
-    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
+    dist.barrier()
 
     model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, **_get_tp_kwargs(tp_plan=TP_PLAN))
     model.load_adapter(tmp_dir_reference)
@@ -6978,7 +7046,9 @@ def _test_load_adapter_forward(rank, world_size, port, tmp_dir_reference):
 
     for mod in model.modules():
         if isinstance(mod, LoraLayer):
-            assert hasattr(mod, "_tp_info"), "load_adapter did not store TP info on the LoRA module"
+            assert any(isinstance(p, DTensor) for p in mod.parameters()), (
+                "load_adapter did not TP-shard the LoRA module's parameters"
+            )
 
     tokenizer = AutoTokenizer.from_pretrained(TINY_MODEL_ID)
     inputs = tokenizer("Paris is the capital of France.", return_tensors="pt")
@@ -7014,7 +7084,7 @@ def _test_load_adapter_save(rank, world_size, port, tmp_dir_reference, tmp_dir_t
         plain_model = get_peft_model(plain_model, lora_config)
         plain_model.save_pretrained(tmp_dir_reference)
 
-    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
+    dist.barrier()
 
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
@@ -7028,7 +7098,7 @@ def _test_load_adapter_save(rank, world_size, port, tmp_dir_reference, tmp_dir_t
         tmp_dir_tp.mkdir(exist_ok=True)
         save_file(tp_sd, f"{tmp_dir_tp}/adapter_model.safetensors")
 
-    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
+    dist.barrier()
 
     if rank == 0:
         reference_sd = load_file(f"{tmp_dir_reference}/adapter_model.safetensors")
@@ -7073,6 +7143,9 @@ class TestLoraTensorParallel:
 
     def test_lora_weight_synchronization(self):
         self._spawn(_test_lora_weight_synchronization, port_offset=0)
+
+    def test_lora_gradient_synchronization(self):
+        self._spawn(_test_lora_gradient_synchronization, port_offset=2)
 
     def test_from_checkpoint(self, tmp_path):
         self._spawn(_test_load_from_checkpoint, tmp_path, port_offset=1)
