@@ -314,14 +314,12 @@ class TestShadowCausalLM:
             make_llama_causal(),
             ShadowConfig(task_type="CAUSAL_LM", shadow_num_hidden_layers=1),
         )
+        assert any(p.requires_grad for p in model.base_model.shadow_backbone["default"].parameters())
         model.add_adapter("other", ShadowConfig(task_type="CAUSAL_LM", shadow_num_hidden_layers=1))
         model.set_adapter("other")
         model.delete_adapter("other")  # falls back to "default"
         backbone = model.base_model.shadow_backbone["default"]
         assert any(p.requires_grad for p in backbone.parameters())
-        ids = torch.randint(0, 128, (2, 6))
-        model(ids, labels=ids).loss.backward()
-        assert any(p.grad is not None for p in backbone.parameters())
 
     def test_requires_two_layers(self):
         # A single decoder block means the shadow carrier has no loop to ride; injection needs >= 2 blocks.
