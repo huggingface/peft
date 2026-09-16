@@ -1,9 +1,10 @@
 {
   "run_info": {
-    "created_at": "2026-06-09T10:16:24+00:00",
-    "total_time": 3001.757409892,
+    "created_at": "2026-09-16T02:52:44+00:00",
+    "total_time": 2981.324185745001,
     "experiment_name": "boft/flux2-klein-default",
     "peft_branch": "main",
+    "peft_worktree_is_dirty": true,
     "train_config": {
       "model_id": "black-forest-labs/FLUX.2-klein-base-4B",
       "dataset_id": "peft-internal-testing/cat-image-dataset",
@@ -98,17 +99,17 @@
       "boft_block_num": 0,
       "boft_n_butterfly_factor": 2,
       "target_modules": [
+        "to_add_out",
         "to_v",
-        "add_k_proj",
-        "to_qkv_mlp_proj",
-        "to_q",
         "linear_in",
-        "add_v_proj",
+        "to_q",
         "to_k",
         "to_out.0",
-        "add_q_proj",
+        "to_qkv_mlp_proj",
+        "add_k_proj",
+        "add_v_proj",
         "linear_out",
-        "to_add_out"
+        "add_q_proj"
       ],
       "exclude_modules": null,
       "boft_dropout": 0.0,
@@ -122,10 +123,10 @@
     "error_msg": ""
   },
   "train_info": {
-    "accelerator_memory_reserved_avg": 17298115002,
-    "accelerator_memory_max": 17368612864,
-    "accelerator_memory_reserved_99th": 17368612864,
-    "train_time": 2524.314185989001,
+    "accelerator_memory_reserved_avg": 17843866654,
+    "accelerator_memory_max": 17844666368,
+    "accelerator_memory_reserved_99th": 17844666368,
+    "train_time": 2529.000063329997,
     "file_size": 8500008,
     "num_trainable_params": 2119680,
     "num_total_params": 3877664256,
@@ -133,86 +134,86 @@
     "metrics": [
       {
         "step": 100,
-        "valid dino_similarity": 0.34351247549057007,
-        "train loss": 0.762182354927063,
+        "valid dino_similarity": 0.28163468837738037,
+        "train loss": 0.762276828289032,
         "train samples": 200,
-        "train time": 243.34609632800084,
-        "eval time": 66.00437694799984,
-        "mem allocated avg": 14321960192.0,
-        "mem reserved avg": 17365215477.76,
-        "elapsed time": 315.7438521270001
+        "train time": 241.720417490993,
+        "eval time": 61.3367268280017,
+        "mem allocated avg": 14320518400.0,
+        "mem reserved avg": 17842569216.0,
+        "elapsed time": 313.261804851998
       },
       {
         "step": 200,
-        "valid dino_similarity": 0.47275498509407043,
-        "train loss": 0.7758499979972839,
+        "valid dino_similarity": 0.4770458936691284,
+        "train loss": 0.7758969664573669,
         "train samples": 400,
-        "train time": 240.73475723299862,
-        "eval time": 66.47240585000009,
-        "mem allocated avg": 14322012416.0,
-        "mem reserved avg": 17286823936.0,
-        "elapsed time": 623.094051045
+        "train time": 241.3862183229794,
+        "eval time": 61.63813805599784,
+        "mem allocated avg": 14320570624.0,
+        "mem reserved avg": 17842569216.0,
+        "elapsed time": 616.3221568900008
       },
       {
         "step": 300,
-        "valid dino_similarity": 0.44021278619766235,
-        "train loss": 0.7750328779220581,
+        "valid dino_similarity": 0.4887232780456543,
+        "train loss": 0.7750172019004822,
         "train samples": 600,
-        "train time": 241.62629119500025,
-        "eval time": 66.06956163099994,
-        "mem allocated avg": 14322063616.0,
-        "mem reserved avg": 17286823936.0,
-        "elapsed time": 930.936767403
+        "train time": 241.87586586801262,
+        "eval time": 61.51012616099979,
+        "mem allocated avg": 14320621824.0,
+        "mem reserved avg": 17844100136.96,
+        "elapsed time": 919.7455131339993
       },
       {
         "step": 400,
-        "valid dino_similarity": 0.5291547775268555,
-        "train loss": 0.7631975412368774,
+        "valid dino_similarity": 0.5289652943611145,
+        "train loss": 0.7630845308303833,
         "train samples": 800,
-        "train time": 239.96141395800169,
-        "eval time": 66.48263424800007,
-        "mem allocated avg": 14322114816.0,
-        "mem reserved avg": 17286823936.0,
-        "elapsed time": 1237.527966265
+        "train time": 242.43463206298838,
+        "eval time": 61.552631918999396,
+        "mem allocated avg": 14320673024.0,
+        "mem reserved avg": 17843575848.96,
+        "elapsed time": 1223.769053142998
       },
       {
         "step": 500,
-        "valid dino_similarity": 0.5172373056411743,
-        "train loss": 0.7812181711196899,
+        "valid dino_similarity": 0.5110691785812378,
+        "train loss": 0.7811291813850403,
         "train samples": 1000,
-        "train time": 241.2803780840004,
-        "eval time": 65.95611584100016,
-        "mem allocated avg": 14322166016.0,
-        "mem reserved avg": 17288061255.68,
-        "elapsed time": 1544.915679325
+        "train time": 241.1736456689614,
+        "eval time": 61.59534383999926,
+        "mem allocated avg": 14320724224.0,
+        "mem reserved avg": 17844540538.88,
+        "elapsed time": 1526.573317287999
       },
       {
         "step": 600,
-        "valid dino_similarity": 0.48621824383735657,
-        "train loss": 0.7532262206077576,
+        "valid dino_similarity": 0.49255192279815674,
+        "train loss": 0.753121554851532,
         "train samples": 1200,
-        "train time": 240.039809554999,
-        "eval time": 66.08985766899968,
-        "mem allocated avg": 14322217216.0,
-        "mem reserved avg": 17288921088.0,
-        "elapsed time": 1851.1966522470002
+        "train time": 242.69891614601147,
+        "eval time": 61.31905923400336,
+        "mem allocated avg": 14320775424.0,
+        "mem reserved avg": 17844666368.0,
+        "elapsed time": 1830.6271132329966
       },
       {
         "step": 700,
-        "valid dino_similarity": 0.6115512251853943,
-        "train loss": 0.7843080759048462,
+        "valid dino_similarity": 0.6346185207366943,
+        "train loss": 0.7843075394630432,
         "train samples": 1400,
-        "train time": 240.69034176499736,
-        "eval time": 66.11447335399953,
-        "mem allocated avg": 14322268416.0,
-        "mem reserved avg": 17288774287.36,
-        "elapsed time": 2158.1504945849997
+        "train time": 241.6321652799743,
+        "eval time": 61.48558600900287,
+        "mem allocated avg": 14320826624.0,
+        "mem reserved avg": 17844645396.48,
+        "elapsed time": 2133.7793448310003
       },
       {
         "step": 750,
-        "test dino_similarity": 0.6449412306149801,
-        "drift": 0.2069137692451477,
-        "train loss": 0.7722759246826172,
+        "test dino_similarity": 0.640242874622345,
+        "drift": 0.21176984906196594,
+        "train loss": 0.7721332907676697,
         "train samples": 1500
       }
     ]
@@ -227,25 +228,25 @@
       "created_at": "2026-03-09T15:31:26+00:00"
     },
     "package_info": {
-      "transformers-version": "5.10.2",
+      "transformers-version": "5.13.1",
       "transformers-commit-hash": null,
-      "peft-version": "0.19.2.dev0",
-      "peft-commit-hash": "b2d61f5f80a7ac540fb572c077d8265a95986db8",
+      "peft-version": "0.21.0",
+      "peft-commit-hash": "514b9e6d11fe9be9d72d04abd0d290a7a6441ddd",
       "datasets-version": "4.2.0",
       "datasets-commit-hash": null,
       "diffusers-version": "0.38.0",
       "diffusers-commit-hash": null,
-      "torch-version": "2.12.0+cu130",
+      "torch-version": "2.13.0+cu130",
       "torch-commit-hash": null
     },
     "system_info": {
       "system": "Linux",
-      "release": "6.17.0-1009-aws",
-      "version": "#9~24.04.2-Ubuntu SMP Fri Mar  6 23:50:29 UTC 2026",
+      "release": "7.0.0-1012-aws",
+      "version": "#12~24.04.1-Ubuntu SMP PREEMPT Wed Aug 12 14:00:57 UTC 2026",
       "machine": "x86_64",
       "processor": "x86_64",
       "accelerator": "NVIDIA L40S"
     },
-    "pytorch_info": "PyTorch built with:\n  - GCC 13.3\n  - C++ Version: 202002\n  - Intel(R) oneAPI Math Kernel Library Version 2024.2-Product Build 20240605 for Intel(R) 64 architecture applications\n  - Intel(R) MKL-DNN v3.11.2 (Git Hash 03c022d3ffdcee958cfacbe720048e725fdf644c)\n  - OpenMP 201511 (a.k.a. OpenMP 4.5)\n  - LAPACK is enabled (usually provided by MKL)\n  - NNPACK is enabled\n  - CPU capability usage: AVX2\n  - CUDA Runtime 13.0\n  - NVCC architecture flags: -gencode;arch=compute_75,code=sm_75;-gencode;arch=compute_80,code=sm_80;-gencode;arch=compute_86,code=sm_86;-gencode;arch=compute_90,code=sm_90;-gencode;arch=compute_100,code=sm_100;-gencode;arch=compute_120,code=sm_120\n  - CuDNN 90.7.1  (built against CUDA 12.8)\n    - Built with CuDNN 92.0\n  - Magma 2.6.1\n  - Build settings: BLAS_INFO=mkl, BUILD_TYPE=Release, COMMIT_SHA=7661cd9c6b841b62b7f411aa52ec51f05457263b, CUDA_FLAGS= -DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS -Xfatbin -compress-all -DONNX_NAMESPACE=onnx_torch -gencode arch=compute_75,code=sm_75 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_100,code=sm_100 -gencode arch=compute_120,code=sm_120 -Xcudafe --diag_suppress=cc_clobber_ignored,--diag_suppress=field_without_dll_interface,--diag_suppress=base_class_has_different_dll_interface,--diag_suppress=dll_interface_conflict_none_assumed,--diag_suppress=dll_interface_conflict_dllexport_assumed,--diag_suppress=bad_friend_decl --expt-relaxed-constexpr --expt-extended-lambda -Xfatbin -compress-all --threads 2 -compress-mode=size -Wno-deprecated-gpu-targets --expt-extended-lambda -DCUB_WRAPPED_NAMESPACE=at_cuda_detail -DDISABLE_CUSPARSE_DEPRECATED -DCUDA_HAS_FP16=1 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -DC10_NODEPRECATED, CUDA_VERSION=13.0, CUDNN_VERSION=9.20.0, CXX_COMPILER=/opt/rh/gcc-toolset-13/root/usr/bin/c++, CXX_FLAGS= -fvisibility-inlines-hidden -DUSE_PTHREADPOOL -DNDEBUG -DUSE_KINETO -DLIBKINETO_NOROCTRACER -DLIBKINETO_NOXPUPTI=ON -DUSE_FBGEMM -DUSE_MSLK -DUSE_PYTORCH_QNNPACK -DUSE_XNNPACK -DSYMBOLICATE_MOBILE_DEBUG_HANDLE -O2 -fPIC -DC10_NODEPRECATED -Wall -Wextra -Werror=return-type -Werror=non-virtual-dtor -Werror=range-loop-construct -Werror=bool-operation -Wnarrowing -Wno-missing-field-initializers -Wno-unknown-pragmas -Wno-unused-parameter -Wno-strict-overflow -Wno-strict-aliasing -Wno-stringop-overflow -Wsuggest-override -Wno-psabi -Wno-error=old-style-cast -faligned-new -Wno-maybe-uninitialized -fno-math-errno -fno-trapping-math -Werror=format -Wno-dangling-reference -Wno-error=dangling-reference -Wno-stringop-overflow, LAPACK_INFO=mkl, PERF_WITH_AVX=1, PERF_WITH_AVX2=1, TORCH_VERSION=2.12.0, USE_CUDA=ON, USE_CUDNN=ON, USE_CUSPARSELT=1, USE_GFLAGS=OFF, USE_GLOG=OFF, USE_GLOO=ON, USE_MKL=ON, USE_MKLDNN=ON, USE_MPI=OFF, USE_NCCL=1, USE_NNPACK=ON, USE_OPENMP=ON, USE_ROCM=OFF, USE_ROCM_KERNEL_ASSERT=OFF, USE_XCCL=OFF, USE_XPU=OFF, \n"
+    "pytorch_info": "PyTorch built with:\n  - GCC 13.3\n  - C++ Version: 202002\n  - Intel(R) oneAPI Math Kernel Library Version 2024.2-Product Build 20240605 for Intel(R) 64 architecture applications\n  - Intel(R) MKL-DNN v3.12.0 (Git Hash 80afa71049cd69a3df32adcccb623b12cd7baa22)\n  - OpenMP 201511 (a.k.a. OpenMP 4.5)\n  - LAPACK is enabled (usually provided by MKL)\n  - NNPACK is enabled\n  - CPU capability usage: AVX2\n  - CUDA Runtime 13.0\n  - NVCC architecture flags: -gencode;arch=compute_75,code=sm_75;-gencode;arch=compute_80,code=sm_80;-gencode;arch=compute_86,code=sm_86;-gencode;arch=compute_90,code=sm_90;-gencode;arch=compute_100,code=sm_100;-gencode;arch=compute_120,code=sm_120\n  - CuDNN 90.7.1  (built against CUDA 12.8)\n    - Built with CuDNN 92.0\n  - Magma 2.6.1\n  - Build settings: BLAS_INFO=mkl, BUILD_TYPE=Release, COMMIT_SHA=cf30153c4c131c8164ee7798e5022d810682e2cb, CUDA_FLAGS= -DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS -Xfatbin -compress-all -DONNX_NAMESPACE=onnx_torch -gencode arch=compute_75,code=sm_75 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_100,code=sm_100 -gencode arch=compute_120,code=sm_120 -Xcudafe --diag_suppress=cc_clobber_ignored,--diag_suppress=field_without_dll_interface,--diag_suppress=base_class_has_different_dll_interface,--diag_suppress=dll_interface_conflict_none_assumed,--diag_suppress=dll_interface_conflict_dllexport_assumed,--diag_suppress=bad_friend_decl --expt-relaxed-constexpr --expt-extended-lambda -Xfatbin -compress-all --threads 2 -compress-mode=size -Wno-deprecated-gpu-targets --expt-extended-lambda -DCUB_WRAPPED_NAMESPACE=at_cuda_detail -DDISABLE_CUSPARSE_DEPRECATED -DCUDA_HAS_FP16=1 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -DC10_NODEPRECATED, CUDA_VERSION=13.0, CUDNN_VERSION=9.20.0, CXX_COMPILER=/opt/rh/gcc-toolset-13/root/usr/bin/c++, CXX_FLAGS= -fvisibility-inlines-hidden -DUSE_PTHREADPOOL -DNDEBUG -DUSE_KINETO -DHAS_CUPTI -DUSE_FBGEMM -DUSE_MSLK -DUSE_PYTORCH_QNNPACK -DSYMBOLICATE_MOBILE_DEBUG_HANDLE -O2 -fPIC -DC10_NODEPRECATED -Wall -Wextra -Werror=return-type -Werror=non-virtual-dtor -Werror=range-loop-construct -Werror=bool-operation -Wnarrowing -Wno-missing-field-initializers -Wno-unknown-pragmas -Wno-unused-parameter -Wno-strict-overflow -Wno-strict-aliasing -Wno-stringop-overflow -Wsuggest-override -Wno-psabi -Wno-error=old-style-cast -faligned-new -Wno-maybe-uninitialized -fno-math-errno -fno-trapping-math -Werror=format -Wno-dangling-reference -Wno-error=dangling-reference -Wno-stringop-overflow, LAPACK_INFO=mkl, PERF_WITH_AVX=1, PERF_WITH_AVX2=1, TORCH_VERSION=2.13.0, USE_CUDA=1, USE_CUDNN=ON, USE_CUSPARSELT=1, USE_GFLAGS=OFF, USE_GLOG=OFF, USE_GLOO=ON, USE_MKL=ON, USE_MKLDNN=ON, USE_MPI=OFF, USE_NCCL=ON, USE_NNPACK=ON, USE_OPENMP=ON, USE_ROCM=OFF, USE_ROCM_KERNEL_ASSERT=OFF, USE_XCCL=OFF, USE_XPU=OFF, \n"
   }
 }
