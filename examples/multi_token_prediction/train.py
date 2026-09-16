@@ -46,6 +46,7 @@ class TrainConfig:
     checkpoint_step: int
     max_gradient_norm: float
     hub_id: str
+    skip_prefix: bool
 
 
 MTP_MASK_TOKENS = None
@@ -890,13 +891,15 @@ class TextDataset(Dataset):
         )
 
 
-def tokenize_wiki(examples, tokenizer, chunk_size):
+def tokenize_wiki(examples, tokenizer, chunk_size, skip_prefix=False):
     chunks = []
-    for tokens in tokenizer.encode(examples["text"], add_special_tokens=False):
+    for i, tokens in enumerate(tokenizer.encode(examples["text"], add_special_tokens=False)):
+        if skip_prefix:
+            tokens = tokens[examples["prefix_len"][i]:]
         for i_split in range(0, len(tokens), chunk_size):
+            # NOTE: it is not unlikely that for self-distilled datasets, len(chunk) < chunk_size
             chunk = tokens[i_split : i_split + chunk_size]
-            if len(chunk) == chunk_size:
-                chunks.append(([tokenizer.bos_token_id] if tokenizer.bos_token else []) + chunk)
+            chunks.append(([tokenizer.bos_token_id] if tokenizer.bos_token else []) + chunk)
 
     return {"input_ids": chunks}
 
@@ -908,6 +911,11 @@ def main():
     parser.add_argument("-k", type=int, default=2)
     parser.add_argument("--text_file", type=str, default="train.txt")
     parser.add_argument("--dataset", type=str, default=False, help="Use a HF dataset instead of --text_file")
+    parser.add_argument("--skip_prefix", action="store_true", default=False, help=(
+        "If the dataset has a `prefix_len` field, skip that many tokens before choosing the training sequence start. "
+        "This is important for self-distillation datasets that have a prompt + generated data - during training we'd "
+        "want to skip the prompt since it is not what we want to learn, we want to match the generated data."
+    ))
     parser.add_argument("--seq_len", type=int, default=128)
     parser.add_argument("--model_id", type=str, default="meta-llama/Llama-3.2-3B")
     parser.add_argument("--lr", type=float)
@@ -996,11 +1004,11 @@ def main():
 
     # Create dataset
     if args.dataset:
-        print("Loading text from {args.dataset}")
+        print(f"Loading text from {args.dataset}")
         ds = load_dataset(args.dataset, split="train", streaming=True)
         num_valid_samples = args.num_valid
         dataset_train = ds.skip(num_valid_samples).map(
-            partial(tokenize_wiki, tokenizer=tokenizer, chunk_size=args.seq_len),
+            partial(tokenize_wiki, tokenizer=tokenizer, chunk_size=args.seq_len, skip_prefix=args.skip_prefix),
             batched=True,
             remove_columns=ds.column_names,
             drop_last_batch=True,
@@ -1102,6 +1110,7 @@ def main():
         checkpoint_step=args.checkpoint_step,
         max_gradient_norm=args.max_grad_norm,
         hub_id=args.hub_id,
+        skip_prefix=args.skip_prefix,
     )
 
     # If we use EVA init for LoRA we need to initialize that with data.
