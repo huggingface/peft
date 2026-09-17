@@ -1151,6 +1151,7 @@ class BaseTuner(nn.Module, ABC):
 
         for parameter, requires_grad in mapping_existing_parameter_requires_grad:
             parameter.requires_grad = requires_grad
+        model.train(model.training)
 
     def _inject_parameters(
         self, peft_config: PeftConfig, model: nn.Module, adapter_name: str, low_cpu_mem_usage: bool
