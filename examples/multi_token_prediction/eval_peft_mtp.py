@@ -198,44 +198,28 @@ class AloraMTPCandidateGenerator:
 class AloraMTPModel(PeftModelForCausalLM):
     def generate(self, *args, **kwargs):
         peft_config = self.active_peft_config
-        if getattr(peft_config, "alora_invocation_tokens", None) is None:
+        if not self.generation_config.use_mtp or getattr(peft_config, "alora_invocation_tokens", None) is None:
             return super().generate(*args, **kwargs)
 
         # Track the current input_ids of each forward (top-level). `_assisted_decoding`
         # calls `LlamaForCausalLM.forward` directly (generate runs on the underlying
         # model, not the LoraModel wrapper), so the hook must live on that model.
         gen_model = self.base_model.model if hasattr(self.base_model, "model") else self.base_model
-        rec = {"input_ids": None, "_is_mtp": getattr(self, "_mtp_dbg_flag", False)}
+        rec = {"input_ids": None}
 
         def top_pre_hook(module, args_, kwargs_):
             inp = kwargs_.get("input_ids")
             if inp is None and len(args_) > 0 and isinstance(args_[0], torch.Tensor):
                 inp = args_[0]
             rec["input_ids"] = inp
-            if os.environ.get("MTP_DEBUG") and rec.get("_is_mtp"):
-                cnt = getattr(module, "_top_dbg", 0)
-                if cnt < 3:
-                    object.__setattr__(module, "_top_dbg", cnt + 1)
-                    pos_ids = kwargs_.get("position_ids")
-                    pos_vals = pos_ids[0, :5].tolist() if pos_ids is not None else None
-                    cache = kwargs_.get("past_key_values")
-                    cache_len = cache.get_seq_length() if cache is not None else "no cache"
-                    print(
-                        f"  [MTP] top_pre_hook: input_ids={inp.shape if inp is not None else None} "
-                        f"pos_start={pos_vals} cache_len={cache_len}"
-                    )
+            rec["alora_offsets"] = (
+                calculate_alora_offsets(self.peft_config, self.active_adapter, inp)
+                if inp is not None else None
+            )
 
         # ... and inject freshly-recomputed alora_offsets into every LoRA layer, recording them.
-        self._alora_offsets_seen = []
-
         def layer_pre_hook(module, args_, kwargs_):
-            inp = rec["input_ids"]
-            off = calculate_alora_offsets(self.peft_config, self.active_adapter, inp) if inp is not None else None
-            kwargs_["alora_offsets"] = off
-            self._alora_offsets_seen.append(off)
-            if os.environ.get("MTP_DEBUG") and rec.get("_is_mtp") and getattr(module, "_lp_dbg", 0) < 5:
-                object.__setattr__(module, "_lp_dbg", getattr(module, "_lp_dbg", 0) + 1)
-                print(f"  [MTP] layer_pre_hook: input_ids={inp.shape if inp is not None else None} offsets={off}")
+            kwargs_["alora_offsets"] = rec["alora_offsets"]
 
         self.base_model.prepare_inputs_for_generation = self.prepare_inputs_for_generation
         if hasattr(self.base_model, "model"):
@@ -302,7 +286,7 @@ def load_model(model_path: str, dtype=torch.bfloat16):
 
     # Load base model (original Llama without LoRA)
     print(f"Loading base model: {base_model_name}")
-    base_model = AutoModelForCausalLM.from_pretrained(base_model_name, dtype=dtype, device_map="auto")
+    base_model = AutoModelForCausalLM.from_pretrained(base_model_name, dtype=dtype)
 
     # Resize embeddings to match tokenizer (added mask tokens during training)
     base_model.resize_token_embeddings(len(tokenizer))
@@ -516,8 +500,8 @@ def main():
     ap.add_argument("--verbose", action="store_true", help="print divergence details")
     args = ap.parse_args()
 
-    dtype = torch.float32 if args.dtype == "float32" else torch.bfloat16
-    model, tokenizer, mask_ids, K = load_model(args.model_path, dtype)
+    dtype = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}[args.dtype]
+    model, tokenizer, mask_ids, K = load_model(args.model_path, dtype=dtype)
     model = model.to(args.device)
 
     # make sure that we generate at least K tokens in every generationi so that every sample can
