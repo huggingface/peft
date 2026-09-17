@@ -208,6 +208,7 @@ class TestRandLora:
                 for other in tensors[index + 1 :]
             )
 
+        # Direct serialization should succeed once the shared projections have no aliased entries in the state dict.
         save_file(state_dict, tmp_path / "adapter.safetensors")
 
     def test_save_projection_true_roundtrip(self, mlp, tmp_path):
@@ -215,9 +216,6 @@ class TestRandLora:
         config = RandLoraConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=True)
         peft_model = get_peft_model(mlp, config)
         peft_model.eval()
-
-        peft_model.base_model.randlora_A["default"] += 1.0
-        peft_model.base_model.randlora_B["default"] += 1.0
 
         inputs = torch.randn(5, 10)
         output = peft_model(inputs)
@@ -239,9 +237,6 @@ class TestRandLora:
         source_model = get_peft_model(mlp, config)
         source_model.eval()
 
-        source_model.base_model.randlora_A["default"] += 1.0
-        source_model.base_model.randlora_B["default"] += 1.0
-
         inputs = torch.randn(5, 10)
         expected_output = source_model(inputs)
         old_state_dict = {
@@ -249,6 +244,11 @@ class TestRandLora:
             for key, value in source_model.state_dict().items()
             if "randlora_" in key and key.endswith(".default")
         }
+        # Confirm that this state dict represents the legacy format with multiple aliases for each shared projection.
+        for projection_name in ("randlora_A", "randlora_B"):
+            projection_values = [value for key, value in old_state_dict.items() if projection_name in key]
+            assert len(projection_values) > 1
+            assert all(torch.equal(projection_values[0], value) for value in projection_values[1:])
 
         torch.manual_seed(0)
         loaded_model = get_peft_model(MLP(), config)

@@ -243,12 +243,12 @@ class RandLoraModel(BaseTuner):
 
     @classmethod
     def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
-        if not config.save_projection:
-            return super()._get_adapter_state_dict(model, config, adapter_name, state_dict, unwanted_adapter_names)
-
         adapter_state_dict = super()._get_adapter_state_dict(
             model, config, adapter_name, state_dict, unwanted_adapter_names
         )
+        if not config.save_projection:
+            return adapter_state_dict
+
         # Each layer holds a reference to the shared projections, so the state dict contains a duplicate of them for
         # every layer. Keep one canonical projection entry per tensor: wrapped PeftModels expose model-level entries,
         # while direct injection has no retained RandLoraModel container and therefore uses one layer-level alias.
@@ -273,13 +273,13 @@ class RandLoraModel(BaseTuner):
 
     @classmethod
     def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
-        if not config.save_projection:
-            return super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
-
         # The remapping renames projection keys from e.g. "base_model.randlora_A" (checkpoint format) to
         # "base_model.randlora_A.<adapter_name>" (model format). The base implementation also accepts the old
         # per-layer aliases, preserving backward compatibility with existing RandLoRA checkpoints.
         peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
+        if not config.save_projection:
+            return peft_model_state_dict
+
         model_state_dict = model.state_dict()
         for projection_name in ("randlora_A", "randlora_B"):
             projection_key = f"base_model.{projection_name}.{adapter_name}"
