@@ -24,7 +24,7 @@ from torch import nn
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.lora.config import BdLoraConfig, MontecloraConfig
 from peft.utils.integrations import dequantize_module_weight, gather_params_ctx
-from peft.utils.other import transpose
+from peft.utils.other import infer_device, transpose
 
 from .arrow import ArrowLoraLinearLayer
 from .config import LoraConfig, PeftConfig
@@ -146,13 +146,13 @@ class DoraLinearVariant(LoraVariant):
         lora_B = module.lora_B[adapter_name].weight
         place_on_cpu = module.ephemeral_gpu_offload and (lora_A.device.type == "cpu" or lora_B.device.type == "cpu")
         if module.ephemeral_gpu_offload:
-            if lora_A.device.type in ["cuda", "xpu"]:
+            if lora_A.device.type in ["cuda", "xpu", "npu"]:
                 lora_B = lora_B.to(lora_A.device)
             else:
-                if lora_B.device.type not in ["cuda", "xpu"]:
-                    # Move offloaded LoRA weights to the base layer's device (device-agnostic)
-                    target_device = module.get_base_layer().weight.device
-                    lora_B = lora_B.to(target_device)
+                if lora_B.device.type not in ["cuda", "xpu", "npu"]:
+                    # Move offloaded LoRA weights to the active accelerator device
+                    # (device-agnostic: handles CUDA, XPU, NPU, MPS, etc.)
+                    lora_B = lora_B.to(infer_device())
                 lora_A = lora_A.to(lora_B.device)
         scaling = module.scaling[adapter_name]
         dora_layer.update_layer(
