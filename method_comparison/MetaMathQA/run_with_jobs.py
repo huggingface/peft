@@ -39,6 +39,7 @@ parser.add_argument("--upload", action="store_true", default=False)
 parser.add_argument("experiment_path", type=str)
 parser.add_argument("--flavor", type=str, default="a10g-large")
 parser.add_argument("--debug", action="store_true", default=False)
+parser.add_argument("--timeout", type=int, default=7200)
 
 args = parser.parse_args()
 
@@ -111,7 +112,7 @@ job = run_job(
     image="huggingface/peft-gpu:latest",
     command=["bash", "-c", cmd],
     flavor=args.flavor,
-    timeout=7200,
+    timeout=args.timeout,
     volumes=volumes,
     secrets={"HF_TOKEN": token},
 )
