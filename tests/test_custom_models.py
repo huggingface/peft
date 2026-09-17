@@ -4117,6 +4117,23 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
 
+    def test_delete_adapter_fallback_with_modules_to_save_becomes_trainable(self):
+        # Bug-fix for #3716: deleting the active adapter that has no modules_to_save copy must
+        # make the fallback adapter's copy trainable (it was frozen while inactive). LoRA is
+        # sufficient here, as the auxiliary-module logic is shared between PEFT methods.
+        model = MLP()
+
+        config_default = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        config_other = LoraConfig(target_modules=["lin0"])
+        model = get_peft_model(model, config_default, adapter_name="default").to(self.torch_device)
+        assert model.base_model.model.lin1.modules_to_save["default"].weight.requires_grad
+        model.add_adapter("other", config_other)
+        model.set_adapter("other")
+        assert not model.base_model.model.lin1.modules_to_save["default"].weight.requires_grad
+        model.delete_adapter("other")
+        assert model.active_adapters == ["default"]
+        assert model.base_model.model.lin1.modules_to_save["default"].weight.requires_grad
+
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_get_base_model_state_dict(self, test_name, model_id, config_cls, config_kwargs):
         if config_kwargs.get("kasa_config", None) is not None:
