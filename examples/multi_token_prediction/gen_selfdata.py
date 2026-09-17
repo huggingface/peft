@@ -198,7 +198,7 @@ def main():
                 max_new_tokens=max_new_tokens,
                 pad_token_id=eos_id,
             )
-        gen_tokens += output.shape[0] * max_new_tokens
+        gen_tokens += output.shape[0] * max_new_tokens  # TODO correct inflated numbers
 
         for row, (_, p_len), length in zip(output.tolist(), prompts, prompt_lens):
             budget = total_len + 1 - length
