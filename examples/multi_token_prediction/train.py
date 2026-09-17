@@ -891,16 +891,21 @@ class TextDataset(Dataset):
         )
 
 
-def tokenize_wiki(examples, tokenizer, chunk_size, skip_prefix=False):
+def tokenize_wiki(examples, tokenizer, chunk_size, min_len, skip_prefix=False):
     chunks = []
+    skipped = 0
     for i, tokens in enumerate(tokenizer.encode(examples["text"], add_special_tokens=False)):
         if skip_prefix:
             tokens = tokens[examples["prefix_len"][i]:]
         for i_split in range(0, len(tokens), chunk_size):
             # NOTE: it is not unlikely that for self-distilled datasets, len(chunk) < chunk_size
             chunk = tokens[i_split : i_split + chunk_size]
-            chunks.append(([tokenizer.bos_token_id] if tokenizer.bos_token else []) + chunk)
+            if len(chunk) > min_len:
+                chunks.append(([tokenizer.bos_token_id] if tokenizer.bos_token else []) + chunk)
+            else:
+                skipped += 1
 
+    print(f"skipped samples due to minimum length not satisfied: {skipped}.")
     return {"input_ids": chunks}
 
 
@@ -1007,14 +1012,15 @@ def main():
         print(f"Loading text from {args.dataset}")
         ds = load_dataset(args.dataset, split="train", streaming=True)
         num_valid_samples = args.num_valid
+        min_len = args.batch_size * args.k + 2 + 1  # see augment_mtp for details
         dataset_train = ds.skip(num_valid_samples).map(
-            partial(tokenize_wiki, tokenizer=tokenizer, chunk_size=args.seq_len, skip_prefix=args.skip_prefix),
+            partial(tokenize_wiki, tokenizer=tokenizer, chunk_size=args.seq_len, min_len=min_len, skip_prefix=args.skip_prefix),
             batched=True,
             remove_columns=ds.column_names,
             drop_last_batch=True,
         )
         dataset_valid = ds.take(num_valid_samples).map(
-            partial(tokenize_wiki, tokenizer=tokenizer, chunk_size=args.seq_len),
+            partial(tokenize_wiki, tokenizer=tokenizer, chunk_size=args.seq_len, min_len=min_len),
             batched=True,
             remove_columns=ds.column_names,
         )
