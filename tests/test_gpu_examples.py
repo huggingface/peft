@@ -7111,12 +7111,14 @@ def test_kappatune_with_4bit_model():
         bnb_4bit_use_double_quant=True,
     )
 
-    model = AutoModelForCausalLM.from_pretrained(
-        "hf-internal-testing/tiny-random-LlamaForCausalLM",
-        quantization_config=quantization_config,
-        device_map=torch_device,
-        dtype=torch.float16,
-    )
+    model_id = "hf-internal-testing/tiny-random-LlamaForCausalLM"
+    with hub_online_once(model_id):
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            quantization_config=quantization_config,
+            device_map=torch_device,
+            dtype=torch.float16,
+        )
 
     # Run KappaTune
     targets = find_kappa_target_modules(model, top_p=0.3)
@@ -7131,13 +7133,19 @@ def test_kappatune_with_4bit_model():
 @pytest.mark.single_gpu_tests
 @require_bitsandbytes
 def test_kappatune_with_8bit_model(tmp_path):
-    """Test that KappaTune dequantizes 8-bit quantized weights before computing condition numbers."""
+    """Test that KappaTune dequantizes 8-bit quantized weights before computing condition numbers.
+
+    Reading the int8 values without their per-row scales does not raise, it silently returns condition numbers that are
+    orders of magnitude off, so they are compared to those of the same model in full precision. See #3736.
+    """
     import torch
     from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 
     from peft.helpers import KappaTuneSelector
 
-    model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-LlamaForCausalLM")
+    model_id = "hf-internal-testing/tiny-random-LlamaForCausalLM"
+    with hub_online_once(model_id):
+        model = AutoModelForCausalLM.from_pretrained(model_id)
     # Give the rows of each weight very different scales. 8-bit quantization stores one scale per row, so condition
     # numbers computed on the int8 values without these scales would differ strongly from those of the actual weights.
     with torch.no_grad():
@@ -7164,4 +7172,4 @@ def test_kappatune_with_8bit_model(tmp_path):
     # Quantization noise can still noticeably change the condition number of nearly singular weights, hence the loose
     # bound. Without dequantization, the condition numbers would be off by a much larger factor.
     for name, kappa_fp in kappas_fp.items():
-        assert 0.5 < kappas_8bit[name] / kappa_fp < 2, name
+        assert 0.5 < kappas_8bit[name] / kappa_fp < 2
