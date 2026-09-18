@@ -8,7 +8,7 @@ fsdp_config:
   fsdp_cpu_ram_efficient_loading: true
   fsdp_forward_prefetch: false
   fsdp_offload_params: false
-  fsdp_sharding_strategy: FULL_SHARD
+  fsdp_sharding_strategy: SHARD_GRAD_OP
   fsdp_state_dict_type: SHARDED_STATE_DICT
   fsdp_sync_module_states: true
   fsdp_use_orig_params: false
