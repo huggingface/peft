@@ -80,6 +80,16 @@ class ModelEmbedInNoGet(torch.nn.Module):
         return self.lin0(self.embed_in(x))
 
 
+class ModelWithOutputHead(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.query = torch.nn.Linear(4, 4)
+        self.lm_head = torch.nn.Linear(4, 7)
+
+    def forward(self, x):
+        return self.lm_head(self.query(x))
+
+
 class TestTrainableTokens:
     @pytest.fixture
     def model_id(self):
@@ -122,6 +132,32 @@ class TestTrainableTokens:
         trainable_tokens_layer.trainable_tokens_delta[adapter_name].data = torch.rand_like(
             trainable_tokens_layer.trainable_tokens_delta[adapter_name].data
         )
+
+    @pytest.mark.parametrize("standalone", [True, False])
+    def test_linear_output_preserves_bias(self, standalone):
+        base_model = ModelWithOutputHead().eval()
+        with torch.no_grad():
+            base_model.lm_head.bias.copy_(torch.arange(7))
+
+        inputs = torch.randn(3, 4)
+        expected = base_model(inputs)
+
+        if standalone:
+            config = TrainableTokensConfig(target_modules=["lm_head"], token_indices=[1, 4])
+        else:
+            config = LoraConfig(
+                target_modules=["query"],
+                trainable_token_indices={"lm_head": [1, 4]},
+            )
+
+        peft_model = get_peft_model(copy.deepcopy(base_model), config).eval()
+        torch.testing.assert_close(peft_model(inputs), expected)
+
+        with peft_model.disable_adapter():
+            torch.testing.assert_close(peft_model(inputs), expected)
+
+        merged_model = peft_model.merge_and_unload()
+        torch.testing.assert_close(merged_model(inputs), expected)
 
     def test_stand_alone_usage(self, model, tokenizer, tmp_path):
         original_model = copy.deepcopy(model)
