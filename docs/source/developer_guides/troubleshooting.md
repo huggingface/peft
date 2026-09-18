@@ -541,4 +541,4 @@ To avoid this, either merge all active adapters, i.e. call `model.merge_adapter(
 This behavior is consistent across PEFT methods that support merging (LoRA, LoHa, LoKr, IA³, OFT, etc.), since they all share the same logic in the forward pass.
 
 > [!WARNING]
-> This behavior is confusing and is planned to change in the PEFT v1.0 release. Since any of the possible solutions would be backwards incompatible, it is only documented for now. Do not rely on the current behavior.
+> This behavior is confusing and is planned to change in the PEFT v1.0 release.
