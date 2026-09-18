@@ -43,9 +43,14 @@ def slice_pca(tensor, r, device, dtype=torch.float32, random_seed=0):
     # torch.svd_lowrank draws a random projection internally, so its result (and hence the downstream
     # clustering and scatter_index) depends on the RNG state. Seed a forked RNG with the configurable
     # random_seed so the result is deterministic (torch.svd_lowrank does not accept a generator argument);
-    # fork_rng leaves the global RNG stream untouched.
-    fork_devices = [device] if torch.device(device).type == "cuda" else []
-    with torch.random.fork_rng(devices=fork_devices):
+    # fork_rng leaves the global RNG stream untouched. Note that torch.manual_seed re-seeds all
+    # accelerators, so the fork must cover the device the SVD runs on, not just cuda.
+    fork_device = torch.device(device)
+    if fork_device.type == "cpu":
+        fork_kwargs = {"devices": []}
+    else:
+        fork_kwargs = {"devices": [fork_device], "device_type": fork_device.type}
+    with torch.random.fork_rng(**fork_kwargs):
         torch.manual_seed(random_seed)
         for i in range(B):
             for j in range(C):

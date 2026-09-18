@@ -10,7 +10,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import datetime
 import gc
 import importlib
 import itertools
@@ -74,6 +73,7 @@ from peft import (
     LoftQConfig,
     LoraConfig,
     PeftModel,
+    PeftWarning,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PveraConfig,
@@ -94,6 +94,7 @@ from peft import (
 from peft.import_utils import (
     is_diffusers_available,
     is_te_available,
+    is_torchao_ge_v0_18_0,
     is_transformers_ge_v5,
     is_transformers_ge_v5_13_0,
     is_xpu_available,
@@ -374,8 +375,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
-            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+            assert set(model.hf_device_map.values()) == {0, 1}
+            assert {p.device.index for p in model.parameters()} == {0, 1}
 
             model = prepare_model_for_kbit_training(model)
 
@@ -710,8 +711,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 device_map=DEVICE_MAP_MAP[self.seq2seq_model_id],
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
-            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+            assert set(model.hf_device_map.values()) == {0, 1}
+            assert {p.device.index for p in model.parameters()} == {0, 1}
 
             tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
             model = prepare_model_for_kbit_training(model)
@@ -995,8 +996,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
-            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+            assert set(model.hf_device_map.values()) == {0, 1}
+            assert {p.device.index for p in model.parameters()} == {0, 1}
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1113,8 +1114,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
-            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+            assert set(model.hf_device_map.values()) == {0, 1}
+            assert {p.device.index for p in model.parameters()} == {0, 1}
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1469,8 +1470,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
-            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+            assert set(model.hf_device_map.values()) == {0, 1}
+            assert {p.device.index for p in model.parameters()} == {0, 1}
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1529,8 +1530,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
-            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+            assert set(model.hf_device_map.values()) == {0, 1}
+            assert {p.device.index for p in model.parameters()} == {0, 1}
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1589,8 +1590,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
-            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+            assert set(model.hf_device_map.values()) == {0, 1}
+            assert {p.device.index for p in model.parameters()} == {0, 1}
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1649,8 +1650,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
-            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+            assert set(model.hf_device_map.values()) == {0, 1}
+            assert {p.device.index for p in model.parameters()} == {0, 1}
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1817,8 +1818,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
-            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+            assert set(model.hf_device_map.values()) == {0, 1}
+            assert {p.device.index for p in model.parameters()} == {0, 1}
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1877,8 +1878,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
-            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+            assert set(model.hf_device_map.values()) == {0, 1}
+            assert {p.device.index for p in model.parameters()} == {0, 1}
 
             model = prepare_model_for_kbit_training(model)
 
@@ -2041,8 +2042,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
-            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+            assert set(model.hf_device_map.values()) == {0, 1}
+            assert {p.device.index for p in model.parameters()} == {0, 1}
 
             model = prepare_model_for_kbit_training(model)
 
@@ -2099,8 +2100,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
-            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+            assert set(model.hf_device_map.values()) == {0, 1}
+            assert {p.device.index for p in model.parameters()} == {0, 1}
 
             model = prepare_model_for_kbit_training(model)
 
@@ -2598,8 +2599,8 @@ class PeftGPTQGPUTests(unittest.TestCase):
                 quantization_config=self.quantization_config,
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
-            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+            assert set(model.hf_device_map.values()) == {0, 1}
+            assert {p.device.index for p in model.parameters()} == {0, 1}
 
             model = prepare_model_for_kbit_training(model)
 
@@ -4409,8 +4410,8 @@ class PeftEetqGPUTests(unittest.TestCase):
             except FileNotFoundError:
                 pytest.skip("There is no kernel for EETQ on this architecture, skipping this test.")
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
-            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+            assert set(model.hf_device_map.values()) == {0, 1}
+            assert {p.device.index for p in model.parameters()} == {0, 1}
 
             model = prepare_model_for_kbit_training(model)
 
@@ -4599,7 +4600,7 @@ class TestPeftTorchao:
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.single_gpu_tests
-    def test_causal_lm_training_single_gpu_torchao_dora_int8_dynamic_activation_int8_weight_raises(self):
+    def test_causal_lm_training_single_gpu_torchao_dora_int8_dynamic_activation_int8_weight(self):
         from transformers import TorchAoConfig
 
         device = 0
@@ -4619,14 +4620,15 @@ class TestPeftTorchao:
             task_type="CAUSAL_LM",
             use_dora=True,
         )
-        with pytest.raises(NotImplementedError):
+        if not is_torchao_ge_v0_18_0():
+            # LinearActivationQuantizedTensor does not support dequantize, so DoRA fails
+            with pytest.raises(NotImplementedError):
+                get_peft_model(model, config)
+        else:
+            # Int8Tensor supports dequantize, so DoRA works
             get_peft_model(model, config)
 
     @pytest.mark.single_gpu_tests
-    @pytest.mark.xfail(
-        reason="int4_weight_only still has issues",
-        raises=(RuntimeError, ValueError),
-    )
     def test_causal_lm_training_single_gpu_torchao_int4_raises(self):
         # TODO: Once proper torchao support for int4 is added, remove this test and add int4 to supported_quant_types
         from transformers import TorchAoConfig
@@ -4648,12 +4650,17 @@ class TestPeftTorchao:
             task_type="CAUSAL_LM",
         )
 
-        model = get_peft_model(model, config)
         inputs = torch.arange(10).view(1, -1).to(device)
-        # this raises:
+        with pytest.raises(TypeError, match="only supports int8 weights for now"):
+            model = get_peft_model(model, config)
+
+        # Without PEFT catching the error above, the following would happen:
+        # >>> model(inputs)
+        # raises:
+        # > RuntimeError: X must be BF16 and contiguous on GPU.
+        # with a bfloat16 base model, it raises:
         # > RuntimeError: cutlass cannot initialize
         # tested in multiple matchines
-        model(inputs)
 
     @pytest.mark.parametrize("quant_type", supported_quant_types)
     @pytest.mark.multi_gpu_tests
@@ -4691,8 +4698,8 @@ class TestPeftTorchao:
                 dtype=torch.bfloat16,
             )
 
-            assert set(model.hf_device_map.values()) == set(range(device_count))
-            assert {p.device.index for p in model.parameters()} == set(range(device_count))
+            assert set(model.hf_device_map.values()) == {0, 1}
+            assert {p.device.index for p in model.parameters()} == {0, 1}
 
             model = prepare_model_for_kbit_training(model)
             model.model_parallel = True
@@ -4772,8 +4779,8 @@ class TestPeftTorchao:
             dtype=torch.bfloat16,
         )
 
-        assert set(model.hf_device_map.values()) == set(range(device_count))
-        assert {p.device.index for p in model.parameters()} == set(range(device_count))
+        assert set(model.hf_device_map.values()) == {0, 1}
+        assert {p.device.index for p in model.parameters()} == {0, 1}
 
         model = prepare_model_for_kbit_training(model)
         model.model_parallel = True
@@ -4847,8 +4854,11 @@ class TestPeftTorchao:
         assert torch.allclose(logits, logits_merged_unloaded, atol=atol, rtol=rtol)
 
     @pytest.mark.single_gpu_tests
-    def test_torchao_merge_layers_int8_dynamic_activation_int8_weight_raises(self):
-        # int8_dynamic_activation_int8_weight does not support dequantize, thus merging does not work
+    def test_torchao_merge_layers_int8_dynamic_activation_int8_weight(self):
+        # int8_dynamic_activation_int8_weight: on torchao < 0.18.0, the weight is a
+        # LinearActivationQuantizedTensor which does not support dequantize, so merging
+        # raises NotImplementedError. On torchao >= 0.18.0, the weight is an Int8Tensor
+        # which supports dequantize, so merging works.
         from transformers import TorchAoConfig
 
         quant_type = "int8_dynamic_activation_int8_weight"
@@ -4871,11 +4881,16 @@ class TestPeftTorchao:
         )
         model = get_peft_model(model, config)
 
-        msg = re.escape(
-            "Weights of type LinearActivationQuantizedTensor do not support dequantization (yet), which is needed to "
-            "support merging."
-        )
-        with pytest.raises(NotImplementedError, match=msg):
+        if not is_torchao_ge_v0_18_0():
+            # LinearActivationQuantizedTensor does not support dequantize
+            msg = re.escape(
+                "Weights of type LinearActivationQuantizedTensor do not support dequantization (yet), which is needed to "
+                "support merging."
+            )
+            with pytest.raises(NotImplementedError, match=msg):
+                model.merge_adapter()
+        else:
+            # Int8Tensor with act_quant_kwargs supports dequantize, so merging works
             model.merge_adapter()
 
     @pytest.mark.single_gpu_tests
@@ -5077,6 +5092,54 @@ class TestFSDPWrap:
         # See #2167
         # Avoid raising on custom models since Trainer uses fsdp_auto_wrap_policy automatically for PEFT + FSDP
         fsdp_auto_wrap_policy(SimpleModel())  # does not raise
+
+
+class TestUnshardedLoRASaveUnderZeRO3:
+    """Regression test for #3251.
+
+    Under DeepSpeed ZeRO-3, the parameters are partitioned across ranks, so a ``save_pretrained()`` that forgets to
+    gather them writes ``lora_A`` / ``lora_B`` tensors that are 1-D (FSDP flat shard) or zero-sized (ZeRO-3 on the
+    non-owning rank). The artifact looks valid on disk but later crashes downstream loaders (e.g. vLLM hot-swap) with
+    an opaque ``IndexError``. ``get_peft_model_state_dict`` now warns at write time when such tensors are detected.
+    This reproduces the real path on a single GPU (world_size=1 is enough: ``deepspeed.zero.Init`` partitions the
+    parameter, leaving the ungathered shard) and asserts the warning fires, and that the documented
+    ``GatheredParameters`` workaround still saves a correct 2-D adapter.
+    """
+
+    @pytest.mark.single_gpu_tests
+    @require_torch_gpu
+    def test_zero3_ungathered_save_warns_and_gather_succeeds(self, tmp_path):
+        deepspeed = pytest.importorskip("deepspeed")
+
+        os.environ.setdefault("MASTER_ADDR", "localhost")
+        os.environ.setdefault("MASTER_PORT", "29555")
+        os.environ.setdefault("LOCAL_RANK", "0")
+        os.environ.setdefault("RANK", "0")
+        os.environ.setdefault("WORLD_SIZE", "1")
+
+        we_initialized_pg = not dist.is_initialized()
+        if we_initialized_pg:
+            init_process_group(world_size=1, rank=0)
+        try:
+            ds_config = {"train_batch_size": dist.get_world_size(), "zero_optimization": {"stage": 3}}
+            with deepspeed.zero.Init(config_dict_or_path=ds_config):
+                model = get_peft_model(SimpleModel(), LoraConfig(target_modules=["linear_transform"], r=8))
+            engine, *_ = deepspeed.initialize(model=model, config=ds_config, model_parameters=model.parameters())
+
+            # Saving without gathering the ZeRO-3 shards must warn instead of silently writing a corrupt adapter.
+            with pytest.warns(PeftWarning, match=r"DeepSpeed ZeRO-3 / FSDP shards"):
+                engine.module.save_pretrained(tmp_path / "ungathered")
+
+            # The documented workaround (gather first) still produces a correct, loadable 2-D adapter.
+            lora_params = [p for n, p in engine.module.named_parameters() if "lora_A" in n or "lora_B" in n]
+            with deepspeed.zero.GatheredParameters(lora_params, modifier_rank=0):
+                engine.module.save_pretrained(tmp_path / "gathered")
+            sd = load_file(tmp_path / "gathered" / "adapter_model.safetensors")
+            lora_a = next(v for k, v in sd.items() if "lora_A" in k)
+            assert lora_a.ndim == 2 and all(d > 0 for d in lora_a.shape)
+        finally:
+            if we_initialized_pg and dist.is_initialized():
+                dist.destroy_process_group()
 
 
 class TestBOFT:
@@ -6661,8 +6724,6 @@ WORLD_SIZE = 2
 TINY_MODEL_ID = "peft-internal-testing/zephyr-smol_llama-100m-sft-full"
 TARGET_MODULES = ["embed_tokens", "q_proj", "k_proj", "v_proj", "o_proj"]
 
-TIMEOUT_BARRIER = datetime.timedelta(seconds=30)
-
 TP_PLAN = {
     "model.embed_tokens": "embedding_rowwise",
     "model.layers.*.self_attn.q_proj": "colwise",
@@ -6702,8 +6763,11 @@ def _setup_dist(rank, world_size, port):
     os.environ["MASTER_PORT"] = str(port)
     os.environ["LOCAL_RANK"] = str(rank)
     os.environ["RANK"] = str(rank)
-    os.environ["WORLD_SIZE"] = str(rank)
-    dist.init_process_group(backend="gloo", rank=rank, world_size=world_size)
+    os.environ["WORLD_SIZE"] = str(world_size)
+    if torch.cuda.is_available():
+        dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+    else:
+        dist.init_process_group(backend="gloo", rank=rank, world_size=world_size)
 
 
 def _teardown_dist():
@@ -6735,7 +6799,9 @@ def _test_lora_weight_synchronization(rank, world_size, port):
     inputs = {k: v.to(device) for k, v in inputs.items()}
 
     model.train()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    # foreach=False: the model mixes plain `Tensor` and `DTensor` parameters (only some LoRA weights are
+    # TP-sharded), and foreach ops refuse to operate on a mix of the two within the same (device, dtype) group.
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, foreach=False)
 
     # Test that loss is finite and decreases over multiple steps
     for _ in range(3):
@@ -6772,6 +6838,70 @@ def _test_lora_weight_synchronization(rank, world_size, port):
                 assert torch.allclose(weight, g), f"{name}.lora_embedding_B differs between rank {rank} and rank {i}"
 
 
+def _test_lora_gradient_synchronization(rank, world_size, port):
+    """
+    Tests that the gradients of the LoRA weights are:
+        1. DTensor if the weight is a DTensor, and that placements match,
+        2. identical across ranks if the weight is replicated (not sharded)
+    """
+    from torch.distributed.tensor import DTensor
+
+    model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, **_get_tp_kwargs(tp_plan=TP_PLAN))
+    lora_config = LoraConfig(r=4, target_modules=TARGET_MODULES, init_lora_weights=True)
+    model = get_peft_model(model, lora_config)
+
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    model.to(device)
+
+    tokenizer = AutoTokenizer.from_pretrained(TINY_MODEL_ID)
+    inputs = tokenizer("Paris is the most beautiful city in the world.", return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    model.train()
+    outputs = model(**inputs, labels=inputs["input_ids"])
+    outputs.loss.backward()
+
+    checked_at_least_one = False
+    for name, module in model.named_modules():
+        if not isinstance(module, LoraLayer):
+            continue
+        base_layer = module.get_base_layer()
+        tp_plan = getattr(base_layer, "_hf_tp_plan", None)
+        if tp_plan == "colwise":
+            sharded_params = {f"{name}.lora_B": module.lora_B["default"].weight}
+            replicated_params = {f"{name}.lora_A": module.lora_A["default"].weight}
+        elif tp_plan == "rowwise":
+            sharded_params = {f"{name}.lora_A": module.lora_A["default"].weight}
+            replicated_params = {f"{name}.lora_B": module.lora_B["default"].weight}
+        elif tp_plan == "embedding_rowwise":
+            sharded_params = {f"{name}.lora_embedding_A": module.lora_embedding_A["default"]}
+            replicated_params = {f"{name}.lora_embedding_B": module.lora_embedding_B["default"]}
+        else:
+            continue
+
+        for param_name, param in {**sharded_params, **replicated_params}.items():
+            checked_at_least_one = True
+            assert param.grad is not None, f"{param_name} has no gradient"
+            assert isinstance(param, DTensor) == isinstance(param.grad, DTensor), (
+                f"{param_name}: parameter {'is' if isinstance(param, DTensor) else 'is not'} a DTensor but its "
+                f"gradient {'is' if isinstance(param.grad, DTensor) else 'is not'}, they must match"
+            )
+
+        # Only the replicated matrix is expected to hold the exact same value on every rank.
+        for param_name, param in replicated_params.items():
+            grad = param.grad.full_tensor() if isinstance(param.grad, DTensor) else param.grad
+            grad = grad.contiguous()
+            gathered = [torch.zeros_like(grad) for _ in range(world_size)]
+            dist.all_gather(gathered, grad)
+            for i, g in enumerate(gathered):
+                assert torch.allclose(grad, g, atol=1e-5), (
+                    f"{param_name} gradient differs between rank {rank} and rank {i}"
+                )
+
+    assert checked_at_least_one, "No LoRA parameter was found to check"
+
+
 def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
     """
     Test that loading from a checkpoint correctly handles the sharding of LoRA weights according to the TP plan.
@@ -6782,7 +6912,7 @@ def _test_load_from_checkpoint(rank, world_size, port, tmp_dir):
         plain_model = get_peft_model(plain_model, lora_config)
         plain_model.save_pretrained(tmp_dir)
 
-    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
+    dist.barrier()
 
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
@@ -6842,7 +6972,7 @@ def _test_save_unsharded_weights(rank, world_size, port, tmp_dir_reference, tmp_
         plain_model = get_peft_model(plain_model, lora_config)
         plain_model.save_pretrained(tmp_dir_reference)
 
-    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
+    dist.barrier()
 
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
@@ -6852,7 +6982,7 @@ def _test_save_unsharded_weights(rank, world_size, port, tmp_dir_reference, tmp_
     tp_model = PeftModel.from_pretrained(tp_base, tmp_dir_reference)
     tp_model.save_pretrained(tmp_dir_tp)
 
-    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
+    dist.barrier()
 
     if rank == 0:
         reference_sd = load_file(f"{tmp_dir_reference}/adapter_model.safetensors")
@@ -6894,9 +7024,11 @@ def _test_load_adapter_forward(rank, world_size, port, tmp_dir_reference):
     Test that load_adapter (with a peft_config) works with a TP base model and the forward pass produces the same loss
     on every rank and that it is finite.
 
-    This exercises the low-level API path where no PeftModel/tuner is created, so TP info must be stored on the lora
-    modules themselves (via _tp_info) rather than on the tuner.
+    This exercises the low-level API path where no PeftModel/tuner is created, so the LoRA modules must be TP-sharded
+    directly (their parameters become `DTensor` instances) rather than relying on the tuner.
     """
+    from torch.distributed.tensor import DTensor
+
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
 
@@ -6906,7 +7038,7 @@ def _test_load_adapter_forward(rank, world_size, port, tmp_dir_reference):
         plain_model = get_peft_model(plain_model, lora_config)
         plain_model.save_pretrained(tmp_dir_reference)
 
-    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
+    dist.barrier()
 
     model = AutoModelForCausalLM.from_pretrained(TINY_MODEL_ID, **_get_tp_kwargs(tp_plan=TP_PLAN))
     model.load_adapter(tmp_dir_reference)
@@ -6914,7 +7046,9 @@ def _test_load_adapter_forward(rank, world_size, port, tmp_dir_reference):
 
     for mod in model.modules():
         if isinstance(mod, LoraLayer):
-            assert hasattr(mod, "_tp_info"), "load_adapter did not store TP info on the LoRA module"
+            assert any(isinstance(p, DTensor) for p in mod.parameters()), (
+                "load_adapter did not TP-shard the LoRA module's parameters"
+            )
 
     tokenizer = AutoTokenizer.from_pretrained(TINY_MODEL_ID)
     inputs = tokenizer("Paris is the capital of France.", return_tensors="pt")
@@ -6950,7 +7084,7 @@ def _test_load_adapter_save(rank, world_size, port, tmp_dir_reference, tmp_dir_t
         plain_model = get_peft_model(plain_model, lora_config)
         plain_model.save_pretrained(tmp_dir_reference)
 
-    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
+    dist.barrier()
 
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
@@ -6964,7 +7098,7 @@ def _test_load_adapter_save(rank, world_size, port, tmp_dir_reference, tmp_dir_t
         tmp_dir_tp.mkdir(exist_ok=True)
         save_file(tp_sd, f"{tmp_dir_tp}/adapter_model.safetensors")
 
-    dist.monitored_barrier(timeout=TIMEOUT_BARRIER, wait_all_ranks=True)
+    dist.barrier()
 
     if rank == 0:
         reference_sd = load_file(f"{tmp_dir_reference}/adapter_model.safetensors")
@@ -7010,6 +7144,9 @@ class TestLoraTensorParallel:
     def test_lora_weight_synchronization(self):
         self._spawn(_test_lora_weight_synchronization, port_offset=0)
 
+    def test_lora_gradient_synchronization(self):
+        self._spawn(_test_lora_gradient_synchronization, port_offset=2)
+
     def test_from_checkpoint(self, tmp_path):
         self._spawn(_test_load_from_checkpoint, tmp_path, port_offset=1)
 
@@ -7050,8 +7187,8 @@ def test_kappatune_with_4bit_model():
     model = AutoModelForCausalLM.from_pretrained(
         "hf-internal-testing/tiny-random-LlamaForCausalLM",
         quantization_config=quantization_config,
-        device_map="cuda",
-        torch_dtype=torch.float16,
+        device_map=torch_device,
+        dtype=torch.float16,
     )
 
     # Run KappaTune

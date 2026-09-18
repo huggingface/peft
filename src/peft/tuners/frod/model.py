@@ -99,6 +99,7 @@ def _projection_from_weights(matrices: list[torch.Tensor], regularization_alpha:
 
 
 class FrodModel(BaseTuner):
+    uses_shared_state: bool = True
     prefix: str = "frod_"
     tuner_layer_cls = FrodLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_FROD_TARGET_MODULES_MAPPING

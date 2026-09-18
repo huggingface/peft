@@ -26,6 +26,7 @@ import time
 
 import torch
 import torch.distributed as dist
+from torch.distributed.tensor import DTensor
 from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
 from transformers.testing_utils import ColoredFormatter, Colors
 
@@ -63,6 +64,25 @@ def _get_tp_kwargs(tp_plan, tp_size=2):
 
         return {"distributed_config": DistributedConfig(tp_plan=tp_plan, tp_size=tp_size)}
     return {"tp_plan": tp_plan, "tp_size": tp_size}
+
+
+def clip_grad_norm_(parameters, max_norm, norm_type=2.0):
+    parameters = [p for p in parameters if p.grad is not None]
+    dtensor_params = [p for p in parameters if isinstance(p.grad, DTensor)]
+    plain_params = [p for p in parameters if not isinstance(p.grad, DTensor)]
+
+    if not dtensor_params or not plain_params:
+        return torch.nn.utils.clip_grad_norm_(parameters, max_norm, norm_type=norm_type)
+
+    # `full_tensor()` gathers the sharded norm, so both group norms can be combined as plain tensors.
+    dtensor_norm = torch.nn.utils.get_total_norm([p.grad for p in dtensor_params], norm_type).full_tensor()
+    plain_norm = torch.nn.utils.get_total_norm([p.grad for p in plain_params], norm_type)
+    total_norm = torch.linalg.vector_norm(torch.stack([dtensor_norm, plain_norm]), norm_type)
+
+    mesh = dtensor_params[0].grad.device_mesh
+    torch.nn.utils.clip_grads_with_norm_(dtensor_params, max_norm, DTensor.from_local(total_norm, mesh))
+    torch.nn.utils.clip_grads_with_norm_(plain_params, max_norm, total_norm)
+    return total_norm
 
 
 def init_test_logger(rank):
@@ -118,7 +138,9 @@ def main(model_id: str, target_modules: list[str]):
     batch = {k: v.repeat(BATCH_SIZE, 1).to(device) for k, v in sample_input.items()}
     batch["labels"] = batch["input_ids"].clone()
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=0.0, betas=(0.9, 0.999))
+    optimizer = torch.optim.Adam(
+        model.parameters(), lr=LEARNING_RATE, weight_decay=0.0, betas=(0.9, 0.999), foreach=False
+    )
 
     initial_loss = None
     final_loss = None
@@ -139,7 +161,7 @@ def main(model_id: str, target_modules: list[str]):
 
         loss.backward()
 
-        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        grad_norm = clip_grad_norm_(model.parameters(), max_norm=1.0)
 
         if initial_grad_norm is None:
             initial_grad_norm = grad_norm.item()

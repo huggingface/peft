@@ -36,6 +36,8 @@ from peft import (
     IA3Config,
     LoHaConfig,
     LoraConfig,
+    NoMatchingPeftModuleError,
+    PeftError,
     PeftModel,
     PromptTuningConfig,
     VeraConfig,
@@ -99,6 +101,10 @@ REGEX_TEST_CASES = [
     ("foo.bar.1.baz", ["baz"], [0, 1, 2], ["bar"], True),
     ("foo.bar.1.baz", ["baz", "spam"], [1], ["bar"], True),
     ("foo.bar.1.baz", ["baz", "spam"], [0, 1, 2], ["bar"], True),
+    ("bar.1.baz", ["baz"], [0, 2], ["bar"], False),
+    ("bar.1.baz", ["baz"], [0, 1, 2], ["foo"], False),
+    ("bar.1.baz", ["baz"], [0, 2], ["bar"], False),
+    ("bar.1.baz", ["baz"], [0, 1, 2], ["bar"], True),
     # empty layers_pattern
     ("foo.whatever.1.baz", ["baz"], [1], [], True),
     ("foo.whatever.1.baz", ["baz"], [0], [], False),
@@ -119,20 +125,31 @@ REGEX_TEST_CASES = [
     ("transformer.h.1.attn.attention.q_proj", ["q_proj", "v_proj"], [0, 1, 2], ["h"], True),
     ("foo.bar.q_proj", ["q_proj"], None, [], True),
     ("foo.bar.1.baz", ["baz"], [1], ["foo"], False),
-    # other corner cases. For ex, below is a case where layers_pattern
-    # is one of the target nn.modules
-    ("foo.bar.1.baz", ["baz"], [1], ["baz"], False),
-    # here, layers_pattern is 'bar', but only keys that contain '.bar' are valid.
-    ("bar.1.baz", ["baz"], [1], ["bar"], False),
     ("foo.bar.001.baz", ["baz"], [1], ["bar"], True),
     ("foo.bar.1.spam.2.baz", ["baz"], [1], ["bar"], True),
     ("foo.bar.2.spam.1.baz", ["baz"], [1], ["bar"], False),
-    # some realistic examples: module using nn.Sequential
-    # for the below test case, key should contain '.blocks' to be valid, because of how layers_pattern is matched
-    ("blocks.1.weight", ["weight"], [1], ["blocks"], False),
+    # same as previous 3 but without prefix before 'bar'; used not to match, but now matches
+    ("bar.001.baz", ["baz"], [1], ["bar"], True),
+    ("bar.1.spam.2.baz", ["baz"], [1], ["bar"], True),
+    ("bar.2.spam.1.baz", ["baz"], [1], ["bar"], False),
+    # other corner cases. For ex, below is a case where layers_pattern
+    # is one of the target nn.modules
+    ("foo.bar.1.baz", ["baz"], [1], ["baz"], False),
+    # some realistic examples: module using nn.Sequential, without and with prefix before 'blocks'
+    ("blocks.1.weight", ["weight"], [1], ["blocks"], True),
     ("blocks.1.bias", ["weight"], [1], ["blocks"], False),
     ("mlp.blocks.1.weight", ["weight"], [1], ["blocks"], True),
     ("mlp.blocks.1.bias", ["weight"], [1], ["blocks"], False),
+    # multiple indices could potential match, we want the first one to count
+    ("model.layers.1.layers.0.up_proj", ["up_proj"], [1], ["layers"], True),
+    ("model.layers.1.layers.0.up_proj", ["up_proj"], [0], ["layers"], False),
+    ("layers.1.layers.0.up_proj", ["up_proj"], [1], ["layers"], True),
+    ("layers.1.layers.0.up_proj", ["up_proj"], [0], ["layers"], False),
+    # if the user specifies it, we can also target the later index with layers_to_transform
+    ("model.layers.1.layers.0.up_proj", ["up_proj"], [1], [r"\d+\.layers"], False),
+    ("model.layers.1.layers.0.up_proj", ["up_proj"], [0], [r"\d+\.layers"], True),
+    ("layers.1.layers.0.up_proj", ["up_proj"], [1], [r"\d+\.layers"], False),
+    ("layers.1.layers.0.up_proj", ["up_proj"], [0], [r"\d+\.layers"], True),
 ]
 
 MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES = [
@@ -621,6 +638,37 @@ class TestExcludedModuleNames:
         model = MLP()
         with pytest.raises(ValueError, match="Target modules .* not found in the base model"):
             get_peft_model(model, LoraConfig(target_modules=["non_existent_module"]))
+
+    def test_no_modules_matched_second_adapter(self):
+        # A second adapter whose target_modules match nothing must raise just like the first adapter does
+        # (test_no_modules_matched). The no-match check used to read targeted_module_names, which accumulates
+        # across adapters, so once the first adapter matched a module the second was silently accepted.
+        # See https://github.com/huggingface/peft/issues/3533.
+        model = MLP()
+        model = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
+        with pytest.raises(NoMatchingPeftModuleError, match="Target modules .* not found in the base model"):
+            model.add_adapter("other", LoraConfig(target_modules=["non_existent_module"]))
+
+    def test_second_adapter_only_modules_to_save_raises(self):
+        # A second adapter is held to the same standard as a first one: if its target_modules match nothing, it
+        # raises even when modules_to_save matches.
+        # See https://github.com/huggingface/peft/issues/3533.
+        model = MLP()
+        model = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
+        with pytest.raises(NoMatchingPeftModuleError, match="No modules were targeted for adaptation"):
+            model.add_adapter("other", LoraConfig(target_modules=["non_existent_module"], modules_to_save=["lin1"]))
+
+    def test_no_matching_peft_module_error_hierarchy(self):
+        # NoMatchingPeftModuleError stays a ValueError for backwards compatibility and a PeftError for interception
+        assert issubclass(NoMatchingPeftModuleError, ValueError)
+        assert issubclass(NoMatchingPeftModuleError, PeftError)
+
+    def test_targeted_module_names_unique_across_adapters(self):
+        # targeted_module_names records each module once, even when several adapters target the same module
+        model = MLP()
+        model = get_peft_model(model, LoraConfig(target_modules=["lin1"]))
+        model.add_adapter("other", LoraConfig(target_modules=["lin0", "lin1"]))
+        assert model.base_model.targeted_module_names == ["lin1", "lin0"]
 
     def test_some_modules_excluded_some_unmatched(self):
         model = MLP()

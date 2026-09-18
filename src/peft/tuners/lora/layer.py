@@ -27,7 +27,7 @@ import torch.nn.functional as F
 from torch import nn, svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
-from peft.import_utils import is_transformers_ge_v5_4_0
+from peft.import_utils import is_transformers_dtensor_tp, is_transformers_ge_v5_4_0
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import (
     BaseTunerLayer,
@@ -734,6 +734,43 @@ class LoraLayer(BaseTunerLayer):
         # Remove redundant fields
         del base_layer._peft_loraga_grad
 
+    @contextmanager
+    def _unmerged_base_weight(self, safe_merge: bool = False):
+        """Yield the base weight with the already merged adapters taken out of it.
+
+        `merge` applies the adapters one after another, so from the second adapter on, the weight already contains the
+        previously merged ones. Variants whose delta depends on the base weight need it unmerged, the same way
+        `forward` sees it, so the merged adapters are unmerged here and merged again afterwards. The weight is dropped
+        again when the context exits.
+
+        Merging the adapters again re-enters this method for each of them. They get the weight the outermost call
+        recovered, which is the one they need anyway. Unmerging again for each of them would make the number of merge
+        calls grow exponentially.
+        """
+        key = "unmerged_base_weight"
+        if key in self._caches:
+            yield self._caches[key]
+            return
+
+        merged_adapters = self.merged_adapters[:]
+        try:
+            if merged_adapters:
+                self.unmerge()
+            # copy it, because the `finally` block replays a plain LoRA adapter by adding its delta to the
+            # base weight in place, which would change this tensor too
+            weight = dequantize_module_weight(self.get_base_layer()).detach().clone()
+            self._cache_store(key, weight)
+            yield weight
+        finally:
+            try:
+                # only the adapters that were actually unmerged, so that an unmerge that failed halfway does not
+                # merge anything twice
+                to_merge = [name for name in merged_adapters if name not in self.merged_adapters]
+                if to_merge:
+                    self.merge(safe_merge=safe_merge, adapter_names=to_merge)
+            finally:
+                self._caches.pop(key, None)
+
     def _cache_store(self, key: str, value: Any) -> None:
         # cache intermediate values, e.g. weight norm of DoRA
         self._caches[key] = value
@@ -949,8 +986,7 @@ class Linear(nn.Module, LoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weight
-
+                    new_bias = None
                     if self.lora_bias[active_adapter]:
                         if getattr(base_layer, "bias", None) is None:
                             raise RuntimeError(
@@ -961,6 +997,9 @@ class Linear(nn.Module, LoraLayer):
                             raise ValueError(
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
+
+                    base_layer.weight.data = orig_weight
+                    if new_bias is not None:
                         base_layer.bias.data = new_bias.to(orig_dtype)
 
                 else:
@@ -1086,14 +1125,26 @@ class Linear(nn.Module, LoraLayer):
         return "lora." + rep
 
 
-class _LoraEmbeddingAHolder(nn.Module):
+class LoraEmbeddingATPHolder(nn.Embedding):
     """
-    A "fake" module to hold the lora_embedding_A weights for the TP hooks.
+    In LoRA, the embedding A weight is a learnable parameter that is added to the original embedding weight, but the TP
+    API acts on modules rather than individual parameters. This class wraps the LoRA embedding A weight in an
+    `nn.Embedding` module, allowing it to be treated as a module by the TP API.
     """
 
-    def __init__(self, lora_embedding_A_weight):
-        super().__init__()
-        self.weight = lora_embedding_A_weight.T  # lora_embedding_A shape is (r, vocab_size)
+    def __init__(self, lora_embedding_A_weight: nn.Parameter):
+        nn.Module.__init__(self)
+        num_embeddings, embedding_dim = lora_embedding_A_weight.T.shape
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.padding_idx = None
+        self.max_norm = None
+        self.norm_type = 2.0
+        self.scale_grad_by_freq = False
+        self.sparse = False
+        self._parameters["weight"] = nn.Parameter(
+            lora_embedding_A_weight.T.contiguous(), requires_grad=lora_embedding_A_weight.requires_grad
+        )
 
 
 class Embedding(nn.Module, LoraLayer):
@@ -1108,10 +1159,6 @@ class Embedding(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         **kwargs,
     ) -> None:
-        if config.lora_bias:
-            # lora_bias=True is not supported (yet) for embedding layers, as they use nn.Parameter
-            raise ValueError(f"lora_bias={config.lora_bias} is not supported for {self.__class__.__name__}.")
-
         super().__init__()
         LoraLayer.__init__(self, base_layer)
         self.fan_in_fan_out = config.fan_in_fan_out
@@ -1121,6 +1168,7 @@ class Embedding(nn.Module, LoraLayer):
         self.device_mesh = getattr(base_layer, "_hf_device_mesh", None)
         self.tp_layer = None
 
+        self.other_param_names += ("input_fns", "output_fns")
         self.input_fns = {}
         self.output_fns = {}
 
@@ -1169,6 +1217,10 @@ class Embedding(nn.Module, LoraLayer):
         use_rslora = config.use_rslora
         lora_bias = config.lora_bias
         inference_mode = config.inference_mode
+
+        if lora_bias:
+            # lora_bias=True is not supported (yet) for embedding layers, as they use nn.Parameter
+            raise ValueError(f"lora_bias={lora_bias} is not supported for {self.__class__.__name__}.")
 
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -1222,13 +1274,27 @@ class Embedding(nn.Module, LoraLayer):
 
         # If there is tensor parallelism, we register the hooks for `self._embed`.
         if self.tp_layer is not None:
-            mod = _LoraEmbeddingAHolder(self.lora_embedding_A[adapter_name])
+            holder = LoraEmbeddingATPHolder(self.lora_embedding_A[adapter_name])
 
-            def input_fn(inputs):
-                return self.tp_layer._prepare_input_fn(mod, inputs, self.device_mesh)
+            if is_transformers_dtensor_tp:
+                self.tp_layer.shard_param(holder, "weight", self.device_mesh)
+                sharded_weight = nn.Parameter(holder.weight.T, requires_grad=holder.weight.requires_grad)
 
-            def output_fn(outputs):
-                return self.tp_layer._prepare_output_fn(mod, outputs, self.device_mesh)
+                def input_fn(inputs):
+                    (x,), _ = self.tp_layer.transform_inputs_pre_forward(holder, inputs, {}, self.device_mesh)
+                    return x
+
+                def output_fn(outputs):
+                    return self.tp_layer.transform_output_post_forward(holder, outputs, self.device_mesh)
+
+                self.lora_embedding_A[adapter_name] = sharded_weight
+            else:
+
+                def input_fn(inputs):
+                    return self.tp_layer._prepare_input_fn(holder, inputs, self.device_mesh)
+
+                def output_fn(outputs):
+                    return self.tp_layer._prepare_output_fn(holder, outputs, self.device_mesh)
 
             self.input_fns[adapter_name] = input_fn
             self.output_fns[adapter_name] = output_fn
@@ -1632,8 +1698,7 @@ class _ConvNd(nn.Module, LoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weight
-
+                    new_bias = None
                     if self.lora_bias[active_adapter]:
                         if getattr(base_layer, "bias", None) is None:
                             raise RuntimeError(
@@ -1644,6 +1709,9 @@ class _ConvNd(nn.Module, LoraLayer):
                             raise ValueError(
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
+
+                    base_layer.weight.data = orig_weight
+                    if new_bias is not None:
                         base_layer.bias.data = new_bias.to(orig_dtype)
 
                 else:
@@ -2234,6 +2302,27 @@ class _LoraParameterProxy(nn.Module):
         return W + self.delta_weight
 
 
+class _LoraFactorsProxy(nn.Module):
+    """This proxies an `nn.Parameter` that is targeted with a single LoRA adapter, keeping the low-rank factors.
+
+    Folding `W + scaling * lhs @ rhs` into one `baddbmm` avoids materialising a delta the size of the full parameter
+    (e.g. a whole expert stack) on every forward. Intended to be used in conjunction with `nn.utils.parametrize`, see
+    `ParamWrapper`.
+    """
+
+    def __init__(self, lhs, rhs, scaling):
+        super().__init__()
+        self.lhs = lhs
+        self.rhs = rhs
+        self.scaling = scaling
+
+    def forward(self, W):
+        # autocast would cast the baddbmm down to the autocast dtype, but a parametrization may not change the dtype of
+        # the parameter, so the fold is performed in the dtype of W (which is also what the non-folded path does).
+        with torch.autocast(device_type=W.device.type, enabled=False):
+            return torch.baddbmm(W, self.lhs, self.rhs, alpha=self.scaling)
+
+
 # copied from:
 # https://github.com/pytorch/pytorch/blob/5e386eec9426f174eea130c0c012d9f65ebe65fb/torch/nn/utils/parametrize.py#L75-L79
 def _register_parameter_or_buffer(module, name, X):
@@ -2302,17 +2391,23 @@ class ParamWrapper(nn.Module, LoraLayer):
         # For ParamWrapper, we don't derive the in_features and out_features based on the base layer type, but directly
         # from the targeted parameter.
         param = self.get_param()
-        if param.ndim == 3:
-            num_experts, in_features, out_features = param.shape
+        # Under DeepSpeed ZeRO-3 the parameter is already partitioned, so `param.shape` is empty and the real shape
+        # lives in `ds_shape` -- the same handling `tuners_utils`, `deft` and `randlora` already use.
+        shape = getattr(param, "ds_shape", param.shape)
+        if len(shape) == 3:
+            num_experts, in_features, out_features = shape
+        elif len(shape) == 2:
+            num_experts, in_features, out_features = 1, shape[1], shape[0]
         else:
-            num_experts, in_features, out_features = 1, param.shape[1], param.shape[0]
-        if param.ndim not in (2, 3):
             raise ValueError(
-                f"lora.{self.__class__.__name__} was initialized with {param.ndim} dimensional Parameter, but only 2d "
+                f"lora.{self.__class__.__name__} was initialized with {len(shape)} dimensional Parameter, but only 2d "
                 "and 3d are supported."
             )
         # we have to store the num_experts attribute here, as the parent class only stores in_features and out_features.
         self.num_experts = num_experts
+        # store the rank too: `update_layer` needs it, and by then reading `param.ndim` under ZeRO-3 would see the
+        # partitioned (empty) shape rather than the real one.
+        self._param_ndim = len(shape)
         return in_features, out_features
 
     def update_layer(
@@ -2339,7 +2434,7 @@ class ParamWrapper(nn.Module, LoraLayer):
 
         # for some MoE layers, the order is (experts, out_features, in_features)
         is_transposed = getattr(self.get_base_layer(), "is_transposed", False)
-        swap_in_out_features = (self.get_param().ndim == 3) and not is_transposed
+        swap_in_out_features = (self._param_ndim == 3) and not is_transposed
         if swap_in_out_features and not self._did_swap_in_out_features:
             self.in_features, self.out_features = self.out_features, self.in_features
             self._did_swap_in_out_features = True
@@ -2427,6 +2522,25 @@ class ParamWrapper(nn.Module, LoraLayer):
         param = getattr(self.get_base_layer(), self.parameter_name)
         return param
 
+    def get_delta_factors(self, adapter_name):
+        """`(lhs, rhs, scaling)` such that the delta weight is `scaling * lhs @ rhs`.
+
+        Keeping the two low-rank factors instead of their product lets the caller fold the update into the base weight
+        with a single `baddbmm`, which avoids materialising a second tensor the size of the whole expert stack on every
+        forward.
+        """
+        weight_A = self.lora_A[adapter_name].weight
+        weight_B = self.lora_B[adapter_name].weight
+        weight_A = weight_A.reshape(self.num_experts, -1, weight_A.shape[-1])  # (experts, rank, in)
+        weight_B = weight_B.reshape(weight_B.shape[0], -1, self.num_experts).permute(2, 0, 1)  # (experts, out, rank)
+        if not self._did_swap_in_out_features:
+            # weights are stored as (experts, in_features, out_features)
+            lhs, rhs = weight_A.transpose(-2, -1), weight_B.transpose(-2, -1)
+        else:
+            lhs, rhs = weight_B, weight_A
+        param = self.get_param()
+        return lhs.to(param.dtype), rhs.to(param.dtype), self.scaling[adapter_name]
+
     def get_delta_weight(self, adapter_name, *args, **kwargs):
         if self.num_experts == 1:
             # could actually be a normal layer or experts stacked block-diagonally, acting like a single layer
@@ -2461,20 +2575,23 @@ class ParamWrapper(nn.Module, LoraLayer):
             yield
             return
 
-        delta_weight = None
-        for active_adapter in active_adapters:
-            if active_adapter not in self.lora_A:
-                continue
-            if delta_weight is None:
-                delta_weight = self.get_delta_weight(active_adapter)
-            else:
-                delta_weight = delta_weight + self.get_delta_weight(active_adapter)
+        adapters = [a for a in active_adapters if a in self.lora_A]
+        param = self.get_param()
+        is_low_precision = any(getattr(torch, dtype_name, None) == param.dtype for dtype_name in UPCAST_DTYPES)
+        if len(adapters) == 1 and self.num_experts > 1 and not is_low_precision:
+            proxy = _LoraFactorsProxy(*self.get_delta_factors(adapters[0]))
+        else:
+            delta_weight = None
+            for active_adapter in adapters:
+                if delta_weight is None:
+                    delta_weight = self.get_delta_weight(active_adapter)
+                else:
+                    delta_weight = delta_weight + self.get_delta_weight(active_adapter)
+            proxy = _LoraParameterProxy(delta_weight)
 
         base_layer = self.get_base_layer()
-        requires_grad_before = self.get_param().requires_grad
-        nn.utils.parametrize.register_parametrization(
-            base_layer, self.parameter_name, _LoraParameterProxy(delta_weight)
-        )
+        requires_grad_before = param.requires_grad
+        nn.utils.parametrize.register_parametrization(base_layer, self.parameter_name, proxy)
         # set requires_grad, as it defaults to False
         base_layer.parametrizations[self.parameter_name].original.requires_grad_(requires_grad_before)
         try:
