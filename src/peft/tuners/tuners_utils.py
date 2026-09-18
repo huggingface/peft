@@ -1318,10 +1318,10 @@ class BaseTuner(nn.Module, ABC):
         memory, which is required to unmerge the adapters. In order to merge the adapter weights without keeping them
         in memory, please call `merge_and_unload`.
 
-        Once a layer has merged adapter weights, its forward pass uses only those weights. Therefore, if `adapter_names`
-        does not cover all active adapters, the remaining active adapters are silently not applied, even though they are
-        still reported as active. Either merge all active adapters or call `unmerge_adapter` first. Note that this
-        behavior is planned to change in the v1.0 release.
+        Once a layer has merged adapter weights, its forward pass uses only those weights. Therefore, if
+        `adapter_names` does not cover all active adapters, the remaining active adapters are silently not applied,
+        even though they are still reported as active. Either merge all active adapters or call `unmerge_adapter`
+        first. Note that this behavior is planned to change in the v1.0 release.
 
         Args:
             adapter_names (`list[str]`, *optional*):
