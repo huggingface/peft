@@ -2431,6 +2431,44 @@ class TestPeftCustomModel(PeftCommonTester):
         X = torch.arange(90).view(9, 10).to(self.torch_device)
         return {"X": X}
 
+    @pytest.mark.parametrize(
+        ("conv_cls", "input_shape"),
+        [
+            pytest.param(nn.Conv1d, (2, 1, 8), id="conv1d"),
+            pytest.param(nn.Conv2d, (2, 1, 8, 8), id="conv2d"),
+            pytest.param(nn.Conv3d, (2, 1, 8, 8, 8), id="conv3d"),
+        ],
+    )
+    def test_lora_conv_preserves_dilation_and_padding_mode(self, conv_cls, input_shape):
+        # Regression test for https://github.com/huggingface/peft/issues/3697
+        class DilatedConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = conv_cls(1, 2, kernel_size=3, padding=2, dilation=2, padding_mode="reflect")
+
+            def forward(self, X):
+                return self.conv(X)
+
+        torch.manual_seed(0)
+        inputs = torch.randn(input_shape)
+        model = DilatedConvModel()
+        base_output_shape = model(inputs).shape
+        model = get_peft_model(
+            model,
+            LoraConfig(target_modules=["conv"], r=2, init_lora_weights=False),
+        )
+        layer = model.base_model.model.conv
+
+        assert layer.lora_A["default"].dilation == layer.base_layer.dilation
+        assert layer.lora_A["default"].padding_mode == layer.base_layer.padding_mode
+
+        output_unmerged = model(inputs)
+        assert output_unmerged.shape == base_output_shape
+
+        model.merge_adapter()
+        output_merged = model(inputs)
+        assert torch.allclose(output_unmerged, output_merged, atol=1e-6, rtol=1e-5)
+
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_attributes_parametrized(self, test_name, model_id, config_cls, config_kwargs):
         self._test_model_attr(model_id, config_cls, config_kwargs)
