@@ -27,11 +27,11 @@ from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
 from transformers.utils import http_user_agent
 
-from peft.import_utils import is_transformers_ge_v5
+from peft.import_utils import is_transformers_dtensor_tp, is_transformers_ge_v5
 from peft.mapping import PEFT_TYPE_TO_TUNER_MAPPING
 
 from .constants import INCLUDE_LINEAR_LAYERS_SHORTHAND
-from .integrations import TpInfo
+from .integrations import TpInfo, dtensor_from_local_like
 from .other import (
     EMBEDDING_LAYER_NAMES,
     SAFETENSORS_WEIGHTS_NAME,
@@ -108,7 +108,12 @@ def get_embedding_layer_name(model, layer, is_embedding_in_target_modules) -> st
 
 
 def _get_tp_info(model) -> TpInfo | None:
-    """Collect TP info from lora modules that have _tp_info set."""
+    """
+    Collect TP info from lora modules that have _tp_info set.
+
+    DEPRECATED: This is only used for the legacy, pre-DTensor TP integration. It returns `None` under the DTensor TP
+    integration.
+    """
     tp_plan, device_mesh, tp_size = {}, None, None
     # We check if there is a TP plan, otherwise it is not worth looping over the modules for nothing.
     if getattr(model, "_tp_plan", None) is None:
@@ -198,6 +203,8 @@ def get_peft_model_state_dict(
     # If model was sharded with TP, gather full tensors for saving
     tp_info = _get_tp_info(model)
     if tp_info is not None:
+        # Legacy, pre-DTensor TP integration: `gather_state_dict_for_save` needs the tp_plan/device_mesh/tp_size
+        # collected from the `_tp_info` markers to know how each adapter weight was sharded.
         from transformers.integrations.tensor_parallel import gather_state_dict_for_save
 
         from peft.peft_model import PeftModel
@@ -214,6 +221,12 @@ def get_peft_model_state_dict(
         if keys_starting_with_prefix:
             tp_plan = {f"{prefix}{k}": v for k, v in tp_plan.items()}
         state_dict = gather_state_dict_for_save(state_dict, tp_plan, tp_info.device_mesh, tp_info.tp_size)
+    elif is_transformers_dtensor_tp and getattr(model, "_tp_size", None):
+        # DTensor TP integration: the adapter weights are already `DTensor` instances, so they carry their own
+        # device_mesh/placements and can be gathered without needing any `_tp_info`.
+        from transformers.integrations.tensor_parallel import gather_state_dict_for_save
+
+        state_dict = gather_state_dict_for_save(state_dict, {}, None, None)
 
     # TUNER SPECIFIC CODE
     if config.peft_type not in PEFT_TYPE_TO_TUNER_MAPPING:
@@ -354,7 +367,11 @@ def _find_mismatched_keys(
             continue
 
         # see https://github.com/huggingface/transformers/blob/09f9f566de83eef1f13ee83b5a1bbeebde5c80c1/src/transformers/modeling_utils.py#L3858-L3864
-        if (state_dict[key].shape[-1] == 1) and (state_dict[key].numel() * 2 == tensor.numel()):
+        if (
+            state_dict[key].ndim > 0
+            and (state_dict[key].shape[-1] == 1)
+            and (state_dict[key].numel() * 2 == tensor.numel())
+        ):
             # This skips size mismatches for 4-bit weights. Two 4-bit values share an 8-bit container, causing size
             # differences. Without matching with module type or parameter type it seems like a practical way to detect
             # valid 4bit weights.
@@ -367,6 +384,26 @@ def _find_mismatched_keys(
         del peft_model_state_dict[key]
 
     return peft_model_state_dict, mismatched
+
+
+def _reshard_dtensor_values_for_load(
+    model: torch.nn.Module, state_dict: dict[str, torch.Tensor]
+) -> dict[str, torch.Tensor]:
+    from transformers.distributed.sharding_utils import DtensorShardOperation
+    from transformers.distributed.utils import is_dtensor
+
+    named_params = dict(model.named_parameters())
+    for key, tensor in state_dict.items():
+        ref = named_params.get(key)
+        if ref is None or not is_dtensor(ref) or is_dtensor(tensor):
+            continue
+        if tensor.shape == ref.shape:
+            tensor = DtensorShardOperation(ref).shard_tensor(tensor)
+        elif tensor.shape != ref._local_tensor.shape:
+            # Neither the global nor the local shape matches: leave it as-is for the normal mismatch handling.
+            continue
+        state_dict[key] = dtensor_from_local_like(tensor, ref)
+    return state_dict
 
 
 def _insert_adapter_name_into_state_dict(
@@ -392,7 +429,7 @@ def _insert_adapter_name_into_state_dict(
 
 def _maybe_shard_state_dict_for_tp(model, state_dict, adapter_name):
     """
-    Shard LoRA adapter weights in-place in `state_dict` according to the tensor-parallel plan of the model.
+    Shard LoRA adapter weights in-place in `state_dict` for the pre-DTensor tensor-parallel integration.
 
     Args:
         model (`nn.Module`): The TP base model (with `_hf_tp_plan` and `_hf_device_mesh` set on its layers).
@@ -533,7 +570,7 @@ def set_peft_model_state_dict(
         adapter_name (`str`, *optional*, defaults to `"default"`):
             The name of the adapter whose state dict should be set.
         ignore_mismatched_sizes (`bool`, *optional*, defaults to `False`):
-            Whether to ignore mismatched in the state dict.
+            Whether to ignore mismatched sizes in the state dict.
         low_cpu_mem_usage (`bool`, `optional`, defaults to `False`):
             This argument must be `True` if the `model` was loaded with adapter weights on the meta device, e.g. after
             calling `inject_adapter_in_model` with `low_cpu_mem_usage=True`. Otherwise, leave it as `False`.
@@ -600,6 +637,8 @@ def set_peft_model_state_dict(
     peft_model_state_dict, mismatched_keys = _find_mismatched_keys(
         model, peft_model_state_dict, ignore_mismatched_sizes=ignore_mismatched_sizes
     )
+    if is_transformers_dtensor_tp:
+        peft_model_state_dict = _reshard_dtensor_values_for_load(model, peft_model_state_dict)
     if low_cpu_mem_usage:
         load_result = model.load_state_dict(peft_model_state_dict, strict=False, assign=True)
         # ensure that the correct device is set

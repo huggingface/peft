@@ -3,14 +3,16 @@
 # "triaged" are skipped.
 #
 # Listed maintainers, public Hugging Face members, and allowlisted
-# contributors receive "triaged" automatically. Others must link a
-# PEFT issue in their PR description, approved by a listed maintainer
-# or public Hugging Face member with "@peft-triage approved" on its
-# own line outside a code block.  Accepted references: #123,
-# huggingface/peft#123, or the full GitHub issue URL.  Contributor
-# allowlists do not grant approval authority. Only public organization
-# membership is checked; private members need an individual allowlist
-# entry.
+# contributors receive "triaged" automatically. Others must link an
+# open PEFT issue approved by a listed maintainer or public Hugging
+# Face member with "/peft-triage: approved" on its own line outside a
+# code block, or link one of the discussions allowlisted in
+# scripts/triage_prs.py. Accepted issue references: #123,
+# huggingface/peft#123, or a full GitHub issue URL. Allowlisted
+# discussions must use their full GitHub URL.
+# Contributor allowlists do not grant approval authority. Only public
+# organization membership is checked; private members need an
+# individual allowlist entry.
 #
 # PRs without approval are closed with an explanation. Contributors
 # can obtain approval and reopen the same PR, or ping maintainers

@@ -1107,6 +1107,25 @@ class BaseTuner(nn.Module, ABC):
                     RuntimeWarning,
                 )
 
+        # Warn about rank_pattern / alpha_pattern entries that matched no targeted module. The
+        # matching semantics are identical to `get_pattern_key`.
+        for pattern_attr in ("rank_pattern", "alpha_pattern"):
+            patterns = getattr(peft_config, pattern_attr, None)
+            if not patterns:
+                continue
+            matched = {
+                pattern_key
+                for pattern_key in patterns
+                if any(re.match(rf"(.*\.)?({pattern_key})$", module_name) for module_name in targeted_module_names)
+            }
+            unmatched = sorted(set(patterns) - matched)
+            if unmatched:
+                warnings.warn(
+                    f"The following {pattern_attr} keys did not match any targeted module and were ignored: "
+                    f"{unmatched}.",
+                    RuntimeWarning,
+                )
+
         # Now that the checks passed, merge this adapter's matches into the tuner-level bookkeeping. Duplicates
         # are skipped so that names stay unique when several adapters target the same modules.
         _extend_unique(self.targeted_module_names, targeted_module_names)
@@ -2685,9 +2704,11 @@ def delete_adapter(
 
 def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
     """
-    A helper method to cast the adapter weights to the correct dtype.
+    A helper method to cast the adapter weights to the correct dtype. It reassigns new parameters to the adapter
+    layers, if some object references the old parameters, they will not be updated.
 
     Currently, this only upcasts float dtypes to float32.
+
 
     Args:
         adapter_name (`str`):
@@ -2718,7 +2739,10 @@ def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dty
 
             if isinstance(submodule[adapter_name], nn.Parameter):
                 if submodule[adapter_name].dtype in dtypes_to_convert_to_fp32:
-                    submodule[adapter_name].data = submodule[adapter_name].data.to(torch.float32)
+                    # Reassign through the ParameterDict rather than mutating `.data` in place: for a
+                    # DTensor-backed parameter (TP), `.data = ...` only updates the outer dtype metadata
+                    # while leaving the local shard's actual dtype unchanged.
+                    submodule[adapter_name] = submodule[adapter_name].to(torch.float32)
                 continue
 
             if isinstance(submodule[adapter_name], torch.Tensor):  # e.g. from a BufferDict
@@ -2726,9 +2750,17 @@ def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dty
                     submodule[adapter_name] = submodule[adapter_name].to(torch.float32)
                 continue
 
-            for param in submodule[adapter_name].parameters():
-                if param.dtype in dtypes_to_convert_to_fp32:
-                    param.data = param.data.to(torch.float32)
+            for owner in submodule[adapter_name].modules():
+                for param_name, param in list(owner.named_parameters(recurse=False)):
+                    if param.dtype in dtypes_to_convert_to_fp32:
+                        # Reassign via setattr rather than mutating `.data` in place: for a DTensor-backed
+                        # parameter (TP), `.data = ...` only updates the outer dtype metadata while leaving
+                        # the local shard's actual dtype unchanged.
+                        setattr(
+                            owner,
+                            param_name,
+                            nn.Parameter(param.data.to(torch.float32), requires_grad=param.requires_grad),
+                        )
 
 
 def set_requires_grad(model, adapter_names: str | Sequence[str], requires_grad: bool = True) -> None:

@@ -4117,6 +4117,23 @@ class TestPeftCustomModel(PeftCommonTester):
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
 
+    def test_delete_adapter_fallback_with_modules_to_save_becomes_trainable(self):
+        # Bug-fix for #3716: deleting the active adapter that has no modules_to_save copy must
+        # make the fallback adapter's copy trainable (it was frozen while inactive). LoRA is
+        # sufficient here, as the auxiliary-module logic is shared between PEFT methods.
+        model = MLP()
+
+        config_default = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        config_other = LoraConfig(target_modules=["lin0"])
+        model = get_peft_model(model, config_default, adapter_name="default").to(self.torch_device)
+        assert model.base_model.model.lin1.modules_to_save["default"].weight.requires_grad
+        model.add_adapter("other", config_other)
+        model.set_adapter("other")
+        assert not model.base_model.model.lin1.modules_to_save["default"].weight.requires_grad
+        model.delete_adapter("other")
+        assert model.active_adapters == ["default"]
+        assert model.base_model.model.lin1.modules_to_save["default"].weight.requires_grad
+
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_get_base_model_state_dict(self, test_name, model_id, config_cls, config_kwargs):
         if config_kwargs.get("kasa_config", None) is not None:
@@ -4430,6 +4447,58 @@ class TestPeftCustomModel(PeftCommonTester):
                 dw_negative = module.get_delta_weight("merged_negative")
                 assert torch.allclose(dw_adapter1, -dw_negative, atol=1e-6)
 
+    def test_add_weighted_adapter_with_rslora_identity_single_adapter(self):
+        # See #3449
+        # Combining a single adapter with weight 1.0 must reproduce that adapter exactly. Previously, when the source
+        # adapter used use_rslora=True, the flag was inherited by the combined adapter's config, whose lora_alpha is
+        # chosen so that scaling == lora_alpha / r == 1. With rslora, the scaling became
+        # lora_alpha / sqrt(r) = sqrt(r) != 1 instead, so the combined adapter was sqrt(r) times overscaled.
+        # (With a single source adapter, add_weighted_adapter always resolves combination_type to "linear".)
+        torch.manual_seed(42)
+        model = MLP()
+        config = LoraConfig(r=4, target_modules=["lin0"], init_lora_weights=False, use_rslora=True)
+        model = get_peft_model(model, config, adapter_name="adapter1")
+
+        model.add_weighted_adapter(adapters=["adapter1"], weights=[1.0], adapter_name="merged")
+
+        for module in model.modules():
+            if isinstance(module, lora.LoraLayer):
+                dw_adapter1 = module.get_delta_weight("adapter1")
+                dw_merged = module.get_delta_weight("merged")
+                assert torch.allclose(dw_adapter1, dw_merged, atol=1e-5)
+
+    @pytest.mark.parametrize("combination_type", ["linear", "cat"])
+    def test_add_weighted_adapter_with_rslora_identity_two_adapters(self, combination_type):
+        # See #3449
+        # With a single source adapter, add_weighted_adapter collapses combination_type to "linear", so the "cat"
+        # branch is only exercised with >= 2 adapters. Here a second, fully-zeroed adapter is added so the merged
+        # adapter must still reproduce the first one exactly. Without the use_rslora=False fix the merged adapter is
+        # sqrt(r) overscaled: at r=4 the delta-weight norm ratio is 2.0 for "linear" and ~2.83 for "cat" instead of 1.0.
+        # combination_type="svd" is intentionally excluded: it has a separate, pre-existing double-scaling bug in
+        # _svd_generalized_task_arithmetic_weighted_adapter (unrelated to rslora) and is out of scope for this fix.
+        torch.manual_seed(42)
+        config = LoraConfig(r=4, target_modules=["lin0"], init_lora_weights=False, use_rslora=True)
+        model = get_peft_model(MLP(), config, adapter_name="adapter1")
+        model.add_adapter("adapter2", config)
+        # Zero the second adapter so it contributes nothing; the merged adapter must reproduce adapter1.
+        for module in model.modules():
+            if isinstance(module, lora.LoraLayer) and "adapter2" in module.lora_A:
+                module.lora_A["adapter2"].weight.data.zero_()
+                module.lora_B["adapter2"].weight.data.zero_()
+
+        model.add_weighted_adapter(
+            adapters=["adapter1", "adapter2"],
+            weights=[1.0, 1.0],
+            adapter_name="merged",
+            combination_type=combination_type,
+        )
+
+        for module in model.modules():
+            if isinstance(module, lora.LoraLayer) and "merged" in module.lora_A:
+                dw_adapter1 = module.get_delta_weight("adapter1")
+                dw_merged = module.get_delta_weight("merged")
+                assert torch.allclose(dw_adapter1, dw_merged, atol=1e-5)
+
     def test_add_weighted_adapter_subtraction_with_negative_weights(self):
         # Test that merging two identical adapters with weights [1.0, -1.0] results in approximately zero weights
         model = MLP()
@@ -4692,6 +4761,30 @@ class TestPeftCustomModel(PeftCommonTester):
         target = PeftModel.from_pretrained(model, tmp_path)
         extra_weight = target.base_model.model.embed_tokens_extra.weight
         assert torch.allclose(extra_weight, torch.full_like(extra_weight, 123.0))
+
+    def test_ignore_mismatched_sizes_with_scalar_modules_to_save(self, tmp_path):
+        # Regression test for #3676: modules_to_save can include scalar state entries.
+        class ModelWithBatchNorm(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 3)
+                self.norm = nn.BatchNorm1d(3)
+
+            def forward(self, x):
+                return self.norm(self.linear(x))
+
+        config = LoraConfig(target_modules=["linear"], modules_to_save=["norm"])
+        model = get_peft_model(ModelWithBatchNorm(), config)
+        model.base_model.model.norm.modules_to_save["default"].num_batches_tracked.fill_(7)
+        model.save_pretrained(tmp_path)
+        state_dict = safe_load_file(tmp_path / "adapter_model.safetensors")
+        assert state_dict["base_model.model.norm.num_batches_tracked"].ndim == 0
+
+        loaded = PeftModel.from_pretrained(
+            ModelWithBatchNorm(), tmp_path, ignore_mismatched_sizes=True, torch_device="cpu"
+        )
+
+        assert loaded.base_model.model.norm.modules_to_save["default"].num_batches_tracked.item() == 7
 
     @pytest.mark.parametrize(
         "config0",
