@@ -39,3 +39,8 @@ These properties make the selected modules good candidates for mitigating catast
 
 [[autodoc]] helpers.find_kappa_target_modules
     - all
+
+## FineGates trainer mixin
+
+[[autodoc]] helpers.FineGatesTrainerMixin
+    - all

@@ -32,6 +32,7 @@ from peft import (
     CPTConfig,
     DeftConfig,
     DeloraConfig,
+    FineGatesConfig,
     FourierFTConfig,
     FrodConfig,
     GloraConfig,
@@ -97,6 +98,7 @@ ALL_CONFIG_CLASSES = (
     (BOFTConfig, {}),
     (C3AConfig, {}),
     (DeftConfig, {}),
+    (FineGatesConfig, {}),
     (FourierFTConfig, {}),
     (FrodConfig, {}),
     (GloraConfig, {}),
@@ -351,7 +353,18 @@ class TestPeftConfig:
         assert str(record.list[0].message) == expected_msg
 
     @pytest.mark.parametrize(
-        "config_class", [LoHaConfig, LoraConfig, IA3Config, BeftConfig, OFTConfig, BOFTConfig, HRAConfig, VBLoRAConfig]
+        "config_class",
+        [
+            LoHaConfig,
+            LoraConfig,
+            IA3Config,
+            BeftConfig,
+            OFTConfig,
+            BOFTConfig,
+            HRAConfig,
+            VBLoRAConfig,
+            FineGatesConfig,
+        ],
     )
     def test_save_pretrained_with_target_modules(self, config_class):
         # See #1041, #1045
