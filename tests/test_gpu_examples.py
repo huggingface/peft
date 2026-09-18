@@ -92,6 +92,7 @@ from peft import (
     replace_lora_weights_loftq,
     set_peft_model_state_dict,
 )
+from peft.helpers import KappaTuneSelector, find_kappa_target_modules
 from peft.import_utils import (
     is_diffusers_available,
     is_te_available,
@@ -7096,80 +7097,69 @@ class TestLoraTensorParallel:
 
 @pytest.mark.single_gpu_tests
 @require_bitsandbytes
-def test_kappatune_with_4bit_model():
-    """Test that KappaTune works with 4-bit quantized models on GPU."""
-    import torch
-    from transformers import AutoModelForCausalLM, BitsAndBytesConfig
-
-    from peft.helpers import find_kappa_target_modules
-
-    # Use a very small model for faster testing
-    quantization_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_compute_dtype=torch.float16,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_use_double_quant=True,
-    )
-
-    model_id = "hf-internal-testing/tiny-random-LlamaForCausalLM"
-    with hub_online_once(model_id):
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            quantization_config=quantization_config,
-            device_map=torch_device,
-            dtype=torch.float16,
+class TestKappaTune:
+    def test_kappatune_with_4bit_model(self):
+        """Test that KappaTune works with 4-bit quantized models on GPU."""
+        # Use a very small model for faster testing
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
         )
 
-    # Run KappaTune
-    targets = find_kappa_target_modules(model, top_p=0.3)
+        model_id = "hf-internal-testing/tiny-random-LlamaForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                quantization_config=quantization_config,
+                device_map=torch_device,
+                dtype=torch.float16,
+            )
 
-    # Basic assertions
-    assert isinstance(targets, dict)
-    assert "target_modules" in targets
-    assert isinstance(targets["target_modules"], list)
-    assert len(targets["target_modules"]) > 0, "Should return at least some target modules"
+        # Run KappaTune
+        targets = find_kappa_target_modules(model, top_p=0.3)
 
+        # Basic assertions
+        assert isinstance(targets, dict)
+        assert "target_modules" in targets
+        assert isinstance(targets["target_modules"], list)
+        assert len(targets["target_modules"]) > 0, "Should return at least some target modules"
 
-@pytest.mark.single_gpu_tests
-@require_bitsandbytes
-def test_kappatune_with_8bit_model(tmp_path):
-    """Test that KappaTune dequantizes 8-bit quantized weights before computing condition numbers.
+    def test_kappatune_with_8bit_model(self, tmp_path):
+        """Test that KappaTune dequantizes 8-bit quantized weights before computing condition numbers.
 
-    Reading the int8 values without their per-row scales does not raise, it silently returns condition numbers that are
-    orders of magnitude off, so they are compared to those of the same model in full precision. See #3736.
-    """
-    import torch
-    from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+        Reading the int8 values without their per-row scales does not raise, it silently returns condition numbers that
+        are orders of magnitude off, so they are compared to those of the same model in full precision. See #3736.
+        """
+        model_id = "hf-internal-testing/tiny-random-LlamaForCausalLM"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+        # Give the rows of each weight very different scales. 8-bit quantization stores one scale per row, so condition
+        # numbers computed on the int8 values without these scales would differ strongly from those of the actual
+        # weights.
+        with torch.no_grad():
+            for module in model.modules():
+                if isinstance(module, torch.nn.Linear):
+                    module.weight.mul_(torch.logspace(-2, 1, module.out_features).unsqueeze(1))
+        model.save_pretrained(tmp_path)
 
-    from peft.helpers import KappaTuneSelector
+        model_fp = AutoModelForCausalLM.from_pretrained(tmp_path, device_map=torch_device, dtype=torch.float32)
+        model_8bit = AutoModelForCausalLM.from_pretrained(
+            tmp_path,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+            device_map=torch_device,
+        )
 
-    model_id = "hf-internal-testing/tiny-random-LlamaForCausalLM"
-    with hub_online_once(model_id):
-        model = AutoModelForCausalLM.from_pretrained(model_id)
-    # Give the rows of each weight very different scales. 8-bit quantization stores one scale per row, so condition
-    # numbers computed on the int8 values without these scales would differ strongly from those of the actual weights.
-    with torch.no_grad():
-        for module in model.modules():
-            if isinstance(module, torch.nn.Linear):
-                module.weight.mul_(torch.logspace(-2, 1, module.out_features).unsqueeze(1))
-    model.save_pretrained(tmp_path)
+        selector_fp = KappaTuneSelector(model_fp, show_progress=False)
+        selector_fp._compute_kappas()
+        selector_8bit = KappaTuneSelector(model_8bit, show_progress=False)
+        selector_8bit._compute_kappas()
 
-    model_fp = AutoModelForCausalLM.from_pretrained(tmp_path, device_map=torch_device, dtype=torch.float32)
-    model_8bit = AutoModelForCausalLM.from_pretrained(
-        tmp_path,
-        quantization_config=BitsAndBytesConfig(load_in_8bit=True),
-        device_map=torch_device,
-    )
-
-    selector_fp = KappaTuneSelector(model_fp, show_progress=False)
-    selector_fp._compute_kappas()
-    selector_8bit = KappaTuneSelector(model_8bit, show_progress=False)
-    selector_8bit._compute_kappas()
-
-    kappas_fp = selector_fp._condition_numbers
-    kappas_8bit = selector_8bit._condition_numbers
-    assert kappas_8bit.keys() == kappas_fp.keys()
-    # Quantization noise can still noticeably change the condition number of nearly singular weights, hence the loose
-    # bound. Without dequantization, the condition numbers would be off by a much larger factor.
-    for name, kappa_fp in kappas_fp.items():
-        assert 0.5 < kappas_8bit[name] / kappa_fp < 2
+        kappas_fp = selector_fp._condition_numbers
+        kappas_8bit = selector_8bit._condition_numbers
+        assert kappas_8bit.keys() == kappas_fp.keys()
+        # Quantization noise can still noticeably change the condition number of nearly singular weights, hence the
+        # loose bound. Without dequantization, the condition numbers would be off by a much larger factor.
+        for name, kappa_fp in kappas_fp.items():
+            assert 0.5 < kappas_8bit[name] / kappa_fp < 2
