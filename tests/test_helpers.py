@@ -824,11 +824,9 @@ class TestCreateDummyLoraConfig:
     @pytest.mark.skipif(platform.system() != "Linux", reason="Running test involving torch.compile only on Linux.")
     @pytest.mark.parametrize("do_compile", [False, True])
     @pytest.mark.parametrize("use_rslora", [False, True])
-    def test_dummy_preserves_base_output_and_hotswaps_every_adapter(self, tmp_path, do_compile, use_rslora):
-        # local import: it's a private clss, we don't want a global import or else all tests will fail if torch
-        # renames/removes this class.
-        from torch._dynamo.testing import CompileCounter
-
+    def test_dummy_config_preserves_base_output_and_hotswaps_every_adapter(self, tmp_path, do_compile, use_rslora):
+        # test is similar to test_hotswap_rank_and_alpha_patterns in test_initialization, but we check the dummy adapter
+        # on top
         class MLP(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -847,7 +845,7 @@ class TestCreateDummyLoraConfig:
         base_model = MLP()
         inputs = torch.randn(2, 10)
         configs = [
-            LoraConfig(r=3, lora_alpha=9, target_modules=["lin0", "lin1"], rank_pattern={"lin1": 3}),
+            LoraConfig(r=3, lora_alpha=9, target_modules=["lin0", "lin1"], rank_pattern={"lin1": 5}),
             LoraConfig(r=2, lora_alpha=4, target_modules=["lin0"]),
             LoraConfig(r=1, lora_alpha=3, target_modules=["lin1"]),
         ]
@@ -869,9 +867,14 @@ class TestCreateDummyLoraConfig:
         dummy_config = create_dummy_lora_config(configs)
         model = get_peft_model(deepcopy(base_model), dummy_config).eval()
         prepare_model_for_compiled_hotswap(model)
-        counter = CompileCounter()
-        model = torch.compile(model, backend=counter, fullgraph=True) if do_compile else model
+        if do_compile:
+            # local import: it's a private class, we don't want a global import or else all tests will fail if torch
+            # renames/removes this class.
+            from torch._dynamo.testing import CompileCounter
 
+            counter = CompileCounter()
+
+        model = torch.compile(model, backend=counter, fullgraph=True) if do_compile else model
         with torch.inference_mode():
             torch.testing.assert_close(model(inputs), base_output)
             for index in [0, 1, 2, 0]:
