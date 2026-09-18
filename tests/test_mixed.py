@@ -588,6 +588,36 @@ class TestMixedAdapterTypes(unittest.TestCase):
         assert torch.isfinite(output_unloaded).all()
         assert torch.allclose(output_base, output_unloaded, atol=atol, rtol=rtol)
 
+    def test_disable_adapter_restores_state(self):
+        # Regression test for #3507: PeftMixedModel.disable_adapter() must restore the
+        # adapter-enabled state that existed on entry, instead of unconditionally
+        # re-enabling. Covers (a) nested contexts and (b) an already-disabled model.
+        atol = 1e-5
+        rtol = 1e-5
+        input = torch.arange(90).reshape(9, 10).to(self.torch_device)
+
+        config = LoraConfig(r=4, lora_alpha=4, target_modules=["lin0", "lin1"], init_lora_weights=False)
+        peft_model = self._get_model(SimpleNet, config, "adapter0", seed=0)
+
+        output_adapter = peft_model(input)
+
+        with peft_model.disable_adapter():
+            output_base = peft_model(input)
+            with peft_model.disable_adapter():
+                pass
+            output_after_inner = peft_model(input)
+
+        assert not torch.allclose(output_adapter, output_base, atol=atol, rtol=rtol)
+        assert torch.allclose(output_after_inner, output_base, atol=atol, rtol=rtol)
+        assert not torch.allclose(output_after_inner, output_adapter, atol=atol, rtol=rtol)
+
+        peft_model.base_model.disable_adapter_layers()
+        before = {m.disable_adapters for m in peft_model.modules() if hasattr(m, "disable_adapters")}
+        with peft_model.disable_adapter():
+            pass
+        after = {m.disable_adapters for m in peft_model.modules() if hasattr(m, "disable_adapters")}
+        assert before == after == {True}
+
     def test_delete_adapter(self):
         atol = 1e-5
         rtol = 1e-5
