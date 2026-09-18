@@ -306,9 +306,14 @@ def test_model_batch_training_text(sst_data, global_tokenizer, collator, config_
 
 
 def test_cpt_forward_loss_matches_reference():
-    """Pin the CPT loss computation: the virtual tokens are prefixed to the labels (using the configured
+    """
+    Ensure that the loss calculated by CPT returns the expected value, as none of the general tests would cover
+    accidental changes in the loss calculation.
+
+    In particular, take care of this: the virtual tokens are prefixed to the labels (using the configured
     cpt_token_ids), then every position whose token type is not a positive multiple of 4 is ignored, and the loss is
-    the (unweighted, as opt_weighted_loss_type="none") shifted cross entropy over the remaining positions."""
+    the (unweighted, as opt_weighted_loss_type="none") shifted cross entropy over the remaining positions.
+    """
     config = CPTConfig(
         cpt_token_ids=[0, 1, 2, 3, 4, 5, 6, 7],
         cpt_mask=[1, 1, 1, 1, 1, 1, 1, 1],
