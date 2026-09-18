@@ -484,7 +484,7 @@ For users, this means:
 
 ## Optimizers
 
-LoRA training can optionally include special purpose optimizers. Currently PEFT supports LoRA-FA and LoRA+.
+LoRA training can optionally include special purpose optimizers. Currently PEFT supports LoRA-FA, LoRA+, and Riemannian-preconditioned LoRA.
 
 ### LoRA-FA Optimizer
 
@@ -547,6 +547,42 @@ trainer = Trainer(
     optimizers=(optimizer, scheduler),
 )
 ```
+
+### Riemannian-preconditioned LoRA
+
+LoRA training can be improved with a Riemannian preconditioner, as described in [Riemannian Preconditioned LoRA](https://huggingface.co/papers/2402.02347). On every optimizer step, the gradients of the LoRA matrices $A$ and $B$ are multiplied by an $r \times r$ preconditioner that rescales the Euclidean gradient toward the Riemannian (scaled-gradient) direction on the low-rank matrix manifold, which better conditions the update and can improve convergence. Because the preconditioner is $r \times r$, its memory and runtime overhead are small in the LoRA rank. `create_riemannian_optimizer` wraps any base optimizer class (e.g. `torch.optim.AdamW` or `torch.optim.SGD`): non-LoRA parameters are updated by the base optimizer unchanged, and only `nn.Linear`-shaped LoRA layers (`lora_A` / `lora_B`) are preconditioned.
+
+```py
+from peft import LoraConfig, get_peft_model
+from peft.optimizers import create_riemannian_optimizer
+from transformers import Trainer, get_cosine_schedule_with_warmup
+import torch
+
+base_model = AutoModelForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-8B-Instruct")
+
+config = LoraConfig(...)
+model = get_peft_model(base_model, config)
+
+optimizer = create_riemannian_optimizer(
+    model=model,
+    optimizer_cls=torch.optim.AdamW,
+    lr=5e-5,
+    reg=1e-2,
+)
+
+scheduler = get_cosine_schedule_with_warmup(
+    optimizer,
+    num_warmup_steps=100,
+    num_training_steps=1000,
+)
+
+trainer = Trainer(
+    ...,
+    optimizers=(optimizer, scheduler),
+)
+```
+
+`reg` is a damping term added to the $r \times r$ matrix diagonal before inversion; it stabilizes the preconditioner when a LoRA factor is (near) rank-deficient.
 
 
 ## Post-Training
