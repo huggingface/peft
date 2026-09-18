@@ -139,11 +139,13 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             # lm_head doesn't have embedding_dim attribute
             embed_dim = self.get_base_layer().in_features
 
+        if check_deepspeed_zero3_enabled():
+            originals = self._collect_token_weights(weight, self.token_indices[adapter_name], embed_dim)
+        else:
+            originals = self.weight[self.token_indices[adapter_name]]
+
         if init_weights:
-            if check_deepspeed_zero3_enabled():
-                values = self._collect_token_weights(weight, self.token_indices[adapter_name], embed_dim)
-            else:
-                values = self.weight[self.token_indices[adapter_name]]
+            values = originals
         else:
             # random init with matching dtype/device
             values = torch.randn(
@@ -153,7 +155,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
             )
 
         self.trainable_tokens_delta[adapter_name] = nn.Parameter(values.clone(), requires_grad=True)
-        self.trainable_tokens_original[adapter_name] = values.clone()
+        self.trainable_tokens_original[adapter_name] = originals.detach().clone()
 
         self._move_adapter_to_device_of_base_layer(adapter_name)
 

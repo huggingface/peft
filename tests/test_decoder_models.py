@@ -60,7 +60,9 @@ from peft import (
     PveraConfig,
     RandLoraConfig,
     RoadConfig,
+    ShadowConfig,
     ShiraConfig,
+    SupertuningConfig,
     TaskType,
     TinyLoraConfig,
     UniLoraConfig,
@@ -343,6 +345,34 @@ ALL_CONFIGS = [
         },
     ),
     (
+        ShadowConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "r": 2,
+            "shadow_num_hidden_layers": 1,
+        },
+    ),
+    (
+        SupertuningConfig,
+        {
+            "sparsity": 0.9,
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "init_weights": False,
+        },
+    ),
+    (
+        SupertuningConfig,
+        {
+            "sparsity": 0.9,
+            "r": 2,
+            "select_top": False,
+            "task_type": "CAUSAL_LM",
+            "target_modules": None,
+            "init_weights": False,
+        },
+    ),
+    (
         VBLoRAConfig,
         {
             "task_type": "CAUSAL_LM",
@@ -431,12 +461,15 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         OSFConfig,
         RoadConfig,
         ShiraConfig,
+        SupertuningConfig,
         C3AConfig,
         MissConfig,
         DeloraConfig,
         PsoftConfig,
     ]:
-        pytest.skip("Skipping Beft/BOFT/GLoRA/HRA/OFT/Road/SHiRA/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel")
+        pytest.skip(
+            "Skipping Beft/BOFT/GLoRA/HRA/OFT/Road/SHiRA/Supertuning/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel"
+        )
 
 
 def _skip_alora_no_activation(config_cls, config_kwargs):
@@ -483,6 +516,13 @@ class TestDecoderModels(PeftCommonTester):
     def test_adapter_name(self, model_id, config_cls, config_kwargs):
         _skip_if_not_conv1d_supported(model_id, config_cls)
         self._test_adapter_name(model_id, config_cls, config_kwargs.copy())
+
+    @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_add_adapter_no_autocast_adapter_dtype(self, model_id, config_cls, config_kwargs, dtype):
+        _skip_if_not_conv1d_supported(model_id, config_cls)
+        self._test_add_adapter_no_autocast_adapter_dtype(model_id, config_cls, config_kwargs.copy(), dtype=dtype)
 
     @pytest.mark.parametrize("model_id", PEFT_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)

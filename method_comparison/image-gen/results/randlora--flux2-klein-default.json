@@ -1,9 +1,10 @@
 {
   "run_info": {
-    "created_at": "2026-06-09T20:17:03+00:00",
-    "total_time": 2401.9957280300005,
+    "created_at": "2026-09-16T04:44:56+00:00",
+    "total_time": 2361.4444995230006,
     "experiment_name": "randlora/flux2-klein-default",
     "peft_branch": "main",
+    "peft_worktree_is_dirty": true,
     "train_config": {
       "model_id": "black-forest-labs/FLUX.2-klein-base-4B",
       "dataset_id": "peft-internal-testing/cat-image-dataset",
@@ -90,23 +91,23 @@
       "task_type": null,
       "peft_type": "RANDLORA",
       "auto_mapping": null,
-      "peft_version": null,
+      "peft_version": "0.21.0",
       "base_model_name_or_path": null,
       "revision": null,
       "inference_mode": false,
       "r": 32,
       "target_modules": [
-        "add_k_proj",
         "to_add_out",
-        "add_q_proj",
-        "add_v_proj",
         "to_k",
-        "to_qkv_mlp_proj",
-        "linear_in",
-        "linear_out",
         "to_q",
+        "add_k_proj",
+        "linear_in",
+        "to_v",
+        "to_qkv_mlp_proj",
+        "linear_out",
         "to_out.0",
-        "to_v"
+        "add_q_proj",
+        "add_v_proj"
       ],
       "projection_prng_key": 0,
       "save_projection": true,
@@ -124,10 +125,10 @@
     "error_msg": ""
   },
   "train_info": {
-    "accelerator_memory_reserved_avg": 11311657604,
-    "accelerator_memory_max": 11456741376,
-    "accelerator_memory_reserved_99th": 11456741376,
-    "train_time": 2124.7402266980134,
+    "accelerator_memory_reserved_avg": 11509600791,
+    "accelerator_memory_max": 11540627456,
+    "accelerator_memory_reserved_99th": 11540627456,
+    "train_time": 2123.0126953630024,
     "file_size": 99999999,
     "num_trainable_params": 23838720,
     "num_total_params": 3899383296,
@@ -135,86 +136,86 @@
     "metrics": [
       {
         "step": 100,
-        "valid dino_similarity": 0.6218022108078003,
-        "train loss": 0.7680090069770813,
+        "valid dino_similarity": 0.6979799866676331,
+        "train loss": 0.7696579694747925,
         "train samples": 200,
-        "train time": 224.56330100700143,
-        "eval time": 38.93820964999759,
-        "mem allocated avg": 9691056670.72,
-        "mem reserved avg": 11264327680.0,
-        "elapsed time": 269.9678261020017
+        "train time": 231.71318567600247,
+        "eval time": 31.75794394699915,
+        "mem allocated avg": 9713771448.32,
+        "mem reserved avg": 11309961707.52,
+        "elapsed time": 275.63545794400125
       },
       {
         "step": 200,
-        "valid dino_similarity": 0.7159435749053955,
-        "train loss": 0.7397028207778931,
+        "valid dino_similarity": 0.6301171779632568,
+        "train loss": 0.7388275265693665,
         "train samples": 400,
-        "train time": 228.395642837997,
-        "eval time": 37.7776130179991,
-        "mem allocated avg": 9690448291.84,
-        "mem reserved avg": 11416874516.48,
-        "elapsed time": 536.2968212320047
+        "train time": 228.66616839997005,
+        "eval time": 31.673103757995705,
+        "mem allocated avg": 9713914112.0,
+        "mem reserved avg": 11539054592.0,
+        "elapsed time": 535.9980971960031
       },
       {
         "step": 300,
-        "valid dino_similarity": 0.7299408912658691,
-        "train loss": 0.7075288891792297,
+        "valid dino_similarity": 0.6546372771263123,
+        "train loss": 0.7147586941719055,
         "train samples": 600,
-        "train time": 235.1546070290351,
-        "eval time": 38.53865340599441,
-        "mem allocated avg": 9690802268.16,
-        "mem reserved avg": 11265858600.96,
-        "elapsed time": 810.1462682580022
+        "train time": 226.18891102703492,
+        "eval time": 32.24524119000125,
+        "mem allocated avg": 9713965312.0,
+        "mem reserved avg": 11540333854.72,
+        "elapsed time": 794.4579203969988
       },
       {
         "step": 400,
-        "valid dino_similarity": 0.7317898273468018,
-        "train loss": 0.6752651333808899,
+        "valid dino_similarity": 0.41441911458969116,
+        "train loss": 0.6785113215446472,
         "train samples": 800,
-        "train time": 230.55097187395586,
-        "eval time": 37.91794563899748,
-        "mem allocated avg": 9690845603.84,
-        "mem reserved avg": 11265900544.0,
-        "elapsed time": 1078.7743308600038
+        "train time": 234.31464956697164,
+        "eval time": 33.4341454710011,
+        "mem allocated avg": 9714016512.0,
+        "mem reserved avg": 11540585512.96,
+        "elapsed time": 1062.2310815610035
       },
       {
         "step": 500,
-        "valid dino_similarity": 0.6655710339546204,
-        "train loss": 0.6499471664428711,
+        "valid dino_similarity": 0.5098466277122498,
+        "train loss": 0.6547732353210449,
         "train samples": 1000,
-        "train time": 230.8947472640357,
-        "eval time": 37.84093423200102,
-        "mem allocated avg": 9690908600.32,
-        "mem reserved avg": 11265879572.48,
-        "elapsed time": 1347.6682676870041
+        "train time": 226.454878922028,
+        "eval time": 31.20479593300115,
+        "mem allocated avg": 9714067712.0,
+        "mem reserved avg": 11540585512.96,
+        "elapsed time": 1319.9155052909991
       },
       {
         "step": 600,
-        "valid dino_similarity": 0.7108818292617798,
-        "train loss": 0.6446861624717712,
+        "valid dino_similarity": 0.6933954358100891,
+        "train loss": 0.6471095681190491,
         "train samples": 1200,
-        "train time": 227.82180542298738,
-        "eval time": 37.25759751300211,
-        "mem allocated avg": 9690944071.68,
-        "mem reserved avg": 11267871866.88,
-        "elapsed time": 1612.9048466910026
+        "train time": 224.7787014669957,
+        "eval time": 31.27486286000203,
+        "mem allocated avg": 9714118912.0,
+        "mem reserved avg": 11540627456.0,
+        "elapsed time": 1575.9935656439993
       },
       {
         "step": 700,
-        "valid dino_similarity": 0.6809412240982056,
-        "train loss": 0.6387181878089905,
+        "valid dino_similarity": 0.647957444190979,
+        "train loss": 0.64121413230896,
         "train samples": 1400,
-        "train time": 228.2885742610015,
-        "eval time": 39.02297116599948,
-        "mem allocated avg": 9690806528.0,
-        "mem reserved avg": 11456720404.48,
-        "elapsed time": 1880.3739446149993
+        "train time": 226.36991130297247,
+        "eval time": 31.849859868998465,
+        "mem allocated avg": 9714170112.0,
+        "mem reserved avg": 11540585512.96,
+        "elapsed time": 1834.2380811740004
       },
       {
         "step": 750,
-        "test dino_similarity": 0.6052322387695312,
-        "drift": 0.4385121874511242,
-        "train loss": 0.6244163513183594,
+        "test dino_similarity": 0.5961240927378336,
+        "drift": 0.44368472695350647,
+        "train loss": 0.6239694952964783,
         "train samples": 1500
       }
     ]
@@ -229,25 +230,25 @@
       "created_at": "2026-03-09T15:31:26+00:00"
     },
     "package_info": {
-      "transformers-version": "5.10.2",
+      "transformers-version": "5.13.1",
       "transformers-commit-hash": null,
-      "peft-version": "0.19.2.dev0",
-      "peft-commit-hash": "b2d61f5f80a7ac540fb572c077d8265a95986db8",
+      "peft-version": "0.21.0",
+      "peft-commit-hash": "514b9e6d11fe9be9d72d04abd0d290a7a6441ddd",
       "datasets-version": "4.2.0",
       "datasets-commit-hash": null,
       "diffusers-version": "0.38.0",
       "diffusers-commit-hash": null,
-      "torch-version": "2.12.0+cu130",
+      "torch-version": "2.13.0+cu130",
       "torch-commit-hash": null
     },
     "system_info": {
       "system": "Linux",
-      "release": "6.17.0-1009-aws",
-      "version": "#9~24.04.2-Ubuntu SMP Fri Mar  6 23:50:29 UTC 2026",
+      "release": "7.0.0-1012-aws",
+      "version": "#12~24.04.1-Ubuntu SMP PREEMPT Wed Aug 12 14:00:57 UTC 2026",
       "machine": "x86_64",
       "processor": "x86_64",
       "accelerator": "NVIDIA L40S"
     },
-    "pytorch_info": "PyTorch built with:\n  - GCC 13.3\n  - C++ Version: 202002\n  - Intel(R) oneAPI Math Kernel Library Version 2024.2-Product Build 20240605 for Intel(R) 64 architecture applications\n  - Intel(R) MKL-DNN v3.11.2 (Git Hash 03c022d3ffdcee958cfacbe720048e725fdf644c)\n  - OpenMP 201511 (a.k.a. OpenMP 4.5)\n  - LAPACK is enabled (usually provided by MKL)\n  - NNPACK is enabled\n  - CPU capability usage: AVX2\n  - CUDA Runtime 13.0\n  - NVCC architecture flags: -gencode;arch=compute_75,code=sm_75;-gencode;arch=compute_80,code=sm_80;-gencode;arch=compute_86,code=sm_86;-gencode;arch=compute_90,code=sm_90;-gencode;arch=compute_100,code=sm_100;-gencode;arch=compute_120,code=sm_120\n  - CuDNN 90.7.1  (built against CUDA 12.8)\n    - Built with CuDNN 92.0\n  - Magma 2.6.1\n  - Build settings: BLAS_INFO=mkl, BUILD_TYPE=Release, COMMIT_SHA=7661cd9c6b841b62b7f411aa52ec51f05457263b, CUDA_FLAGS= -DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS -Xfatbin -compress-all -DONNX_NAMESPACE=onnx_torch -gencode arch=compute_75,code=sm_75 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_100,code=sm_100 -gencode arch=compute_120,code=sm_120 -Xcudafe --diag_suppress=cc_clobber_ignored,--diag_suppress=field_without_dll_interface,--diag_suppress=base_class_has_different_dll_interface,--diag_suppress=dll_interface_conflict_none_assumed,--diag_suppress=dll_interface_conflict_dllexport_assumed,--diag_suppress=bad_friend_decl --expt-relaxed-constexpr --expt-extended-lambda -Xfatbin -compress-all --threads 2 -compress-mode=size -Wno-deprecated-gpu-targets --expt-extended-lambda -DCUB_WRAPPED_NAMESPACE=at_cuda_detail -DDISABLE_CUSPARSE_DEPRECATED -DCUDA_HAS_FP16=1 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -DC10_NODEPRECATED, CUDA_VERSION=13.0, CUDNN_VERSION=9.20.0, CXX_COMPILER=/opt/rh/gcc-toolset-13/root/usr/bin/c++, CXX_FLAGS= -fvisibility-inlines-hidden -DUSE_PTHREADPOOL -DNDEBUG -DUSE_KINETO -DLIBKINETO_NOROCTRACER -DLIBKINETO_NOXPUPTI=ON -DUSE_FBGEMM -DUSE_MSLK -DUSE_PYTORCH_QNNPACK -DUSE_XNNPACK -DSYMBOLICATE_MOBILE_DEBUG_HANDLE -O2 -fPIC -DC10_NODEPRECATED -Wall -Wextra -Werror=return-type -Werror=non-virtual-dtor -Werror=range-loop-construct -Werror=bool-operation -Wnarrowing -Wno-missing-field-initializers -Wno-unknown-pragmas -Wno-unused-parameter -Wno-strict-overflow -Wno-strict-aliasing -Wno-stringop-overflow -Wsuggest-override -Wno-psabi -Wno-error=old-style-cast -faligned-new -Wno-maybe-uninitialized -fno-math-errno -fno-trapping-math -Werror=format -Wno-dangling-reference -Wno-error=dangling-reference -Wno-stringop-overflow, LAPACK_INFO=mkl, PERF_WITH_AVX=1, PERF_WITH_AVX2=1, TORCH_VERSION=2.12.0, USE_CUDA=ON, USE_CUDNN=ON, USE_CUSPARSELT=1, USE_GFLAGS=OFF, USE_GLOG=OFF, USE_GLOO=ON, USE_MKL=ON, USE_MKLDNN=ON, USE_MPI=OFF, USE_NCCL=1, USE_NNPACK=ON, USE_OPENMP=ON, USE_ROCM=OFF, USE_ROCM_KERNEL_ASSERT=OFF, USE_XCCL=OFF, USE_XPU=OFF, \n"
+    "pytorch_info": "PyTorch built with:\n  - GCC 13.3\n  - C++ Version: 202002\n  - Intel(R) oneAPI Math Kernel Library Version 2024.2-Product Build 20240605 for Intel(R) 64 architecture applications\n  - Intel(R) MKL-DNN v3.12.0 (Git Hash 80afa71049cd69a3df32adcccb623b12cd7baa22)\n  - OpenMP 201511 (a.k.a. OpenMP 4.5)\n  - LAPACK is enabled (usually provided by MKL)\n  - NNPACK is enabled\n  - CPU capability usage: AVX2\n  - CUDA Runtime 13.0\n  - NVCC architecture flags: -gencode;arch=compute_75,code=sm_75;-gencode;arch=compute_80,code=sm_80;-gencode;arch=compute_86,code=sm_86;-gencode;arch=compute_90,code=sm_90;-gencode;arch=compute_100,code=sm_100;-gencode;arch=compute_120,code=sm_120\n  - CuDNN 90.7.1  (built against CUDA 12.8)\n    - Built with CuDNN 92.0\n  - Magma 2.6.1\n  - Build settings: BLAS_INFO=mkl, BUILD_TYPE=Release, COMMIT_SHA=cf30153c4c131c8164ee7798e5022d810682e2cb, CUDA_FLAGS= -DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS -Xfatbin -compress-all -DONNX_NAMESPACE=onnx_torch -gencode arch=compute_75,code=sm_75 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_100,code=sm_100 -gencode arch=compute_120,code=sm_120 -Xcudafe --diag_suppress=cc_clobber_ignored,--diag_suppress=field_without_dll_interface,--diag_suppress=base_class_has_different_dll_interface,--diag_suppress=dll_interface_conflict_none_assumed,--diag_suppress=dll_interface_conflict_dllexport_assumed,--diag_suppress=bad_friend_decl --expt-relaxed-constexpr --expt-extended-lambda -Xfatbin -compress-all --threads 2 -compress-mode=size -Wno-deprecated-gpu-targets --expt-extended-lambda -DCUB_WRAPPED_NAMESPACE=at_cuda_detail -DDISABLE_CUSPARSE_DEPRECATED -DCUDA_HAS_FP16=1 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -DC10_NODEPRECATED, CUDA_VERSION=13.0, CUDNN_VERSION=9.20.0, CXX_COMPILER=/opt/rh/gcc-toolset-13/root/usr/bin/c++, CXX_FLAGS= -fvisibility-inlines-hidden -DUSE_PTHREADPOOL -DNDEBUG -DUSE_KINETO -DHAS_CUPTI -DUSE_FBGEMM -DUSE_MSLK -DUSE_PYTORCH_QNNPACK -DSYMBOLICATE_MOBILE_DEBUG_HANDLE -O2 -fPIC -DC10_NODEPRECATED -Wall -Wextra -Werror=return-type -Werror=non-virtual-dtor -Werror=range-loop-construct -Werror=bool-operation -Wnarrowing -Wno-missing-field-initializers -Wno-unknown-pragmas -Wno-unused-parameter -Wno-strict-overflow -Wno-strict-aliasing -Wno-stringop-overflow -Wsuggest-override -Wno-psabi -Wno-error=old-style-cast -faligned-new -Wno-maybe-uninitialized -fno-math-errno -fno-trapping-math -Werror=format -Wno-dangling-reference -Wno-error=dangling-reference -Wno-stringop-overflow, LAPACK_INFO=mkl, PERF_WITH_AVX=1, PERF_WITH_AVX2=1, TORCH_VERSION=2.13.0, USE_CUDA=1, USE_CUDNN=ON, USE_CUSPARSELT=1, USE_GFLAGS=OFF, USE_GLOG=OFF, USE_GLOO=ON, USE_MKL=ON, USE_MKLDNN=ON, USE_MPI=OFF, USE_NCCL=ON, USE_NNPACK=ON, USE_OPENMP=ON, USE_ROCM=OFF, USE_ROCM_KERNEL_ASSERT=OFF, USE_XCCL=OFF, USE_XPU=OFF, \n"
   }
 }

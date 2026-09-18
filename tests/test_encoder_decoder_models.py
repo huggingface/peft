@@ -46,6 +46,7 @@ from peft import (
     RandLoraConfig,
     RoadConfig,
     ShiraConfig,
+    SupertuningConfig,
     TaskType,
     TinyLoraConfig,
     UniLoraConfig,
@@ -65,7 +66,8 @@ PEFT_ENCODER_DECODER_MODELS_TO_TEST = [
     "peft-internal-testing/tiny-random-BartForConditionalGeneration",
 ]
 
-# TODO Missing from this list are LoKr, LoHa, LN Tuning, add them
+# TODO Missing from this list are LoKr, LoHa, LN Tuning, add them.
+# ShadowPEFT is intentionally omitted: it only supports decoder-only models.
 ALL_CONFIGS = [
     (
         AdaLoraConfig,
@@ -261,6 +263,15 @@ ALL_CONFIGS = [
         },
     ),
     (
+        SupertuningConfig,
+        {
+            "sparsity": 0.9,
+            "task_type": "SEQ_2_SEQ_LM",
+            "target_modules": None,
+            "init_weights": False,
+        },
+    ),
+    (
         VBLoRAConfig,
         {
             "target_modules": None,
@@ -400,6 +411,12 @@ class TestEncoderDecoderModels(PeftCommonTester):
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
     def test_adapter_name(self, model_id, config_cls, config_kwargs):
         self._test_adapter_name(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
+    @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_add_adapter_no_autocast_adapter_dtype(self, model_id, config_cls, config_kwargs, dtype):
+        self._test_add_adapter_no_autocast_adapter_dtype(model_id, config_cls, config_kwargs, dtype=dtype)
 
     @pytest.mark.parametrize("model_id", PEFT_ENCODER_DECODER_MODELS_TO_TEST)
     @pytest.mark.parametrize("config_cls,config_kwargs", ALL_CONFIGS)
