@@ -66,7 +66,7 @@ Now wrap the base model and `peft_config` with the [`get_peft_model`] function t
 <div class="flex justify-center">
   <div class="flex flex-col basis-2/4">
     <p>
-    Wrapping means that PEFT replaces the targeted layers (here: all <code>q_proj</code> layers) with the adapter-specific layer for the target layer's type.  Since we're dealing with linear layers, it will be, in this case, a <code>lora.Linear</code> layer. <b>Note</b> that these changes are done in-place to save memory, so your base model is now modified.
+    Wrapping means that PEFT replaces the targeted layers (here: all <code>q_proj</code> layers) with the adapter-specific layer for the target layer's type.  Since we're dealing with linear layers, it will be, in this case, a <code>lora.Linear</code> layer. <b>Note</b> that these changes are done in-place to save memory, so your base model is now modified. If you want to keep the base model unmodified, pass a copy created with <code>peft.detached_copy</code> to <code>get_peft_model</code> instead; the copy shares the weights of the base model, so it requires practically no extra memory.
     </p>
     <p>
     Note that we've only specified <code>q_proj</code> but in actuality we are targeting all <code>model.layers[:].self_attn.q_proj</code> layers. This is because PEFT searches for matching suffixes by default. Pass a string with a regular expression if you want to target more complex layer patterns.
