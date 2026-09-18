@@ -1332,6 +1332,7 @@ class BaseTuner(nn.Module, ABC):
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
         """
+        # TODO: update docstring about the interaction of active/merged adapters for PEFT v1.0
         # Note: The order of arguments here is:
         #   adapter_names, safe_merge
         # For layer.merge, the order is:
