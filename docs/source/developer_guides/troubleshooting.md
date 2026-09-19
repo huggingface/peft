@@ -313,7 +313,7 @@ The [`~peft.PeftModel.get_layer_status`] method gives you a detailed overview of
 >>> model.get_model_status()
 TunerModelStatus(
     base_model_type='T5Model',
-    adapter_model_type='LoraModel',
+    adapter_model_type='affected',
     peft_types={'default': 'LORA'},
     trainable_params=344064,
     total_params=60855680,
