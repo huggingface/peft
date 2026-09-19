@@ -47,6 +47,7 @@ class TrainConfig:
     max_gradient_norm: float
     hub_id: str
     skip_prefix: bool
+    loss_decay: bool
 
 
 MTP_MASK_TOKENS = None
@@ -349,13 +350,26 @@ def calculate_tv_loss(logits, offsets, num_mtp: int, tv_loss_weight: float):
     return loss / len(offsets[:-1])
 
 
-def calculate_mtp_loss(logits, labels, offsets, use_lc_loss: bool, use_tv_loss: bool, num_mtp: int):
+def calculate_mtp_loss(logits, labels, offsets, use_lc_loss: bool, use_tv_loss: bool, num_mtp: int, loss_decay: bool):
     """Calculates the cross-entropy loss exactly on the MTP tokens"""
     loss = 0
     logits = logits if not (use_lc_loss or use_tv_loss) else logits[:-1]
+
+    # Implements loss decay as discussed in the FastMTP and DSpark papers. Rationale is that we want to focus
+    # the loss on the causal order as the earlier a mistake happens, the less speed gain we will observe.
+    if loss_decay:
+        weights = torch.exp(-(torch.arange(1, num_mtp+1) - 1) / num_mtp).to(logits)
+    else:
+        weights = torch.ones(num_mtp).to(logits)
+
     for logit, label, offset in zip(logits, labels, offsets):
         # since the number of MTP tokens is equal for each sample, we can just sum them
-        loss += F.cross_entropy(logit[offset : offset + num_mtp], label[offset : offset + num_mtp], ignore_index=-100)
+        loss += (F.cross_entropy(
+            logit[offset : offset + num_mtp],  # [K, V]
+            label[offset : offset + num_mtp],  # [K, 1]
+            ignore_index=-100,
+            reduction='none',  # return [K] items instead of [1] to apply loss weights
+        ) * weights).mean()
 
     return loss / len(logits)
 
@@ -611,7 +625,15 @@ def train_step(
     # train step
     optimizer.zero_grad()
     outputs = model(**batch, num_items_in_batch=total_tokens, output_hidden_states=True)
-    loss_mtp = calculate_mtp_loss(outputs.logits, labels, offsets, train_config.use_lc_loss, train_config.use_tv_loss, train_config.num_mtp)
+    loss_mtp = calculate_mtp_loss(
+        outputs.logits,
+        labels,
+        offsets,
+        train_config.use_lc_loss,
+        train_config.use_tv_loss,
+        train_config.num_mtp,
+        train_config.loss_decay,
+    )
     if train_config.use_lc_loss:
         loss_lc = calculate_lc_loss(
             outputs.hidden_states[-1],
@@ -735,7 +757,15 @@ def eval_step(model, tokenizer, sampler, train_config: TrainConfig, sample, step
 
     # train step
     outputs = model(**batch, num_items_in_batch=total_tokens, output_hidden_states=True)
-    loss_mtp = calculate_mtp_loss(outputs.logits, labels, offsets, train_config.use_lc_loss, train_config.use_tv_loss, train_config.num_mtp)
+    loss_mtp = calculate_mtp_loss(
+        outputs.logits,
+        labels,
+        offsets,
+        train_config.use_lc_loss,
+        train_config.use_tv_loss,
+        train_config.num_mtp,
+        train_config.loss_decay,
+    )
     if train_config.use_lc_loss:
         loss_lc = calculate_lc_loss(
             outputs.hidden_states[-1],
@@ -942,6 +972,8 @@ def main():
     parser.add_argument("--tv_loss_weight", type=float, default=0.9)
     parser.add_argument("--use_lc_loss", action="store_true", default=False)
     parser.add_argument("--use_tv_loss", action="store_true", default=False)
+    parser.add_argument("--loss_decay", action="store_true", default=False,
+        help="Use exponential decayed weight for each MTP token in the CE loss.")
     parser.add_argument("--log_step", type=int, default=10)
     parser.add_argument("--eval_step", type=int, default=1000)  # eval is expensive, not too often
     parser.add_argument("--checkpoint_step", type=int, default=1000)
@@ -1109,6 +1141,7 @@ def main():
         tv_loss_weight=args.tv_loss_weight,
         use_lc_loss=args.use_lc_loss,
         use_tv_loss=args.use_tv_loss,
+        loss_decay=args.loss_decay,
         log_step=args.log_step,
         eval_step=args.eval_step,
         output_dir=args.output_dir,
