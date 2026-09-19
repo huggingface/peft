@@ -258,6 +258,9 @@ class LoraLayer(BaseTunerLayer):
             lora_dropout_layer = nn.Identity()
 
         self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
+        # Inherit the training/eval mode from the parent tuner layer, so that adding an
+        # adapter to an already-eval'd model keeps stochastic layers (dropout) in eval mode.
+        lora_dropout_layer.train(self.training)
 
         # Actual trainable parameters
         self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
@@ -1237,13 +1240,15 @@ class Embedding(nn.Module, LoraLayer):
             lora_dropout_layer = nn.Identity()
 
         self.lora_dropout[adapter_name] = lora_dropout_layer
+        # Inherit the training/eval mode from the parent tuner layer, so that adding an
+        # adapter to an already-eval'd model keeps stochastic layers (dropout) in eval mode.
+        lora_dropout_layer.train(self.training)
         # Actual trainable parameters
         weight_A = torch.randn((r, self.in_features))
         weight_B = torch.randn((self.out_features, r))
         self.lora_embedding_A[adapter_name] = nn.Parameter(weight_A)
         self.lora_embedding_B[adapter_name] = nn.Parameter(weight_B)
         self.lora_bias[adapter_name] = lora_bias
-
         if use_rslora:
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
@@ -1615,6 +1620,9 @@ class _ConvNd(nn.Module, LoraLayer):
             lora_dropout_layer = nn.Identity()
 
         self.lora_dropout[adapter_name] = lora_dropout_layer
+        # Inherit the training/eval mode from the parent tuner layer, so that adding an
+        # adapter to an already-eval'd model keeps stochastic layers (dropout) in eval mode.
+        lora_dropout_layer.train(self.training)
         # Actual trainable parameters
         base_layer = self.get_base_layer()
         kernel_size = base_layer.kernel_size
