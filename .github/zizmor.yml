@@ -23,6 +23,6 @@ rules:
       # to deploy anything so we deem it safe to use those, even if they are unpinned.
       - nightly-bnb.yml:30:7
       - nightly-bnb.yml:155:7
-      - nightly.yml:27:7
-      - nightly.yml:95:7
+      - nightly.yml:29:7
+      - nightly.yml:99:7
       - torch_compile_tests.yml:32:7
