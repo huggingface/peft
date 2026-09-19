@@ -1273,6 +1273,12 @@ class BaseTuner(nn.Module, ABC):
 
         """
         setattr(parent, child_name, new_module)
+        # Propagate the training/eval mode of the original module to the injected adapter.
+        # Newly created adapter modules default to training mode; without this, injecting an
+        # adapter into an already-eval'd model (or adding an adapter to an eval'd PEFT model)
+        # leaves stochastic layers such as dropout in training mode, making inference
+        # nondeterministic.
+        new_module.train(child.training)
         # It's not necessary to set requires_grad here, as that is handled by
         # _mark_only_adapters_as_trainable
 
