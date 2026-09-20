@@ -455,7 +455,9 @@ class ShadowModel(BaseTuner):
             )
 
         config_file = cached_file(config.shadow_model, "config.json")
-        with open(config_file) as f:
+        # Model configs are JSON (UTF-8); pin the encoding so this read does not depend on the
+        # locale's preferred encoding (e.g. cp936 on Windows), which crashes on non-ASCII content.
+        with open(config_file, encoding="utf-8") as f:
             raw_config = json.load(f)
         if raw_config.get("model_type") == "causal_lm_with_hidden_projection":
             return self._load_projected_shadow_backbone(config, raw_config)
