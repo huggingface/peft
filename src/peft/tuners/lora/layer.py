@@ -2065,22 +2065,13 @@ class MultiheadAttention(nn.Module, LoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    # merging out_proj (subclass of nn.Linear)
-                    orig_weight_out = base_layer.out_proj.weight.data.detach().clone()
-                    orig_weight_out += base_layer.out_proj.get_delta_weight(active_adapter).to(orig_dtype)
-                    if not torch.isfinite(orig_weight_out).all():
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
-
                     # unregister parameter implicitly and overwrite using merged weights; gradients are computed after
                     # forward and, thus, after unmerging (see forward()), therefore this is safe to do.
                     del base_layer.in_proj_weight
                     base_layer.in_proj_weight = orig_weight_in
 
-                    del base_layer.out_proj.get_base_layer().weight
-                    base_layer.out_proj.get_base_layer().weight = orig_weight_out
-                    base_layer.out_proj.merge(adapter_names=[active_adapter])
+                    # merging out_proj: delegate entirely so the delta is applied exactly once
+                    base_layer.out_proj.merge(safe_merge=True, adapter_names=[active_adapter])
                 else:
                     # merging in_proj (nn.Parameter)
                     # TODO: work with separate weights
@@ -2092,12 +2083,8 @@ class MultiheadAttention(nn.Module, LoraLayer):
                     del base_layer.in_proj_weight
                     base_layer.in_proj_weight = weight_merged
 
-                    # merging out_proj (subclass of nn.Linear)
-                    delta_weight = base_layer.out_proj.get_delta_weight(active_adapter).to(orig_dtype)
-                    weight_merged = base_layer.out_proj.weight.data.detach() + delta_weight
-                    del base_layer.out_proj.get_base_layer().weight
-                    base_layer.out_proj.get_base_layer().weight = weight_merged
-                    base_layer.out_proj.merge(adapter_names=[active_adapter])
+                    # merging out_proj: delegate entirely so the delta is applied exactly once
+                    base_layer.out_proj.merge(safe_merge=False, adapter_names=[active_adapter])
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -2122,14 +2109,6 @@ class MultiheadAttention(nn.Module, LoraLayer):
                 old_weight = base_layer.in_proj_weight.data - delta_weight
                 del base_layer.in_proj_weight
                 base_layer.register_parameter("in_proj_weight", nn.Parameter(old_weight, requires_grad=False))
-
-                # out_proj
-                delta_weight = base_layer.out_proj.get_delta_weight(active_adapter).to(orig_dtype)
-                old_weight = base_layer.out_proj.base_layer.weight.data - delta_weight
-                del base_layer.out_proj.base_layer.weight
-                base_layer.out_proj.base_layer.register_parameter(
-                    "weight", nn.Parameter(old_weight, requires_grad=False)
-                )
 
         self.get_base_layer().out_proj.unmerge()
 
