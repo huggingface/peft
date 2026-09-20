@@ -685,6 +685,16 @@ class LoraModel(BaseTuner):
                 raise ValueError(
                     f"add_weighted_adapter does not support targeting nn.Parameter (problematic adapter '{adapter}')"
                 )
+            if self.peft_config[adapter].use_dora:
+                raise ValueError(
+                    f"add_weighted_adapter does not support DoRA (problematic adapter '{adapter}'). "
+                    "DoRA's learned magnitude vector has no defined combination."
+                )
+            if self.peft_config[adapter].kasa_config is not None:
+                raise ValueError(
+                    f"add_weighted_adapter does not support KaSA (problematic adapter '{adapter}'). "
+                    "KaSA's learned diagonal has no defined combination."
+                )
 
         # If more than one of the adapters targets the same module with modules_to_save, raise an error, as these
         # modules cannot be merged. First, find the ModulesToSaveWrapper instances in the model, then check if they
@@ -828,11 +838,13 @@ class LoraModel(BaseTuner):
         # The scaling of each source adapter is already folded into the combined lora_A/lora_B weights below, so the
         # new adapter must have a scaling of exactly 1. With lora_alpha == r this only holds when use_rslora=False
         # (otherwise scaling would be r / sqrt(r) = sqrt(r)), so don't inherit use_rslora from adapters[0].
+        # Enable lora_bias on the combined adapter if any source uses it so the combined lora_B bias can be written.
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],
             r=new_rank,
             lora_alpha=new_rank,
             use_rslora=False,
+            lora_bias=any(self.peft_config[adapter].lora_bias for adapter in adapters),
             target_modules=new_target_modules,
             alpha_pattern={},
             rank_pattern={},
@@ -902,6 +914,35 @@ class LoraModel(BaseTuner):
                     target_lora_A.data, target_lora_B.data = self._generalized_task_arithmetic_weighted_adapter(
                         combination_type, adapters, weights, target, density, majority_sign_method
                     )
+
+                self._combine_weighted_adapter_lora_bias(adapters, weights, adapter_name, target)
+
+    def _combine_weighted_adapter_lora_bias(
+        self,
+        adapters: list[str],
+        weights: list[float],
+        adapter_name: str,
+        target: LoraLayer,
+    ) -> None:
+        """Set the combined adapter's lora_B bias to ``sum(w_i * scaling_i * bias_i)``.
+
+        The combined adapter is created with scaling 1, so this is the exact contribution of each source adapter's
+        ``lora_B`` bias in ``lora_B(lora_A(x)) * scaling``. Embedding layers do not support ``lora_bias``.
+        """
+        if not target.lora_bias.get(adapter_name, False):
+            return
+        if adapter_name not in target.lora_B:
+            return
+        target_bias = target.lora_B[adapter_name].bias
+        if target_bias is None:
+            return
+
+        combined = torch.zeros_like(target_bias.data)
+        for adapter, weight in zip(adapters, weights):
+            if adapter not in target.lora_B or not target.lora_bias.get(adapter, False):
+                continue
+            combined = combined + (weight * target.scaling[adapter]) * target.lora_B[adapter].bias.data
+        target_bias.data.copy_(combined)
 
     def _svd_generalized_task_arithmetic_weighted_adapter(
         self,

@@ -99,6 +99,10 @@ def _skip_if_merging_not_supported(model_id, config_cls, config_kwargs):
 def _skip_if_adding_weighted_adapters_not_supported(config):
     if not isinstance(config, (IA3Config, LoraConfig)):
         pytest.skip("This PEFT method does not support adding weighted adapters, skipping this test.")
+    if isinstance(config, LoraConfig) and config.use_dora:
+        pytest.skip("add_weighted_adapter does not support DoRA, skipping this test.")
+    if isinstance(config, LoraConfig) and config.kasa_config is not None:
+        pytest.skip("add_weighted_adapter does not support KaSA, skipping this test.")
 
 
 def _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs):

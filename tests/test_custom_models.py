@@ -4499,6 +4499,108 @@ class TestPeftCustomModel(PeftCommonTester):
                 dw_merged = module.get_delta_weight("merged")
                 assert torch.allclose(dw_adapter1, dw_merged, atol=1e-5)
 
+    def _add_zeroed_helper_adapter(self, model, config, adapter_name="adapter2"):
+        """Add a second adapter whose A/B weights (and bias, if any) are zero so cat identity checks can run."""
+        model.add_adapter(adapter_name, config)
+        for module in model.modules():
+            if not isinstance(module, lora.LoraLayer):
+                continue
+            if adapter_name in module.lora_A:
+                module.lora_A[adapter_name].weight.data.zero_()
+                module.lora_B[adapter_name].weight.data.zero_()
+                if module.lora_bias.get(adapter_name, False) and module.lora_B[adapter_name].bias is not None:
+                    module.lora_B[adapter_name].bias.data.zero_()
+
+    @pytest.mark.parametrize("combination_type", ["linear", "cat"])
+    @pytest.mark.parametrize(
+        "config_kwargs",
+        [
+            {"use_rslora": True},
+            {"lora_bias": True},
+            {"use_rslora": True, "lora_bias": True},
+        ],
+        ids=["rslora", "lora_bias", "rslora_and_lora_bias"],
+    )
+    def test_add_weighted_adapter_identity_matches_source_outputs(self, combination_type, config_kwargs):
+        # See #3761
+        # Combining adapters with weight 1.0 must reproduce the source adapter. Previously, use_rslora was inherited by
+        # the combined config (scaling became sqrt(r) instead of 1) and lora_B.bias was left at its random init.
+        # combination_type="cat" requires >= 2 adapters (a single adapter is forced to "linear"), so a zeroed helper
+        # adapter is added in that case. svd is excluded: it has a separate pre-existing double-scaling bug.
+        torch.manual_seed(42)
+        config = LoraConfig(r=4, target_modules=["lin0"], init_lora_weights=False, **config_kwargs)
+        model = get_peft_model(MLP(), config, adapter_name="adapter1").eval()
+        inputs = torch.arange(20, dtype=torch.float32).view(2, 10)
+
+        with torch.no_grad():
+            out_source = model(inputs)
+
+        if combination_type == "cat":
+            self._add_zeroed_helper_adapter(model, config)
+            adapters, weights = ["adapter1", "adapter2"], [1.0, 1.0]
+        else:
+            adapters, weights = ["adapter1"], [1.0]
+
+        model.add_weighted_adapter(
+            adapters=adapters, weights=weights, adapter_name="merged", combination_type=combination_type
+        )
+        model.set_adapter("merged")
+        with torch.no_grad():
+            out_merged = model(inputs)
+
+        rel = (out_merged - out_source).norm() / out_source.norm()
+        assert torch.allclose(out_merged, out_source, atol=1e-5, rtol=1e-5), f"relative difference {rel.item():.3e}"
+
+    def test_add_weighted_adapter_combines_lora_bias(self):
+        # See #3761
+        # lora_B bias is part of the adapter output as bias * scaling. The combined adapter has scaling 1, so its bias
+        # must be sum(w_i * scaling_i * bias_i) for every combination type.
+        torch.manual_seed(0)
+        config1 = LoraConfig(r=4, lora_alpha=8, target_modules=["lin0"], init_lora_weights=False, lora_bias=True)
+        config2 = LoraConfig(r=4, lora_alpha=16, target_modules=["lin0"], init_lora_weights=False, lora_bias=True)
+        model = get_peft_model(MLP(), config1, adapter_name="adapter1")
+        model.add_adapter("adapter2", config2)
+        weights = [0.3, 0.7]
+        model.add_weighted_adapter(
+            adapters=["adapter1", "adapter2"],
+            weights=weights,
+            adapter_name="merged",
+            combination_type="cat",
+        )
+
+        found_bias = False
+        for module in model.modules():
+            if not isinstance(module, lora.LoraLayer) or "merged" not in module.lora_B:
+                continue
+            if not module.lora_bias.get("merged", False) or module.lora_B["merged"].bias is None:
+                continue
+            found_bias = True
+            expected = (
+                weights[0] * module.scaling["adapter1"] * module.lora_B["adapter1"].bias
+                + weights[1] * module.scaling["adapter2"] * module.lora_B["adapter2"].bias
+            )
+            assert torch.allclose(module.lora_B["merged"].bias, expected, atol=1e-5)
+        assert found_bias
+
+    def test_add_weighted_adapter_raises_for_dora(self):
+        # See #3761
+        # DoRA's learned magnitude vector is not combined, so add_weighted_adapter would silently produce a wrong
+        # adapter. Reject it the same way target_parameters is rejected.
+        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False, use_dora=True)
+        model = get_peft_model(MLP(), config, adapter_name="adapter1")
+        msg = "add_weighted_adapter does not support DoRA"
+        with pytest.raises(ValueError, match=msg):
+            model.add_weighted_adapter(["adapter1"], [1.0], "merged")
+
+    def test_add_weighted_adapter_raises_for_kasa(self):
+        # See #3761
+        # KaSA's learned diagonal is not combined, so add_weighted_adapter would silently produce a wrong adapter.
+        config = LoraConfig(target_modules=["lin0"], r=4, init_lora_weights=False, kasa_config=KasaConfig())
+        model = get_peft_model(MLP(), config, adapter_name="adapter1")
+        msg = "add_weighted_adapter does not support KaSA"
+        with pytest.raises(ValueError, match=msg):
+            model.add_weighted_adapter(["adapter1"], [1.0], "merged")
+
     def test_add_weighted_adapter_subtraction_with_negative_weights(self):
         # Test that merging two identical adapters with weights [1.0, -1.0] results in approximately zero weights
         model = MLP()
