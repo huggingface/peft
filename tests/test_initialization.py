@@ -6431,8 +6431,8 @@ class TestAdapterNameCollisionFiltering:
                 "base_model.model.mlp.lora_B.weight",
             }
             for key in state_dict:
-                module_name, param_name = key.split(".")[2], key.split(".")[3]
-                weight = getattr(getattr(model.base_model.model, module_name), param_name)[name].weight
+                module_name = key.rpartition(".")[0]
+                weight = model.get_submodule(module_name)[name].weight
                 assert torch.equal(state_dict[key], weight)
 
     def test_save_load_round_trip_with_colliding_adapter_name(self, mlp_net, tmp_path):
@@ -6478,8 +6478,8 @@ class TestAdapterNameCollisionFiltering:
         }
         # Value attribution: every returned weight must be default's, not foo's.
         for key in state_dict:
-            module_name, param_name = key.split(".")[2], key.split(".")[3]
-            weight = getattr(getattr(model.base_model.model, module_name), param_name)["default"].weight
+            module_name = key.rpartition(".")[0]
+            weight = model.get_submodule(module_name)["default"].weight
             assert torch.equal(state_dict[key], weight)
 
     def test_adapter_named_like_tuner_attribute(self, mlp_net):
@@ -6511,6 +6511,6 @@ class TestAdapterNameCollisionFiltering:
         }
         # Value attribution: every returned weight must be the "lora_A" adapter's, not default's.
         for key in lora_a_state_dict:
-            module_name, param_name = key.split(".")[2], key.split(".")[3]
-            weight = getattr(getattr(model.base_model.model, module_name), param_name)["lora_A"].weight
+            module_name = key.rpartition(".")[0]
+            weight = model.get_submodule(module_name)["lora_A"].weight
             assert torch.equal(lora_a_state_dict[key], weight)
