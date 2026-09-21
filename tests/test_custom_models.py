@@ -226,6 +226,8 @@ TEST_CASES = [
     ("Conv3d 2 LoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"]}),
     ("Conv3d 1 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "use_dora": True}),
     ("Conv3d 2 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"], "use_dora": True}),
+    ("Conv3d 1x1 LoRA", "Conv3d1x1", LoraConfig, {"target_modules": ["conv3d"]}),
+    ("Conv3d 1x1 LoRA with DoRA", "Conv3d1x1", LoraConfig, {"target_modules": ["conv3d"], "use_dora": True}),
     # LoRA with lora_B bias enabled (note: embedding is not supported)
     # It's important to set lora_alpha != r to ensure that scaling is taken into account correctly
     (
@@ -1297,6 +1299,7 @@ TEST_CASES = [
     ("Conv2d 2 HiRA", "Conv2d", HiraConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv3d 1 HiRA", "Conv3d", HiraConfig, {"target_modules": ["conv3d"]}),
     ("Conv3d 2 HiRA", "Conv3d", HiraConfig, {"target_modules": ["conv3d", "lin0"]}),
+    ("Conv3d 1x1 HiRA", "Conv3d1x1", HiraConfig, {"target_modules": ["conv3d"]}),
     ##########
     # Adamss #
     ##########
@@ -2298,6 +2301,31 @@ class ModelConv3D(nn.Module):
         return X
 
 
+class ModelConv3D1x1(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # pointwise 3d convolution, as used e.g. in the downsample shortcuts of 3d resnets, see #3768
+        self.conv3d = nn.Conv3d(5, 10, kernel_size=1)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(10 * 3 * 3 * 3, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
+
+    def forward(self, X):
+        X = X.to(self.dtype)
+        # If necessary, convert from 2D image to 3D volume
+        if X.dim() == 2:
+            X = torch.stack([X] * 3, dim=-1)
+        X = X.reshape(-1, 5, 3, 3, 3)
+        X = self.conv3d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
+
 class ModelMha(nn.Module):
     def __init__(self):
         super().__init__()
@@ -2397,6 +2425,9 @@ class MockTransformerWrapper:
 
         if model_id == "Conv3d":
             return ModelConv3D().to(dtype)
+
+        if model_id == "Conv3d1x1":
+            return ModelConv3D1x1().to(dtype)
 
         if model_id == "MLP_LayerNorm":
             return MLP_LayerNorm().to(dtype)
