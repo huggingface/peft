@@ -16,6 +16,8 @@ permissions: {}
 
 jobs:
   run_all_tests_single_gpu:
+    # skip on forks, the self-hosted runner group and secrets used below only exist in the main repo
+    if: github.repository == 'huggingface/peft'
     strategy:
       fail-fast: false
     runs-on:
@@ -84,6 +86,8 @@ jobs:
           exit 1
 
   run_all_tests_multi_gpu:
+    # skip on forks, the self-hosted runner group and secrets used below only exist in the main repo
+    if: github.repository == 'huggingface/peft'
     strategy:
       fail-fast: false
     runs-on:
