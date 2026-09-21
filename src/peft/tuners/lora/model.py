@@ -62,7 +62,7 @@ from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .inc import dispatch_inc
-from .layer import Conv2d, LoraLayer, ParamWrapper, dispatch_default
+from .layer import Conv1d, Conv2d, Conv3d, LoraLayer, ParamWrapper, dispatch_default
 from .te import dispatch_transformer_engine
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
@@ -945,13 +945,16 @@ class LoraModel(BaseTuner):
         else:
             raise ValueError(f"Invalid value passed to combination type: {combination_type}")
 
-        conv2d = isinstance(target, Conv2d)
-        if conv2d:
-            conv2d_1x1 = target.weight.size()[2:4] == (1, 1)
-            if not conv2d_1x1:
-                delta_weight = delta_weight.flatten(start_dim=1)
-            else:
+        # Flatten conv deltas (out, in, *spatial) to 2D for SVD. Prefer public Conv* classes over private _ConvNd.
+        is_conv = isinstance(target, (Conv1d, Conv2d, Conv3d))
+        if is_conv:
+            # spatial dims are everything after (out_channels, in_channels)
+            spatial = target.weight.size()[2:]
+            if all(s == 1 for s in spatial):
+                # same as previous Conv2d 1x1 path
                 delta_weight = delta_weight.squeeze()
+            else:
+                delta_weight = delta_weight.flatten(start_dim=1)
         if (hasattr(target, "fan_in_fan_out") and target.fan_in_fan_out) or is_embedding:
             delta_weight = delta_weight.T
 
@@ -967,7 +970,17 @@ class LoraModel(BaseTuner):
             low_val = -hi_val
             U = U.clamp(low_val, hi_val)
             Vh = Vh.clamp(low_val, hi_val)
-        if conv2d:
+        if is_conv:
+            # new_rank can exceed the numerical rank of the delta (e.g. out_channels < r).
+            # Zero-pad so reshape matches the allocated adapter weight shapes.
+            if U.numel() != target_lora_B.data.numel():
+                U_pad = U.new_zeros(target_lora_B.data.shape[0], target_lora_B.data.shape[1])
+                U_pad[: U.shape[0], : U.shape[1]] = U
+                U = U_pad
+            if Vh.numel() != target_lora_A.data.numel():
+                Vh_pad = Vh.new_zeros(target_lora_A.data.shape[0], Vh.shape[1])
+                Vh_pad[: Vh.shape[0], : Vh.shape[1]] = Vh
+                Vh = Vh_pad
             U = U.reshape(target_lora_B.data.shape)
             Vh = Vh.reshape(target_lora_A.data.shape)
         return Vh, U
