@@ -62,7 +62,7 @@ from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .inc import dispatch_inc
-from .layer import Conv2d, LoraLayer, ParamWrapper, dispatch_default
+from .layer import Conv2d, LoraLayer, MultiheadAttention as LoraMultiheadAttention, ParamWrapper, dispatch_default
 from .te import dispatch_transformer_engine
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
@@ -1107,6 +1107,25 @@ class LoraModel(BaseTuner):
 
         if not is_transformers_dtensor_tp and torch.distributed.is_available() and torch.distributed.is_initialized():
             _maybe_shard_state_dict_for_tp(model, peft_model_state_dict, adapter_name)
+
+        # Backward compatibility: checkpoints saved with peft <= 0.20.0 were trained with a double-delta
+        # bug in MultiheadAttention LoRA (out_proj delta was applied twice on every forward/merge).
+        # Mark affected layers so merge()/unmerge() can apply the extra factor at runtime without
+        # modifying the stored weights (which would break save/load round-trips).
+        # See https://github.com/huggingface/peft/pull/3774.
+        peft_version_str = (getattr(config, "peft_version", None) or "0.0.0").partition("@")[0]
+        if packaging.version.Version(peft_version_str) <= packaging.version.Version("0.20.0"):
+            for _module_name, module in model.named_modules():
+                if isinstance(module, LoraMultiheadAttention) and adapter_name in module.lora_A:
+                    if not hasattr(module, "_legacy_out_proj_double_delta"):
+                        module._legacy_out_proj_double_delta = set()
+                    module._legacy_out_proj_double_delta.add(adapter_name)
+                    warnings.warn(
+                        f"Adapter '{adapter_name}' in module '{_module_name}' was saved with peft "
+                        f"{peft_version_str!r}, which had a MultiheadAttention out_proj double-delta "
+                        "bug. The adapter will behave as trained, but please retrain with peft >= 0.21.0 "
+                        "to remove this warning."
+                    )
 
         return peft_model_state_dict
 

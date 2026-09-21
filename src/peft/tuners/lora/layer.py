@@ -2070,8 +2070,15 @@ class MultiheadAttention(nn.Module, LoraLayer):
                     del base_layer.in_proj_weight
                     base_layer.in_proj_weight = orig_weight_in
 
-                    # merging out_proj: delegate entirely so the delta is applied exactly once
+                    # merging out_proj: delegate entirely so the delta is applied exactly once;
+                    # for legacy checkpoints (peft <= 0.20.0) temporarily double lora_B to reproduce
+                    # the original double-delta behaviour without changing the stored weights.
+                    legacy = active_adapter in getattr(self, "_legacy_out_proj_double_delta", set())
+                    if legacy:
+                        base_layer.out_proj.lora_B[active_adapter].weight.data.mul_(2.0)
                     base_layer.out_proj.merge(safe_merge=True, adapter_names=[active_adapter])
+                    if legacy:
+                        base_layer.out_proj.lora_B[active_adapter].weight.data.mul_(0.5)
                 else:
                     # merging in_proj (nn.Parameter)
                     # TODO: work with separate weights
@@ -2083,8 +2090,14 @@ class MultiheadAttention(nn.Module, LoraLayer):
                     del base_layer.in_proj_weight
                     base_layer.in_proj_weight = weight_merged
 
-                    # merging out_proj: delegate entirely so the delta is applied exactly once
+                    # merging out_proj: delegate entirely so the delta is applied exactly once;
+                    # legacy BC same as safe_merge path above.
+                    legacy = active_adapter in getattr(self, "_legacy_out_proj_double_delta", set())
+                    if legacy:
+                        base_layer.out_proj.lora_B[active_adapter].weight.data.mul_(2.0)
                     base_layer.out_proj.merge(safe_merge=False, adapter_names=[active_adapter])
+                    if legacy:
+                        base_layer.out_proj.lora_B[active_adapter].weight.data.mul_(0.5)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -2110,7 +2123,16 @@ class MultiheadAttention(nn.Module, LoraLayer):
                 del base_layer.in_proj_weight
                 base_layer.register_parameter("in_proj_weight", nn.Parameter(old_weight, requires_grad=False))
 
-        self.get_base_layer().out_proj.unmerge()
+        # For legacy adapters (peft <= 0.20.0) out_proj was merged with a 2x delta; temporarily
+        # double lora_B so unmerge() removes the correct amount without changing stored weights.
+        out_proj = self.get_base_layer().out_proj
+        legacy_set = getattr(self, "_legacy_out_proj_double_delta", set())
+        scaled = [a for a in out_proj.merged_adapters if a in legacy_set]
+        for a in scaled:
+            out_proj.lora_B[a].weight.data.mul_(2.0)
+        out_proj.unmerge()
+        for a in scaled:
+            out_proj.lora_B[a].weight.data.mul_(0.5)
 
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
