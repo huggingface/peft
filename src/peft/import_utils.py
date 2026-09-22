@@ -37,12 +37,7 @@ is_transformers_ge_v5_13_0 = packaging.version.parse(transformers.__version__) >
 
 is_transformers_le_4_53 = packaging.version.parse(transformers.__version__) < packaging.version.parse("4.54.0.dev0")
 
-try:
-    from transformers.distributed.tensor_parallel import apply_tensor_parallelism  # noqa: F401
-
-    is_transformers_dtensor_tp = True
-except ImportError:
-    is_transformers_dtensor_tp = False
+is_transformers_dtensor_tp = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.17.0")
 
 
 @lru_cache
