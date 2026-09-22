@@ -302,6 +302,21 @@ class TestLoraInitialization:
         # as long as they are not zero, in order to avoid identity transformation.
         assert not torch.allclose(weight_B, torch.zeros_like(weight_B))
 
+    def test_lora_conv2d_preserves_dilation_and_padding_mode(self):
+        class DilatedConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv2d = nn.Conv2d(1, 1, 3, padding=2, dilation=2, padding_mode="reflect")
+
+            def forward(self, x):
+                return self.conv2d(x)
+
+        model = get_peft_model(DilatedConvModel(), LoraConfig(r=1, lora_alpha=1, target_modules=["conv2d"]))
+
+        assert model.conv2d.lora_A["default"].dilation == (2, 2)
+        assert model.conv2d.lora_A["default"].padding_mode == "reflect"
+        assert model(torch.randn(1, 1, 8, 8)).shape == (1, 1, 8, 8)
+
     def test_lora_init_orthogonal(self):
         torch.manual_seed(0)
 
