@@ -2592,19 +2592,26 @@ class TestPeftCustomModel(PeftCommonTester):
         if (config_cls == LoraConfig) and config_kwargs.get("use_bdlora"):
             # BD-LoRA: get_delta_weight does not unpack the block-diagonal factors, so the delta does not correspond
             # to the merged weight
-            pytest.xfail("BD-LoRA delta weight computation does not handle block-diagonal factors")
+            pytest.skip("BD-LoRA delta weight computation does not handle block-diagonal factors")
 
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)
         self._test_get_additive_delta_corresponds_to_merged_weight(model_id, config_cls, config_kwargs, dtype=dtype)
 
-    def test_get_additive_delta_uses_adapter_dtype(self):
+    @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
+    def test_get_additive_delta_uses_adapter_dtype(self, config_cls):
         # The additive delta should have the dtype of the adapter weights, not the dtype of the base weight. E.g. if
         # the base model is in bf16 but the adapter is in fp32 (the default when autocasting the adapter dtype is
         # enabled), the additive delta should be fp32. This is relevant e.g. for quantized base weights, whose dtype
         # is not a floating point type.
-        model = MLP().to(torch.bfloat16)
-        config = LoraConfig(target_modules=["lin0", "lin1"], r=8, lora_alpha=16)
-        model = get_peft_model(model, config)  # default autocast_adapter_dtype=True -> adapter in fp32
+        # Use a representative test case for this config class.
+        _, model_id, _, config_kwargs = next(row for row in TEST_CASES if row[2] is config_cls)
+        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id, dtype=torch.bfloat16)
+            config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+            model = get_peft_model(model, config)  # default autocast_adapter_dtype=True -> adapter in fp32
+        if not model.supports_lora_conversion():
+            pytest.skip(f"{config_cls.__name__} does not support LoRA conversion")
         for name, module in model.named_modules():
             if isinstance(module, BaseTunerLayer):
                 delta = module.get_additive_delta()

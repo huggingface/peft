@@ -205,7 +205,9 @@ class C3ALinear(nn.Module, C3ALayer):
         return True
 
     def _get_additive_delta(self, adapter_name: str = "default") -> torch.Tensor:
-        return self.get_delta_weight(adapter_name)
+        # get_delta_weight returns the delta in the dtype of the base weight, so cast to the dtype of the adapter
+        # weights
+        return self.get_delta_weight(adapter_name).to(self.c3a_kernel[adapter_name].dtype)
 
     def __repr__(self) -> str:
         rep = super().__repr__()

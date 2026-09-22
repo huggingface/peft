@@ -863,9 +863,9 @@ class PeftCommonTester:
         # This test checks that the get_additive_delta method really returns the weight delta between the base weight
         # and the merged weight. For many PEFT methods, this is trivial, as _get_additive_delta ==
         # get_delta_weight, but for some they differ, e.g. for multiplicative methods like OFT.
-        _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
         if (config_cls == MissConfig) and (config_kwargs.get("init_weights") == "bat"):
             pytest.skip(reason="Test requires non-zero init but MiSS is using 'bat' init")
+
         torch.manual_seed(0)
         atol = rtol = {torch.float32: 1e-5, torch.bfloat16: 1e-2, torch.float16: 2e-3}[dtype]
 
