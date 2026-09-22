@@ -1273,6 +1273,29 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config, adapter_name="foobar")
 
+    @pytest.mark.parametrize("module_name", ["out", "A", "B"])
+    def test_modules_to_save_does_not_match_lora_internals(self, module_name):
+        # modules_to_save uses suffix matching for backwards compatibility. After LoRA layers are injected, their
+        # ModuleDict children can match short suffixes (e.g. "out" matches lora_dropout). Those PEFT-internal modules
+        # should never be treated as modules_to_save targets.
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(8, 8)
+                self.out = nn.Linear(8, 2)
+
+            def forward(self, x):
+                return self.out(self.lin(x))
+
+        config = LoraConfig(r=4, target_modules=["lin"], modules_to_save=[module_name])
+        peft_model = get_peft_model(Net(), config)
+
+        if module_name == "out":
+            assert isinstance(peft_model.base_model.model.out, ModulesToSaveWrapper)
+        else:
+            assert not isinstance(peft_model.base_model.model.out, ModulesToSaveWrapper)
+        assert not isinstance(peft_model.base_model.model.lin, ModulesToSaveWrapper)
+
     def test_trainable_token_indices_targets_lora_layer_raises(self):
         # Same test as test_modules_to_save_targets_lora_layer_raises, but using trainable_token_indices
         model = self.get_model()
