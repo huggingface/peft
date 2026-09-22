@@ -417,6 +417,21 @@ def prepare_model_for_compiled_hotswap(
                 lora_config.rank_pattern[key] = target_rank
 
 
+
+def _state_dict_key_belongs_to_adapter(key: str, adapter_name: str, parameter_prefix: str) -> bool:
+    """Return whether a state-dict key belongs to the given adapter by exact name.
+
+    LoRA keys look like ``...lora_A.<adapter_name>.weight``. Matching with a bare
+    ``adapter_name in key`` incorrectly treats a longer name that shares a prefix
+    (e.g. ``foobar`` when swapping ``foo``) as part of the same adapter.
+    """
+    parts = key.split(".")
+    for i, part in enumerate(parts[:-1]):
+        if parameter_prefix in part and parts[i + 1] == adapter_name:
+            return True
+    return False
+
+
 def hotswap_adapter_from_state_dict(
     model: torch.nn.Module,
     state_dict: dict[str, torch.Tensor],
@@ -468,8 +483,13 @@ def hotswap_adapter_from_state_dict(
 
     # _orig_mod is for torch.compile(model)
     is_compiled_wrapper = hasattr(model, "_orig_mod")
-    # TODO: there is probably a more precise way to identify the adapter keys
-    missing_keys = {k for k in model.state_dict() if (parameter_prefix in k) and (adapter_name in k)}
+    # Match the adapter as an exact path component after a lora_* module name so that
+    # swapping "foo" does not also treat keys for "foobar" as missing (and zero them).
+    missing_keys = {
+        k
+        for k in model.state_dict()
+        if _state_dict_key_belongs_to_adapter(k, adapter_name=adapter_name, parameter_prefix=parameter_prefix)
+    }
     unexpected_keys = []
 
     # first: dry run, not swapping anything

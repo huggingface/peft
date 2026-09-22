@@ -79,7 +79,7 @@ from peft.tuners.lora.config import CordaConfig
 from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
-from peft.utils.hotswap import hotswap_adapter, prepare_model_for_compiled_hotswap
+from peft.utils.hotswap import hotswap_adapter, hotswap_adapter_from_state_dict, prepare_model_for_compiled_hotswap
 from peft.utils.other import ModulesToSaveWrapper
 
 from .testing_utils import hub_online_once, require_deterministic_for_xpu
@@ -5120,6 +5120,46 @@ class TestHotSwapping:
 
         # must not raise: the adapter being swapped out ("default") is not merged
         hotswap_adapter(model0, tmp_path / "adapter0", adapter_name="default")
+
+    def test_hotswap_does_not_zero_adapter_with_shared_name_prefix(self):
+        # Regression for #3780: selecting missing keys with `adapter_name in key` also
+        # matched longer adapter names that share a prefix (foo vs foobar) and zeroed them.
+        config = LoraConfig(target_modules=["lin0"], r=2, lora_alpha=2, lora_dropout=0.0, init_lora_weights=False)
+
+        torch.manual_seed(0)
+        model = get_peft_model(self.get_model(), config, adapter_name="foo")
+        model.add_adapter("foobar", config)
+        layer = model.base_model.model.lin0
+
+        with torch.no_grad():
+            layer.lora_A["foobar"].weight.fill_(1.0)
+            layer.lora_B["foobar"].weight.fill_(1.0)
+
+        model.set_adapter("foobar")
+        inputs = torch.randn(2, 10, device=self.torch_device)
+        model = model.to(self.torch_device)
+
+        with torch.no_grad():
+            output_before = model(inputs).clone()
+            adapter_a_before = layer.lora_A["foobar"].weight.clone()
+            adapter_b_before = layer.lora_B["foobar"].weight.clone()
+
+        incoming = {
+            "base_model.model.lin0.lora_A.foo.weight": torch.full_like(layer.lora_A["foo"].weight, 2.0),
+            "base_model.model.lin0.lora_B.foo.weight": torch.full_like(layer.lora_B["foo"].weight, 3.0),
+        }
+        hotswap_adapter_from_state_dict(model, incoming, adapter_name="foo", config=config)
+
+        with torch.no_grad():
+            output_after = model(inputs)
+
+        torch.testing.assert_close(layer.lora_A["foobar"].weight, adapter_a_before)
+        torch.testing.assert_close(layer.lora_B["foobar"].weight, adapter_b_before)
+        torch.testing.assert_close(output_after, output_before)
+        # Sanity: the target adapter itself was updated.
+        assert torch.all(layer.lora_A["foo"].weight == 2.0)
+        assert torch.all(layer.lora_B["foo"].weight == 3.0)
+
 
     def test_prepare_model_for_compiled_hotswap_scalings_are_tensors(self):
         config = LoraConfig(target_modules=["lin0", "lin1"])
