@@ -93,7 +93,7 @@ def _convert_module_to_lora(
 
     # MiSS standard/mini modes have an exact rank-r factorization that avoids SVD.
     # MiSS bat mode uses get_additive_delta and falls through to the generic SVD path below.
-    if isinstance(module, MissLinear) and module.miss_fn != "bat":
+    if isinstance(module, MissLinear) and module.miss_fn[adapter_name] != "bat":
         return _convert_miss_module_to_lora(module, rank, adapter_name)
 
     delta_weight = module.get_additive_delta(adapter_name)

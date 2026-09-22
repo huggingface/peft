@@ -389,7 +389,7 @@ class MissLinear(nn.Module, MissLayer):
         delta_weight`), so we delegate to it. For `standard` and `mini` modes, `get_delta_weight_miss` returns the
         full merged weight, so we subtract the base weight from it.
         """
-        if self.miss_fn == "bat":
+        if self.miss_fn[adapter_name] == "bat":
             return self.get_delta_weight(adapter_name, self.get_base_weight())
         # `get_delta_weight_miss` returns the full merged weight and may modify the tensor passed to it in-place,
         # hence the clone. The result has the dtype of the base weight, so cast to the dtype of the adapter weights.
