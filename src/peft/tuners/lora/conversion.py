@@ -57,7 +57,7 @@ def _convert_miss_module_to_lora(
     For `bat` mode, the conversion goes through the generic `get_additive_delta` + SVD path and does not call this
     function.
     """
-    miss_fn = module.miss_fn
+    miss_fn = module.miss_fn[adapter_name]
     miss_block = module.miss_block[adapter_name]
     in_features = module.in_features
     out_features = module.out_features

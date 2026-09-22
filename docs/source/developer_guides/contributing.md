@@ -18,6 +18,16 @@ rendered properly in your Markdown viewer.
 
 We are happy to accept contributions to PEFT. If you plan to contribute, please read this to make the process as smooth as possible.
 
+## Discuss and obtain approval before opening a PR
+
+Before opening a pull request (including a draft), open or find an issue in [huggingface/peft](https://github.com/huggingface/peft/issues) and discuss your proposed contribution. If there is an existing issue and someone is already working on it, has declared their intent to work on it, or has an open PR, you should not submit a separate PR. Wait for a PEFT maintainer or Hugging Face member to explicitly approve the proposal. If you open an issue, keep the length and complexity of the description in proportion with the complexity of the issue. Often, a short description with a reproducer is more valuable than a long description.
+
+Link the approved, open issue in your PR description using `#123`, `huggingface/peft#123`, or `https://github.com/huggingface/peft/issues/123`. As an exception, maintainers may designate specific long-running discussions that can be referenced by their full GitHub URL without a separate approval comment. If you reference several issues or discussions, one valid reference is sufficient.
+
+An automated workflow checks PRs for approved open issues or discussions. PRs without a valid reference are automatically closed with an explanation. You can obtain issue approval, update the PR description, and reopen the same PR; please do not create a replacement. If you believe your PR was closed incorrectly, ping the maintainers on the PR.
+
+The independent stale bot can still close inactive items, even if labeled as `triaged`. If you feel like the maintainers have overlooked your contribution, you may ping them, but not earlier than before two weeks of inactivity.
+
 ## Installation
 
 Follow these steps to start contributing:
@@ -64,6 +74,9 @@ If you are new to creating a pull request, follow the [Creating a pull request](
 
 Regardless of the contribution type (unless it’s only about the docs), you should run tests and code quality checks before creating a PR to ensure your contribution doesn’t break anything and follows the project standards.
 
+
+### Running test and checks
+
 We provide a Makefile to execute the necessary tests. Run the code below for the unit test:
 
 ```sh
@@ -95,13 +108,19 @@ pytest tests/<test-file-name> -k <name-of-test>
 
 This should finish much quicker and allow for faster iteration.
 
+### Adding tests
+
+For a general guide on adding new tests, check `tests/README.md`.
+
 If your change is specific to a hardware setting (e.g., it requires CUDA), take a look at [`tests/test_gpu_examples.py`](https://github.com/huggingface/peft/blob/1c1c7fdaa6e6abaa53939b865dee1eded82ad032/tests/test_gpu_examples.py) and [`tests/test_common_gpu.py`](https://github.com/huggingface/peft/blob/1c1c7fdaa6e6abaa53939b865dee1eded82ad032/tests/test_common_gpu.py) to see if it makes sense to add tests there. If your change could have an effect on saving and loading models, please run the tests with the `--regression` flag to trigger regression tests.
+
+## Stale PRs
 
 It can happen that while you’re working on your PR, the underlying code base changes due to other changes being merged. If that happens – especially when there is a merge conflict – please update your branch with the latest changes. This can be a merge or a rebase, and we'll squash and merge the PR once it’s ready. If possible, **avoid force pushes** to make reviews easier.
 
 ## PR description
 
-When opening a PR, please provide a nice description of the change you're proposing. If it relates to other issues or PRs, please reference them. Providing a good description not only helps the reviewers review your code better and faster, it can also be used later (as a basis) for the commit message which helps with long term maintenance of the project.
+When opening a PR, please provide a nice description of the change you're proposing and reference the approved issue as described above. If it relates to other issues or PRs, please reference them as well. Providing a good description not only helps the reviewers review your code better and faster, it can also be used later (as a basis) for the commit message which helps with long term maintenance of the project.
 
 Keep the length and complexity of the PR description in line with the change. We don't need ten paragraphs of explanation for a trivial one-line change. Don't restate what is obvious from looking at the diff (e.g. "Fixed the typo in 'foobaar').
 
@@ -134,13 +153,13 @@ Please refrain from sending pull requests that *only* correct typing errors as t
 New parameter-efficient fine-tuning methods are developed all the time. If you would like to add a new and promising method to PEFT, please follow these steps.
 
 1. If you're _not_ an author of the original paper, check for existing implementations and double check with the authors that they don't plan to submit a PR themselves.
-2. Start with the core integration work listed below.
+2. Open a proposal issue and wait for explicit approval as described above, before starting the core integration work listed below.
 3. Check recent commits for new PEFT methods being added to take as inspiration.
-4. It can be useful to open a draft PR early once the method basically works and first tests pass, then ask for feedback.
+4. After the proposal is approved, it can be useful to open a draft PR early once the method basically works and first tests pass, then ask for feedback. Reference the approved issue in the draft PR description.
 
 ### Core integration of a new PEFT method
 
-- [ ] Open a proposal issue on `huggingface/peft` before investing too much work.
+- [ ] Open an issue on `huggingface/peft` and obtain explicit approval before investing too much work.
 - [ ] Link the source of the method, usually the final paper or another stable primary reference. We want to avoid work that is still under review, as the implementation should be stable.
 - [ ] Add a new `PeftType` entry in `src/peft/utils/peft_types.py`.
 - [ ] Create a new tuner package under `src/peft/tuners/` with the files your method needs (typically:  `config.py`, `model.py`, `layer.py`, and `__init__.py`).
@@ -170,7 +189,7 @@ If you make a change to a PEFT method that could potentially change its outputs,
 
 ## Add other features
 
-It is best if you first open an issue on GitHub with a proposal to add the new feature. This way, you can discuss with the maintainers if it makes sense to add the feature before spending too much time on implementing it.
+First open an issue on GitHub with a proposal to add the new feature and wait for explicit approval as described above. This way, you can discuss with the maintainers if it makes sense to add the feature before spending too much time on implementing it.
 
 New features should generally be accompanied by tests and documentation or examples. Without the latter, users will have a hard time discovering your cool new feature.
 

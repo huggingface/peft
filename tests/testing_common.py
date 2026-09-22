@@ -101,11 +101,6 @@ def _skip_if_adding_weighted_adapters_not_supported(config):
         pytest.skip("This PEFT method does not support adding weighted adapters, skipping this test.")
 
 
-def _skip_if_deleting_adapter_not_supported(config_cls, config_kwargs):
-    if issubclass(config_cls, PromptLearningConfig):
-        pytest.skip("Prompt learning does not support deletion of adapters, skipping this test.")
-
-
 def _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs):
     if "gpt2" not in model_id.lower():
         return
@@ -520,6 +515,65 @@ class PeftCommonTester:
                 if config.peft_type != "VBLORA":
                     assert load_result1.missing_keys == []
                     assert load_result2.missing_keys == []
+
+    def _test_add_adapter_no_autocast_adapter_dtype(self, model_id, config_cls, config_kwargs, dtype):
+        # With autocast_adapter_dtype=False, adapters that are added after the PeftModel was created must keep the
+        # dtype of the base model instead of being upcast to float32. This covers add_adapter, which some task types
+        # override, as well as load_adapter, which routes through add_adapter.
+        if issubclass(config_cls, PromptLearningConfig):
+            pytest.skip("Prompt learning does not create tuner layers whose dtype could be autocast.")
+        if config_cls == AdaLoraConfig:
+            pytest.skip("AdaLoRA does not support multiple adapters")
+        if issubclass(config_cls, ShadowConfig):
+            # ShadowPEFT does not support multiple adapters for sequence classification. On top of that, its layer
+            # weights never follow the base model dtype: ShadowPEFT wraps whole decoder layers, so
+            # BaseTunerLayer.get_base_layer() returns a module without a `weight` attribute,
+            # _move_adapter_to_device_of_base_layer() cannot determine a dtype and returns early, and
+            # shadow_down/shadow_up/shadow_update_* keep the float32 that nn.Linear defaults to regardless of
+            # autocast_adapter_dtype. That is unrelated to the task-type add_adapter fix this test covers.
+            pytest.skip("ShadowPEFT layer weights do not follow the base model dtype")
+
+        def get_adapter_dtype(model, adapter_name):
+            dtypes = set()
+            for name, param in model.named_parameters():
+                if (model.prefix in name) and (adapter_name in name) and param.is_floating_point():
+                    dtypes.add(param.dtype)
+            if not dtypes:
+                raise ValueError("Could not determine the dtype of this adapter")
+            return dtypes
+
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id, dtype=dtype)
+
+            expected_dtype = {dtype}
+            if any(param.dtype == torch.float32 for param in model.parameters()):
+                # Some architectures pin individual modules to float32 through transformers'
+                # `_keep_in_fp32_modules`, even though the rest of the model is loaded in a lower precision. T5 does
+                # this for `wo` to avoid overflow:
+                # https://github.com/huggingface/transformers/blob/3283d5f78ed6836d39430c8190a6e0500be78698/src/transformers/models/t5/modeling_t5.py#L537
+                # An adapter on such a module correctly inherits the float32 dtype of its own base layer, so float32
+                # has to be allowed on top of `dtype` here. Of all models used by the tests, only T5 loaded in
+                # float16 hits this branch; every other model and dtype keeps the strict single-dtype expectation.
+                expected_dtype.add(torch.float32)
+
+            config = config_cls(
+                base_model_name_or_path=model_id,
+                **config_kwargs,
+            )
+            model = get_peft_model(model, config, autocast_adapter_dtype=False)
+            # Subset, not equality: get_adapter_dtype never returns an empty set, so when expected_dtype holds a
+            # single dtype this is the same check as equality.
+            assert get_adapter_dtype(model, "default") <= expected_dtype
+
+            model.add_adapter("added", config, autocast_adapter_dtype=False)
+            assert get_adapter_dtype(model, "added") <= expected_dtype
+
+            with tempfile.TemporaryDirectory() as tmp_dirname:
+                model.save_pretrained(tmp_dirname)
+
+                # load_adapter goes through the same add_adapter code path
+                model.load_adapter(tmp_dirname, adapter_name="loaded", autocast_adapter_dtype=False)
+                assert get_adapter_dtype(model, "loaded") <= expected_dtype
 
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
         _skip_if_merging_not_supported(model_id, config_cls, config_kwargs)
@@ -943,6 +997,18 @@ class PeftCommonTester:
         dummy_input = self.prepare_inputs_for_testing()
         # ensure that we have at least 3 samples for this test
         dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
+
+        # Run with mixed adapter batches first: layers that don't support the feature raise immediately, sparing us the
+        # reference outputs below whose results would never be used.
+        # Alternate between base model, adapter0, and adapter1
+        adapters = ["__base__", "adapter0", "adapter1"]
+        adapter_names = [adapters[i % 3] for i in (range(len(dummy_input["input_ids"])))]
+        with torch.inference_mode():
+            output_mixed = model(**dummy_input, adapter_names=adapter_names)[0]
+            logits_mixed = model.generate(
+                **dummy_input, adapter_names=adapter_names, return_dict_in_generate=True, output_scores=True
+            ).scores[0]
+
         with torch.inference_mode(), model.disable_adapter():
             output_base = model(**dummy_input)[0]
             logits_base = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
@@ -967,13 +1033,6 @@ class PeftCommonTester:
         assert not torch.allclose(logits_base, logits_adapter0, atol=atol, rtol=rtol)
         assert not torch.allclose(logits_base, logits_adapter1, atol=atol, rtol=rtol)
         assert not torch.allclose(logits_adapter0, logits_adapter1, atol=atol, rtol=rtol)
-
-        # alternate between base model, adapter0, and adapter1
-        adapters = ["__base__", "adapter0", "adapter1"]
-        dummy_input["adapter_names"] = [adapters[i % 3] for i in (range(len(dummy_input["input_ids"])))]
-        with torch.inference_mode():
-            output_mixed = model(**dummy_input)[0]
-            logits_mixed = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
 
         assert torch.allclose(output_base[::3], output_mixed[::3], atol=atol, rtol=rtol)
         assert torch.allclose(output_adapter0[1::3], output_mixed[1::3], atol=atol, rtol=rtol)
@@ -1018,7 +1077,18 @@ class PeftCommonTester:
             dummy_input = self.prepare_inputs_for_testing()
             # ensure that we have at least 3 samples for this test
             dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
-            gen_kwargs = {**dummy_input, "max_length": 20, "num_beams": 10, "early_stopping": True}
+            # note: don't lower num_beams and max_length too much, or else the generations of different adapters could
+            # coincidentally be identical, tripping up the sanity checks below
+            gen_kwargs = {**dummy_input, "max_length": 15, "num_beams": 4, "early_stopping": True}
+
+            # Generate with mixed adapter batches first: layers that don't support the feature raise immediately,
+            # sparing us the expensive reference generations below whose results would never be used.
+            # Alternate between base model, adapter0, and adapter1
+            adapters = ["__base__", "adapter0", "adapter1"]
+            adapter_names = [adapters[i % 3] for i in (range(len(dummy_input["input_ids"])))]
+            with torch.inference_mode():
+                gen_mixed = model.generate(**gen_kwargs, adapter_names=adapter_names)
+
             with torch.inference_mode(), model.disable_adapter():
                 gen_base = model.generate(**gen_kwargs)
 
@@ -1057,13 +1127,6 @@ class PeftCommonTester:
         assert not gens_are_same(gen_base, gen_adapter0)
         assert not gens_are_same(gen_base, gen_adapter1)
         assert not gens_are_same(gen_adapter0, gen_adapter1)
-
-        # alternate between base model, adapter0, and adapter1
-        adapters = ["__base__", "adapter0", "adapter1"]
-        gen_kwargs["adapter_names"] = [adapters[i % 3] for i in (range(len(dummy_input["input_ids"])))]
-
-        with torch.inference_mode():
-            gen_mixed = model.generate(**gen_kwargs)
 
         assert gens_are_same(gen_base[::3], gen_mixed[::3])
         assert gens_are_same(gen_adapter0[1::3], gen_mixed[1::3])
@@ -1442,7 +1505,6 @@ class PeftCommonTester:
                 assert param.grad is not None
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
-        _skip_if_deleting_adapter_not_supported(config_cls, config_kwargs)
         if config_cls == AdaLoraConfig:
             pytest.skip("AdaLoRA does not support multiple adapters")
 
@@ -1504,7 +1566,6 @@ class PeftCommonTester:
     def _test_delete_inactive_adapter(self, model_id, config_cls, config_kwargs):
         if config_cls == AdaLoraConfig:
             pytest.skip("AdaLoRA does not support multiple adapters")
-        _skip_if_deleting_adapter_not_supported(config_cls, config_kwargs)
 
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -1752,21 +1813,7 @@ class PeftCommonTester:
                 density=0.5,
             )
 
-        new_adapters = [
-            "single_adapter_reweighting",
-            "multi_adapter_svd_reweighting",
-            "multi_adapter_ties_svd_reweighting",
-            "multi_adapter_dare_linear_svd_reweighting",
-            "multi_adapter_dare_ties_svd_reweighting",
-            "multi_adapter_magnitude_prune_svd_reweighting",
-            "multi_adapter_cat_reweighting",
-            "multi_adapter_linear_reweighting",
-            "multi_adapter_linear_reweighting_single_enabled",
-            "multi_adapter_ties_reweighting",
-            "multi_adapter_dare_linear_reweighting",
-            "multi_adapter_dare_ties_reweighting",
-            "multi_adapter_magnitude_prune_reweighting",
-        ]
+        new_adapters = [k for k in model.peft_config.keys() if not k.startswith("adapter_")]
         for new_adapter in new_adapters:
             assert new_adapter in model.peft_config
 
@@ -1775,6 +1822,8 @@ class PeftCommonTester:
             _, target, _ = _get_submodules(model, key)
             if isinstance(target, LoraLayer):
                 for adapter_name in new_adapters:
+                    # for a single adapter, the result should be exact and we can check that; otherwise, we deal with
+                    # approximations
                     if "single" in adapter_name:
                         new_delta_weight = target.get_delta_weight(adapter_name)
                         # A negative merge weight must also negate the resulting delta weight.
@@ -1824,6 +1873,9 @@ class PeftCommonTester:
             model(**dummy_input)[0]
 
     def _test_weighted_combination_of_adapters(self, model_id, config_cls, config_kwargs):
+        if not issubclass(config_cls, (LoraConfig, IA3Config)):
+            # This test is only applicable for Lora and IA3 configs
+            return pytest.skip(f"Test not applicable for {config_cls}")
         if issubclass(config_cls, AdaLoraConfig):
             # AdaLora does not support adding more than 1 adapter
             return pytest.skip(f"Test not applicable for {config_cls}")
@@ -1833,7 +1885,7 @@ class PeftCommonTester:
         if "gemma" in model_id.lower():
             return pytest.skip("Combining Gemma adapters with SVD is currently failing")
 
-        adapter_list = ["adapter1", "adapter_2", "adapter_3"]
+        adapter_list = ["adapter_1", "adapter_2", "adapter_3"]
         weight_list = [0.5, 1.5, 1.5]
         negative_weight_list = [-0.5, -0.8, -1.2]
         # Initialize the config
@@ -1842,29 +1894,25 @@ class PeftCommonTester:
             **config_kwargs,
         )
 
-        if not isinstance(config, (LoraConfig, IA3Config)):
-            # This test is only applicable for Lora and IA3 configs
-            return pytest.skip(f"Test not applicable for {config}")
-
         with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            model = get_peft_model(model, copy.deepcopy(config), adapter_list[0])
 
-            def create_model():
-                # Positive and negative scenarios reuse adapter names, so they need isolated registries.
-                model = self.transformers_class.from_pretrained(model_id)
-                return get_peft_model(model, copy.deepcopy(config), adapter_list[0])
-
+            # test positive weights
             if isinstance(config, LoraConfig):
-                self._test_weighted_combination_of_adapters_lora(create_model(), config, adapter_list, weight_list)
-                self._test_weighted_combination_of_adapters_lora(
-                    create_model(), config, adapter_list, negative_weight_list
-                )
+                self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, weight_list)
             elif isinstance(config, IA3Config):
-                self._test_weighted_combination_of_adapters_ia3(create_model(), config, adapter_list, weight_list)
-                self._test_weighted_combination_of_adapters_ia3(
-                    create_model(), config, adapter_list, negative_weight_list
-                )
-            else:
-                pytest.skip(f"Test not applicable for {config}")
+                self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, weight_list)
+
+            del model
+            model = self.transformers_class.from_pretrained(model_id)
+            model = get_peft_model(model, config, adapter_list[0])
+
+            # test negative weights
+            if isinstance(config, LoraConfig):
+                self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, negative_weight_list)
+            elif isinstance(config, IA3Config):
+                self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, negative_weight_list)
 
     def _test_disable_adapter(self, model_id, config_cls, config_kwargs):
         task_type = config_kwargs.get("task_type")

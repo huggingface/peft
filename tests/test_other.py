@@ -21,8 +21,10 @@ import torch
 from torch import nn
 from transformers import (
     AutoModelForCausalLM,
+    AutoModelForQuestionAnswering,
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
+    AutoModelForTokenClassification,
     LlavaForConditionalGeneration,
 )
 
@@ -821,3 +823,42 @@ class TestPrepareModelForKbitTraining:
         ):
             prepare_model_for_kbit_training(fp16_model, use_gradient_checkpointing=False, auto_clear_cache=False)
         mock_empty_cache.assert_not_called()
+
+
+# The task-type subclasses that add their head to modules_to_save. One tiny BERT checkpoint covers all three, since the
+# auto classes build the matching head from the same config.
+TASK_TYPE_CASES = [
+    ("SEQ_CLS", AutoModelForSequenceClassification, ["classifier", "score"]),
+    ("TOKEN_CLS", AutoModelForTokenClassification, ["classifier", "score"]),
+    ("QUESTION_ANS", AutoModelForQuestionAnswering, ["qa_outputs"]),
+]
+TASK_TYPE_MODEL_ID = "peft-internal-testing/tiny-random-BertForSequenceClassification"
+
+
+class TestTaskTypeModulesToSave:
+    """Reusing one config must not mutate the caller's list or accumulate the head names in modules_to_save."""
+
+    def get_model(self, auto_cls):
+        with hub_online_once(TASK_TYPE_MODEL_ID):
+            return auto_cls.from_pretrained(TASK_TYPE_MODEL_ID)
+
+    @pytest.mark.parametrize("task_type, auto_cls, head_names", TASK_TYPE_CASES)
+    def test_reusing_config_across_models(self, task_type, auto_cls, head_names):
+        # e.g. the same config in every fold of a cross-validation loop
+        user_list = ["my_head"]
+        config = LoraConfig(task_type=task_type, target_modules=["query", "value"], modules_to_save=user_list)
+        models = [get_peft_model(self.get_model(auto_cls), config) for _ in range(3)]
+
+        assert user_list == ["my_head"]
+        for model in models:
+            assert model.peft_config["default"].modules_to_save == ["my_head"] + head_names
+
+    @pytest.mark.parametrize("task_type, auto_cls, head_names", TASK_TYPE_CASES)
+    def test_reusing_config_in_add_adapter(self, task_type, auto_cls, head_names):
+        user_list = ["my_head"]
+        config = LoraConfig(task_type=task_type, target_modules=["query", "value"], modules_to_save=user_list)
+        model = get_peft_model(self.get_model(auto_cls), config)
+        model.add_adapter("other", config)
+
+        assert user_list == ["my_head"]
+        assert model.peft_config["other"].modules_to_save == ["my_head"] + head_names

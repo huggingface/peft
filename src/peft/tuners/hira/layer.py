@@ -549,7 +549,7 @@ class _ConvNd(nn.Module, HiraLayer):
             weight_A = weight_A.float()
             weight_B = weight_B.float()
 
-        if self.get_base_layer().weight.size()[2:4] == (1, 1):
+        if self.get_base_layer().weight.shape[2:] == (1, 1):
             # conv2d 1x1
             output_tensor = (weight_B.squeeze(3).squeeze(2) @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(3)
         else:
