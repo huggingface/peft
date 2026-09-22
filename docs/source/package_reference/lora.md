@@ -592,7 +592,7 @@ model.unmerge_adapter()
 ```
 
 > [!WARNING]
-> If several adapters are active and only some of them are merged, the adapters that are not merged are silently not applied. See [Merging only some of the active adapters](../developer_guides/troubleshooting#merging-only-some-of-the-active-adapters).
+> If several adapters are active and only some of them are merged, the adapters that are not merged are silently not applied. This behavior will change in PEFT v1.0. See [Merging only some of the active adapters](../developer_guides/troubleshooting#merging-only-some-of-the-active-adapters).
 
 The [`~LoraModel.add_weighted_adapter`] function is useful for merging multiple LoRAs into a new adapter based on a user provided weighting scheme in the `weights` parameter. Below is an end-to-end example.
 
