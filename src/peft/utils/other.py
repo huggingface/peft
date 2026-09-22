@@ -357,7 +357,11 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         if isinstance(self.original_module, BaseTunerLayer):
             # e.g. applying a training wrapper to a lora layer makes no sense
             cls_name = self.original_module.__class__
-            raise TypeError(f"{self._error_message_name()} cannot be applied to modules of type {cls_name}")
+            raise TypeError(
+                f"{self._error_message_name()} cannot be applied to modules of type {cls_name}, as this module is "
+                "already targeted by the PEFT method. Please remove it from either the target modules or from "
+                f"{self._error_message_name()}."
+            )
 
     @property
     def disable_adapters(self) -> bool:
@@ -1093,9 +1097,13 @@ def _set_trainable(
     key_list = [key for key, _ in model.named_modules(remove_duplicate=False)]
 
     for key in key_list:
-        target_module_found = any(key.endswith(target_key) for target_key in module_names)
+        target_module_found = any(_is_valid_match(key, target_key) for target_key in module_names)
         if target_module_found:
             parent, grandparent, target, target_name = _get_submodules_with_grandparent(model, key)
+            if isinstance(parent, BaseTunerLayer):
+                # The match is a sub-module that the PEFT layer created for itself, e.g. "foo.lora_A" matching a
+                # requested "lora_A". These are never valid targets, so skip them.
+                continue
             if isinstance(grandparent, BaseTunerLayer):
                 # This is an extreme edge case: Let's assume that there is a PEFT config with
                 # modules_to_save=["default"], which is the same name as the adapter name. The PEFT method's adapter

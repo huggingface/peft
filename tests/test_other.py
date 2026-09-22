@@ -828,7 +828,7 @@ class TestPrepareModelForKbitTraining:
 # The task-type subclasses that add their head to modules_to_save. One tiny BERT checkpoint covers all three, since the
 # auto classes build the matching head from the same config.
 TASK_TYPE_CASES = [
-    ("SEQ_CLS", AutoModelForSequenceClassification, ["classifier", "score"]),
+    ("SEQ_CLS", AutoModelForSequenceClassification, ["classifier", "score", "pre_classifier"]),
     ("TOKEN_CLS", AutoModelForTokenClassification, ["classifier", "score"]),
     ("QUESTION_ANS", AutoModelForQuestionAnswering, ["qa_outputs"]),
 ]

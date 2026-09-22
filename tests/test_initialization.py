@@ -28,7 +28,13 @@ from huggingface_hub import snapshot_download
 from safetensors.torch import load_file, save_file
 from scipy import stats
 from torch import nn
-from transformers import AutoModelForCausalLM, LlamaConfig, LlamaForSequenceClassification
+from transformers import (
+    AutoModelForCausalLM,
+    DistilBertConfig,
+    DistilBertForSequenceClassification,
+    LlamaConfig,
+    LlamaForSequenceClassification,
+)
 
 from peft import (
     AdaLoraConfig,
@@ -1272,6 +1278,63 @@ class TestLoraInitialization:
         )
         with pytest.raises(ValueError, match=msg):
             get_peft_model(model, config, adapter_name="foobar")
+
+    @pytest.mark.parametrize("modules_to_save", [["out"], ["A"], ["B"], ["out", "A"]])
+    def test_modules_to_save_does_not_match_lora_submodule(self, modules_to_save):
+        # modules_to_save is matched against module names. A name must not match a sub-module that the LoRA layer
+        # created for itself, e.g. "out" must not match "linear.lora_dropout" and "A" must not match "linear.lora_A",
+        # which used to raise a TypeError because those are nn.ModuleDicts. Only the real module is wrapped.
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(10, 10)
+                self.out = nn.Linear(10, 2)
+                self.A = nn.Linear(2, 2)
+                self.B = nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.B(self.A(self.out(self.linear(x))))
+
+        config = LoraConfig(target_modules=["linear"], modules_to_save=modules_to_save)
+        model = get_peft_model(MyModule(), config)
+
+        wrapped = {name for name, module in model.named_modules() if isinstance(module, ModulesToSaveWrapper)}
+        assert wrapped == {f"base_model.model.{name}" for name in modules_to_save}
+        # the LoRA layer's own sub-modules are untouched
+        lora_layer = model.base_model.model.linear
+        assert isinstance(lora_layer.lora_A, nn.ModuleDict)
+        assert isinstance(lora_layer.lora_B, nn.ModuleDict)
+        assert isinstance(lora_layer.lora_dropout, nn.ModuleDict)
+
+    def test_modules_to_save_requires_full_module_name(self):
+        # modules_to_save matches whole module names, so "classifier" must not match "my_classifier".
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(10, 10)
+                self.classifier = nn.Linear(10, 2)
+                self.my_classifier = nn.Linear(10, 2)
+
+            def forward(self, x):
+                return self.classifier(self.linear(x))
+
+        config = LoraConfig(target_modules=["linear"], modules_to_save=["classifier"])
+        model = get_peft_model(MyModule(), config)
+
+        wrapped = {name for name, module in model.named_modules() if isinstance(module, ModulesToSaveWrapper)}
+        assert wrapped == {"base_model.model.classifier"}
+
+    def test_seq_cls_auto_modules_to_save_targets_expected_layers(self):
+        # The classification head must still be auto-targeted for task_type="SEQ_CLS". DistilBERT is the relevant
+        # case: its randomly initialized `pre_classifier` used to be wrapped only because "classifier" happened to be
+        # a suffix of it, so it is now listed explicitly.
+        config = DistilBertConfig(vocab_size=100, dim=32, hidden_dim=64, n_layers=2, n_heads=2, num_labels=2)
+        model = DistilBertForSequenceClassification(config)
+        peft_config = LoraConfig(task_type="SEQ_CLS", target_modules=["q_lin", "v_lin"])
+        model = get_peft_model(model, peft_config)
+
+        wrapped = {name for name, module in model.named_modules() if isinstance(module, ModulesToSaveWrapper)}
+        assert wrapped == {"base_model.model.classifier", "base_model.model.pre_classifier"}
 
     def test_trainable_token_indices_targets_lora_layer_raises(self):
         # Same test as test_modules_to_save_targets_lora_layer_raises, but using trainable_token_indices
