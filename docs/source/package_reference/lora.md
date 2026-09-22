@@ -706,6 +706,7 @@ LoRA supports [Tensor Parallelism (TP)](https://huggingface.co/docs/transformers
 
 > [!WARNING]
 > Tensor Parallelism support for LoRA requires `transformers >= 5.4.0`.
+> The DTensor-based Tensor Parallelism API requires `peft >= 0.21.1` and `transformers >= 5.17.0`.
 
 Usage is identical to the standard LoRA workflow — simply load the base model with a `tp_plan` before wrapping it with PEFT:
 
@@ -1100,5 +1101,4 @@ To encode general knowledge, GenKnowSub subtracts the average of the provided ge
 ## Intruder Dimension Reduction
 
 [[autodoc]] tuners.lora.intruders.reduce_intruder_dimension
-
 
