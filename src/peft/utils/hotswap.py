@@ -219,8 +219,10 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
             kernel_size=lora_module.kernel_size,
             stride=lora_module.stride,
             padding=lora_module.padding,
+            dilation=lora_module.dilation,
             bias=lora_module.bias is not None,
             groups=groups,
+            padding_mode=lora_module.padding_mode,
         )
     else:
         # LoRA B affects in_channels. When groups > 1, the target rank must be divisible by groups and the weight
