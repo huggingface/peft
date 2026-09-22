@@ -1741,6 +1741,13 @@ class TestLoraInitialization:
         with pytest.warns(RuntimeWarning, match=msg):
             get_peft_model(model, config)
 
+    def test_partially_unmatched_target_modules_warn(self):
+        model = self.get_model()
+        config = LoraConfig(target_modules=["linear", "foobar"])
+        msg = re.escape("The following target_modules entries matched no modules: ['foobar'].")
+        with pytest.warns(RuntimeWarning, match=msg):
+            get_peft_model(model, config)
+
     def test_valid_target_modules_invalid_target_parameters_warns(self):
         model = self.get_model()
         config = LoraConfig(target_modules=["linear"], target_parameters=["foobar.weight"])

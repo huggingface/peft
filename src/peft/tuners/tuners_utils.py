@@ -1104,7 +1104,26 @@ class BaseTuner(nn.Module, ABC):
                 warnings.warn(
                     f"target_modules={peft_config.target_modules} were set but no module was matched.", RuntimeWarning
                 )
-            elif getattr(peft_config, "target_parameters", []) and not targeted_parameter_names:
+            elif peft_config.target_modules:
+                # Surface partial matches: a typo in one entry can otherwise silently reduce adapter coverage.
+                targets = (
+                    [peft_config.target_modules]
+                    if isinstance(peft_config.target_modules, str)
+                    else list(peft_config.target_modules)
+                )
+                matched_targets = set()
+                for target in targets:
+                    target_config = copy.copy(peft_config)
+                    target_config.target_modules = target
+                    if any(self._check_target_module_exists(target_config, name) for name in targeted_module_names):
+                        matched_targets.add(target)
+                unmatched_targets = sorted(set(targets) - matched_targets)
+                if unmatched_targets:
+                    warnings.warn(
+                        f"The following target_modules entries matched no modules: {unmatched_targets}.",
+                        RuntimeWarning,
+                    )
+            if getattr(peft_config, "target_parameters", []) and not targeted_parameter_names:
                 warnings.warn(
                     f"target_parameters={peft_config.target_parameters} were set but no parameter was matched.",
                     RuntimeWarning,
