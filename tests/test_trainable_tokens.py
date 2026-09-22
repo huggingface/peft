@@ -80,7 +80,7 @@ class ModelEmbedInNoGet(torch.nn.Module):
         return self.lin0(self.embed_in(x))
 
 
-class ModelWithOutputHead(torch.nn.Module):
+class ModelWithOutputHeadBias(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.query = torch.nn.Linear(4, 4)
@@ -135,7 +135,7 @@ class TestTrainableTokens:
 
     @pytest.mark.parametrize("standalone", [True, False])
     def test_linear_output_preserves_bias(self, standalone):
-        base_model = ModelWithOutputHead().eval()
+        base_model = ModelWithOutputHeadBias().eval()
         with torch.no_grad():
             base_model.lm_head.bias.copy_(torch.arange(7))
 
