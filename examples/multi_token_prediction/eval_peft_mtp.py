@@ -410,15 +410,16 @@ def format_summary_row(name, a):
     tps_ref = a["n_tok"] / a["t_ref"] if a["t_ref"] > 0 else float("nan")
     tps_mtp = a["n_tok"] / a["t_mtp"] if a["t_mtp"] > 0 else float("nan")
     speedup = a["t_ref"] / a["t_mtp"] if a["t_mtp"] > 0 else float("nan")
+    avg_k = a["avg_k"] / a["n"] if a["n"] else 0.0
     return (
-        f"{name:<42} {a['n']:>4} {a['n_acc']:>5}/{a['n_tok']:<5} {acc_pct:>5.1f} "
+        f"{name:<42} {a['n']:>4} {a['n_acc']:>5}/{a['n_tok']:<5} {acc_pct:>6.1f} {avg_k:>3.2f}"
         f"{tps_ref:>10.2f} {tps_mtp:>10.2f} {speedup:>7.2f}x {a['lossless']:>4}/{a['n']:<4}"
     )
 
 
 def print_summary(records, K, args, skipped):
     mode = "sampler" if args.use_sampler else "no-sampler"
-    keys = ("n", "n_tok", "n_acc", "fwd", "t_ref", "t_mtp", "lossless")
+    keys = ("n", "n_tok", "n_acc", "fwd", "t_ref", "t_mtp", "avg_k", "lossless")
 
     order = []
     agg = {}
@@ -434,10 +435,11 @@ def print_summary(records, K, args, skipped):
         a["fwd"] += r["fwd"]
         a["t_ref"] += r["t_ref"]
         a["t_mtp"] += r["t_mtp"]
+        a["avg_k"] += r["avg_k"]
         a["lossless"] += int(r["lossless"])
 
     header = (
-        f"{'source':<42.42} {'n':>4} {'accepted':>11} {'acc%':>6} {'tok/s ref':>10} "
+        f"{'source':<42.42} {'n':>4} {'accepted':>11} {'acc%':>6} {'Øk':>5} {'tok/s ref':>10} "
         f"{'tok/s mtp':>10} {'speedup':>8} {'lossless':>9}"
     )
     lines = [
@@ -542,9 +544,11 @@ def main():
                     break
 
         cg = getattr(model, "_last_mtp_generator", None)
-        nm = cg.n_matches_history if cg else []
+        nm = cg.n_matches_history if cg else []  # safe since AloraMTPCandidateGenerator is reset each generation
         n_acc = sum(nm)
         n_tok = len(out_new)
+        matched = [n for n in nm if n > 0]
+        avg_k = sum(matched) / len(matched)  # average number of successive matches
         records.append(
             {
                 "source": row["source"],
@@ -553,14 +557,15 @@ def main():
                 "fwd": len(nm),
                 "t_ref": t_ref,
                 "t_mtp": t_mtp,
+                "avg_k": avg_k,
                 "lossless": match,
             }
         )
 
         src = row["source"].removeprefix("ai2-adapt-dev/")
         print(
-            f"[{i + 1}/{len(rows)}] {src}: accepted {n_acc}/{n_tok} "
-            f"({n_acc / max(n_tok, 1) * 100:4.0f}%) | fwd {len(nm)} | "
+            f"[{i + 1}/{len(rows)}] {src}: accepted {n_acc:3d}/{n_tok:3d} "
+            f"({n_acc / max(n_tok, 1) * 100:4.0f}%) | avg_k {avg_k:2.2f} | fwd {len(nm)} | "
             f"t_ref {t_ref:6.1f}s t_mtp {t_mtp:6.1f}s | {t_ref / max(t_mtp, 1e-9):5.2f}x"
         )
 
