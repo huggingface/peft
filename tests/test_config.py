@@ -16,7 +16,6 @@ import inspect
 import json
 import os
 import pickle
-import sys
 import tempfile
 import warnings
 
@@ -250,11 +249,11 @@ class TestPeftConfig:
             config_from_json = config_class.from_json_file(config_path)
             assert config.to_dict() == config_from_json
 
-    @pytest.mark.skipif(not sys.platform.startswith("win"), reason="locale-encoding regression only manifests on Windows")
     def test_from_json_file_utf8_non_ascii(self, tmp_path):
-        # Config files are UTF-8; without an explicit encoding, reading them on Windows falls back
-        # to the locale encoding (e.g. cp936), crashing or corrupting literal non-ASCII values
-        # (e.g. a hand-edited config or one written by another tool with ensure_ascii=False).
+        # Config files are UTF-8; without an explicit encoding, reading them falls back to the
+        # locale encoding (e.g. cp936 on Windows, or LC_ALL=C on Linux), crashing or corrupting
+        # literal non-ASCII values (e.g. a hand-edited config or one written by another tool with
+        # ensure_ascii=False). Not Windows-gated: the regression shows on any non-UTF-8 locale.
         value = "汉 模型 🤗 Ё"
         config_path = os.path.join(tmp_path, "adapter_config.json")
         with open(config_path, "w", encoding="utf-8") as f:
@@ -262,6 +261,12 @@ class TestPeftConfig:
 
         loaded = LoraConfig.from_json_file(config_path)
         assert loaded["base_model_name_or_path"] == value
+
+        # Roundtrip through save_pretrained to lock in the write-side encoding pin as well.
+        roundtrip_dir = os.path.join(tmp_path, "roundtrip")
+        LoraConfig(base_model_name_or_path=value).save_pretrained(roundtrip_dir)
+        reloaded = LoraConfig.from_json_file(os.path.join(roundtrip_dir, "adapter_config.json"))
+        assert reloaded["base_model_name_or_path"] == value
 
     @pytest.mark.parametrize("config_class, mandatory_kwargs", ALL_CONFIG_CLASSES)
     def test_to_dict(self, config_class, mandatory_kwargs):
