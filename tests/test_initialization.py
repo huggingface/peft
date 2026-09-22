@@ -4668,6 +4668,58 @@ def test_prepare_model_for_compiled_hotswap_preserves_conv2d_attributes():
     assert torch.allclose(output_before, output_after, atol=1e-6, rtol=1e-5)
 
 
+def test_hotswap_preserves_adapter_with_shared_name_prefix(tmp_path):
+    class MLP(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.lin = nn.Linear(4, 4, bias=False)
+
+        def forward(self, x):
+            return self.lin(x)
+
+    torch.manual_seed(0)
+    base_model = MLP()
+    config = LoraConfig(target_modules=["lin"], r=2, lora_alpha=2, init_lora_weights=False)
+
+    model = get_peft_model(deepcopy(base_model), config, adapter_name="foo").eval()
+    model.add_adapter("foobar", config)
+    layer = model.base_model.model.lin
+    with torch.no_grad():
+        layer.lora_A["foo"].weight.zero_()
+        layer.lora_B["foo"].weight.zero_()
+        layer.lora_A["foobar"].weight.fill_(1.0)
+        layer.lora_B["foobar"].weight.fill_(1.0)
+
+    incoming_model = get_peft_model(deepcopy(base_model), config).eval()
+    incoming_layer = incoming_model.base_model.model.lin
+    with torch.no_grad():
+        incoming_layer.lora_A["default"].weight.fill_(2.0)
+        incoming_layer.lora_B["default"].weight.fill_(3.0)
+    incoming_model.save_pretrained(tmp_path / "incoming")
+    inputs = torch.ones(2, 4)
+
+    with torch.inference_mode():
+        expected_foo_output = incoming_model(inputs)
+        model.set_adapter("foo")
+        old_foo_output = model(inputs)
+        model.set_adapter("foobar")
+        expected_foobar_output = model(inputs)
+        foobar_a = layer.lora_A["foobar"].weight.clone()
+        foobar_b = layer.lora_B["foobar"].weight.clone()
+    assert not torch.allclose(old_foo_output, expected_foo_output)
+
+    hotswap_adapter(model, tmp_path / "incoming", adapter_name="foo")
+
+    model.set_adapter("foo")
+    with torch.inference_mode():
+        torch.testing.assert_close(model(inputs), expected_foo_output)
+        model.set_adapter("foobar")
+        torch.testing.assert_close(model(inputs), expected_foobar_output)
+
+    torch.testing.assert_close(layer.lora_A["foobar"].weight, foobar_a)
+    torch.testing.assert_close(layer.lora_B["foobar"].weight, foobar_b)
+
+
 @pytest.mark.skipif(
     platform.system() != "Linux", reason="Out of the box, torch.compile does not work on Windows or MacOS"
 )
@@ -5148,47 +5200,6 @@ class TestHotSwapping:
 
         # must not raise: the adapter being swapped out ("default") is not merged
         hotswap_adapter(model0, tmp_path / "adapter0", adapter_name="default")
-
-    def test_hotswap_preserves_adapter_with_shared_name_prefix(self, tmp_path):
-        config = LoraConfig(target_modules=["lin0"], r=2, lora_alpha=2, init_lora_weights=False)
-        base_model = self.get_model()
-
-        model = get_peft_model(deepcopy(base_model), config, adapter_name="foo")
-        model.add_adapter("foobar", config)
-        model = model.to(self.torch_device).eval()
-        layer = model.base_model.model.lin0
-        with torch.no_grad():
-            layer.lora_A["foobar"].weight.fill_(1.0)
-            layer.lora_B["foobar"].weight.fill_(1.0)
-
-        incoming_model = get_peft_model(deepcopy(base_model), config).to(self.torch_device).eval()
-        incoming_layer = incoming_model.base_model.model.lin0
-        with torch.no_grad():
-            incoming_layer.lora_A["default"].weight.fill_(2.0)
-            incoming_layer.lora_B["default"].weight.fill_(3.0)
-        incoming_model.save_pretrained(tmp_path / "incoming")
-        inputs = torch.randn(2, 10, device=self.torch_device)
-
-        with torch.inference_mode():
-            expected_foo_output = incoming_model(inputs)
-            model.set_adapter("foo")
-            old_foo_output = model(inputs)
-            model.set_adapter("foobar")
-            expected_foobar_output = model(inputs)
-            foobar_a = layer.lora_A["foobar"].weight.clone()
-            foobar_b = layer.lora_B["foobar"].weight.clone()
-        assert not torch.allclose(old_foo_output, expected_foo_output)
-
-        hotswap_adapter(model, tmp_path / "incoming", adapter_name="foo")
-
-        model.set_adapter("foo")
-        with torch.inference_mode():
-            torch.testing.assert_close(model(inputs), expected_foo_output)
-            model.set_adapter("foobar")
-            torch.testing.assert_close(model(inputs), expected_foobar_output)
-
-        torch.testing.assert_close(layer.lora_A["foobar"].weight, foobar_a)
-        torch.testing.assert_close(layer.lora_B["foobar"].weight, foobar_b)
 
     def test_prepare_model_for_compiled_hotswap_scalings_are_tensors(self):
         config = LoraConfig(target_modules=["lin0", "lin1"])
