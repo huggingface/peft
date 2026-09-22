@@ -878,6 +878,9 @@ class BaseTuner(nn.Module, ABC):
 
         named_modules = list(model.named_modules())
         key_list = [key for key, _ in named_modules]
+        # Adapter modules are created in train mode by default. Remember the training state of the modules that are
+        # about to be wrapped so that newly created adapters can inherit it after injection.
+        targeted_module_training_states = {key: module.training for key, module in named_modules}
 
         # Adding an adapter must not change the trainability of parameters that were already present. Some tuners
         # create their new adapter parameters before calling this method, so exclude those from the snapshot.
@@ -1125,6 +1128,13 @@ class BaseTuner(nn.Module, ABC):
                     f"{unmatched}.",
                     RuntimeWarning,
                 )
+
+        # Restore the training mode on wrapped target modules. This also propagates it to the adapter modules that
+        # were just created (e.g. dropout), so inference on an eval-mode model stays deterministic.
+        for module_name in targeted_module_names:
+            if (training := targeted_module_training_states.get(module_name)) is not None:
+                parent, _, _ = _get_submodules(model, module_name)
+                parent.train(training)
 
         # Now that the checks passed, merge this adapter's matches into the tuner-level bookkeeping. Duplicates
         # are skipped so that names stay unique when several adapters target the same modules.
