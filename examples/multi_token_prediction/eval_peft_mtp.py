@@ -275,7 +275,7 @@ def wire_candidate_generator(model, sampler, mask_token_ids, use_sampler):
     base._get_candidate_generator = patched.__get__(base, type(base))
 
 
-def load_model(model_path: str, dtype=torch.bfloat16):
+def load_model(model_path: str, dtype=torch.bfloat16, force_num_mtp=None):
     """Load base model and apply trained LoRA adapter with mask tokens."""
     # Load tokenizer (has the mask tokens we added during training)
     tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -300,6 +300,14 @@ def load_model(model_path: str, dtype=torch.bfloat16):
 
     # Get mask token IDs
     mask_token_ids = model.peft_config["default"].alora_invocation_tokens
+
+    # Make it so that every component thinks that there are only <force_num_mtp> mask
+    # tokens instead of the original K, this way we will only predict that number of
+    # tokens additionally, potentially increasing the odds of having a 100% match rate
+    # and subsequent chaining for increased performance.
+    if force_num_mtp is not None:
+        mask_token_ids = mask_token_ids[:force_num_mtp]
+        model.peft_config["default"].alora_invocation_tokens = mask_token_ids
 
     print("Model loaded successfully")
     print(f"Mask token IDs: {mask_token_ids}")
@@ -475,6 +483,12 @@ def main():
     ap.add_argument("--dataset", default="hubnemo/tulu3-sft-mini")
     ap.add_argument("--max_new_tokens", type=int, default=200)
     ap.add_argument(
+        "--num_mtp",
+        type=int,
+        default=None,
+        help="Artificially lower the number of MTP tokens to make use of chaining."
+    )
+    ap.add_argument(
         "--prompt_len",
         type=int,
         default=None,
@@ -503,7 +517,7 @@ def main():
     args = ap.parse_args()
 
     dtype = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}[args.dtype]
-    model, tokenizer, mask_ids, K = load_model(args.model_path, dtype=dtype)
+    model, tokenizer, mask_ids, K = load_model(args.model_path, dtype=dtype, force_num_mtp=args.num_mtp)
     model = model.to(args.device)
 
     # make sure that we generate at least K tokens in every generationi so that every sample can
