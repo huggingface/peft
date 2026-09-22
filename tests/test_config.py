@@ -250,7 +250,9 @@ class TestPeftConfig:
             config_from_json = config_class.from_json_file(config_path)
             assert config.to_dict() == config_from_json
 
-    @pytest.mark.skipif(not sys.platform.startswith("win"), reason="locale-encoding regression only manifests on Windows")
+    @pytest.mark.skipif(
+        not sys.platform.startswith("win"), reason="locale-encoding regression only manifests on Windows"
+    )
     def test_from_json_file_utf8_non_ascii(self, tmp_path):
         # Config files are UTF-8; without an explicit encoding, reading them on Windows falls back
         # to the locale encoding (e.g. cp936), crashing or corrupting literal non-ASCII values
