@@ -63,9 +63,14 @@ class MultiplicativeDropoutLayer(nn.Module):
 
             num_to_replace = int(self.p * D)
             num_zeros = D - num_to_replace
-            mask = torch.cat([torch.ones(num_to_replace, device=x.device), torch.zeros(num_zeros, device=x.device)])
+            mask = torch.cat(
+                [
+                    torch.ones(num_to_replace, device=x.device, dtype=x.dtype),
+                    torch.zeros(num_zeros, device=x.device, dtype=x.dtype),
+                ]
+            )
             mask = mask[torch.randperm(D)].view(D, 1, 1)
-            eye_matrix = torch.eye(H, device=x.device).repeat(D, 1, 1)
+            eye_matrix = torch.eye(H, device=x.device, dtype=x.dtype).repeat(D, 1, 1)
             x = (1 - mask) * x + mask * eye_matrix
         return x
 

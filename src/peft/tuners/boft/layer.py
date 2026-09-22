@@ -180,16 +180,21 @@ class MultiplicativeDropoutLayer(nn.Module):
             num_zeros = D - num_to_replace
 
             # Generate a flat tensor with desired number of 1s and 0s
-            mask = torch.cat([torch.ones(num_to_replace, device=x.device), torch.zeros(num_zeros, device=x.device)])
+            mask = torch.cat(
+                [
+                    torch.ones(num_to_replace, device=x.device, dtype=x.dtype),
+                    torch.zeros(num_zeros, device=x.device, dtype=x.dtype),
+                ]
+            )
 
             # Shuffle and reshape the mask
             mask = mask[torch.randperm(D)].view(1, D, 1, 1)
 
-            full_mask = torch.zeros(N, D, 1, 1, device=x.device)
+            full_mask = torch.zeros(N, D, 1, 1, device=x.device, dtype=x.dtype)
             full_mask[n_random] = mask
 
             # Use the mask to combine original matrices and identity matrices
-            eye_matrix = torch.eye(H, device=x.device).repeat(N, D, 1, 1)
+            eye_matrix = torch.eye(H, device=x.device, dtype=x.dtype).repeat(N, D, 1, 1)
             x = (1 - full_mask) * x + full_mask * eye_matrix
         return x
 

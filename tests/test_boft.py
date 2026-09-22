@@ -19,6 +19,7 @@ from torch import nn
 from transformers import AutoModelForCausalLM
 
 from peft import BOFTConfig, PeftModel, get_peft_model
+from peft.tuners.boft.layer import MultiplicativeDropoutLayer
 from peft.utils import infer_device
 
 
@@ -101,3 +102,13 @@ class TestBoft:
         config = BOFTConfig(target_modules=["conv"], boft_block_size=4)
         with pytest.raises(NotImplementedError, match="BOFT does not support .* layers with groups > 1"):
             get_peft_model(model, config)
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_boft_multiplicative_dropout_preserves_dtype(self, dtype):
+        # MultiplicativeDropoutLayer built its mask/identity buffers with device= but no dtype=, so mixing them
+        # with a half-precision input silently upcast the layer's output to float32.
+        torch.manual_seed(0)
+        layer = MultiplicativeDropoutLayer(p=0.5).train()
+        x = torch.randn(2, 4, 3, 3, dtype=dtype)
+        out = layer(x)
+        assert out.dtype == dtype
