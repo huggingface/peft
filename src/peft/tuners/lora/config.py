@@ -470,7 +470,7 @@ class LoraConfig(PeftConfig):
             The names of the modules to not apply the adapter. When passing a string, a regex match will be performed.
             When passing a list of strings, either an exact match will be performed or it is checked if the name of the
             module ends with any of the passed strings.
-        lora_alpha (`int`):
+        lora_alpha (`int` or `float`):
             The alpha parameter for Lora scaling.
         lora_dropout (`float`):
             The dropout probability for Lora layers.
@@ -649,7 +649,7 @@ class LoraConfig(PeftConfig):
         default=None,
         metadata={"help": "List of module names or regex expression of the module names to exclude from Lora."},
     )
-    lora_alpha: int = field(default=8, metadata={"help": "Lora alpha"})
+    lora_alpha: int | float = field(default=8, metadata={"help": "Lora alpha"})
     lora_dropout: float = field(default=0.0, metadata={"help": "Lora dropout"})
     fan_in_fan_out: bool = field(
         default=False,

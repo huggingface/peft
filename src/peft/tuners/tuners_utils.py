@@ -1114,7 +1114,7 @@ class BaseTuner(nn.Module, ABC):
                 matched_targets = set()
                 for target in targets:
                     target_config = copy.copy(peft_config)
-                    target_config.target_modules = target
+                    target_config.target_modules = [target]
                     if any(self._check_target_module_exists(target_config, name) for name in targeted_module_names):
                         matched_targets.add(target)
                 unmatched_targets = sorted(set(targets) - matched_targets)

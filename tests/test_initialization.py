@@ -5586,6 +5586,14 @@ class TestScaling:
         expected = [2.0] * n_layers
         assert scalings == expected
 
+    def test_scaling_with_float_lora_alpha(self, model):
+        n_layers = 5
+        rank, lora_alpha = 8, 16.5
+        config = LoraConfig(r=rank, lora_alpha=lora_alpha, target_modules=["q_proj"])
+        model = get_peft_model(model, config)
+
+        assert self.get_scalings(model) == [lora_alpha / rank] * n_layers
+
     def test_scaling_with_rslora(self, model):
         n_layers = 5
         rank, lora_alpha = 8, 16
