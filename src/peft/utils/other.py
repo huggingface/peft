@@ -1096,6 +1096,12 @@ def _set_trainable(
         target_module_found = any(key.endswith(target_key) for target_key in module_names)
         if target_module_found:
             parent, grandparent, target, target_name = _get_submodules_with_grandparent(model, key)
+            if isinstance(parent, BaseTunerLayer):
+                # Aux modules are added after the tuner layers themselves. Their ModuleDict children (e.g. lora_A,
+                # lora_B and lora_dropout) can match a suffix in modules_to_save even though the user never targeted
+                # them. Those are internal PEFT modules, not valid targets, so skip them.
+                continue
+
             if isinstance(grandparent, BaseTunerLayer):
                 # This is an extreme edge case: Let's assume that there is a PEFT config with
                 # modules_to_save=["default"], which is the same name as the adapter name. The PEFT method's adapter
