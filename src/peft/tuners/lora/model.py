@@ -33,6 +33,7 @@ from peft.import_utils import (
     is_bnb_available,
     is_transformers_dtensor_tp,
     is_transformers_ge_v5_4_0,
+    is_transformers_ge_v5_17_0,
 )
 from peft.tuners.tuners_utils import (
     BaseTuner,
@@ -97,15 +98,24 @@ def _replace_layer_number_by_wildcard(name: str) -> str:
 
 
 def get_tp_plan_and_mesh(model, current_key: str):
-    tp_plan = getattr(model, "tp_plan", None)
     device_mesh = getattr(model, "_device_mesh", None)
-    # FSDP-only models also have a device mesh, but their TP size is 1.
-    if tp_plan is None or device_mesh is None or (getattr(model, "_tp_size", None) or 1) <= 1:
+    if device_mesh is None:
+        return None, None
+
+    distributed_config = getattr(model.config, "distributed_config", None)
+    if getattr(distributed_config, "tp_size", 1) <= 1:
         return None, None
 
     # A named mesh must actually contain TP, an FSDP-only mesh is not a TP mesh.
     mesh_dim_names = device_mesh.mesh_dim_names
     if mesh_dim_names is not None and "tp" not in mesh_dim_names:
+        return None, None
+
+    if not is_transformers_ge_v5_17_0:
+        raise RuntimeError("LoRA with DTensor tensor parallelism requires transformers >= 5.17.0. Please upgrade.")
+
+    tp_plan = getattr(model, "tp_plan", None)
+    if tp_plan is None:
         return None, None
 
     plan_name = tp_plan.get(_replace_layer_number_by_wildcard(current_key))
