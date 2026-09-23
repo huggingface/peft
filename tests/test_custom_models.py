@@ -226,6 +226,8 @@ TEST_CASES = [
     ("Conv3d 2 LoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"]}),
     ("Conv3d 1 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d"], "use_dora": True}),
     ("Conv3d 2 LoRA with DoRA", "Conv3d", LoraConfig, {"target_modules": ["conv3d", "lin0"], "use_dora": True}),
+    ("Conv3d 1x1 LoRA", "Conv3d1x1", LoraConfig, {"target_modules": ["conv3d"]}),
+    ("Conv3d 1x1 LoRA with DoRA", "Conv3d1x1", LoraConfig, {"target_modules": ["conv3d"], "use_dora": True}),
     # LoRA with lora_B bias enabled (note: embedding is not supported)
     # It's important to set lora_alpha != r to ensure that scaling is taken into account correctly
     (
@@ -1297,6 +1299,7 @@ TEST_CASES = [
     ("Conv2d 2 HiRA", "Conv2d", HiraConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv3d 1 HiRA", "Conv3d", HiraConfig, {"target_modules": ["conv3d"]}),
     ("Conv3d 2 HiRA", "Conv3d", HiraConfig, {"target_modules": ["conv3d", "lin0"]}),
+    ("Conv3d 1x1 HiRA", "Conv3d1x1", HiraConfig, {"target_modules": ["conv3d"]}),
     ##########
     # Adamss #
     ##########
@@ -2298,6 +2301,31 @@ class ModelConv3D(nn.Module):
         return X
 
 
+class ModelConv3D1x1(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # pointwise 3d convolution, as used e.g. in the downsample shortcuts of 3d resnets, see #3768
+        self.conv3d = nn.Conv3d(5, 10, kernel_size=1)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(10 * 3 * 3 * 3, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+        self.dtype = torch.float
+
+    def forward(self, X):
+        X = X.to(self.dtype)
+        # If necessary, convert from 2D image to 3D volume
+        if X.dim() == 2:
+            X = torch.stack([X] * 3, dim=-1)
+        X = X.reshape(-1, 5, 3, 3, 3)
+        X = self.conv3d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
+
 class ModelMha(nn.Module):
     def __init__(self):
         super().__init__()
@@ -2398,6 +2426,9 @@ class MockTransformerWrapper:
         if model_id == "Conv3d":
             return ModelConv3D().to(dtype)
 
+        if model_id == "Conv3d1x1":
+            return ModelConv3D1x1().to(dtype)
+
         if model_id == "MLP_LayerNorm":
             return MLP_LayerNorm().to(dtype)
 
@@ -2430,6 +2461,44 @@ class TestPeftCustomModel(PeftCommonTester):
     def prepare_inputs_for_testing(self):
         X = torch.arange(90).view(9, 10).to(self.torch_device)
         return {"X": X}
+
+    @pytest.mark.parametrize(
+        ("conv_cls", "input_shape"),
+        [
+            pytest.param(nn.Conv1d, (2, 1, 8), id="conv1d"),
+            pytest.param(nn.Conv2d, (2, 1, 8, 8), id="conv2d"),
+            pytest.param(nn.Conv3d, (2, 1, 8, 8, 8), id="conv3d"),
+        ],
+    )
+    def test_lora_conv_preserves_dilation_and_padding_mode(self, conv_cls, input_shape):
+        # Regression test for https://github.com/huggingface/peft/issues/3697
+        class DilatedConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = conv_cls(1, 2, kernel_size=3, padding=2, dilation=2, padding_mode="reflect")
+
+            def forward(self, X):
+                return self.conv(X)
+
+        torch.manual_seed(0)
+        inputs = torch.randn(input_shape)
+        model = DilatedConvModel()
+        base_output_shape = model(inputs).shape
+        model = get_peft_model(
+            model,
+            LoraConfig(target_modules=["conv"], r=2, init_lora_weights=False),
+        )
+        layer = model.base_model.model.conv
+
+        assert layer.lora_A["default"].dilation == layer.base_layer.dilation
+        assert layer.lora_A["default"].padding_mode == layer.base_layer.padding_mode
+
+        output_unmerged = model(inputs)
+        assert output_unmerged.shape == base_output_shape
+
+        model.merge_adapter()
+        output_merged = model(inputs)
+        assert torch.allclose(output_unmerged, output_merged, atol=1e-6, rtol=1e-5)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_attributes_parametrized(self, test_name, model_id, config_cls, config_kwargs):
@@ -4446,6 +4515,58 @@ class TestPeftCustomModel(PeftCommonTester):
                 dw_adapter1 = module.get_delta_weight("adapter1")
                 dw_negative = module.get_delta_weight("merged_negative")
                 assert torch.allclose(dw_adapter1, -dw_negative, atol=1e-6)
+
+    def test_add_weighted_adapter_with_rslora_identity_single_adapter(self):
+        # See #3449
+        # Combining a single adapter with weight 1.0 must reproduce that adapter exactly. Previously, when the source
+        # adapter used use_rslora=True, the flag was inherited by the combined adapter's config, whose lora_alpha is
+        # chosen so that scaling == lora_alpha / r == 1. With rslora, the scaling became
+        # lora_alpha / sqrt(r) = sqrt(r) != 1 instead, so the combined adapter was sqrt(r) times overscaled.
+        # (With a single source adapter, add_weighted_adapter always resolves combination_type to "linear".)
+        torch.manual_seed(42)
+        model = MLP()
+        config = LoraConfig(r=4, target_modules=["lin0"], init_lora_weights=False, use_rslora=True)
+        model = get_peft_model(model, config, adapter_name="adapter1")
+
+        model.add_weighted_adapter(adapters=["adapter1"], weights=[1.0], adapter_name="merged")
+
+        for module in model.modules():
+            if isinstance(module, lora.LoraLayer):
+                dw_adapter1 = module.get_delta_weight("adapter1")
+                dw_merged = module.get_delta_weight("merged")
+                assert torch.allclose(dw_adapter1, dw_merged, atol=1e-5)
+
+    @pytest.mark.parametrize("combination_type", ["linear", "cat"])
+    def test_add_weighted_adapter_with_rslora_identity_two_adapters(self, combination_type):
+        # See #3449
+        # With a single source adapter, add_weighted_adapter collapses combination_type to "linear", so the "cat"
+        # branch is only exercised with >= 2 adapters. Here a second, fully-zeroed adapter is added so the merged
+        # adapter must still reproduce the first one exactly. Without the use_rslora=False fix the merged adapter is
+        # sqrt(r) overscaled: at r=4 the delta-weight norm ratio is 2.0 for "linear" and ~2.83 for "cat" instead of 1.0.
+        # combination_type="svd" is intentionally excluded: it has a separate, pre-existing double-scaling bug in
+        # _svd_generalized_task_arithmetic_weighted_adapter (unrelated to rslora) and is out of scope for this fix.
+        torch.manual_seed(42)
+        config = LoraConfig(r=4, target_modules=["lin0"], init_lora_weights=False, use_rslora=True)
+        model = get_peft_model(MLP(), config, adapter_name="adapter1")
+        model.add_adapter("adapter2", config)
+        # Zero the second adapter so it contributes nothing; the merged adapter must reproduce adapter1.
+        for module in model.modules():
+            if isinstance(module, lora.LoraLayer) and "adapter2" in module.lora_A:
+                module.lora_A["adapter2"].weight.data.zero_()
+                module.lora_B["adapter2"].weight.data.zero_()
+
+        model.add_weighted_adapter(
+            adapters=["adapter1", "adapter2"],
+            weights=[1.0, 1.0],
+            adapter_name="merged",
+            combination_type=combination_type,
+        )
+
+        for module in model.modules():
+            if isinstance(module, lora.LoraLayer) and "merged" in module.lora_A:
+                dw_adapter1 = module.get_delta_weight("adapter1")
+                dw_merged = module.get_delta_weight("merged")
+                assert torch.allclose(dw_adapter1, dw_merged, atol=1e-5)
 
     def test_add_weighted_adapter_subtraction_with_negative_weights(self):
         # Test that merging two identical adapters with weights [1.0, -1.0] results in approximately zero weights

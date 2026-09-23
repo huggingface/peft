@@ -22,18 +22,12 @@ from typing import Any, Optional, Union
 
 import torch
 from torch import nn
-
-
-try:
-    import bitsandbytes as bnb
-except ImportError:
-    bnb = None
-
 from tqdm.auto import tqdm
 
 from .peft_model import PeftConfig, PeftModel
 from .tuners.lora import LoraLayer, LoraModel, dora
 from .tuners.tuners_utils import BaseTunerLayer
+from .utils.integrations import dequantize_module_weight
 
 
 def update_forward_signature(model: PeftModel) -> None:
@@ -443,16 +437,7 @@ class KappaTuneSelector:
             else linear_modules
         )
         for module_name, module in linear_iter:
-            weight = module.weight
-            if bnb is not None:
-                if hasattr(weight, "quant_state"):  # 4-bit
-                    w = bnb.functional.dequantize_4bit(weight.data, weight.quant_state).float()
-                elif hasattr(weight, "state") and hasattr(weight.state, "CB"):  # int8
-                    w = bnb.functional.int8_vectorwise_dequant(weight.state.CB, weight.state.SCB).float()
-                else:
-                    w = weight.data.detach().float()
-            else:
-                w = weight.data.detach().float()
+            w = dequantize_module_weight(module).detach().float()
 
             if any(dim > self.max_dim_size_to_analyze for dim in w.shape):
                 continue
