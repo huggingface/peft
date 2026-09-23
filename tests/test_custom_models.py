@@ -5789,6 +5789,40 @@ class TestRequiresGrad:
         peft_model.set_adapter("adapter1", inference_mode=True)
         self.check_requires_grad(peft_model)
 
+    @pytest.mark.parametrize(
+        "config_cls, config_kwargs, dropout_name",
+        [
+            (LoraConfig, {"lora_dropout": 0.5}, "lora_dropout"),
+            (BOFTConfig, {"boft_dropout": 0.5, "boft_block_size": 2}, "boft_dropout"),
+            (RandLoraConfig, {"randlora_dropout": 0.5, "r": 2}, "randlora_dropout"),
+            (TinyLoraConfig, {"tinylora_dropout": 0.5, "r": 2}, "tinylora_dropout"),
+        ],
+    )
+    def test_inference_mode_controls_adapter_dropout(self, config_cls, config_kwargs, dropout_name):
+        config = config_cls(target_modules=["lin0"], **config_kwargs)
+        peft_model = get_peft_model(MLP(), config)
+        tuner_layer = peft_model.base_model.model.lin0
+        dropout = getattr(tuner_layer, dropout_name)["default"]
+
+        assert dropout.training
+        peft_model.set_adapter("default", inference_mode=True)
+        assert not dropout.training
+        assert tuner_layer.training
+        peft_model.set_adapter("default", inference_mode=False)
+        assert dropout.training
+
+    def test_add_adapter_inference_mode_preserves_existing_adapter_dropout(self):
+        config = LoraConfig(target_modules=["lin0"], lora_dropout=0.5)
+        peft_model = get_peft_model(MLP(), config)
+        tuner_layer = peft_model.base_model.model.lin0
+        default_dropout = tuner_layer.lora_dropout["default"]
+
+        inference_config = LoraConfig(target_modules=["lin0"], lora_dropout=0.5, inference_mode=True)
+        peft_model.add_adapter("other", inference_config)
+
+        assert default_dropout.training
+        assert not tuner_layer.lora_dropout["other"].training
+
     def test_requires_grad_follows_inference_mode_trainable_token_indices(self):
         # check that passing inference_mode to set_adapter has the intended effect with LoRA and trainable tokens
         config0 = LoraConfig(target_modules=["conv1d"], trainable_token_indices={"emb": [0, 1, 2]})
