@@ -46,6 +46,9 @@ from peft import (
     HiraConfig,
     HRAConfig,
     IA3Config,
+    LNTuningConfig,
+    LoHaConfig,
+    LoKrConfig,
     LoraConfig,
     MissConfig,
     OFTConfig,
@@ -447,6 +450,33 @@ ALL_CONFIGS = [
             "psoft_alpha": 4,
         },
     ),
+    (
+        LoHaConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "r": 8,
+            "alpha": 8,
+            "target_modules": None,
+            "rank_dropout": 0.0,
+            "module_dropout": 0.0,
+        },
+    ),
+    (
+        LoKrConfig,
+        {
+            "task_type": "CAUSAL_LM",
+            "r": 8,
+            "alpha": 8,
+            "target_modules": None,
+            "module_dropout": 0.0,
+        },
+    ),
+    (
+        LNTuningConfig,
+        {
+            "task_type": "CAUSAL_LM",
+        },
+    ),
 ]
 
 
@@ -465,6 +495,8 @@ def _skip_if_not_conv1d_supported(model_id, config_cls):
         MissConfig,
         DeloraConfig,
         PsoftConfig,
+        LoHaConfig,
+        LoKrConfig,
     ]:
         pytest.skip(
             "Skipping Beft/BOFT/GLoRA/HRA/OFT/Road/SHiRA/Supertuning/C3A/MiSS/OSF/DeLoRA/PSOFT for GPT2LMHeadModel"

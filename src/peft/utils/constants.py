@@ -163,6 +163,7 @@ TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING = {
         "embed_tokens",
         "lm_head",
     ],
+    "opt": ["self_attn_layer_norm", "final_layer_norm"],
     "t5": ["layer_norm", "final_layer_norm"],
     "mt5": ["layer_norm", "final_layer_norm"],
     "bart": ["self_attn_layer_norm", "encoder_attn_layer_norm", "final_layer_norm"],

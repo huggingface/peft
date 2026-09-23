@@ -105,7 +105,7 @@ def _skip_if_conv1d_not_supported(model_id, config_cls, config_kwargs):
     if "gpt2" not in model_id.lower():
         return
 
-    if config_cls not in (IA3Config, LoHaConfig, LoKrConfig, LoraConfig):
+    if config_cls not in (IA3Config, LoraConfig):
         pytest.skip("This PEFT method does not support Conv1D layers, skipping this test.")
 
 
