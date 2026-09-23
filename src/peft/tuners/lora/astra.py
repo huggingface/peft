@@ -106,30 +106,24 @@ def preprocess_astra(
     verbose = lora_config.astra_config.verbose
     prune_temporary_fields = lora_config.astra_config.prune_temporary_fields
 
-    # If cache exists, skip building
     if cache_file is not None and os.path.exists(cache_file) and os.path.getsize(cache_file) > 0:
-        cache = torch.load(cache_file, map_location=get_model_device(model))
+        cache = torch.load(cache_file, map_location=get_model_device(model), weights_only=True)
         for name, module in target_modules(model, lora_config):
             module.eigens = AstraEigens(
                 S=cache[f"{name}.eigens.S"],
                 V=cache[f"{name}.eigens.V"],
             )
     else:
-        # Specify Astra rank for each layer
         for name, module in target_modules(model, lora_config):
             r_key = get_pattern_key(lora_config.rank_pattern.keys(), name)
             module.rank = lora_config.rank_pattern.get(r_key, lora_config.r)
 
-        # Calculate covariance matrix
         calib_cov_distribution(model, lora_config, run_model, hooked_model, covariance_file)
 
-        # Calculate eigens
         collect_eigens(model, lora_config, verbose)
 
-        # Crop Astra eigens so that there's less to save
         crop_astra_eigens(model, lora_config)
 
-        # Remove redundant fields if exist
         if prune_temporary_fields:
             for name, module in target_modules(model, lora_config):
                 if hasattr(module, "sample_count"):
@@ -139,7 +133,6 @@ def preprocess_astra(
                 if hasattr(module, "rank"):
                     del module.rank
 
-        # Save cache to disk
         if cache_file is not None:
             cache: dict[str, Any] = {}
             for name, module in target_modules(model, lora_config):
@@ -160,7 +153,7 @@ def calib_cov_distribution(
     covariance_file: Optional[str],
 ):
     if covariance_file is not None and os.path.exists(covariance_file) and os.path.getsize(covariance_file) > 0:
-        all_covariance_matrix = torch.load(covariance_file, map_location=get_model_device(model))
+        all_covariance_matrix = torch.load(covariance_file, map_location=get_model_device(model), weights_only=True)
         for name, module in target_modules(model, config):
             module.covariance_matrix = all_covariance_matrix[name]
         return

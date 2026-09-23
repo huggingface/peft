@@ -99,7 +99,7 @@ def preprocess_corda(
 
     # If cache exists, skip building
     if cache_file is not None and os.path.exists(cache_file) and os.path.getsize(cache_file) > 0:
-        cache = torch.load(cache_file, map_location=get_model_device(model))
+        cache = torch.load(cache_file, map_location=get_model_device(model), weights_only=True)
         for name, module in target_modules(model, lora_config):
             module.eigens = CordaEigens(
                 S_WC=cache[f"{name}.eigens.S_WC"],
@@ -160,7 +160,7 @@ def calib_cov_distribution(
     covariance_file: Optional[str],
 ):
     if covariance_file is not None and os.path.exists(covariance_file) and os.path.getsize(covariance_file) > 0:
-        all_covariance_matrix = torch.load(covariance_file, map_location=get_model_device(model))
+        all_covariance_matrix = torch.load(covariance_file, map_location=get_model_device(model), weights_only=True)
         for name, module in target_modules(model, config):
             module.covariance_matrix = all_covariance_matrix[name]
         return
