@@ -471,7 +471,7 @@ def hotswap_adapter_from_state_dict(
     # _orig_mod is for torch.compile(model)
     is_compiled_wrapper = hasattr(model, "_orig_mod")
     # TODO: there is probably a more precise way to identify the adapter keys
-    missing_keys = {k for k in model.state_dict() if (parameter_prefix in k) and (adapter_name in k)}
+    missing_keys = {k for k in model.state_dict() if (parameter_prefix in k) and (f".{adapter_name}." in k)}
     unexpected_keys = []
 
     # first: dry run, not swapping anything
