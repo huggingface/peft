@@ -45,6 +45,28 @@ class TestGetPeftModel:
             if warning_checker.matches(warning):
                 pytest.fail("Warning raised even though model was unloaded.")
 
+    def test_get_peft_model_preserves_eval_mode(self, base_model):
+        config = LoraConfig(target_modules="0", lora_dropout=0.5, init_lora_weights=False)
+        peft_model = get_peft_model(base_model.eval(), config)
+
+        assert not peft_model.training
+        assert not peft_model.base_model.model[0].lora_dropout["default"].training
+        inputs = torch.ones(2, 10)
+        with torch.no_grad():
+            assert torch.equal(peft_model(inputs), peft_model(inputs))
+
+    def test_add_adapter_preserves_eval_mode(self, base_model):
+        initial_config = LoraConfig(target_modules="0", lora_dropout=0.0, init_lora_weights=False)
+        peft_model = get_peft_model(base_model, initial_config).eval()
+
+        config = LoraConfig(target_modules="0", lora_dropout=0.5, init_lora_weights=False)
+        peft_model.add_adapter("other", config)
+        peft_model.set_adapter("other")
+
+        assert not peft_model.training
+        assert not peft_model.base_model.model[0].training
+        assert not peft_model.base_model.model[0].lora_dropout["other"].training
+
     def test_get_peft_model_repeated_invocation(self, lora_config_0, base_model):
         peft_model = get_peft_model(base_model, lora_config_0)
 
