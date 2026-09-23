@@ -50,8 +50,7 @@ peft_config = PromptTuningConfig(
     tokenizer_name_or_path="bigscience/bloomz-560m",
 )
 model = get_peft_model(model, peft_config)
-model.print_trainable_parameters()
-"trainable params: 8,192 || all params: 559,222,784 || trainable%: 0.0014648902430985358"
+model.print_healthcheck()
 ```
 
 ## Benchmark overview

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import dataclasses
+import json
 import re
 from copy import deepcopy
 
@@ -60,6 +61,7 @@ from peft.tuners.tuners_utils import (
 )
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, ModulesToSaveWrapper, infer_device
 from peft.utils.constants import DUMMY_MODEL_CONFIG, MIN_TARGET_MODULES_FOR_OPTIMIZATION
+from peft.utils.healthcheck import format_healthcheck, run_healthcheck
 from peft.utils.quantization_utils import Bnb8bitBackend
 
 from .testing_utils import hub_online_once, require_bitsandbytes, require_non_cpu
@@ -1673,6 +1675,252 @@ class TestModelAndLayerStatus:
 
         with pytest.raises(TypeError, match="get_model_status is not supported for PeftMixedModel"):
             model.get_model_status()
+
+
+class TestHealthcheck:
+    """
+    Test for PEFT model healthcheck.
+
+    Note: These tests don't cover all possible edge cases, as most of the functionality is provided by get_model_status
+    and get_layer status, which are already extensively covered in TestModelAndLayerStatus.
+    """
+
+    def get_model(self):
+        class SmallModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 10)
+                self.lin1 = nn.Linear(10, 10)
+
+        return SmallModel()
+
+    def get_peft_model(self):
+        # small rank or else number of trainable parameters exceeds pre-configured threshold for warning
+        config = LoraConfig(target_modules=["lin0", "lin1"], r=4)
+        return get_peft_model(self.get_model(), config)
+
+    def test_healthcheck_returns_json_serializable_report(self):
+        model = self.get_peft_model()
+
+        healthcheck = model.healthcheck()
+        json.dumps(healthcheck)  # does not raise
+
+    def test_healthcheck_values(self):
+        model = self.get_peft_model()
+        healthcheck = model.healthcheck()
+
+        assert healthcheck["is_ready"] is True
+        assert healthcheck["summary"]["model_id"] == "other"
+        assert healthcheck["summary"]["num_adapter_layers"] == 2
+        assert healthcheck["summary"]["adapter_layer_types"] == {"lora.Linear": 2}
+        assert healthcheck["environment"]["peft_version"]
+        assert healthcheck["environment"]["torch_version"]
+        assert healthcheck["adapter_configurations"]["default"]["target_modules"] == ["lin0", "lin1"]
+        assert healthcheck["model_runtime"]["parameter_devices"] == ["cpu"]
+        assert healthcheck["findings"] == []
+
+    def test_format_healthcheck(self):
+        healthcheck = self.get_peft_model().healthcheck()
+
+        output = format_healthcheck(healthcheck)
+
+        assert "PEFT healthcheck" in output
+        assert "Environment:" in output
+        assert "all good" in output
+
+    def test_print_healthcheck(self, capsys):
+        model = self.get_peft_model()
+
+        model.print_healthcheck()  # does not raise
+
+        output = capsys.readouterr().out
+        assert "PEFT healthcheck" in output
+        assert "Environment:" in output
+        assert "all good" in output
+
+    def test_print_healthcheck_with_findings(self, capsys):
+        model = self.get_peft_model()
+
+        # Add irruglarities:
+        # enable all requires_grad
+        model.requires_grad_(True)
+        # add partially active adapter
+        model.add_adapter("other", LoraConfig(target_modules=["lin0", "lin1"]))
+        adapter_layers = [module for module in model.modules() if isinstance(module, BaseTunerLayer)]
+        adapter_layers[0].set_adapter("other")
+        # merge an adapter, which is not advisable for training
+        model.merge_adapter(["default"])
+
+        model.print_healthcheck()  # does not raise
+        output = capsys.readouterr().out
+
+        assert "adapters: default (LORA), other (LORA)" in output
+        assert "active=irregular" in output
+        assert "WARNING: 65.71% of model parameters are trainable" in output
+        assert "ERROR: Active adapters differ across adapter layers" in output
+        assert "WARNING: Adapter(s) 'default' is/are merged; unmerge them before training." in output
+        assert "ERROR: Adapter parameters do not consistently have requires_grad set across adapter layers" in output
+
+    def test_merged_adapters_are_flagged(self):
+        model = self.get_peft_model()
+        model.merge_adapter()
+
+        model.print_healthcheck()  # does not raise
+        healthcheck = model.healthcheck()
+
+        assert healthcheck["is_ready"] is True
+        expected_findings = {"MERGED_ADAPTERS"}
+        assert {finding["code"] for finding in healthcheck["findings"]} == expected_findings
+
+    def test_irregular_merged_adapters_are_flagged(self):
+        model = self.get_peft_model()
+        adapter_layers = [module for module in model.modules() if isinstance(module, BaseTunerLayer)]
+        adapter_layers[0].merge()
+
+        model.print_healthcheck()  # does not raise
+        healthcheck = model.healthcheck()
+
+        assert healthcheck["is_ready"] is False
+        expected_findings = {"IRREGULAR_MERGED_ADAPTERS"}
+        assert {finding["code"] for finding in healthcheck["findings"]} == expected_findings
+
+    def test_irregular_active_adapters_are_flagged(self):
+        model = self.get_peft_model()
+        model.add_adapter("other", LoraConfig(target_modules=["lin0", "lin1"]))
+        adapter_layers = [module for module in model.modules() if isinstance(module, BaseTunerLayer)]
+        adapter_layers[0].set_adapter("other")
+
+        model.print_healthcheck()  # does not raise
+        healthcheck = model.healthcheck()
+
+        assert healthcheck["is_ready"] is False
+        expected_findings = {"IRREGULAR_ACTIVE_ADAPTERS", "IRREGULAR_REQUIRES_GRAD"}
+        assert {finding["code"] for finding in healthcheck["findings"]} == expected_findings
+
+    def test_irregular_enabled_adapters_are_flagged(self):
+        model = self.get_peft_model()
+        adapter_layers = [module for module in model.modules() if isinstance(module, BaseTunerLayer)]
+        adapter_layers[0].enable_adapters(False)
+
+        model.print_healthcheck()  # does not raise
+        healthcheck = model.healthcheck()
+
+        assert healthcheck["is_ready"] is False
+        expected_findings = {"IRREGULAR_ADAPTER_ENABLED_STATE", "IRREGULAR_REQUIRES_GRAD"}
+        assert {finding["code"] for finding in healthcheck["findings"]} == expected_findings
+
+    def test_all_adapters_disabled_is_flagged(self):
+        model = self.get_peft_model()
+
+        with model.disable_adapter():
+            model.print_healthcheck()  # does not raise
+            healthcheck = model.healthcheck()
+
+            assert healthcheck["is_ready"] is False
+            expected_findings = {"NO_TRAINABLE_PARAMETERS", "ADAPTERS_DISABLED", "ACTIVE_ADAPTERS_NOT_TRAINABLE"}
+            assert {finding["code"] for finding in healthcheck["findings"]} == expected_findings
+
+    def test_zero_trainable_parameters_are_flagged(self):
+        model = self.get_peft_model()
+        model.set_requires_grad("default", requires_grad=False)
+
+        model.print_healthcheck()  # does not raise
+        healthcheck = model.healthcheck()
+
+        assert healthcheck["is_ready"] is False
+        expected_findings = {"NO_TRAINABLE_PARAMETERS", "ACTIVE_ADAPTERS_NOT_TRAINABLE"}
+        assert {finding["code"] for finding in healthcheck["findings"]} == expected_findings
+
+    def test_high_trainable_parameter_fraction_is_flagged(self):
+        model = self.get_peft_model()
+        for parameter in model.parameters():
+            parameter.requires_grad = True
+
+        model.print_healthcheck()  # does not raise
+        healthcheck = model.healthcheck()
+
+        assert healthcheck["is_ready"] is True
+        expected_findings = {"HIGH_TRAINABLE_PARAMETER_FRACTION"}
+        assert {finding["code"] for finding in healthcheck["findings"]} == expected_findings
+
+    def test_healthcheck_target_parameters(self):
+        # for good measure: check with target_parameters
+        model = self.get_model()
+        config = LoraConfig(target_modules=["lin0"], target_parameters=["lin1.weight"])
+        model = get_peft_model(model, config)
+
+        model.print_healthcheck()  # does not raise
+        healthcheck = model.healthcheck()
+
+        adapter = healthcheck["adapter_configurations"]["default"]
+        assert adapter["target_modules"] == ["lin0"]
+        assert adapter["target_parameters"] == ["lin1.weight"]
+        assert healthcheck["summary"]["adapter_layer_types"] == {"lora.Linear": 1, "lora.ParamWrapper": 1}
+        assert healthcheck["summary"]["num_adapter_layers"] == 2
+
+    def test_healthcheck_not_lora(self):
+        model = self.get_model()
+        config = LoHaConfig(target_modules=["lin0", "lin1"])
+        model = get_peft_model(model, config)
+
+        model.print_healthcheck()  # does not raise
+        healthcheck = model.healthcheck()
+
+        assert healthcheck["summary"]["adapter_model_type"] == "LoHaModel"
+        assert healthcheck["summary"]["peft_types"] == {"default": "LOHA"}
+
+    def test_healthcheck_transformers_peft_model(self):
+        # check with a real Transformers model
+        model_id = "peft-internal-testing/opt-125m"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            model = get_peft_model(model, LoraConfig(modules_to_save=["embed_tokens"]))
+
+            model.print_healthcheck()  # does not raise
+            healthcheck = model.healthcheck()
+
+            assert healthcheck["is_ready"] is True
+            assert healthcheck["summary"]["model_id"] == model_id
+            assert healthcheck["summary"]["num_adapter_layers"] == 24 + 1  # 24 linear, 1 embedding
+            assert healthcheck["summary"]["adapter_layer_types"] == {"lora.Linear": 24, "ModulesToSaveWrapper": 1}
+            assert healthcheck["environment"]["peft_version"]
+            assert healthcheck["environment"]["torch_version"]
+            assert healthcheck["adapter_configurations"]["default"]["target_modules"] == ["q_proj", "v_proj"]
+            assert healthcheck["adapter_configurations"]["default"]["modules_to_save"] == ["embed_tokens"]
+            assert healthcheck["model_runtime"]["parameter_devices"] == ["cpu"]
+            assert healthcheck["findings"] == []
+
+    def test_healthcheck_transformers_model_injected_directly(self):
+        # check with a model using the PEFT integration of Transformers directly; probably not very useful, as the check
+        # is intended for training, but it doesn't hurt to ensure it works
+        model_id = "peft-internal-testing/opt-125m"
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+            target_str = r".*\.k_proj"
+            target_params = ["q_proj.weight"]
+            model.add_adapter(
+                LoraConfig(
+                    target_modules=target_str, target_parameters=target_params, modules_to_save=["embed_tokens"]
+                )
+            )
+
+            healthcheck = run_healthcheck(model)
+
+            assert healthcheck["is_ready"] is True
+            assert healthcheck["summary"]["model_id"] == model_id
+            assert healthcheck["summary"]["num_adapter_layers"] == 24 + 1  # 12 linear, 12 params, 1 embedding
+            assert healthcheck["summary"]["adapter_layer_types"] == {
+                "lora.Linear": 12,
+                "lora.ParamWrapper": 12,
+                "ModulesToSaveWrapper": 1,
+            }
+            assert healthcheck["environment"]["peft_version"]
+            assert healthcheck["environment"]["torch_version"]
+            assert healthcheck["adapter_configurations"]["default"]["target_modules"] == target_str
+            assert healthcheck["adapter_configurations"]["default"]["target_parameters"] == target_params
+            assert healthcheck["adapter_configurations"]["default"]["modules_to_save"] == ["embed_tokens"]
+            assert healthcheck["model_runtime"]["parameter_devices"] == ["cpu"]
+            assert healthcheck["findings"] == []
 
 
 # Tests for BaseTuner

@@ -129,7 +129,7 @@ from peft import LoraConfig, get_peft_model
 
 config = LoraConfig(target_modules=["q_proj", "v_proj", "gate_proj"])
 model = get_peft_model(base_model, config)
-model.print_trainable_parameters()
+model.print_healthcheck()
 ```
 
 If the reported number is much lower than expected, inspect the adapter layers in the model:
@@ -278,6 +278,23 @@ To check the name of the classification head, print the model and it should be t
 If you get this warning from your inference code, i.e. _after_ training the model, when you load the PEFT model, you always have to load the Transformers model first. Since Transformers does not know that you will load PEFT weights afterwards, it still gives the warning.
 
 As always, it is best practice to ensure the model works correctly for inference by running some validation on it.
+
+### Run a training healthcheck
+
+Before training, use [`~peft.PeftModel.print_healthcheck`] to get a compact, human readable summary of the state of the PEFT model. It is derived from the model and layer status APIs (see next section), and flags suspicious states such as inconsistent adapters, merged adapters, or a suspicious number trainable parameters.
+
+```py
+peft_model.print_healthcheck()
+```
+
+Pay special attention to the last line ("Findings:"), which reports possible irregularities and prints "all good" if everything looks fine. If you prefer a dictionary output, which is JSON-serializable, use [`~peft.PeftModel.healthcheck`] instead:
+
+```py
+healthcheck = peft_model.healthcheck()
+print(healthcheck["findings"])
+```
+
+This check only inspects the model and its adapters. It does not validate your training loop, optimizer, or dataset.
 
 ### Check layer and model status
 

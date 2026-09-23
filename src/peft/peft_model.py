@@ -1284,6 +1284,23 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         return get_model_status(self)
 
+    def healthcheck(self) -> dict[str, Any]:
+        """Check this model for adapter states that are suspicious before training.
+
+        The returned dictionary is JSON-serializable. It summarizes the model and layer status APIs, and includes
+        findings for inconsistent adapter state, merged adapters, and implausible numbers of trainable parameters. It
+        does not validate the training loop, optimizer, or dataset.
+        """
+        from .utils.healthcheck import run_healthcheck
+
+        return run_healthcheck(self)
+
+    def print_healthcheck(self) -> None:
+        """Print a compact, human-readable healthcheck report."""
+        from .utils.healthcheck import format_healthcheck
+
+        print(format_healthcheck(self.healthcheck()))
+
     @classmethod
     def _split_kwargs(cls, kwargs: dict[str, Any]):
         _kwargs_not_in_hf_hub_download_signature = ("use_auth_token",)

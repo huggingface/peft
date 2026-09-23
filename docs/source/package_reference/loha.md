@@ -67,7 +67,7 @@ config_unet = LoHaConfig(
 
 pipeline = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5")
 pipeline.unet = get_peft_model(pipeline.unet, config_unet)
-pipeline.unet.print_trainable_parameters()
+pipeline.unet.print_healthcheck()
 ```
 
 ## Benchmark overview

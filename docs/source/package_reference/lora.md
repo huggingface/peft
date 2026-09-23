@@ -58,8 +58,7 @@ config = LoraConfig(
     modules_to_save=["classifier"],
 )
 model = get_peft_model(model, config)
-model.print_trainable_parameters()
-"trainable params: 667,493 || all params: 86,543,818 || trainable%: 0.7712775047664294"
+model.print_healthcheck()
 ```
 
 
@@ -1100,5 +1099,4 @@ To encode general knowledge, GenKnowSub subtracts the average of the provided ge
 ## Intruder Dimension Reduction
 
 [[autodoc]] tuners.lora.intruders.reduce_intruder_dimension
-
 
