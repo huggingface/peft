@@ -158,8 +158,9 @@ class PeftConfigMixin(PushToHubMixin):
         if auto_mapping_dict is not None:
             output_dict["auto_mapping"] = auto_mapping_dict
 
-        # save it
-        with open(output_path, "w") as writer:
+        # save it; config JSON is UTF-8, pin the encoding so this does not depend on the
+        # locale's preferred encoding (e.g. cp936 on Windows)
+        with open(output_path, "w", encoding="utf-8") as writer:
             writer.write(json.dumps(output_dict, indent=2, sort_keys=True))
 
     @classmethod
@@ -276,7 +277,10 @@ class PeftConfigMixin(PushToHubMixin):
             path_json_file (`str`):
                 The path to the json file.
         """
-        with open(path_json_file) as file:
+        # Config JSON files are UTF-8; pin the encoding so reading a config containing
+        # non-ASCII (e.g. a CJK path in `base_model_name_or_path`) does not crash on
+        # Windows locales such as cp936.
+        with open(path_json_file, encoding="utf-8") as file:
             json_object = json.load(file)
 
         # Sanity check that config does not contain a runtime_config
