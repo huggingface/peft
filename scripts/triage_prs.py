@@ -38,7 +38,7 @@ BOT_NAME = "peft-triage"
 
 # see: https://api.github.com/users/<user-id>
 MAINTAINERS = {"BenjaminBossan": 6229650, "githubnemo": 264196}
-ALLOW_LIST_USERS = {"dependabot[bot]": 49699333, "peft-jambot": 295153068}
+ALLOW_LIST_USERS = {"dependabot[bot]": 49699333, "peft-jambot": 295153068, "hf-security-analysis": 265538906}
 ALLOW_LIST_ORGANIZATIONS = {}  # Organization name -> immutable organization ID.
 # see: https://api.github.com/orgs/huggingface
 HF_ORGANIZATION_ID = 25720743
