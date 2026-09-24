@@ -9,10 +9,13 @@ on:
       - "!method_comparison/peft-shop/**"
   workflow_dispatch:
 
+
 permissions: {}
 
 jobs:
   deploy:
+    permissions:
+      contents: read
     # skip on forks, the secrets used below only exist in the main repo
     if: github.repository == 'huggingface/peft'
     # GH Environment for extra protection: https://github.com/huggingface/peft/settings/environments

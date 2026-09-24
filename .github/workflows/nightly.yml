@@ -12,10 +12,13 @@ env:
   NVIDIA_DISABLE_REQUIRE: "1"
   SLACK_API_TOKEN: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
+
 permissions: {}
 
 jobs:
   run_all_tests_single_gpu:
+    permissions:
+      contents: read
     # skip on forks, the self-hosted runner group and secrets used below only exist in the main repo
     if: github.repository == 'huggingface/peft'
     strategy:
@@ -86,6 +89,8 @@ jobs:
           exit 1
 
   run_all_tests_multi_gpu:
+    permissions:
+      contents: read
     # skip on forks, the self-hosted runner group and secrets used below only exist in the main repo
     if: github.repository == 'huggingface/peft'
     strategy:

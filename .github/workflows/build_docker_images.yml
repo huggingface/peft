@@ -17,6 +17,7 @@ env:
 
 jobs:
   latest-cpu:
+    permissions: {}
     name: "Latest Peft CPU [dev]"
     # skip on forks, the self-hosted runner group and secrets used below only exist in the main repo
     if: github.repository == 'huggingface/peft'
@@ -54,6 +55,7 @@ jobs:
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
   latest-cuda:
+    permissions: {}
     name: "Latest Peft GPU [dev]"
     # skip on forks, the self-hosted runner group and secrets used below only exist in the main repo
     if: github.repository == 'huggingface/peft'
