@@ -862,3 +862,120 @@ class TestTaskTypeModulesToSave:
 
         assert user_list == ["my_head"]
         assert model.peft_config["other"].modules_to_save == ["my_head"] + head_names
+
+
+class TestMHAMergeOutProjDelta:
+    """merge_and_unload on a LoRA-wrapped nn.MultiheadAttention must not apply the out_proj
+    delta twice.  The MHA merge() code was manually writing W+dW into out_proj.weight and then
+    calling out_proj.merge(), which added dW a second time, corrupting the merged weight to
+    W + 2*dW while leaving merge()+unmerge() round-trips intact (masking the bug).
+
+    Note: lora_B is zero-initialised so we must set it to non-zero to expose the bug.
+    Tests compare against a reference model that applies the LoRA delta exactly once.
+    """
+
+    def _make_peft_model(self, embed_dim: int = 16, num_heads: int = 4):
+        class MHAModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
+
+            def forward(self, x):
+                out, _ = self.attn(x, x, x)
+                return out
+
+        torch.manual_seed(42)
+        model = MHAModel()
+        config = LoraConfig(r=4, lora_alpha=8, target_modules=["attn"])
+        peft_model = get_peft_model(model, config)
+        # lora_B is zero-initialised; fill it so the adapter has a measurable effect.
+        with torch.no_grad():
+            for mod in peft_model.modules():
+                if hasattr(mod, "lora_B") and "default" in mod.lora_B:
+                    mod.lora_B["default"].weight.data.fill_(0.1)
+        return peft_model
+
+    def _make_reference_model(self, peft_model, embed_dim: int = 16, num_heads: int = 4):
+        """Build a plain nn.MultiheadAttention with base weights + LoRA delta applied exactly once."""
+        import copy
+
+        attn_lora = peft_model.base_model.model.attn
+        base_layer = attn_lora.get_base_layer()
+
+        ref = copy.deepcopy(nn.MultiheadAttention(embed_dim, num_heads, batch_first=True))
+        with torch.no_grad():
+            dW_in = attn_lora.get_delta_weight("default").detach()
+            ref.in_proj_weight.data = (base_layer.in_proj_weight.data + dW_in).clone()
+
+            dW_out = base_layer.out_proj.get_delta_weight("default").detach()
+            out_base_weight = base_layer.out_proj.get_base_layer().weight.data
+            ref.out_proj.weight.data = (out_base_weight + dW_out).clone()
+
+            if base_layer.in_proj_bias is not None:
+                ref.in_proj_bias.data = base_layer.in_proj_bias.data.clone()
+            out_bias = base_layer.out_proj.get_base_layer().bias
+            if out_bias is not None:
+                ref.out_proj.bias.data = out_bias.data.clone()
+        return ref
+
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    def test_merge_and_unload_matches_reference(self, safe_merge):
+        """merge_and_unload output must match a reference that applies out_proj delta once."""
+        peft_model = self._make_peft_model()
+        ref = self._make_reference_model(peft_model)
+        peft_model.eval()
+        ref.eval()
+
+        x = torch.randn(2, 8, 16)
+        with torch.no_grad():
+            ref_out = ref(x, x, x)[0]
+
+        merged = peft_model.merge_and_unload(safe_merge=safe_merge)
+        merged.eval()
+        with torch.no_grad():
+            actual = merged(x)
+
+        max_diff = (ref_out - actual).abs().max().item()
+        assert torch.allclose(ref_out, actual, atol=1e-5), (
+            f"MHA merge_and_unload (safe_merge={safe_merge}) does not match single-delta reference "
+            f"(max diff={max_diff:.6f}); out_proj delta was likely applied twice"
+        )
+
+    def test_peft_forward_matches_reference(self):
+        """Unmerged peft forward must match a reference that applies out_proj delta once."""
+        peft_model = self._make_peft_model()
+        ref = self._make_reference_model(peft_model)
+        peft_model.eval()
+        ref.eval()
+
+        x = torch.randn(2, 8, 16)
+        with torch.no_grad():
+            ref_out = ref(x, x, x)[0]
+            peft_out = peft_model(x)
+
+        max_diff = (ref_out - peft_out).abs().max().item()
+        assert torch.allclose(ref_out, peft_out, atol=1e-5), (
+            f"Unmerged MHA forward does not match single-delta reference "
+            f"(max diff={max_diff:.6f}); merge+unmerge on every forward likely applies delta twice"
+        )
+
+    def test_merge_unmerge_roundtrip(self):
+        """merge() followed by unmerge() must restore the original weights exactly."""
+        peft_model = self._make_peft_model()
+        peft_model.eval()
+
+        x = torch.randn(2, 8, 16)
+        with torch.no_grad():
+            before = peft_model(x).clone()
+
+        peft_model.merge_adapter()
+        peft_model.unmerge_adapter()
+        peft_model.eval()
+
+        with torch.no_grad():
+            after = peft_model(x)
+
+        max_diff = (before - after).abs().max().item()
+        assert torch.allclose(before, after, atol=1e-5), (
+            f"MHA merge+unmerge round-trip changed output (max diff={max_diff:.6f})"
+        )
