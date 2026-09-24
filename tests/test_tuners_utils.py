@@ -15,6 +15,7 @@ import dataclasses
 import json
 import re
 from copy import deepcopy
+from unittest.mock import Mock
 
 import diffusers
 import packaging.version
@@ -1728,17 +1729,18 @@ class TestHealthcheck:
         assert "Environment:" in output
         assert "findings" not in output.lower()
 
-    def test_print_healthcheck(self, capsys):
+    def test_print_healthcheck(self):
         model = self.get_peft_model()
 
-        model.print_healthcheck()  # does not raise
+        sink = Mock()
+        model.print_healthcheck(sink=sink)
+        output = sink.call_args_list[0].args[0]
 
-        output = capsys.readouterr().out
         assert "PEFT healthcheck" in output
         assert "Environment:" in output
         assert "findings" not in output.lower()
 
-    def test_print_healthcheck_with_findings(self, capsys):
+    def test_print_healthcheck_with_findings(self):
         model = self.get_peft_model()
 
         # Add irruglarities:
@@ -1751,8 +1753,9 @@ class TestHealthcheck:
         # merge an adapter, which is not advisable for training
         model.merge_adapter(["default"])
 
-        model.print_healthcheck()  # does not raise
-        output = capsys.readouterr().out
+        sink = Mock()
+        model.print_healthcheck(sink=sink)
+        output = sink.call_args_list[0].args[0]
 
         assert "adapters: default (LORA), other (LORA)" in output
         assert "active: irregular" in output

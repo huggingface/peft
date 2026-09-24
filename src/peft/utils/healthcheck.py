@@ -257,6 +257,9 @@ def format_healthcheck(healthcheck: dict[str, Any], sep=", ", indent="  ") -> st
             The separator to use between listed items.
         indent (`str`, *optional*, defaults to `"  "`)
             The indentation level for nested items.
+        sink (`callable`, *optiona*, default=`print`)
+            Function which is called to print the output. By default, just the builtin `print` function, but can also
+            be something else like `logger.info`.
 
     Returns:
         Result (`str`)

@@ -197,7 +197,7 @@ def train(
 
     # print this after getting the optimizer, in case it modifies requires_gard
     if hasattr(model, "print_healthcheck"):
-        model.print_healthcheck()
+        model.print_healthcheck(sink=print_verbose)
 
     status = TrainStatus.FAILED
     tic_train = time.perf_counter()

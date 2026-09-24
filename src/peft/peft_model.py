@@ -1295,11 +1295,21 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         return run_healthcheck(self)
 
-    def print_healthcheck(self) -> None:
-        """Print a compact, human-readable healthcheck report."""
+    def print_healthcheck(self, sink=print, **kwargs) -> None:
+        """
+        Print a compact, human-readable healthcheck report.
+
+        Args:
+            sink (`callable`, *optiona*, default=`print`)
+                Function which is called to print the output. By default, just the builtin `print` function, but can also
+                be something else like `logger.info`.
+            kwargs
+                Further keyword arguments are passed along to `format_healthcheck`.
+
+        """
         from .utils.healthcheck import format_healthcheck
 
-        print(format_healthcheck(self.healthcheck()))
+        sink(format_healthcheck(self.healthcheck(), **kwargs))
 
     @classmethod
     def _split_kwargs(cls, kwargs: dict[str, Any]):
