@@ -1712,9 +1712,9 @@ class TestHealthcheck:
         assert healthcheck["is_ready"] is True
         assert healthcheck["summary"]["model_id"] == "other"
         assert healthcheck["summary"]["num_adapter_layers"] == 2
-        assert healthcheck["summary"]["adapter_layer_types"] == {"lora.Linear": 2}
-        assert healthcheck["environment"]["peft_version"]
-        assert healthcheck["environment"]["torch_version"]
+        assert healthcheck["summary"]["adapter_layer_types"] == {"default": {"lora.Linear": 2}}
+        assert healthcheck["environment"]["peft_version"]  # exists and not empty
+        assert healthcheck["environment"]["torch_version"]  # exists and not empty
         assert healthcheck["adapter_configurations"]["default"]["target_modules"] == ["lin0", "lin1"]
         assert healthcheck["model_runtime"]["parameter_devices"] == ["cpu"]
         assert healthcheck["findings"] == []
@@ -1726,7 +1726,7 @@ class TestHealthcheck:
 
         assert "PEFT healthcheck" in output
         assert "Environment:" in output
-        assert "all good" in output
+        assert "findings" not in output.lower()
 
     def test_print_healthcheck(self, capsys):
         model = self.get_peft_model()
@@ -1736,7 +1736,7 @@ class TestHealthcheck:
         output = capsys.readouterr().out
         assert "PEFT healthcheck" in output
         assert "Environment:" in output
-        assert "all good" in output
+        assert "findings" not in output.lower()
 
     def test_print_healthcheck_with_findings(self, capsys):
         model = self.get_peft_model()
@@ -1755,7 +1755,8 @@ class TestHealthcheck:
         output = capsys.readouterr().out
 
         assert "adapters: default (LORA), other (LORA)" in output
-        assert "active=irregular" in output
+        assert "active: irregular" in output
+        assert "merged: default" in output
         assert "WARNING: 65.71% of model parameters are trainable" in output
         assert "ERROR: Active adapters differ across adapter layers" in output
         assert "WARNING: Adapter(s) 'default' is/are merged; unmerge them before training." in output
@@ -1848,6 +1849,7 @@ class TestHealthcheck:
         model = self.get_model()
         config = LoraConfig(target_modules=["lin0"], target_parameters=["lin1.weight"])
         model = get_peft_model(model, config)
+        model.add_adapter("other", LoraConfig(target_modules=[], target_parameters=["lin1.weight"]))
 
         model.print_healthcheck()  # does not raise
         healthcheck = model.healthcheck()
@@ -1855,7 +1857,10 @@ class TestHealthcheck:
         adapter = healthcheck["adapter_configurations"]["default"]
         assert adapter["target_modules"] == ["lin0"]
         assert adapter["target_parameters"] == ["lin1.weight"]
-        assert healthcheck["summary"]["adapter_layer_types"] == {"lora.Linear": 1, "lora.ParamWrapper": 1}
+        assert healthcheck["summary"]["adapter_layer_types"] == {
+            "default": {"lora.Linear": 1, "lora.ParamWrapper": 1},
+            "other": {"lora.ParamWrapper": 1},
+        }
         assert healthcheck["summary"]["num_adapter_layers"] == 2
 
     def test_healthcheck_not_lora(self):
@@ -1882,7 +1887,9 @@ class TestHealthcheck:
             assert healthcheck["is_ready"] is True
             assert healthcheck["summary"]["model_id"] == model_id
             assert healthcheck["summary"]["num_adapter_layers"] == 24 + 1  # 24 linear, 1 embedding
-            assert healthcheck["summary"]["adapter_layer_types"] == {"lora.Linear": 24, "ModulesToSaveWrapper": 1}
+            assert healthcheck["summary"]["adapter_layer_types"] == {
+                "default": {"lora.Linear": 24, "ModulesToSaveWrapper": 1}
+            }
             assert healthcheck["environment"]["peft_version"]
             assert healthcheck["environment"]["torch_version"]
             assert healthcheck["adapter_configurations"]["default"]["target_modules"] == ["q_proj", "v_proj"]
@@ -1910,9 +1917,11 @@ class TestHealthcheck:
             assert healthcheck["summary"]["model_id"] == model_id
             assert healthcheck["summary"]["num_adapter_layers"] == 24 + 1  # 12 linear, 12 params, 1 embedding
             assert healthcheck["summary"]["adapter_layer_types"] == {
-                "lora.Linear": 12,
-                "lora.ParamWrapper": 12,
-                "ModulesToSaveWrapper": 1,
+                "default": {
+                    "lora.Linear": 12,
+                    "lora.ParamWrapper": 12,
+                    "ModulesToSaveWrapper": 1,
+                }
             }
             assert healthcheck["environment"]["peft_version"]
             assert healthcheck["environment"]["torch_version"]

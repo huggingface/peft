@@ -287,11 +287,13 @@ Before training, use [`~peft.PeftModel.print_healthcheck`] to get a compact, hum
 peft_model.print_healthcheck()
 ```
 
-Pay special attention to the last line ("Findings:"), which reports possible irregularities and prints "all good" if everything looks fine. If you prefer a dictionary output, which is JSON-serializable, use [`~peft.PeftModel.healthcheck`] instead:
+Pay special attention to the presence of "Findings" at the end of the report, which is included if irregularities were found.
+
+If you prefer a dictionary output, which is JSON-serializable, use [`~peft.PeftModel.healthcheck`] instead:
 
 ```py
 healthcheck = peft_model.healthcheck()
-print(healthcheck["findings"])
+print(healthcheck.get("findings", "all good")
 ```
 
 This check only inspects the model and its adapters. It does not validate your training loop, optimizer, or dataset.

@@ -199,7 +199,13 @@ def run_healthcheck(model) -> dict[str, Any]:
                 )
             )
 
-    layer_types = Counter(status.module_type for status in layer_status)
+    layer_types_per_adapter = {}
+    for adapter_name in model_status.available_adapters:
+        layer_types = Counter(
+            status.module_type for status in layer_status if adapter_name in status.available_adapters
+        )
+        layer_types_per_adapter[adapter_name] = dict(layer_types.most_common())
+
     # works for Transformers, needs refinement for other types like Diffusers, just shows 'other' for now
     model_id = getattr(getattr(model, "config", None), "name_or_path", "other")
 
@@ -223,7 +229,7 @@ def run_healthcheck(model) -> dict[str, Any]:
             "total_params": model_status.total_params,
             "trainable_percent": trainable_percent,
             "num_adapter_layers": model_status.num_adapter_layers,
-            "adapter_layer_types": dict(sorted(layer_types.items())),
+            "adapter_layer_types": layer_types_per_adapter,
         },
         "adapter_configurations": _get_adapter_configurations(model),
         "model_runtime": _get_model_runtime(model),
@@ -240,45 +246,91 @@ def run_healthcheck(model) -> dict[str, Any]:
     }
 
 
-def format_healthcheck(healthcheck: dict[str, Any]) -> str:
-    """Format :func:`run_healthcheck` output as a compact human-readable report."""
+def format_healthcheck(healthcheck: dict[str, Any], sep=", ", indent="  ") -> str:
+    """
+    Format `run_healthcheck` output as a compact human-readable report.
+
+    Args:
+        healthcheck: dict
+            The healthcheck dictionary as returned by `run_healthcheck`.
+        sep (`str`, *optional*, defaults to `", "`)
+            The separator to use between listed items.
+        indent (`str`, *optional*, defaults to `"  "`)
+            The indentation level for nested items.
+
+    Returns:
+        Result (`str`)
+            The formatted string in human-readable format.
+    """
+    sep = ", "
+    indent = "  "
+
     summary = healthcheck["summary"]
     adapter_state = healthcheck["adapter_state"]
     environment = healthcheck["environment"]
     model_runtime = healthcheck["model_runtime"]
+    devices = ", ".join(model_runtime["parameter_devices"])
     adapter_types = ", ".join(f"{name} ({peft_type})" for name, peft_type in summary["peft_types"].items())
-    layer_types = ", ".join(f"{count} {module_type}" for module_type, count in summary["adapter_layer_types"].items())
-    dtypes = ", ".join(f"{k}: {v:,}" for k, v in model_runtime["parameter_dtypes"].items())
+    dtypes = ", ".join(f"{k}={v:,}" for k, v in model_runtime["parameter_dtypes"].items())
+
+    active_adapters = adapter_state["active_adapters"]
+    if not isinstance(active_adapters, str):
+        active_adapters = ", ".join(active_adapters) or "none"
+    merged_adapters = adapter_state["merged_adapters"]
+    if not isinstance(merged_adapters, str):
+        merged_adapters = ", ".join(merged_adapters) or "none"
+    layer_types = ""
+    for adapter_name, dct in summary["adapter_layer_types"].items():
+        layer_types += f"{indent}{adapter_name}:\n"
+        layer_types += f"{2 * indent}" + sep.join(f"{k}={v}" for k, v in dct.items())
 
     lines = [
         "PEFT healthcheck",
-        f"Model:\n  ID: {summary['model_id']} | type: {summary['base_model_type']} | adapters: {adapter_types}",
-        (
-            f"Environment:\n  peft={environment['peft_version']} | "
-            f"transformers={environment['transformers_version']} | "
-            f"torch={environment['torch_version']} | Python={environment['python_version']}"
+        sep.join(
+            (
+                f"Model:\n{indent}ID: {summary['model_id']}",
+                f"type: {summary['base_model_type']}",
+                f"adapters: {adapter_types}",
+            )
         ),
-        (
-            f"Runtime:\n  training={model_runtime['training']} | devices={model_runtime['parameter_devices']} | "
-            f"dtypes={dtypes} | checkpointing={model_runtime['gradient_checkpointing']}"
+        sep.join(
+            (
+                f"Environment:\n{indent}peft: {environment['peft_version']}",
+                f"transformers: {environment['transformers_version']}",
+                f"torch: {environment['torch_version']}",
+                f"Python: {environment['python_version']}",
+            )
         ),
-        (
-            f"Trainable:\n  {summary['trainable_params']:,} / {summary['total_params']:,} parameters "
-            f"({summary['trainable_percent']:.4f}%) | {summary['num_adapter_layers']} adapter layers"
+        sep.join(
+            (
+                f"Runtime:\n{indent}training: {model_runtime['training']}",
+                f"devices: {devices}",
+                f"dtypes: {dtypes}",
+                f"gradient checkpointing: {model_runtime['gradient_checkpointing']}",
+            )
         ),
-        (
-            "State:\n  "
-            f"enabled={adapter_state['enabled']} | active={adapter_state['active_adapters']} | "
-            f"merged={adapter_state['merged_adapters']}"
+        sep.join(
+            (
+                f"Parameters:\n{indent}trainable: {summary['trainable_params']:,}",
+                f"total: {summary['total_params']:,}",
+                f"percent trainable: {summary['trainable_percent']:.4f}%",
+                f"adapter layers: {summary['num_adapter_layers']}",
+            )
         ),
-        f"Layer types:\n  {layer_types}",
+        sep.join(
+            (
+                f"State:\n{indent}adapter is enabled: {adapter_state['enabled']}",
+                f"active: {active_adapters}",
+                f"merged: {merged_adapters}",
+            )
+        ),
+        f"Layer types:\n{layer_types}",
     ]
 
     findings = healthcheck["findings"]
     if findings:
         lines.append("Findings:")
         lines.extend(f"  {finding['severity'].upper()}: {finding['message']}" for finding in findings)
-    else:
-        lines.append("Findings:\n  all good")
 
-    return "\n".join(lines)
+    result = "\n".join(lines)
+    return result

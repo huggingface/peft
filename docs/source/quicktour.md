@@ -109,19 +109,18 @@ This should show something like:
 ```
 PEFT healthcheck
 Model:
-  ID: meta-llama/Llama-3.2-1B | type: LlamaForCausalLM | adapters: default (LORA)
+  ID: meta-llama/Llama-3.2-1B, type: LlamaForCausalLM, adapters: default (LORA)
 Environment:
-  peft=0.21.0 | transformers=5.18.0.dev0 | torch=2.14.0+cu130 | Python=3.13.9
+  peft: 0.21.0, transformers: 5.18.0.dev0, torch: 2.14.0+cu130, Python: 3.13.9
 Runtime:
-  training=True | devices=['cpu'] | dtypes=bfloat16: 1,235,814,400, float32: 851,968 | checkpointing=False
-Trainable:
-  851,968 / 1,236,666,368 parameters (0.0689%) | 32 adapter layers
+  training: True, devices: cpu, dtypes: bfloat16=1,235,814,400, float32=851,968, gradient checkpointing: False
+Parameters:
+  trainable: 851,968, total: 1,236,666,368, percent trainable: 0.0689%, adapter layers: 32
 State:
-  enabled=True | active=['default'] | merged=[]
+  adapter is enabled: True, active: default, merged: none
 Layer types:
-  32 lora.Linear
-Findings:
-  all good
+  default:
+    lora.Linear=32
 ```
 
 The print output is subject to change, don't try to parse it. For programmatic use, call [`~peft.PeftModel.healthcheck`] instead, which returns the same information as a JSON-serializable dictionary.
