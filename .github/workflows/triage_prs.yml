@@ -30,9 +30,9 @@
 name: PR triage
 
 on:
-  # TODO: set up automatic cron job
-  # schedule:
-  #   - cron: "17 */4 * * *"
+  schedule:
+    # every 4 hours, 17 minutes past the hour (some arbitrary offset to avoid congestion)
+    - cron: "17 */4 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
