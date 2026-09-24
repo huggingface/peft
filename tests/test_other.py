@@ -979,3 +979,38 @@ class TestMHAMergeOutProjDelta:
         assert torch.allclose(before, after, atol=1e-5), (
             f"MHA merge+unmerge round-trip changed output (max diff={max_diff:.6f})"
         )
+
+    def test_merge_delta_matches_get_delta_weight(self):
+        """After merge(), both in_proj and out_proj must equal base_weight + get_delta_weight().
+
+        On unfixed code, merge() applied the out_proj delta twice (W + 2*dW) while
+        get_delta_weight() returns the single-application delta.  Catching it here means
+        the test fails for the bug on main and passes with this fix.
+        """
+        peft_model = self._make_peft_model()
+        attn_lora = peft_model.base_model.model.attn
+        base_layer = attn_lora.get_base_layer()
+        out_proj_lora = base_layer.out_proj  # LoraLinear wrapping out_proj
+
+        with torch.no_grad():
+            dW_in = attn_lora.get_delta_weight("default").detach()
+            expected_in = base_layer.in_proj_weight.data.clone() + dW_in
+
+            dW_out = out_proj_lora.get_delta_weight("default").detach()
+            expected_out = out_proj_lora.get_base_layer().weight.data.clone() + dW_out
+
+        peft_model.merge_adapter()
+
+        actual_in = base_layer.in_proj_weight.data
+        actual_out = out_proj_lora.get_base_layer().weight.data
+
+        max_diff_in = (expected_in - actual_in).abs().max().item()
+        assert torch.allclose(expected_in, actual_in, atol=1e-6), (
+            f"After merge(), in_proj weight differs from base + get_delta_weight "
+            f"(max diff={max_diff_in:.6f})"
+        )
+        max_diff_out = (expected_out - actual_out).abs().max().item()
+        assert torch.allclose(expected_out, actual_out, atol=1e-6), (
+            f"After merge(), out_proj weight differs from base + get_delta_weight "
+            f"(max diff={max_diff_out:.6f}); delta was likely applied more than once"
+        )
