@@ -4791,7 +4791,7 @@ class TestHotSwapping:
         assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
 
     def test_hotswap_preserves_adapter_with_shared_name_prefix(self, tmp_path):
-        """Replacing `foo` must leave the separate `foobar` adapter's output unchanged."""
+        """Regression for #3780: replacing `foo` must leave `foobar`'s output unchanged."""
         base_model = self.get_model()
         config = LoraConfig(target_modules=["lin0"], r=2, init_lora_weights=False)
         torch.manual_seed(1)
@@ -4804,19 +4804,19 @@ class TestHotSwapping:
         inputs = torch.rand(3, 10, device=self.torch_device)
 
         with torch.inference_mode():
-            expected_foo_output = incoming_model(inputs)
+            incoming_output = incoming_model(inputs)
             model.set_adapter("foo")
             old_foo_output = model(inputs)
             model.set_adapter("foobar")
             expected_foobar_output = model(inputs)
-        assert not torch.allclose(old_foo_output, expected_foo_output)
-        assert not torch.allclose(expected_foobar_output, expected_foo_output)
+        assert not torch.allclose(old_foo_output, incoming_output)
+        assert not torch.allclose(expected_foobar_output, incoming_output)
 
         hotswap_adapter(model, tmp_path / "incoming", adapter_name="foo")
 
         with torch.inference_mode():
             model.set_adapter("foo")
-            torch.testing.assert_close(model(inputs), expected_foo_output)
+            torch.testing.assert_close(model(inputs), incoming_output)
             model.set_adapter("foobar")
             torch.testing.assert_close(model(inputs), expected_foobar_output)
 
