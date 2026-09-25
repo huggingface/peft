@@ -5142,6 +5142,40 @@ class TestUnshardedLoRASaveUnderZeRO3:
             if we_initialized_pg and dist.is_initialized():
                 dist.destroy_process_group()
 
+    @pytest.mark.single_gpu_tests
+    @require_torch_gpu
+    def test_zero3_gathered_save_doesnt_warn(self, tmp_path, recwarn):
+        deepspeed = pytest.importorskip("deepspeed")
+
+        os.environ.setdefault("MASTER_ADDR", "localhost")
+        os.environ.setdefault("MASTER_PORT", "29555")
+        os.environ.setdefault("LOCAL_RANK", "0")
+        os.environ.setdefault("RANK", "0")
+        os.environ.setdefault("WORLD_SIZE", "1")
+
+        we_initialized_pg = not dist.is_initialized()
+        if we_initialized_pg:
+            init_process_group(world_size=1, rank=0)
+        try:
+            ds_config = {"train_batch_size": dist.get_world_size(), "zero_optimization": {"stage": 3}}
+            with deepspeed.zero.Init(config_dict_or_path=ds_config):
+                model = get_peft_model(
+                    SimpleModel(),
+                    LoraConfig(target_modules=["linear_transform"], r=8, lora_bias=True),
+                )
+            engine, *_ = deepspeed.initialize(model=model, config=ds_config, model_parameters=model.parameters())
+
+            lora_params = [p for n, p in engine.module.named_parameters() if "lora_A" in n or "lora_B" in n]
+            with deepspeed.zero.GatheredParameters(lora_params, modifier_rank=0):
+                engine.module.save_pretrained(tmp_path / "gathered")
+
+            for warning in recwarn.list:
+                assert "not gathered" not in str(warning.message)
+
+
+        finally:
+            if we_initialized_pg and dist.is_initialized():
+                dist.destroy_process_group()
 
 class TestBOFT:
     """

@@ -72,7 +72,12 @@ def _validate_lora_adapter_state_dict(
     for name, tensor in state_dict.items():
         if not isinstance(tensor, torch.Tensor):
             continue
-        if ".lora_A" not in name and ".lora_B" not in name:
+        if not (
+            ".lora_A." in name or ".lora_B." in name or
+            ".lora_embedding_A." in name or ".lora_embedding_B." in name
+        ):
+            continue
+        if ".weight" not in name:
             continue
         shape = tuple(tensor.shape)
         if len(shape) < 2 or any(d == 0 for d in shape):
