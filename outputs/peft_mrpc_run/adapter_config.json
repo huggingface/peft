@@ -1,0 +1,30 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": "roberta-base",
+  "bias": "finegates_only",
+  "exclude_modules": null,
+  "fan_in_fan_out": false,
+  "gate_init_mean": 1.0,
+  "gate_init_std": 0.1,
+  "gate_noise_std": 0.1,
+  "inference_mode": true,
+  "modules_to_save": [
+    "classifier",
+    "classifier",
+    "score"
+  ],
+  "peft_type": "FINEGATES",
+  "peft_version": "0.19.2.dev0@UNKNOWN",
+  "revision": null,
+  "sparsity_loss_weight": 50.0,
+  "target_modules": [
+    "value",
+    "output.dense",
+    "query",
+    "intermediate.dense",
+    "key",
+    "attention.output.dense"
+  ],
+  "target_sparsity": 0.4,
+  "task_type": "SEQ_CLS"
+}
