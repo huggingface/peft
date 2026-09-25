@@ -28,7 +28,7 @@ from transformers import (
     LlavaForConditionalGeneration,
 )
 
-from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model
+from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model, get_peft_model_state_dict
 from peft.import_utils import is_transformers_ge_v5_1_0, is_transformers_ge_v5_6_0
 from peft.utils.other import (
     ModulesToSaveWrapper,
@@ -482,6 +482,89 @@ class TestModulesToSaveNameSubstringBug:
             param_merged = sd_merged[key]
             param_unmerged = sd_unmerged[key]
             assert torch.allclose(param_merged, param_unmerged)
+
+
+class TestAuxiliaryTrainingWrapperParamsOnlyStateDict:
+    """Saving with a state_dict that only contains parameters, e.g. one built from gathered FSDP2 DTensors via
+    named_parameters().
+
+    ModulesToSaveWrapper used to raise a bare KeyError when the modules_to_save module has a persistent buffer, since
+    the buffer is part of the module's state_dict but not of the passed dict. The buffer is not sharded, so it is taken
+    from the module itself. A missing parameter cannot be recovered that way and should raise an informative error.
+
+    This bug was reported in #3805.
+    """
+
+    def get_model(self):
+        class Router(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(4, 8))
+                # persistent buffer, like the score correction bias of an MoE router
+                self.register_buffer("e_score_correction_bias", torch.zeros(4))
+
+            def forward(self, x):
+                return x @ self.weight.T + self.e_score_correction_bias
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = nn.Embedding(10, 8)
+                self.proj = nn.Linear(8, 8)
+                self.router = Router()
+
+            def forward(self, x):
+                return self.router(self.proj(self.emb(x)))
+
+        torch.manual_seed(0)
+        return MyModule()
+
+    def get_peft_model(self):
+        config = LoraConfig(target_modules=["proj"], modules_to_save=["router"], trainable_token_indices={"emb": [0]})
+        model = get_peft_model(self.get_model(), config)
+        # use a non-default buffer value to check that the actual value is saved and loaded
+        model.base_model.model.router.modules_to_save["default"].e_score_correction_bias.fill_(3.0)
+        return model
+
+    def test_params_only_state_dict_includes_buffer(self):
+        model = self.get_peft_model()
+        sd_full = get_peft_model_state_dict(model)
+        sd_params_only = get_peft_model_state_dict(model, state_dict=dict(model.named_parameters()))
+
+        buffer_key = "base_model.model.router.e_score_correction_bias"
+        assert buffer_key in sd_params_only
+        assert sd_full.keys() == sd_params_only.keys()
+        for key in sd_full:
+            assert torch.equal(sd_full[key], sd_params_only[key])
+
+    def test_params_only_save_and_load_restores_buffer(self, tmp_path):
+        model = self.get_peft_model()
+        x = torch.arange(4).unsqueeze(0)
+        output_before = model(x)
+        model.save_pretrained(tmp_path, state_dict=dict(model.named_parameters()))
+
+        loaded = PeftModel.from_pretrained(self.get_model(), tmp_path)
+        buffer = loaded.base_model.model.router.modules_to_save["default"].e_score_correction_bias
+        assert torch.equal(buffer, torch.full((4,), 3.0))
+        assert torch.allclose(loaded(x), output_before)
+
+    def test_modules_to_save_missing_parameter_raises(self):
+        model = self.get_peft_model()
+        state_dict = dict(model.named_parameters())
+        del state_dict["base_model.model.router.modules_to_save.default.weight"]
+
+        msg = "Expected key 'modules_to_save.default.weight' of modules_to_save adapter 'default'"
+        with pytest.raises(KeyError, match=msg):
+            get_peft_model_state_dict(model, state_dict=state_dict)
+
+    def test_trainable_tokens_missing_parameter_raises(self):
+        model = self.get_peft_model()
+        state_dict = dict(model.named_parameters())
+        del state_dict["base_model.model.emb.token_adapter.trainable_tokens_delta.default"]
+
+        msg = "Expected key 'token_adapter.trainable_tokens_delta.default' of trainable tokens adapter 'default'"
+        with pytest.raises(KeyError, match=msg):
+            get_peft_model_state_dict(model, state_dict=state_dict)
 
 
 class TestTargetingAuxiliaryTrainingWrapper:
