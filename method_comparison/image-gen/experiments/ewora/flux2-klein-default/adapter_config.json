@@ -1,0 +1,30 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": null,
+  "ewora_dropout": 0.0,
+  "inference_mode": false,
+  "init_weights": true,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "modules_to_save": null,
+  "num_experts": 4,
+  "peft_type": "EWORA",
+  "peft_version": "0.20.1.dev0@UNKNOWN",
+  "r": 8,
+  "rank_pattern": {},
+  "revision": null,
+  "target_modules": [
+    "to_out.0",
+    "to_v",
+    "to_qkv_mlp_proj",
+    "to_add_out",
+    "add_v_proj",
+    "add_q_proj",
+    "to_q",
+    "linear_in",
+    "add_k_proj",
+    "linear_out",
+    "to_k"
+  ],
+  "task_type": null
+}
