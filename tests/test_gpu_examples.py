@@ -5172,10 +5172,10 @@ class TestUnshardedLoRASaveUnderZeRO3:
             for warning in recwarn.list:
                 assert "not gathered" not in str(warning.message)
 
-
         finally:
             if we_initialized_pg and dist.is_initialized():
                 dist.destroy_process_group()
+
 
 class TestBOFT:
     """
