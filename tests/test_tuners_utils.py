@@ -1899,6 +1899,10 @@ class TestHealthcheck:
             assert healthcheck["adapter_configurations"]["default"]["modules_to_save"] == ["embed_tokens"]
             assert healthcheck["model_runtime"]["parameter_devices"] == ["cpu"]
             assert healthcheck["findings"] == []
+            # expected number of trainable parameters:
+            # - LoRA: 24 layers, hidden size 768, rank 8, x2 for LoRA A and B
+            # - embeddings: fully trainable, hidden size 768, vocab size 50272
+            assert healthcheck["summary"]["trainable_params"] == 24 * 768 * 8 * 2 + 768 * 50272
 
     def test_healthcheck_transformers_model_injected_directly(self):
         # check with a model using the PEFT integration of Transformers directly; probably not very useful, as the check

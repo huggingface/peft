@@ -25,9 +25,6 @@ from ..peft_model import get_layer_status, get_model_status
 
 
 SEVERITY = Literal["warning", "error"]
-# very generous bounds
-MIN_TRAINABLE_PARAMS = 1
-MAX_TRAINABLE_PARAMS_PERCENT = 50  # 50%
 
 
 def _format_finding(code: str, severity: SEVERITY, message: str) -> dict[str, str]:
@@ -96,15 +93,32 @@ def _get_model_runtime(model) -> dict[str, Any]:
     }
 
 
-def run_healthcheck(model) -> dict[str, Any]:
-    """Inspect a PEFT model for states that are suspicious before training.
+def run_healthcheck(model, min_trainable_params: int = 1, max_trainable_params_percent: int = 50) -> dict[str, Any]:
+    """
+    Inspect a PEFT model for states that are suspicious before training.
 
-    The returned dictionary only contains JSON-serializable values and is intended for both programmatic inspection and
-    formatting with :func:`format_healthcheck`. It summarizes the existing model and layer status APIs instead of
-    enumerating every adapter layer.
+    This function summarizes the model and layer status APIs, and includes findings for inconsistent adapter state,
+    merged adapters, and implausible numbers of trainable parameters. It does not validate the training loop,
+    optimizer, or dataset. A status will be reported as `"irregular"` if inconsistencies are found in the model, e.g.
+    when for the same adapter, some layers are enabled and some layers are disabled. This almost always means that
+    something went wrong and that you should check that you didn't accidentally change some attributes on the model
+    incorrectly.
 
-    This check does not validate a training loop, optimizer, or dataset. An empty ``findings`` list means that no
-    suspicious adapter state was detected, not that a training run is guaranteed to succeed.
+    If the check found something suspicious, it will be reported in the `"findings"` field. An empty `"findings""` list
+    means that no suspicious adapter state was detected, not that a training run is guaranteed to succeed.
+
+    Args:
+        model (`nn.Module`)
+            The model to be checked. Must be adapted with PEFT.
+        min_trainable_params (`int`, *optional*, default=`1`)
+            Minimum expected number of parameters. If less than those are found, this is reported as an error.
+        max_trainable_params_percent (`int`, *optional*, default=`50`)
+            The maximum percentage of parameters that should be trainable. If more than those are found, this is
+            reported as a warning.
+
+    Returns:
+        result
+            Dictionary containing the different findings. The returned dictionary is JSON-serializable.
     """
     model_status = get_model_status(model)
     layer_status = get_layer_status(model)
@@ -112,22 +126,22 @@ def run_healthcheck(model) -> dict[str, Any]:
     trainable_percent = 100 * model_status.trainable_params / model_status.total_params
     findings: list[dict[str, str]] = []
 
-    if model_status.trainable_params < MIN_TRAINABLE_PARAMS:
+    if model_status.trainable_params < min_trainable_params:
         findings.append(
             _format_finding(
                 "NO_TRAINABLE_PARAMETERS",
                 "error",
-                f"The model should have at least {MIN_TRAINABLE_PARAMS} trainable parameter(s).",
+                f"The model should have at least {min_trainable_params} trainable parameter(s).",
             )
         )
-    elif trainable_percent > MAX_TRAINABLE_PARAMS_PERCENT:
+    elif trainable_percent > max_trainable_params_percent:
         findings.append(
             _format_finding(
                 "HIGH_TRAINABLE_PARAMETER_FRACTION",
                 "warning",
                 (
                     f"{trainable_percent:.2f}% of model parameters are trainable; expected no more than "
-                    f"{MAX_TRAINABLE_PARAMS_PERCENT}% for PEFT training."
+                    f"{max_trainable_params_percent}% for PEFT training."
                 ),
             )
         )
@@ -209,7 +223,7 @@ def run_healthcheck(model) -> dict[str, Any]:
     # works for Transformers, needs refinement for other types like Diffusers, just shows 'other' for now
     model_id = getattr(getattr(model, "config", None), "name_or_path", "other")
 
-    return {
+    result = {
         "is_ready": not any(finding["severity"] == "error" for finding in findings),
         "environment": {
             "python_version": platform.python_version(),
@@ -244,6 +258,7 @@ def run_healthcheck(model) -> dict[str, Any]:
         },
         "findings": findings,
     }
+    return result
 
 
 def format_healthcheck(healthcheck: dict[str, Any], sep=", ", indent="  ") -> str:

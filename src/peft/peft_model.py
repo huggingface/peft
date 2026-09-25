@@ -1284,32 +1284,71 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         return get_model_status(self)
 
-    def healthcheck(self) -> dict[str, Any]:
+    def healthcheck(self, min_trainable_params: int = 1, max_trainable_params_percent=50) -> dict[str, Any]:
         """Check this model for adapter states that are suspicious before training.
 
-        The returned dictionary is JSON-serializable. It summarizes the model and layer status APIs, and includes
-        findings for inconsistent adapter state, merged adapters, and implausible numbers of trainable parameters. It
-        does not validate the training loop, optimizer, or dataset.
+        This function summarizes the model and layer status APIs, and includes findings for inconsistent adapter state,
+        merged adapters, and implausible numbers of trainable parameters. It does not validate the training loop,
+        optimizer, or dataset. A status will be reported as `"irregular"` if inconsistencies are found in the model,
+        e.g. when for the same adapter, some layers are enabled and some layers are disabled. This almost always means
+        that something went wrong and that you should check that you didn't accidentally change some attributes on the
+        model incorrectly.
+
+        If the check found something suspicious, it will be reported in the `"findings"` field. An empty `"findings""`
+        list means that no suspicious adapter state was detected, not that a training run is guaranteed to succeed.
+
+        Args:
+            min_trainable_params (`int`, *optional*, default=`1`)
+                Minimum expected number of parameters. If less than those are found, this is reported as an error.
+            max_trainable_params_percent (`int`, *optional*, default=`50`)
+                The maximum percentage of parameters that should be trainable. If more than those are found, this is
+                reported as a warning.
+
+        Returns:
+            result
+                Dictionary containing the different findings. The returned dictionary is JSON-serializable.
         """
         from .utils.healthcheck import run_healthcheck
 
-        return run_healthcheck(self)
+        return run_healthcheck(
+            self, min_trainable_params=min_trainable_params, max_trainable_params_percent=max_trainable_params_percent
+        )
 
-    def print_healthcheck(self, sink=print, **kwargs) -> None:
+    def print_healthcheck(
+        self, sink=print, min_trainable_params: int = 1, max_trainable_params_percent=50, **kwargs
+    ) -> None:
         """
         Print a compact, human-readable healthcheck report.
 
+        The output summarizes the state of your PEFT model and includes findings for inconsistent adapter state, merged
+        adapters, and implausible numbers of trainable parameters. It does not validate the training loop, optimizer,
+        or dataset. A status will be reported as `"irregular"` if inconsistencies are found in the model, e.g. when for
+        the same adapter, some layers are enabled and some layers are disabled. This almost always means that something
+        went wrong and that you should check that you didn't accidentally change some attributes on the model
+        incorrectly.
+
+        If issues were detected, they will be shown in the last section under "findings". If no issues were detected,
+        it does mean that a training run is guaranteed to succeed.
+
         Args:
             sink (`callable`, *optiona*, default=`print`)
-                Function which is called to print the output. By default, just the builtin `print` function, but can also
-                be something else like `logger.info`.
+                Function which is called to print the output. By default, just the builtin `print` function, but can
+                also be something else like `logger.info`.
+            min_trainable_params (`int`, *optional*, default=`1`)
+                Minimum expected number of parameters. If less than those are found, this is reported as an error.
+            max_trainable_params_percent (`int`, *optional*, default=`50`)
+                The maximum percentage of parameters that should be trainable. If more than those are found, this is
+                reported as a warning.
             kwargs
                 Further keyword arguments are passed along to `format_healthcheck`.
-
         """
         from .utils.healthcheck import format_healthcheck
 
-        sink(format_healthcheck(self.healthcheck(), **kwargs))
+        healthcheck = self.healthcheck(
+            min_trainable_params=min_trainable_params,
+            max_trainable_params_percent=max_trainable_params_percent,
+        )
+        sink(format_healthcheck(healthcheck, **kwargs))
 
     @classmethod
     def _split_kwargs(cls, kwargs: dict[str, Any]):
@@ -3552,6 +3591,7 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
     else:
         quantization_backend = "irregular"
 
+    # TODO: consider adding info about tied modules (_get_module_names_tied_with_embedding) and DTensors here
     adapter_model_status = TunerModelStatus(
         base_model_type=base_model_type,
         adapter_model_type=adapter_model_type,
