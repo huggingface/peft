@@ -8,6 +8,12 @@ from trl import SFTConfig, SFTTrainer
 from utils import create_and_prepare_model, create_datasets
 
 
+if os.environ.get("PERF_RUN_DIR"):
+    from perf_harness import instrument
+
+    instrument(SFTTrainer)
+
+
 # Define and parse arguments.
 @dataclass
 class ModelArguments:
@@ -99,6 +105,11 @@ def main(model_args, data_args, training_args):
 
     # model
     model, peft_config, tokenizer = create_and_prepare_model(model_args, data_args, training_args)
+
+    if training_args.bf16:
+        from qwen_chunk_views import enable_chunk_views
+
+        enable_chunk_views(model)
 
     # gradient ckpt
     model.config.use_cache = not training_args.gradient_checkpointing
