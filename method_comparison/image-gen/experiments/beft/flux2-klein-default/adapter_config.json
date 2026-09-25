@@ -7,18 +7,6 @@
   "peft_type": "BEFT",
   "peft_version": "0.20.1.dev0@UNKNOWN",
   "revision": null,
-  "target_modules": [
-    "to_add_out",
-    "linear_in",
-    "to_qkv_mlp_proj",
-    "to_out.0",
-    "to_v",
-    "to_k",
-    "to_q",
-    "add_v_proj",
-    "linear_out",
-    "add_k_proj",
-    "add_q_proj"
-  ],
+  "target_modules": "transformer_blocks\\.\\d+\\.(attn\\.(to_q|to_k|to_v|to_out\\.0|add_q_proj|add_k_proj|add_v_proj|to_add_out)|ff(_context)?\\.(linear_in|linear_out))|single_transformer_blocks\\.\\d+\\.attn\\.(to_qkv_mlp_proj|to_out)",
   "task_type": null
 }

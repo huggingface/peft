@@ -28,7 +28,13 @@ import torch
 import transformers
 from torch import nn
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_transformers_ge_v5_4_0
+from peft.import_utils import (
+    is_bnb_4bit_available,
+    is_bnb_available,
+    is_transformers_dtensor_tp,
+    is_transformers_ge_v5_4_0,
+    is_transformers_ge_v5_17_0,
+)
 from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
@@ -87,6 +93,75 @@ def _get_encoder(model: nn.Module) -> nn.Module | None:
     return encoder
 
 
+def _replace_layer_number_by_wildcard(name: str) -> str:
+    return re.sub(r"\.\d+(\.|$)", lambda m: ".*" + m.group(1), name)
+
+
+def get_tp_plan_and_mesh(model, current_key: str):
+    device_mesh = getattr(model, "_device_mesh", None)
+    if device_mesh is None:
+        return None, None
+
+    distributed_config = getattr(model.config, "distributed_config", None)
+    if getattr(distributed_config, "tp_size", 1) <= 1:
+        return None, None
+
+    # A named mesh must actually contain TP, an FSDP-only mesh is not a TP mesh.
+    mesh_dim_names = device_mesh.mesh_dim_names
+    if mesh_dim_names is not None and "tp" not in mesh_dim_names:
+        return None, None
+
+    if not is_transformers_ge_v5_17_0:
+        raise RuntimeError("LoRA with DTensor tensor parallelism requires transformers >= 5.17.0. Please upgrade.")
+
+    tp_plan = getattr(model, "tp_plan", None)
+    if tp_plan is None:
+        return None, None
+
+    plan_name = tp_plan.get(_replace_layer_number_by_wildcard(current_key))
+    if plan_name is None:
+        return None, None
+
+    # Match Transformers: use a TP-only mesh directly, and select TP from a combined FSDP/PP mesh.
+    tp_mesh = device_mesh["tp"] if device_mesh.ndim > 1 else device_mesh
+    return plan_name, tp_mesh
+
+
+def add_lora_tp_hooks_dtensor(
+    tp_module: nn.Module, tp_plan_name: str, device_mesh, *, base_layer: nn.Module, module_name: str
+) -> None:
+    from torch.distributed.tensor import DTensor, Shard
+    from transformers.distributed.tensor_parallel import ALL_PARALLEL_STYLES
+
+    style = ALL_PARALLEL_STYLES[tp_plan_name]
+    if tp_plan_name not in ("colwise", "rowwise"):
+        raise ValueError(f"Unsupported TP plan {tp_plan_name} for LoRA: only colwise and rowwise are supported.")
+
+    shard_dim = 0 if tp_plan_name == "colwise" else 1
+    for p_name, param in list(tp_module.named_parameters(recurse=False)):
+        style.validate_param(tp_module, p_name, device_mesh, parameter_name=f"{module_name}.{p_name}")
+        global_shape = list(param.shape)
+        global_shape[shard_dim] = base_layer.weight.shape[shard_dim]
+        if param.shape == torch.Size(global_shape):
+            # The adapter was initialized with global dimensions, so we can shard it directly.
+            style.shard_param(tp_module, p_name, device_mesh)
+        else:
+            # The adapter was initialized with local dimensions, so wrap it without sharding a second time.
+            global_stride = torch.empty(global_shape, device="meta").stride()
+            tp_module._parameters[p_name] = nn.Parameter(
+                DTensor.from_local(
+                    param,
+                    device_mesh,
+                    [Shard(shard_dim)],
+                    run_check=False,
+                    shape=torch.Size(global_shape),
+                    stride=global_stride,
+                ),
+                requires_grad=param.requires_grad,
+            )
+    style.install_forward(tp_module, device_mesh)
+
+
 class LoraModel(BaseTuner):
     """
     Creates Low Rank Adapter (LoRA) model from a pretrained transformers model.
@@ -107,7 +182,7 @@ class LoraModel(BaseTuner):
 
         ```py
         >>> from transformers import AutoModelForSeq2SeqLM
-        >>> from peft import LoraModel, LoraConfig
+        >>> from peft import LoraConfig, get_peft_model
 
         >>> config = LoraConfig(
         ...     task_type="SEQ_2_SEQ_LM",
@@ -118,13 +193,13 @@ class LoraModel(BaseTuner):
         ... )
 
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> lora_model = LoraModel(model, config, "default")
+        >>> lora_model = get_peft_model(model, config)
         ```
 
         ```py
         >>> import torch
         >>> import transformers
-        >>> from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
+        >>> from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
         >>> rank = ...
         >>> target_modules = ["q_proj", "k_proj", "v_proj", "out_proj", "fc_in", "fc_out", "wte"]
@@ -277,7 +352,23 @@ class LoraModel(BaseTuner):
 
         # if the target is a ParamWrapper, we nest it to allow targeting multiple nn.Parameter on the same module
         wrap_target_param = isinstance(target, ParamWrapper) and (adapter_name in target.lora_A)
-        if isinstance(target, LoraLayer) and not isinstance(target, AdaLoraLayer) and not wrap_target_param:
+        is_existing_lora_layer = (
+            isinstance(target, LoraLayer) and not isinstance(target, AdaLoraLayer) and not wrap_target_param
+        )
+
+        if is_transformers_dtensor_tp:
+            # Transformers' newer DTensor-based TP API stores the plan/mesh on the top-level
+            # model (`model.tp_plan`/`model._device_mesh`) instead of per-module attributes. Stamp
+            # the old per-module attribute names onto the base layer before `update_layer`/
+            # `_create_new_module` run below. This way it preserves the existing logic.
+            base_layer = target.get_base_layer() if is_existing_lora_layer else target
+            if getattr(base_layer, "_hf_tp_plan", None) is None:
+                tp_plan, device_mesh = get_tp_plan_and_mesh(self.model, current_key)
+                if tp_plan is not None:
+                    base_layer._hf_tp_plan = tp_plan
+                    base_layer._hf_device_mesh = device_mesh
+
+        if is_existing_lora_layer:
             target.update_layer(
                 adapter_name,
                 r,
@@ -314,9 +405,11 @@ class LoraModel(BaseTuner):
                     "The base model is tensor-parallel sharded but the installed version of Transformers does not "
                     "support LoRA with Tensor Parallelism. Please upgrade to transformers >= 5.4.0."
                 )
-            from transformers.integrations.tensor_parallel import (
-                add_tensor_parallel_hooks_to_module,
-            )
+
+            if not is_transformers_dtensor_tp:
+                from transformers.integrations.tensor_parallel import (
+                    add_tensor_parallel_hooks_to_module,
+                )
 
             _SUPPORTED_TP_PLANS = ("colwise", "rowwise", "embedding_rowwise")
 
@@ -339,13 +432,22 @@ class LoraModel(BaseTuner):
                         tp_module = lora_module.lora_A[adapter_name]
                         tp_layer_name = (f"{current_key}.lora_A.{adapter_name}",)
                     tp_plans.append(tp_plan)
-                    add_tensor_parallel_hooks_to_module(
-                        self.model,
-                        tp_module,
-                        tp_plan,
-                        tp_layer_name,
-                        device_mesh,
-                    )
+                    if is_transformers_dtensor_tp:
+                        add_lora_tp_hooks_dtensor(
+                            tp_module,
+                            tp_plan,
+                            device_mesh,
+                            base_layer=base_layer,
+                            module_name=tp_layer_name[0],
+                        )
+                    else:
+                        add_tensor_parallel_hooks_to_module(
+                            self.model,
+                            tp_module,
+                            tp_plan,
+                            tp_layer_name,
+                            device_mesh,
+                        )
                 else:  # embedding_rowwise
                     # TP hooks are  handled in the `_embed` method in lora/layer.py where they are explicitly called.
                     # Here we simply register the TP plans.
@@ -356,11 +458,14 @@ class LoraModel(BaseTuner):
                     # to embedding_colwise so that the gathering happens on the correct dimension at save time.
                     tp_plans.append("embedding_colwise")
 
-                lora_module._tp_info = TpInfo(
-                    tp_plan=dict(zip(tp_plan_keys, tp_plans)),
-                    device_mesh=device_mesh,
-                    tp_size=self.model._tp_size,
-                )
+                if not is_transformers_dtensor_tp:
+                    # DTensor parameters carry their own sharding metadata, so this per-module marker
+                    # is only needed for the pre-DTensor TP integration.
+                    lora_module._tp_info = TpInfo(
+                        tp_plan=dict(zip(tp_plan_keys, tp_plans)),
+                        device_mesh=device_mesh,
+                        tp_size=self.model._tp_size,
+                    )
 
     def _replace_module(self, parent, child_name, new_module, child):
         # override in LoraModel to handle quantized weights properly
@@ -683,7 +788,19 @@ class LoraModel(BaseTuner):
         adapters: list[str],
         weights: list[float],
         adapter_name: str,
-        combination_type: str = "svd",
+        combination_type: Literal[
+            "svd",
+            "linear",
+            "cat",
+            "ties",
+            "ties_svd",
+            "dare_ties",
+            "dare_linear",
+            "dare_ties_svd",
+            "dare_linear_svd",
+            "magnitude_prune",
+            "magnitude_prune_svd",
+        ] = "svd",
         svd_rank: int | None = None,
         svd_clamp: int | None = None,
         svd_full_matrices: bool = True,
@@ -710,7 +827,9 @@ class LoraModel(BaseTuner):
                 The merging type can be one of [`svd`, `linear`, `cat`, `ties`, `ties_svd`, `dare_ties`, `dare_linear`,
                 `dare_ties_svd`, `dare_linear_svd`, `magnitude_prune`, `magnitude_prune_svd`]. When using the `cat`
                 combination_type, the rank of the resulting adapter is equal to the sum of all adapters ranks (the
-                mixed adapter may be too big and result in OOM errors).
+                mixed adapter may be too big and result in OOM errors). Note that `cat` and `svd` are precise methods
+                and will give you good accuracy, `linear` is efficient but a very rough approximation and should be
+                avoided if you can afford it.
             svd_rank (`int`, *optional*):
                 Rank of output adapter for svd. If None provided, will use max rank of merging adapters.
             svd_clamp (`float`, *optional*):
@@ -741,10 +860,14 @@ class LoraModel(BaseTuner):
             svd_rank=svd_rank,
         )
 
+        # The scaling of each source adapter is already folded into the combined lora_A/lora_B weights below, so the
+        # new adapter must have a scaling of exactly 1. With lora_alpha == r this only holds when use_rslora=False
+        # (otherwise scaling would be r / sqrt(r) = sqrt(r)), so don't inherit use_rslora from adapters[0].
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],
             r=new_rank,
             lora_alpha=new_rank,
+            use_rslora=False,
             target_modules=new_target_modules,
             alpha_pattern={},
             rank_pattern={},
@@ -836,11 +959,12 @@ class LoraModel(BaseTuner):
         for adapter, weight in zip(adapters, weights):
             if adapter in target.lora_A or adapter in target.lora_embedding_A:
                 valid_adapters.append(adapter)
-                valid_weights.append(weight * target.scaling[adapter])
+                valid_weights.append(weight)
 
         # if no valid adapter, nothing to do
         if len(valid_adapters) == 0:
-            raise ValueError("No matching LoRAs found. Please raise an issue on Github.")
+            raise ValueError("No matching LoRAs found. Please raise an issue on GitHub.")
+        # get_delta_weight applies the scaling, no need to handle it explicitly
         delta_weight = [target.get_delta_weight(adapter) for adapter in valid_adapters]
         valid_weights = torch.tensor(valid_weights).to(delta_weight[0].device)
         if combination_type == "svd":
@@ -1016,7 +1140,7 @@ class LoraModel(BaseTuner):
         state_dict = {renamed_dora_weights(k): v for k, v in state_dict.items()}
         peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
 
-        if torch.distributed.is_available() and torch.distributed.is_initialized():
+        if not is_transformers_dtensor_tp and torch.distributed.is_available() and torch.distributed.is_initialized():
             _maybe_shard_state_dict_for_tp(model, peft_model_state_dict, adapter_name)
 
         return peft_model_state_dict

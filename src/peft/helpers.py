@@ -22,18 +22,12 @@ from typing import Any, Optional, Union
 
 import torch
 from torch import nn
-
-
-try:
-    import bitsandbytes as bnb
-except ImportError:
-    bnb = None
-
 from tqdm.auto import tqdm
 
 from .peft_model import PeftConfig, PeftModel
 from .tuners.lora import LoraLayer, LoraModel, dora
 from .tuners.tuners_utils import BaseTunerLayer
+from .utils.integrations import dequantize_module_weight
 
 
 def update_forward_signature(model: PeftModel) -> None:
@@ -177,7 +171,7 @@ def rescale_adapter_scale(model: nn.Module, multiplier: Union[float, int]) -> It
 
     For LoRA, applying this context manager with multiplier in [0, 1] is strictly equivalent to applying
     [wise-ft](https://huggingface.co/papers/2109.01903) (see [#1940](https://github.com/huggingface/peft/issues/1940)
-    for details). It can improve the performances of the model if there is a distribution shiftbetween the training
+    for details). It can improve the performances of the model if there is a distribution shift between the training
     data used for fine-tuning, and the test data used during inference.
 
     Warning: It has been reported that when using Apple's MPS backend for PyTorch, it is necessary to add a short sleep
@@ -443,16 +437,7 @@ class KappaTuneSelector:
             else linear_modules
         )
         for module_name, module in linear_iter:
-            weight = module.weight
-            if bnb is not None:
-                if hasattr(weight, "quant_state"):  # 4-bit
-                    w = bnb.functional.dequantize_4bit(weight.data, weight.quant_state).float()
-                elif hasattr(weight, "state") and hasattr(weight.state, "CB"):  # int8
-                    w = bnb.functional.int8_vectorwise_dequant(weight.state.CB, weight.state.SCB).float()
-                else:
-                    w = weight.data.detach().float()
-            else:
-                w = weight.data.detach().float()
+            w = dequantize_module_weight(module).detach().float()
 
             if any(dim > self.max_dim_size_to_analyze for dim in w.shape):
                 continue

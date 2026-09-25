@@ -38,6 +38,16 @@ def _sequence_classification_loss(logits: torch.Tensor, labels: torch.Tensor) ->
     return torch.nn.functional.binary_cross_entropy_with_logits(logits, labels)
 
 
+def _pool_last_token(hidden: torch.Tensor, attention_mask: Optional[torch.Tensor]) -> torch.Tensor:
+    """Return the hidden state of the last non-padding token for both left- and right-padded sequences."""
+    if attention_mask is None:
+        return hidden[:, -1, :]
+    token_positions = torch.arange(attention_mask.shape[-1], device=attention_mask.device)
+    last_non_padding_token_indices = (attention_mask.ne(0) * token_positions).argmax(dim=-1)
+    batch_idx = torch.arange(hidden.shape[0], device=hidden.device)
+    return hidden[batch_idx, last_non_padding_token_indices]
+
+
 class ShadowCarrier:
     """Couples the base `hidden_states` with the parallel `shadow_states` so the pair rides the base decoder loop."""
 
@@ -444,15 +454,6 @@ class DetachedShadowModel(PreTrainedModel, GenerationMixin):
     def get_output_embeddings(self):
         return None if getattr(self, "is_classification", False) else self.head
 
-    @staticmethod
-    def _pool_last_token(hidden: torch.Tensor, attention_mask: Optional[torch.Tensor]) -> torch.Tensor:
-        """Pool the last non-padding token representation (used for sequence classification)."""
-        if attention_mask is None:
-            return hidden[:, -1, :]
-        token_counts = (attention_mask.long().sum(dim=1) - 1).clamp(min=0)
-        batch_idx = torch.arange(hidden.size(0), device=hidden.device)
-        return hidden[batch_idx, token_counts]
-
     def forward(
         self,
         input_ids: Optional[torch.Tensor] = None,
@@ -476,7 +477,7 @@ class DetachedShadowModel(PreTrainedModel, GenerationMixin):
             return hidden
 
         if self.is_classification:
-            pooled = self._pool_last_token(hidden, attention_mask)
+            pooled = _pool_last_token(hidden, attention_mask)
             logits = self.head(pooled)
             loss = None
             if labels is not None:

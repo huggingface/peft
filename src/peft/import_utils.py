@@ -37,6 +37,15 @@ is_transformers_ge_v5_13_0 = packaging.version.parse(transformers.__version__) >
 
 is_transformers_le_4_53 = packaging.version.parse(transformers.__version__) < packaging.version.parse("4.54.0.dev0")
 
+is_transformers_ge_v5_17_0 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("5.17.0")
+
+try:
+    from transformers.distributed.tensor_parallel import apply_tensor_parallelism  # noqa: F401
+
+    is_transformers_dtensor_tp = True
+except ImportError:
+    is_transformers_dtensor_tp = False
+
 
 @lru_cache
 def is_bnb_available() -> bool:
@@ -155,6 +164,18 @@ def is_torchao_available() -> bool:
             f"but only versions above {TORCHAO_MINIMUM_VERSION} are supported"
         )
     return True
+
+
+@lru_cache
+def is_torchao_ge_v0_18_0() -> bool:
+    """Return True if torchao is installed and its version is >= 0.18.0.
+
+    torchao 0.18.0 removed the v1 tensor subclass system (AffineQuantizedTensor, LinearActivationQuantizedTensor) in
+    favor of v2 tensor subclasses (Int8Tensor, Int4Tensor, etc.) that inherit from TorchAOBaseTensor.
+    """
+    if not is_torchao_available():
+        return False
+    return packaging.version.parse(importlib_metadata.version("torchao")) >= packaging.version.parse("0.18.0")
 
 
 @lru_cache

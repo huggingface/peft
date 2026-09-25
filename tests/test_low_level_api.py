@@ -30,10 +30,17 @@ from transformers import (
 
 from peft import (
     AdaLoraConfig,
+    FrodConfig,
     IA3Config,
     LoKrConfig,
     LoraConfig,
+    PeftWarning,
+    PveraConfig,
     RandLoraConfig,
+    TinyLoraConfig,
+    UniLoraConfig,
+    VBLoRAConfig,
+    VeraConfig,
     get_base_model_state_dict,
     get_peft_model,
     get_peft_model_state_dict,
@@ -86,6 +93,27 @@ class TestLowLevelFunctional:
             if name == "linear":
                 assert hasattr(module, "lora_A")
                 assert hasattr(module, "lora_B")
+
+    @pytest.mark.parametrize(
+        "config_cls, config_kwargs",
+        [
+            pytest.param(TinyLoraConfig, {"r": 2, "u": 4}, id="TinyLoRA"),
+            pytest.param(UniLoraConfig, {"r": 2, "theta_d_length": 16}, id="UniLoRA"),
+            pytest.param(VeraConfig, {"r": 2}, id="VeRA"),
+            pytest.param(PveraConfig, {"r": 2}, id="PVeRA"),
+            pytest.param(VBLoRAConfig, {"r": 2, "num_vectors": 8, "vector_length": 2}, id="VBLoRA"),
+            pytest.param(FrodConfig, {"progressbar": False}, id="FRoD"),
+        ],
+    )
+    def test_inject_adapter_in_model_rejects_shared_state_tuners(self, config_cls, config_kwargs):
+        config = config_cls(target_modules=["linear"], **config_kwargs)
+        model = DummyModel()
+        original_module_names = [name for name, _ in model.named_modules()]
+
+        with pytest.raises(ValueError, match="shared state.*get_peft_model"):
+            inject_adapter_in_model(config, model)
+
+        assert [name for name, _ in model.named_modules()] == original_module_names
 
     def test_get_peft_model_state_dict(self, model):
         peft_state_dict = get_peft_model_state_dict(model)
@@ -858,3 +886,23 @@ class TestGetBaseModelStateDict:
         peft_model.add_adapter("adapter2", LoraConfig(r=8, lora_alpha=4, target_modules=["k_proj", "out_proj"]))
 
         assert set(get_base_model_state_dict(peft_model).keys()) == base_model_keys
+
+
+class TestStateDictFsdpShapeValidation:
+    # Mitigation for a potential error in DeepSpeed ZeRO-3 / FSDP settings where the
+    # gather context was forgot when retrieving the state dict. See #3251
+    # for details.
+
+    def test_save_pretrained_warns_for_unsharded_state_dict(self, tmp_path):
+        peft_model = get_peft_model(DummyModel(), LoraConfig(target_modules=["linear"], r=4))
+        # Emulate the ungathered ZeRO-3 / FSDP shard: lora_A is left as a flat (1-D) tensor instead of (r, in_dim).
+        peft_model.base_model.model.linear.lora_A["default"].weight.data = torch.zeros(32)
+        with pytest.warns(PeftWarning, match=r"DeepSpeed ZeRO-3 / FSDP shards"):
+            peft_model.save_pretrained(tmp_path / "broken-adapter")
+        # Warning must not block the write — existing callers may intentionally skip gathering.
+        assert (tmp_path / "broken-adapter" / "adapter_config.json").exists()
+
+    def test_save_pretrained_succeeds_for_normal_lora(self, tmp_path):
+        peft_model = get_peft_model(DummyModel(), LoraConfig(target_modules=["linear"], r=4))
+        peft_model.save_pretrained(tmp_path / "ok-adapter")
+        assert (tmp_path / "ok-adapter" / "adapter_config.json").exists()

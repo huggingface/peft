@@ -296,6 +296,10 @@ class BaseTuner(nn.Module, ABC):
 
     # Required attributes for child classes:
 
+    # Whether the tuner stores adapter state shared between multiple injected layers. Direct injection returns only the
+    # wrapped model, so tuners with shared state cannot be used through `inject_adapter_in_model`.
+    uses_shared_state: bool = False
+
     # The unique prefix for this PEFT method, e.g. 'lora_' for LoRA.
     prefix: str
     # The class of the tuner layer, e.g. `LoraLayer` for LoRA.
@@ -875,6 +879,26 @@ class BaseTuner(nn.Module, ABC):
         named_modules = list(model.named_modules())
         key_list = [key for key, _ in named_modules]
 
+        # Adding an adapter must not change the trainability of parameters that were already present. Some tuners
+        # create their new adapter parameters before calling this method, so exclude those from the snapshot.
+        existing_adapter_prefixes = []
+        mapping_existing_parameter_requires_grad = []
+        seen_parameters = set()
+        for key, module in named_modules:
+            if isinstance(module, BaseTunerLayer):
+                existing_adapter_prefixes.append(key + ".")
+            for parameter_name, parameter in module.named_parameters(recurse=False):
+                full_name = f"{key}.{parameter_name}" if key else parameter_name
+                if id(parameter) in seen_parameters:
+                    continue
+                seen_parameters.add(id(parameter))
+                if f".{adapter_name}." not in full_name and not full_name.endswith(f".{adapter_name}"):
+                    mapping_existing_parameter_requires_grad.append((parameter, parameter.requires_grad))
+
+        if not existing_adapter_prefixes:
+            # The first injection should freeze the base model instead of restoring its default trainability.
+            mapping_existing_parameter_requires_grad = []
+
         uses_dummy_target_modules = getattr(peft_config, "target_modules", None) == DUMMY_TARGET_MODULES
         if uses_dummy_target_modules:
             # dummy adapter, we allow not matching any module
@@ -912,11 +936,6 @@ class BaseTuner(nn.Module, ABC):
         ###############################
         # MATCHING & CREATING MODULES #
         ###############################
-
-        existing_adapter_prefixes = []
-        for key, module in named_modules:
-            if isinstance(module, BaseTunerLayer):
-                existing_adapter_prefixes.append(key + ".")
 
         # TODO: check if this the most robust way
         module_names: set[str] = set()
@@ -1088,6 +1107,25 @@ class BaseTuner(nn.Module, ABC):
                     RuntimeWarning,
                 )
 
+        # Warn about rank_pattern / alpha_pattern entries that matched no targeted module. The
+        # matching semantics are identical to `get_pattern_key`.
+        for pattern_attr in ("rank_pattern", "alpha_pattern"):
+            patterns = getattr(peft_config, pattern_attr, None)
+            if not patterns:
+                continue
+            matched = {
+                pattern_key
+                for pattern_key in patterns
+                if any(re.match(rf"(.*\.)?({pattern_key})$", module_name) for module_name in targeted_module_names)
+            }
+            unmatched = sorted(set(patterns) - matched)
+            if unmatched:
+                warnings.warn(
+                    f"The following {pattern_attr} keys did not match any targeted module and were ignored: "
+                    f"{unmatched}.",
+                    RuntimeWarning,
+                )
+
         # Now that the checks passed, merge this adapter's matches into the tuner-level bookkeeping. Duplicates
         # are skipped so that names stay unique when several adapters target the same modules.
         _extend_unique(self.targeted_module_names, targeted_module_names)
@@ -1103,11 +1141,6 @@ class BaseTuner(nn.Module, ABC):
         self.set_adapter(self.active_adapters, inference_mode=peft_config.inference_mode)
         self._mark_only_adapters_as_trainable(model)
 
-        if self.peft_config[adapter_name].inference_mode:
-            for n, p in model.named_parameters():
-                if adapter_name in n:
-                    p.requires_grad = False
-
         set_additional_trainable_modules(
             model=model,
             peft_config=peft_config,
@@ -1115,6 +1148,9 @@ class BaseTuner(nn.Module, ABC):
             adapter_name=adapter_name,
             activate_adapter=adapter_name in self.active_adapters,
         )
+
+        for parameter, requires_grad in mapping_existing_parameter_requires_grad:
+            parameter.requires_grad = requires_grad
 
     def _inject_parameters(
         self, peft_config: PeftConfig, model: nn.Module, adapter_name: str, low_cpu_mem_usage: bool
@@ -1282,6 +1318,11 @@ class BaseTuner(nn.Module, ABC):
         memory, which is required to unmerge the adapters. In order to merge the adapter weights without keeping them
         in memory, please call `merge_and_unload`.
 
+        Once a layer has merged adapter weights, its forward pass uses only those weights. Therefore, if
+        `adapter_names` does not cover all active adapters, the remaining active adapters are silently not applied,
+        even though they are still reported as active. Either merge all active adapters or call `unmerge_adapter`
+        first. Note that this behavior is planned to change in the v1.0 release.
+
         Args:
             adapter_names (`list[str]`, *optional*):
                 The list of adapter names that should be merged. If `None`, all active adapters will be merged.
@@ -1291,6 +1332,7 @@ class BaseTuner(nn.Module, ABC):
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
         """
+        # TODO: update docstring about the interaction of active/merged adapters for PEFT v1.0
         # Note: The order of arguments here is:
         #   adapter_names, safe_merge
         # For layer.merge, the order is:
@@ -2352,18 +2394,22 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
             if layers_pattern is None or len(layers_pattern) == 0:
                 # Lazy .*? matches the first numbered segment (the layer index), not the last one; a greedy .* would
                 # wrongly pick up nested indices such as the expert index in MoE models ("...layers.1.experts.0...").
-                layer_index = re.match(r".*?\.[^.]*\.(\d+)\.", key)
+                match = re.match(r".*?\.[^.]*\.(?P<idx>\d+)\.", key)
             else:
                 layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
                 for pattern in layers_pattern:
-                    layer_index = re.match(rf".*?\.{pattern}\.(\d+)\.", key)
-                    if layer_index is not None:
+                    # Again, ensure to match the first index, not the last
+                    match = re.match(rf"(?:^|.*?\.){pattern}\.(?P<idx>\d+)\.", key)
+                    if match is not None:
                         break
+
+            if match:
+                layer_index = match.groupdict().get("idx")
 
             if layer_index is None:
                 target_module_found = False
             else:
-                layer_index = int(layer_index.group(1))
+                layer_index = int(layer_index)
                 if isinstance(layer_indexes, int):
                     target_module_found = layer_index == layer_indexes
                 else:
@@ -2664,9 +2710,11 @@ def delete_adapter(
 
 def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
     """
-    A helper method to cast the adapter weights to the correct dtype.
+    A helper method to cast the adapter weights to the correct dtype. It reassigns new parameters to the adapter
+    layers, if some object references the old parameters, they will not be updated.
 
     Currently, this only upcasts float dtypes to float32.
+
 
     Args:
         adapter_name (`str`):
@@ -2697,7 +2745,10 @@ def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dty
 
             if isinstance(submodule[adapter_name], nn.Parameter):
                 if submodule[adapter_name].dtype in dtypes_to_convert_to_fp32:
-                    submodule[adapter_name].data = submodule[adapter_name].data.to(torch.float32)
+                    # Reassign through the ParameterDict rather than mutating `.data` in place: for a
+                    # DTensor-backed parameter (TP), `.data = ...` only updates the outer dtype metadata
+                    # while leaving the local shard's actual dtype unchanged.
+                    submodule[adapter_name] = submodule[adapter_name].to(torch.float32)
                 continue
 
             if isinstance(submodule[adapter_name], torch.Tensor):  # e.g. from a BufferDict
@@ -2705,9 +2756,17 @@ def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dty
                     submodule[adapter_name] = submodule[adapter_name].to(torch.float32)
                 continue
 
-            for param in submodule[adapter_name].parameters():
-                if param.dtype in dtypes_to_convert_to_fp32:
-                    param.data = param.data.to(torch.float32)
+            for owner in submodule[adapter_name].modules():
+                for param_name, param in list(owner.named_parameters(recurse=False)):
+                    if param.dtype in dtypes_to_convert_to_fp32:
+                        # Reassign via setattr rather than mutating `.data` in place: for a DTensor-backed
+                        # parameter (TP), `.data = ...` only updates the outer dtype metadata while leaving
+                        # the local shard's actual dtype unchanged.
+                        setattr(
+                            owner,
+                            param_name,
+                            nn.Parameter(param.data.to(torch.float32), requires_grad=param.requires_grad),
+                        )
 
 
 def set_requires_grad(model, adapter_names: str | Sequence[str], requires_grad: bool = True) -> None:

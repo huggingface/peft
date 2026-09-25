@@ -510,3 +510,35 @@ trainer.train()
 
 > [!TIP]
 > This section deals with using multiple adapters _of the same type_ on the same model, for example, using multiple LoRA adapters at the same time. It does not apply to using _different types_ of adapters on the same model, for example one LoRA adapter and one LoHa adapter. For this, please check [`PeftMixedModel`](https://huggingface.co/docs/peft/developer_guides/mixed_models).
+
+### Merging only some of the active adapters
+
+When adapter weights are merged into the base weights, the affected layers no longer apply any adapter during the forward pass, they only use the merged base weights. Therefore, if several adapters are active but only some of them are merged, the adapters that are still active but not merged are silently not applied:
+
+```python
+model = get_peft_model(base_model, lora_config_0, adapter_name="default")
+model.add_adapter("other", lora_config_1)
+model.base_model.set_adapter(["default", "other"])
+output_both = model(**inputs)
+
+model.merge_adapter(adapter_names=["default"])
+output_merged = model(**inputs)  # this is *not* the same as output_both
+```
+
+Here, `output_merged` is the output of the `"default"` adapter alone, even though `"other"` is still listed as active:
+
+```python
+>>> model.get_layer_status()[0].active_adapters
+['default', 'other']
+>>> model.get_layer_status()[0].merged_adapters
+['default']
+```
+
+The same applies when an adapter that is *not* active is merged: from then on, the model returns the output of the merged adapter and the active one is ignored. No error or warning is raised in either case. The adapter weights themselves are unaffected, so calling [`~LoraModel.unmerge_adapter`] restores the combined output.
+
+To avoid this, either merge all active adapters, i.e. call `model.merge_adapter()` without `adapter_names`, or unmerge before changing which adapters are active.
+
+This behavior is consistent across PEFT methods that support merging (LoRA, LoHa, LoKr, IA³, OFT, etc.), since they all share the same logic in the forward pass.
+
+> [!WARNING]
+> This behavior is confusing and is planned to change in the PEFT v1.0 release.

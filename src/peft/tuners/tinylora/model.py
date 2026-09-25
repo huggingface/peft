@@ -63,6 +63,7 @@ class TinyLoraModel(BaseTuner):
         - **peft_config** ([`TinyLoraConfig`]): The configuration of the TinyLoRA model.
     """
 
+    uses_shared_state: bool = True
     prefix: str = "tinylora_"
     tuner_layer_cls = TinyLoraLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_TINYLORA_TARGET_MODULES_MAPPING

@@ -105,6 +105,7 @@ class VeraModel(BaseTuner):
         - **peft_config** ([`VeraConfig`]): The configuration of the Vera model.
     """
 
+    uses_shared_state: bool = True
     prefix: str = "vera_lambda_"
     tuner_layer_cls = VeraLayer
     target_module_mapping = TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING

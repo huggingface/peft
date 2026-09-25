@@ -117,21 +117,32 @@ class Linear(nn.Module, IA3Layer):
                 ia3_l = transpose(self.ia3_l[active_adapter].data, self.fan_in_fan_out)
                 orig_dtype = base_layer.weight.data.dtype
                 if safe_merge:
-                    orig_weights = base_layer.weight.data
-                    orig_weights = torch.mul(orig_weights, ia3_l)
+                    output_weight = torch.mul(base_layer.weight.data, ia3_l)
 
-                    if not torch.isfinite(orig_weights).all():
+                    if not torch.isfinite(output_weight).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
-                    base_layer.weight.data = orig_weights.to(orig_dtype)
+
+                    output_bias = None
+                    if not self.is_feedforward and (base_layer.bias is not None):
+                        scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
+                        output_bias = torch.mul(base_layer.bias.data, scaling.data)
+                        if not torch.isfinite(output_bias).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged bias. The adapter {active_adapter} seems to be broken"
+                            )
+
+                    base_layer.weight.data = output_weight.to(orig_dtype)
+                    if output_bias is not None:
+                        base_layer.bias.data = output_bias.to(base_layer.bias.data.dtype)
                 else:
                     base_layer.weight.data = torch.mul(base_layer.weight.data, ia3_l).to(orig_dtype)
 
-                if not self.is_feedforward and (base_layer.bias is not None):
-                    scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
-                    orig_dtype = base_layer.bias.data.dtype
-                    base_layer.bias.data = torch.mul(base_layer.bias.data, scaling.data).to(orig_dtype)
+                    if not self.is_feedforward and (base_layer.bias is not None):
+                        scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
+                        bias_dtype = base_layer.bias.data.dtype
+                        base_layer.bias.data = torch.mul(base_layer.bias.data, scaling.data).to(bias_dtype)
 
                 self.merged_adapters.append(active_adapter)
 
@@ -267,13 +278,24 @@ class _ConvNd(nn.Module, IA3Layer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
+                    output_bias = None
+                    if not self.is_feedforward and (base_layer.bias is not None):
+                        scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
+                        output_bias = torch.mul(base_layer.bias.data, scaling.data)
+                        if not torch.isfinite(output_bias).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged bias. The adapter {active_adapter} seems to be broken"
+                            )
+
                     base_layer.weight.data = output_weight.to(orig_dtype)
+                    if output_bias is not None:
+                        base_layer.bias.data = output_bias.to(orig_dtype)
                 else:
                     base_layer.weight.data = torch.mul(base_layer.weight.data, ia3_scaling).to(orig_dtype)
 
-                if not self.is_feedforward and (base_layer.bias is not None):
-                    scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
-                    base_layer.bias.data = torch.mul(base_layer.bias.data, scaling.data).to(orig_dtype)
+                    if not self.is_feedforward and (base_layer.bias is not None):
+                        scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
+                        base_layer.bias.data = torch.mul(base_layer.bias.data, scaling.data).to(orig_dtype)
 
                 self.merged_adapters.append(active_adapter)
 

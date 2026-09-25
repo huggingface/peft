@@ -54,7 +54,8 @@ def inject_adapter_in_model(
     r"""
     Create PEFT layers and inject them into the model in-place.
 
-    Currently the API does not support prompt learning methods and adaption prompt.
+    Currently the API does not support prompt learning methods, adaption prompt, or tuners that keep adapter state
+    shared between multiple target layers. Use [`get_peft_model`] for the latter.
 
     This function is similar to [`get_peft_model`] but it does not return a [`PeftModel`] instance. Instead, it returns
     the original, mutated instance of the passed model.
@@ -87,6 +88,12 @@ def inject_adapter_in_model(
         )
 
     tuner_cls = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
+
+    if tuner_cls.uses_shared_state:
+        raise ValueError(
+            f"`inject_adapter_in_model` does not support {peft_config.peft_type} because it uses shared state "
+            "stored on the tuner. Please use `get_peft_model` instead."
+        )
 
     # By instantiating a peft model we are injecting randomly initialized LoRA layers into the model's modules.
     peft_model = tuner_cls(

@@ -27,7 +27,7 @@ import torch.nn.functional as F
 from torch import nn, svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
-from peft.import_utils import is_transformers_ge_v5_4_0
+from peft.import_utils import is_transformers_dtensor_tp, is_transformers_ge_v5_4_0
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.tuners_utils import (
     BaseTunerLayer,
@@ -734,6 +734,43 @@ class LoraLayer(BaseTunerLayer):
         # Remove redundant fields
         del base_layer._peft_loraga_grad
 
+    @contextmanager
+    def _unmerged_base_weight(self, safe_merge: bool = False):
+        """Yield the base weight with the already merged adapters taken out of it.
+
+        `merge` applies the adapters one after another, so from the second adapter on, the weight already contains the
+        previously merged ones. Variants whose delta depends on the base weight need it unmerged, the same way
+        `forward` sees it, so the merged adapters are unmerged here and merged again afterwards. The weight is dropped
+        again when the context exits.
+
+        Merging the adapters again re-enters this method for each of them. They get the weight the outermost call
+        recovered, which is the one they need anyway. Unmerging again for each of them would make the number of merge
+        calls grow exponentially.
+        """
+        key = "unmerged_base_weight"
+        if key in self._caches:
+            yield self._caches[key]
+            return
+
+        merged_adapters = self.merged_adapters[:]
+        try:
+            if merged_adapters:
+                self.unmerge()
+            # copy it, because the `finally` block replays a plain LoRA adapter by adding its delta to the
+            # base weight in place, which would change this tensor too
+            weight = dequantize_module_weight(self.get_base_layer()).detach().clone()
+            self._cache_store(key, weight)
+            yield weight
+        finally:
+            try:
+                # only the adapters that were actually unmerged, so that an unmerge that failed halfway does not
+                # merge anything twice
+                to_merge = [name for name in merged_adapters if name not in self.merged_adapters]
+                if to_merge:
+                    self.merge(safe_merge=safe_merge, adapter_names=to_merge)
+            finally:
+                self._caches.pop(key, None)
+
     def _cache_store(self, key: str, value: Any) -> None:
         # cache intermediate values, e.g. weight norm of DoRA
         self._caches[key] = value
@@ -949,8 +986,7 @@ class Linear(nn.Module, LoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weight
-
+                    new_bias = None
                     if self.lora_bias[active_adapter]:
                         if getattr(base_layer, "bias", None) is None:
                             raise RuntimeError(
@@ -961,6 +997,9 @@ class Linear(nn.Module, LoraLayer):
                             raise ValueError(
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
+
+                    base_layer.weight.data = orig_weight
+                    if new_bias is not None:
                         base_layer.bias.data = new_bias.to(orig_dtype)
 
                 else:
@@ -1086,14 +1125,26 @@ class Linear(nn.Module, LoraLayer):
         return "lora." + rep
 
 
-class _LoraEmbeddingAHolder(nn.Module):
+class LoraEmbeddingATPHolder(nn.Embedding):
     """
-    A "fake" module to hold the lora_embedding_A weights for the TP hooks.
+    In LoRA, the embedding A weight is a learnable parameter that is added to the original embedding weight, but the TP
+    API acts on modules rather than individual parameters. This class wraps the LoRA embedding A weight in an
+    `nn.Embedding` module, allowing it to be treated as a module by the TP API.
     """
 
-    def __init__(self, lora_embedding_A_weight):
-        super().__init__()
-        self.weight = lora_embedding_A_weight.T  # lora_embedding_A shape is (r, vocab_size)
+    def __init__(self, lora_embedding_A_weight: nn.Parameter):
+        nn.Module.__init__(self)
+        num_embeddings, embedding_dim = lora_embedding_A_weight.T.shape
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.padding_idx = None
+        self.max_norm = None
+        self.norm_type = 2.0
+        self.scale_grad_by_freq = False
+        self.sparse = False
+        self._parameters["weight"] = nn.Parameter(
+            lora_embedding_A_weight.T.contiguous(), requires_grad=lora_embedding_A_weight.requires_grad
+        )
 
 
 class Embedding(nn.Module, LoraLayer):
@@ -1108,10 +1159,6 @@ class Embedding(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         **kwargs,
     ) -> None:
-        if config.lora_bias:
-            # lora_bias=True is not supported (yet) for embedding layers, as they use nn.Parameter
-            raise ValueError(f"lora_bias={config.lora_bias} is not supported for {self.__class__.__name__}.")
-
         super().__init__()
         LoraLayer.__init__(self, base_layer)
         self.fan_in_fan_out = config.fan_in_fan_out
@@ -1121,6 +1168,7 @@ class Embedding(nn.Module, LoraLayer):
         self.device_mesh = getattr(base_layer, "_hf_device_mesh", None)
         self.tp_layer = None
 
+        self.other_param_names += ("input_fns", "output_fns")
         self.input_fns = {}
         self.output_fns = {}
 
@@ -1169,6 +1217,10 @@ class Embedding(nn.Module, LoraLayer):
         use_rslora = config.use_rslora
         lora_bias = config.lora_bias
         inference_mode = config.inference_mode
+
+        if lora_bias:
+            # lora_bias=True is not supported (yet) for embedding layers, as they use nn.Parameter
+            raise ValueError(f"lora_bias={lora_bias} is not supported for {self.__class__.__name__}.")
 
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -1222,13 +1274,27 @@ class Embedding(nn.Module, LoraLayer):
 
         # If there is tensor parallelism, we register the hooks for `self._embed`.
         if self.tp_layer is not None:
-            mod = _LoraEmbeddingAHolder(self.lora_embedding_A[adapter_name])
+            holder = LoraEmbeddingATPHolder(self.lora_embedding_A[adapter_name])
 
-            def input_fn(inputs):
-                return self.tp_layer._prepare_input_fn(mod, inputs, self.device_mesh)
+            if is_transformers_dtensor_tp:
+                self.tp_layer.shard_param(holder, "weight", self.device_mesh)
+                sharded_weight = nn.Parameter(holder.weight.T, requires_grad=holder.weight.requires_grad)
 
-            def output_fn(outputs):
-                return self.tp_layer._prepare_output_fn(mod, outputs, self.device_mesh)
+                def input_fn(inputs):
+                    (x,), _ = self.tp_layer.transform_inputs_pre_forward(holder, inputs, {}, self.device_mesh)
+                    return x
+
+                def output_fn(outputs):
+                    return self.tp_layer.transform_output_post_forward(holder, outputs, self.device_mesh)
+
+                self.lora_embedding_A[adapter_name] = sharded_weight
+            else:
+
+                def input_fn(inputs):
+                    return self.tp_layer._prepare_input_fn(holder, inputs, self.device_mesh)
+
+                def output_fn(outputs):
+                    return self.tp_layer._prepare_output_fn(holder, outputs, self.device_mesh)
 
             self.input_fns[adapter_name] = input_fn
             self.output_fns[adapter_name] = output_fn
@@ -1554,9 +1620,20 @@ class _ConvNd(nn.Module, LoraLayer):
         kernel_size = base_layer.kernel_size
         stride = base_layer.stride
         padding = base_layer.padding
+        dilation = base_layer.dilation
+        padding_mode = base_layer.padding_mode
         conv_layer = type(base_layer)
         out_kernel = out_stride = (1,) * (self._kernel_dim - 2)
-        self.lora_A[adapter_name] = conv_layer(self.in_features, r, kernel_size, stride, padding, bias=False)
+        self.lora_A[adapter_name] = conv_layer(
+            self.in_features,
+            r,
+            kernel_size,
+            stride,
+            padding,
+            dilation=dilation,
+            padding_mode=padding_mode,
+            bias=False,
+        )
         self.lora_B[adapter_name] = conv_layer(
             r, self.out_features, out_kernel, out_stride, groups=base_layer.groups, bias=lora_bias
         )
@@ -1632,8 +1709,7 @@ class _ConvNd(nn.Module, LoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    base_layer.weight.data = orig_weight
-
+                    new_bias = None
                     if self.lora_bias[active_adapter]:
                         if getattr(base_layer, "bias", None) is None:
                             raise RuntimeError(
@@ -1644,6 +1720,9 @@ class _ConvNd(nn.Module, LoraLayer):
                             raise ValueError(
                                 f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                             )
+
+                    base_layer.weight.data = orig_weight
+                    if new_bias is not None:
                         base_layer.bias.data = new_bias.to(orig_dtype)
 
                 else:
@@ -1708,7 +1787,7 @@ class _ConvNd(nn.Module, LoraLayer):
             weight_B = weight_B.float()
 
         # https://github.com/bmaltais/kohya_ss/blob/feb6728762a8f463d15ba936d189d4c3abfaa1ab/networks/lora.py#L117
-        if self.get_base_layer().weight.size()[2:4] == (1, 1):
+        if self.get_base_layer().weight.shape[2:] == (1, 1):
             # conv2d 1x1
             output_tensor = (weight_B.squeeze(3).squeeze(2) @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(
                 3
