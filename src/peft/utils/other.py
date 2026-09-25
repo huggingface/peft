@@ -1161,7 +1161,9 @@ def _prepare_prompt_learning_config(peft_config, model_config):
     if hasattr(model_config, "to_dict"):
         model_config = model_config.to_dict()
     # In case of VLM we focus on the language model portion of the model.
-    if "text_config" in model_config:
+    # Some configs expose a `text_config` key that is still `None` (incomplete / placeholder
+    # multimodal configs). Only switch over when the nested config is actually present.
+    if "text_config" in model_config and model_config["text_config"] is not None:
         model_config = model_config["text_config"]
 
     if peft_config.num_layers is None:

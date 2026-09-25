@@ -28,12 +28,13 @@ from transformers import (
     LlavaForConditionalGeneration,
 )
 
-from peft import LoraConfig, PeftModel, VeraConfig, get_peft_model
+from peft import LoraConfig, PeftModel, PrefixTuningConfig, TaskType, VeraConfig, get_peft_model
 from peft.import_utils import is_transformers_ge_v5_1_0, is_transformers_ge_v5_6_0
 from peft.utils.other import (
     ModulesToSaveWrapper,
     _get_module_names_tied_with_embedding,
     _get_no_split_modules,
+    _prepare_prompt_learning_config,
     prepare_model_for_kbit_training,
 )
 
@@ -862,3 +863,48 @@ class TestTaskTypeModulesToSave:
 
         assert user_list == ["my_head"]
         assert model.peft_config["other"].modules_to_save == ["my_head"] + head_names
+
+
+def test_prepare_prompt_learning_config_ignores_none_text_config():
+    """VLM-style configs may expose `text_config=None`; fall back to top-level fields instead of TypeError."""
+    peft_config = PrefixTuningConfig(task_type=TaskType.CAUSAL_LM, num_virtual_tokens=4)
+    model_config = {
+        "text_config": None,
+        "num_hidden_layers": 2,
+        "hidden_size": 32,
+        "num_attention_heads": 4,
+        "num_key_value_heads": 4,
+    }
+
+    prepared = _prepare_prompt_learning_config(peft_config, model_config)
+
+    assert prepared.num_layers == 2
+    assert prepared.token_dim == 32
+    assert prepared.num_attention_heads == 4
+
+
+def test_get_peft_model_prefix_tuning_with_none_text_config():
+    """End-to-end: PrefixTuning must not crash when config.to_dict() includes text_config=None."""
+    from transformers import LlamaConfig, LlamaForCausalLM
+
+    class ConfigWithNoneTextConfig(LlamaConfig):
+        def to_dict(self):
+            config_dict = super().to_dict()
+            config_dict["text_config"] = None
+            return config_dict
+
+    config = ConfigWithNoneTextConfig(
+        vocab_size=100,
+        hidden_size=32,
+        intermediate_size=64,
+        num_hidden_layers=2,
+        num_attention_heads=4,
+        num_key_value_heads=4,
+    )
+    model = LlamaForCausalLM(config)
+    peft_config = PrefixTuningConfig(task_type=TaskType.CAUSAL_LM, num_virtual_tokens=4)
+
+    peft_model = get_peft_model(model, peft_config)
+
+    assert peft_model.peft_config["default"].num_layers == 2
+    assert peft_model.peft_config["default"].token_dim == 32
