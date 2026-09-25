@@ -800,10 +800,24 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             # ModulesToSaveWrapper will be queried but not every wrapper is obliged to serve the same adapters.
             return {}
 
-        return {
-            k: state_dict[f"modules_to_save.{adapter_name}.{k}"]
-            for k in self.modules_to_save[adapter_name].state_dict()
-        }
+        module = self.modules_to_save[adapter_name]
+        buffer_names = {name for name, _ in module.named_buffers()}
+        adapter_state_dict = {}
+        for k in module.state_dict():
+            key = f"modules_to_save.{adapter_name}.{k}"
+            if key in state_dict:
+                adapter_state_dict[k] = state_dict[key]
+            elif k in buffer_names:
+                # The passed state_dict may contain only parameters, e.g. when it was built from gathered FSDP2
+                # DTensors via named_parameters(). Buffers are not sharded by FSDP or DeepSpeed, so the local copy
+                # holds the full value. Skipping the buffer instead would make loading the checkpoint fail.
+                adapter_state_dict[k] = module.get_buffer(k)
+            else:
+                raise KeyError(
+                    f"Expected key '{key}' of modules_to_save adapter '{adapter_name}' in the passed state_dict, but "
+                    "it is missing. The state_dict must contain all parameters of the modules_to_save module."
+                )
+        return adapter_state_dict
 
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
@@ -923,9 +937,15 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
             # therefore we return an empty state dict.
             return {}
 
-        return {
-            f"token_adapter.{k}": state_dict[f"token_adapter.{k}.{adapter_name}"] for k in ["trainable_tokens_delta"]
-        }
+        key = f"token_adapter.trainable_tokens_delta.{adapter_name}"
+        if key not in state_dict:
+            # No fallback to the module's own tensor here: this is a parameter, which may be sharded (e.g. with
+            # DeepSpeed ZeRO-3), so the local copy is not guaranteed to hold the full value.
+            raise KeyError(
+                f"Expected key '{key}' of trainable tokens adapter '{adapter_name}' in the passed state_dict, but it "
+                "is missing. The state_dict must contain the full (gathered) trainable tokens parameters."
+            )
+        return {"token_adapter.trainable_tokens_delta": state_dict[key]}
 
     def enable_adapters(self, enabled: bool):
         """Enables/disables the underlying `TrainableTokens` adapter.
