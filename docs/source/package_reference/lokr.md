@@ -40,8 +40,7 @@ config = LoKrConfig(
     modules_to_save=["classifier"],
 )
 model = get_peft_model(model, config)
-model.print_trainable_parameters()
-"trainable params: 116,069 || all params: 87,172,042 || trainable%: 0.13314934162033282"
+model.print_healthcheck()
 ```
 
 ## Benchmark overview

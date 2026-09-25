@@ -129,8 +129,8 @@ def main(model_args, data_args, training_args):
         peft_config=peft_config,
     )
     trainer.accelerator.print(f"{trainer.model}")
-    if hasattr(trainer.model, "print_trainable_parameters"):
-        trainer.model.print_trainable_parameters()
+    if hasattr(trainer.model, "print_healthcheck"):
+        trainer.model.print_healthcheck()
 
     # train
     checkpoint = None

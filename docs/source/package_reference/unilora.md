@@ -40,7 +40,7 @@ config = UniLoraConfig(
 )
 
 peft_model = get_peft_model(model, config)
-peft_model.print_trainable_parameters()
+peft_model.print_healthcheck()
 ```
 
 ## Important Parameters
