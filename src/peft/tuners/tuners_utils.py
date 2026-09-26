@@ -883,10 +883,16 @@ class BaseTuner(nn.Module, ABC):
         # create their new adapter parameters before calling this method, so exclude those from the snapshot.
         existing_adapter_prefixes = []
         mapping_existing_parameter_requires_grad = []
+        # Adapter creation calls set_adapter as part of its housekeeping. Preserve existing dropout modes because the
+        # new adapter's inference_mode must not change the behavior of adapters that were already present.
+        existing_adapter_dropout_training = []
         seen_parameters = set()
         for key, module in named_modules:
             if isinstance(module, BaseTunerLayer):
                 existing_adapter_prefixes.append(key + ".")
+                existing_adapter_dropout_training.append(
+                    (module, {name: dropout.training for name, dropout in module._adapter_dropout_modules()})
+                )
             for parameter_name, parameter in module.named_parameters(recurse=False):
                 full_name = f"{key}.{parameter_name}" if key else parameter_name
                 if id(parameter) in seen_parameters:
@@ -1148,6 +1154,14 @@ class BaseTuner(nn.Module, ABC):
             adapter_name=adapter_name,
             activate_adapter=adapter_name in self.active_adapters,
         )
+
+        # Restore existing adapter state after housekeeping, then initialize the newly added adapter from its config.
+        for module, dropout_training in existing_adapter_dropout_training:
+            for existing_adapter_name, training in dropout_training.items():
+                module._set_adapter_dropout_training(existing_adapter_name, training)
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayer):
+                module._set_adapter_dropout_training(adapter_name, not peft_config.inference_mode)
 
         for parameter, requires_grad in mapping_existing_parameter_requires_grad:
             parameter.requires_grad = requires_grad
@@ -2003,6 +2017,28 @@ class BaseTunerLayer(ABC):
         # is already a list of str
         return self.active_adapter
 
+    def _adapter_dropout_modules(self, adapter_names: str | Sequence[str] | None = None):
+        # Dropout containers are registered in other_param_names across tuners, so keep their inference-mode handling
+        # here instead of duplicating it in every tuner implementation.
+        if adapter_names is None:
+            adapter_names = self._all_available_adapter_names()
+        elif isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+
+        for name in self.other_param_names:
+            if not name.endswith("dropout"):
+                continue
+            module_dict = getattr(self, name, None)
+            if not isinstance(module_dict, nn.ModuleDict):
+                continue
+            for adapter_name in adapter_names:
+                if adapter_name in module_dict:
+                    yield adapter_name, module_dict[adapter_name]
+
+    def _set_adapter_dropout_training(self, adapter_name: str, training: bool) -> None:
+        for name, dropout in self._adapter_dropout_modules(adapter_name):
+            dropout.train(training)
+
     def enable_adapters(self, enabled: bool) -> None:
         """Toggle the enabling and disabling of adapters
 
@@ -2069,6 +2105,11 @@ class BaseTunerLayer(ABC):
             for key, layer in module_dict.items():
                 should_require_grad = (key in adapter_names) and (not inference_mode)
                 _set_layer_requires_grad(layer, should_require_grad)
+
+        # Inference mode freezes both the adapter parameters and its stochastic dropout path. The parent tuner layer
+        # remains in its existing training/eval mode because it can host multiple adapters.
+        for adapter_name in adapter_names:
+            self._set_adapter_dropout_training(adapter_name, not inference_mode)
 
         self._freeze_non_trainable_peft_weights(adapter_names)
         self._active_adapter = adapter_names
