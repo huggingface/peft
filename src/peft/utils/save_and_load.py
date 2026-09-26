@@ -80,11 +80,11 @@ def _filter_state_dict_for_adapter_name(
 ) -> dict[str, torch.Tensor]:
     """Filter the state dict to remove keys that correspond to the unwanted adapter.
 
-    Matching is positional: a key is dropped only when the segment immediately after a tuner prefix
-    (e.g. `lora_A`, `lora_B`, `ia3_l`) is an unwanted adapter name. A plain substring check would also
-    drop the selected adapter's tensors whenever an unwanted adapter's *name* happens to equal a
-    base-model module path segment (e.g. an adapter called "mlp"). Keys outside any tuner prefix are
-    always kept; auxiliary modules such as `modules_to_save` are resolved per adapter downstream.
+    Matching is positional: a key is dropped only when the segment immediately after a tuner prefix (e.g. `lora_A`,
+    `lora_B`, `ia3_l`) is an unwanted adapter name. A plain substring check would also drop the selected adapter's
+    tensors whenever an unwanted adapter's *name* happens to equal a base-model module path segment (e.g. an adapter
+    called "mlp"). Keys outside any tuner prefix are always kept; auxiliary modules such as `modules_to_save` are
+    resolved per adapter downstream.
     """
     # avoid circular import
     from peft.tuners.tuners_utils import _get_tuner_state_dict_key_prefixes
