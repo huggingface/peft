@@ -1841,7 +1841,9 @@ class PeftModelForSequenceClassification(PeftModel):
     def __init__(
         self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default", **kwargs
     ) -> None:
-        classifier_module_names = ["classifier", "score"]
+        # `pre_classifier` is randomly initialized in DistilBERT-style sequence classification
+        # heads and thus has to be trained and saved alongside `classifier`.
+        classifier_module_names = ["classifier", "score", "pre_classifier"]
 
         if hasattr(peft_config, "modules_to_save"):
             _add_modules_to_save(peft_config, classifier_module_names)
@@ -1898,7 +1900,9 @@ class PeftModelForSequenceClassification(PeftModel):
         """
         # ensure that additional adapters also add the classifier layer to modules_to_save
         if hasattr(peft_config, "modules_to_save"):
-            classifier_module_names = ["classifier", "score"]
+            # `pre_classifier` is randomly initialized in DistilBERT-style sequence classification
+            # heads and thus has to be trained and saved alongside `classifier`.
+            classifier_module_names = ["classifier", "score", "pre_classifier"]
             _add_modules_to_save(peft_config, classifier_module_names)
 
         return super().add_adapter(
