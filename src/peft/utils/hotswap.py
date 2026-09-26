@@ -23,7 +23,11 @@ import torch
 from peft.config import PeftConfig
 from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.tuners.lora import Conv2d, Linear, LoraConfig, LoraLayer
-from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.tuners.tuners_utils import (
+    BaseTunerLayer,
+    _filter_state_dict_by_key_prefixes,
+    _get_tuner_state_dict_key_prefixes,
+)
 
 from .other import get_pattern_key, infer_device
 from .peft_types import PeftType
@@ -470,8 +474,9 @@ def hotswap_adapter_from_state_dict(
 
     # _orig_mod is for torch.compile(model)
     is_compiled_wrapper = hasattr(model, "_orig_mod")
-    # TODO: there is probably a more precise way to identify the adapter keys
-    missing_keys = {k for k in model.state_dict() if (parameter_prefix in k) and (adapter_name in k)}
+    adapter_prefixes = _get_tuner_state_dict_key_prefixes(model, adapter_name=adapter_name)
+    adapter_state_dict = _filter_state_dict_by_key_prefixes(model.state_dict(), adapter_prefixes)
+    missing_keys = {key for key in adapter_state_dict if parameter_prefix in key}
     unexpected_keys = []
 
     # first: dry run, not swapping anything
