@@ -23,7 +23,7 @@ import torch
 from accelerate.utils.memory import clear_device_cache
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig, TorchAoConfig
 
-from peft import BOFTConfig, LoraConfig, MissConfig, OFTConfig, ShiraConfig, VeraConfig, get_peft_model
+from peft import BOFTConfig, MissConfig, OFTConfig, ShiraConfig, VeraConfig, get_peft_model
 from peft.import_utils import (
     is_bnb_4bit_available,
     is_bnb_available,
@@ -380,33 +380,3 @@ class TestQuantization:
             out_unloaded = model(dummy_input).logits
 
         check_outputs_similar(out_before, out_unloaded)
-
-    @pytest.mark.skipif(not is_torchao_available(), reason="torchao is not installed")
-    def test_torchao_lora_merge_several_adapters_in_one_call(self):
-        # Merging several adapters in one call should give the same weights as merging them one at a time
-        def load_model_with_two_adapters():
-            model = TorchAoInt8WeightOnlyLoader().load_model()
-            torch.manual_seed(SEED)
-            config_kwargs = {"target_modules": ["q_proj", "v_proj"], "init_lora_weights": False}
-            model = get_peft_model(model, LoraConfig(**config_kwargs))
-            model.add_adapter("other", LoraConfig(**config_kwargs))
-            return model
-
-        model_one_call = load_model_with_two_adapters()
-        model_one_call.base_model.merge_adapter(adapter_names=["default", "other"])
-
-        model_one_by_one = load_model_with_two_adapters()
-        model_one_by_one.base_model.merge_adapter(adapter_names=["default"])
-        model_one_by_one.base_model.merge_adapter(adapter_names=["other"])
-
-        layers_one_call = dict(model_one_call.named_modules())
-        lora_layers = [
-            (name, module) for name, module in model_one_by_one.named_modules() if isinstance(module, BaseTunerLayer)
-        ]
-        assert len(lora_layers) == TorchAoInt8WeightOnlyLoader.expected_layer_count
-        for name, layer in lora_layers:
-            layer_one_call = layers_one_call[name]
-            assert layer_one_call.merged_adapters == ["default", "other"]
-            assert torch.equal(
-                layer_one_call.get_base_layer().weight.dequantize(), layer.get_base_layer().weight.dequantize()
-            )

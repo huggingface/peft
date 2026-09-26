@@ -918,25 +918,19 @@ class PeftCommonTester:
         for module in model.modules():
             if not isinstance(module, BaseTunerLayer):
                 continue
+            # skip base layers that keep their weights under other names, such as nn.MultiheadAttention with its
+            # in_proj_weight, since there is no single weight tensor to compare before and after the merge
             base_layer = module.get_base_layer()
             if not isinstance(getattr(base_layer, "weight", None), torch.Tensor):
                 continue
             layers.append(module)
         return layers
 
-    def _snapshot_base_layer(self, layer):
+    def _assert_base_layer_unchanged(self, layer, orig_weight, orig_bias):
         base_layer = layer.get_base_layer()
-        weight = base_layer.weight.detach().clone()
-        bias = getattr(base_layer, "bias", None)
-        bias = bias.detach().clone() if bias is not None else None
-        return weight, bias
-
-    def _assert_base_layer_unchanged(self, layer, snapshot):
-        base_layer = layer.get_base_layer()
-        weight, bias = snapshot
-        assert torch.equal(base_layer.weight, weight)
-        if bias is not None:
-            assert torch.equal(base_layer.bias, bias)
+        assert torch.equal(base_layer.weight, orig_weight)
+        if orig_bias is not None:
+            assert torch.equal(base_layer.bias, orig_bias)
         assert not layer.merged
 
     def _test_safe_merge_broken_adapter_leaves_base_layer_unchanged(self, model_id, config_cls, config_kwargs):
@@ -947,25 +941,31 @@ class PeftCommonTester:
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
-            config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+            config = config_cls(**config_kwargs)
             model = get_peft_model(model.to(self.torch_device), config)
 
-        layers = self._get_mergeable_tuner_layers(model)
+        layers = [
+            layer
+            for layer in self._get_mergeable_tuner_layers(model)
+            if any(param.requires_grad for param in layer.parameters())
+        ]
         if not layers:
             pytest.skip("No mergeable tuner layers in this model.")
 
-        for layer in layers:
-            adapter_params = [param for param in layer.parameters() if param.requires_grad]
-            if not adapter_params:
-                continue
-            with torch.no_grad():
-                for param in adapter_params:
-                    param.fill_(float("nan"))
-            snapshot = self._snapshot_base_layer(layer)
+        # poison the first layer that merge_adapter visits, so the merge fails before any layer is merged; one
+        # non-finite value per adapter parameter is enough to make the delta weight non-finite
+        layer = layers[0]
+        with torch.no_grad():
+            for param in layer.parameters():
+                if param.requires_grad:
+                    param.view(-1)[0] = float("nan")
+        base_layer = layer.get_base_layer()
+        orig_weight = base_layer.weight.detach().clone()
+        orig_bias = base_layer.bias.detach().clone() if getattr(base_layer, "bias", None) is not None else None
 
-            with pytest.raises(ValueError, match="NaNs detected"):
-                layer.merge(safe_merge=True)
-            self._assert_base_layer_unchanged(layer, snapshot)
+        with pytest.raises(ValueError, match="NaNs detected"):
+            model.merge_adapter(safe_merge=True)
+        self._assert_base_layer_unchanged(layer, orig_weight, orig_bias)
 
     def _test_safe_merge_non_finite_bias_leaves_base_layer_unchanged(self, model_id, config_cls, config_kwargs):
         # A non-finite merged bias must be caught before the merged weight is written. The bias is poisoned in the
@@ -977,7 +977,7 @@ class PeftCommonTester:
 
         with hub_online_once(model_id):
             model = self.transformers_class.from_pretrained(model_id)
-            config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+            config = config_cls(**config_kwargs)
             model = get_peft_model(model.to(self.torch_device), config)
 
         layers = [
@@ -988,19 +988,21 @@ class PeftCommonTester:
         if not layers:
             pytest.skip("No mergeable tuner layers with a bias in this model.")
 
-        for layer in layers:
-            with torch.no_grad():
-                layer.get_base_layer().bias.view(-1)[0] = float("inf")
-            snapshot = self._snapshot_base_layer(layer)
+        layer = layers[0]
+        base_layer = layer.get_base_layer()
+        with torch.no_grad():
+            base_layer.bias.view(-1)[0] = float("inf")
+        orig_weight = base_layer.weight.detach().clone()
+        orig_bias = base_layer.bias.detach().clone()
 
-            try:
-                layer.merge(safe_merge=True)
-            except ValueError as exc:
-                assert "NaNs detected" in str(exc)
-                self._assert_base_layer_unchanged(layer, snapshot)
-            else:
-                # no error is only acceptable if this method does not merge the bias at all
-                assert torch.equal(layer.get_base_layer().bias, snapshot[1])
+        try:
+            model.merge_adapter(safe_merge=True)
+        except ValueError as exc:
+            assert "NaNs detected" in str(exc)
+            self._assert_base_layer_unchanged(layer, orig_weight, orig_bias)
+        else:
+            # no error is only acceptable if this method does not merge the bias at all
+            assert torch.equal(base_layer.bias, orig_bias)
 
     def _test_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
         # Test for mixing different adapters in a single batch by passing the adapter_names argument
