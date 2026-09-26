@@ -490,3 +490,125 @@ class TestTransformersV5:
         assert reloaded_config.target_modules == {"q_proj", "k_proj", "v_proj"}
         assert {"gate_up_proj", "down_proj"} <= set(reloaded_config.target_parameters)
         assert reloaded_config.rank_pattern == {r".*\.gate_up_proj": reloaded_config.r * 2}
+
+    # Tiny configs with 2 layers: layer 0 has a dense MLP, layer 1 is MoE (plus shared experts where the architecture has
+    # them). The dense and shared-expert projections are plain nn.Linear on v5 but share their names with the fused
+    # experts (gate_proj, up_proj, down_proj). See #3801.
+    _moe_base_kwargs = {
+        "vocab_size": 128,
+        "hidden_size": 32,
+        "intermediate_size": 64,
+        "moe_intermediate_size": 16,
+        "num_hidden_layers": 2,
+        "num_attention_heads": 4,
+        "num_key_value_heads": 2,
+        "head_dim": 8,
+    }
+    _dsv3_kwargs = {
+        "n_routed_experts": 4,
+        "n_shared_experts": 1,
+        "num_experts_per_tok": 2,
+        "first_k_dense_replace": 1,
+        "n_group": 1,
+        "topk_group": 1,
+    }
+    _moe_dense_shared_kwargs = {
+        "qwen3_moe": {"num_experts": 4, "num_experts_per_tok": 2, "mlp_only_layers": [0]},
+        "qwen3_next": {
+            "num_experts": 4,
+            "num_experts_per_tok": 2,
+            "mlp_only_layers": [0],
+            "shared_expert_intermediate_size": 16,
+            "layer_types": ["full_attention"] * 2,
+        },
+        "glm4_moe": _dsv3_kwargs,
+        "deepseek_v3": {
+            **_dsv3_kwargs,
+            "q_lora_rank": 16,
+            "kv_lora_rank": 16,
+            "qk_rope_head_dim": 8,
+            "qk_nope_head_dim": 8,
+            "v_head_dim": 8,
+        },
+        "cohere2_moe": {
+            "num_experts": 4,
+            "num_experts_per_tok": 2,
+            "num_shared_experts": 1,
+            "mlp_layer_types": ["dense", "sparse"],
+            "prefix_dense_intermediate_size": 64,
+            "layer_types": ["sliding_attention", "full_attention"],
+        },
+        "afmoe": {
+            "num_experts": 4,
+            "num_experts_per_tok": 2,
+            "num_shared_experts": 1,
+            "num_dense_layers": 1,
+            "layer_types": ["full_attention"] * 2,
+        },
+    }
+
+    def _get_tiny_moe_model(self, model_type):
+        if model_type not in transformers.CONFIG_MAPPING:
+            pytest.skip(f"{model_type} is not available in this transformers version")
+        config = transformers.AutoConfig.for_model(
+            model_type, **self._moe_base_kwargs, **self._moe_dense_shared_kwargs[model_type]
+        )
+        torch.manual_seed(0)
+        return AutoModelForCausalLM.from_config(config).eval()
+
+    @pytest.mark.parametrize("model_type", list(_moe_dense_shared_kwargs))
+    def test_all_linear_targets_dense_and_shared_expert_layers(self, model_type):
+        # https://github.com/huggingface/peft/issues/3801
+        # "all-linear" used to reduce the resolved nn.Linear names to their leaf names, so the dense MLP and shared-expert
+        # projections were remapped to the fused expert parameters and not targeted at all.
+        model = self._get_tiny_moe_model(model_type)
+        mlp_linears = {
+            name
+            for name, module in model.named_modules()
+            if isinstance(module, nn.Linear) and ".mlp." in name and not name.endswith(".router.gate")
+        }
+        assert mlp_linears  # sanity check: the tiny config has dense/shared-expert layers
+
+        peft_model = get_peft_model(model, LoraConfig(r=2, target_modules="all-linear"))
+
+        targeted_modules = {name.removeprefix("base_model.model.") for name in peft_model.targeted_module_names}
+        assert mlp_linears <= targeted_modules
+        # the fused experts and the router are still targeted as parameters
+        targeted_parameters = set(peft_model.targeted_parameter_names)
+        assert "model.layers.1.mlp.experts.gate_up_proj" in targeted_parameters
+        assert "model.layers.1.mlp.experts.down_proj" in targeted_parameters
+        assert any(name.endswith(".gate.weight") for name in targeted_parameters)
+
+    def test_all_linear_afmoe_linear_router_targeted_once(self):
+        # https://github.com/huggingface/peft/issues/3801
+        # afmoe's router `mlp.router.gate` is an nn.Linear on v5. Its weight is targeted as a parameter via the router
+        # mapping (gate -> gate.weight), so it must not also be targeted as a module, which would raise.
+        model = self._get_tiny_moe_model("afmoe")
+        peft_model = get_peft_model(model, LoraConfig(r=2, target_modules="all-linear"))  # does not raise
+
+        assert "model.layers.1.mlp.router.gate.weight" in peft_model.targeted_parameter_names
+        assert not any(name.endswith(".router.gate") for name in peft_model.targeted_module_names)
+
+    def test_all_linear_dense_and_shared_expert_layers_save_load_roundtrip(self, tmp_path):
+        # The dense and shared-expert projections are stored as qualified names in the converted config. Reloading
+        # re-runs the conversion on that config, which should target the same layers and give the same output.
+        inputs = torch.arange(10).view(1, -1)
+        model = self._get_tiny_moe_model("glm4_moe")
+        # init_lora_weights=False gives the adapter non-zero (random) weights so it actually changes the output
+        peft_model = get_peft_model(model, LoraConfig(r=2, target_modules="all-linear", init_lora_weights=False))
+        with torch.inference_mode():
+            logits_before = peft_model(inputs).logits
+        peft_model.save_pretrained(tmp_path)
+
+        reloaded = PeftModel.from_pretrained(self._get_tiny_moe_model("glm4_moe"), tmp_path)
+        with torch.inference_mode():
+            logits_after = reloaded(inputs).logits
+
+        assert torch.allclose(logits_before, logits_after, atol=1e-5, rtol=1e-5)
+        assert set(reloaded.targeted_module_names) == set(peft_model.targeted_module_names)
+        assert set(reloaded.targeted_parameter_names) == set(peft_model.targeted_parameter_names)
+        # layer 0 is dense, layer 1 has a shared expert; both kept as module targets through the reload
+        targeted_modules = {name.removeprefix("base_model.model.") for name in reloaded.targeted_module_names}
+        for layer_prefix in ["model.layers.0.mlp", "model.layers.1.mlp.shared_experts"]:
+            for proj in ["gate_proj", "up_proj", "down_proj"]:
+                assert f"{layer_prefix}.{proj}" in targeted_modules
