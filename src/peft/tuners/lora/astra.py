@@ -1,4 +1,4 @@
-# Copyright 2024-present the HuggingFace Inc. team.
+# Copyright 2026-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Reference code: https://github.com/iboing/CorDA/blob/main/cordalib/decomposition.py
-# Reference paper: https://huggingface.co/papers/2406.05223
+# Reference code: https://github.com/LyoAI/Astra/blob/main/astra.py
+# Reference paper: https://huggingface.co/papers/2602.19111
+# This implementation builds on `corda.py`.
 
 import os
 from collections.abc import Callable, Iterable
@@ -31,17 +32,21 @@ from peft.utils.other import get_pattern_key
 
 
 @dataclass
-class CordaEigens:
-    S_WC: torch.Tensor
-    U_WC: torch.Tensor
-    V_WC: torch.Tensor
+class AstraEigens:
+    S: torch.Tensor
+    V: torch.Tensor
 
 
 def target_modules(model: nn.Module, config: LoraConfig) -> Iterable[nn.Module]:
     """
-    Iterate over CorDA target name and modules of a model. A module is a target if its name is in
+    Iterate over Astra target name and modules of a model. A module is a target if its name is in
     `config.target_modules` and is `nn.Linear` or `Conv1D`.
     """
+    if config.target_modules is None:
+        raise ValueError(
+            "`target_modules` must be set explicitly for Astra preprocessing because covariance matrices are "
+            "collected from the targeted modules."
+        )
     for name, module in model.named_modules():
         if LoraModel._check_target_module_exists(config, name) and isinstance(module, (nn.Linear, Conv1D)):
             yield name, module
@@ -54,100 +59,88 @@ def get_model_device(model: nn.Module) -> str:
 
 
 @torch.no_grad()
-def preprocess_corda(
+def preprocess_astra(
     model: nn.Module,
     lora_config: LoraConfig,
     run_model: Optional[Callable[[], None]] = None,
     hooked_model: Optional[nn.Module] = None,
 ):
     """
-    Build necessary CorDA fields for a model.
+    Build necessary Astra fields for a model.
 
     For each `M * N` linear layer, a `M * M` covariance matrix will be built temporarily during the preprocessing
     process, consuming roughly another `2 * MODEL_SIZE` memory for typical LLMs if model weight is FP16 and covariance
-    is FP32. If that's too much, consider specifying `use_float16_for_covariance` in `lora_config.corda_config`.
+    is FP32. If that's too much, consider specifying `use_float16_for_covariance` in `lora_config.astra_config`.
 
     Args:
         model (`nn.Module`):
             Model to preprocess.
         lora_config (`LoraConfig`):
-            Lora configuration of the model. `lora_config.corda_config` should be set.
+            Lora configuration of the model. `lora_config.astra_config` should be set. `lora_config.target_modules`
+            must be set explicitly.
         run_model (`Optional[Callable[[], None]]`):
             Callback to run the model when building covariance. Typically you should run model inference on your sample
             dataset in this callback. Experiments have shown that when token count per sample is 2048, hidden dimension
             is 4096, collecting 256 distinct samples is enough. If you collect too few or too repetitive samples, the
             covariance matrix may be low-ranked and unstabilize preprocessing. You can estimate sample count as
             `HIDDEN_DIM / TOKEN_PER_SAMPLE * 128`. `run_model` can be `None` only if covariance file in
-            `lora_config.corda_config` is already created.
+            `lora_config.astra_config` is already created.
         hooked_model (`Optional[nn.Module]`):
             Model to hook when building covariance. If none, original model will be hooked. This is only useful when
             you want to hook a different model than the one you are training, typically you should leave this `None`.
 
     Upon completion, the following fields are set for each target module:
-        eigens.S_WC (`torch.Tensor`):
-            Singular values of the weight matrix.
-        eigens.U_WC (`torch.Tensor`):
-            Left singular vectors of the weight matrix.
-        eigens.V_WC (`torch.Tensor`):
-            Right singular vectors of the weight matrix, multiplied by inverse of covariance matrix.
+        eigens.S (`torch.Tensor`):
+            Eigenvalue of the collected output activations' covariance matrix.
+        eigens.V (`torch.Tensor`):
+            Eigenvectors of the collected output activations' covariance matrix.
     """
-    cache_file = lora_config.corda_config.cache_file
-    covariance_file = lora_config.corda_config.covariance_file
-    corda_method = lora_config.corda_config.corda_method
-    verbose = lora_config.corda_config.verbose
-    prune_temporary_fields = lora_config.corda_config.prune_temporary_fields
+    if lora_config.astra_config is None:
+        raise ValueError(
+            "`lora_config.astra_config` must be set to use Astra. Set `init_lora_weights='astra'` and pass an "
+            "`AstraConfig`."
+        )
 
-    # If cache exists, skip building
+    cache_file = lora_config.astra_config.cache_file
+    covariance_file = lora_config.astra_config.covariance_file
+    verbose = lora_config.astra_config.verbose
+    prune_temporary_fields = lora_config.astra_config.prune_temporary_fields
+
     if cache_file is not None and os.path.exists(cache_file) and os.path.getsize(cache_file) > 0:
         cache = torch.load(cache_file, map_location=get_model_device(model), weights_only=True)
         for name, module in target_modules(model, lora_config):
-            module.eigens = CordaEigens(
-                S_WC=cache[f"{name}.eigens.S_WC"],
-                U_WC=cache[f"{name}.eigens.U_WC"],
-                V_WC=cache[f"{name}.eigens.V_WC"],
+            module.eigens = AstraEigens(
+                S=cache[f"{name}.eigens.S"],
+                V=cache[f"{name}.eigens.V"],
             )
     else:
-        # Specify CorDA method for each layer
-        if corda_method is None:
-            raise ValueError("corda_method is required when cache_file is not provided.")
-        for name, module in target_modules(model, lora_config):
-            module.corda_method = corda_method
-
-        # Specify CorDA rank for each layer
         for name, module in target_modules(model, lora_config):
             r_key = get_pattern_key(lora_config.rank_pattern.keys(), name)
             module.rank = lora_config.rank_pattern.get(r_key, lora_config.r)
 
-        # Calculate covariance matrix
         calib_cov_distribution(model, lora_config, run_model, hooked_model, covariance_file)
 
-        # Calculate eigens
         collect_eigens(model, lora_config, verbose)
 
-        # Crop CorDA eigens so that there's less to save
-        crop_corda_eigens(model, lora_config)
+        crop_astra_eigens(model, lora_config)
 
-        # Remove redundant fields if exist
         if prune_temporary_fields:
             for name, module in target_modules(model, lora_config):
                 if hasattr(module, "sample_count"):
                     del module.sample_count
                 if hasattr(module, "covariance_matrix"):
                     del module.covariance_matrix
-                if hasattr(module, "corda_method"):
-                    del module.corda_method
                 if hasattr(module, "rank"):
                     del module.rank
 
-        # Save cache to disk
         if cache_file is not None:
             cache: dict[str, Any] = {}
             for name, module in target_modules(model, lora_config):
-                cache[f"{name}.eigens.S_WC"] = module.eigens.S_WC
-                cache[f"{name}.eigens.U_WC"] = module.eigens.U_WC
-                cache[f"{name}.eigens.V_WC"] = module.eigens.V_WC
+                cache[f"{name}.eigens.S"] = module.eigens.S
+                cache[f"{name}.eigens.V"] = module.eigens.V
 
-            os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+            if dirname := os.path.dirname(cache_file):
+                os.makedirs(dirname, exist_ok=True)
             torch.save(cache, cache_file)
 
 
@@ -172,17 +165,22 @@ def calib_cov_distribution(
     hooked_model.eval()
 
     def hook(module, input, output):
-        input = input[0].detach().squeeze(0).data  ## (context_length = 2048, dim)
-        if not config.corda_config.use_float16_for_covariance:
-            input = input.float()
-        input = input / torch.max(input).abs()
+        # Astra builds the covariance matrix of the module output activations, e.g. of shape
+        # (batch_size, context_length, dim), so the first element is the actual output tensor in case a tuple is
+        # returned. All leading dimensions are flattened to obtain a (num_tokens, dim) matrix.
+        output = output[0] if isinstance(output, (tuple, list)) else output
+        output = output.detach().reshape(-1, output.size(-1)).data  # (num_tokens, dim)
+        if not config.astra_config.use_float16_for_covariance:
+            output = output.float()
+        # scale the activations to make the covariance invariant to their magnitude
+        output = output / torch.max(output).abs()
 
-        # check if input is valid
-        if torch.isnan(input).any() or torch.isinf(input).any():
-            raise ValueError("Invalid value found in input, please check your input data.")
+        # check if output is valid
+        if torch.isnan(output).any() or torch.isinf(output).any():
+            raise ValueError("Invalid value found in output, please check your output data.")
 
         # calculate covariance and check if it's valid
-        covariance = input.t().matmul(input)
+        covariance = output.t().matmul(output)
         if torch.isnan(covariance).any() or torch.isinf(covariance).any():
             raise ValueError(
                 "Invalid value found in covariance. Please file an issue at https://github.com/huggingface/peft/issues."
@@ -193,7 +191,7 @@ def calib_cov_distribution(
         module.covariance_matrix += covariance
 
         # free memory
-        del covariance, input
+        del covariance, output
 
     handles = []
     for name, module in target_modules(hooked_model, config):
@@ -229,16 +227,13 @@ def calib_cov_distribution(
         all_covariance_matrix = {}
         for name, module in target_modules(model, config):
             all_covariance_matrix[name] = module.covariance_matrix
-        os.makedirs(os.path.dirname(covariance_file), exist_ok=True)
+        if dirname := os.path.dirname(covariance_file):
+            os.makedirs(dirname, exist_ok=True)
         torch.save(all_covariance_matrix, covariance_file)
 
 
 @torch.no_grad()
-def collect_eigens(
-    model: nn.Module,
-    config: LoraConfig,
-    verbose: bool,
-):
+def collect_eigens(model: nn.Module, config: LoraConfig, verbose: bool):
     """Call collect_eigens_for_layer and store result in key `eigens` of each layer."""
     linear_modules = []
     for name, module in target_modules(model, config):
@@ -246,125 +241,74 @@ def collect_eigens(
     if verbose:
         linear_modules = tqdm(linear_modules, desc="Collecting eigens")
     for name, module in linear_modules:
-        module.eigens = collect_eigens_for_layer(module, config)
+        module.eigens = collect_eigens_for_layer(module)
 
 
 @torch.no_grad()
-def collect_eigens_for_layer(
-    linear: nn.Module,
-    config: LoraConfig,
-) -> CordaEigens:
-    w = linear.weight.data.float()
-    # Conv1D stores weights as (in_features, out_features), transposed compared to Linear
-    # We need to transpose it to match Linear's (out_features, in_features) layout for SVD
-    if isinstance(linear, Conv1D):
-        w = w.T
-    out_dim = w.size(0)
-    in_dim = w.size(1)
-    min_dim = min(in_dim, out_dim)
-
+def collect_eigens_for_layer(linear: nn.Linear) -> AstraEigens:
     if not hasattr(linear, "covariance_matrix"):
         raise ValueError(
             "Covariance matrix not found in linear module. Please do not call this function directly, "
-            "instead call `preprocess_corda`. If your usage is correct but this error still encounters, "
+            "instead call `preprocess_astra`. If your usage is correct but this error still encounters, "
             "please file an issue at https://github.com/huggingface/peft/issues."
         )
     covariance_matrix = linear.covariance_matrix.float()
+    dim = covariance_matrix.size(0)
+    S, V = torch.linalg.eigh(covariance_matrix)
 
-    damp = 0.01
-    while True:
-        compensate = torch.diag(
-            torch.ones(covariance_matrix.size(0)).to(covariance_matrix.device)
-            * torch.mean(torch.diag(covariance_matrix))
-            * damp
-        )
-        fix_covariance_matrix = covariance_matrix + compensate
-        cov_inv = torch.linalg.inv(fix_covariance_matrix)
-        inv_error = torch.dist(
-            fix_covariance_matrix @ cov_inv, torch.eye(covariance_matrix.size(0)).to(get_model_device(linear))
-        ).item()
-        if inv_error < 0.05:
-            break
-        else:
-            damp = damp * 2
-    w = w @ fix_covariance_matrix  ## w: out_dim, in_dim; covariance_matrix: in_dim, in_dim
-
-    U, S, Vh = torch.linalg.svd(w, full_matrices=False)
-    V = (Vh @ cov_inv).transpose(0, 1)
-
-    # Sanity check, temporarily U and V are large, they will be crop after rank search
-    r = min_dim
-    if U.size(0) != out_dim or U.size(1) != r:
+    # Sanity check, temporarily S and V are large, they will be cropped after rank search
+    if S.size(0) != dim:
         raise ValueError(
-            f"Matrix U size mismatch: {U.size()} vs. ({out_dim}, {r}), "
+            f"Matrix S size mismatch: {S.size()} vs. ({dim},), "
             "please file an issue at https://github.com/huggingface/peft/issues."
         )
-    if S.size(0) != r:
+    if V.size(0) != dim or V.size(1) != dim:
         raise ValueError(
-            f"Matrix S size mismatch: {S.size()} vs. ({r},), "
-            "please file an issue at https://github.com/huggingface/peft/issues."
-        )
-    if V.size(0) != in_dim or V.size(1) != r:
-        raise ValueError(
-            f"Matrix V size mismatch: {V.size()} vs. ({in_dim}, {r}), "
+            f"Matrix V size mismatch: {V.size()} vs. ({dim}, {dim}), "
             "please file an issue at https://github.com/huggingface/peft/issues."
         )
 
-    # Offload U and V to CPU, they consume too much memory
-    U = U.cpu()
+    # Offload S and V to CPU, they consume too much memory
+    S = S.cpu()
     V = V.cpu()
-    return CordaEigens(
-        S_WC=S,
-        U_WC=U,
-        V_WC=V,
+    return AstraEigens(
+        S=S,
+        V=V,
     )
 
 
 @torch.no_grad()
-def crop_corda_eigens(model: nn.Module, config: LoraConfig):
+def crop_astra_eigens(model: nn.Module, config: LoraConfig):
     for name, module in target_modules(model, config):
+        # For Conv1D, weight is stored as (in_features, out_features), transposed compared to Linear
+        # But eigens are computed on the module output, so we need to account for this
+        weight_out_dim = module.weight.size(1) if isinstance(module, Conv1D) else module.weight.size(0)
+
+        if module.rank > weight_out_dim:
+            raise ValueError(
+                f"Astra requires `r` <= out_features but got r={module.rank} for a layer with weight shape "
+                f"{tuple(module.weight.shape)} (max usable r is {weight_out_dim})."
+            )
+
         # We don't expect saving sliced tensor writes the whole tensor to disk,
         # so it's necessary to copy the tensors.
         # Reference: https://github.com/pytorch/pytorch/issues/40157
-        if module.corda_method == "ipm":
-            module.eigens.S_WC = module.eigens.S_WC[: module.rank].clone()
-            module.eigens.U_WC = module.eigens.U_WC[:, : module.rank].clone().to(get_model_device(model))
-            module.eigens.V_WC = module.eigens.V_WC[:, : module.rank].clone().to(get_model_device(model))
-        elif module.corda_method == "kpm":
-            module.eigens.S_WC = module.eigens.S_WC[-module.rank :].clone()
-            module.eigens.U_WC = module.eigens.U_WC[:, -module.rank :].clone().to(get_model_device(model))
-            module.eigens.V_WC = module.eigens.V_WC[:, -module.rank :].clone().to(get_model_device(model))
-        else:
-            raise ValueError(f"Invalid corda_method found: {module.corda_method}, it should be 'ipm' or 'kpm'.")
+        module.eigens.S = module.eigens.S.clone()
+        module.eigens.V = module.eigens.V[:, -module.rank :].clone().to(get_model_device(model))
 
         # Sanity check
-        # For Conv1D, weight is stored as (in_features, out_features), transposed compared to Linear
-        # But U and V are computed on the transposed weight, so we need to account for this
-        weight_out_dim = module.weight.size(1) if isinstance(module, Conv1D) else module.weight.size(0)
-        weight_in_dim = module.weight.size(0) if isinstance(module, Conv1D) else module.weight.size(1)
-
-        if module.eigens.S_WC.size(0) != module.rank:
+        if module.eigens.S.size(0) != weight_out_dim:
             raise ValueError(
-                f"rank mismatch: {module.eigens.S_WC.size(0)} vs. {module.rank},"
+                f"Matrix S size mismatch: {module.eigens.S.size(0)} vs. ({weight_out_dim},),"
                 "please file an issue at https://github.com/huggingface/peft/issues."
             )
-        if module.eigens.U_WC.size(0) != weight_out_dim:
+        if module.eigens.V.size(0) != weight_out_dim:
             raise ValueError(
-                f"U size mismatch: {module.eigens.U_WC.size(0)} vs. {weight_out_dim},"
+                f"Matrix V size mismatch: {module.eigens.V.size(0)} vs. ({weight_out_dim},),"
                 "please file an issue at https://github.com/huggingface/peft/issues."
             )
-        if module.eigens.U_WC.size(1) != module.rank:
+        if module.eigens.V.size(1) != module.rank:
             raise ValueError(
-                f"U size mismatch: {module.eigens.U_WC.size(1)} vs. {module.rank},"
-                "please file an issue at https://github.com/huggingface/peft/issues."
-            )
-        if module.eigens.V_WC.size(0) != weight_in_dim:
-            raise ValueError(
-                f"V size mismatch: {module.eigens.V_WC.size(0)} vs. {weight_in_dim},"
-                "please file an issue at https://github.com/huggingface/peft/issues."
-            )
-        if module.eigens.V_WC.size(1) != module.rank:
-            raise ValueError(
-                f"V size mismatch: {module.eigens.V_WC.size(1)} vs. {module.rank},"
+                f"Matrix V size mismatch: {module.eigens.V.size(1)} vs. ({module.rank},),"
                 "please file an issue at https://github.com/huggingface/peft/issues."
             )
