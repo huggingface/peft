@@ -54,6 +54,7 @@ from transformers import (
     FineGrainedFP8Config,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
+    TorchAoConfig,
     Trainer,
     TrainerCallback,
     TrainingArguments,
@@ -4893,6 +4894,65 @@ class TestPeftTorchao:
         else:
             # Int8Tensor with act_quant_kwargs supports dequantize, so merging works
             model.merge_adapter()
+
+    @pytest.mark.single_gpu_tests
+    def test_torchao_safe_merge_broken_adapter_leaves_base_layer_unchanged(self):
+        torch.manual_seed(0)
+        device = 0
+
+        quantization_config = TorchAoConfig(quant_type=self.get_quant_type("int8_weight_only"))
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
+        ).eval()
+        config = LoraConfig(target_modules=["q_proj", "v_proj"], init_lora_weights=False)
+        model = get_peft_model(model, config)
+
+        # poison the first layer that merge_adapter visits, so the merge fails before any layer is merged
+        layer = next(module for module in model.modules() if isinstance(module, BaseTunerLayer))
+        with torch.no_grad():
+            layer.lora_B["default"].weight[0, 0] = float("nan")
+        orig_weight = layer.get_base_layer().weight.dequantize()
+
+        with pytest.raises(ValueError, match="NaNs detected in the merged weights"):
+            model.merge_adapter(safe_merge=True)
+
+        assert torch.equal(layer.get_base_layer().weight.dequantize(), orig_weight)
+        assert not layer.merged
+
+    @pytest.mark.single_gpu_tests
+    def test_torchao_lora_merge_several_adapters_in_one_call(self):
+        # Merging several adapters in one call should give the same weights as merging them one at a time
+        device = 0
+
+        def get_model_with_two_adapters():
+            torch.manual_seed(0)
+            quantization_config = TorchAoConfig(quant_type=self.get_quant_type("int8_weight_only"))
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
+            ).eval()
+            config_kwargs = {"target_modules": ["q_proj", "v_proj"], "init_lora_weights": False}
+            model = get_peft_model(model, LoraConfig(**config_kwargs))
+            model.add_adapter("other", LoraConfig(**config_kwargs))
+            return model
+
+        model_one_call = get_model_with_two_adapters()
+        model_one_call.merge_adapter(adapter_names=["default", "other"])
+
+        model_one_by_one = get_model_with_two_adapters()
+        model_one_by_one.merge_adapter(adapter_names=["default"])
+        model_one_by_one.merge_adapter(adapter_names=["other"])
+
+        layers_one_call = dict(model_one_call.named_modules())
+        lora_layers = [
+            (name, module) for name, module in model_one_by_one.named_modules() if isinstance(module, BaseTunerLayer)
+        ]
+        assert len(lora_layers) == 24  # (q_proj, v_proj) x 12 layers
+        for name, layer in lora_layers:
+            layer_one_call = layers_one_call[name]
+            assert layer_one_call.merged_adapters == ["default", "other"]
+            assert torch.equal(
+                layer_one_call.get_base_layer().weight.dequantize(), layer.get_base_layer().weight.dequantize()
+            )
 
     @pytest.mark.single_gpu_tests
     def test_torchao_lora_warns_when_base_not_quantized_via_transformers(self):

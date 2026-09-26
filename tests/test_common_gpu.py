@@ -57,11 +57,13 @@ from peft import (
 )
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_xpu_available
 from peft.tuners.lora.config import LoraRuntimeConfig
+from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import infer_device
 
 from .testing_utils import (
     DEVICE_MAP_MAP,
     device_count,
+    hub_online_once,
     load_cat_image,
     require_bitsandbytes,
     require_deterministic_for_xpu,
@@ -1786,6 +1788,94 @@ class PeftGPUCommonTests(unittest.TestCase):
         logits_hra = model(random_input).logits
 
         assert not torch.allclose(logits, logits_hra)
+
+
+@require_non_cpu
+@require_bitsandbytes
+@pytest.mark.single_gpu_tests
+class TestBnbMergeBias:
+    """Merging adapters that change the bias of a bitsandbytes quantized layer"""
+
+    model_id = "peft-internal-testing/opt-125m"
+
+    @pytest.fixture(autouse=True)
+    def cleanup(self):
+        yield
+        clear_device_cache(garbage_collection=True)
+
+    def get_model(self, quantization, config):
+        if quantization == "4bit":
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_use_double_quant=False,
+                bnb_4bit_compute_dtype=torch.float32,
+            )
+        else:
+            quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+
+        with hub_online_once(self.model_id):
+            model = AutoModelForCausalLM.from_pretrained(
+                self.model_id, quantization_config=quantization_config, dtype=torch.float32
+            )
+        return get_peft_model(model, config)
+
+    @staticmethod
+    def get_first_tuner_layer(model):
+        # the first layer that merge_adapter visits
+        return next(module for module in model.modules() if isinstance(module, BaseTunerLayer))
+
+    @pytest.mark.parametrize("quantization", ["8bit", "4bit"])
+    @pytest.mark.parametrize("method", ["lora", "road"])
+    def test_safe_merge_non_finite_bias_leaves_base_layer_unchanged(self, method, quantization):
+        # a safe merge that fails on the bias must not have replaced the quantized weight already
+        torch.manual_seed(0)
+        if method == "lora":
+            model = self.get_model(quantization, LoraConfig(init_lora_weights=False, lora_bias=True))
+            layer = self.get_first_tuner_layer(model)
+            bias_to_poison = layer.lora_B["default"].bias
+        else:
+            model = self.get_model(quantization, RoadConfig(init_weights=False))
+            layer = self.get_first_tuner_layer(model)
+            # RoAd has no bias of its own, it rotates the bias of the base layer
+            bias_to_poison = layer.get_base_layer().bias
+        with torch.no_grad():
+            bias_to_poison[0] = float("inf")
+
+        base_layer = layer.get_base_layer()
+        base_layer_cls = bnb.nn.Linear4bit if quantization == "4bit" else bnb.nn.Linear8bitLt
+        assert isinstance(base_layer, base_layer_cls)
+        orig_weight = base_layer.weight
+        orig_bias = base_layer.bias.detach().clone()
+
+        with pytest.raises(ValueError, match="NaNs detected in the merged bias"):
+            model.merge_adapter(safe_merge=True)
+
+        # a bnb merge replaces the weight with a newly quantized parameter, so identity shows it was not replaced
+        assert base_layer.weight is orig_weight
+        assert torch.equal(base_layer.bias, orig_bias)
+        assert not layer.merged
+
+    @pytest.mark.parametrize("quantization", ["8bit", "4bit"])
+    def test_merge_lora_bias_with_scaling(self, quantization):
+        # the forward pass adds lora_B.bias * scaling, so merging has to add the same amount to the base bias
+        torch.manual_seed(0)
+        config = LoraConfig(r=8, lora_alpha=16, init_lora_weights=False, lora_bias=True)
+        model = self.get_model(quantization, config)
+        lora_layers = [module for module in model.modules() if isinstance(module, BaseTunerLayer)]
+        assert lora_layers
+        orig_biases = [layer.get_base_layer().bias.detach().clone() for layer in lora_layers]
+        expected_biases = []
+        for layer, orig_bias in zip(lora_layers, orig_biases):
+            assert layer.scaling["default"] == 2
+            expected_biases.append(orig_bias + layer.lora_B["default"].bias.detach() * layer.scaling["default"])
+
+        model.merge_adapter()
+        for layer, expected_bias in zip(lora_layers, expected_biases):
+            assert torch.allclose(layer.get_base_layer().bias, expected_bias)
+
+        model.unmerge_adapter()
+        for layer, orig_bias in zip(lora_layers, orig_biases):
+            assert torch.allclose(layer.get_base_layer().bias, orig_bias, atol=1e-6)
 
 
 @pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
