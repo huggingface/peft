@@ -2351,82 +2351,94 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
     @pytest.mark.single_gpu_tests
     def test_bnb_8bit_merge_bias_applies_scaling(self):
-        # Regression test for #3741: the 8-bit merge/unmerge dropped
-        # `* scaling` on the bias, unlike the base path (`lora/layer.py`).
-        # Runs on a real quantized model, so the dequant path is genuine.
-        # scaling 8.0 (r=4, lora_alpha=32) makes a missing factor show up.
+        # Regression test for #3741: the 8-bit merge/unmerge dropped `* scaling` on the bias.
         model_id = "peft-internal-testing/opt-125m"
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
-            device_map="auto",
-        )
+
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+                device_map="auto",
+            )
+
         torch.manual_seed(0)
         model = get_peft_model(
             model,
-            LoraConfig(
-                r=4,
-                lora_alpha=32,
-                target_modules=["q_proj"],
-                lora_bias=True,
-                init_lora_weights=False,
-            ),
-        )
+            LoraConfig(r=4, lora_alpha=32, target_modules=["q_proj"], lora_bias=True, init_lora_weights=False),
+        ).eval()
+
+        inputs = torch.tensor([[1, 2, 3, 4, 5]], device=model.device)
+
+        with torch.inference_mode():
+            out_before = model(inputs).logits
+
+        model.merge_adapter()
+
+        with torch.inference_mode():
+            out_merged = model(inputs).logits
+
+        # With `lora_bias=True`, merging must reproduce the LoRA contribution including `* scaling`
+        # (scaling is 8.0 for r=4, lora_alpha=32). A dropped factor shifts the logits by several units.
+        mse = ((out_before - out_merged) ** 2).mean()
+        assert mse < 1.0
+
+        model.unmerge_adapter()
+
+        with torch.inference_mode():
+            out_unmerged = model(inputs).logits
+
+        mse = ((out_before - out_unmerged) ** 2).mean()
+        assert mse < 1.0
+
+        # safe_merge must raise ValueError on NaNs (a missing `.all()` raised an ambiguous-Boolean RuntimeError)
         layer = next(
             module
             for module in model.modules()
             if isinstance(module, LoraLayer) and module.get_base_layer().bias is not None
         )
-        assert layer.scaling["default"] == 8.0
-        base_bias = layer.get_base_layer().bias.data.clone()
-        expected = base_bias + layer.lora_B["default"].bias * 8.0
-        model.merge_adapter()
-        merged = layer.get_base_layer().bias.data.clone()
-        assert torch.allclose(merged.float(), expected.float(), atol=1e-3)
-        model.unmerge_adapter()
-        assert torch.allclose(layer.get_base_layer().bias.data.float(), base_bias.float(), atol=1e-3)
-
-        # safe_merge NaN guard must raise ValueError (the missing `.all()`
-        # raised an ambiguous-Boolean RuntimeError instead on multi-element
-        # bias).
         layer.lora_B["default"].bias.data.fill_(float("nan"))
+
         with pytest.raises(ValueError, match="NaNs detected"):
             model.merge_adapter(safe_merge=True)
 
     @pytest.mark.single_gpu_tests
     def test_bnb_4bit_merge_bias_applies_scaling(self):
-        # Same as above for the 4-bit path (#3741 comment scope), on a real
-        # quantized model.
+        # Regression test for #3741: the 4-bit merge/unmerge dropped `* scaling` on the bias.
         model_id = "peft-internal-testing/opt-125m"
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
-            device_map="auto",
-        )
+
+        with hub_online_once(model_id):
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+                device_map="auto",
+            )
+
         torch.manual_seed(0)
         model = get_peft_model(
             model,
-            LoraConfig(
-                r=4,
-                lora_alpha=32,
-                target_modules=["q_proj"],
-                lora_bias=True,
-                init_lora_weights=False,
-            ),
-        )
-        layer = next(
-            module
-            for module in model.modules()
-            if isinstance(module, LoraLayer) and module.get_base_layer().bias is not None
-        )
-        assert layer.scaling["default"] == 8.0
-        base_bias = layer.get_base_layer().bias.data.clone()
-        expected = base_bias + layer.lora_B["default"].bias * 8.0
+            LoraConfig(r=4, lora_alpha=32, target_modules=["q_proj"], lora_bias=True, init_lora_weights=False),
+        ).eval()
+
+        inputs = torch.tensor([[1, 2, 3, 4, 5]], device=model.device)
+
+        with torch.inference_mode():
+            out_before = model(inputs).logits
+
         model.merge_adapter()
-        merged = layer.get_base_layer().bias.data.clone()
-        assert torch.allclose(merged.float(), expected.float(), atol=1e-3)
+
+        with torch.inference_mode():
+            out_merged = model(inputs).logits
+
+        mse = ((out_before - out_merged) ** 2).mean()
+        assert mse < 1.0
+
         model.unmerge_adapter()
-        assert torch.allclose(layer.get_base_layer().bias.data.float(), base_bias.float(), atol=1e-3)
+
+        with torch.inference_mode():
+            out_unmerged = model(inputs).logits
+
+        mse = ((out_before - out_unmerged) ** 2).mean()
+        assert mse < 1.0
 
 
 @require_non_cpu

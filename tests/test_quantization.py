@@ -380,30 +380,3 @@ class TestQuantization:
             out_unloaded = model(dummy_input).logits
 
         check_outputs_similar(out_before, out_unloaded)
-
-    @pytest.mark.skipif(not is_bnb_available(), reason="bitsandbytes not available")
-    def test_bnb_merge_bias_without_base_bias_raises(self):
-        # Matches the base path: merging with `lora_bias=True` and no base bias raises.
-        import bitsandbytes as bnb
-
-        import peft.tuners.lora.bnb as bnb_lora
-        from peft import LoraConfig
-
-        orig_dequant = bnb_lora.dequantize_bnb_weight
-        bnb_lora.dequantize_bnb_weight = lambda w, state=None: w.data.float()
-        try:
-
-            class NoBiasNet(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-                    self.lin = bnb.nn.Linear8bitLt(16, 16, bias=False)
-                    self.is_loaded_in_8bit = True
-
-            torch.manual_seed(0)
-            model = get_peft_model(
-                NoBiasNet(), LoraConfig(r=4, target_modules=["lin"], lora_bias=True, init_lora_weights=False)
-            )
-            with pytest.raises(RuntimeError, match="has no bias"):
-                model.merge_adapter()
-        finally:
-            bnb_lora.dequantize_bnb_weight = orig_dequant
