@@ -1622,7 +1622,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         Sets the active adapter.
 
-        Only one adapter can be active at a time.
+        Only one adapter can be active at a time, since not all PEFT methods support having multiple adapters active
+        (e.g. prompt learning methods don't). For a method that does support it, activate several adapters at once with
+        `model.base_model.set_adapter([...])`.
 
         Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True) unless
         inference_mode is True.
@@ -1633,6 +1635,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             inference_mode (`bool`, optional):
                 Whether the activated adapter should be frozen (i.e. `requires_grad=False`). Default is False.
         """
+        if not isinstance(adapter_name, str):
+            raise TypeError(
+                f"Expected a single adapter name (str), got '{type(adapter_name)}' instead. This API can only "
+                "activate one adapter, since not all PEFT methods support multiple active adapters. If the PEFT "
+                "method being used supports it, call model.base_model.set_adapter([...]) instead."
+            )
         if adapter_name not in self.peft_config:
             raise ValueError(f"Adapter {adapter_name} not found.")
         self.active_adapter = adapter_name

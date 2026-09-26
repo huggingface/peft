@@ -5617,6 +5617,17 @@ class TestMultipleActiveAdapters:
 
         assert torch.equal(merged_weight(safe_merge=True), merged_weight(safe_merge=False))
 
+    def test_set_adapter_with_multiple_adapter_names_raises(self):
+        # PeftModel.set_adapter activates a single adapter, passing several of them must point to the API that
+        # supports it instead of failing on the adapter name lookup, see #3723
+        config = LoraConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config, adapter_name="adapter_1")
+        peft_model.add_adapter("adapter_2", config)
+
+        msg = "Expected a single adapter name (str), got '<class 'list'>' instead."
+        with pytest.raises(TypeError, match=re.escape(msg)):
+            peft_model.set_adapter(["adapter_1", "adapter_2"])
+
 
 class MLP_2x_same_shape(nn.Module):
     """Simple MLP with two layers of the same shape to test multiple adapters targeting same shape layers."""
