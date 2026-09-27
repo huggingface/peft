@@ -5799,6 +5799,8 @@ class TestRequiresGrad:
         ],
     )
     def test_inference_mode_controls_adapter_dropout(self, config_cls, config_kwargs, dropout_name):
+        # Use nonzero dropout to verify that inference_mode controls the adapter's stochastic behavior, not only its
+        # parameter trainability. Switching back to inference_mode=False should restore training behavior.
         config = config_cls(target_modules=["lin0"], **config_kwargs)
         peft_model = get_peft_model(MLP(), config)
         tuner_layer = peft_model.base_model.model.lin0
@@ -5807,21 +5809,33 @@ class TestRequiresGrad:
         assert dropout.training
         peft_model.set_adapter("default", inference_mode=True)
         assert not dropout.training
-        assert tuner_layer.training
         peft_model.set_adapter("default", inference_mode=False)
         assert dropout.training
 
-    def test_add_adapter_inference_mode_preserves_existing_adapter_dropout(self):
-        config = LoraConfig(target_modules=["lin0"], lora_dropout=0.5)
+    @pytest.mark.parametrize(
+        "config_cls, config_kwargs, dropout_name",
+        [
+            (LoraConfig, {"lora_dropout": 0.5}, "lora_dropout"),
+            (BOFTConfig, {"boft_dropout": 0.5, "boft_block_size": 2}, "boft_dropout"),
+            (RandLoraConfig, {"randlora_dropout": 0.5, "r": 2}, "randlora_dropout"),
+            (TinyLoraConfig, {"tinylora_dropout": 0.5, "r": 2}, "tinylora_dropout"),
+        ],
+    )
+    def test_add_adapter_inference_mode_preserves_existing_adapter_dropout(
+        self, config_cls, config_kwargs, dropout_name
+    ):
+        # Add an inference-mode adapter after a training-mode adapter and verify that each adapter keeps its own
+        # configured dropout state. The parent tuner layer is not checked because it cannot represent both modes.
+        config = config_cls(target_modules=["lin0"], **config_kwargs)
         peft_model = get_peft_model(MLP(), config)
         tuner_layer = peft_model.base_model.model.lin0
-        default_dropout = tuner_layer.lora_dropout["default"]
+        default_dropout = getattr(tuner_layer, dropout_name)["default"]
 
-        inference_config = LoraConfig(target_modules=["lin0"], lora_dropout=0.5, inference_mode=True)
+        inference_config = config_cls(target_modules=["lin0"], inference_mode=True, **config_kwargs)
         peft_model.add_adapter("other", inference_config)
 
         assert default_dropout.training
-        assert not tuner_layer.lora_dropout["other"].training
+        assert not getattr(tuner_layer, dropout_name)["other"].training
 
     def test_requires_grad_follows_inference_mode_trainable_token_indices(self):
         # check that passing inference_mode to set_adapter has the intended effect with LoRA and trainable tokens
