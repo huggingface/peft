@@ -886,6 +886,7 @@ class BaseTuner(nn.Module, ABC):
         # Adapter creation calls set_adapter as part of its housekeeping. Preserve existing adapter module modes
         # because the new adapter's inference_mode must not change the behavior of adapters that were already present.
         existing_adapter_modules_training = []
+        existing_auxiliary_modules_training = []
         seen_parameters = set()
         for key, module in named_modules:
             if isinstance(module, BaseTunerLayer):
@@ -896,6 +897,15 @@ class BaseTuner(nn.Module, ABC):
                         (submodule, submodule.training) for submodule in adapter_module.modules()
                     )
                 existing_adapter_modules_training.append((module, adapter_modules_training))
+            elif isinstance(module, AuxiliaryTrainingWrapper):
+                auxiliary_modules_training = {}
+                for existing_adapter_name in module._adapters:
+                    auxiliary_modules_training[existing_adapter_name] = [
+                        (submodule, submodule.training)
+                        for adapter_module in module._adapter_modules(existing_adapter_name)
+                        for submodule in adapter_module.modules()
+                    ]
+                existing_auxiliary_modules_training.append((module, auxiliary_modules_training))
             for parameter_name, parameter in module.named_parameters(recurse=False):
                 full_name = f"{key}.{parameter_name}" if key else parameter_name
                 if id(parameter) in seen_parameters:
@@ -1161,6 +1171,10 @@ class BaseTuner(nn.Module, ABC):
         # Restore existing adapter state after housekeeping, then initialize the newly added adapter from its config.
         for _, adapter_modules_training in existing_adapter_modules_training:
             for module_training in adapter_modules_training.values():
+                for submodule, training in module_training:
+                    submodule.train(training)
+        for _, auxiliary_modules_training in existing_auxiliary_modules_training:
+            for module_training in auxiliary_modules_training.values():
                 for submodule, training in module_training:
                     submodule.train(training)
         for module in model.modules():

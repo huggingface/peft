@@ -5805,6 +5805,38 @@ class TestRequiresGrad:
         peft_model.set_adapter("adapter1", inference_mode=True)
         self.check_requires_grad(peft_model)
 
+    def test_inference_mode_controls_modules_to_save_training_state(self):
+        # inference_mode must switch the selected modules_to_save copy to eval mode, while leaving the original module
+        # used by the base-model path unchanged. Switching back to training mode should restore the saved copy.
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = get_peft_model(MLP(), config)
+        wrapper = peft_model.base_model.model.lin1
+        saved_module = wrapper.modules_to_save["default"]
+
+        assert saved_module.training
+        assert wrapper.original_module.training
+        peft_model.set_adapter("default", inference_mode=True)
+        assert not saved_module.training
+        assert wrapper.original_module.training
+        peft_model.set_adapter("default", inference_mode=False)
+        assert saved_module.training
+        assert wrapper.original_module.training
+
+    def test_add_adapter_inference_mode_preserves_existing_modules_to_save_training_state(self):
+        # Adding an inference-only adapter must not change the existing adapter's saved-module mode. The new copy should
+        # start in eval mode, and the wrapper's original module must remain in its existing training mode.
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = get_peft_model(MLP(), config)
+        wrapper = peft_model.base_model.model.lin1
+        default_module = wrapper.modules_to_save["default"]
+
+        inference_config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"], inference_mode=True)
+        peft_model.add_adapter("other", inference_config)
+
+        assert default_module.training
+        assert not wrapper.modules_to_save["other"].training
+        assert wrapper.original_module.training
+
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", ALL_PEFT_CONFIG_CASES)
     def test_inference_mode_controls_adapter_modules(self, test_name, model_id, config_cls, config_kwargs):
         # Use one working custom-model case for every PEFT method. Some methods store adapter state only as tensors and
