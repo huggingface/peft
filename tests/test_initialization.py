@@ -4640,6 +4640,34 @@ class TestLilyInitialization:
         assert lin0_B_ptrs.isdisjoint(lin1_B_ptrs), "B adapters should not be shared between lin0 and lin1 layers"
 
 
+def test_prepare_model_for_compiled_hotswap_preserves_conv2d_attributes():
+    # Regression test for https://github.com/huggingface/peft/issues/3697: rank padding reconstructs Conv2d LoRA
+    # modules, which must retain the spatial attributes copied from the base layer.
+    class ConvModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = nn.Conv2d(1, 2, kernel_size=3, padding=2, dilation=2, padding_mode="reflect")
+
+        def forward(self, X):
+            return self.conv(X)
+
+    torch.manual_seed(0)
+    inputs = torch.randn(2, 1, 8, 8)
+    model = get_peft_model(
+        ConvModel(),
+        LoraConfig(target_modules=["conv"], r=2, init_lora_weights=False),
+    )
+    layer = model.base_model.model.conv
+    output_before = model(inputs)
+
+    prepare_model_for_compiled_hotswap(model, target_rank=4)
+    output_after = model(inputs)
+
+    assert layer.lora_A["default"].dilation == layer.base_layer.dilation
+    assert layer.lora_A["default"].padding_mode == layer.base_layer.padding_mode
+    assert torch.allclose(output_before, output_after, atol=1e-6, rtol=1e-5)
+
+
 @pytest.mark.skipif(
     platform.system() != "Linux", reason="Out of the box, torch.compile does not work on Windows or MacOS"
 )
@@ -4761,6 +4789,36 @@ class TestHotSwapping:
 
         # real check: model now behaves again like adapter 0
         assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
+
+    def test_hotswap_preserves_adapter_with_shared_name_prefix(self, tmp_path):
+        """Regression for #3780: replacing `foo` must leave `foobar`'s output unchanged."""
+        base_model = self.get_model()
+        config = LoraConfig(target_modules=["lin0"], r=2, init_lora_weights=False)
+        torch.manual_seed(1)
+        model = get_peft_model(deepcopy(base_model), config, adapter_name="foo").eval()
+        model.add_adapter("foobar", config)
+
+        torch.manual_seed(2)
+        incoming_model = get_peft_model(deepcopy(base_model), config).eval()
+        incoming_model.save_pretrained(tmp_path / "incoming")
+        inputs = torch.rand(3, 10, device=self.torch_device)
+
+        with torch.inference_mode():
+            incoming_output = incoming_model(inputs)
+            model.set_adapter("foo")
+            old_foo_output = model(inputs)
+            model.set_adapter("foobar")
+            expected_foobar_output = model(inputs)
+        assert not torch.allclose(old_foo_output, incoming_output)
+        assert not torch.allclose(expected_foobar_output, incoming_output)
+
+        hotswap_adapter(model, tmp_path / "incoming", adapter_name="foo")
+
+        with torch.inference_mode():
+            model.set_adapter("foo")
+            torch.testing.assert_close(model(inputs), incoming_output)
+            model.set_adapter("foobar")
+            torch.testing.assert_close(model(inputs), expected_foobar_output)
 
     @pytest.mark.parametrize("use_rslora", [False, True])
     @pytest.mark.parametrize("do_compile", [False, True])

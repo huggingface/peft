@@ -117,6 +117,20 @@ def _get_return_dict_transformers_v4(config) -> bool:
     return getattr(config, "return_dict", True) and not getattr(config, "torchscript", False)
 
 
+def _add_modules_to_save(peft_config: PeftConfig, module_names: list[str]) -> None:
+    """Add a task head's module names to `peft_config.modules_to_save`.
+
+    The config belongs to the caller and is stored by reference, so the list is rebound instead of extended in place,
+    and names that are already present are skipped. This way, reusing the same config (e.g. across cross-validation
+    folds) neither accumulates duplicates nor changes the configs of models that were already created from it.
+    """
+    if peft_config.modules_to_save is None:
+        peft_config.modules_to_save = module_names[:]
+    else:
+        existing = list(peft_config.modules_to_save)
+        peft_config.modules_to_save = existing + [name for name in module_names if name not in existing]
+
+
 class PeftModel(PushToHubMixin, torch.nn.Module):
     """
     Base model encompassing various Peft methods.
@@ -1830,10 +1844,7 @@ class PeftModelForSequenceClassification(PeftModel):
         classifier_module_names = ["classifier", "score"]
 
         if hasattr(peft_config, "modules_to_save"):
-            if peft_config.modules_to_save is None:
-                peft_config.modules_to_save = classifier_module_names[:]
-            else:
-                peft_config.modules_to_save.extend(classifier_module_names)
+            _add_modules_to_save(peft_config, classifier_module_names)
 
         # The modification of peft_config must happen before the init call as the `modules_to_save` information
         # will be used to guard the target layer matching against matching `modules_to_save` layers. Only the
@@ -1888,10 +1899,7 @@ class PeftModelForSequenceClassification(PeftModel):
         # ensure that additional adapters also add the classifier layer to modules_to_save
         if hasattr(peft_config, "modules_to_save"):
             classifier_module_names = ["classifier", "score"]
-            if peft_config.modules_to_save is None:
-                peft_config.modules_to_save = classifier_module_names[:]
-            else:
-                peft_config.modules_to_save.extend(classifier_module_names)
+            _add_modules_to_save(peft_config, classifier_module_names)
 
         return super().add_adapter(
             adapter_name,
@@ -2691,10 +2699,7 @@ class PeftModelForTokenClassification(PeftModel):
 
         classifier_module_names = ["classifier", "score"]
         if hasattr(peft_config, "modules_to_save"):
-            if peft_config.modules_to_save is None:
-                peft_config.modules_to_save = classifier_module_names[:]
-            else:
-                peft_config.modules_to_save.extend(classifier_module_names)
+            _add_modules_to_save(peft_config, classifier_module_names)
 
         for name, _ in self.base_model.named_children():
             if any(module_name in name for module_name in self.modules_to_save):
@@ -2744,10 +2749,7 @@ class PeftModelForTokenClassification(PeftModel):
         # ensure that additional adapters also add the classifier layer to modules_to_save
         if hasattr(peft_config, "modules_to_save"):
             classifier_module_names = ["classifier", "score"]
-            if peft_config.modules_to_save is None:
-                peft_config.modules_to_save = classifier_module_names[:]
-            else:
-                peft_config.modules_to_save.extend(classifier_module_names)
+            _add_modules_to_save(peft_config, classifier_module_names)
 
         return super().add_adapter(
             adapter_name,
@@ -2926,10 +2928,7 @@ class PeftModelForQuestionAnswering(PeftModel):
 
         qa_module_names = ["qa_outputs"]
         if hasattr(peft_config, "modules_to_save"):
-            if peft_config.modules_to_save is None:
-                peft_config.modules_to_save = qa_module_names[:]
-            else:
-                peft_config.modules_to_save.extend(qa_module_names)
+            _add_modules_to_save(peft_config, qa_module_names)
 
         for name, _ in self.base_model.named_children():
             if any(module_name in name for module_name in self.modules_to_save):
@@ -2979,10 +2978,7 @@ class PeftModelForQuestionAnswering(PeftModel):
         # ensure that additional adapters also add the classifier layer to modules_to_save
         if hasattr(peft_config, "modules_to_save"):
             qa_module_names = ["qa_outputs"]
-            if peft_config.modules_to_save is None:
-                peft_config.modules_to_save = qa_module_names[:]
-            else:
-                peft_config.modules_to_save.extend(qa_module_names)
+            _add_modules_to_save(peft_config, qa_module_names)
 
         return super().add_adapter(
             adapter_name,
