@@ -237,8 +237,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         are no active adapters (enabled but inactive). They are two separate mechanisms but sometimes it is helpful to
         know whether the model has any active/enabled adapter at all.
         """
-        if self.peft_config[self.active_adapter].is_prompt_learning:
-            return not self._adapters_disabled
+        if isinstance(self.active_adapter, str) and self.active_adapter in self.peft_config:
+            return not self.peft_config[self.active_adapter].is_prompt_learning
 
         return not self._adapters_disabled or not self.active_adapters
 
@@ -295,6 +295,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         if os.path.isfile(save_directory):
             raise ValueError(f"Provided path ({save_directory}) should be a directory, not a file")
+
+        if not self.peft_config:
+            raise ValueError(
+                "There are no adapters left to save: all adapters were deleted via `delete_adapter`. A PeftModel "
+                "without adapters has no adapter weights or configuration to write."
+            )
 
         if selected_adapters is None:
             selected_adapters = list(self.peft_config.keys())
@@ -1217,6 +1223,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # don't introduce a backwards incompatibility by raising an error.
         if num_adapters == 1:
             self.active_adapter = new_active_adapters[0]
+        elif num_adapters == 0:
+            # All adapters are gone (mirrors the prompt learning branch above); leaving the old name in place made
+            # active_peft_config and friends crash with a KeyError afterwards.
+            self.active_adapter = []
 
     @property
     def modules_to_save(self) -> Optional[set[str]]:
@@ -1669,7 +1679,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
     @property
     def active_peft_config(self):
-        return self.peft_config[self.active_adapter]
+        if isinstance(self.active_adapter, str) and self.active_adapter in self.peft_config:
+            return self.peft_config[self.active_adapter]
+        if len(self.peft_config) == 1:
+            return next(iter(self.peft_config.values()))
+        # All adapters were deleted; there is no active config anymore.
+        return PeftConfig()
 
     def _adjust_prompt_learning_kwargs(
         self,
