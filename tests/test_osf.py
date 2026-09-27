@@ -87,3 +87,29 @@ def test_osf_merge_and_unload_and_unmerge_behavior():
     # merge_and_unload should return the base model (no OSF wrappers)
     merged_model = wrapped.merge_and_unload()
     assert isinstance(merged_model.linear, torch.nn.Linear)
+
+
+def test_osf_merge_idempotent():
+    torch.manual_seed(0)
+    model = DummyModel(DummyConfig())
+    # init_weights=False ensures delta is non-zero so we can verify weight changes
+    cfg = OSFConfig(target_modules=["linear"], effective_rank=2, init_weights=False)
+    wrapped = get_peft_model(model, cfg)
+    osf_linear = wrapped.base_model.model.linear
+
+    w_initial = osf_linear.get_base_layer().weight.data.clone()
+    wrapped.merge_adapter()
+    w_merge1 = osf_linear.get_base_layer().weight.data.clone()
+
+    # Verify adapter delta was applied and adapter is recorded as merged
+    assert not torch.equal(w_initial, w_merge1)
+    assert osf_linear.merged_adapters == ["default"]
+    assert osf_linear.merged
+
+    # Merging a second time should be idempotent, raise standard warning, and not alter weights
+    with pytest.warns(UserWarning, match="All adapters are already merged, nothing to do"):
+        wrapped.merge_adapter()
+
+    w_merge2 = osf_linear.get_base_layer().weight.data.clone()
+    assert torch.equal(w_merge1, w_merge2)
+    assert osf_linear.merged_adapters == ["default"]
