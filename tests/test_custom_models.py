@@ -1371,6 +1371,9 @@ TEST_CASES = [
     ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
+ALL_PEFT_CONFIG_CASES = [
+    next(row for row in TEST_CASES if row[2] is config_cls) for config_cls in ALL_PEFT_CONFIG_CLASSES
+]
 
 # For this test matrix, each tuple consists of:
 # - test name
@@ -5662,12 +5665,16 @@ class TestRequiresGrad:
         assert len(diff) == 0, msg
 
     @staticmethod
-    def get_adapter_submodules(tuner_layer, adapter_name):
+    def get_adapter_submodules(model, adapter_name):
         adapter_submodules = []
-        for name in tuner_layer.adapter_layer_names + tuner_layer.other_param_names:
-            module_dict = getattr(tuner_layer, name, None)
-            if isinstance(module_dict, nn.ModuleDict) and adapter_name in module_dict:
-                adapter_submodules.extend(module_dict[adapter_name].modules())
+        for tuner_layer in model.modules():
+            if not isinstance(tuner_layer, BaseTunerLayer):
+                continue
+            for name, module_dict in tuner_layer.named_children():
+                if name == "base_layer":
+                    continue
+                if isinstance(module_dict, nn.ModuleDict) and adapter_name in module_dict:
+                    adapter_submodules.extend(module_dict[adapter_name].modules())
         return adapter_submodules
 
     def test_requires_grad_modules_to_save_default(self):
@@ -5798,71 +5805,52 @@ class TestRequiresGrad:
         peft_model.set_adapter("adapter1", inference_mode=True)
         self.check_requires_grad(peft_model)
 
-    @pytest.mark.parametrize(
-        "config_cls, config_kwargs, dropout_name",
-        [
-            (LoraConfig, {"lora_dropout": 0.5}, "lora_dropout"),
-            (BOFTConfig, {"boft_dropout": 0.5, "boft_block_size": 2}, "boft_dropout"),
-            (RandLoraConfig, {"randlora_dropout": 0.5, "r": 2}, "randlora_dropout"),
-            (TinyLoraConfig, {"tinylora_dropout": 0.5, "r": 2}, "tinylora_dropout"),
-        ],
-    )
-    def test_inference_mode_controls_adapter_dropout(self, config_cls, config_kwargs, dropout_name):
-        # Use nonzero dropout to ensure this test includes at least one adapter-owned module whose behavior depends on
-        # training mode, while the assertions below cover every adapter-owned submodule.
-        config = config_cls(target_modules=["lin0"], **config_kwargs)
-        peft_model = get_peft_model(MLP(), config)
-        tuner_layer = peft_model.base_model.model.lin0
-        dropout = getattr(tuner_layer, dropout_name)["default"]
-        adapter_submodules = self.get_adapter_submodules(tuner_layer, "default")
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", ALL_PEFT_CONFIG_CASES)
+    def test_inference_mode_controls_adapter_modules(self, test_name, model_id, config_cls, config_kwargs):
+        # Use one working custom-model case for every PEFT method. Some methods store adapter state only as tensors and
+        # therefore have no module training state to assert, methods with adapter submodules are checked recursively.
+        config = config_cls(**copy.deepcopy(config_kwargs))
+        peft_model = get_peft_model(MockTransformerWrapper.from_pretrained(model_id), config)
+        adapter_submodules = self.get_adapter_submodules(peft_model, "default")
+        base_layers = [module.base_layer for module in peft_model.modules() if isinstance(module, BaseTunerLayer)]
 
-        assert dropout in adapter_submodules
-        assert adapter_submodules
         assert all(submodule.training for submodule in adapter_submodules)
         # The base layer is not part of the adapter and must keep the model's original training state.
-        assert tuner_layer.base_layer.training
+        assert all(base_layer.training for base_layer in base_layers)
         peft_model.set_adapter("default", inference_mode=True)
         # inference_mode must switch the complete adapter sub-tree to eval mode, not only freeze its parameters.
         assert all(not submodule.training for submodule in adapter_submodules)
-        assert tuner_layer.base_layer.training
+        assert all(base_layer.training for base_layer in base_layers)
         peft_model.set_adapter("default", inference_mode=False)
         # Switching back to training mode restores the adapter sub-tree without changing the base layer.
         assert all(submodule.training for submodule in adapter_submodules)
-        assert tuner_layer.base_layer.training
+        assert all(base_layer.training for base_layer in base_layers)
 
-    @pytest.mark.parametrize(
-        "config_cls, config_kwargs, dropout_name",
-        [
-            (LoraConfig, {"lora_dropout": 0.5}, "lora_dropout"),
-            (BOFTConfig, {"boft_dropout": 0.5, "boft_block_size": 2}, "boft_dropout"),
-            (RandLoraConfig, {"randlora_dropout": 0.5, "r": 2}, "randlora_dropout"),
-            (TinyLoraConfig, {"tinylora_dropout": 0.5, "r": 2}, "tinylora_dropout"),
-        ],
-    )
-    def test_add_adapter_inference_mode_preserves_existing_adapter_dropout(
-        self, config_cls, config_kwargs, dropout_name
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", ALL_PEFT_CONFIG_CASES)
+    def test_add_adapter_inference_mode_preserves_existing_adapter_modules(
+        self, test_name, model_id, config_cls, config_kwargs
     ):
-        # Add an inference-mode adapter after a training-mode adapter. Each adapter sub-tree must keep its own mode,
-        # the parent tuner layer is deliberately not checked because it cannot represent both modes at once.
-        config = config_cls(target_modules=["lin0"], **config_kwargs)
-        peft_model = get_peft_model(MLP(), config)
-        tuner_layer = peft_model.base_model.model.lin0
-        default_dropout = getattr(tuner_layer, dropout_name)["default"]
-        default_submodules = self.get_adapter_submodules(tuner_layer, "default")
+        # Add an inference-mode adapter after a training-mode adapter for every PEFT method. Each adapter sub-tree must
+        # keep its own mode, the parent tuner layer is deliberately not checked because it cannot represent both modes.
+        config_kwargs = copy.deepcopy(config_kwargs)
+        config = config_cls(**config_kwargs)
+        peft_model = get_peft_model(MockTransformerWrapper.from_pretrained(model_id), config)
+        peft_model.set_adapter("default", inference_mode=False)
+        default_submodules = self.get_adapter_submodules(peft_model, "default")
 
-        inference_config = config_cls(target_modules=["lin0"], inference_mode=True, **config_kwargs)
+        inference_kwargs = copy.deepcopy(config_kwargs)
+        inference_kwargs["inference_mode"] = True
+        inference_config = config_cls(**inference_kwargs)
         peft_model.add_adapter("other", inference_config)
-        other_dropout = getattr(tuner_layer, dropout_name)["other"]
-        other_submodules = self.get_adapter_submodules(tuner_layer, "other")
+        other_submodules = self.get_adapter_submodules(peft_model, "other")
 
-        assert default_dropout in default_submodules
-        assert other_dropout in other_submodules
         # Adding the inference-only adapter must not reconfigure the existing training adapter.
         assert all(submodule.training for submodule in default_submodules)
         # The new adapter is initialized from inference_mode=True, including all nested adapter modules.
         assert all(not submodule.training for submodule in other_submodules)
         # Neither adapter-specific operation is allowed to change the base layer's mode.
-        assert tuner_layer.base_layer.training
+        base_layers = [module.base_layer for module in peft_model.modules() if isinstance(module, BaseTunerLayer)]
+        assert all(base_layer.training for base_layer in base_layers)
 
     def test_requires_grad_follows_inference_mode_trainable_token_indices(self):
         # check that passing inference_mode to set_adapter has the intended effect with LoRA and trainable tokens
