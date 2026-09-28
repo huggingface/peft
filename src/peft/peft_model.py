@@ -131,6 +131,36 @@ def _add_modules_to_save(peft_config: PeftConfig, module_names: list[str]) -> No
         peft_config.modules_to_save = existing + [name for name in module_names if name not in existing]
 
 
+def _filter_expected_adapter_keys(keys: list[str], config: PeftConfig) -> list[str]:
+    """Remove keys from a missing/unexpected adapter key list that are expected for structural reasons.
+
+    A key can legitimately be absent from, or extra in, a params-only comparison without indicating a real load
+    problem:
+
+    - VB-LoRA's shared ``vblora_vector_bank`` and TinyLoRA's layer-level ``tinylora_v`` are references to a
+      model-level parameter, not independent per-layer state.
+    - ``prompt_encoder`` itself is not part of the checkpoint.
+    - UniLoRA's ``unilora_theta_d`` outside its canonical ``base_model.unilora_theta_d.`` location is a reference,
+      not the owning parameter.
+    - Prompt learning's ``prompt_embeddings`` key is loaded through the prompt encoder
+      (:meth:`BaseTuner._load_adapter_state_dict`), not through ``model.load_state_dict``, so it never resolves
+      through the normal path and would otherwise always show up as unexpected.
+    """
+
+    def is_expected(k: str) -> bool:
+        if "vblora_vector_bank" in k or "prompt_encoder" in k or ".tinylora_v." in k:
+            return True
+        if (
+            config.peft_type == PeftType.UNILORA
+            and ".unilora_theta_d." in k
+            and not k.startswith("base_model.unilora_theta_d.")
+        ):
+            return True
+        return config.is_prompt_learning and k == "prompt_embeddings"
+
+    return [k for k in keys if not is_expected(k)]
+
+
 class PeftModel(PushToHubMixin, torch.nn.Module):
     """
     Base model encompassing various Peft methods.
@@ -440,6 +470,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         ephemeral_gpu_offload: bool = False,
         low_cpu_mem_usage: bool = False,
         key_mapping: Optional[dict[str, str]] = None,
+        strict_adapter_check: bool = False,
         **kwargs: Any,
     ) -> PeftModel:
         r"""
@@ -484,6 +515,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 Extra mapping of PEFT `state_dict` keys applied before loading the `state_dict`. When this mapping is
                 applied, the PEFT-specific `"base_model.model"` prefix is removed beforehand and the adapter name (e.g.
                 `"default"`) is not inserted yet. Only pass this argument if you know what you're doing.
+            strict_adapter_check (`bool`, *optional*, defaults to `False`):
+                If `True`, raise a `RuntimeError` when the checkpoint has adapter keys missing from, or unexpected
+                for, the model (see [`load_adapter`][PeftModel.load_adapter] for the exact semantics). When `False`
+                (the default), the same conditions are surfaced as a warning instead of an error.
             kwargs: (`optional`):
                 Additional keyword arguments passed along to the specific PEFT configuration class. This includes
                 `torch_device` (`str`, *optional*): the device to load the adapter on (forwarded to
@@ -619,32 +654,27 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             autocast_adapter_dtype=autocast_adapter_dtype,
             low_cpu_mem_usage=low_cpu_mem_usage,
             key_mapping=key_mapping,
+            strict_adapter_check=strict_adapter_check,
             **kwargs,
         )
 
-        # Filter out shared parameters that are duplicated at layer level:
-        # 1. Remove VB-LoRA vector bank, since it's a shared parameter set via the VBLoRAModel
-        # 2. Remove the prompt encoder, as it does not need to be part of the checkpoint
-        # 3. Remove TinyLoRA layer-level tinylora_v references (they share with model-level tinylora_v)
-        def is_shared_parameter(k):
-            # TinyLoRA: layer-level tinylora_v is a reference to model-level, exclude from warning
-            if "vblora_vector_bank" in k or "prompt_encoder" in k or ".tinylora_v." in k:
-                return True
-
-            return (
-                config.peft_type == PeftType.UNILORA
-                and ".unilora_theta_d." in k
-                and not k.startswith("base_model.unilora_theta_d.")
-            )
-
-        missing_keys = [k for k in load_result.missing_keys if not is_shared_parameter(k)]
-        if missing_keys:
-            # Let's warn here since (in contrast to load_adapter) we don't return the load result, so it could be quite
-            # difficult for users to even notice that something might have gone wrong here. As we filter out non PEFT
-            # keys from the missing keys, this gives no false positives.
+        # load_adapter already filters out keys that are expected to differ for structural reasons (shared
+        # parameters, the prompt encoder path, etc.) via `_filter_expected_adapter_keys`, and already raised above
+        # if `strict_adapter_check` was set and a real problem was found. What's left on `load_result` here is
+        # exactly what's worth telling the caller about.
+        missing_keys = load_result.missing_keys
+        unexpected_keys = load_result.unexpected_keys
+        if missing_keys or unexpected_keys:
+            # Let's warn here since (in contrast to load_adapter) we don't return the load result, so it could be
+            # quite difficult for users to even notice that something might have gone wrong here.
 
             # careful: if the wording of the warning is changed, adjust the unit tests accordingly!
-            warn_message = f"Found missing adapter keys while loading the checkpoint: {missing_keys}."
+            warn_parts = []
+            if missing_keys:
+                warn_parts.append(f"missing adapter keys: {missing_keys}")
+            if unexpected_keys:
+                warn_parts.append(f"unexpected adapter keys: {unexpected_keys}")
+            warn_message = f"Found {' and '.join(warn_parts)} while loading the checkpoint."
 
             prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(config.peft_type)
             if prefix and adapter_name in prefix:
@@ -1438,6 +1468,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         ephemeral_gpu_offload: bool = False,
         low_cpu_mem_usage: bool = False,
         key_mapping: Optional[dict[str, str]] = None,
+        strict_adapter_check: bool = False,
         **kwargs: Any,
     ):
         """
@@ -1476,6 +1507,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 Extra mapping of PEFT `state_dict` keys applied before loading the `state_dict`. When this mapping is
                 applied, the PEFT-specific `"base_model.model"` prefix is removed beforehand and the adapter name (e.g.
                 `"default"`) is not inserted yet. Only pass this argument if you know what you're doing.
+            strict_adapter_check (`bool`, *optional*, defaults to `False`):
+                If `True`, raise a `RuntimeError` when the checkpoint has adapter keys missing from, or unexpected
+                for, the model, after accounting for keys that are expected to differ for structural reasons (shared
+                parameters, the prompt encoder path, etc.). This is not the same check as
+                `torch.nn.Module.load_state_dict`'s `strict`: PEFT adapters always coexist with a frozen base model,
+                so this only ever concerns adapter-specific keys, never the base model's own parameters. When
+                `False` (the default), the same conditions are surfaced as a warning instead of an error.
             kwargs: (`optional`):
                 Additional arguments to modify the way the adapter is loaded, e.g. the token for Hugging Face Hub.
         """
@@ -1531,26 +1569,33 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 low_cpu_mem_usage=low_cpu_mem_usage,
             )
 
-        tuner = self.peft_config[adapter_name].peft_type
+        adapter_config = self.peft_config[adapter_name]
+        tuner = adapter_config.peft_type
         tuner_prefix = PEFT_TYPE_TO_PREFIX_MAPPING.get(tuner, "")
         adapter_missing_keys = []
 
         # Filter missing keys specific to the current adapter and tuner prefix.
         for key in load_result.missing_keys:
             if tuner_prefix in key and adapter_name in key:
-                # TinyLoRA: layer-level tinylora_v is a reference to model-level, skip it
-                if ".tinylora_v." in key:
-                    continue
-                if (
-                    tuner == PeftType.UNILORA
-                    and ".unilora_theta_d." in key
-                    and not key.startswith("base_model.unilora_theta_d.")
-                ):
-                    continue
                 adapter_missing_keys.append(key)
+        adapter_missing_keys = _filter_expected_adapter_keys(adapter_missing_keys, adapter_config)
 
         load_result.missing_keys.clear()
         load_result.missing_keys.extend(adapter_missing_keys)
+
+        adapter_unexpected_keys = _filter_expected_adapter_keys(load_result.unexpected_keys, adapter_config)
+        load_result.unexpected_keys.clear()
+        load_result.unexpected_keys.extend(adapter_unexpected_keys)
+
+        if strict_adapter_check and (load_result.missing_keys or load_result.unexpected_keys):
+            error_msgs = []
+            if load_result.missing_keys:
+                error_msgs.append(f"Missing key(s) in adapter state_dict: {load_result.missing_keys}")
+            if load_result.unexpected_keys:
+                error_msgs.append(f"Unexpected key(s) in adapter state_dict: {load_result.unexpected_keys}")
+            raise RuntimeError(
+                f"Error(s) in loading adapter '{adapter_name}' state_dict:\n\t" + "\n\t".join(error_msgs)
+            )
 
         if (
             (getattr(self, "hf_device_map", None) is not None)

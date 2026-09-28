@@ -3675,6 +3675,120 @@ def test_from_pretrained_missing_keys_warning(recwarn, tmp_path):
     assert any(missing_key in str(w.message) for w in recwarn.list)
 
 
+def test_from_pretrained_unexpected_keys_warning(recwarn, tmp_path):
+    # See issue 3804. from_pretrained should warn about unexpected adapter keys the same way it already warns
+    # about missing ones, since it discards the load_adapter result and the caller has no other way to notice.
+    model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+    config = LoraConfig()
+    model = get_peft_model(model, config)
+    state_dict = model.state_dict()
+    extra_key = "base_model.model.model.decoder.layers.0.self_attn.v_proj.lora_A.default.extra_weight"
+
+    def new_state_dict():
+        out = dict(state_dict)
+        out[extra_key] = state_dict["base_model.model.model.decoder.layers.0.self_attn.v_proj.lora_A.default.weight"]
+        return out
+
+    model.state_dict = new_state_dict
+    model.save_pretrained(tmp_path)
+    del model
+
+    model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+    model = PeftModel.from_pretrained(model, tmp_path)
+    assert any("unexpected adapter keys" in str(w.message) for w in recwarn.list)
+    # the adapter name segment is stripped from the reported key (it's re-inserted on load, not part of the file)
+    assert any("extra_weight" in str(w.message) for w in recwarn.list)
+
+
+class TestStrictAdapterCheck:
+    """Tests for the `strict_adapter_check` argument to `load_adapter` and `from_pretrained`. See issue 3804."""
+
+    def _get_model_and_state_dict(self):
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        model = get_peft_model(model, LoraConfig())
+        return model, model.state_dict()
+
+    def test_load_adapter_strict_adapter_check_passes_on_clean_load(self, tmp_path):
+        model, _ = self._get_model_and_state_dict()
+        model.save_pretrained(tmp_path)
+        del model
+
+        base = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        model = get_peft_model(base, LoraConfig())
+        # should not raise
+        model.load_adapter(tmp_path, adapter_name="other", strict_adapter_check=True)
+
+    def test_load_adapter_strict_adapter_check_raises_on_missing_key(self, tmp_path):
+        model, state_dict = self._get_model_and_state_dict()
+        missing_key = "base_model.model.model.decoder.layers.0.self_attn.v_proj.lora_A.default.weight"
+        model.state_dict = lambda: {k: v for k, v in state_dict.items() if k != missing_key}
+        model.save_pretrained(tmp_path)
+        del model
+
+        base = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        model = get_peft_model(base, LoraConfig())
+        with pytest.raises(RuntimeError, match="Missing key"):
+            model.load_adapter(tmp_path, adapter_name="other", strict_adapter_check=True)
+
+    def test_load_adapter_strict_adapter_check_raises_on_unexpected_key(self, tmp_path):
+        model, state_dict = self._get_model_and_state_dict()
+        extra_key = "base_model.model.model.decoder.layers.0.self_attn.v_proj.lora_A.default.extra_weight"
+
+        def new_state_dict():
+            out = dict(state_dict)
+            out[extra_key] = state_dict[
+                "base_model.model.model.decoder.layers.0.self_attn.v_proj.lora_A.default.weight"
+            ]
+            return out
+
+        model.state_dict = new_state_dict
+        model.save_pretrained(tmp_path)
+        del model
+
+        base = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        model = get_peft_model(base, LoraConfig())
+        with pytest.raises(RuntimeError, match="Unexpected key"):
+            model.load_adapter(tmp_path, adapter_name="other", strict_adapter_check=True)
+
+    def test_load_adapter_strict_adapter_check_default_false_only_warns(self, recwarn, tmp_path):
+        model, state_dict = self._get_model_and_state_dict()
+        missing_key = "base_model.model.model.decoder.layers.0.self_attn.v_proj.lora_A.default.weight"
+        model.state_dict = lambda: {k: v for k, v in state_dict.items() if k != missing_key}
+        model.save_pretrained(tmp_path)
+        del model
+
+        base = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        model = get_peft_model(base, LoraConfig())
+        # default is strict_adapter_check=False: no raise, load_adapter itself doesn't warn (from_pretrained does)
+        # loading under a new adapter name re-inserts that name into the reported key
+        result = model.load_adapter(tmp_path, adapter_name="other")
+        assert missing_key.replace(".default.", ".other.") in result.missing_keys
+
+    def test_from_pretrained_strict_adapter_check_raises(self, tmp_path):
+        model, state_dict = self._get_model_and_state_dict()
+        missing_key = "base_model.model.model.decoder.layers.0.self_attn.v_proj.lora_A.default.weight"
+        model.state_dict = lambda: {k: v for k, v in state_dict.items() if k != missing_key}
+        model.save_pretrained(tmp_path)
+        del model
+
+        base = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        with pytest.raises(RuntimeError, match="Missing key"):
+            PeftModel.from_pretrained(base, tmp_path, strict_adapter_check=True)
+
+    def test_strict_adapter_check_ignores_shared_and_prompt_encoder_keys(self, tmp_path):
+        # VB-LoRA's shared vector bank and the prompt encoder path must not trip strict_adapter_check: these are
+        # expected to differ from a plain per-layer key comparison for structural reasons, not load problems.
+        model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        config = VBLoRAConfig(target_modules=["q_proj", "v_proj"], vector_length=1, num_vectors=2)
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path)
+        del model
+
+        base = AutoModelForCausalLM.from_pretrained("peft-internal-testing/tiny-random-OPTForCausalLM")
+        # should not raise: vblora_vector_bank round-trips correctly, nothing structurally missing/unexpected
+        PeftModel.from_pretrained(base, tmp_path, strict_adapter_check=True)
+
+
 class TestNamingConflictWarning:
     """
     Tests for warnings related to naming conflicts between adapter names and tuner prefixes. References: Issue 2252
