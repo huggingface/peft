@@ -386,8 +386,8 @@ class MissLinear(nn.Module, MissLayer):
         """Return the additive delta weight W' - W for the given adapter.
 
         For `bat` mode, `get_delta_weight` already computes the additive delta (used in forward as `orig_weight +
-        delta_weight`), so we delegate to it. For `standard` and `mini` modes, `get_delta_weight_miss` returns the
-        full merged weight, so we subtract the base weight from it.
+        delta_weight`), so we delegate to it. For `standard` and `mini` modes, `get_delta_weight_miss` returns the full
+        merged weight, so we subtract the base weight from it.
         """
         if self.miss_fn[adapter_name] == "bat":
             return self.get_delta_weight(adapter_name, self.get_base_weight())
