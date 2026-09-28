@@ -36,7 +36,12 @@ from packaging import version
 from safetensors.torch import storage_ptr, storage_size
 from transformers import PreTrainedModel
 
-from ..import_utils import is_gptqmodel_available, is_torch_tpu_available, is_transformers_ge_v5_1_0
+from ..import_utils import (
+    is_gptqmodel_available,
+    is_torch_tpu_available,
+    is_transformers_ge_v5,
+    is_transformers_ge_v5_1_0,
+)
 from .constants import (
     CONFIG_NAME,
     EMBEDDING_LAYER_NAMES,
@@ -71,6 +76,7 @@ from .constants import (
     TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_SUPERTUNING_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_TINYLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_UNILORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
@@ -122,6 +128,7 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_RANDLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_ROAD_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_SHIRA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_SUPERTUNING_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_TINYLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_UNILORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
@@ -740,6 +747,14 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
         layers.
         """
         if adapter_name not in self.modules_to_save:
+            # The deleted adapter never managed this module, but the fallback adapter might: sync it to
+            # active, mirroring the path below. Otherwise the fallback's copy stays frozen while active.
+            if new_active_adapters:
+                new_active_adapter = new_active_adapters[0]
+                if new_active_adapter in self.modules_to_save and (
+                    not self.active_adapters or new_active_adapter != self.active_adapters[0]
+                ):
+                    self.set_adapter(new_active_adapter)
             return
 
         # set new active adapter, if necessary
@@ -1692,6 +1707,9 @@ def create_attention_mask(
     # the 4D causal mask exists, it should be present in the base model (XXXModel class) or in its decoder.
     base_model = getattr(model, model.base_model_prefix, model)
     decoder = base_model.get_decoder() if hasattr(base_model, "get_decoder") else None
+    # TODO: remove check for _prepare_4d_causal_attention_mask_with_cache_position once Transformers <= v5.2 is
+    # dropped. Note that for <= v5.2, the function may or may not exist, so the fallback in the
+    # `causal_mask_creation_function is None` case is still needed.
     causal_mask_creation_function = getattr(base_model, "_prepare_4d_causal_attention_mask_with_cache_position", None)
     if causal_mask_creation_function is None and decoder is not None:  # it may be in the decoder
         causal_mask_creation_function = getattr(decoder, "_prepare_4d_causal_attention_mask_with_cache_position", None)
@@ -1701,16 +1719,29 @@ def create_attention_mask(
         token_type_ids = getattr(model_input, "token_type_ids", None)
         # Some models may overwrite the general one
         causal_mask_creation_function = getattr(model, "create_masks_for_generate", create_masks_for_generate)
-        attention_mask = causal_mask_creation_function(
-            config=model.config,
-            # we only need batch size, seq_length and dtype here - we don't care about the values of the embeddings
-            input_embeds=torch.empty((batch_size, sequence_length), dtype=model.dtype),
-            attention_mask=attention_mask,
-            cache_position=cache_position,
-            past_key_values=past_key_values,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-        )
+        # Transforrmers only uses batch size, seq_length, and dtype of inputs_embeds to create the mask, so it's safe to
+        # create a dummy tensor here.
+        dummy_embeds = torch.empty((batch_size, sequence_length), dtype=model.dtype)
+        if is_transformers_ge_v5:
+            # transformers v5 renamed the input_embeds argument to inputs_embeds and removed cache_position
+            attention_mask = causal_mask_creation_function(
+                config=model.config,
+                inputs_embeds=dummy_embeds,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values,
+                token_type_ids=token_type_ids,
+                position_ids=position_ids,
+            )
+        else:
+            attention_mask = causal_mask_creation_function(
+                config=model.config,
+                input_embeds=dummy_embeds,
+                attention_mask=attention_mask,
+                cache_position=cache_position,
+                past_key_values=past_key_values,
+                token_type_ids=token_type_ids,
+                position_ids=position_ids,
+            )
     else:
         attention_mask = causal_mask_creation_function(
             attention_mask,

@@ -45,7 +45,6 @@ if is_bnb_available():
             super().__init__()
             PveraLayer.__init__(self, base_layer)
             self.fan_in_fan_out = config.fan_in_fan_out
-            self.sample_at_inference = config.sample_at_inference
 
             self._active_adapter = adapter_name
             self.update_layer(
@@ -226,9 +225,7 @@ if is_bnb_available():
 
                     x_temp = dropout(x.to(lambda_d.dtype))
                     mu, logvar = (lambda_d * F.linear(x_temp, sliced_A)).chunk(2, dim=-1)
-                    adapter_output = lambda_b * F.linear(
-                        self._reparametrize(mu, logvar, self.sample_at_inference), sliced_B
-                    )
+                    adapter_output = lambda_b * F.linear(self._reparametrize(mu, logvar, active_adapter), sliced_B)
 
                     if requires_conversion:
                         adapter_output = adapter_output.to(expected_dtype)
@@ -259,7 +256,6 @@ if is_bnb_4bit_available():
             super().__init__()
             PveraLayer.__init__(self, base_layer)
             self.fan_in_fan_out = config.fan_in_fan_out
-            self.sample_at_inference = config.sample_at_inference
 
             self._active_adapter = adapter_name
             self.update_layer(
@@ -396,9 +392,7 @@ if is_bnb_4bit_available():
 
                     x_temp = dropout(x.to(lambda_d.dtype))
                     mu, logvar = (lambda_d * F.linear(x_temp, sliced_A)).chunk(2, dim=-1)
-                    adapter_output = lambda_b * F.linear(
-                        self._reparametrize(mu, logvar, self.sample_at_inference), sliced_B
-                    )
+                    adapter_output = lambda_b * F.linear(self._reparametrize(mu, logvar, active_adapter), sliced_B)
 
                     if requires_conversion:
                         adapter_output = adapter_output.to(expected_dtype)

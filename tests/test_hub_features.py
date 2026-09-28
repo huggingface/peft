@@ -16,7 +16,7 @@ import copy
 import pytest
 import torch
 from huggingface_hub import ModelCard
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, GPT2Config, GPT2LMHeadModel
 
 from peft import AutoPeftModelForCausalLM, LoraConfig, PeftConfig, PeftModel, TaskType, get_peft_model
 
@@ -62,6 +62,26 @@ class TestLocalModel:
         peft_model = get_peft_model(base_model, peft_config)
         peft_model.save_pretrained(local_dir)
 
+        for warning in recwarn.list:
+            assert "Could not find a config file" not in warning.message.args[0]
+
+    def test_from_config_model_saving_skips_empty_name_or_path(self, recwarn, tmp_path):
+        # Transformers models built from a config have name_or_path == "". That empty string must not be treated as a
+        # Hub repo id when save_pretrained looks for config.json (see #1452 for the offline Hub lookup).
+        config = GPT2Config(
+            n_layer=1,
+            n_head=2,
+            n_embd=16,
+            n_positions=16,
+            n_ctx=16,
+            vocab_size=32,
+            bos_token_id=1,
+            eos_token_id=2,
+        )
+        peft_model = get_peft_model(GPT2LMHeadModel(config), LoraConfig(task_type=TaskType.CAUSAL_LM, r=4))
+        peft_model.save_pretrained(tmp_path)
+
+        assert peft_model.peft_config["default"].base_model_name_or_path is None
         for warning in recwarn.list:
             assert "Could not find a config file" not in warning.message.args[0]
 

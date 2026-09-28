@@ -109,7 +109,7 @@ class LycorisLayer(BaseTunerLayer):
         """Activations added on top of the base layer output (i.e. after the base layer forward pass)"""
 
     @abstractmethod
-    def get_delta_weight(self, adapter_name: str) -> torch.Tensor: ...
+    def get_delta_weight(self, adapter_name: str, *, apply_rank_dropout: bool = False) -> torch.Tensor: ...
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """

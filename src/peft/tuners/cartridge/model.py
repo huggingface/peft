@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import torch
 
+from peft.tuners.tuners_utils import BasePromptEncoder
 
-class CartridgeEncoder(torch.nn.Module):
+
+class CartridgeEncoder(BasePromptEncoder):
     """
     A parameterized prefix KV cache.
 
@@ -114,3 +116,6 @@ class CartridgeEncoder(torch.nn.Module):
         batch_size = prefix_tokens.shape[0]
         # Ignore token ids; they exist for prompt-learning uniformity.
         return self.weight.unsqueeze(0).expand(batch_size, -1, -1)
+
+    def _load_adapter_state_dict(self, state_dict):
+        self.load_prompt_embeddings(state_dict["prompt_embeddings"])

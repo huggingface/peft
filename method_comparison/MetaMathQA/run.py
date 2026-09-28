@@ -83,7 +83,10 @@ def get_generation_config(*, seq_len, generate_kwargs) -> GenerationConfig:
 
 def evaluate(model, tokenizer, ds, batch_size, generate_kwargs, use_tqdm: bool = False) -> tuple[list[str], list[str]]:
     generate_kwargs = generate_kwargs.copy()
-    generate_kwargs["pad_token_id"] = tokenizer.eos_token_id
+
+    if "pad_token_id" not in generate_kwargs:
+        generate_kwargs["pad_token_id"] = tokenizer.pad_token_id
+
     with torch.inference_mode():
         predictions = []
         responses = []
@@ -371,7 +374,7 @@ def train(
             tokenizer=tokenizer,
             ds=ds_test,
             batch_size=batch_size_eval,
-            generate_kwargs={**generation_kwargs, "pad_token_id": tokenizer.eos_token_id},
+            generate_kwargs={**generation_kwargs},
             use_tqdm=len(ds_test) > 100,
         )
         accuracy = get_accuracy(predictions=predictions, responses=responses)

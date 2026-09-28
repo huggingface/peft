@@ -17,10 +17,11 @@ import copy
 import torch
 from torch.nn import CrossEntropyLoss
 
+from peft.tuners.tuners_utils import BasePromptEncoder
 from peft.utils.integrations import gather_params_ctx
 
 
-class CPTEmbedding(torch.nn.Module):
+class CPTEmbedding(BasePromptEncoder):
     """
     CPTEmbedding is a custom embedding layer designed for Context-aware Prompt Tuning (CPT) in PEFT. It initializes
     embeddings, applies prompt-specific projections, and computes loss using label masks.

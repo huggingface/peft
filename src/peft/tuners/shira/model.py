@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import platform
 import warnings
 
 import torch
@@ -152,3 +153,49 @@ class ShiraModel(BaseTuner):
         )
 
         return new_module
+
+    @classmethod
+    def _get_adapter_state_dict(cls, model, config, adapter_name, state_dict, unwanted_adapter_names):
+        from peft.utils.save_and_load import _filter_state_dict_for_adapter_name
+
+        to_return = super()._get_adapter_state_dict(model, config, adapter_name, state_dict, unwanted_adapter_names)
+        if platform.system() == "Windows":
+            warnings.warn(
+                "Windows has issues saving integers into safetensors. Hence, we convert shira_indices to float32 "
+                "before saving on Windows OS. The shira_indices will always be converted to integers when loading."
+            )
+        for name, module in model.named_modules():
+            if hasattr(module, "shira_indices"):
+                for k, v in module.shira_indices.items():
+                    # Windows has some issues with saving integers into safetensors. Tests fail with some kind of
+                    # PermissionError. This results in failed tests, so we are converting indices to float32 before
+                    # saving and then converting them back to int when loading. This is happening only for Windows,
+                    # not for Linux and Mac-OS.
+                    to_return[f"{name}.shira_indices.{k}"] = (
+                        v.to(torch.float32) if platform.system() == "Windows" else v
+                    )
+                    # the above may contain other adapter names, so filter again
+                    to_return = _filter_state_dict_for_adapter_name(to_return, unwanted_adapter_names)
+        return to_return
+
+    @classmethod
+    def _remap_adapter_state_dict_for_load(cls, model, config, adapter_name, state_dict):
+        peft_model_state_dict = super()._remap_adapter_state_dict_for_load(model, config, adapter_name, state_dict)
+        if platform.system() == "Windows":
+            warnings.warn(
+                "Windows has issues saving integers into safetensors. Hence, we had converted shira_indices "
+                "to float32 before saving on Windows OS. The shira_indices will always be converted to integers "
+                "when loading."
+            )
+        for name, module in model.named_modules():
+            if hasattr(module, "shira_indices"):
+                # The shira_indices are stored in a plain dict, not as registered buffers, so their checkpoint keys
+                # have no counterpart in the model state_dict and are thus not remapped, i.e. they carry no adapter
+                # name.
+                if f"{name}.shira_indices" in peft_model_state_dict:
+                    shira_indices_values = peft_model_state_dict.pop(f"{name}.shira_indices")
+                    # Convert shira_indices to int in case they were saved on a Windows OS and are being loaded
+                    # on a Linux or a Mac-OS system. If they were saved in Linux or Mac-OS, they are already
+                    # integers and the following will not affect anything.
+                    module.shira_indices[adapter_name] = shira_indices_values.to(torch.int)
+        return peft_model_state_dict

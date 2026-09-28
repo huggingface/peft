@@ -204,8 +204,14 @@ def init_accelerator() -> int:
 def get_tokenizer(*, model_id: str, max_seq_length: int):
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.model_max_length = max_seq_length
-    if not tokenizer.pad_token:
-        tokenizer.pad_token = tokenizer.eos_token
+
+    # Override tokenizer settings to match our code.
+    # We assume that inputs are padded on the right side and we also assume
+    # the padding token to be the EOS token. We'll use this in the label
+    # creation so that we always have an EOS token at the end. See train().
+    tokenizer.padding_side = "right"
+    tokenizer.pad_token = tokenizer.eos_token
+
     return tokenizer
 
 
@@ -586,6 +592,15 @@ def get_peft_branch() -> str:
     )
 
 
+def get_peft_worktree_is_dirty() -> bool:
+    """Check if the PEFT git worktree has uncommitted changes."""
+    peft_dir = os.path.dirname(peft.__file__)
+    # Exit code 0 means clean, non-zero means dirty (or error, which we treat as dirty)
+    result = subprocess.run(["git", "diff", "--quiet"], cwd=peft_dir)
+    result_cached = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=peft_dir)
+    return result.returncode != 0 or result_cached.returncode != 0
+
+
 class TrainStatus(enum.Enum):
     FAILED = "failed"
     SUCCESS = "success"
@@ -705,6 +720,7 @@ def log_results(
             "total_time": time_total,
             "experiment_name": experiment_name,
             "peft_branch": peft_branch,
+            "peft_worktree_is_dirty": get_peft_worktree_is_dirty(),
             "train_config": asdict(train_config),
             "peft_config": peft_config_dict,
             "error_msg": train_result.error_msg,

@@ -28,7 +28,6 @@ from torch import nn
 __all__ = [
     "decompose_weight_matrix",
     "project_gradient_to_orthogonal_space",
-    "reconstruct_weight_matrix",
 ]
 
 
@@ -57,28 +56,6 @@ def decompose_weight_matrix(weight: torch.Tensor, top_k: int) -> dict[str, Any]:
         "rank_high": k,
     }
     return svd
-
-
-def reconstruct_weight_matrix(svd_dict: dict[str, torch.Tensor]) -> torch.Tensor:
-    """Reconstruct a weight matrix from its SVD components."""
-    U_high = svd_dict["U_high"]
-    S_high = svd_dict["S_high"]
-    V_high = svd_dict["V_high"]
-    U_low = svd_dict["U_low"]
-    S_low = svd_dict["S_low"]
-    V_low = svd_dict["V_low"]
-
-    high_part = (
-        torch.mm(U_high * S_high.unsqueeze(0), V_high)
-        if U_high.numel() > 0 and S_high.numel() > 0
-        else torch.zeros(U_low.size(0), V_low.size(1), device=U_high.device)
-    )
-    low_part = (
-        torch.mm(U_low * S_low.unsqueeze(0), V_low)
-        if U_low.numel() > 0 and S_low.numel() > 0
-        else torch.zeros(U_high.size(0), V_high.size(1), device=U_low.device)
-    )
-    return high_part + low_part
 
 
 def project_gradient_to_orthogonal_space(svd_dict: dict[str, Any]) -> None:

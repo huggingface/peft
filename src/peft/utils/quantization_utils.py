@@ -31,6 +31,7 @@ from peft.import_utils import (
     is_inc_available,
     is_te_pytorch_available,
     is_torchao_available,
+    is_torchao_ge_v0_18_0,
 )
 from peft.utils.integrations import dequantize_bnb_weight
 from peft.utils.other import is_gptqmodel_awq_layer
@@ -280,12 +281,9 @@ def resolve_quantization_backend(base_layer: nn.Module, **kwargs) -> Quantizatio
 
     # torchao
     if is_torchao_available():
-        from torchao.dtypes import AffineQuantizedTensor
-        from torchao.quantization import LinearActivationQuantizedTensor
+        from torchao.utils import TorchAOBaseTensor
 
-        if hasattr(base_layer, "weight") and isinstance(
-            base_layer.weight, (AffineQuantizedTensor, LinearActivationQuantizedTensor)
-        ):
+        if hasattr(base_layer, "weight") and isinstance(base_layer.weight, TorchAOBaseTensor):
             get_apply_tensor_subclass = kwargs.get("get_apply_tensor_subclass")
             if get_apply_tensor_subclass is None:
                 raise ValueError(
@@ -293,8 +291,13 @@ def resolve_quantization_backend(base_layer: nn.Module, **kwargs) -> Quantizatio
                     "This is required for merge/unmerge support."
                 )
             backend = TorchaoBackend(get_apply_tensor_subclass)
-            if isinstance(base_layer.weight, LinearActivationQuantizedTensor):
-                backend.supports_merge = False
+            if not is_torchao_ge_v0_18_0():
+                # On torchao < 0.18.0, LinearActivationQuantizedTensor does not support dequantize,
+                # so merging is not available for this weight type
+                from torchao.quantization import LinearActivationQuantizedTensor
+
+                if isinstance(base_layer.weight, LinearActivationQuantizedTensor):
+                    backend.supports_merge = False
             return backend
 
     # AQLM

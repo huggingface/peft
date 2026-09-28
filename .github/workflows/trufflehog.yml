@@ -15,4 +15,4 @@ jobs:
         fetch-depth: 0
         persist-credentials: false
     - name: Secret Scanning
-      uses: trufflesecurity/trufflehog@f446421baf832d6356c42c1743d99abff52ff334  # v3.95.7
+      uses: trufflesecurity/trufflehog@20652fbbdefffcdaa493a5bf57ab2ac6b1db715b  # v3.97.1

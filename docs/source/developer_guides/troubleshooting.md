@@ -106,6 +106,8 @@ after = next(p for p in model.parameters() if p.requires_grad)
 print("weights updated:", not torch.allclose(before, after.detach().cpu()))
 ```
 
+### Missing forward or backward hooks
+
 If the weights did not move, a likely cause is that parameter references were captured before the parameters were materialized on their target device. This can happen when the base model is wrapped with [`get_peft_model`] while its parameters have not yet been moved to the target device, and a third-party library then registers forward/backward hooks (for example, per-sample gradient hooks from a differential privacy framework) or an optimizer is created before the first forward call. When the parameters are materialized later, those hooks and optimizer references point at stale tensors and every update becomes a silent no-op.
 
 To avoid this, use the following order:
@@ -113,6 +115,35 @@ To avoid this, use the following order:
 1. Load the base model and move it to the target device (e.g. `model.to(device)`).
 2. Wrap it with [`get_peft_model`].
 3. Only then register hooks or create the optimizer.
+
+### Target modules don't match the model
+
+If training runs without errors but the loss barely moves — or the model shows no improvement after fine-tuning — the configured `target_modules` (or the default `target_modules` if not specified otherwise by the user) may not match the actual module names in the model. This is common with hybrid architectures such as Mamba, Jamba, or NemotronH, which use different layer names than standard Transformer models.
+
+PEFT raises an error only when *none* of the configured `target_modules` match any module in the model. If *some* match and *some* do not, the non-matching entries are silently skipped — there is no warning. A large fraction of the model can remain frozen without any indication.
+
+The first diagnostic is to check the trainable parameter count:
+
+```python
+from peft import LoraConfig, get_peft_model
+
+config = LoraConfig(target_modules=["q_proj", "v_proj", "gate_proj"])
+model = get_peft_model(base_model, config)
+model.print_trainable_parameters()
+```
+
+If the reported number is much lower than expected, inspect the adapter layers in the model:
+
+```python
+print(model.get_layer_status())
+```
+
+This returns a list of `TunerLayerStatus` entries showing each adapter layer's name, module type, enabled state, and active adapters. Alternatively, printing the model repr (`print(model)`) gives an overview of the full module hierarchy, which is useful for identifying the correct layer names on unfamiliar architectures.
+
+Any `target_modules` entry that does not correspond to a module in the model is silently skipped. Update `target_modules` to match the actual module names.
+
+> [!TIP]
+> This issue affects all PEFT methods that use `target_modules` (LoRA, LoHa, IA³, etc.), not just LoRA. The diagnostic steps are the same regardless of the method. If you are unsure which module names a given architecture uses, check the model's documentation or inspect `model.named_modules()` before configuring the adapter.
 
 ## Bad results from a loaded PEFT model
 
@@ -479,3 +510,35 @@ trainer.train()
 
 > [!TIP]
 > This section deals with using multiple adapters _of the same type_ on the same model, for example, using multiple LoRA adapters at the same time. It does not apply to using _different types_ of adapters on the same model, for example one LoRA adapter and one LoHa adapter. For this, please check [`PeftMixedModel`](https://huggingface.co/docs/peft/developer_guides/mixed_models).
+
+### Merging only some of the active adapters
+
+When adapter weights are merged into the base weights, the affected layers no longer apply any adapter during the forward pass, they only use the merged base weights. Therefore, if several adapters are active but only some of them are merged, the adapters that are still active but not merged are silently not applied:
+
+```python
+model = get_peft_model(base_model, lora_config_0, adapter_name="default")
+model.add_adapter("other", lora_config_1)
+model.base_model.set_adapter(["default", "other"])
+output_both = model(**inputs)
+
+model.merge_adapter(adapter_names=["default"])
+output_merged = model(**inputs)  # this is *not* the same as output_both
+```
+
+Here, `output_merged` is the output of the `"default"` adapter alone, even though `"other"` is still listed as active:
+
+```python
+>>> model.get_layer_status()[0].active_adapters
+['default', 'other']
+>>> model.get_layer_status()[0].merged_adapters
+['default']
+```
+
+The same applies when an adapter that is *not* active is merged: from then on, the model returns the output of the merged adapter and the active one is ignored. No error or warning is raised in either case. The adapter weights themselves are unaffected, so calling [`~LoraModel.unmerge_adapter`] restores the combined output.
+
+To avoid this, either merge all active adapters, i.e. call `model.merge_adapter()` without `adapter_names`, or unmerge before changing which adapters are active.
+
+This behavior is consistent across PEFT methods that support merging (LoRA, LoHa, LoKr, IA³, OFT, etc.), since they all share the same logic in the forward pass.
+
+> [!WARNING]
+> This behavior is confusing and is planned to change in the PEFT v1.0 release.

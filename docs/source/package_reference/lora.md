@@ -240,7 +240,7 @@ preprocess_loraga(model, lora_config, train_step)
 
 - **Initialization Strategies**: LoRA-GA supports four direction strategies (`direction`): `"ArBr"`, `"A2rBr"`, `"ArB2r"` (default), and `"random"`, and four scaling strategies (`scale`): `"stable"` (default), `"weight_svd"`, `"gd_scale"`, and `"unit"`. The default combination provides the best balance of convergence speed and stability.
 
-- **Base Weight Modification**: Unlike standard LoRA, LoRA-GA modifies the base model weights during initialization by subtracting a scaled version of the low-rank approximation. This enables better alignment with full fine-tuning gradients. Since base weights are modified, use `save_pretrained()` with the `save_embedding_layers` argument or `save_mutated_as_lora` pattern to properly save the adapter.
+- **Base Weight Modification**: Unlike standard LoRA, LoRA-GA modifies the base model weights during initialization by subtracting a scaled version of the low-rank approximation. This enables better alignment with full fine-tuning gradients. Since base weights are modified, use `save_pretrained()` with the `save_embedding_layers` argument or pass `path_initial_model_for_weight_conversion`.
 
 - **Computational Overhead**: The gradient estimation adds a small overhead during initialization (typically 1-2 minutes for 64 batches), but this is quickly amortized by faster convergence during training.
 
@@ -484,7 +484,7 @@ For users, this means:
 
 ## Optimizers
 
-LoRA training can optionally include special purpose optimizers. Currently PEFT supports LoRA-FA and LoRA+.
+LoRA training can optionally include special purpose optimizers. Currently PEFT supports LoRA-FA, LoRA+, and Riemannian-preconditioned LoRA.
 
 ### LoRA-FA Optimizer
 
@@ -548,6 +548,42 @@ trainer = Trainer(
 )
 ```
 
+### Riemannian-preconditioned LoRA
+
+LoRA training can be improved with a Riemannian preconditioner, as described in [Riemannian Preconditioned LoRA](https://huggingface.co/papers/2402.02347). On every optimizer step, the gradients of the LoRA matrices $A$ and $B$ are multiplied by an $r \times r$ preconditioner that rescales the Euclidean gradient toward the Riemannian (scaled-gradient) direction on the low-rank matrix manifold, which better conditions the update and can improve convergence. Because the preconditioner is $r \times r$, its memory and runtime overhead are small in the LoRA rank. `create_riemannian_optimizer` wraps any base optimizer class (e.g. `torch.optim.AdamW` or `torch.optim.SGD`): non-LoRA parameters are updated by the base optimizer unchanged, and only `nn.Linear`-shaped LoRA layers (`lora_A` / `lora_B`) are preconditioned.
+
+```py
+from peft import LoraConfig, get_peft_model
+from peft.optimizers import create_riemannian_optimizer
+from transformers import Trainer, get_cosine_schedule_with_warmup
+import torch
+
+base_model = AutoModelForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-8B-Instruct")
+
+config = LoraConfig(...)
+model = get_peft_model(base_model, config)
+
+optimizer = create_riemannian_optimizer(
+    model=model,
+    optimizer_cls=torch.optim.AdamW,
+    lr=5e-5,
+    reg=1e-2,
+)
+
+scheduler = get_cosine_schedule_with_warmup(
+    optimizer,
+    num_warmup_steps=100,
+    num_training_steps=1000,
+)
+
+trainer = Trainer(
+    ...,
+    optimizers=(optimizer, scheduler),
+)
+```
+
+`reg` is a damping term added to the $r \times r$ matrix diagonal before inversion; it stabilizes the preconditioner when a LoRA factor is (near) rank-deficient.
+
 
 ## Post-Training
 
@@ -590,6 +626,9 @@ model.merge_adapter()
 # unmerge the LoRA layers from the base model
 model.unmerge_adapter()
 ```
+
+> [!WARNING]
+> If several adapters are active and only some of them are merged, the adapters that are not merged are silently not applied. This behavior will change in PEFT v1.0. See [Merging only some of the active adapters](../developer_guides/troubleshooting#merging-only-some-of-the-active-adapters).
 
 The [`~LoraModel.add_weighted_adapter`] function is useful for merging multiple LoRAs into a new adapter based on a user provided weighting scheme in the `weights` parameter. Below is an end-to-end example.
 
@@ -706,6 +745,7 @@ LoRA supports [Tensor Parallelism (TP)](https://huggingface.co/docs/transformers
 
 > [!WARNING]
 > Tensor Parallelism support for LoRA requires `transformers >= 5.4.0`.
+> The DTensor-based Tensor Parallelism API requires `peft >= 0.21.1` and `transformers >= 5.17.0`.
 
 Usage is identical to the standard LoRA workflow — simply load the base model with a `tp_plan` before wrapping it with PEFT:
 
@@ -890,7 +930,7 @@ Using this feature has some drawbacks, namely:
 
 - It only works for inference, not for training.
 - Disabling adapters using the `with model.disable_adapter()` context takes precedence over `adapter_names`.
-- You cannot pass `adapter_names` when some adapter weights were merged with base weight using the `merge_adapter` method. Please unmerge all adapters first by calling `model.unmerge_adapter()`.
+- You cannot pass `adapter_names` when some adapter weights were merged with base weight using the `merge_adapter` method. Please unmerge all adapters first by calling `model.unmerge_adapter()`. Note that merging only some of the active adapters has a [similar caveat](../developer_guides/troubleshooting#merging-only-some-of-the-active-adapters) outside of `adapter_names`.
 - For obvious reasons, this cannot be used after calling `merge_and_unload()`, since all the LoRA adapters will be merged into the base weights in this case.
 - This feature does not currently work with DoRA, so set `use_dora=False` in your `LoraConfig` if you want to use it.
 - The `modules_to_save` feature is currently only supported for the layers of types `Linear`, `Embedding`, `Conv2d` and `Conv1d`.
@@ -1100,5 +1140,4 @@ To encode general knowledge, GenKnowSub subtracts the average of the provided ge
 ## Intruder Dimension Reduction
 
 [[autodoc]] tuners.lora.intruders.reduce_intruder_dimension
-
 

@@ -37,7 +37,7 @@ from peft import (
     get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
-from peft.utils import infer_device
+from peft.utils import AuxiliaryTrainingWrapper, infer_device
 
 
 class SimpleNet(nn.Module):
@@ -678,6 +678,49 @@ class TestMixedAdapterTypes(unittest.TestCase):
         peft_model.base_model.unmerge_adapter()
         peft_model.delete_adapter(["adapter1"])
         assert not peft_model.peft_config
+
+    def test_delete_active_adapter_keeps_remaining_adapter_active(self):
+        # Deleting the active LoRA adapter must keep the surviving LoHa adapter active even though it lives on a
+        # different layer and is therefore absent from the first tuner layer visited during deletion.
+        model = SimpleNet().eval().to(self.torch_device)
+        peft_model = get_peft_model(model, LoraConfig(target_modules=["lin0"]), "adapter0", mixed=True)
+        peft_model.add_adapter("adapter1", LoHaConfig(target_modules=["lin1"]))
+        peft_model.base_model.set_adapter("adapter0")
+
+        peft_model.delete_adapter("adapter0")
+
+        assert set(peft_model.peft_config) == {"adapter1"}
+        assert peft_model.active_adapters == ["adapter1"]
+        for module in peft_model.modules():
+            if isinstance(module, BaseTunerLayer) and "adapter1" in module._all_available_adapter_names():
+                assert module.active_adapters == ["adapter1"]
+
+    @parameterized.expand(["modules_to_save", "trainable_tokens"])
+    def test_delete_multiple_adapters_removes_every_auxiliary_adapter(self, auxiliary_type):
+        # Deleting multiple adapters in one call must remove every auxiliary entry in either input order. Previously,
+        # cleanup ran only for the final loop item and left the other adapter's auxiliary entry behind.
+        for names in (["adapter0", "adapter1"], ["adapter1", "adapter0"]):
+            model = SimpleNet().eval().to(self.torch_device)
+            if auxiliary_type == "modules_to_save":
+                config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+                config1 = LoHaConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+            else:
+                model.emb = nn.Embedding(10, 10).to(self.torch_device)
+                config0 = LoraConfig(target_modules=["lin0"], trainable_token_indices={"emb": [0, 1]})
+                config1 = LoraConfig(target_modules=["lin0"], trainable_token_indices={"emb": [0, 1]})
+
+            peft_model = get_peft_model(model, config0, "adapter0", mixed=True)
+            peft_model.add_adapter("adapter1", config1)
+
+            wrappers = [m for m in peft_model.modules() if isinstance(m, AuxiliaryTrainingWrapper)]
+            assert wrappers
+            assert all(w._get_available_adapters() == {"adapter0", "adapter1"} for w in wrappers)
+
+            peft_model.delete_adapter(names)
+
+            assert not peft_model.peft_config
+            for wrapper in wrappers:
+                assert not wrapper._get_available_adapters(), f"leftover after deleting {names}"
 
     def test_modules_to_save(self):
         model = SimpleNet().eval().to(self.torch_device)
