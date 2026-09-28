@@ -1217,6 +1217,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # don't introduce a backwards incompatibility by raising an error.
         if num_adapters == 1:
             self.active_adapter = new_active_adapters[0]
+        elif num_adapters == 0:
+            # Clearing the last adapter must clear PeftModel.active_adapter too;
+            # otherwise forward still asserts on the deleted name (#3828).
+            self.active_adapter = []
 
     @property
     def modules_to_save(self) -> Optional[set[str]]:
