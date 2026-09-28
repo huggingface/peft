@@ -11,7 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Enforce issue approval for new PRs. Setup and policy are documented in triage_prs.yml."""
+"""Enforce issue approval for new PRs. Setup and policy are documented in triage_prs.yml.
+
+Add the string
+
+      /peft-triage approved
+
+to approve an issue.
+"""
 
 import os
 import re
@@ -31,14 +38,18 @@ BOT_NAME = "peft-triage"
 
 # see: https://api.github.com/users/<user-id>
 MAINTAINERS = {"BenjaminBossan": 6229650, "githubnemo": 264196}
-ALLOW_LIST_USERS = {"dependabot[bot]": 49699333, "peft-jambot": 295153068}
+ALLOW_LIST_USERS = {"dependabot[bot]": 49699333, "peft-jambot": 295153068, "hf-security-analysis": 265538906}
 ALLOW_LIST_ORGANIZATIONS = {}  # Organization name -> immutable organization ID.
 # see: https://api.github.com/orgs/huggingface
 HF_ORGANIZATION_ID = 25720743
 GITHUB_ACTIONS_BOT_ID = 41898282
 MAX_ISSUE_REFERENCES = 10
+# Issue numbers listed here are accepted without an approval comment or API lookup.
+ALLOWED_ISSUES = {
+    2310,  # method comparison thread
+}
 # Discussion numbers listed here are accepted without an approval comment or API lookup.
-ALLOW_LIST_DISCUSSIONS: set[str] = {
+ALLOWED_DISCUSSIONS: set[str] = {
     3521,  # MetaMathQA benchmark discussion
     3522,  # image-gen benchmark discussion
 }
@@ -233,6 +244,7 @@ class PullRequestTriage:
         maintainers,
         allowed_users,
         allowed_organizations,
+        allowed_issues,
         allowed_discussions,
     ):
         self.client = client
@@ -243,6 +255,7 @@ class PullRequestTriage:
         self.maintainers = set(maintainers)
         self.allowed_users = set(allowed_users)
         self.allowed_organizations = dict(allowed_organizations)
+        self.allowed_issues = allowed_issues
         self.allowed_discussions = allowed_discussions
 
     def can_approve(self, user_id):
@@ -277,6 +290,9 @@ class PullRequestTriage:
     def has_allowed_discussion(self, body):
         return any(number in self.allowed_discussions for number in extract_discussion_numbers(body, self.repository))
 
+    def has_allowed_issue(self, body):
+        return any(number in self.allowed_issues for number in extract_issue_numbers(body, self.repository))
+
     def is_human_author(self, body):
         """Require a standalone declaration or checked checkbox outside comments and code fences."""
         pattern = rf" {{0,3}}(?:[-*+] \[x\][ \t]+)?{re.escape(HUMAN_MARKER)}\.?[ \t]*"
@@ -300,6 +316,7 @@ class PullRequestTriage:
         approved = (
             self.is_human_author(pr["body"])
             or self.is_exempt_author(pr["user"]["id"])
+            or self.has_allowed_issue(pr["body"])
             or self.has_allowed_discussion(pr["body"])
             or self.has_approved_issue(pr["body"])
         )
@@ -353,7 +370,8 @@ def main():
         maintainers=MAINTAINERS.values(),
         allowed_users=ALLOW_LIST_USERS.values(),
         allowed_organizations=ALLOW_LIST_ORGANIZATIONS,
-        allowed_discussions=ALLOW_LIST_DISCUSSIONS,
+        allowed_issues=ALLOWED_ISSUES,
+        allowed_discussions=ALLOWED_DISCUSSIONS,
     )
     triage.run(dry_run=str_to_bool(os.environ.get("DRY_RUN", "false")))
 

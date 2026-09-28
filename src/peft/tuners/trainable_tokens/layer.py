@@ -267,6 +267,7 @@ class TrainableTokensLayer(nn.Module, BaseTunerLayer):
                 result = F.linear(
                     input=x,
                     weight=W,
+                    bias=self.base_layer.bias,
                 )
             else:
                 raise ValueError(

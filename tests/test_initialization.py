@@ -4790,6 +4790,36 @@ class TestHotSwapping:
         # real check: model now behaves again like adapter 0
         assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
 
+    def test_hotswap_preserves_adapter_with_shared_name_prefix(self, tmp_path):
+        """Regression for #3780: replacing `foo` must leave `foobar`'s output unchanged."""
+        base_model = self.get_model()
+        config = LoraConfig(target_modules=["lin0"], r=2, init_lora_weights=False)
+        torch.manual_seed(1)
+        model = get_peft_model(deepcopy(base_model), config, adapter_name="foo").eval()
+        model.add_adapter("foobar", config)
+
+        torch.manual_seed(2)
+        incoming_model = get_peft_model(deepcopy(base_model), config).eval()
+        incoming_model.save_pretrained(tmp_path / "incoming")
+        inputs = torch.rand(3, 10, device=self.torch_device)
+
+        with torch.inference_mode():
+            incoming_output = incoming_model(inputs)
+            model.set_adapter("foo")
+            old_foo_output = model(inputs)
+            model.set_adapter("foobar")
+            expected_foobar_output = model(inputs)
+        assert not torch.allclose(old_foo_output, incoming_output)
+        assert not torch.allclose(expected_foobar_output, incoming_output)
+
+        hotswap_adapter(model, tmp_path / "incoming", adapter_name="foo")
+
+        with torch.inference_mode():
+            model.set_adapter("foo")
+            torch.testing.assert_close(model(inputs), incoming_output)
+            model.set_adapter("foobar")
+            torch.testing.assert_close(model(inputs), expected_foobar_output)
+
     @pytest.mark.parametrize("use_rslora", [False, True])
     @pytest.mark.parametrize("do_compile", [False, True])
     @pytest.mark.parametrize("pattern_key", ["lin1", "lin[1]"])
