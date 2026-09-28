@@ -520,7 +520,12 @@ class TestAuxiliaryTrainingWrapperParamsOnlyStateDict:
         return MyModule()
 
     def get_peft_model(self):
-        config = LoraConfig(target_modules=["proj"], modules_to_save=["router"], trainable_token_indices={"emb": [0]})
+        config = LoraConfig(
+            target_modules=["proj"],
+            modules_to_save=["router"],
+            trainable_token_indices={"emb": [0]},
+            init_lora_weights=False,
+        )
         model = get_peft_model(self.get_model(), config)
         # use a non-default buffer value to check that the actual value is saved and loaded
         model.base_model.model.router.modules_to_save["default"].e_score_correction_bias.fill_(3.0)

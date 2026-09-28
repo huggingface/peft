@@ -808,9 +808,12 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             if key in state_dict:
                 adapter_state_dict[k] = state_dict[key]
             elif k in buffer_names:
-                # The passed state_dict may contain only parameters, e.g. when it was built from gathered FSDP2
-                # DTensors via named_parameters(). Buffers are not sharded by FSDP or DeepSpeed, so the local copy
-                # holds the full value. Skipping the buffer instead would make loading the checkpoint fail.
+                # See #3805: the passed state_dict may contain only parameters, e.g. when it was built from
+                # gathered FSDP2 DTensors via named_parameters(). Buffers are not sharded by FSDP or DeepSpeed,
+                # so the local copy already holds the full value, and falling back to it here is correct.
+                # Skipping the buffer instead would leave the key out of the checkpoint, which
+                # set_peft_model_state_dict requires to be present for every key of the load map, so loading
+                # would fail later with a less clear error.
                 adapter_state_dict[k] = module.get_buffer(k)
             else:
                 raise KeyError(
@@ -939,8 +942,10 @@ class TrainableTokensWrapper(AuxiliaryTrainingWrapper):
 
         key = f"token_adapter.trainable_tokens_delta.{adapter_name}"
         if key not in state_dict:
-            # No fallback to the module's own tensor here: this is a parameter, which may be sharded (e.g. with
-            # DeepSpeed ZeRO-3), so the local copy is not guaranteed to hold the full value.
+            # See #3805, which added the equivalent fallback for ModulesToSaveWrapper's buffers above. There is
+            # no equivalent fallback here on purpose: trainable_tokens_delta is a parameter, not a buffer, and
+            # parameters (unlike buffers) can be sharded, e.g. with DeepSpeed ZeRO-3, so the local copy on this
+            # rank is not guaranteed to hold the full value the way a buffer's local copy is.
             raise KeyError(
                 f"Expected key '{key}' of trainable tokens adapter '{adapter_name}' in the passed state_dict, but it "
                 "is missing. The state_dict must contain the full (gathered) trainable tokens parameters."
