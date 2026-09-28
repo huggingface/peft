@@ -8233,8 +8233,24 @@ class TestDefaultTargetModules:
         assert model.peft_config["default"].target_modules == {"lin0", "lin1"}
 
 
+@pytest.fixture(scope="class")
+def fsdp_process_group():
+    # robust and minimal FSDP setup
+    dist.init_process_group(
+        backend="gloo",
+        store=dist.HashStore(),
+        rank=0,
+        world_size=1,
+    )
+    try:
+        yield
+    finally:
+        dist.destroy_process_group()
+
+
 @pytest.mark.skipif(platform.system() != "Linux", reason="Run FSDP tests only on Linux")
 @pytest.mark.skipif(not dist.is_available(), reason="These tests require torch.distributed")
+@pytest.mark.usefixtures("fsdp_process_group")
 class TestPeftFsdpStateDict:
     """
     Tests with FSDP-wrapped models.
@@ -8251,20 +8267,6 @@ class TestPeftFsdpStateDict:
     def prepare_inputs_for_testing(self):
         X = torch.arange(90).view(9, 10).to(self.torch_device)
         return {"X": X}
-
-    @pytest.fixture(autouse=True, scope="class")
-    def fsdp_process_group(self):
-        # robust and minimal FSDP setup
-        dist.init_process_group(
-            backend="gloo",
-            store=dist.HashStore(),
-            rank=0,
-            world_size=1,
-        )
-        try:
-            yield
-        finally:
-            dist.destroy_process_group()
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_save_load_roundtrip_fsdp_wrapped(self, test_name, model_id, config_cls, config_kwargs):
@@ -8360,3 +8362,106 @@ class TestPeftFsdpStateDict:
         with torch.no_grad():
             output_after = model(**X)
         assert torch.allclose(output_after, output_before)
+
+
+@pytest.mark.skipif(platform.system() != "Linux", reason="Run FSDP tests only on Linux")
+@pytest.mark.skipif(not dist.is_available(), reason="These tests require torch.distributed")
+@pytest.mark.usefixtures("fsdp_process_group")
+class TestFsdp2UnshardedParams:
+    """
+    Changes to `requires_grad` must reach the FSDP2 shards while a forward left unsharded parameters, see #3800.
+    """
+
+    def get_model(self, adapter_names=("default",), reshard_after_forward=False):
+        # imported here, as FSDP2 is public from torch 2.6 on
+        from torch.distributed.device_mesh import init_device_mesh
+        from torch.distributed.fsdp import fully_shard
+
+        torch.manual_seed(0)
+        config = LoraConfig(target_modules=["lin0", "lin1"], init_lora_weights=False)
+        model = get_peft_model(MLP(), config, adapter_name=adapter_names[0])
+        for adapter_name in adapter_names[1:]:
+            model.add_adapter(adapter_name, config)
+        mesh = init_device_mesh("cpu", (1,))
+        # lin0 gets its own FSDP module, lin1 belongs to the root FSDP module, which is the PeftModel
+        fully_shard(model.base_model.model.lin0, mesh=mesh, reshard_after_forward=reshard_after_forward)
+        fully_shard(model, mesh=mesh, reshard_after_forward=reshard_after_forward)
+        return model
+
+    def get_input(self):
+        return torch.arange(90).view(9, 10).float()
+
+    def get_lora_params(self, model, adapter_name="default"):
+        from torch.distributed.tensor import DTensor
+
+        # called before the first forward, so these are the sharded parameters that FSDP2 keeps
+        params = [param for name, param in model.named_parameters() if f"lora_A.{adapter_name}." in name]
+        params += [param for name, param in model.named_parameters() if f"lora_B.{adapter_name}." in name]
+        assert len(params) == 4
+        assert all(isinstance(param, DTensor) for param in params)
+        return params
+
+    @pytest.mark.parametrize("reshard_after_forward", [False, None])
+    def test_disable_adapter_after_backward(self, reshard_after_forward):
+        model = self.get_model(reshard_after_forward=reshard_after_forward)
+        X = self.get_input()
+        lora_params = self.get_lora_params(model)
+
+        model(X).sum().backward()  # the backward reshards all FSDP modules
+        with torch.no_grad(), model.disable_adapter():
+            model(X)
+        assert all(param.requires_grad for param in lora_params)
+
+        for _ in range(2):
+            for param in lora_params:
+                param.grad = None
+            model(X).sum().backward()
+            assert all(param.grad is not None for param in lora_params)
+
+    def test_set_requires_grad_after_forward(self):
+        model = self.get_model()
+        lora_params = self.get_lora_params(model)
+
+        with torch.no_grad():
+            model(self.get_input())
+        model.set_requires_grad("default", requires_grad=False)
+        assert not any(param.requires_grad for param in lora_params)
+
+    def test_set_adapter_after_forward(self):
+        model = self.get_model(adapter_names=("default", "other"))
+        default_params = self.get_lora_params(model, "default")
+        other_params = self.get_lora_params(model, "other")
+
+        with torch.no_grad():
+            model(self.get_input())
+        model.set_adapter("other")
+        assert all(param.requires_grad for param in other_params)
+        assert not any(param.requires_grad for param in default_params)
+
+    @pytest.mark.parametrize("operation", ["disable_adapter", "set_requires_grad", "set_adapter"])
+    def test_merged_after_forward_keeps_base_weights(self, operation):
+        # A merge after a forward goes into the unsharded parameters. Resharding would drop it, and the unmerge would
+        # then subtract the delta from the sharded base weights.
+        model = self.get_model(adapter_names=("default", "other"))
+        base_weights = {
+            name: model.base_model.model.get_submodule(name).base_layer.weight.full_tensor().clone()
+            for name in ("lin0", "lin1")
+        }
+
+        with torch.no_grad():
+            model(self.get_input())
+        model.merge_adapter()
+        if operation == "disable_adapter":
+            with model.disable_adapter():
+                pass
+        elif operation == "set_requires_grad":
+            model.set_requires_grad("default")
+        else:
+            model.set_adapter("other")  # unmerges first
+        if model.base_model.model.lin0.merged:
+            model.unmerge_adapter()
+
+        state_dict = model.state_dict()  # reshards, so this returns the sharded weights
+        for name, base_weight in base_weights.items():
+            weight = state_dict[f"base_model.model.{name}.base_layer.weight"].full_tensor()
+            assert torch.allclose(weight, base_weight, atol=1e-6)
