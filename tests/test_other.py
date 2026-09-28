@@ -108,6 +108,25 @@ def test_get_peft_model_revision_warning(tmp_path):
         _ = get_peft_model(base_model, lora_config, revision=overwrite_revision)
 
 
+def test_warn_unmatched_target_modules_entry():
+    # When some target_modules entries match and others don't, warn about the ones that matched nothing.
+    model = nn.Sequential(nn.Linear(8, 16), nn.ReLU(), nn.Linear(16, 8))
+    config = LoraConfig(r=2, target_modules=["0", "2", "nonexistent_proj"])
+    with pytest.warns(UserWarning, match="nonexistent_proj"):
+        get_peft_model(model, config)
+
+
+def test_no_warn_when_all_target_modules_match():
+    # No warning when every entry matches at least one module.
+    model = nn.Sequential(nn.Linear(8, 16), nn.ReLU(), nn.Linear(16, 8))
+    config = LoraConfig(r=2, target_modules=["0", "2"])
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        get_peft_model(model, config)
+
+
 def test_load_multiple_adapters_different_modules_to_save(tmp_path):
     # This tests the error described in #2422 where loading multiple adapters with different modules_to_save
     # attributes fails (due to a regression from #2376).

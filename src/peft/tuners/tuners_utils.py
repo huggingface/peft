@@ -1107,6 +1107,24 @@ class BaseTuner(nn.Module, ABC):
                     RuntimeWarning,
                 )
 
+        # Warn about individual target_modules entries that matched no module. Only applies when
+        # target_modules is an explicit list of strings (not a regex or "all-linear").
+        if (
+            targeted_module_names
+            and isinstance(peft_config.target_modules, (list, set))
+            and peft_config.target_modules != {"all-linear"}
+        ):
+            for target in peft_config.target_modules:
+                # A target entry matched if any targeted module name ends with it.
+                if not any(
+                    name == target or name.endswith(f".{target}") for name in targeted_module_names
+                ):
+                    warnings.warn(
+                        f"target_modules includes '{target}', but no module with that name was found in the model. "
+                        "Check for typos or remove it from target_modules.",
+                        UserWarning,
+                    )
+
         # Warn about rank_pattern / alpha_pattern entries that matched no targeted module. The
         # matching semantics are identical to `get_pattern_key`.
         for pattern_attr in ("rank_pattern", "alpha_pattern"):
