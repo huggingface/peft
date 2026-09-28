@@ -5033,6 +5033,24 @@ class TestPeftCustomModel(PeftCommonTester):
         assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is True
         assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is True
 
+    def test_mha_merge_applies_delta_weight_once(self):
+        # check for this bug: https://github.com/huggingface/peft/pull/3774
+        # The out_proj delta weight used to be applied twice when merging. Since forward of lora MHA merges the weights
+        # too, checking that the outputs with and without merging are the same is not sufficient to detect this.
+        base_model = ModelMha()
+        config = LoraConfig(target_modules=["mha"], init_lora_weights=False)
+        model = get_peft_model(base_model, config)
+        model = model.to(self.torch_device)
+        mha = model.base_model.model.mha.base_layer
+        lora_mha = model.base_model.model.mha
+
+        in_proj_expected = mha.in_proj_weight + lora_mha.get_delta_weight("default")
+        out_proj_expected = mha.out_proj.base_layer.weight + mha.out_proj.get_delta_weight("default")
+        model.merge_adapter()
+
+        assert torch.allclose(mha.in_proj_weight, in_proj_expected)
+        assert torch.allclose(mha.out_proj.base_layer.weight, out_proj_expected)
+
     def test_monteclora_variational_loss_computation(self):
         config = LoraConfig(
             r=8,

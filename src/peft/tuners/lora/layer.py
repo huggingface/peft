@@ -2078,9 +2078,11 @@ class MultiheadAttention(nn.Module, LoraLayer):
                     del base_layer.in_proj_weight
                     base_layer.in_proj_weight = orig_weight_in
 
+                    # out_proj.merge handles lora_bias and marks the adapter as merged, but its weight is replaced, as
+                    # otherwise the delta weight would be applied twice
+                    base_layer.out_proj.merge(safe_merge=True, adapter_names=[active_adapter])
                     del base_layer.out_proj.get_base_layer().weight
                     base_layer.out_proj.get_base_layer().weight = orig_weight_out
-                    base_layer.out_proj.merge(adapter_names=[active_adapter])
                 else:
                     # merging in_proj (nn.Parameter)
                     # TODO: work with separate weights
@@ -2095,9 +2097,11 @@ class MultiheadAttention(nn.Module, LoraLayer):
                     # merging out_proj (subclass of nn.Linear)
                     delta_weight = base_layer.out_proj.get_delta_weight(active_adapter).to(orig_dtype)
                     weight_merged = base_layer.out_proj.weight.data.detach() + delta_weight
+                    # out_proj.merge handles lora_bias and marks the adapter as merged, but its weight is replaced, as
+                    # otherwise the delta weight would be applied twice and gradients would not reach the LoRA weights
+                    base_layer.out_proj.merge(adapter_names=[active_adapter])
                     del base_layer.out_proj.get_base_layer().weight
                     base_layer.out_proj.get_base_layer().weight = weight_merged
-                    base_layer.out_proj.merge(adapter_names=[active_adapter])
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -2123,15 +2127,12 @@ class MultiheadAttention(nn.Module, LoraLayer):
                 del base_layer.in_proj_weight
                 base_layer.register_parameter("in_proj_weight", nn.Parameter(old_weight, requires_grad=False))
 
-                # out_proj
-                delta_weight = base_layer.out_proj.get_delta_weight(active_adapter).to(orig_dtype)
-                old_weight = base_layer.out_proj.base_layer.weight.data - delta_weight
-                del base_layer.out_proj.base_layer.weight
-                base_layer.out_proj.base_layer.register_parameter(
-                    "weight", nn.Parameter(old_weight, requires_grad=False)
-                )
-
-        self.get_base_layer().out_proj.unmerge()
+        # out_proj
+        base_layer.out_proj.unmerge()
+        out_proj_base = base_layer.out_proj.get_base_layer()
+        old_weight = out_proj_base.weight.data
+        del out_proj_base.weight
+        out_proj_base.register_parameter("weight", nn.Parameter(old_weight, requires_grad=False))
 
     def unload_and_optionally_merge_module(
         self, merge: bool, safe_merge: bool, adapter_names: Optional[list[str]]
