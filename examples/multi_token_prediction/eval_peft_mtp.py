@@ -274,19 +274,88 @@ def wire_candidate_generator(model, sampler, mask_token_ids, use_sampler):
 
     base._get_candidate_generator = patched.__get__(base, type(base))
 
+def determine_num_mtp_tokens_from_checkpoint(model_path: str):
+    adapter_config = PeftConfig.from_pretrained(model_path)
 
-def load_model(model_path: str, dtype=torch.bfloat16, force_num_mtp=None):
-    """Load base model and apply trained LoRA adapter with mask tokens."""
+    return len(adapter_config.alora_invocation_tokens)
+
+
+def load_base_model(model_path: str, dtype=torch.bfloat16, quantization=None, base_model_override=None):
+    """Load base model + tokenizer from an adapter checkpoint."""
+
+    # Read adapter config to get base model name
+    adapter_config = PeftConfig.from_pretrained(model_path)
+
+    if base_model_override is None:
+        base_model_name = adapter_config.base_model_name_or_path
+    else:
+        base_model_name = base_model_override
+
+    # Load tokenizer explicitly from base model repo to avoid using a modified tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(base_model_name)
+
+    # Load base model (original Llama without LoRA)
+    if quantization is None:
+        print(f"Loading base model: {base_model_name}")
+        base_model = AutoModelForCausalLM.from_pretrained(base_model_name, dtype=dtype)
+    elif quantization == "bnb4bit":
+        print(f"Loading base model in {quantization}: {base_model_name}")
+        from transformers import BitsAndBytesConfig
+
+        bnb_config = BitsAndBytesConfig(load_in_4bit=True)
+        base_model = AutoModelForCausalLM.from_pretrained(base_model_name, dtype="auto", quantization_config=bnb_config)
+    elif quantization == "bnbint8":
+        print(f"Loading base model in {quantization}: {base_model_name}")
+        from transformers import BitsAndBytesConfig
+
+        bnb_config = BitsAndBytesConfig()
+        base_model = AutoModelForCausalLM.from_pretrained(base_model_name, dtype="auto", quantization_config=bnb_config)
+    elif quantization == "awq4bit":
+        print(f"Loading base model in {quantization}: {base_model_name}")
+        from transformers import AwqConfig
+
+        quant_config = AwqConfig()
+        base_model = AutoModelForCausalLM.from_pretrained(base_model_name, dtype="auto", quantization_config=quant_config)
+
+    print("Base model loaded successfully")
+    return base_model, tokenizer
+
+
+def load_model(model_path: str, dtype=torch.bfloat16, force_num_mtp=None, quantization=None, base_model_override=None):
+    """Load base model and apply trained LoRA adapter with mask tokens. Loads the checkpoint's tokenizer as well. """
     # Load tokenizer (has the mask tokens we added during training)
     tokenizer = AutoTokenizer.from_pretrained(model_path)
 
     # Read adapter config to get base model name
     adapter_config = PeftConfig.from_pretrained(model_path)
-    base_model_name = adapter_config.base_model_name_or_path
+
+    if base_model_override is None:
+        base_model_name = adapter_config.base_model_name_or_path
+    else:
+        base_model_name = base_model_override
 
     # Load base model (original Llama without LoRA)
-    print(f"Loading base model: {base_model_name}")
-    base_model = AutoModelForCausalLM.from_pretrained(base_model_name, dtype=dtype)
+    if quantization is None:
+        print(f"Loading base model: {base_model_name}")
+        base_model = AutoModelForCausalLM.from_pretrained(base_model_name, dtype=dtype)
+    elif quantization == "bnb4bit":
+        print(f"Loading base model in {quantization}: {base_model_name}")
+        from transformers import BitsAndBytesConfig
+
+        bnb_config = BitsAndBytesConfig(load_in_4bit=True)
+        base_model = AutoModelForCausalLM.from_pretrained(base_model_name, dtype="auto", quantization_config=bnb_config)
+    elif quantization == "bnbint8":
+        print(f"Loading base model in {quantization}: {base_model_name}")
+        from transformers import BitsAndBytesConfig
+
+        bnb_config = BitsAndBytesConfig()
+        base_model = AutoModelForCausalLM.from_pretrained(base_model_name, dtype="auto", quantization_config=bnb_config)
+    elif quantization == "awq4bit":
+        print(f"Loading base model in {quantization}: {base_model_name}")
+        from transformers import AwqConfig
+
+        quant_config = AwqConfig()
+        base_model = AutoModelForCausalLM.from_pretrained(base_model_name, dtype="auto", quantization_config=quant_config)
 
     # Resize embeddings to match tokenizer (added mask tokens during training)
     base_model.resize_token_embeddings(len(tokenizer))
@@ -311,7 +380,6 @@ def load_model(model_path: str, dtype=torch.bfloat16, force_num_mtp=None):
 
     print("Model loaded successfully")
     print(f"Mask token IDs: {mask_token_ids}")
-    print(f"Trainable params: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
     return model, tokenizer, mask_token_ids, len(mask_token_ids)
 
@@ -477,6 +545,94 @@ def print_summary(records, K, args, skipped):
         print("        float32 is lossless — confirmed by test_precision.py")
 
 
+def run_eval(model, tokenizer, args, min_new_tokens, base_records=None):
+    """Runs the evaluation for a specific model.
+
+    Assumes that the first run is the base model run and that the second run is the modified MTP
+    model with `base_records` being the records done in the base model run.
+
+    Further assumes that the base model run produces exactly as many rows in exactly the
+    same order as the MTP run.
+    """
+    rows, skipped = load_eval_rows(
+        args.dataset, tokenizer, args.prompt_len, args.num_samples, args.per_source
+    )
+
+    is_base_run = base_records is None
+
+    if is_base_run:
+        print(f"Base model: Evaluating {len(rows)} samples from {args.dataset}")
+    else:
+        print(f"MTP model: Evaluating {len(rows)} samples from {args.dataset}")
+
+    records = []
+    for i, row in enumerate(rows):
+        ids = torch.tensor([row["ids"]], dtype=torch.long)
+
+        if is_base_run:
+            ref, t_ref = greedy_ref(model, ids.clone(), min_new_tokens, args.max_new_tokens, args.device)
+            ref_new = ref[0, len(row["ids"]) :].tolist()
+            n_tok_ref = len(ref_new)
+
+            record = {
+                "source": row["source"],
+                "ref_new": ref_new,
+                "n_tok_ref": n_tok_ref,
+                "t_ref": t_ref,
+            }
+
+            src = row["source"].removeprefix("ai2-adapt-dev/")
+            print(
+                f"[{i + 1}/{len(rows)}] {src}: generated {n_tok_ref:3d} t_ref {t_ref:6.1f}s"
+            )
+        else:
+            out, t_mtp = mtp_gen(model, ids.clone(), min_new_tokens, args.max_new_tokens, args.device)
+
+            ref_new = base_records[i]['ref_new']
+            out_new = out[0, len(row["ids"]) :].tolist()
+
+            match = ref_new == out_new
+            if args.verbose and not match:
+                for j, (r, o) in enumerate(zip(ref_new, out_new)):
+                    if r != o:
+                        print(
+                            f"  DIVERGE at pos {j}: ref={tokenizer.decode([r])!r} mtp={tokenizer.decode([o])!r}"
+                        )
+
+            cg = getattr(model, "_last_mtp_generator", None)
+            nm = cg.n_matches_history if cg else []  # safe since AloraMTPCandidateGenerator is reset each generation
+            n_acc = sum(nm)
+            n_tok = len(out_new)
+            matched = [n for n in nm if n > 0]
+            avg_k = sum(matched) / len(matched)  # average number of successive matches
+            t_ref = base_records[i]['t_ref']
+
+            # sanity check to prevent misaligned samples
+            assert base_records[i]['source'] == row['source']
+            assert base_records[i]['n_tok_ref'] == n_tok
+
+            record = {
+                "n_tok": n_tok,  # asserted to be == n_tok_ref
+                "n_acc": n_acc,
+                "fwd": len(nm),
+                "t_mtp": t_mtp,
+                "avg_k": avg_k,
+                "lossless": match,
+            }
+            record = {**base_records[i], **record}
+
+            src = row["source"].removeprefix("ai2-adapt-dev/")
+            print(
+                f"[{i + 1}/{len(rows)}] {src}: accepted {n_acc:3d}/{n_tok:3d} "
+                f"({n_acc / max(n_tok, 1) * 100:4.0f}%) | avg_k {avg_k:2.2f} | fwd {len(nm)} | "
+                f"t_ref {t_ref:6.1f}s t_mtp {t_mtp:6.1f}s | {t_ref / max(t_mtp, 1e-9):5.2f}x"
+            )
+
+        records.append(record)
+
+    return records, skipped
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model_path", default="mtp_a3_seq384")
@@ -513,18 +669,58 @@ def main():
         help="use trained sampler head instead of base unembedding",
     )
     ap.add_argument("--dtype", default="bfloat16", choices=["float16", "bfloat16", "float32"])
+    ap.add_argument("--quantization", default=None, choices=["bnbint8", "bnb4bit", "awq4bit"])
+    ap.add_argument("--base_model_override", default=None, type=str,
+        help="Useful for AWQ which needs a quantized base model.")
     ap.add_argument("--verbose", action="store_true", help="print divergence details")
     args = ap.parse_args()
 
     dtype = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}[args.dtype]
-    model, tokenizer, mask_ids, K = load_model(args.model_path, dtype=dtype, force_num_mtp=args.num_mtp)
-    model = model.to(args.device)
 
-    # make sure that we generate at least K tokens in every generationi so that every sample can
+    # make sure that we generate at least K tokens in every generation, so that every sample can
     # be used to determine how well the MTP portion models the base model - even when the base
     # model would generate EOS immediately. While this is certainly possible, it is unlikely to
     # be the case for instruction-trained models and also not the focus of this benchmark.
+    K = determine_num_mtp_tokens_from_checkpoint(args.model_path)
     min_new_tokens = K
+    print(f"Setting {min_new_tokens=} ( == num_mtp)")
+
+    # Base model evaluation
+    #
+    # To make sure that the baseline is as correct as possible we evalaute the base model
+    # first before doing any patching / loading / ... regarding PEFT.
+    base_model, tokenizer = load_base_model(
+        args.model_path,
+        dtype=dtype,
+        quantization=args.quantization,
+        base_model_override=args.base_model_override
+    )
+    base_model = base_model.to(args.device)
+
+    # TODO remove these two lines, just for benchmarking
+    from peft import get_peft_model
+    base_model = get_peft_model(base_model, PeftConfig.from_pretrained(args.model_path))
+
+    base_records, base_skipped_rows = run_eval(
+        model=base_model,
+        tokenizer=tokenizer,
+        args=args,
+        min_new_tokens=min_new_tokens,
+    )
+
+    del base_model
+    del tokenizer
+
+    # PEFT MTP model evaluation
+    #
+    # We explicitly do not adapt the base model but make sure to load everything freshly.
+    model, tokenizer, mask_ids, K = load_model(
+        args.model_path, dtype=dtype,
+        force_num_mtp=args.num_mtp,
+        quantization=args.quantization,
+        base_model_override=args.base_model_override,
+    )
+    model = model.to(args.device)
 
     sampler = None
     if args.use_sampler:
@@ -535,55 +731,16 @@ def main():
         model, sampler=sampler, mask_token_ids=mask_ids, use_sampler=args.use_sampler
     )
 
-    rows, skipped = load_eval_rows(
-        args.dataset, tokenizer, args.prompt_len, args.num_samples, args.per_source
+    total_records, mtp_skipped_rows = run_eval(
+        model=model,
+        tokenizer=tokenizer,
+        args=args,
+        min_new_tokens=min_new_tokens,
+        base_records=base_records,
     )
-    print(f"Evaluating {len(rows)} samples from {args.dataset}")
 
-    records = []
-    for i, row in enumerate(rows):
-        ids = torch.tensor([row["ids"]], dtype=torch.long)
-        ref, t_ref = greedy_ref(model, ids.clone(), min_new_tokens, args.max_new_tokens, args.device)
-        out, t_mtp = mtp_gen(model, ids.clone(), min_new_tokens, args.max_new_tokens, args.device)
-
-        ref_new = ref[0, len(row["ids"]) :].tolist()
-        out_new = out[0, len(row["ids"]) :].tolist()
-        match = ref_new == out_new
-        if args.verbose and not match:
-            for j, (r, o) in enumerate(zip(ref_new, out_new)):
-                if r != o:
-                    print(
-                        f"  DIVERGE at pos {j}: ref={tokenizer.decode([r])!r} mtp={tokenizer.decode([o])!r}"
-                    )
-                    break
-
-        cg = getattr(model, "_last_mtp_generator", None)
-        nm = cg.n_matches_history if cg else []  # safe since AloraMTPCandidateGenerator is reset each generation
-        n_acc = sum(nm)
-        n_tok = len(out_new)
-        matched = [n for n in nm if n > 0]
-        avg_k = sum(matched) / len(matched)  # average number of successive matches
-        records.append(
-            {
-                "source": row["source"],
-                "n_tok": n_tok,
-                "n_acc": n_acc,
-                "fwd": len(nm),
-                "t_ref": t_ref,
-                "t_mtp": t_mtp,
-                "avg_k": avg_k,
-                "lossless": match,
-            }
-        )
-
-        src = row["source"].removeprefix("ai2-adapt-dev/")
-        print(
-            f"[{i + 1}/{len(rows)}] {src}: accepted {n_acc:3d}/{n_tok:3d} "
-            f"({n_acc / max(n_tok, 1) * 100:4.0f}%) | avg_k {avg_k:2.2f} | fwd {len(nm)} | "
-            f"t_ref {t_ref:6.1f}s t_mtp {t_mtp:6.1f}s | {t_ref / max(t_mtp, 1e-9):5.2f}x"
-        )
-
-    print_summary(records, K, args, skipped)
+    assert mtp_skipped_rows == base_skipped_rows
+    print_summary(total_records, K, args, base_skipped_rows)
 
 
 if __name__ == "__main__":
