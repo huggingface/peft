@@ -1331,7 +1331,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         it does mean that a training run is guaranteed to succeed.
 
         Args:
-            sink (`callable`, *optiona*, default=`print`)
+            sink (`callable`, *optional*, default=`print`)
                 Function which is called to print the output. By default, just the builtin `print` function, but can
                 also be something else like `logger.info`.
             min_trainable_params (`int`, *optional*, default=`1`)

@@ -97,12 +97,12 @@ def run_healthcheck(model, min_trainable_params: int = 1, max_trainable_params_p
     """
     Inspect a PEFT model for states that are suspicious before training.
 
-    This function summarizes the model and layer status APIs, and includes findings for inconsistent adapter state,
-    merged adapters, and implausible numbers of trainable parameters. It does not validate the training loop,
-    optimizer, or dataset. A status will be reported as `"irregular"` if inconsistencies are found in the model, e.g.
-    when for the same adapter, some layers are enabled and some layers are disabled. This almost always means that
-    something went wrong and that you should check that you didn't accidentally change some attributes on the model
-    incorrectly.
+    This function summarizes the model and layer status APIs (see [~`PeftModel.get_model_status`] and
+    [~`PeftModel.get_layer_status`]), and includes findings for inconsistent adapter state, merged adapters, and
+    implausible numbers of trainable parameters. It does not validate the training loop, optimizer, or dataset. A
+    status will be reported as `"irregular"` if inconsistencies are found in the model, e.g. when for the same adapter,
+    some layers are enabled and some layers are disabled. This almost always means that something went wrong and that
+    you should check that you didn't accidentally change some attributes on the model incorrectly.
 
     If the check found something suspicious, it will be reported in the `"findings"` field. An empty `"findings""` list
     means that no suspicious adapter state was detected, not that a training run is guaranteed to succeed.
@@ -272,9 +272,6 @@ def format_healthcheck(healthcheck: dict[str, Any], sep=", ", indent="  ") -> st
             The separator to use between listed items.
         indent (`str`, *optional*, defaults to `"  "`)
             The indentation level for nested items.
-        sink (`callable`, *optiona*, default=`print`)
-            Function which is called to print the output. By default, just the builtin `print` function, but can also
-            be something else like `logger.info`.
 
     Returns:
         Result (`str`)
