@@ -801,7 +801,9 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             return {}
 
         module = self.modules_to_save[adapter_name]
-        buffer_names = {name for name, _ in module.named_buffers()}
+        # remove_duplicate=False: a buffer registered under two names (aliased to the same tensor) should still
+        # be recognized under both, not just whichever one named_buffers() happens to report by default.
+        buffer_names = {name for name, _ in module.named_buffers(remove_duplicate=False)}
         adapter_state_dict = {}
         for k in module.state_dict():
             key = f"modules_to_save.{adapter_name}.{k}"

@@ -571,6 +571,43 @@ class TestAuxiliaryTrainingWrapperParamsOnlyStateDict:
         with pytest.raises(KeyError, match=msg):
             get_peft_model_state_dict(model, state_dict=state_dict)
 
+    def test_params_only_state_dict_includes_buffer_registered_under_two_names(self):
+        # See PR #3816 review: a buffer that is the same tensor registered under two submodule paths (aliased)
+        # must be recognized under both, module.named_buffers() de-duplicates by tensor identity by default and
+        # would silently drop the second path, wrongly leaving it out of buffer_names.
+        class AliasedRouter(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(4, 8))
+                self.head_a = nn.Module()
+                self.head_b = nn.Module()
+                bias = torch.zeros(4)
+                self.head_a.register_buffer("bias", bias)
+                self.head_b.register_buffer("bias", bias)  # same tensor, second registration path
+
+            def forward(self, x):
+                return x @ self.weight.T + self.head_a.bias
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj = nn.Linear(8, 8)
+                self.router = AliasedRouter()
+
+            def forward(self, x):
+                return self.router(self.proj(x))
+
+        torch.manual_seed(0)
+        model = get_peft_model(
+            MyModule(), LoraConfig(target_modules=["proj"], modules_to_save=["router"], init_lora_weights=False)
+        )
+        sd_full = get_peft_model_state_dict(model)
+        sd_params_only = get_peft_model_state_dict(model, state_dict=dict(model.named_parameters()))
+
+        assert "base_model.model.router.head_a.bias" in sd_params_only
+        assert "base_model.model.router.head_b.bias" in sd_params_only
+        assert sd_full.keys() == sd_params_only.keys()
+
 
 class TestTargetingAuxiliaryTrainingWrapper:
     """AuxiliaryTrainingWrapper such as ModulesToSaveWrapper and TrainableTokensWrapper are
