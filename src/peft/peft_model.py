@@ -2421,9 +2421,6 @@ class PeftModelForSeq2SeqLM(PeftModel):
     ) -> None:
         super().__init__(model, peft_config, adapter_name, **kwargs)
         self.base_model_prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
-        self.base_model_prepare_encoder_decoder_kwargs_for_generation = (
-            self.base_model._prepare_encoder_decoder_kwargs_for_generation
-        )
 
     def forward(
         self,
@@ -2554,9 +2551,6 @@ class PeftModelForSeq2SeqLM(PeftModel):
     def generate(self, **kwargs):
         peft_config = self.active_peft_config
         self.base_model.prepare_inputs_for_generation = self.prepare_inputs_for_generation
-        self.base_model._prepare_encoder_decoder_kwargs_for_generation = (
-            self._prepare_encoder_decoder_kwargs_for_generation
-        )
         try:
             if not peft_config.is_prompt_learning:
                 with self._enable_peft_forward_hooks(**kwargs):
@@ -2605,15 +2599,9 @@ class PeftModelForSeq2SeqLM(PeftModel):
                     raise NotImplementedError
         except Exception:
             self.base_model.prepare_inputs_for_generation = self.base_model_prepare_inputs_for_generation
-            self.base_model._prepare_encoder_decoder_kwargs_for_generation = (
-                self.base_model_prepare_encoder_decoder_kwargs_for_generation
-            )
             raise
         else:
             self.base_model.prepare_inputs_for_generation = self.base_model_prepare_inputs_for_generation
-            self.base_model._prepare_encoder_decoder_kwargs_for_generation = (
-                self.base_model_prepare_encoder_decoder_kwargs_for_generation
-            )
             return outputs
 
     def prepare_inputs_for_generation(self, *args, task_ids: torch.Tensor = None, **kwargs):
