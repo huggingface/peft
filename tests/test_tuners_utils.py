@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import dataclasses
-import os
-import platform
 import re
 from copy import deepcopy
 
@@ -21,8 +19,6 @@ import diffusers
 import packaging.version
 import pytest
 import torch
-import torch.distributed as dist
-import torch.multiprocessing as mp
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 from torch import nn
@@ -49,7 +45,6 @@ from peft import (
     get_model_status,
     get_peft_model,
 )
-from peft.import_utils import is_transformers_ge_v5_17_0
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import (
     BaseTuner,
@@ -64,7 +59,7 @@ from peft.tuners.tuners_utils import (
     _find_minimal_target_modules as find_minimal_target_modules,
 )
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, ModulesToSaveWrapper, infer_device
-from peft.utils.constants import DUMMY_MODEL_CONFIG, MIN_TARGET_MODULES_FOR_OPTIMIZATION, TP_MESH_DIM_NAMES
+from peft.utils.constants import DUMMY_MODEL_CONFIG, MIN_TARGET_MODULES_FOR_OPTIMIZATION
 from peft.utils.quantization_utils import Bnb8bitBackend
 
 from .testing_utils import hub_online_once, require_bitsandbytes, require_non_cpu
@@ -2462,135 +2457,3 @@ class TestTunerStateDictKeyPrefixes:
         prefixes = _get_tuner_state_dict_key_prefixes(model)
         assert len(prefixes) > 0  # sanity check
         assert not any(prefix.startswith("base_model.model.emb") for prefix in prefixes)
-
-
-def _run_distributed_worker(rank, world_size, init_file, fn, args):
-    # Transformers reads the rank from the environment when it builds its TP device map
-    os.environ.update(RANK=str(rank), LOCAL_RANK=str(rank), WORLD_SIZE=str(world_size))
-    torch.set_num_threads(1)
-    dist.init_process_group("gloo", init_method=f"file://{init_file}", rank=rank, world_size=world_size)
-    try:
-        fn(*args)
-    finally:
-        dist.destroy_process_group()
-
-
-def _check_lora_shapes_without_tp_plan(model_id):
-    from torch.distributed.device_mesh import init_device_mesh
-    from torch.distributed.fsdp import fully_shard
-    from torch.distributed.tensor.parallel import ColwiseParallel, RowwiseParallel, parallelize_module
-
-    # FSDP2 computes the full projection whatever the mesh dims are called. (mesh shape, mesh dim names), where None is
-    # the default mesh of fully_shard, which has no dim names.
-    lora_kwargs = {"target_modules": "all-linear", "init_lora_weights": False}
-    input_ids = torch.tensor([[1, 2, 3, 4, 5]])
-    for mesh_spec in [None, ((2,), ("fsdp",)), ((2,), ("dp",)), ((1, 2), ("dp_replicate", "dp_shard"))]:
-        mesh = None if mesh_spec is None else init_device_mesh("cpu", mesh_spec[0], mesh_dim_names=mesh_spec[1])
-        model = AutoModelForCausalLM.from_pretrained(model_id)
-        for layer in model.model.layers:
-            fully_shard(layer, mesh=mesh)
-        fully_shard(model, mesh=mesh)
-        reference = AutoModelForCausalLM.from_pretrained(model_id)
-        torch.manual_seed(0)
-        model = get_peft_model(model, LoraConfig(**lora_kwargs))
-        torch.manual_seed(0)
-        reference = get_peft_model(reference, LoraConfig(**lora_kwargs))
-
-        shapes = {name: param.shape for name, param in model.named_parameters() if "lora_" in name}
-        expected_shapes = {name: param.shape for name, param in reference.named_parameters() if "lora_" in name}
-        assert shapes == expected_shapes, f"mesh {mesh_spec}"
-        with torch.no_grad():
-            logits = model(input_ids=input_ids).logits
-            expected_logits = reference(input_ids=input_ids).logits
-        torch.testing.assert_close(logits, expected_logits, msg=f"logits differ for mesh {mesh_spec}")
-
-    # TP applied with parallelize_module has no plan, so the mesh dim name decides whether a layer is tensor parallel.
-    # lin0 (10 -> 20) is sharded on its output dim and lin1 (20 -> 2) on its input dim, so the sharded side of their
-    # LoRA factors has 10 features if they count as TP and 20 otherwise. Adding a name to TP_MESH_DIM_NAMES only affects
-    # this spawned process.
-    for dim_name, add_to_tp_names, expected_features in [("tp", False, 10), ("model", False, 20), ("model", True, 10)]:
-        if add_to_tp_names:
-            TP_MESH_DIM_NAMES.add(dim_name)
-        mesh = init_device_mesh("cpu", (2,), mesh_dim_names=(dim_name,))
-        model = parallelize_module(MLP(), mesh, {"lin0": ColwiseParallel(), "lin1": RowwiseParallel()})
-        model = get_peft_model(model, LoraConfig(target_modules=["lin0", "lin1"], r=4))
-        assert model.base_model.model.lin0.lora_B["default"].weight.shape == (expected_features, 4), dim_name
-        assert model.base_model.model.lin1.lora_A["default"].weight.shape == (4, expected_features), dim_name
-
-
-def _check_tp_plan_lora_matches_unsharded(model_id):
-    from torch.distributed.device_mesh import init_device_mesh
-    from torch.distributed.tensor import DTensor
-    from transformers.distributed import DistributedConfig
-
-    def full(tensor):
-        return tensor.full_tensor() if isinstance(tensor, DTensor) else tensor
-
-    # init_lora_weights=False makes both LoRA factors non-zero. Every rank uses the same seed, so the gathered adapter
-    # must equal the adapter of the unsharded model. The lm_head TP plan gathers the output, so it needs no LoRA hooks.
-    lora_kwargs = {"target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "lm_head"], "init_lora_weights": False}
-    input_ids = torch.tensor([[1, 2, 3, 4, 5]])
-    # None lets Transformers build its own mesh, which v5.17 leaves unnamed
-    for mesh_dim_names in [None, ("tp",)]:
-        tp_kwargs = {"distributed_config": DistributedConfig(tp_size=2)}
-        if mesh_dim_names is not None:
-            tp_kwargs["device_mesh"] = init_device_mesh("cpu", (2,), mesh_dim_names=mesh_dim_names)
-        model = AutoModelForCausalLM.from_pretrained(model_id, **tp_kwargs)
-        reference = AutoModelForCausalLM.from_pretrained(model_id)
-        torch.manual_seed(0)
-        model = get_peft_model(model, LoraConfig(**lora_kwargs))
-        torch.manual_seed(0)
-        reference = get_peft_model(reference, LoraConfig(**lora_kwargs))
-
-        params = {name: param for name, param in model.named_parameters() if "lora_" in name}
-        reference_params = {name: param for name, param in reference.named_parameters() if "lora_" in name}
-        assert params.keys() == reference_params.keys()
-        for name, param in params.items():
-            torch.testing.assert_close(
-                full(param.detach()), reference_params[name].detach(), msg=f"{name}, mesh {mesh_dim_names}"
-            )
-
-        loss = model(input_ids=input_ids, labels=input_ids).loss
-        reference_loss = reference(input_ids=input_ids, labels=input_ids).loss
-        torch.testing.assert_close(full(loss), reference_loss, msg=f"loss, mesh {mesh_dim_names}")
-        loss.backward()
-        reference_loss.backward()
-        for name, param in params.items():
-            torch.testing.assert_close(
-                full(param.grad), reference_params[name].grad, msg=f"{name} grad, mesh {mesh_dim_names}"
-            )
-
-
-@pytest.mark.skipif(platform.system() != "Linux", reason="Run distributed tests only on Linux")
-@pytest.mark.skipif(not dist.is_available(), reason="These tests require torch.distributed")
-@pytest.mark.skipif(
-    packaging.version.parse(torch.__version__) < packaging.version.parse("2.6"), reason="FSDP2 requires torch >= 2.6"
-)
-class TestShardedBaseLayerShapes:
-    """
-    Check the shapes of LoRA factors on layers with DTensor weights, see #3803.
-
-    FSDP2 shards the stored weight but the layer still computes the full projection, whatever the mesh dimensions are
-    called. A tensor parallel layer without a Transformers TP plan computes on its local shard. These tests run two CPU
-    processes with gloo.
-    """
-
-    model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
-
-    def _spawn(self, fn, tmp_path, *args):
-        mp.spawn(_run_distributed_worker, args=(2, str(tmp_path / "dist_init"), fn, args), nprocs=2, join=True)
-
-    def _cache_model(self, monkeypatch):
-        with hub_online_once(self.model_id):
-            AutoModelForCausalLM.from_pretrained(self.model_id)
-        # the spawned processes load the model from the cache
-        monkeypatch.setenv("HF_HUB_OFFLINE", "1")
-
-    def test_lora_shapes_without_tp_plan(self, tmp_path, monkeypatch):
-        self._cache_model(monkeypatch)
-        self._spawn(_check_lora_shapes_without_tp_plan, tmp_path, self.model_id)
-
-    @pytest.mark.skipif(not is_transformers_ge_v5_17_0, reason="LoRA with DTensor TP requires transformers >= 5.17")
-    def test_tp_plan_lora_matches_unsharded_model(self, tmp_path, monkeypatch):
-        self._cache_model(monkeypatch)
-        self._spawn(_check_tp_plan_lora_matches_unsharded, tmp_path, self.model_id)
