@@ -1670,15 +1670,28 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
     def _reshard_fsdp_modules(self) -> None:
         """
-        Reshard all FSDP2 modules in this model, including itself, so that changes to `requires_grad` land on the
+        Reshard the FSDP2 modules in this model, including itself, so that changes to `requires_grad` land on the
         sharded parameters. Must be called on all ranks, since a resharded module is all-gathered again in its next
         forward.
         """
-        fsdp_modules = get_fsdp_modules(self)
-        # resharding drops the unsharded parameters, including weights that were merged into them
-        if fsdp_modules and not any(isinstance(module, BaseTunerLayer) and module.merged for module in self.modules()):
-            for module in fsdp_modules:
-                module.reshard()
+        fsdp_modules = set(get_fsdp_modules(self))
+        # resharding drops the unsharded parameters, including weights that were merged into them, so FSDP modules
+        # that shard parameters of a merged layer are skipped
+        merged_modules = {
+            module
+            for layer in self.modules()
+            if isinstance(layer, BaseTunerLayer) and layer.merged
+            for module in layer.modules()
+        }
+        for fsdp_module in fsdp_modules:
+            # an FSDP module shards the parameters of its submodules, except those inside nested FSDP modules
+            sharded_modules, stack = set(), [fsdp_module]
+            while stack:
+                module = stack.pop()
+                sharded_modules.add(module)
+                stack.extend(child for child in module.children() if child not in fsdp_modules)
+            if sharded_modules.isdisjoint(merged_modules):
+                fsdp_module.reshard()
 
     @property
     def base_model_torch_dtype(self):

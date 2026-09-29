@@ -22,12 +22,15 @@ from contextlib import contextmanager
 from functools import partial
 from unittest.mock import MagicMock
 
+import packaging.version
 import pytest
 import torch
 import torch.distributed as dist
 from safetensors.torch import load_file as safe_load_file
 from torch import nn
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.tensor import DTensor
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
 from transformers.pytorch_utils import Conv1D
 
@@ -8366,15 +8369,17 @@ class TestPeftFsdpStateDict:
 
 @pytest.mark.skipif(platform.system() != "Linux", reason="Run FSDP tests only on Linux")
 @pytest.mark.skipif(not dist.is_available(), reason="These tests require torch.distributed")
+@pytest.mark.skipif(
+    packaging.version.parse(torch.__version__) < packaging.version.parse("2.6"), reason="FSDP2 requires torch >= 2.6"
+)
 @pytest.mark.usefixtures("fsdp_process_group")
 class TestFsdp2UnshardedParams:
     """
     Changes to `requires_grad` must reach the FSDP2 shards while a forward left unsharded parameters, see #3800.
     """
 
-    def get_model(self, adapter_names=("default",), reshard_after_forward=False):
+    def get_model(self, adapter_names=("default",), reshard_after_forward=False, fsdp_module_names=("lin0",)):
         # imported here, as FSDP2 is public from torch 2.6 on
-        from torch.distributed.device_mesh import init_device_mesh
         from torch.distributed.fsdp import fully_shard
 
         torch.manual_seed(0)
@@ -8383,8 +8388,10 @@ class TestFsdp2UnshardedParams:
         for adapter_name in adapter_names[1:]:
             model.add_adapter(adapter_name, config)
         mesh = init_device_mesh("cpu", (1,))
-        # lin0 gets its own FSDP module, lin1 belongs to the root FSDP module, which is the PeftModel
-        fully_shard(model.base_model.model.lin0, mesh=mesh, reshard_after_forward=reshard_after_forward)
+        # by default, lin0 gets its own FSDP module and lin1 belongs to the root FSDP module, which is the PeftModel
+        for name in fsdp_module_names:
+            module = model.base_model.model.get_submodule(name)
+            fully_shard(module, mesh=mesh, reshard_after_forward=reshard_after_forward)
         fully_shard(model, mesh=mesh, reshard_after_forward=reshard_after_forward)
         return model
 
@@ -8392,8 +8399,6 @@ class TestFsdp2UnshardedParams:
         return torch.arange(90).view(9, 10).float()
 
     def get_lora_params(self, model, adapter_name="default"):
-        from torch.distributed.tensor import DTensor
-
         # called before the first forward, so these are the sharded parameters that FSDP2 keeps
         params = [param for name, param in model.named_parameters() if f"lora_A.{adapter_name}." in name]
         params += [param for name, param in model.named_parameters() if f"lora_B.{adapter_name}." in name]
@@ -8438,11 +8443,26 @@ class TestFsdp2UnshardedParams:
         assert all(param.requires_grad for param in other_params)
         assert not any(param.requires_grad for param in default_params)
 
+    @pytest.mark.parametrize("merged_name, other_name", [("lin0", "lin1"), ("lin1", "lin0")])
+    def test_set_requires_grad_with_merged_layer_in_other_fsdp_module(self, merged_name, other_name):
+        # a merged layer only keeps the FSDP module that shards its parameters from resharding
+        model = self.get_model()
+        other_params = [param for name, param in model.named_parameters() if f".{other_name}.lora_" in name]
+        assert len(other_params) == 2
+
+        with torch.no_grad():
+            model(self.get_input())
+        model.base_model.model.get_submodule(merged_name).merge()
+        model.set_requires_grad("default", requires_grad=False)
+        assert not any(param.requires_grad for param in other_params)
+
     @pytest.mark.parametrize("operation", ["disable_adapter", "set_requires_grad", "set_adapter"])
-    def test_merged_after_forward_keeps_base_weights(self, operation):
+    # FSDP wrapping by size can also give the base layer inside a LoRA layer its own FSDP module
+    @pytest.mark.parametrize("fsdp_module_names", [("lin0",), ("lin0.base_layer", "lin0")])
+    def test_merged_after_forward_keeps_base_weights(self, operation, fsdp_module_names):
         # A merge after a forward goes into the unsharded parameters. Resharding would drop it, and the unmerge would
         # then subtract the delta from the sharded base weights.
-        model = self.get_model(adapter_names=("default", "other"))
+        model = self.get_model(adapter_names=("default", "other"), fsdp_module_names=fsdp_module_names)
         base_weights = {
             name: model.base_model.model.get_submodule(name).base_layer.weight.full_tensor().clone()
             for name in ("lin0", "lin1")

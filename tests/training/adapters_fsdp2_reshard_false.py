@@ -17,7 +17,7 @@ Test that LoRA adapters stay trainable after a reference pass with `disable_adap
 `reshard_after_forward=False`, see #3800.
 
 Run with:
-    accelerate launch --config_file tests/training/fsdp2_config.yaml tests/training/adapters_fsdp2.py
+    accelerate launch --config_file tests/training/fsdp2_config.yaml tests/training/adapters_fsdp2_reshard_false.py
 """
 
 import os
@@ -83,6 +83,8 @@ def train_step(model, optimizer, input_ids, ref_logits=None):
     output = model(input_ids, labels=input_ids)
     loss = output.loss
     if ref_logits is not None:
+        # the KL term to the logits of the reference pass makes the loss depend on that pass, so the comparison with
+        # the unsharded model also checks that the adapters were disabled for it
         log_probs = F.log_softmax(output.logits, dim=-1)
         ref_log_probs = F.log_softmax(ref_logits, dim=-1)
         loss = loss + KL_COEF * F.kl_div(log_probs, ref_log_probs, log_target=True, reduction="batchmean")
