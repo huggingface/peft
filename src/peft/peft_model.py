@@ -142,9 +142,14 @@ def _filter_expected_adapter_keys(keys: list[str], config: PeftConfig) -> list[s
     - ``prompt_encoder`` itself is not part of the checkpoint.
     - UniLoRA's ``unilora_theta_d`` outside its canonical ``base_model.unilora_theta_d.`` location is a reference,
       not the owning parameter.
-    - Prompt learning's ``prompt_embeddings`` key is loaded through the prompt encoder
-      (:meth:`BaseTuner._load_adapter_state_dict`), not through ``model.load_state_dict``, so it never resolves
-      through the normal path and would otherwise always show up as unexpected.
+    - Prompt learning's state is loaded through the prompt encoder
+      (:meth:`BasePromptEncoder._load_adapter_state_dict`), not through ``model.load_state_dict``, so its keys
+      never resolve through the normal path and would otherwise always show up as unexpected. Every prompt
+      learning variant (plain prompt/prefix tuning, Cartridge, MultitaskPromptTuning's extra
+      ``prefix_task_cols``/``prefix_task_rows``) reports this state as flat, top-level keys with no ``.`` in
+      them, see every ``_get_adapter_state_dict`` override under ``src/peft/tuners/*/model.py`` for prompt
+      learning tuners: none of them ever nest a key under a submodule path. That is the general signal used
+      here, rather than hardcoding each variant's key names one by one.
     """
 
     def is_expected(k: str) -> bool:
@@ -156,7 +161,7 @@ def _filter_expected_adapter_keys(keys: list[str], config: PeftConfig) -> list[s
             and not k.startswith("base_model.unilora_theta_d.")
         ):
             return True
-        return config.is_prompt_learning and k == "prompt_embeddings"
+        return config.is_prompt_learning and "." not in k
 
     return [k for k in keys if not is_expected(k)]
 
