@@ -73,6 +73,7 @@ from peft import (
 )
 from peft.tuners.lora.config import (
     ArrowConfig,
+    AstraConfig,
     BdLoraConfig,
     CordaConfig,
     EvaConfig,
@@ -681,6 +682,7 @@ class TestLoraNestedConfigRoundTrip:
         [
             ("eva_config", EvaConfig, "rho", 7.5),
             ("corda_config", CordaConfig, "corda_method", "kpm"),
+            ("astra_config", AstraConfig, "verbose", True),
             ("arrow_config", ArrowConfig, "top_k", 4),
             ("lora_ga_config", LoraGAConfig, "direction", "ArBr"),
             ("use_bdlora", BdLoraConfig, "nblocks", 4),
