@@ -2696,9 +2696,7 @@ def delete_adapter(
     """
     new_adapter = None
 
-    for key, target in model.named_modules():
-        if prefix in key:
-            continue
+    for target in model.modules():
         if isinstance(target, layer_cls):
             target.delete_adapter(adapter_name)
             if new_adapter is None:
