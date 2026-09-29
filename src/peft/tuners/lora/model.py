@@ -63,7 +63,7 @@ from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .inc import dispatch_inc
-from .layer import Conv2d, LoraLayer, MultiheadAttention, ParamWrapper, dispatch_default
+from .layer import Conv2d, Embedding, LoraLayer, MultiheadAttention, ParamWrapper, dispatch_default
 from .te import dispatch_transformer_engine
 from .torchao import dispatch_torchao
 from .tp_layer import dispatch_megatron
@@ -720,6 +720,19 @@ class LoraModel(BaseTuner):
                 raise ValueError(
                     f"add_weighted_adapter does not support targeting nn.Parameter (problematic adapter '{adapter}')"
                 )
+            if self.peft_config[adapter].use_dora:
+                raise ValueError(f"add_weighted_adapter does not support DoRA (problematic adapter '{adapter}')")
+            if self.peft_config[adapter].kasa_config is not None:
+                raise ValueError(f"add_weighted_adapter does not support KaSA (problematic adapter '{adapter}')")
+
+        # lora_bias has nowhere to go on an embedding, which rejects it outright, so combining the two cannot work
+        if any(self.peft_config[adapter].lora_bias for adapter in adapters):
+            targets_embedding = any(
+                isinstance(module, Embedding) and any(adapter in module.lora_embedding_A for adapter in adapters)
+                for module in self.modules()
+            )
+            if targets_embedding:
+                raise ValueError("add_weighted_adapter does not support lora_bias when an nn.Embedding is targeted")
 
         # If more than one of the adapters targets the same module with modules_to_save, raise an error, as these
         # modules cannot be merged. First, find the ModulesToSaveWrapper instances in the model, then check if they
@@ -868,6 +881,7 @@ class LoraModel(BaseTuner):
             r=new_rank,
             lora_alpha=new_rank,
             use_rslora=False,
+            lora_bias=any(self.peft_config[adapter].lora_bias for adapter in adapters),
             target_modules=new_target_modules,
             alpha_pattern={},
             rank_pattern={},
@@ -937,6 +951,14 @@ class LoraModel(BaseTuner):
                     target_lora_A.data, target_lora_B.data = self._generalized_task_arithmetic_weighted_adapter(
                         combination_type, adapters, weights, target, density, majority_sign_method
                     )
+
+                if target.lora_bias[adapter_name]:
+                    # the bias adds to the output independently of the lora_A/lora_B factorization
+                    new_bias = torch.zeros_like(target.lora_B[adapter_name].bias)
+                    for adapter, weight in zip(adapters, weights):
+                        if adapter in target.lora_B and target.lora_bias[adapter]:
+                            new_bias += weight * target.scaling[adapter] * target.lora_B[adapter].bias.data
+                    target.lora_B[adapter_name].bias.data = new_bias
 
     def _svd_generalized_task_arithmetic_weighted_adapter(
         self,

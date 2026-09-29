@@ -4489,11 +4489,8 @@ class TestPeftCustomModel(PeftCommonTester):
         with pytest.raises(ValueError, match=msg):
             model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
 
-    @pytest.mark.parametrize(
-        "config_cls", [IA3Config, BeftConfig, LoHaConfig, LoKrConfig, LoraConfig, HRAConfig, MissConfig]
-    )
-    def test_add_weighted_adapter_cat_with_rank_pattern(self, config_cls):
-        # Fixes a bug described in #2512, which resulted from the rank_pattern not being taken into account
+    def test_add_weighted_adapter_cat_with_rank_pattern(self):
+        # Tests against a bug described in #2512, which resulted from the rank_pattern not being taken into account.
         config0 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 2})
         config1 = LoraConfig(target_modules=["lin0", "lin1"], r=8, rank_pattern={"lin0": 16})
         model = MLP()
@@ -4523,26 +4520,6 @@ class TestPeftCustomModel(PeftCommonTester):
                 dw_adapter1 = module.get_delta_weight("adapter1")
                 dw_negative = module.get_delta_weight("merged_negative")
                 assert torch.allclose(dw_adapter1, -dw_negative, atol=1e-6)
-
-    def test_add_weighted_adapter_with_rslora_identity_single_adapter(self):
-        # See #3449
-        # Combining a single adapter with weight 1.0 must reproduce that adapter exactly. Previously, when the source
-        # adapter used use_rslora=True, the flag was inherited by the combined adapter's config, whose lora_alpha is
-        # chosen so that scaling == lora_alpha / r == 1. With rslora, the scaling became
-        # lora_alpha / sqrt(r) = sqrt(r) != 1 instead, so the combined adapter was sqrt(r) times overscaled.
-        # (With a single source adapter, add_weighted_adapter always resolves combination_type to "linear".)
-        torch.manual_seed(42)
-        model = MLP()
-        config = LoraConfig(r=4, target_modules=["lin0"], init_lora_weights=False, use_rslora=True)
-        model = get_peft_model(model, config, adapter_name="adapter1")
-
-        model.add_weighted_adapter(adapters=["adapter1"], weights=[1.0], adapter_name="merged")
-
-        for module in model.modules():
-            if isinstance(module, lora.LoraLayer):
-                dw_adapter1 = module.get_delta_weight("adapter1")
-                dw_merged = module.get_delta_weight("merged")
-                assert torch.allclose(dw_adapter1, dw_merged, atol=1e-5)
 
     @pytest.mark.parametrize("combination_type", ["linear", "cat"])
     def test_add_weighted_adapter_with_rslora_identity_two_adapters(self, combination_type):
@@ -5188,6 +5165,62 @@ class TestPeftCustomModel(PeftCommonTester):
         model = get_peft_model(MLP(), config).to(self.torch_device)
 
         assert model.base_model.model.lin0.pvera_generator["default"] is None
+
+    @pytest.mark.parametrize(
+        "model_cls, module_name",
+        [(MLP, "lin0"), (ModelConv2D, "conv2d")],
+    )
+    @pytest.mark.parametrize("extra_kwargs", [{"lora_bias": True}, {"use_rslora": True}])
+    def test_add_weighted_adapter_with_extra_parameters_identity(self, model_cls, module_name, extra_kwargs):
+        # See #3761 and #3449. Combining a single adapter with weight 1.0 has to reproduce that adapter. The bias of
+        # lora_B contributes bias * scaling to the output and was never combined, and with use_rslora the combined
+        # adapter inherited the flag and ended up scaled by sqrt(r) rather than 1.
+        # (With a single source adapter, add_weighted_adapter always resolves combination_type to "linear".)
+        torch.manual_seed(0)
+
+        model = model_cls().to(self.torch_device).eval()
+        X = self.prepare_inputs_for_testing()
+        config = LoraConfig(r=8, lora_alpha=16, target_modules=[module_name], init_lora_weights=False, **extra_kwargs)
+        peft_model = get_peft_model(model, config, adapter_name="source").eval()
+
+        peft_model.set_adapter("source")
+        source_output = peft_model(**X)
+
+        peft_model.add_weighted_adapter(adapters=["source"], weights=[1.0], adapter_name="combined")
+        peft_model.set_adapter("combined")
+        assert torch.allclose(peft_model(**X), source_output, atol=1e-4)
+
+    @pytest.mark.parametrize(
+        "extra_kwargs",
+        [{"use_dora": True}, {"kasa_config": KasaConfig(), "r": 4}],
+    )
+    def test_add_weighted_adapter_rejects_variants_with_extra_state(self, extra_kwargs):
+        # See #3761
+        # DoRA and KaSA learn state besides lora_A and lora_B, the magnitude vector and lora_diag. There is no
+        # defined way to combine it, and add_weighted_adapter never did, so the result silently differed from its
+        # sources. The check is on the config, so one model type is enough.
+        torch.manual_seed(0)
+
+        model = MLP().to(self.torch_device)
+        config = LoraConfig(target_modules=["lin0"], init_lora_weights=False, **extra_kwargs)
+        peft_model = get_peft_model(model, config, adapter_name="source")
+
+        with pytest.raises(ValueError, match="add_weighted_adapter does not support"):
+            peft_model.add_weighted_adapter(adapters=["source"], weights=[1.0], adapter_name="combined")
+
+    def test_add_weighted_adapter_rejects_lora_bias_with_embedding(self):
+        # See #3761. The combined adapter needs lora_bias whenever a source has it, but an embedding rejects
+        # lora_bias, so the two cannot be combined and the conflict is reported instead of dropping the bias.
+        torch.manual_seed(0)
+
+        model = ModelEmbConv1D().to(self.torch_device)
+        peft_model = get_peft_model(
+            model, LoraConfig(target_modules=["emb"], init_lora_weights=False), adapter_name="source"
+        )
+        peft_model.add_adapter("other", LoraConfig(target_modules=["lin0"], init_lora_weights=False, lora_bias=True))
+
+        with pytest.raises(ValueError, match="does not support lora_bias when an nn.Embedding is targeted"):
+            peft_model.add_weighted_adapter(adapters=["source", "other"], weights=[1.0, 1.0], adapter_name="combined")
 
 
 class TestMultiRankAdapter:
