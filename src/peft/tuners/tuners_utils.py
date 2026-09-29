@@ -542,6 +542,30 @@ class BaseTuner(nn.Module, ABC):
             if isinstance(module, self.tuner_layer_cls):
                 module._freeze_non_trainable_peft_weights()
 
+    def _get_adapter_modules_training(self, model: nn.Module) -> list[tuple[nn.Module, bool]]:
+        """Collect the training state of each adapter-owned module root in ``model``."""
+        adapter_modules_training = []
+        for module in model.modules():
+            if not isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
+                continue
+
+            for name in module.adapter_layer_names + module.other_param_names:
+                try:
+                    module_dict = module.get_submodule(name)
+                except AttributeError:
+                    continue
+                if not isinstance(module_dict, nn.ModuleDict):
+                    continue
+                adapter_modules_training.extend(
+                    (adapter_module, adapter_module.training) for adapter_module in module_dict.values()
+                )
+        return adapter_modules_training
+
+    @staticmethod
+    def _restore_adapter_modules_training(adapter_modules_training: list[tuple[nn.Module, bool]]) -> None:
+        for adapter_module, training in adapter_modules_training:
+            adapter_module.train(training)
+
     def _enable_adapter_layers(self, enabled: bool = True) -> None:
         for module in self.model.modules():
             if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
@@ -885,27 +909,11 @@ class BaseTuner(nn.Module, ABC):
         mapping_existing_parameter_requires_grad = []
         # Adapter creation calls set_adapter as part of its housekeeping. Preserve existing adapter module modes
         # because the new adapter's inference_mode must not change the behavior of adapters that were already present.
-        existing_adapter_modules_training = []
-        existing_auxiliary_modules_training = []
+        existing_adapter_modules_training = self._get_adapter_modules_training(model)
         seen_parameters = set()
         for key, module in named_modules:
             if isinstance(module, BaseTunerLayer):
                 existing_adapter_prefixes.append(key + ".")
-                adapter_modules_training = {}
-                for existing_adapter_name, adapter_module in module._adapter_modules():
-                    adapter_modules_training.setdefault(existing_adapter_name, []).extend(
-                        (submodule, submodule.training) for submodule in adapter_module.modules()
-                    )
-                existing_adapter_modules_training.append((module, adapter_modules_training))
-            elif isinstance(module, AuxiliaryTrainingWrapper):
-                auxiliary_modules_training = {}
-                for existing_adapter_name in module._adapters:
-                    auxiliary_modules_training[existing_adapter_name] = [
-                        (submodule, submodule.training)
-                        for adapter_module in module._adapter_modules(existing_adapter_name)
-                        for submodule in adapter_module.modules()
-                    ]
-                existing_auxiliary_modules_training.append((module, auxiliary_modules_training))
             for parameter_name, parameter in module.named_parameters(recurse=False):
                 full_name = f"{key}.{parameter_name}" if key else parameter_name
                 if id(parameter) in seen_parameters:
@@ -1168,15 +1176,8 @@ class BaseTuner(nn.Module, ABC):
             activate_adapter=adapter_name in self.active_adapters,
         )
 
-        # Restore existing adapter state after housekeeping, then initialize the newly added adapter from its config.
-        for _, adapter_modules_training in existing_adapter_modules_training:
-            for module_training in adapter_modules_training.values():
-                for submodule, training in module_training:
-                    submodule.train(training)
-        for _, auxiliary_modules_training in existing_auxiliary_modules_training:
-            for module_training in auxiliary_modules_training.values():
-                for submodule, training in module_training:
-                    submodule.train(training)
+        # Restore existing adapter training state after housekeeping, then initialize the newly added adapter from its config.
+        self._restore_adapter_modules_training(existing_adapter_modules_training)
         for module in model.modules():
             if isinstance(module, BaseTunerLayer):
                 module._set_adapter_modules_training(adapter_name, not peft_config.inference_mode)
@@ -2035,25 +2036,11 @@ class BaseTunerLayer(ABC):
         # is already a list of str
         return self.active_adapter
 
-    def _adapter_modules(self, adapter_names: str | Sequence[str] | None = None):
-        # Adapter-specific modules are registered in the same containers as adapter parameters, so keep their
-        # inference-mode handling here instead of duplicating it in every tuner implementation.
-        if adapter_names is None:
-            adapter_names = self._all_available_adapter_names()
-        elif isinstance(adapter_names, str):
-            adapter_names = [adapter_names]
-
+    def _set_adapter_modules_training(self, adapter_name: str, training: bool) -> None:
         for name in self.adapter_layer_names + self.other_param_names:
             module_dict = getattr(self, name, None)
-            if not isinstance(module_dict, nn.ModuleDict):
-                continue
-            for adapter_name in adapter_names:
-                if adapter_name in module_dict:
-                    yield adapter_name, module_dict[adapter_name]
-
-    def _set_adapter_modules_training(self, adapter_name: str, training: bool) -> None:
-        for _, adapter_module in self._adapter_modules(adapter_name):
-            adapter_module.train(training)
+            if isinstance(module_dict, nn.ModuleDict) and adapter_name in module_dict:
+                module_dict[adapter_name].train(training)
 
     def enable_adapters(self, enabled: bool) -> None:
         """Toggle the enabling and disabling of adapters

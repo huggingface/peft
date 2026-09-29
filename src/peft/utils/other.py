@@ -525,15 +525,11 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         """
         raise NotImplementedError
 
-    def _adapter_modules(self, adapter_name: str):
+    def _set_adapter_modules_training(self, adapter_name: str, training: bool) -> None:
         for name in self.adapter_layer_names + self.other_param_names:
             module_dict = attrgetter(name)(self)
             if isinstance(module_dict, torch.nn.ModuleDict) and adapter_name in module_dict:
-                yield module_dict[adapter_name]
-
-    def _set_adapter_modules_training(self, adapter_name: str, training: bool) -> None:
-        for adapter_module in self._adapter_modules(adapter_name):
-            adapter_module.train(training)
+                module_dict[adapter_name].train(training)
 
     def set_adapter(self, adapter_names: Union[str, list[str]], inference_mode: bool = False) -> None:
         """Set the active adapter
