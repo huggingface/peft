@@ -1486,6 +1486,7 @@ class TestTrainableTokens:
         assert embed_layer.trainable_tokens_delta["adapter2"] is lm_head_layer.trainable_tokens_delta["adapter2"]
 
         assert isinstance(lm_head_layer.base_layer, torch.nn.Linear)
+        # Nested token wrappers can survive injection and parameter checks but fail during the forward pass.
         for adapter_name in ("default", "adapter2"):
             peft_model.set_adapter(adapter_name)
             peft_model(input_ids=torch.tensor([[1, 2, 3, 4, 5, 6]], device=peft_model.device))
