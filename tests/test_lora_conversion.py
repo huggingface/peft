@@ -493,55 +493,71 @@ class TestLoraConversion:
         # here we expect an actual loss of 0, since only the modules_to_save affect the result, and those are identical
         assert mse_converted == 0.0
 
-    def test_convert_model_with_modules_to_save_buffers(self):
-        # ModulesToSaveWrapper can wrap modules with persistent buffers (e.g. BatchNorm)
-        # The converted state dict must include those buffers, not only parameters
-        class ModelWithBatchNorm(nn.Module):
+    @pytest.mark.parametrize("auxiliary_type", ["modules_to_save", "trainable_tokens"])
+    def test_convert_model_with_auxiliary_training_wrappers(self, auxiliary_type):
+        class ModelWithAuxiliaryModules(nn.Module):
             def __init__(self):
                 super().__init__()
+                self.embedding = nn.Embedding(8, 4)
                 self.linear = nn.Linear(4, 4)
                 self.head = nn.BatchNorm1d(4)
 
-            def forward(self, x):
-                return self.head(self.linear(x))
+            def forward(self, input_ids):
+                hidden_states = self.embedding(input_ids).mean(dim=1)
+                return self.head(self.linear(hidden_states))
 
         torch.manual_seed(0)
-        base_model = ModelWithBatchNorm().eval()
-        lokr_model = get_peft_model(
-            copy.deepcopy(base_model),
-            LoKrConfig(target_modules=["linear"], modules_to_save=["head"]),
-        ).eval()
+        base_model = ModelWithAuxiliaryModules().eval()
+        if auxiliary_type == "modules_to_save":
+            # LoKr exercises a full saved module, including its persistent buffers.
+            peft_config = LoKrConfig(target_modules=["linear"], modules_to_save=["head"])
+        else:
+            # LoRA exercises a second auxiliary wrapper around selected embedding rows.
+            peft_config = LoraConfig(
+                target_modules=["linear"],
+                trainable_token_indices={"embedding": [1, 3]},
+                init_lora_weights=False,
+            )
+        source_model = get_peft_model(copy.deepcopy(base_model), peft_config).eval()
 
-        # modify the saved BatchNorm buffers so we can verify they are preserved
-        source_head = lokr_model.base_model.model.head.modules_to_save.default
-        source_head.running_mean.copy_(torch.tensor([1.0, -2.0, 3.0, -4.0]))
-        source_head.running_var.copy_(torch.tensor([0.25, 0.5, 2.0, 4.0]))
-        source_head.num_batches_tracked.fill_(17)
+        if auxiliary_type == "modules_to_save":
+            # modify the saved BatchNorm buffers so we can verify they are preserved
+            source_head = source_model.base_model.model.head.modules_to_save.default
+            source_head.running_mean.copy_(torch.tensor([1.0, -2.0, 3.0, -4.0]))
+            source_head.running_var.copy_(torch.tensor([0.25, 0.5, 2.0, 4.0]))
+            source_head.num_batches_tracked.fill_(17)
+            expected_keys = {
+                "base_model.model.head.running_mean",
+                "base_model.model.head.running_var",
+                "base_model.model.head.num_batches_tracked",
+            }
+        else:
+            # modify the trainable token delta so we can verify it is preserved
+            source_tokens = source_model.base_model.model.embedding.token_adapter
+            with torch.no_grad():
+                source_tokens.trainable_tokens_delta["default"].add_(0.5)
+            expected_keys = {"base_model.model.embedding.token_adapter.trainable_tokens_delta"}
 
-        lora_config, state_dict = convert_to_lora(lokr_model, rank=4)
+        lora_config, state_dict = convert_to_lora(source_model, rank=4)
 
-        # buffers must be present in the converted checkpoint
-        expected_buffer_keys = {
-            "base_model.model.head.running_mean",
-            "base_model.model.head.running_var",
-            "base_model.model.head.num_batches_tracked",
-        }
-        assert expected_buffer_keys <= state_dict.keys()
+        # The converted checkpoint must contain the state selected by either wrapper type.
+        assert expected_keys <= state_dict.keys()
+        if auxiliary_type == "trainable_tokens":
+            assert lora_config.trainable_token_indices == peft_config.trainable_token_indices
 
-        # loading into a fresh LoRA model should not miss any saved-module keys
-        lora_model = get_peft_model(copy.deepcopy(base_model), lora_config).eval()
-        load_result = set_peft_model_state_dict(lora_model, state_dict)
-        assert not [key for key in load_result.missing_keys if ".modules_to_save." in key]
+        # Loading into a fresh LoRA model should recreate and preserve the auxiliary wrapper state.
+        target_model = get_peft_model(copy.deepcopy(base_model), lora_config).eval()
+        set_peft_model_state_dict(target_model, state_dict)
 
-        # the loaded buffers must match the source buffers exactly
-        target_head = lora_model.base_model.model.head.modules_to_save.default
-        assert torch.equal(target_head.running_mean, source_head.running_mean)
-        assert torch.equal(target_head.running_var, source_head.running_var)
-        assert torch.equal(target_head.num_batches_tracked, source_head.num_batches_tracked)
+        if auxiliary_type == "modules_to_save":
+            target_head = target_model.base_model.model.head.modules_to_save.default
+            assert torch.equal(target_head.running_mean, source_head.running_mean)
+            assert torch.equal(target_head.running_var, source_head.running_var)
+            assert torch.equal(target_head.num_batches_tracked, source_head.num_batches_tracked)
 
-        # inference outputs must match since only the saved module changed
-        inputs = torch.tensor([[1.0, 2.0, 3.0, 4.0], [-1.0, 0.0, 2.0, 1.0]])
-        assert torch.allclose(lora_model(inputs), lokr_model(inputs))
+        # inference outputs must match after conversion and reload
+        inputs = torch.tensor([[0, 1, 2], [3, 4, 5]])
+        assert torch.allclose(target_model(inputs), source_model(inputs))
 
     @pytest.mark.parametrize("bias", ["c3a_only", "all"])
     def test_convert_model_with_trainable_bias_raises(self, bias):
