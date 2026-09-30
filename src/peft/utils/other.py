@@ -525,11 +525,15 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         """
         raise NotImplementedError
 
-    def _set_adapter_modules_training(self, adapter_name: str, training: bool) -> None:
-        for name in self.adapter_layer_names + self.other_param_names:
-            module_dict = attrgetter(name)(self)
-            if isinstance(module_dict, torch.nn.ModuleDict) and adapter_name in module_dict:
-                module_dict[adapter_name].train(training)
+    def set_training(self, adapter_names: str | Sequence[str], training: bool = True) -> None:
+        if isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+
+        for adapter_name in adapter_names:
+            for name in self.adapter_layer_names + self.other_param_names:
+                module_dict = attrgetter(name)(self)
+                if isinstance(module_dict, torch.nn.ModuleDict) and adapter_name in module_dict:
+                    module_dict[adapter_name].train(training)
 
     def set_adapter(self, adapter_names: Union[str, list[str]], inference_mode: bool = False) -> None:
         """Set the active adapter
@@ -545,7 +549,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
         """
         if isinstance(adapter_names, str):
             self._active_adapter = adapter_names
-            self._set_adapter_modules_training(adapter_names, not inference_mode)
+            self.set_training(adapter_names, not inference_mode)
         else:
             self._active_adapter = []
             for adapter_name in adapter_names:
@@ -553,7 +557,7 @@ class AuxiliaryTrainingWrapper(torch.nn.Module):
                     raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
 
                 self._active_adapter.append(adapter_name)
-                self._set_adapter_modules_training(adapter_name, not inference_mode)
+                self.set_training(adapter_name, not inference_mode)
 
     def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
         """Delete an adapter from the layer, set a new active adapter if necessary"""
@@ -744,7 +748,7 @@ class ModulesToSaveWrapper(AuxiliaryTrainingWrapper):
             raise ValueError(f"Adapter {adapter_name} not found in {self._adapters}")
 
         _set_layer_requires_grad(self.modules_to_save[adapter_name], not inference_mode)
-        self._set_adapter_modules_training(adapter_name, not inference_mode)
+        self.set_training(adapter_name, not inference_mode)
         self._active_adapter = adapter_name
 
     def delete_adapter(self, adapter_name: str, new_active_adapters: Optional[list[str]]) -> None:
@@ -1128,11 +1132,11 @@ def _set_trainable(
             if isinstance(grandparent, wrapper_cls):
                 grandparent.update(adapter_name, **wrapper_kwargs)
                 grandparent.set_adapter(grandparent.active_adapter, inference_mode=inference_mode)
-                grandparent._set_adapter_modules_training(adapter_name, not inference_mode)
+                grandparent.set_training(adapter_name, not inference_mode)
             elif isinstance(target, wrapper_cls):
                 target.update(adapter_name, **wrapper_kwargs)
                 target.set_adapter(target.active_adapter, inference_mode=inference_mode)
-                target._set_adapter_modules_training(adapter_name, not inference_mode)
+                target.set_training(adapter_name, not inference_mode)
             else:
                 new_module = wrapper_cls(target, adapter_name, **wrapper_kwargs)
                 if activate_adapter:

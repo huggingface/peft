@@ -543,7 +543,11 @@ class BaseTuner(nn.Module, ABC):
                 module._freeze_non_trainable_peft_weights()
 
     def _get_adapter_modules_training(self, model: nn.Module) -> list[tuple[nn.Module, bool]]:
-        """Collect the training state of each adapter-owned module root in ``model``."""
+        """Return `(adapter_module, training)` pairs for adapter-owned module roots in `model`.
+
+        The saved state is only the root module's state. Restoring it with `Module.train` also updates all
+        descendants, so a subtree with manually mixed training states is normalized to the root state.
+        """
         adapter_modules_training = []
         for module in model.modules():
             if not isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
@@ -1180,7 +1184,7 @@ class BaseTuner(nn.Module, ABC):
         self._restore_adapter_modules_training(existing_adapter_modules_training)
         for module in model.modules():
             if isinstance(module, BaseTunerLayer):
-                module._set_adapter_modules_training(adapter_name, not peft_config.inference_mode)
+                module.set_training(adapter_name, not peft_config.inference_mode)
 
         for parameter, requires_grad in mapping_existing_parameter_requires_grad:
             parameter.requires_grad = requires_grad
@@ -2036,11 +2040,15 @@ class BaseTunerLayer(ABC):
         # is already a list of str
         return self.active_adapter
 
-    def _set_adapter_modules_training(self, adapter_name: str, training: bool) -> None:
-        for name in self.adapter_layer_names + self.other_param_names:
-            module_dict = getattr(self, name, None)
-            if isinstance(module_dict, nn.ModuleDict) and adapter_name in module_dict:
-                module_dict[adapter_name].train(training)
+    def set_training(self, adapter_names: str | Sequence[str], training: bool = True) -> None:
+        if isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+
+        for adapter_name in adapter_names:
+            for name in self.adapter_layer_names + self.other_param_names:
+                module_dict = getattr(self, name, None)
+                if isinstance(module_dict, nn.ModuleDict) and adapter_name in module_dict:
+                    module_dict[adapter_name].train(training)
 
     def enable_adapters(self, enabled: bool) -> None:
         """Toggle the enabling and disabling of adapters
@@ -2112,7 +2120,7 @@ class BaseTunerLayer(ABC):
         # Inference mode freezes both the adapter parameters and all adapter-specific submodules. The parent tuner
         # layer remains in its existing training/eval mode because it can host multiple adapters.
         for adapter_name in adapter_names:
-            self._set_adapter_modules_training(adapter_name, not inference_mode)
+            self.set_training(adapter_name, not inference_mode)
 
         self._freeze_non_trainable_peft_weights(adapter_names)
         self._active_adapter = adapter_names
@@ -2828,6 +2836,13 @@ def set_requires_grad(model, adapter_names: str | Sequence[str], requires_grad: 
     for module in model.modules():
         if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
             module.set_requires_grad(adapter_names=adapter_names, requires_grad=requires_grad)
+
+
+def set_training(model, adapter_names: str | Sequence[str], training: bool = True) -> None:
+    """Set the training mode of the given adapter modules."""
+    for module in model.modules():
+        if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
+            module.set_training(adapter_names=adapter_names, training=training)
 
 
 def get_device_map(model) -> dict:
