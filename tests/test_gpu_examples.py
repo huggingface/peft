@@ -4921,24 +4921,21 @@ class TestPeftTorchao:
 
     @pytest.mark.single_gpu_tests
     def test_torchao_lora_merge_several_adapters_in_one_call(self):
-        # Merging several adapters in one call should give the same weights as merging them one at a time
+        # Merging several adapters in one call should give the same weights as merging them one at a time, see
+        # https://github.com/huggingface/peft/issues/3728
         device = 0
-
-        def get_model_with_two_adapters():
-            torch.manual_seed(0)
-            quantization_config = TorchAoConfig(quant_type=self.get_quant_type("int8_weight_only"))
+        torch.manual_seed(0)
+        quantization_config = TorchAoConfig(quant_type=self.get_quant_type("int8_weight_only"))
+        with hub_online_once(self.causal_lm_model_id):
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
             ).eval()
-            config_kwargs = {"target_modules": ["q_proj", "v_proj"], "init_lora_weights": False}
-            model = get_peft_model(model, LoraConfig(**config_kwargs))
-            model.add_adapter("other", LoraConfig(**config_kwargs))
-            return model
+        config_kwargs = {"target_modules": ["q_proj", "v_proj"], "init_lora_weights": False}
+        model_one_call = get_peft_model(model, LoraConfig(**config_kwargs))
+        model_one_call.add_adapter("other", LoraConfig(**config_kwargs))
+        model_one_by_one = deepcopy(model_one_call)
 
-        model_one_call = get_model_with_two_adapters()
         model_one_call.merge_adapter(adapter_names=["default", "other"])
-
-        model_one_by_one = get_model_with_two_adapters()
         model_one_by_one.merge_adapter(adapter_names=["default"])
         model_one_by_one.merge_adapter(adapter_names=["other"])
 

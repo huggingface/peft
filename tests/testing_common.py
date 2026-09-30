@@ -952,8 +952,10 @@ class PeftCommonTester:
         if not layers:
             pytest.skip("No mergeable tuner layers in this model.")
 
-        # poison the first layer that merge_adapter visits, so the merge fails before any layer is merged; one
-        # non-finite value per adapter parameter is enough to make the delta weight non-finite
+        # Only the first layer that merge_adapter visits is poisoned, by setting one value in each of that layer's
+        # adapter parameters to NaN, so the merge fails before any layer is merged. This only covers the layer that
+        # fails the check: if a later layer failed instead, the layers before it would already be merged, since
+        # merge_adapter does not roll them back.
         layer = layers[0]
         with torch.no_grad():
             for param in layer.parameters():
