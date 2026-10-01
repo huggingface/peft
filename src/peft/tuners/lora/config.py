@@ -1224,6 +1224,15 @@ class LoraConfig(PeftConfig):
             self._custom_modules = {}
         self._custom_modules.update(mapping)
 
+    @classmethod
+    def check_kwargs(cls, **kwargs):
+        # peft_version is stored since PEFT 0.18.0, so a config without it was created with an older version.
+        # Otherwise, it would be set to the current version, but loading MHA adapters depends on the actual version,
+        # see #3774
+        if "peft_version" not in kwargs:
+            kwargs["peft_version"] = "0.0.0"
+        return super().check_kwargs(**kwargs)
+
 
 @dataclass
 class LoraGAConfig:
