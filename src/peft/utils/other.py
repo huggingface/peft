@@ -208,7 +208,7 @@ def prepare_model_for_kbit_training(
             ) and param.__class__.__name__ != "Params4bit":
                 param.data = param.data.to(torch.float32)
 
-        # Release CUDA allocator cache after bulk fp16→fp32 casts to reduce
+        # Release the accelerator cache after bulk fp16→fp32 casts to reduce
         # reserved-but-unused memory to free up system memory in devices
         # that share host and accelerator memory (issue #3265)
         if auto_clear_cache:
@@ -217,6 +217,9 @@ def prepare_model_for_kbit_training(
 
             if is_xpu_available():
                 torch.xpu.empty_cache()
+
+            if is_npu_available():
+                torch.npu.empty_cache()
 
     if (
         loaded_in_kbit

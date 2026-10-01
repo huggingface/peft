@@ -949,6 +949,24 @@ class TestPrepareModelForKbitTraining:
             prepare_model_for_kbit_training(fp16_model, use_gradient_checkpointing=False, auto_clear_cache=False)
         mock_empty_cache.assert_not_called()
 
+    def test_auto_clear_cache_npu(self, fp16_model):
+        # auto_clear_cache=True on an NPU: the NPU allocator cache is cleared as well, not only CUDA/XPU
+        with (
+            patch("peft.utils.other.is_npu_available", return_value=True),
+            patch("torch.npu", create=True) as mock_npu,
+        ):
+            prepare_model_for_kbit_training(fp16_model, use_gradient_checkpointing=False)
+        mock_npu.empty_cache.assert_called_once()
+
+    def test_auto_clear_cache_npu_unavailable(self, fp16_model):
+        # no NPU available: the NPU cache must be left alone
+        with (
+            patch("peft.utils.other.is_npu_available", return_value=False),
+            patch("torch.npu", create=True) as mock_npu,
+        ):
+            prepare_model_for_kbit_training(fp16_model, use_gradient_checkpointing=False)
+        mock_npu.empty_cache.assert_not_called()
+
 
 # The task-type subclasses that add their head to modules_to_save. One tiny BERT checkpoint covers all three, since the
 # auto classes build the matching head from the same config.

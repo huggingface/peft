@@ -18,6 +18,7 @@ import unittest
 import pytest
 import torch
 import torch.nn.functional as F
+from accelerate.utils import is_npu_available
 from accelerate.utils.memory import clear_device_cache
 from parameterized import parameterized
 from torch import nn
@@ -2213,10 +2214,13 @@ class TestPrepareModelForKbitTraining:
         model.is_loaded_in_8bit = True
         return model
 
-    # Keep this skip limited to CUDA/XPU because prepare_model_for_kbit_training only clears those caches today.
-    @pytest.mark.skipif(not (torch.cuda.is_available() or is_xpu_available()), reason="test requires a GPU or XPU")
+    # Keep this skip limited to CUDA/XPU/NPU because prepare_model_for_kbit_training only clears those caches today.
+    @pytest.mark.skipif(
+        not (torch.cuda.is_available() or is_xpu_available() or is_npu_available()),
+        reason="test requires a GPU, XPU or NPU",
+    )
     def test_prepare_model_for_kbit_training_no_memory_leak(self):
-        """CUDA/XPU: empty_cache() after bulk fp16→fp32 casts keeps reserved memory under 200 MB (issue #3265)."""
+        """CUDA/XPU/NPU: empty_cache() after bulk fp16→fp32 casts keeps reserved memory under 200 MB (issue #3265)."""
         device = torch.accelerator.current_accelerator().type
         model = self._make_fp16_model().to(device)
 
