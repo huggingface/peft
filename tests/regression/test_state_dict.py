@@ -655,7 +655,7 @@ class TestStateDictRegression:
     def test_save_load_roundtrip(self, case, tmp_path):
         # saving the loaded model must reproduce the checkpoint: same keys and same tensor values
         if case.model_cls == "MhaModel":
-            # the out_proj weights of MHA checkpoints from PEFT <= 0.21.0 are adjusted when loading, see #3774
+            # the out_proj weights of MHA checkpoints from PEFT < 0.22.0 are adjusted when loading, see #3774
             pytest.skip("MHA is covered by test_save_load_roundtrip_mha")
         case_dir = download_artifact(case.name)
         manifest = self.load_manifest(case_dir)
@@ -675,7 +675,7 @@ class TestStateDictRegression:
 
     @pytest.mark.parametrize("case", MHA_CASES, ids=[case.name for case in MHA_CASES])
     def test_save_load_roundtrip_mha(self, case, tmp_path):
-        # The out_proj weights of MHA checkpoints from PEFT <= 0.21.0 are adjusted when loading (see #3774), so the
+        # The out_proj weights of MHA checkpoints from PEFT < 0.22.0 are adjusted when loading (see #3774), so the
         # saved checkpoint differs from the original one. Instead, check that saving and loading it again doesn't
         # change it, e.g. because the adjustment is applied a second time.
         case_dir = download_artifact(case.name)

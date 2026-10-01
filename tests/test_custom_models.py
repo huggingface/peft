@@ -5052,11 +5052,14 @@ class TestPeftCustomModel(PeftCommonTester):
         assert torch.allclose(mha.in_proj_weight, in_proj_expected)
         assert torch.allclose(mha.out_proj.base_layer.weight, out_proj_expected)
 
-    @pytest.mark.parametrize("peft_version", [None, "0.21.0", "0.21.1"])
-    def test_mha_load_adapter_from_older_peft_version(self, peft_version, tmp_path):
-        # Up to PEFT 0.21.0, the out_proj delta weight of MHA was applied twice (#3774), so when loading such an
+    @pytest.mark.parametrize(
+        "peft_version, factor",
+        [(None, 2), ("0.21.0", 2), ("0.21.2", 2), ("0.21.3.dev0@abc123", 1), ("0.22.0", 1)],
+    )
+    def test_mha_load_adapter_from_older_peft_version(self, peft_version, factor, tmp_path):
+        # Before PEFT 0.22.0, the out_proj delta weight of MHA was applied twice (#3774), so when loading such an
         # adapter, the out_proj lora_B is doubled to keep its outputs unchanged. Configs from before PEFT 0.18.0 have
-        # no version.
+        # no version. Dev versions come from main, which contains the fix.
         config = LoraConfig(target_modules=["mha"], init_lora_weights=False)
         model = get_peft_model(ModelMha(), config)
         model.save_pretrained(tmp_path)
@@ -5072,7 +5075,6 @@ class TestPeftCustomModel(PeftCommonTester):
         loaded = PeftModel.from_pretrained(ModelMha(), tmp_path)
         lora_B = model.base_model.model.mha.base_layer.out_proj.lora_B["default"].weight
         lora_B_loaded = loaded.base_model.model.mha.base_layer.out_proj.lora_B["default"].weight
-        factor = 1 if peft_version == "0.21.1" else 2
         assert torch.allclose(lora_B_loaded, factor * lora_B)
 
     def test_monteclora_variational_loss_computation(self):
