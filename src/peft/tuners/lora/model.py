@@ -1142,20 +1142,20 @@ class LoraModel(BaseTuner):
 
         # Up to PEFT 0.21.0, the out_proj delta weight of MultiheadAttention was applied twice (#3774). To keep the
         # outputs of these adapters unchanged, lora_B is doubled and the version is updated so this happens only once.
+        suffix = f".base_layer.out_proj.lora_B.{adapter_name}.weight"
         out_proj_keys = [
-            f"{name}.base_layer.out_proj.lora_B.{adapter_name}.weight"
-            for name, module in model.named_modules()
-            if isinstance(module, MultiheadAttention)
+            key
+            for key in peft_model_state_dict
+            if key.endswith(suffix) and isinstance(model.get_submodule(key.removesuffix(suffix)), MultiheadAttention)
         ]
-        out_proj_keys = [key for key in out_proj_keys if key in peft_model_state_dict]
         peft_version = packaging.version.Version(config.peft_version.partition("@")[0]) if out_proj_keys else None
         if out_proj_keys and peft_version <= packaging.version.Version("0.21.0"):
             for key in out_proj_keys:
                 peft_model_state_dict[key] = 2 * peft_model_state_dict[key]
             config.peft_version = config._get_peft_version()
             warnings.warn(
-                f"Adapter '{adapter_name}' was saved with PEFT {peft_version}, which applied the out_proj LoRA "
-                "weights of MultiheadAttention twice. They were doubled to keep the outputs of the adapter unchanged."
+                f"Adapter '{adapter_name}' was saved with PEFT <= 0.21.0, which applied the out_proj LoRA weights of "
+                "MultiheadAttention twice. They were doubled to keep the outputs of the adapter unchanged."
             )
 
         if not is_transformers_dtensor_tp and torch.distributed.is_available() and torch.distributed.is_initialized():
