@@ -906,3 +906,22 @@ class TestMixedAdapterTypes(unittest.TestCase):
             assert torch.isfinite(output01_loaded).all()
             assert not torch.allclose(output0_save, output01_loaded, atol=atol, rtol=rtol)
             assert not torch.allclose(output1_save, output01_loaded, atol=atol, rtol=rtol)
+
+
+class TestMixedModelLoadTrainability:
+    @pytest.mark.parametrize("is_trainable", [False, True])
+    def test_load_adapter_respects_is_trainable(self, tmp_path, is_trainable):
+        config = LoraConfig(r=2, target_modules=["lin0"])
+        get_peft_model(SimpleNet(), config).save_pretrained(tmp_path)
+
+        def lora_a_requires_grad(model):
+            return {n: p.requires_grad for n, p in model.named_parameters() if ".lora_A." in n}
+
+        model = PeftMixedModel.from_pretrained(SimpleNet(), tmp_path, is_trainable=is_trainable)
+        assert set(lora_a_requires_grad(model).values()) == {is_trainable}
+
+        # loading a further frozen adapter must not change the state of the active one
+        model.load_adapter(tmp_path, "other", is_trainable=False)
+        grads = lora_a_requires_grad(model)
+        assert all(v == is_trainable for n, v in grads.items() if ".default." in n)
+        assert not any(v for n, v in grads.items() if ".other." in n)

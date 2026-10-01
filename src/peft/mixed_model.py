@@ -379,7 +379,9 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         # the low_cpu_mem_usage option is handled through kwargs
         output = PeftModel.load_adapter(self, model_id, adapter_name, *args, **kwargs)
         # TODO: not quite clear why this is necessary but tests fail without it
-        self.set_adapter(self.active_adapters)
+        # keep the active adapters' trainability as configured instead of unfreezing them
+        inference_mode = all(self.peft_config[name].inference_mode for name in self.active_adapters)
+        self.set_adapter(self.active_adapters, inference_mode=inference_mode)
         return output
 
     def create_or_update_model_card(self, output_dir: str):
