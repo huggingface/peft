@@ -151,7 +151,6 @@ class TinyLoraLayer(BaseTunerLayer):
         tinylora_dropout = config.tinylora_dropout
         projection_seed = config.projection_seed
         inference_mode = config.inference_mode
-        fan_in_fan_out = config.fan_in_fan_out
 
         # The projection tensors P are only part of the checkpoint if save_projection is set, otherwise they are
         # regenerated from the projection seed when loading.
@@ -177,7 +176,9 @@ class TinyLoraLayer(BaseTunerLayer):
 
         # Compute truncated SVD of base weights (following LoRA-XS convention)
         # actual_r may be less than r if matrix dimensions are smaller
-        self._init_svd(adapter_name, r, fan_in_fan_out)
+        # Use the layer's fan_in_fan_out, which is set once from the corrected config when the layer is created (e.g.
+        # True for Conv1D). The config of an adapter added later to the existing layer is not corrected.
+        self._init_svd(adapter_name, r, self.fan_in_fan_out)
 
         # Initialize random projection tensors P using the actual rank
         self._init_projection(adapter_name, u, projection_seed)

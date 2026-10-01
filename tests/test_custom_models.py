@@ -3695,6 +3695,33 @@ class TestPeftCustomModel(PeftCommonTester):
         assert not model.base_model.model.lin0.merged
         assert model.active_adapter == "other"
 
+    @pytest.mark.parametrize(
+        "config_cls, config_kwargs",
+        [
+            (DeftConfig, {"init_weights": False}),
+            (TinyLoraConfig, {"r": 2, "u": 16, "init_weights": "uniform"}),
+        ],
+    )
+    def test_add_second_adapter_to_conv1d_target(self, config_cls, config_kwargs):
+        # Injecting the first adapter into a transformers Conv1D layer automatically corrects fan_in_fan_out=False to
+        # True. Adding a second adapter with the same config to the already wrapped layer must work the same way (as
+        # it does for LoRA): both adapters must be usable in the forward pass and for merging, and adding the second
+        # adapter must not break merging of the first one.
+        model = get_peft_model(ModelEmbConv1D(), config_cls(target_modules=["conv1d"], **config_kwargs))
+        model.add_adapter("other", config_cls(target_modules=["conv1d"], **config_kwargs))
+        model = model.to(self.torch_device).eval()
+        inputs = self.prepare_inputs_for_testing()
+
+        for adapter_name in ["other", "default"]:
+            model.set_adapter(adapter_name)
+            with torch.inference_mode():
+                output_unmerged = model(**inputs)
+            model.merge_adapter()
+            with torch.inference_mode():
+                output_merged = model(**inputs)
+            model.unmerge_adapter()
+            assert torch.allclose(output_unmerged, output_merged, atol=1e-5, rtol=1e-5)
+
     @pytest.mark.parametrize("config_cls", ALL_PEFT_CONFIG_CLASSES)
     def test_set_adapter_non_overlapping_modules(self, config_cls):
         # Ensure that when setting multiple adapters, the active adapters are correctly being set, even if
