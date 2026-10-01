@@ -23,7 +23,11 @@ import torch
 from peft.config import PeftConfig
 from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING, PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.tuners.lora import Conv2d, Linear, LoraConfig, LoraLayer
-from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.tuners.tuners_utils import (
+    BaseTunerLayer,
+    _filter_state_dict_by_key_prefixes,
+    _get_tuner_state_dict_key_prefixes,
+)
 
 from .other import get_pattern_key, infer_device
 from .peft_types import PeftType
@@ -219,8 +223,10 @@ def _get_padded_conv2d(lora_module: torch.nn.Module, target_rank: int, is_lora_A
             kernel_size=lora_module.kernel_size,
             stride=lora_module.stride,
             padding=lora_module.padding,
+            dilation=lora_module.dilation,
             bias=lora_module.bias is not None,
             groups=groups,
+            padding_mode=lora_module.padding_mode,
         )
     else:
         # LoRA B affects in_channels. When groups > 1, the target rank must be divisible by groups and the weight
@@ -468,8 +474,9 @@ def hotswap_adapter_from_state_dict(
 
     # _orig_mod is for torch.compile(model)
     is_compiled_wrapper = hasattr(model, "_orig_mod")
-    # TODO: there is probably a more precise way to identify the adapter keys
-    missing_keys = {k for k in model.state_dict() if (parameter_prefix in k) and (adapter_name in k)}
+    adapter_prefixes = _get_tuner_state_dict_key_prefixes(model, adapter_name=adapter_name)
+    adapter_state_dict = _filter_state_dict_by_key_prefixes(model.state_dict(), adapter_prefixes)
+    missing_keys = {key for key in adapter_state_dict if parameter_prefix in key}
     unexpected_keys = []
 
     # first: dry run, not swapping anything
@@ -510,8 +517,8 @@ def hotswap_adapter_from_state_dict(
         module = model.get_submodule(module_name)
 
         # swap alpha/scaling
-        r_key = get_pattern_key(config.rank_pattern.keys(), key)
-        alpha_key = get_pattern_key(config.alpha_pattern.keys(), key)
+        r_key = get_pattern_key(config.rank_pattern.keys(), module_name)
+        alpha_key = get_pattern_key(config.alpha_pattern.keys(), module_name)
         rank = config.rank_pattern.get(r_key, config.r)
         alpha = config.alpha_pattern.get(alpha_key, config.lora_alpha)
         if config.use_rslora:

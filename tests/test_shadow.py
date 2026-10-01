@@ -307,6 +307,20 @@ class TestShadowCausalLM:
         assert any("lm_head" in key for key in keys)
         assert not any(".shadow_head." in key for key in keys)
 
+    def test_shadow_fallback_trainable_after_delete(self):
+        # Bug-fix for #3717: deleting the active Shadow adapter must re-sync the fallback's
+        # backbone/projection/head trainability (they live on the tuner, not on the base model).
+        model = get_peft_model(
+            make_llama_causal(),
+            ShadowConfig(task_type="CAUSAL_LM", shadow_num_hidden_layers=1),
+        )
+        assert any(p.requires_grad for p in model.base_model.shadow_backbone["default"].parameters())
+        model.add_adapter("other", ShadowConfig(task_type="CAUSAL_LM", shadow_num_hidden_layers=1))
+        model.set_adapter("other")
+        model.delete_adapter("other")  # falls back to "default"
+        backbone = model.base_model.shadow_backbone["default"]
+        assert any(p.requires_grad for p in backbone.parameters())
+
     def test_requires_two_layers(self):
         # A single decoder block means the shadow carrier has no loop to ride; injection needs >= 2 blocks.
         # Target only one block of the tiny 2-layer model so entry == exit.

@@ -16,8 +16,10 @@ from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_eetq_a
 from peft.utils import register_peft_method
 
 from .arrow import create_arrow_model
+from .astra import preprocess_astra
 from .config import (
     ArrowConfig,
+    AstraConfig,
     BdLoraConfig,
     EvaConfig,
     KasaConfig,
@@ -38,6 +40,7 @@ from .model import LoraModel
 
 __all__ = [
     "ArrowConfig",
+    "AstraConfig",
     "BdLoraConfig",
     "Conv2d",
     "Conv3d",
@@ -59,6 +62,7 @@ __all__ = [
     "create_arrow_model",
     "get_eva_state_dict",
     "initialize_lora_eva_weights",
+    "preprocess_astra",
     "preprocess_loraga",
     "save_as_lora",
 ]

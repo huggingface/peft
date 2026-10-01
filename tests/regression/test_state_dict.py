@@ -54,6 +54,7 @@ import tempfile
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Literal
 
 import pytest
@@ -174,10 +175,31 @@ MODEL_T5 = "peft-internal-testing/tiny-random-T5ForConditionalGeneration-calibra
 MODEL_GEMMA4 = "peft-internal-testing/tiny-random-gemma4-E2B"
 # model for targeting MoE parameters
 MODEL_GPTOSS = "trl-internal-testing/tiny-GptOssForCausalLM"
+# local model used to exercise LoRA's special MultiheadAttention wrapper
+MODEL_MHA = "custom-multihead-attention-model"
+
+
+class MhaModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.embed = torch.nn.Embedding(8, 8)
+        self.mha = torch.nn.MultiheadAttention(8, 2, batch_first=True)
+        self.lm_head = torch.nn.Linear(8, 8)
+
+    @classmethod
+    def from_pretrained(cls, model_id):
+        return cls()
+
+    def forward(self, input_ids, attention_mask=None):
+        hidden_states = self.embed(input_ids)
+        hidden_states, _ = self.mha(hidden_states, hidden_states, hidden_states, need_weights=False)
+        return SimpleNamespace(logits=self.lm_head(hidden_states))
+
 
 MODEL_CLASSES = {
     "AutoModelForCausalLM": AutoModelForCausalLM,
     "AutoModelForSeq2SeqLM": AutoModelForSeq2SeqLM,
+    "MhaModel": MhaModel,
 }
 
 INPUTS_DECODER = {"input_ids": [[1, 2, 3], [6, 5, 4]], "attention_mask": [[1, 1, 1], [1, 1, 1]]}
@@ -269,6 +291,20 @@ CASES = [
     Case("loha", LoHaConfig, {"target_modules": ["q_proj", "v_proj"]}),
     Case("lokr", LoKrConfig, {"target_modules": ["q_proj", "v_proj"]}),
     Case("lora", LoraConfig, {"task_type": "CAUSAL_LM", "r": 8, "lora_alpha": 16}),
+    Case(
+        "lora_mha",
+        LoraConfig,
+        {"target_modules": ["mha"], "r": 4},
+        model_id=MODEL_MHA,
+        model_cls="MhaModel",
+    ),
+    Case(
+        "lora_mha_lora_bias",
+        LoraConfig,
+        {"target_modules": ["mha"], "r": 4, "lora_bias": True},
+        model_id=MODEL_MHA,
+        model_cls="MhaModel",
+    ),
     Case("lora_rslora", LoraConfig, {"task_type": "CAUSAL_LM", "r": 8, "use_rslora": True}),
     Case(
         "lora_rank_alpha_pattern",

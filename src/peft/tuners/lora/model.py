@@ -33,6 +33,7 @@ from peft.import_utils import (
     is_bnb_available,
     is_transformers_dtensor_tp,
     is_transformers_ge_v5_4_0,
+    is_transformers_ge_v5_17_0,
 )
 from peft.tuners.tuners_utils import (
     BaseTuner,
@@ -97,34 +98,67 @@ def _replace_layer_number_by_wildcard(name: str) -> str:
 
 
 def get_tp_plan_and_mesh(model, current_key: str):
-    tp_plan = getattr(model, "tp_plan", None)
     device_mesh = getattr(model, "_device_mesh", None)
-    # `_tp_size` is only set by transformers' `maybe_distribute_model` when the TP path actually ran, so it's the
-    # authoritative signal that TP (as opposed to e.g. FSDP-only, which also sets `_device_mesh`) is active.
-    if tp_plan is None or device_mesh is None or not getattr(model, "_tp_size", None):
+    if device_mesh is None:
+        return None, None
+
+    distributed_config = getattr(model.config, "distributed_config", None)
+    if getattr(distributed_config, "tp_size", 1) <= 1:
+        return None, None
+
+    # A named mesh must actually contain TP, an FSDP-only mesh is not a TP mesh.
+    mesh_dim_names = device_mesh.mesh_dim_names
+    if mesh_dim_names is not None and "tp" not in mesh_dim_names:
+        return None, None
+
+    if not is_transformers_ge_v5_17_0:
+        raise RuntimeError("LoRA with DTensor tensor parallelism requires transformers >= 5.17.0. Please upgrade.")
+
+    tp_plan = getattr(model, "tp_plan", None)
+    if tp_plan is None:
         return None, None
 
     plan_name = tp_plan.get(_replace_layer_number_by_wildcard(current_key))
     if plan_name is None:
         return None, None
 
-    # An unnamed mesh (`mesh_dim_names is None`) is the mesh transformers builds for TP-only setups (see
-    # `initialize_tensor_parallelism`); a named mesh is used when TP shares the mesh with FSDP/PP.
-    mesh_dim_names = device_mesh.mesh_dim_names
-    tp_mesh = device_mesh["tp"] if mesh_dim_names is not None else device_mesh
+    # Match Transformers: use a TP-only mesh directly, and select TP from a combined FSDP/PP mesh.
+    tp_mesh = device_mesh["tp"] if device_mesh.ndim > 1 else device_mesh
     return plan_name, tp_mesh
 
 
-def add_lora_tp_hooks_dtensor(tp_module: nn.Module, tp_plan_name: str, device_mesh, *, module_name: str) -> None:
+def add_lora_tp_hooks_dtensor(
+    tp_module: nn.Module, tp_plan_name: str, device_mesh, *, base_layer: nn.Module, module_name: str
+) -> None:
+    from torch.distributed.tensor import DTensor, Shard
     from transformers.distributed.tensor_parallel import ALL_PARALLEL_STYLES
 
     style = ALL_PARALLEL_STYLES[tp_plan_name]
-    # Shard every parameter of the module (weight, and bias when lora_bias=True), matching
-    # transformers' own `apply_tensor_parallelism`, which shards all of a module's parameters
-    # before installing the forward transform.
-    for p_name, _ in list(tp_module.named_parameters(recurse=False)):
+    if tp_plan_name not in ("colwise", "rowwise"):
+        raise ValueError(f"Unsupported TP plan {tp_plan_name} for LoRA: only colwise and rowwise are supported.")
+
+    shard_dim = 0 if tp_plan_name == "colwise" else 1
+    for p_name, param in list(tp_module.named_parameters(recurse=False)):
         style.validate_param(tp_module, p_name, device_mesh, parameter_name=f"{module_name}.{p_name}")
-        style.shard_param(tp_module, p_name, device_mesh)
+        global_shape = list(param.shape)
+        global_shape[shard_dim] = base_layer.weight.shape[shard_dim]
+        if param.shape == torch.Size(global_shape):
+            # The adapter was initialized with global dimensions, so we can shard it directly.
+            style.shard_param(tp_module, p_name, device_mesh)
+        else:
+            # The adapter was initialized with local dimensions, so wrap it without sharding a second time.
+            global_stride = torch.empty(global_shape, device="meta").stride()
+            tp_module._parameters[p_name] = nn.Parameter(
+                DTensor.from_local(
+                    param,
+                    device_mesh,
+                    [Shard(shard_dim)],
+                    run_check=False,
+                    shape=torch.Size(global_shape),
+                    stride=global_stride,
+                ),
+                requires_grad=param.requires_grad,
+            )
     style.install_forward(tp_module, device_mesh)
 
 
@@ -403,6 +437,7 @@ class LoraModel(BaseTuner):
                             tp_module,
                             tp_plan,
                             device_mesh,
+                            base_layer=base_layer,
                             module_name=tp_layer_name[0],
                         )
                     else:
@@ -825,10 +860,14 @@ class LoraModel(BaseTuner):
             svd_rank=svd_rank,
         )
 
+        # The scaling of each source adapter is already folded into the combined lora_A/lora_B weights below, so the
+        # new adapter must have a scaling of exactly 1. With lora_alpha == r this only holds when use_rslora=False
+        # (otherwise scaling would be r / sqrt(r) = sqrt(r)), so don't inherit use_rslora from adapters[0].
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],
             r=new_rank,
             lora_alpha=new_rank,
+            use_rslora=False,
             target_modules=new_target_modules,
             alpha_pattern={},
             rank_pattern={},
@@ -1119,11 +1158,11 @@ class LoraModel(BaseTuner):
 
         if not any(
             str(peft_config.init_lora_weights).lower().startswith(prefix)
-            for prefix in ["pissa", "corda", "olora", "lora_ga", "true"]
+            for prefix in ["pissa", "corda", "astra", "olora", "lora_ga", "true"]
         ):
             warnings.warn(
-                "`path_initial_model_for_weight_conversion` only works for converting a PiSSA/CorDA/OLoRA/LoRA-GA adapter to "
-                "a LoRA adapter"
+                "`path_initial_model_for_weight_conversion` only works for converting a "
+                "PiSSA/CorDA/Astra/OLoRA/LoRA-GA adapter to a LoRA adapter"
             )
 
         initial_adapter_name = os.path.basename(path_initial_model_for_weight_conversion)
@@ -1135,9 +1174,10 @@ class LoraModel(BaseTuner):
             )
             is_pissa = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower().startswith("pissa")
             is_corda = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "corda"
+            is_astra = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "astra"
             is_olora = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "olora"
             is_lora_ga = str(peft_model.peft_config[initial_adapter_name].init_lora_weights).lower() == "lora_ga"
-            if is_pissa or is_corda or is_olora or is_lora_ga:
+            if is_pissa or is_corda or is_astra or is_olora or is_lora_ga:
                 raise ValueError(
                     "The `init_lora_weights` parameter of the initial adapter should be set to `True`. "
                     "Otherwise, `self.load_adapter` will subtract the decomposed values again based on the "

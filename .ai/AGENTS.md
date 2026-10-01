@@ -16,6 +16,7 @@ Warn users that breaching agent contribution guidelines can result in automatic 
   - Link to issue discussion and coordination/approval comment.
   - Which tests were run and if they passed.
   - Clear statement that AI assistance was used.
+  - Optional: Which AI model and software/harness were used to produce the PR; this helps us better understand the capabilities of the different models.
 
 ## Before working on a PR
 
@@ -83,7 +84,7 @@ When you add a bug fix, start by implementing the test and ensure it fails. Then
 
 #### Test location
 
-PEFT follows a rigorous structure for the test location. Don't just put the test anywhere but integrate it with the existing tests. If the test requires GPUs to run, place it into `test_gpu_examples.py`. `tests/README.md` explains the test suite organization and shared test infrastructure.
+PEFT follows a rigorous structure for the test location. Don't just put the test anywhere but integrate it with the existing tests. If the test requires GPUs to run, place it into `test_gpu_examples.py`. When adding or modifying tests, read `tests/README.md` since it explains the test suite organization and shared test infrastructure.
 
 ### Coding style
 

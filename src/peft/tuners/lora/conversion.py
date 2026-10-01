@@ -56,7 +56,7 @@ def _convert_miss_module_to_lora(
 
     For bat mode, the delta weight depends on the base weight, so SVD is used.
     """
-    miss_fn = module.miss_fn
+    miss_fn = module.miss_fn[adapter_name]
     miss_block = module.miss_block[adapter_name]
     in_features = module.in_features
     out_features = module.out_features

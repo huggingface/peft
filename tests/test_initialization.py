@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import copy
+import itertools
 import math
 import platform
 import re
@@ -74,7 +75,8 @@ from peft import (
 )
 from peft.mapping import PEFT_TYPE_TO_PREFIX_MAPPING
 from peft.tuners.lokr.layer import LoKrLayer
-from peft.tuners.lora.config import CordaConfig
+from peft.tuners.lora.astra import preprocess_astra
+from peft.tuners.lora.config import AstraConfig, CordaConfig
 from peft.tuners.lora.corda import preprocess_corda
 from peft.tuners.lora.layer import LoraLayer
 from peft.utils import infer_device
@@ -2992,7 +2994,13 @@ class TestMissInitialization:
                 X = self.lin1(X)
                 return X
 
+        torch.manual_seed(0)
         return MLP().to(self.torch_device)
+
+    @pytest.fixture
+    def data(self):
+        torch.manual_seed(0)
+        return torch.randn(4, 10, device=self.torch_device)
 
     @pytest.mark.parametrize("init_weights", [True, False, "bat", "mini"])
     @pytest.mark.parametrize("r", [11, 64])
@@ -3006,6 +3014,96 @@ class TestMissInitialization:
 
         # a rank equal to the bound is allowed
         get_peft_model(self.get_model(), MissConfig(target_modules=["lin0"], r=10, init_weights=init_weights))
+
+    def test_miss_fn_per_adapter(self):
+        # Reproduces the bug where `miss_fn` (from `init_weights`) is not set on a
+        # per-adapter level: adding a second adapter with a different `init_weights`
+        # value overrides the first adapter's setting. Miss issue #6.
+        model = self.get_model()
+        config0 = MissConfig(target_modules=["lin0"], r=2, init_weights=True)
+        model = get_peft_model(model, config0)
+
+        config1 = MissConfig(target_modules=["lin0"], r=2, init_weights="bat")
+        model.add_adapter("adapter1", config1)
+
+        layer = model.base_model.model.lin0
+        # miss_fn should be stored per-adapter, not as a single value
+        assert layer.miss_fn["default"] is True
+        assert layer.miss_fn["adapter1"] == "bat"
+
+    def test_miss_fn_per_adapter_three_variants(self):
+        # Add three adapters with all three init_weights variants: True, "bat", "mini"
+        model = self.get_model()
+        config0 = MissConfig(target_modules=["lin0"], r=2, init_weights=True)
+        model = get_peft_model(model, config0)
+
+        config1 = MissConfig(target_modules=["lin0"], r=2, init_weights="bat")
+        model.add_adapter("adapter1", config1)
+
+        config2 = MissConfig(target_modules=["lin0"], r=2, init_weights="mini", mini_r=1)
+        model.add_adapter("adapter2", config2)
+
+        layer = model.base_model.model.lin0
+        assert layer.miss_fn["default"] is True
+        assert layer.miss_fn["adapter1"] == "bat"
+        assert layer.miss_fn["adapter2"] == "mini"
+
+    def test_miss_fn_output_respects_init_weights(self, data):
+        init_options = [True, False, "bat", "mini"]
+
+        model = self.get_model()
+        with torch.inference_mode():
+            output_before = {"base": model(data)}
+
+        for init_weights in init_options:
+            model = self.get_model()
+            torch.manual_seed(0)
+            config = MissConfig(r=2, mini_r=2, target_modules=["lin0", "lin1"], init_weights=init_weights)
+            model = get_peft_model(model, config)
+            # perturb randomly (but with seed) to ensure that the init options differ
+            for layer in (model.lin0, model.lin1):
+                block = layer.miss_block["default"]
+                block.data.add_(torch.randn_like(block))
+            with torch.inference_mode():
+                output_before[init_weights] = model(data)
+
+        # sanity check: each option differs
+        atol, rtol = 1e-4, 1e-4
+        for init0, init1 in itertools.combinations(["base"] + init_options, r=2):
+            assert not torch.allclose(output_before[init0], output_before[init1], atol=atol, rtol=rtol), (
+                f"Expected outputs for {init0} and {init1} to differ, but they were equal."
+            )
+
+        # now check a single model with multiple adapters
+        model = self.get_model()
+        # initialize with first adapter
+        torch.manual_seed(0)
+        config = MissConfig(r=2, mini_r=2, target_modules=["lin0", "lin1"], init_weights=init_options[0])
+        model = get_peft_model(model, config, adapter_name=str(init_options[0]))
+        for layer in (model.lin0, model.lin1):
+            block = layer.miss_block[str(init_options[0])]
+            block.data.add_(torch.randn_like(block))
+        # add the other adapters
+        for init_weights in init_options[1:]:
+            torch.manual_seed(0)
+            config = MissConfig(r=2, mini_r=2, target_modules=["lin0", "lin1"], init_weights=init_weights)
+            model.add_adapter(str(init_weights), config)
+            # perturb randomly (but with seed) to ensure that the init options differ
+            for layer in (model.lin0, model.lin1):
+                block = layer.miss_block[str(init_weights)]
+                block.data.add_(torch.randn_like(block))
+
+        # collect the outputs
+        with model.disable_adapter(), torch.inference_mode():
+            output_after = {"base": model(data)}
+        for init_weights in init_options:
+            model.set_adapter(str(init_weights))
+            with torch.inference_mode():
+                output_after[init_weights] = model(data)
+
+        # compare the output: should be the same for multiple adapters or for a single adapter
+        for key in ["base"] + init_options:
+            assert torch.allclose(output_before[key], output_after[key], atol=atol, rtol=rtol)
 
 
 class TestPeanutInitialization:
@@ -4283,6 +4381,320 @@ class TestCordaInitialization:
         assert torch.allclose(output_base, output_peft, atol=1e-5)
 
 
+class TestAstraInitialization:
+    """Test class to check the initialization of Astra adapters."""
+
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # choose a large weight so that averages are close to expected values
+                self.linear = nn.Linear(1000, 1000)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        return MyModule().eval().to(self.torch_device)
+
+    def get_small_model(self):
+        class SmallModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(64, 16)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        return SmallModule().eval().to(self.torch_device)
+
+    @pytest.fixture
+    def data(self):
+        torch.manual_seed(233)
+        return torch.rand(1000, 1000).to(self.torch_device)
+
+    def test_lora_astra_requires_rank_at_most_out_features(self, tmp_path):
+        model = self.get_small_model()
+        data = torch.rand(4, 64).to(self.torch_device)
+
+        config = LoraConfig(init_lora_weights="astra", target_modules=["linear"], r=32)
+        with pytest.raises(ValueError, match="Astra requires `r` <= out_features"):
+            preprocess_astra(model, config, run_model=lambda: model(data))
+
+        # when the cache is reused, preprocessing does not crop, so the rank is checked when the adapter is created
+        cache_file = tmp_path / "astra_cache.pt"
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            r=8,
+            astra_config=AstraConfig(cache_file=cache_file),
+        )
+        preprocess_astra(model, config, run_model=lambda: model(data))
+
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            r=32,
+            astra_config=AstraConfig(cache_file=cache_file),
+        )
+        preprocess_astra(model, config)
+        with pytest.raises(ValueError, match="Astra requires `r` <= out_features"):
+            get_peft_model(model, config)
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_lora_astra_linear_init_low_precision_base(self, data, dtype):
+        # The residual weight is rounded to the base dtype after the fp32 projection has been subtracted, so the
+        # identity property only holds up to that rounding.
+        model = self.get_model().to(dtype)
+        data = data.to(dtype)
+        output_base = model(data)
+
+        config = LoraConfig(init_lora_weights="astra", target_modules=["linear"], r=8)
+        preprocess_astra(model, config, run_model=lambda: model(data), hooked_model=model)
+        peft_model = get_peft_model(model, config)
+
+        assert torch.allclose(output_base, peft_model(data), atol=1e-2)
+
+    def test_lora_astra_file_paths_without_directory(self, data, tmp_path, monkeypatch):
+        # a bare filename has no directory component, so no directory needs to be created
+        monkeypatch.chdir(tmp_path)
+        model = self.get_model()
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            astra_config=AstraConfig(cache_file="astra_cache.pt", covariance_file="covariance_cache.pt"),
+        )
+        preprocess_astra(model, config, run_model=lambda: model(data), hooked_model=model)
+
+        assert (tmp_path / "astra_cache.pt").exists()
+        assert (tmp_path / "covariance_cache.pt").exists()
+
+    def test_lora_astra_requires_target_modules(self):
+        model = self.get_model()
+        config = LoraConfig(
+            init_lora_weights="astra",
+            astra_config=AstraConfig(),
+        )
+
+        with pytest.raises(ValueError, match="`target_modules` must be set explicitly"):
+            preprocess_astra(model, config)
+
+    def test_lora_astra_does_not_support_target_parameters(self):
+        with pytest.raises(ValueError, match="`target_parameters` is not supported with Astra"):
+            LoraConfig(
+                init_lora_weights="astra",
+                target_modules=["linear"],
+                target_parameters=["linear.weight"],
+            )
+
+    def test_lora_astra_requires_astra_config(self):
+        model = self.get_model()
+        config = LoraConfig(
+            target_modules=["linear"],
+        )
+
+        with pytest.raises(ValueError, match="`lora_config.astra_config` must be set to use Astra"):
+            preprocess_astra(model, config)
+
+    def test_lora_astra_no_redundant_fields(self, data):
+        original_model = self.get_model()
+        model = deepcopy(original_model)
+
+        astra_config = AstraConfig()
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            astra_config=astra_config,
+        )
+        preprocess_astra(
+            model,
+            config,
+            run_model=lambda: model(data),
+            hooked_model=model,
+        )
+        peft_model = get_peft_model(model, config)
+
+        # check if the redundant fields are removed
+        assert not hasattr(peft_model.base_model.linear, "sample_count")
+        assert not hasattr(peft_model.base_model.linear, "covariance_matrix")
+        assert not hasattr(peft_model.base_model.linear, "rank")
+        assert not hasattr(peft_model.base_model.linear, "eigens")
+
+    def test_lora_astra_sample_count(self, data):
+        model = self.get_model()
+
+        astra_config = AstraConfig(
+            prune_temporary_fields=False,
+        )
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            astra_config=astra_config,
+        )
+
+        def run_model():
+            model(data)
+            model(data)
+
+        preprocess_astra(
+            model,
+            config,
+            run_model=run_model,
+            hooked_model=model,
+        )
+
+        # Temporary fields are kept when pruning is disabled.
+        layer = model.linear
+        assert hasattr(layer, "covariance_matrix")
+        assert hasattr(layer, "sample_count")
+
+        # The covariance hook increments `sample_count` once per forward pass, and `run_model` performs two.
+        assert layer.sample_count == 2
+
+    def test_lora_astra_hook_unregister(self, data):
+        original_model = self.get_model()
+        model = deepcopy(original_model)
+        hook_call_count = 0
+
+        def hook(*args):
+            nonlocal hook_call_count
+            hook_call_count += 1
+
+        model.linear.register_forward_hook(hook)
+
+        astra_config = AstraConfig(
+            prune_temporary_fields=False,
+        )
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            astra_config=astra_config,
+        )
+        preprocess_astra(
+            model,
+            config,
+            run_model=lambda: model(data),
+            hooked_model=model,
+        )
+
+        # after preprocessing, external and internal hook should be run once
+        assert hook_call_count == 1
+        assert model.linear.sample_count == 1
+
+        # run preprocessed model once
+        model(data)
+
+        # the external hook should be kept, but the internal hook should be gone
+        assert hook_call_count == 2
+        assert model.linear.sample_count == 1
+
+    def test_lora_astra_linear_init_default(self, data, tmp_path):
+        original_model = self.get_model()
+        model = deepcopy(original_model)
+        output_base = model(data)
+
+        astra_config = AstraConfig(
+            cache_file=tmp_path / "astra_cache.pt",
+            covariance_file=tmp_path / "covariance_cache.pt",
+        )
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            astra_config=astra_config,
+        )
+        preprocess_astra(
+            model,
+            config,
+            run_model=lambda: model(data),
+            hooked_model=model,
+        )
+        peft_model = get_peft_model(model, config)
+
+        # check if adapter performs an identity transformation; the tolerance accounts for the float32 rounding
+        # error of subtracting and re-adding the projected weight
+        assert torch.allclose(output_base, peft_model(data), atol=1e-05)
+
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_astra = peft_model(data)
+
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_base, output_astra, atol=tol, rtol=tol)
+
+        # if load eigendecomposition result from cache, the output should be the same
+        model = deepcopy(original_model)
+        config = LoraConfig(
+            init_lora_weights="astra",
+            target_modules=["linear"],
+            astra_config=AstraConfig(cache_file=tmp_path / "astra_cache.pt"),
+        )
+        preprocess_astra(model, config)
+        peft_model = get_peft_model(model, config)
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        assert torch.allclose(output_astra, peft_model(data), atol=1e-06)
+
+    def test_lora_astra_conversion_same_output_after_loading(self, data, tmp_path):
+        model = self.get_model()
+        output_base = model(data)
+
+        astra_config = AstraConfig()
+        config = LoraConfig(init_lora_weights="astra", target_modules=["linear"], r=8, astra_config=astra_config)
+        preprocess_astra(model, config, run_model=lambda: model(data), hooked_model=model)
+        peft_model = get_peft_model(deepcopy(model), config)
+        # save the initial model
+        peft_model.peft_config["default"].init_lora_weights = True
+        peft_model.save_pretrained(tmp_path / "init-model")
+        peft_model.peft_config["default"].init_lora_weights = "astra"
+
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_astra = peft_model(data)
+
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_base, output_astra, atol=tol, rtol=tol)
+
+        # save the model normally
+        peft_model.save_pretrained(tmp_path / "astra-model")
+        model_loaded = PeftModel.from_pretrained(deepcopy(model), tmp_path / "astra-model")
+        output_loaded = model_loaded(data)
+
+        assert torch.allclose(output_astra, output_loaded, atol=tol, rtol=tol)
+        # sanity check: ranks should still be 8 as initially
+        assert model_loaded.peft_config["default"].r == 8
+        assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
+        # sanity check: the base model weights were indeed changed
+        assert not torch.allclose(
+            model.linear.weight, model_loaded.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+        # save the model with conversion
+        peft_config_keys_before = list(peft_model.peft_config.keys())
+        peft_config_dict_before = peft_model.peft_config["default"].to_dict()
+        peft_model.save_pretrained(
+            tmp_path / "astra-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
+        peft_config_keys_after = list(peft_model.peft_config.keys())
+        peft_config_dict_after = peft_model.peft_config["default"].to_dict()
+        assert peft_config_keys_before == peft_config_keys_after
+        assert peft_config_dict_before == peft_config_dict_after
+
+        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "astra-model-converted")
+        output_converted = model_converted(data)
+
+        # tolerance accounts for the float32 rounding error of subtracting and re-adding the projected weight
+        assert torch.allclose(output_astra, output_converted, atol=1e-05, rtol=tol)
+        # rank should be double of what it was initially
+        assert model_converted.peft_config["default"].r == 16
+        assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 16
+        # base model weights should be the same as the initial model
+        assert torch.allclose(
+            model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+
 class TestEvaInitialization:
     """Tests for the EVA (Explained Variance Adaptation) initialization method.
 
@@ -4543,6 +4955,34 @@ class TestLilyInitialization:
         assert lin0_B_ptrs.isdisjoint(lin1_B_ptrs), "B adapters should not be shared between lin0 and lin1 layers"
 
 
+def test_prepare_model_for_compiled_hotswap_preserves_conv2d_attributes():
+    # Regression test for https://github.com/huggingface/peft/issues/3697: rank padding reconstructs Conv2d LoRA
+    # modules, which must retain the spatial attributes copied from the base layer.
+    class ConvModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = nn.Conv2d(1, 2, kernel_size=3, padding=2, dilation=2, padding_mode="reflect")
+
+        def forward(self, X):
+            return self.conv(X)
+
+    torch.manual_seed(0)
+    inputs = torch.randn(2, 1, 8, 8)
+    model = get_peft_model(
+        ConvModel(),
+        LoraConfig(target_modules=["conv"], r=2, init_lora_weights=False),
+    )
+    layer = model.base_model.model.conv
+    output_before = model(inputs)
+
+    prepare_model_for_compiled_hotswap(model, target_rank=4)
+    output_after = model(inputs)
+
+    assert layer.lora_A["default"].dilation == layer.base_layer.dilation
+    assert layer.lora_A["default"].padding_mode == layer.base_layer.padding_mode
+    assert torch.allclose(output_before, output_after, atol=1e-6, rtol=1e-5)
+
+
 @pytest.mark.skipif(
     platform.system() != "Linux", reason="Out of the box, torch.compile does not work on Windows or MacOS"
 )
@@ -4664,6 +5104,80 @@ class TestHotSwapping:
 
         # real check: model now behaves again like adapter 0
         assert torch.allclose(output0, output_loaded_back0, atol=atol, rtol=rtol)
+
+    def test_hotswap_preserves_adapter_with_shared_name_prefix(self, tmp_path):
+        """Regression for #3780: replacing `foo` must leave `foobar`'s output unchanged."""
+        base_model = self.get_model()
+        config = LoraConfig(target_modules=["lin0"], r=2, init_lora_weights=False)
+        torch.manual_seed(1)
+        model = get_peft_model(deepcopy(base_model), config, adapter_name="foo").eval()
+        model.add_adapter("foobar", config)
+
+        torch.manual_seed(2)
+        incoming_model = get_peft_model(deepcopy(base_model), config).eval()
+        incoming_model.save_pretrained(tmp_path / "incoming")
+        inputs = torch.rand(3, 10, device=self.torch_device)
+
+        with torch.inference_mode():
+            incoming_output = incoming_model(inputs)
+            model.set_adapter("foo")
+            old_foo_output = model(inputs)
+            model.set_adapter("foobar")
+            expected_foobar_output = model(inputs)
+        assert not torch.allclose(old_foo_output, incoming_output)
+        assert not torch.allclose(expected_foobar_output, incoming_output)
+
+        hotswap_adapter(model, tmp_path / "incoming", adapter_name="foo")
+
+        with torch.inference_mode():
+            model.set_adapter("foo")
+            torch.testing.assert_close(model(inputs), incoming_output)
+            model.set_adapter("foobar")
+            torch.testing.assert_close(model(inputs), expected_foobar_output)
+
+    @pytest.mark.parametrize("use_rslora", [False, True])
+    @pytest.mark.parametrize("do_compile", [False, True])
+    @pytest.mark.parametrize("pattern_key", ["lin1", "lin[1]"])
+    @pytest.mark.parametrize("pattern", [["rank"], ["alpha"], ["rank", "alpha"]])
+    def test_hotswap_rank_and_alpha_patterns(self, use_rslora, do_compile, pattern_key, pattern, tmp_path):
+        # Regression for #3738: hotswapping must use the same per-module scaling as normal loading.
+        inputs = torch.rand(3, 10, device=self.torch_device)
+        base_model = self.get_model()
+        configs = [
+            LoraConfig(r=3, lora_alpha=9, target_modules=["lin0", "lin1"]),
+            LoraConfig(r=2, lora_alpha=4, target_modules=["lin0"]),
+            LoraConfig(r=1, lora_alpha=3, target_modules=["lin1"]),
+        ]
+        expected_outputs = []
+        with torch.inference_mode():
+            for index, config in enumerate(configs):
+                config.init_lora_weights = False
+                config.use_rslora = use_rslora
+                if "rank" in pattern:
+                    config.rank_pattern = {pattern_key: 4 - index}
+                if "alpha" in pattern:
+                    # Hotswap requires identical alpha patterns across adapters.
+                    config.alpha_pattern = {pattern_key: 7}
+                adapter = get_peft_model(deepcopy(base_model), config).eval()
+                adapter.save_pretrained(tmp_path / str(index))
+                expected_outputs.append(adapter(inputs))
+
+        model = PeftModel.from_pretrained(deepcopy(base_model), tmp_path / "0").eval()
+        if do_compile:
+            from torch._dynamo.testing import CompileCounter
+
+            prepare_model_for_compiled_hotswap(model, target_rank=4)
+            torch._dynamo.reset()
+            counter = CompileCounter()
+            model = torch.compile(model, backend=counter, fullgraph=True)
+        with torch.inference_mode():
+            torch.testing.assert_close(model(inputs), expected_outputs[0])
+            # Re-swapping the first adapter pins the same-checkpoint case, then exercise missing targets and return.
+            for index in [0, 1, 2, 0]:
+                hotswap_adapter(model, tmp_path / str(index), adapter_name="default")
+                torch.testing.assert_close(model(inputs), expected_outputs[index], atol=1e-4, rtol=1e-4)
+        if do_compile:
+            assert counter.frame_count == 1
 
     def test_hotswap_different_peft_types_raises(self, tmp_path):
         # When the configs of the two adapters are different PEFT methods, raise
