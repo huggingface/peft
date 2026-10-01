@@ -640,10 +640,9 @@ class TestTrainableTokens:
         assert not torch.allclose(emb_image_orig[:, [0, 1]], emb_image_peft[:, [0, 1]])
         assert torch.allclose(emb_image_orig[:, [2]], emb_image_peft[:, [2]])
 
-    @pytest.mark.parametrize("active_adapters", [["default"], ["other"], ["default", "other"]])
-    @pytest.mark.parametrize("safe_merge", [False, True])
-    def test_multiple_adapters_different_target_modules(self, model_multi_embedding, active_adapters, safe_merge):
-        # Regression for #3842: an adapter absent from a layer must leave that layer unchanged.
+    @pytest.fixture(params=[["default"], ["other"], ["default", "other"]])
+    def disjoint_adapters(self, model_multi_embedding, request):
+        active_adapters = request.param
         original_model = copy.deepcopy(model_multi_embedding)
         config = TrainableTokensConfig(target_modules=["emb_text"], token_indices=[0, 1])
         model = get_peft_model(model_multi_embedding, config)
@@ -659,27 +658,45 @@ class TestTrainableTokens:
                 expected_model.emb_text.weight[:2].copy_(model.model.emb_text.trainable_tokens_delta["default"])
             if "other" in active_adapters:
                 expected_model.emb_image.weight[:2].copy_(model.model.emb_image.trainable_tokens_delta["other"])
+        return model, original_model, expected_model, inputs
+
+    def test_disjoint_adapters_forward(self, disjoint_adapters):
+        model, original_model, expected_model, inputs = disjoint_adapters
         expected = expected_model(**inputs)
+        assert not torch.allclose(expected[0], original_model(**inputs)[0])
         torch.testing.assert_close(model(**inputs), expected)
+
+    def test_disjoint_adapters_merged_weights(self, disjoint_adapters):
+        model, _, expected_model, _ = disjoint_adapters
         torch.testing.assert_close(
-            model.model.emb_text.get_merged_weights(active_adapters), expected_model.emb_text.weight
+            model.model.emb_text.get_merged_weights(model.active_adapters), expected_model.emb_text.weight
         )
         torch.testing.assert_close(
-            model.model.emb_image.get_merged_weights(active_adapters), expected_model.emb_image.weight
+            model.model.emb_image.get_merged_weights(model.active_adapters), expected_model.emb_image.weight
         )
+
+    def test_disjoint_adapters_disable(self, disjoint_adapters):
+        model, original_model, _, inputs = disjoint_adapters
         with model.disable_adapter():
             torch.testing.assert_close(model(**inputs), original_model(**inputs))
 
-        model.merge_adapter(safe_merge=safe_merge, adapter_names=active_adapters)
-        assert model.model.emb_text.merged_adapters == [name for name in active_adapters if name == "default"]
-        assert model.model.emb_image.merged_adapters == [name for name in active_adapters if name == "other"]
-        torch.testing.assert_close(model(**inputs), expected)
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    def test_disjoint_adapters_merge_unmerge(self, disjoint_adapters, safe_merge):
+        model, original_model, expected_model, inputs = disjoint_adapters
+        model.merge_adapter(safe_merge=safe_merge, adapter_names=model.active_adapters)
+        assert model.model.emb_text.merged_adapters == (["default"] if "default" in model.active_adapters else [])
+        assert model.model.emb_image.merged_adapters == (["other"] if "other" in model.active_adapters else [])
+        torch.testing.assert_close(model(**inputs), expected_model(**inputs))
         model.unmerge_adapter()
-        torch.testing.assert_close(model(**inputs), expected)
+        torch.testing.assert_close(model(**inputs), expected_model(**inputs))
         torch.testing.assert_close(model.model.emb_text.get_base_layer().weight, original_model.emb_text.weight)
         torch.testing.assert_close(model.model.emb_image.get_base_layer().weight, original_model.emb_image.weight)
-        merged_model = model.merge_and_unload(safe_merge=safe_merge, adapter_names=active_adapters)
-        torch.testing.assert_close(merged_model(**inputs), expected)
+
+    @pytest.mark.parametrize("safe_merge", [False, True])
+    def test_disjoint_adapters_merge_and_unload(self, disjoint_adapters, safe_merge):
+        model, _, expected_model, inputs = disjoint_adapters
+        merged_model = model.merge_and_unload(safe_merge=safe_merge, adapter_names=model.active_adapters)
+        torch.testing.assert_close(merged_model(**inputs), expected_model(**inputs))
 
     @pytest.mark.parametrize(
         "peft_config",
