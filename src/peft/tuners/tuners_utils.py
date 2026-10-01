@@ -2212,10 +2212,18 @@ class BaseTunerLayer(ABC):
             item = adapter_layer[adapter_name]
             item_dtype = getattr(item, "dtype", None)
             cast_dtype = item_dtype is None or item_dtype.is_floating_point or item_dtype.is_complex
+
+            # Note that `adapter_layer[adapter_name] = item.to(target_device, dtype=target_dtype)` always sets
+            # requires_grad=True if the device or dtype is different, even if LHS and RHS of the assignment have
+            # requires_grad=False, as a new tensor is returned. This leads to a new nn.Parameter being registered, which
+            # has requires_grad=True by default. We need to use `getattr` for nn.Identity etc.
+            requires_grad_before = getattr(item, "requires_grad", None)
             if target_dtype is not None and cast_dtype:
                 adapter_layer[adapter_name] = item.to(target_device, dtype=target_dtype)
             else:
                 adapter_layer[adapter_name] = item.to(target_device)
+            if requires_grad_before is not None:
+                adapter_layer[adapter_name].requires_grad = requires_grad_before
 
     @overload
     def _cast_input_dtype(self, x: None, dtype: torch.dtype) -> None: ...
@@ -2744,11 +2752,18 @@ def cast_adapter_dtype(model: nn.Module, adapter_name: str, autocast_adapter_dty
                 continue
 
             if isinstance(submodule[adapter_name], nn.Parameter):
+                # Note that the assignment below always sets requires_grad=True if the dtype is different, even if LHS
+                # and RHS of the assignment have requires_grad=False, as a new tensor is returned. This leads to a new
+                # nn.Parameter being registered, which has requires_grad=True by default. We need to use `getattr` for
+                # nn.Identity etc.
+                requires_grad_before = getattr(submodule[adapter_name], "requires_grad", None)
                 if submodule[adapter_name].dtype in dtypes_to_convert_to_fp32:
                     # Reassign through the ParameterDict rather than mutating `.data` in place: for a
                     # DTensor-backed parameter (TP), `.data = ...` only updates the outer dtype metadata
                     # while leaving the local shard's actual dtype unchanged.
                     submodule[adapter_name] = submodule[adapter_name].to(torch.float32)
+                    if requires_grad_before is not None:
+                        submodule[adapter_name].requires_grad = requires_grad_before
                 continue
 
             if isinstance(submodule[adapter_name], torch.Tensor):  # e.g. from a BufferDict

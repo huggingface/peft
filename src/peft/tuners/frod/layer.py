@@ -376,10 +376,14 @@ class Linear(nn.Linear, FrodLayer):
             param = adapter_layer[adapter_name]
             if param.is_meta:
                 continue
+
+            requires_grad_before = getattr(param, "requires_grad", None)
             if target_dtype is not None:
                 adapter_layer[adapter_name] = param.to(target_device, dtype=target_dtype)
             else:
                 adapter_layer[adapter_name] = param.to(target_device)
+            if requires_grad_before is not None:
+                adapter_layer[adapter_name].requires_grad = requires_grad_before
 
     def _get_existing_adapter_device_dtype(
         self, adapter_name: Optional[str] = None
