@@ -542,6 +542,34 @@ class BaseTuner(nn.Module, ABC):
             if isinstance(module, self.tuner_layer_cls):
                 module._freeze_non_trainable_peft_weights()
 
+    def _get_adapter_modules_training(self, model: nn.Module) -> list[tuple[nn.Module, bool]]:
+        """Return `(adapter_module, training)` pairs for adapter-owned module roots in `model`.
+
+        The saved state is only the root module's state. Restoring it with `Module.train` also updates all
+        descendants, so a subtree with manually mixed training states is normalized to the root state.
+        """
+        adapter_modules_training = []
+        for module in model.modules():
+            if not isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
+                continue
+
+            for name in module.adapter_layer_names + module.other_param_names:
+                try:
+                    module_dict = module.get_submodule(name)
+                except AttributeError:
+                    continue
+                if not isinstance(module_dict, nn.ModuleDict):
+                    continue
+                adapter_modules_training.extend(
+                    (adapter_module, adapter_module.training) for adapter_module in module_dict.values()
+                )
+        return adapter_modules_training
+
+    @staticmethod
+    def _restore_adapter_modules_training(adapter_modules_training: list[tuple[nn.Module, bool]]) -> None:
+        for adapter_module, training in adapter_modules_training:
+            adapter_module.train(training)
+
     def _enable_adapter_layers(self, enabled: bool = True) -> None:
         for module in self.model.modules():
             if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
@@ -883,6 +911,9 @@ class BaseTuner(nn.Module, ABC):
         # create their new adapter parameters before calling this method, so exclude those from the snapshot.
         existing_adapter_prefixes = []
         mapping_existing_parameter_requires_grad = []
+        # Adapter creation calls set_adapter as part of its housekeeping. Preserve existing adapter module modes
+        # because the new adapter's inference_mode must not change the behavior of adapters that were already present.
+        existing_adapter_modules_training = self._get_adapter_modules_training(model)
         seen_parameters = set()
         for key, module in named_modules:
             if isinstance(module, BaseTunerLayer):
@@ -1148,6 +1179,12 @@ class BaseTuner(nn.Module, ABC):
             adapter_name=adapter_name,
             activate_adapter=adapter_name in self.active_adapters,
         )
+
+        # Restore existing adapter training state after housekeeping, then initialize the newly added adapter from its config.
+        self._restore_adapter_modules_training(existing_adapter_modules_training)
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayer):
+                module.set_training(adapter_name, not peft_config.inference_mode)
 
         for parameter, requires_grad in mapping_existing_parameter_requires_grad:
             parameter.requires_grad = requires_grad
@@ -2003,6 +2040,16 @@ class BaseTunerLayer(ABC):
         # is already a list of str
         return self.active_adapter
 
+    def set_training(self, adapter_names: str | Sequence[str], training: bool = True) -> None:
+        if isinstance(adapter_names, str):
+            adapter_names = [adapter_names]
+
+        for adapter_name in adapter_names:
+            for name in self.adapter_layer_names + self.other_param_names:
+                module_dict = getattr(self, name, None)
+                if isinstance(module_dict, nn.ModuleDict) and adapter_name in module_dict:
+                    module_dict[adapter_name].train(training)
+
     def enable_adapters(self, enabled: bool) -> None:
         """Toggle the enabling and disabling of adapters
 
@@ -2069,6 +2116,11 @@ class BaseTunerLayer(ABC):
             for key, layer in module_dict.items():
                 should_require_grad = (key in adapter_names) and (not inference_mode)
                 _set_layer_requires_grad(layer, should_require_grad)
+
+        # Inference mode freezes both the adapter parameters and all adapter-specific submodules. The parent tuner
+        # layer remains in its existing training/eval mode because it can host multiple adapters.
+        for adapter_name in adapter_names:
+            self.set_training(adapter_name, not inference_mode)
 
         self._freeze_non_trainable_peft_weights(adapter_names)
         self._active_adapter = adapter_names
@@ -2784,6 +2836,13 @@ def set_requires_grad(model, adapter_names: str | Sequence[str], requires_grad: 
     for module in model.modules():
         if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
             module.set_requires_grad(adapter_names=adapter_names, requires_grad=requires_grad)
+
+
+def set_training(model, adapter_names: str | Sequence[str], training: bool = True) -> None:
+    """Set the training mode of the given adapter modules."""
+    for module in model.modules():
+        if isinstance(module, (BaseTunerLayer, AuxiliaryTrainingWrapper)):
+            module.set_training(adapter_names=adapter_names, training=training)
 
 
 def get_device_map(model) -> dict:

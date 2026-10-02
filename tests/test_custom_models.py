@@ -1374,6 +1374,9 @@ TEST_CASES = [
     ),
 ]
 ALL_PEFT_CONFIG_CLASSES = sorted({row[2] for row in TEST_CASES}, key=lambda cls: cls.__name__)
+ALL_PEFT_CONFIG_CASES = [
+    next(row for row in TEST_CASES if row[2] is config_cls) for config_cls in ALL_PEFT_CONFIG_CLASSES
+]
 
 # For this test matrix, each tuple consists of:
 # - test name
@@ -5656,6 +5659,8 @@ class TestRequiresGrad:
 
     """
 
+    transformers_class = MockTransformerWrapper
+
     def check_requires_grad(self, model, *params_expected: str):
         # Check that only the given parameters have requires_grad=True, and all others have requires_grad=False.
         # Calling without arguments besides the model means that all parameters should have requires_grad=False.
@@ -5663,6 +5668,19 @@ class TestRequiresGrad:
         diff = set(params_expected).symmetric_difference(set(params_with_requires_grad))
         msg = f"Expected {params_expected} to require gradients, got {params_with_requires_grad}"
         assert len(diff) == 0, msg
+
+    @staticmethod
+    def get_adapter_submodules(model, adapter_name):
+        adapter_submodules = []
+        for tuner_layer in model.modules():
+            if not isinstance(tuner_layer, BaseTunerLayer):
+                continue
+            for name, module_dict in tuner_layer.named_children():
+                if name == "base_layer":
+                    continue
+                if isinstance(module_dict, nn.ModuleDict) and adapter_name in module_dict:
+                    adapter_submodules.extend(module_dict[adapter_name].modules())
+        return adapter_submodules
 
     def test_requires_grad_modules_to_save_default(self):
         config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
@@ -5791,6 +5809,122 @@ class TestRequiresGrad:
         # set config1 as active but in inference mode, should result in no module requiring grad
         peft_model.set_adapter("adapter1", inference_mode=True)
         self.check_requires_grad(peft_model)
+
+    def test_inference_mode_controls_modules_to_save_training_state(self):
+        # This uses LoRA because modules_to_save shares this mechanism across all PEFT methods that support it.
+        # inference_mode must switch the selected modules_to_save copy to eval mode, while leaving the original module
+        # used by the base-model path unchanged. Switching back to training mode should restore the saved copy.
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = get_peft_model(MLP(), config)
+        wrapper = peft_model.base_model.model.lin1
+        saved_module = wrapper.modules_to_save["default"]
+        lora_modules = [
+            peft_model.base_model.model.lin0.lora_A["default"],
+            peft_model.base_model.model.lin0.lora_B["default"],
+        ]
+
+        assert saved_module.training
+        assert all(module.training for module in lora_modules)
+        assert wrapper.original_module.training
+        peft_model.set_adapter("default", inference_mode=True)
+        assert not saved_module.training
+        assert not any(module.training for module in lora_modules)
+        assert wrapper.original_module.training
+        peft_model.set_adapter("default", inference_mode=False)
+        assert saved_module.training
+        assert all(module.training for module in lora_modules)
+        assert wrapper.original_module.training
+
+    def test_add_adapter_inference_mode_preserves_existing_modules_to_save_training_state(self):
+        # This uses LoRA because modules_to_save shares this mechanism across all PEFT methods that support it.
+        # Adding an inference-only adapter must not change the existing adapter's saved-module mode. The new copy should
+        # start in eval mode, and the wrapper's original module must remain in its existing training mode.
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = get_peft_model(MLP(), config)
+        wrapper = peft_model.base_model.model.lin1
+        default_module = wrapper.modules_to_save["default"]
+        default_lora_modules = [
+            peft_model.base_model.model.lin0.lora_A["default"],
+            peft_model.base_model.model.lin0.lora_B["default"],
+        ]
+
+        inference_config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"], inference_mode=True)
+        peft_model.add_adapter("other", inference_config)
+
+        assert default_module.training
+        assert all(module.training for module in default_lora_modules)
+        assert not wrapper.modules_to_save["other"].training
+        assert not peft_model.base_model.model.lin0.lora_A["other"].training
+        assert not peft_model.base_model.model.lin0.lora_B["other"].training
+        assert wrapper.original_module.training
+
+    def test_add_adapter_normalizes_mixed_nested_training_state(self):
+        # PEFT stores the root training state and restores it recursively. If a child was manually put in a different
+        # mode, adding another adapter intentionally normalizes it to the root mode instead of preserving the mismatch.
+        class ModelWithNestedModule(MLP):
+            def __init__(self):
+                super().__init__()
+                self.lin1 = nn.Sequential(nn.Linear(20, 2), nn.Dropout())
+
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = get_peft_model(ModelWithNestedModule(), config)
+        saved_module = peft_model.base_model.model.lin1.modules_to_save["default"]
+        saved_module[1].eval()
+
+        assert saved_module.training
+        assert not saved_module[1].training
+
+        peft_model.add_adapter("other", LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"]))
+
+        assert saved_module.training
+        assert saved_module[1].training
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", ALL_PEFT_CONFIG_CASES)
+    def test_inference_mode_controls_adapter_modules(self, test_name, model_id, config_cls, config_kwargs):
+        # Use one working custom-model case for every PEFT method. Some methods store adapter state only as tensors and
+        # therefore have no module training state to assert, methods with adapter submodules are checked recursively.
+        config = config_cls(**copy.deepcopy(config_kwargs))
+        peft_model = get_peft_model(self.transformers_class.from_pretrained(model_id), config)
+        adapter_submodules = self.get_adapter_submodules(peft_model, "default")
+        base_layers = [module.base_layer for module in peft_model.modules() if isinstance(module, BaseTunerLayer)]
+
+        assert all(submodule.training for submodule in adapter_submodules)
+        # The base layer is not part of the adapter and must keep the model's original training state.
+        assert all(base_layer.training for base_layer in base_layers)
+        peft_model.set_adapter("default", inference_mode=True)
+        # inference_mode must switch the complete adapter sub-tree to eval mode, not only freeze its parameters.
+        assert not any(submodule.training for submodule in adapter_submodules)
+        assert all(base_layer.training for base_layer in base_layers)
+        peft_model.set_adapter("default", inference_mode=False)
+        # Switching back to training mode restores the adapter sub-tree without changing the base layer.
+        assert all(submodule.training for submodule in adapter_submodules)
+        assert all(base_layer.training for base_layer in base_layers)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", ALL_PEFT_CONFIG_CASES)
+    def test_add_adapter_inference_mode_preserves_existing_adapter_modules(
+        self, test_name, model_id, config_cls, config_kwargs
+    ):
+        # Add an inference-mode adapter after a training-mode adapter for every PEFT method. Each adapter sub-tree must
+        # keep its own mode, the parent tuner layer is deliberately not checked because it cannot represent both modes.
+        config_kwargs = copy.deepcopy(config_kwargs)
+        config = config_cls(**config_kwargs)
+        peft_model = get_peft_model(self.transformers_class.from_pretrained(model_id), config)
+        peft_model.set_adapter("default", inference_mode=False)
+        default_submodules = self.get_adapter_submodules(peft_model, "default")
+
+        inference_kwargs = copy.deepcopy(config_kwargs)
+        inference_kwargs["inference_mode"] = True
+        inference_config = config_cls(**inference_kwargs)
+        peft_model.add_adapter("other", inference_config)
+        other_submodules = self.get_adapter_submodules(peft_model, "other")
+
+        # Adding the inference-only adapter must not reconfigure the existing training adapter.
+        assert all(submodule.training for submodule in default_submodules)
+        # The new adapter is initialized from inference_mode=True, including all nested adapter modules.
+        assert not any(submodule.training for submodule in other_submodules)
+        # Neither adapter-specific operation is allowed to change the base layer's mode.
+        base_layers = [module.base_layer for module in peft_model.modules() if isinstance(module, BaseTunerLayer)]
+        assert all(base_layer.training for base_layer in base_layers)
 
     def test_requires_grad_follows_inference_mode_trainable_token_indices(self):
         # check that passing inference_mode to set_adapter has the intended effect with LoRA and trainable tokens
