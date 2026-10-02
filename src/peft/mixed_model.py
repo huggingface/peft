@@ -377,9 +377,14 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
                 Additional arguments to modify the way the adapter is loaded, e.g. the token for Hugging Face Hub.
         """
         # the low_cpu_mem_usage option is handled through kwargs
+        requires_grad = {param: param.requires_grad for param in self.parameters()}
         output = PeftModel.load_adapter(self, model_id, adapter_name, *args, **kwargs)
-        # TODO: not quite clear why this is necessary but tests fail without it
+        for param in self.parameters():
+            requires_grad.setdefault(param, param.requires_grad)
+        # Synchronize activation without changing existing freezes or the newly loaded adapter's trainability.
         self.set_adapter(self.active_adapters)
+        for param, is_trainable in requires_grad.items():
+            param.requires_grad_(is_trainable)
         return output
 
     def create_or_update_model_card(self, output_dir: str):
