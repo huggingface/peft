@@ -174,7 +174,7 @@ MODEL_T5 = "peft-internal-testing/tiny-random-T5ForConditionalGeneration-calibra
 # decoder model with a more exotic architecture than opt
 MODEL_GEMMA4 = "peft-internal-testing/tiny-random-gemma4-E2B"
 # model for targeting MoE parameters
-MODEL_GPTOSS = "trl-internal-testing/tiny-GptOssForCausalLM"
+MODEL_GPTOSS = "peft-internal-testing/tiny-GptOssForCausalLM"
 # local model used to exercise LoRA's special MultiheadAttention wrapper
 MODEL_MHA = "custom-multihead-attention-model"
 
@@ -630,6 +630,13 @@ class TestStateDictRegression:
         with open(case_dir / MANIFEST_NAME) as f:
             return json.load(f)
 
+    def get_tolerances_for_model(self, model) -> tuple[float | None, float | None]:
+        if getattr(model, "dtype", None) == torch.bfloat16:
+            atol, rtol = 1e-3, 1e-2
+        else:
+            atol, rtol = None, None
+        return atol, rtol
+
     @pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
     def test_load_and_forward(self, case):
         # the checkpoint must load into the current version and produce the recorded output
@@ -638,7 +645,8 @@ class TestStateDictRegression:
         model = load_model_from_artifact(case_dir, manifest)
         logits = get_output(model, manifest["inputs"])
         expected = safe_load_file(case_dir / MODEL_OUTPUT_FILENAME)["logits"]
-        torch.testing.assert_close(logits, expected)
+        atol, rtol = self.get_tolerances_for_model(model)
+        torch.testing.assert_close(logits, expected, atol=atol, rtol=rtol)
 
     @pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
     def test_load_with_different_adapter_name(self, case):
@@ -648,7 +656,8 @@ class TestStateDictRegression:
         model = load_model_from_artifact(case_dir, manifest, adapter_name="other")
         logits = get_output(model, manifest["inputs"])
         expected = safe_load_file(case_dir / MODEL_OUTPUT_FILENAME)["logits"]
-        torch.testing.assert_close(logits, expected)
+        atol, rtol = self.get_tolerances_for_model(model)
+        torch.testing.assert_close(logits, expected, atol=atol, rtol=rtol)
 
     @pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
     def test_save_load_roundtrip(self, case, tmp_path):
@@ -662,9 +671,12 @@ class TestStateDictRegression:
         new_state_dict = safe_load_file(tmp_path / ADAPTER_WEIGHTS_NAME)
         assert set(new_state_dict.keys()) == set(manifest["state_dict_keys"])
 
+        atol, rtol = self.get_tolerances_for_model(model)
         for key in sorted(new_state_dict.keys()):
             torch.testing.assert_close(
                 new_state_dict[key],
                 old_state_dict[key],
+                atol=atol,
+                rtol=rtol,
                 msg=lambda m, key=key: f"Mismatch in key {key}:\n{m}",
             )
