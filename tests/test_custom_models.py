@@ -2518,6 +2518,10 @@ class TestPeftCustomModel(PeftCommonTester):
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
 
     @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
+    def test_save_pretrained_failure(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_save_pretrained_failure(model_id, config_cls, config_kwargs)
+
+    @pytest.mark.parametrize("test_name, model_id, config_cls, config_kwargs", TEST_CASES)
     def test_save_load_roundtrip_direct_injection(self, test_name, model_id, config_cls, config_kwargs):
         X = self.prepare_inputs_for_testing()
         config_kwargs = set_init_weights_false(config_cls, config_kwargs)

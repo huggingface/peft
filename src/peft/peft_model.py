@@ -393,9 +393,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     if peft_config.is_prompt_learning
                     else self.base_model.model.__dict__.get("name_or_path", None)
                 ) or None
-            inference_mode = peft_config.inference_mode
-            peft_config.inference_mode = True
-
             if peft_config.task_type is None:
                 # deal with auto mapping
                 base_model_class = self._get_base_model_class(
@@ -425,8 +422,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     if peft_config.alpha_pattern:
                         peft_config.alpha_pattern = {key: 2 * val for key, val in peft_config.alpha_pattern.items()}
 
-                peft_config.save_pretrained(output_dir, auto_mapping_dict=auto_mapping_dict)
-            peft_config.inference_mode = inference_mode
+                inference_mode = peft_config.inference_mode
+                peft_config.inference_mode = True
+                try:
+                    peft_config.save_pretrained(output_dir, auto_mapping_dict=auto_mapping_dict)
+                finally:
+                    peft_config.inference_mode = inference_mode
 
     @classmethod
     def from_pretrained(

@@ -363,6 +363,25 @@ class PeftCommonTester:
                 self.check_modelcard(tmp_dirname, model)
                 self.check_config_json(tmp_dirname, model)
 
+    def _test_save_pretrained_failure(self, model_id, config_cls, config_kwargs):
+        # Regression for #3854: a config-write failure must not change the live inference flag.
+        with hub_online_once(model_id):
+            model = self.transformers_class.from_pretrained(model_id)
+            config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+            model = get_peft_model(model, config)
+            inference_mode = config.inference_mode
+            with tempfile.TemporaryDirectory() as tmp_dirname:
+                os.mkdir(os.path.join(tmp_dirname, "adapter_config.json"))
+                with pytest.raises(OSError):
+                    model.save_pretrained(tmp_dirname)
+                assert config.inference_mode == inference_mode
+
+            with tempfile.TemporaryDirectory() as tmp_dirname:
+                model.save_pretrained(tmp_dirname)
+                assert config.inference_mode == inference_mode
+                with open(os.path.join(tmp_dirname, "adapter_config.json"), encoding="utf-8") as file:
+                    assert json.load(file)["inference_mode"] is True
+
     def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs, safe_serialization=True):
         if issubclass(config_cls, AdaLoraConfig):
             # AdaLora does not support adding more than 1 adapter
